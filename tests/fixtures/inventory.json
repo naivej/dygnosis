@@ -1,0 +1,3888 @@
+{
+  "schema": 1,
+  "readme": "tests/fixtures/README.md",
+  "rows": [
+    {
+      "id": "e001_clean_trend_rbc_gov_inv",
+      "codes": [
+        "E001"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "e001.rs::e001_clean_archive_files_are_empty",
+      "cluster": "",
+      "notes": "clean archive: no E001"
+    },
+    {
+      "id": "e001_clean_sims_wu_2019",
+      "codes": [
+        "E001"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "e001.rs::e001_clean_archive_files_are_empty",
+      "cluster": "",
+      "notes": "clean archive: no E001"
+    },
+    {
+      "id": "e001_clean_lk2024",
+      "codes": [
+        "E001"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "e001.rs::e001_clean_archive_files_are_empty",
+      "cluster": "",
+      "notes": "clean archive: no E001"
+    },
+    {
+      "id": "e001_govt_rbc_method_of_moments",
+      "codes": [
+        "E001"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "e001.rs::e001_clean_archive_files_are_empty",
+      "cluster": "",
+      "notes": "existing E001 on method_of_moments; reuse, do not mutate for W130"
+    },
+    {
+      "id": "e001_delete_model_end",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/delete_model_end.mod",
+      "source": "e001.rs::e001_delete_model_end",
+      "cluster": "e001/delete_model_end.mod",
+      "notes": "missing model end"
+    },
+    {
+      "id": "e001_delete_ss_end",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/delete_ss_end.mod",
+      "source": "e001.rs::e001_delete_ss_end",
+      "cluster": "e001/delete_ss_end.mod",
+      "notes": "missing steady_state_model end"
+    },
+    {
+      "id": "e001_delete_shocks_end",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/delete_shocks_end.mod",
+      "source": "e001.rs::e001_delete_shocks_end",
+      "cluster": "e001/delete_shocks_end.mod",
+      "notes": "missing shocks end"
+    },
+    {
+      "id": "e001_strip_var_semi",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/strip_var_semi.mod",
+      "source": "e001.rs::e001_strip_var_semicolon",
+      "cluster": "e001/strip_var_semi.mod",
+      "notes": "var declaration missing ;"
+    },
+    {
+      "id": "e001_strip_betta_semi",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/strip_betta_semi.mod",
+      "source": "e001.rs::e001_strip_betta_semicolon",
+      "cluster": "e001/strip_betta_semi.mod",
+      "notes": "param assignment missing ;"
+    },
+    {
+      "id": "e001_strip_last_eq_semi",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/strip_last_eq.mod",
+      "source": "e001.rs::e001_strip_last_model_equation_semicolon",
+      "cluster": "e001/strip_last_eq.mod",
+      "notes": "last model equation missing ;"
+    },
+    {
+      "id": "e001_join_two_model_eqs",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/join_two_eqs.mod",
+      "source": "e001.rs::e001_join_two_model_equations",
+      "cluster": "e001/join_two_eqs.mod",
+      "notes": "two model equations joined by missing ;"
+    },
+    {
+      "id": "e001_join_two_param_assigns",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/join_two_params.mod",
+      "source": "e001.rs::e001_join_two_param_assignments",
+      "cluster": "e001/join_two_params.mod",
+      "notes": "two param assignments joined by missing ;"
+    },
+    {
+      "id": "e001_shocks_var_no_semi",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/shocks_var_no_semi.mod",
+      "source": "e001.rs::e001_shocks_var_missing_semicolon",
+      "cluster": "e001/shocks_var_no_semi.mod",
+      "notes": "shocks var missing ;"
+    },
+    {
+      "id": "e001_keyword_typo_mdoel",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/typo_mdoel.mod",
+      "source": "e001.rs::e001_keyword_typo_mdoel",
+      "cluster": "e001/typo_mdoel.mod",
+      "notes": "keyword typo mdoel"
+    },
+    {
+      "id": "e001_unbalanced_paren",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/unbalanced_paren.mod",
+      "source": "e001.rs::e001_unbalanced_paren",
+      "cluster": "e001/unbalanced_paren.mod",
+      "notes": "extra ) ; auto_fix noop"
+    },
+    {
+      "id": "e001_invalid_ident",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/invalid_ident.mod",
+      "source": "e001.rs::e001_invalid_ident_c_minus_x",
+      "cluster": "e001/invalid_ident.mod",
+      "notes": "invalid ident c-x ; auto_fix noop"
+    },
+    {
+      "id": "e001_reserved_log",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/reserved_log.mod",
+      "source": "e001.rs::e001_reserved_parameters_log",
+      "cluster": "e001/reserved_log.mod",
+      "notes": "reserved parameters log ; auto_fix noop"
+    },
+    {
+      "id": "e001_cascade_missing_model_end",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/delete_model_end.mod",
+      "source": "e001.rs::e001_cascade_missing_model_end",
+      "cluster": "e001/delete_model_end.mod",
+      "notes": "same file as delete_model_end; analyze() is E001-only"
+    },
+    {
+      "id": "e001_variable_inside_model_not_var_typo",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/variable_ident.mod",
+      "source": "e001.rs::e001_variable_inside_model_is_not_var_typo",
+      "cluster": "e001/variable_ident.mod",
+      "notes": "identifier named variable inside model is not a var typo"
+    },
+    {
+      "id": "e001_refuse_macro",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/refuse_macro.mod",
+      "source": "auto_fix.rs::auto_fix_refuse_macro",
+      "cluster": "e001/refuse_macro.mod",
+      "notes": "macro prefix; auto_fix is identity"
+    },
+    {
+      "id": "auto_fix_apply_table",
+      "codes": [],
+      "kind": "harness",
+      "package": "parse",
+      "fixture": "",
+      "source": "auto_fix.rs::apply_fix_table",
+      "cluster": "",
+      "notes": "TextEdit apply table, not a .mod"
+    },
+    {
+      "id": "auto_fix_clean_archives",
+      "codes": [
+        "E001"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "auto_fix.rs::apply_matches_python_required_rows",
+      "cluster": "",
+      "notes": "identity auto_fix on clean archives; govt_rbc inserts ; on MoM lines"
+    },
+    {
+      "id": "auto_fix_clean_sims_wu_2019",
+      "codes": [],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "auto_fix.rs::apply_matches_python_required_rows",
+      "cluster": "",
+      "notes": "auto_fix on archive"
+    },
+    {
+      "id": "auto_fix_clean_lk2024",
+      "codes": [],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "auto_fix.rs::apply_matches_python_required_rows",
+      "cluster": "",
+      "notes": "auto_fix on archive"
+    },
+    {
+      "id": "auto_fix_clean_govt_rbc_irf_matching",
+      "codes": [
+        "E001"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "auto_fix.rs::apply_matches_python_required_rows",
+      "cluster": "",
+      "notes": "auto_fix on archive"
+    },
+    {
+      "id": "auto_fix_cascade_clean_trend",
+      "codes": [],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "auto_fix.rs::cascade_clean_trend_is_empty",
+      "cluster": "",
+      "notes": "thin codes empty"
+    },
+    {
+      "id": "auto_fix_cascade_delete_model_end",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/delete_model_end.mod",
+      "source": "auto_fix.rs::cascade_delete_model_end_is_e001_only",
+      "cluster": "e001/delete_model_end.mod",
+      "notes": "same E001 file"
+    },
+    {
+      "id": "auto_fix_cascade_govt",
+      "codes": [
+        "E001"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "auto_fix.rs::cascade_govt_rbc_is_e001_only",
+      "cluster": "",
+      "notes": "E001 only"
+    },
+    {
+      "id": "auto_fix_analyze_w120_no_e001",
+      "codes": [
+        "W120"
+      ],
+      "kind": "harness",
+      "package": "parse",
+      "fixture": "",
+      "source": "auto_fix.rs::analyze_emits_w120_when_no_e001",
+      "cluster": "",
+      "notes": "analyze() continues without E001; load w120/w120_det.mod once that file exists"
+    },
+    {
+      "id": "e010_unmodified_trend_rbc_gov_inv",
+      "codes": [
+        "E010"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "e010.rs::e010_unmodified_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "unmodified archive E010 family"
+    },
+    {
+      "id": "e010_unmodified_sims_wu_2019",
+      "codes": [
+        "E010"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "e010.rs::e010_unmodified_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "unmodified archive E010 family"
+    },
+    {
+      "id": "e010_unmodified_govt_rbc_irf_matching",
+      "codes": [
+        "E010"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "e010.rs::e010_unmodified_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "unmodified archive E010 family"
+    },
+    {
+      "id": "e010_unmodified_lk2024",
+      "codes": [
+        "E010"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "e010.rs::e010_unmodified_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "unmodified archive E010 family"
+    },
+    {
+      "id": "e010_extra",
+      "codes": [
+        "E010"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e010/e010_extra.mod",
+      "source": "e010.rs::e010_duplicate_equation_generic_extra",
+      "cluster": "e010/e010_extra.mod",
+      "notes": "wave-a template: 2 equations, 1 var (generic extra)"
+    },
+    {
+      "id": "e010_drop_log_n_linked",
+      "codes": [
+        "E010"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e010/e010_linked.mod",
+      "source": "e010.rs::e010_drop_log_n_linked_remove_from_var",
+      "cluster": "e010/e010_linked.mod",
+      "notes": "unused endogenous explains the gap (linked remove-from-var message)"
+    },
+    {
+      "id": "e010_drop_resource_generic",
+      "codes": [
+        "E010"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e010/e010_missing.mod",
+      "source": "e010.rs::e010_drop_resource_constraint_generic_missing",
+      "cluster": "e010/e010_missing.mod",
+      "notes": "count mismatch; all vars still referenced (generic missing equation)"
+    },
+    {
+      "id": "e030_unmodified_trend_rbc_gov_inv",
+      "codes": [
+        "E030"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "e030.rs::e030_unmodified_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "unmodified archive E030"
+    },
+    {
+      "id": "e030_unmodified_sims_wu_2019",
+      "codes": [
+        "E030"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "e030.rs::e030_unmodified_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "unmodified archive E030"
+    },
+    {
+      "id": "e030_unmodified_govt_rbc_irf_matching",
+      "codes": [
+        "E030"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "e030.rs::e030_unmodified_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "unmodified archive E030"
+    },
+    {
+      "id": "e030_unmodified_lk2024",
+      "codes": [
+        "E030"
+      ],
+      "kind": "archive",
+      "package": "parse",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "e030.rs::e030_unmodified_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "unmodified archive E030"
+    },
+    {
+      "id": "e030_shocks_vars_lists",
+      "codes": [],
+      "kind": "harness",
+      "package": "parse",
+      "fixture": "",
+      "source": "e030.rs::shocks_vars_lists_eps_z_and_eps_ig",
+      "cluster": "",
+      "notes": "parser field on archive, not a diagnostic file"
+    },
+    {
+      "id": "e030_model_local_hash_flag",
+      "codes": [],
+      "kind": "harness",
+      "package": "parse",
+      "fixture": "",
+      "source": "e030.rs::model_local_hash_sets_flag_and_lhs_ident",
+      "cluster": "",
+      "notes": "parser flag; fire coverage is e030_model_local_dup"
+    },
+    {
+      "id": "e030_varexo_det_cloned",
+      "codes": [],
+      "kind": "harness",
+      "package": "parse",
+      "fixture": "",
+      "source": "e030.rs::varexo_det_cloned_into_exogenous",
+      "cluster": "",
+      "notes": "parser clone; quiet coverage is e030_varexo_det_only"
+    },
+    {
+      "id": "e030_same_kind_var",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e030/same_kind_var.mod",
+      "source": "e030.rs::e030_same_kind_var",
+      "cluster": "e030/same_kind_var.mod",
+      "notes": "var y twice"
+    },
+    {
+      "id": "e030_same_kind_var_third",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e030/same_kind_var_third.mod",
+      "source": "e030.rs::e030_same_kind_var_third_compares_to_first",
+      "cluster": "e030/same_kind_var_third.mod",
+      "notes": "third var y compares to first"
+    },
+    {
+      "id": "e030_same_kind_param",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e030/same_kind_param.mod",
+      "source": "e030.rs::e030_same_kind_param",
+      "cluster": "e030/same_kind_param.mod",
+      "notes": "parameters betta twice"
+    },
+    {
+      "id": "e030_var_varexo_timed",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e030/var_varexo_timed.mod",
+      "source": "e030.rs::e030_var_varexo_timed",
+      "cluster": "e030/var_varexo_timed.mod",
+      "notes": "varexo on a timed endogenous"
+    },
+    {
+      "id": "e030_var_varexo_lhs",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e030/var_varexo_lhs.mod",
+      "source": "e030.rs::e030_var_varexo_lhs",
+      "cluster": "e030/var_varexo_lhs.mod",
+      "notes": "varexo on an equation lhs"
+    },
+    {
+      "id": "e030_var_varexo_shock",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e030/var_varexo_shock.mod",
+      "source": "e030.rs::e030_var_varexo_shock",
+      "cluster": "e030/var_varexo_shock.mod",
+      "notes": "var on a varexo shock"
+    },
+    {
+      "id": "e030_varexo_param_assigned",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e030/varexo_param.mod",
+      "source": "e030.rs::e030_varexo_param_assigned",
+      "cluster": "e030/varexo_param.mod",
+      "notes": "varexo on an assigned parameter"
+    },
+    {
+      "id": "e030_varexo_det",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e030/varexo_det.mod",
+      "source": "e030.rs::e030_varexo_det",
+      "cluster": "e030/varexo_det.mod",
+      "notes": "varexo_det on a varexo"
+    },
+    {
+      "id": "e030_model_local_dup",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e030/model_local_dup.mod",
+      "source": "e030.rs::e030_model_local_dup",
+      "cluster": "e030/model_local_dup.mod",
+      "notes": "# foo twice"
+    },
+    {
+      "id": "e030_model_local_shadow",
+      "codes": [
+        "E030"
+      ],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e030/model_local_shadow.mod",
+      "source": "e030.rs::e030_model_local_shadow_emits_none",
+      "cluster": "e030/model_local_shadow.mod",
+      "notes": "# y shadows declared y; not E030"
+    },
+    {
+      "id": "e030_varexo_det_only",
+      "codes": [
+        "E030"
+      ],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e030/varexo_det_only.mod",
+      "source": "e030.rs::e030_varexo_det_only",
+      "cluster": "e030/varexo_det_only.mod",
+      "notes": "varexo_det of another shock; not E030"
+    },
+    {
+      "id": "e020_unmodified_trend_rbc_gov_inv",
+      "codes": [
+        "E020",
+        "E023",
+        "E024",
+        "E025"
+      ],
+      "kind": "archive",
+      "package": "e020",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "d_e020.rs::e020_unmodified_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "unmodified archive E020 family empty"
+    },
+    {
+      "id": "e020_unmodified_sims_wu_2019",
+      "codes": [
+        "E020",
+        "E023",
+        "E024",
+        "E025"
+      ],
+      "kind": "archive",
+      "package": "e020",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "d_e020.rs::e020_unmodified_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "unmodified archive E020 family empty"
+    },
+    {
+      "id": "e020_unmodified_govt_rbc_irf_matching",
+      "codes": [
+        "E020",
+        "E023",
+        "E024",
+        "E025"
+      ],
+      "kind": "archive",
+      "package": "e020",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "d_e020.rs::e020_unmodified_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "unmodified archive E020 family empty"
+    },
+    {
+      "id": "e020_unmodified_lk2024",
+      "codes": [
+        "E020",
+        "E023",
+        "E024",
+        "E025"
+      ],
+      "kind": "archive",
+      "package": "e020",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "d_e020.rs::e020_unmodified_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "unmodified archive E020 family empty"
+    },
+    {
+      "id": "e020_shocks_vars_lists",
+      "codes": [],
+      "kind": "harness",
+      "package": "e020",
+      "fixture": "",
+      "source": "d_e020.rs::shocks_vars_lists_eps_z_and_eps_ig",
+      "cluster": "",
+      "notes": "parser field"
+    },
+    {
+      "id": "e020_src_no_ident_harvest_regex",
+      "codes": [],
+      "kind": "harness",
+      "package": "e020",
+      "fixture": "",
+      "source": "d_e020.rs::src_has_no_ident_harvest_regex",
+      "cluster": "",
+      "notes": "src/ scan, not a .mod"
+    },
+    {
+      "id": "e020_alpph_typo",
+      "codes": [
+        "E020"
+      ],
+      "kind": "fire",
+      "package": "e020",
+      "fixture": "tests/fixtures/e020/e020_typo.mod",
+      "source": "d_e020.rs::e020_alpph_typo_replace",
+      "cluster": "e020/e020_typo.mod",
+      "notes": "undeclared alpph, likely alppha"
+    },
+    {
+      "id": "e023_predetermined_exo",
+      "codes": [
+        "E023"
+      ],
+      "kind": "fire",
+      "package": "e020",
+      "fixture": "tests/fixtures/e020/e023_predetermined.mod",
+      "source": "d_e020.rs::e023_predetermined_eps_z",
+      "cluster": "e020/e023_predetermined.mod",
+      "notes": "predetermined_variables on a varexo"
+    },
+    {
+      "id": "e024_timed_det_exo",
+      "codes": [
+        "E024"
+      ],
+      "kind": "fire",
+      "package": "e020",
+      "fixture": "tests/fixtures/e020/e024_timed_det.mod",
+      "source": "d_e020.rs::e024_timed_det_exo_tau",
+      "cluster": "e020/e024_timed_det.mod",
+      "notes": "varexo_det with a lag"
+    },
+    {
+      "id": "e025_use_before_def",
+      "codes": [
+        "E025"
+      ],
+      "kind": "fire",
+      "package": "e020",
+      "fixture": "tests/fixtures/e020/e025_use_before.mod",
+      "source": "d_e020.rs::e025_use_before_def",
+      "cluster": "e020/e025_use_before.mod",
+      "notes": "# foo used before definition"
+    },
+    {
+      "id": "e025_shadow_declared",
+      "codes": [
+        "E025"
+      ],
+      "kind": "fire",
+      "package": "e020",
+      "fixture": "tests/fixtures/e020/e025_shadow.mod",
+      "source": "d_e020.rs::e025_shadow_declared_y",
+      "cluster": "e020/e025_shadow.mod",
+      "notes": "# y shadows declared y"
+    },
+    {
+      "id": "e020_mystery_call_not_undeclared",
+      "codes": [
+        "E020"
+      ],
+      "kind": "quiet",
+      "package": "e020",
+      "fixture": "tests/fixtures/e020/mystery_call.mod",
+      "source": "d_e020.rs::mystery_call_is_not_e020",
+      "cluster": "e020/mystery_call.mod",
+      "notes": "unknown function callee is not E020"
+    },
+    {
+      "id": "e020_comment_string_not_ident",
+      "codes": [
+        "E020"
+      ],
+      "kind": "quiet",
+      "package": "e020",
+      "fixture": "tests/fixtures/e020/comment_string.mod",
+      "source": "d_e020.rs::comment_and_string_are_not_e020",
+      "cluster": "e020/comment_string.mod",
+      "notes": "ident only in comment/string"
+    },
+    {
+      "id": "shape_clean_trend",
+      "codes": [
+        "E050",
+        "E051",
+        "E052",
+        "E053",
+        "W042",
+        "W050",
+        "W051",
+        "W052",
+        "W053",
+        "I050"
+      ],
+      "kind": "archive",
+      "package": "shape",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "d_e040.rs::shape_clean_trend_rbc_gov_inv",
+      "cluster": "",
+      "notes": "FAMILY empty"
+    },
+    {
+      "id": "shape_i050_sims_wu_2019",
+      "codes": [
+        "I050"
+      ],
+      "kind": "archive",
+      "package": "shape",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "d_e040.rs::shape_clean_sims_wu_2019",
+      "cluster": "",
+      "notes": "archive I050; do not duplicate"
+    },
+    {
+      "id": "shape_clean_govt",
+      "codes": [
+        "E050",
+        "E051",
+        "E052",
+        "E053",
+        "W042",
+        "W050",
+        "W051",
+        "W052",
+        "W053",
+        "I050"
+      ],
+      "kind": "archive",
+      "package": "shape",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "d_e040.rs::shape_clean_govt_rbc_irf_matching",
+      "cluster": "",
+      "notes": "FAMILY empty (E001 is a different family)"
+    },
+    {
+      "id": "shape_i050_lk2024",
+      "codes": [
+        "I050"
+      ],
+      "kind": "archive",
+      "package": "shape",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "d_e040.rs::shape_clean_lk2024",
+      "cluster": "",
+      "notes": "archive I050; do not duplicate"
+    },
+    {
+      "id": "shape_e050_dup_eq",
+      "codes": [
+        "E050"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/e050_dup.mod",
+      "source": "d_e040.rs::shape_e050_duplicate_equation",
+      "cluster": "shape/e050_dup.mod",
+      "notes": "two identical equations"
+    },
+    {
+      "id": "shape_e051_0eq1",
+      "codes": [
+        "E051"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/e051_false.mod",
+      "source": "d_e040.rs::shape_e051_contradictory",
+      "cluster": "shape/e051_false.mod",
+      "notes": "0 = 1"
+    },
+    {
+      "id": "shape_e051_yeqy",
+      "codes": [
+        "E051"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/e051_true.mod",
+      "source": "d_e040.rs::shape_e051_trivially_true",
+      "cluster": "shape/e051_true.mod",
+      "notes": "y = y"
+    },
+    {
+      "id": "shape_e052_dup_param",
+      "codes": [
+        "E052"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/e052_dup_param.mod",
+      "source": "d_e040.rs::shape_e052_duplicate_param",
+      "cluster": "shape/e052_dup_param.mod",
+      "notes": "betta assigned twice"
+    },
+    {
+      "id": "shape_e053_stray",
+      "codes": [
+        "E053"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/e053_stray.mod",
+      "source": "d_e040.rs::shape_e053_stray_top_level",
+      "cluster": "shape/e053_stray.mod",
+      "notes": "equation before model"
+    },
+    {
+      "id": "shape_w042_missing_ss",
+      "codes": [
+        "W042"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/w042_missing.mod",
+      "source": "d_e040.rs::shape_w042_missing_ss_coverage",
+      "cluster": "shape/w042_missing.mod",
+      "notes": "ss block misses an endogenous"
+    },
+    {
+      "id": "shape_w050_undeclared_initval",
+      "codes": [
+        "W050"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/w050_initval.mod",
+      "source": "d_e040.rs::shape_w050_undeclared_initval",
+      "cluster": "shape/w050_initval.mod",
+      "notes": "undeclared in initval"
+    },
+    {
+      "id": "shape_w051_varexo_initval",
+      "codes": [
+        "W051"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/w051_varexo.mod",
+      "source": "d_e040.rs::shape_w051_varexo_in_initval",
+      "cluster": "shape/w051_varexo.mod",
+      "notes": "varexo in initval"
+    },
+    {
+      "id": "shape_w052_missing_initval",
+      "codes": [
+        "W052"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/w052_partial.mod",
+      "source": "d_e040.rs::shape_w052_missing_initval",
+      "cluster": "shape/w052_partial.mod",
+      "notes": "initval misses an endogenous"
+    },
+    {
+      "id": "shape_w053_param_initval",
+      "codes": [
+        "W053"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/w053_initval.mod",
+      "source": "d_e040.rs::shape_w053_param_in_initval",
+      "cluster": "shape/w053_initval.mod",
+      "notes": "parameter in initval"
+    },
+    {
+      "id": "shape_i050_no_ss_block",
+      "codes": [
+        "I050"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/i050_none.mod",
+      "source": "d_e040.rs::shape_i050_missing_ss_recorded_message",
+      "cluster": "shape/i050_none.mod",
+      "notes": "no initval and no steady_state_model"
+    },
+    {
+      "id": "shape_w050_undeclared_endval",
+      "codes": [
+        "W050"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/w050_endval.mod",
+      "source": "d_e040.rs::shape_w050_undeclared_endval",
+      "cluster": "shape/w050_endval.mod",
+      "notes": "undeclared in endval"
+    },
+    {
+      "id": "shape_w053_param_endval",
+      "codes": [
+        "W053"
+      ],
+      "kind": "fire",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/w053_endval.mod",
+      "source": "d_e040.rs::shape_w053_param_in_endval",
+      "cluster": "shape/w053_endval.mod",
+      "notes": "parameter in endval"
+    },
+    {
+      "id": "shape_static_dynamic_not_e050",
+      "codes": [
+        "E050"
+      ],
+      "kind": "quiet",
+      "package": "shape",
+      "fixture": "tests/fixtures/shape/e050_static_dynamic.mod",
+      "source": "d_e040.rs::shape_static_vs_dynamic_same_body_not_e050",
+      "cluster": "shape/e050_static_dynamic.mod",
+      "notes": "[static] and [dynamic] same body is not E050"
+    },
+    {
+      "id": "e060_clean_swff",
+      "codes": [
+        "E060",
+        "E061",
+        "E062",
+        "E063",
+        "E064",
+        "E065",
+        "W061"
+      ],
+      "kind": "archive",
+      "package": "include",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/swff/swff.mod",
+      "source": "e060.rs::e060_clean_fixtures_empty",
+      "cluster": "",
+      "notes": "clean include archive"
+    },
+    {
+      "id": "e060_clean_zlb_qe",
+      "codes": [
+        "E060",
+        "E061",
+        "E062",
+        "E063",
+        "E064",
+        "E065",
+        "W061"
+      ],
+      "kind": "archive",
+      "package": "include",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/zlb_qe/zlb_qe.mod",
+      "source": "e060.rs::e060_clean_fixtures_empty",
+      "cluster": "",
+      "notes": "clean include archive"
+    },
+    {
+      "id": "e060_clean_US_RE09_rep",
+      "codes": [
+        "E060",
+        "E061",
+        "E062",
+        "E063",
+        "E064",
+        "E065",
+        "W061"
+      ],
+      "kind": "archive",
+      "package": "include",
+      "fixture": ".agents/skills/dynare-copilot/references/examples/US_RE09_rep.mod",
+      "source": "e060.rs::e060_clean_fixtures_empty",
+      "cluster": "",
+      "notes": "clean example with includes"
+    },
+    {
+      "id": "e060_cycle",
+      "codes": [
+        "E060"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/cycle",
+      "source": "e060.rs::e060_cycle_swff_params_overlay",
+      "cluster": "e060/cycle",
+      "notes": "directory: a.mod <-> b.inc cycle"
+    },
+    {
+      "id": "e061_missing_sibling",
+      "codes": [
+        "E061"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/missing",
+      "source": "e060.rs::e061_missing_sibling",
+      "cluster": "e060/missing",
+      "notes": "directory: include of a missing sibling"
+    },
+    {
+      "id": "e061_nested_missing",
+      "codes": [
+        "E061"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/nested",
+      "source": "e060.rs::e061_nested_missing",
+      "cluster": "e060/nested",
+      "notes": "directory: nested include of a missing file"
+    },
+    {
+      "id": "e062_unterminated_if",
+      "codes": [
+        "E062"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e062_if.mod",
+      "source": "e060.rs::e062_unterminated_if",
+      "cluster": "e060/e062_if.mod",
+      "notes": "@#if without endif"
+    },
+    {
+      "id": "e062_unterminated_for",
+      "codes": [
+        "E062"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e062_for.mod",
+      "source": "e060.rs::e062_unterminated_for",
+      "cluster": "e060/e062_for.mod",
+      "notes": "@#for without endfor"
+    },
+    {
+      "id": "e062_stray_endif",
+      "codes": [
+        "E062"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e062_stray_endif.mod",
+      "source": "e060.rs::e062_stray_endif",
+      "cluster": "e060/e062_stray_endif.mod",
+      "notes": "stray @#endif"
+    },
+    {
+      "id": "e062_mismatch_if_endfor",
+      "codes": [
+        "E062"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e062_mismatch.mod",
+      "source": "e060.rs::e062_mismatch_if_endfor",
+      "cluster": "e060/e062_mismatch.mod",
+      "notes": "@#if closed with @#endfor"
+    },
+    {
+      "id": "e062_duplicate_else",
+      "codes": [
+        "E062"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e062_dup_else.mod",
+      "source": "e060.rs::e062_duplicate_else",
+      "cluster": "e060/e062_dup_else.mod",
+      "notes": "two @#else"
+    },
+    {
+      "id": "e062_elseif_after_else",
+      "codes": [
+        "E062"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e062_elseif.mod",
+      "source": "e060.rs::e062_elseif_after_else",
+      "cluster": "e060/e062_elseif.mod",
+      "notes": "@#elseif after @#else"
+    },
+    {
+      "id": "e062_commented_endif",
+      "codes": [
+        "E062"
+      ],
+      "kind": "quiet",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e062_comment.mod",
+      "source": "e060.rs::e062_commented_endif_is_not_e062",
+      "cluster": "e060/e062_comment.mod",
+      "notes": "// @#endif is not E062"
+    },
+    {
+      "id": "e063_undef_simple",
+      "codes": [
+        "E063"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e063_undef.mod",
+      "source": "e060.rs::e063_undef_simple",
+      "cluster": "e060/e063_undef.mod",
+      "notes": "@{UNDEF}"
+    },
+    {
+      "id": "e063_expr_with_include",
+      "codes": [
+        "E063"
+      ],
+      "kind": "quiet",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e063_expr_include.mod",
+      "source": "e060.rs::e063_expression_skipped_when_include_present",
+      "cluster": "e060/e063_expr_include.mod",
+      "notes": "@{UNDEF+1} skipped when include present"
+    },
+    {
+      "id": "e063_expr_no_include",
+      "codes": [
+        "E063"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e063_expr.mod",
+      "source": "e060.rs::e063_expression_without_include",
+      "cluster": "e060/e063_expr.mod",
+      "notes": "@{UNDEF+1} without include"
+    },
+    {
+      "id": "e063_defined_before_use",
+      "codes": [
+        "E063"
+      ],
+      "kind": "quiet",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e063_defined.mod",
+      "source": "e060.rs::e063_defined_before_use",
+      "cluster": "e060/e063_defined.mod",
+      "notes": "@#define before use"
+    },
+    {
+      "id": "e063_for_var_after_endfor",
+      "codes": [
+        "E063"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e063_for.mod",
+      "source": "e060.rs::e063_for_var_not_known_after_endfor",
+      "cluster": "e060/e063_for.mod",
+      "notes": "@{i} after @#endfor"
+    },
+    {
+      "id": "e064_error_quoted",
+      "codes": [
+        "E064"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e064_quoted.mod",
+      "source": "e060.rs::e064_error_quoted",
+      "cluster": "e060/e064_quoted.mod",
+      "notes": "@#error \"boom\""
+    },
+    {
+      "id": "e064_error_no_arg",
+      "codes": [
+        "E064"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e064_noarg.mod",
+      "source": "e060.rs::e064_error_no_argument",
+      "cluster": "e060/e064_noarg.mod",
+      "notes": "@#error"
+    },
+    {
+      "id": "e064_spaced",
+      "codes": [
+        "E064"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e064_spaced.mod",
+      "source": "e060.rs::e064_spaced_error_directive",
+      "cluster": "e060/e064_spaced.mod",
+      "notes": "@# error"
+    },
+    {
+      "id": "e064_inactive",
+      "codes": [
+        "E064"
+      ],
+      "kind": "quiet",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e064_inactive.mod",
+      "source": "e060.rs::e064_inactive_in_if_zero",
+      "cluster": "e060/e064_inactive.mod",
+      "notes": "@#if 0 hides @#error"
+    },
+    {
+      "id": "e065_varexo",
+      "codes": [
+        "E065"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e065_varexo.mod",
+      "source": "e060.rs::e065_steady_state_varexo",
+      "cluster": "e060/e065_varexo.mod",
+      "notes": "steady_state(varexo)"
+    },
+    {
+      "id": "e065_two_varexo",
+      "codes": [
+        "E065"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e065_two.mod",
+      "source": "e060.rs::e065_steady_state_two_varexo",
+      "cluster": "e060/e065_two.mod",
+      "notes": "steady_state of two varexo, sorted names"
+    },
+    {
+      "id": "e065_endogenous_ok",
+      "codes": [
+        "E065"
+      ],
+      "kind": "quiet",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e065_endo.mod",
+      "source": "e060.rs::e065_steady_state_endogenous_ok",
+      "cluster": "e060/e065_endo.mod",
+      "notes": "steady_state(endogenous)"
+    },
+    {
+      "id": "e065_uppercase",
+      "codes": [
+        "E065"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/e065_upper.mod",
+      "source": "e060.rs::e065_steady_state_uppercase",
+      "cluster": "e060/e065_upper.mod",
+      "notes": "STEADY_STATE(varexo)"
+    },
+    {
+      "id": "w061_two_sibling_parents",
+      "codes": [
+        "W061"
+      ],
+      "kind": "fire",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/w061_siblings",
+      "source": "e060.rs::w061_two_sibling_parents",
+      "cluster": "e060/w061_siblings",
+      "notes": "directory: two parents include shared.inc; open the include"
+    },
+    {
+      "id": "w061_chain_not_ambiguous",
+      "codes": [
+        "W061"
+      ],
+      "kind": "quiet",
+      "package": "include",
+      "fixture": "tests/fixtures/e060/w061_chain",
+      "source": "e060.rs::w061_chain_not_ambiguous",
+      "cluster": "e060/w061_chain",
+      "notes": "directory: A\u2192B\u2192shared is not W061"
+    },
+    {
+      "id": "w010_clean_trend_rbc_gov_inv",
+      "codes": [
+        "W010",
+        "W011",
+        "W012",
+        "W020",
+        "W021",
+        "W022"
+      ],
+      "kind": "archive",
+      "package": "w010",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "w010.rs::w010_clean_archives_empty",
+      "cluster": "",
+      "notes": "clean archive W010 family empty"
+    },
+    {
+      "id": "w010_clean_sims_wu_2019",
+      "codes": [
+        "W010",
+        "W011",
+        "W012",
+        "W020",
+        "W021",
+        "W022"
+      ],
+      "kind": "archive",
+      "package": "w010",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "w010.rs::w010_clean_archives_empty",
+      "cluster": "",
+      "notes": "clean archive W010 family empty"
+    },
+    {
+      "id": "w010_clean_govt_rbc_irf_matching",
+      "codes": [
+        "W010",
+        "W011",
+        "W012",
+        "W020",
+        "W021",
+        "W022"
+      ],
+      "kind": "archive",
+      "package": "w010",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "w010.rs::w010_clean_archives_empty",
+      "cluster": "",
+      "notes": "clean archive W010 family empty"
+    },
+    {
+      "id": "w010_clean_lk2024",
+      "codes": [
+        "W010",
+        "W011",
+        "W012",
+        "W020",
+        "W021",
+        "W022"
+      ],
+      "kind": "archive",
+      "package": "w010",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "w010.rs::w010_clean_archives_empty",
+      "cluster": "",
+      "notes": "clean archive W010 family empty"
+    },
+    {
+      "id": "w010_unassigned_referenced",
+      "codes": [
+        "W010"
+      ],
+      "kind": "fire",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w010_ref.mod",
+      "source": "w010.rs::w010_unassigned_referenced_param",
+      "cluster": "w010/w010_ref.mod",
+      "notes": "declared param used in model, never assigned"
+    },
+    {
+      "id": "w010_w022_unassigned_unref",
+      "codes": [
+        "W010",
+        "W022"
+      ],
+      "kind": "fire",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w010_unref.mod",
+      "source": "w010.rs::w010_and_w022_unassigned_unref_param",
+      "cluster": "w010/w010_unref.mod",
+      "notes": "declared param unused and unassigned"
+    },
+    {
+      "id": "w011_unknown_ident",
+      "codes": [
+        "W011"
+      ],
+      "kind": "fire",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w011_unknown.mod",
+      "source": "w010.rs::w011_unknown_ident",
+      "cluster": "w010/w011_unknown.mod",
+      "notes": "RHS unknown_zzz"
+    },
+    {
+      "id": "w011_missing_in_expr",
+      "codes": [
+        "W011"
+      ],
+      "kind": "fire",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w011_expr.mod",
+      "source": "w010.rs::w011_missing_in_expr",
+      "cluster": "w010/w011_expr.mod",
+      "notes": "1/(1-missing)"
+    },
+    {
+      "id": "w011_latest_wins",
+      "codes": [
+        "W011"
+      ],
+      "kind": "quiet",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w011_later.mod",
+      "source": "w010.rs::w011_latest_wins_before_steady",
+      "cluster": "w010/w011_later.mod",
+      "notes": "bad assign then good assign before steady"
+    },
+    {
+      "id": "w012_helper_before_block",
+      "codes": [
+        "W012"
+      ],
+      "kind": "fire",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w012_helper.mod",
+      "source": "w010.rs::w012_helper_before_first_block",
+      "cluster": "w010/w012_helper.mod",
+      "notes": "helper before first block"
+    },
+    {
+      "id": "w012_helper_after_model",
+      "codes": [
+        "W012"
+      ],
+      "kind": "quiet",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w012_late.mod",
+      "source": "w010.rs::w012_helper_after_model_end_skipped",
+      "cluster": "w010/w012_late.mod",
+      "notes": "helper after model end is not W012"
+    },
+    {
+      "id": "w020_unused_endo",
+      "codes": [
+        "W020"
+      ],
+      "kind": "fire",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w020_zzz.mod",
+      "source": "w010.rs::w020_unused_endo_count_preserving",
+      "cluster": "w010/w020_zzz.mod",
+      "notes": "unused endogenous; keep equation count"
+    },
+    {
+      "id": "w021_unused_varexo",
+      "codes": [
+        "W021"
+      ],
+      "kind": "fire",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w021_exo.mod",
+      "source": "w010.rs::w021_unused_varexo",
+      "cluster": "w010/w021_exo.mod",
+      "notes": "unused varexo"
+    },
+    {
+      "id": "w022_unused_assigned",
+      "codes": [
+        "W022"
+      ],
+      "kind": "fire",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w022_unused.mod",
+      "source": "w010.rs::w022_unused_assigned_param",
+      "cluster": "w010/w022_unused.mod",
+      "notes": "assigned param unused in model"
+    },
+    {
+      "id": "w022_stderr_only",
+      "codes": [
+        "W022"
+      ],
+      "kind": "fire",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w022_stderr.mod",
+      "source": "w010.rs::w022_param_used_only_in_stderr",
+      "cluster": "w010/w022_stderr.mod",
+      "notes": "param only in stderr"
+    },
+    {
+      "id": "w022_ss_only",
+      "codes": [
+        "W022"
+      ],
+      "kind": "fire",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w022_ss.mod",
+      "source": "w010.rs::w022_param_used_only_in_ss",
+      "cluster": "w010/w022_ss.mod",
+      "notes": "param only in steady_state_model"
+    },
+    {
+      "id": "w022_initval_only",
+      "codes": [
+        "W022"
+      ],
+      "kind": "fire",
+      "package": "w010",
+      "fixture": "tests/fixtures/w010/w022_initval.mod",
+      "source": "w010.rs::w022_param_used_only_in_initval",
+      "cluster": "w010/w022_initval.mod",
+      "notes": "param only in initval"
+    },
+    {
+      "id": "w070_betta_rhs_number",
+      "codes": [],
+      "kind": "harness",
+      "package": "w070",
+      "fixture": "",
+      "source": "w070.rs::w070_betta_rhs_is_number",
+      "cluster": "",
+      "notes": "parser Number on archive betta"
+    },
+    {
+      "id": "w070_clean_trend_rbc_gov_inv",
+      "codes": [
+        "W070"
+      ],
+      "kind": "archive",
+      "package": "w070",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "w070.rs::w070_clean_archives_empty",
+      "cluster": "",
+      "notes": "clean archive no W070"
+    },
+    {
+      "id": "w070_clean_sims_wu_2019",
+      "codes": [
+        "W070"
+      ],
+      "kind": "archive",
+      "package": "w070",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "w070.rs::w070_clean_archives_empty",
+      "cluster": "",
+      "notes": "clean archive no W070"
+    },
+    {
+      "id": "w070_clean_govt_rbc_irf_matching",
+      "codes": [
+        "W070"
+      ],
+      "kind": "archive",
+      "package": "w070",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "w070.rs::w070_clean_archives_empty",
+      "cluster": "",
+      "notes": "clean archive no W070"
+    },
+    {
+      "id": "w070_clean_lk2024",
+      "codes": [
+        "W070"
+      ],
+      "kind": "archive",
+      "package": "w070",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "w070.rs::w070_clean_archives_empty",
+      "cluster": "",
+      "notes": "clean archive no W070"
+    },
+    {
+      "id": "w070_betta_99",
+      "codes": [
+        "W070"
+      ],
+      "kind": "fire",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_betta.mod",
+      "source": "w070.rs::w070_betta_99",
+      "cluster": "w070/w070_betta.mod",
+      "notes": "beta > 1; cluster with other bound fires if they still all fire"
+    },
+    {
+      "id": "w070_betta_0",
+      "codes": [
+        "W070"
+      ],
+      "kind": "fire",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_betta_0.mod",
+      "source": "w070.rs::w070_betta_0",
+      "cluster": "w070/w070_betta_0.mod",
+      "notes": "beta = 0"
+    },
+    {
+      "id": "w070_betta_1",
+      "codes": [
+        "W070"
+      ],
+      "kind": "fire",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_betta_1.mod",
+      "source": "w070.rs::w070_betta_1",
+      "cluster": "w070/w070_betta_1.mod",
+      "notes": "beta = 1 is on the bound that fires"
+    },
+    {
+      "id": "w070_delta_1p5",
+      "codes": [
+        "W070"
+      ],
+      "kind": "fire",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_delta.mod",
+      "source": "w070.rs::w070_delta_1p5",
+      "cluster": "w070/w070_delta.mod",
+      "notes": "delta > 1"
+    },
+    {
+      "id": "w070_delta_1",
+      "codes": [
+        "W070"
+      ],
+      "kind": "fire",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_delta_1.mod",
+      "source": "w070.rs::w070_delta_1",
+      "cluster": "w070/w070_delta_1.mod",
+      "notes": "delta = 1"
+    },
+    {
+      "id": "w070_delta_0",
+      "codes": [
+        "W070"
+      ],
+      "kind": "quiet",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_delta_0.mod",
+      "source": "w070.rs::w070_delta_0",
+      "cluster": "w070/w070_delta_0.mod",
+      "notes": "delta = 0 is in [0,1)"
+    },
+    {
+      "id": "w070_rhoz_1p5",
+      "codes": [
+        "W070"
+      ],
+      "kind": "fire",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_rho.mod",
+      "source": "w070.rs::w070_rhoz_1p5",
+      "cluster": "w070/w070_rho.mod",
+      "notes": "|rho| > 1"
+    },
+    {
+      "id": "w070_rhoz_m1",
+      "codes": [
+        "W070"
+      ],
+      "kind": "fire",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_rho_m1.mod",
+      "source": "w070.rs::w070_rhoz_m1",
+      "cluster": "w070/w070_rho_m1.mod",
+      "notes": "rho = -1"
+    },
+    {
+      "id": "w070_sigma_e",
+      "codes": [
+        "W070"
+      ],
+      "kind": "fire",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_sigma.mod",
+      "source": "w070.rs::w070_sigma_e",
+      "cluster": "w070/w070_sigma.mod",
+      "notes": "declared sigma_e = -0.1"
+    },
+    {
+      "id": "w070_sigma_e_helper",
+      "codes": [
+        "W070"
+      ],
+      "kind": "quiet",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_sigma_helper.mod",
+      "source": "w070.rs::w070_sigma_e_helper",
+      "cluster": "w070/w070_sigma_helper.mod",
+      "notes": "undeclared helper named sigma_e"
+    },
+    {
+      "id": "w070_alphag_1p5",
+      "codes": [
+        "W070"
+      ],
+      "kind": "fire",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_alpha.mod",
+      "source": "w070.rs::w070_alphag_1p5",
+      "cluster": "w070/w070_alpha.mod",
+      "notes": "name contains alpha"
+    },
+    {
+      "id": "w070_alppha_1p5",
+      "codes": [
+        "W070"
+      ],
+      "kind": "quiet",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_alppha.mod",
+      "source": "w070.rs::w070_alppha_1p5",
+      "cluster": "w070/w070_alppha.mod",
+      "notes": "alppha does not contain substring alpha"
+    },
+    {
+      "id": "w070_expr_sum",
+      "codes": [
+        "W070"
+      ],
+      "kind": "fire",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_expr.mod",
+      "source": "w070.rs::w070_expr_sum",
+      "cluster": "w070/w070_expr.mod",
+      "notes": "0.9+0.2 folds out of range"
+    },
+    {
+      "id": "w070_later_wins",
+      "codes": [
+        "W070"
+      ],
+      "kind": "fire",
+      "package": "w070",
+      "fixture": "tests/fixtures/w070/w070_later.mod",
+      "source": "w070.rs::w070_later_wins",
+      "cluster": "w070/w070_later.mod",
+      "notes": "later assignment 99 wins"
+    },
+    {
+      "id": "w090_unmodified_govt",
+      "codes": [
+        "W090",
+        "W091",
+        "W092",
+        "W093",
+        "W094",
+        "W095"
+      ],
+      "kind": "archive",
+      "package": "est",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "w090.rs::w090_unmodified_govt_empty",
+      "cluster": "",
+      "notes": "estimation archive empty FAMILY (E001 is other family)"
+    },
+    {
+      "id": "w090_clean_trend_rbc_gov_inv",
+      "codes": [
+        "W090",
+        "W091",
+        "W092",
+        "W093",
+        "W094",
+        "W095"
+      ],
+      "kind": "archive",
+      "package": "est",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "w090.rs::w090_clean_extra_empty",
+      "cluster": "",
+      "notes": "no estimation \u2192 empty FAMILY"
+    },
+    {
+      "id": "w090_clean_sims_wu_2019",
+      "codes": [
+        "W090",
+        "W091",
+        "W092",
+        "W093",
+        "W094",
+        "W095"
+      ],
+      "kind": "archive",
+      "package": "est",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "w090.rs::w090_clean_extra_empty",
+      "cluster": "",
+      "notes": "no estimation \u2192 empty FAMILY"
+    },
+    {
+      "id": "w090_clean_lk2024",
+      "codes": [
+        "W090",
+        "W091",
+        "W092",
+        "W093",
+        "W094",
+        "W095"
+      ],
+      "kind": "archive",
+      "package": "est",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "w090.rs::w090_clean_extra_empty",
+      "cluster": "",
+      "notes": "no estimation \u2192 empty FAMILY"
+    },
+    {
+      "id": "w090_base_stripped",
+      "codes": [
+        "W090",
+        "W091",
+        "W092",
+        "W093",
+        "W094",
+        "W095"
+      ],
+      "kind": "quiet",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w090_base.mod",
+      "source": "w090.rs::w090_base_stripped",
+      "cluster": "w090/w090_base.mod",
+      "notes": "small estimation model that is FAMILY-empty (2 obs, 2 shocks)"
+    },
+    {
+      "id": "w090_w091_dup",
+      "codes": [
+        "W091"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w091_dup.mod",
+      "source": "w090.rs::w090_w091_dup",
+      "cluster": "w090/w091_dup.mod",
+      "notes": "duplicate varobs"
+    },
+    {
+      "id": "w090_exo",
+      "codes": [
+        "W090"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w090_exo.mod",
+      "source": "w090.rs::w090_exo",
+      "cluster": "w090/w090_exo.mod",
+      "notes": "varobs on a varexo"
+    },
+    {
+      "id": "w090_param",
+      "codes": [
+        "W090"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w090_param.mod",
+      "source": "w090.rs::w090_param",
+      "cluster": "w090/w090_param.mod",
+      "notes": "varobs on a parameter"
+    },
+    {
+      "id": "w090_undecl",
+      "codes": [
+        "W090"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w090_undecl.mod",
+      "source": "w090.rs::w090_undecl",
+      "cluster": "w090/w090_undecl.mod",
+      "notes": "varobs undeclared name"
+    },
+    {
+      "id": "w090_w092_3obs",
+      "codes": [
+        "W092"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w092_3obs.mod",
+      "source": "w090.rs::w090_w092_3obs",
+      "cluster": "w090/w092_3obs.mod",
+      "notes": "3 obs, 2 shocks"
+    },
+    {
+      "id": "w090_w092_4obs",
+      "codes": [
+        "W092"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w092_4obs.mod",
+      "source": "w090.rs::w090_w092_4obs",
+      "cluster": "w090/w092_4obs.mod",
+      "notes": "4 obs, 2 shocks"
+    },
+    {
+      "id": "w090_w092_4obs_me",
+      "codes": [
+        "W092"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w092_4obs_me.mod",
+      "source": "w090.rs::w090_w092_4obs_me",
+      "cluster": "w090/w092_4obs_me.mod",
+      "notes": "4 obs, 2 shocks + 1 ME"
+    },
+    {
+      "id": "w090_w092_3obs_me",
+      "codes": [
+        "W092"
+      ],
+      "kind": "quiet",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w092_3obs_me.mod",
+      "source": "w090.rs::w090_w092_3obs_me",
+      "cluster": "w090/w092_3obs_me.mod",
+      "notes": "3 obs + ME = 3 shocks"
+    },
+    {
+      "id": "w090_w093_param",
+      "codes": [
+        "W093"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w093_param.mod",
+      "source": "w090.rs::w090_w093_param",
+      "cluster": "w090/w093_param.mod",
+      "notes": "estimated_params undeclared param"
+    },
+    {
+      "id": "w090_w093_stderr",
+      "codes": [
+        "W093"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w093_stderr.mod",
+      "source": "w090.rs::w090_w093_stderr",
+      "cluster": "w090/w093_stderr.mod",
+      "notes": "stderr undeclared shock"
+    },
+    {
+      "id": "w090_w093_corr",
+      "codes": [
+        "W093"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w093_corr.mod",
+      "source": "w090.rs::w090_w093_corr",
+      "cluster": "w090/w093_corr.mod",
+      "notes": "corr foo, bar"
+    },
+    {
+      "id": "w090_w094_swap",
+      "codes": [
+        "W094"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w094_swap.mod",
+      "source": "w090.rs::w090_w094_swap",
+      "cluster": "w090/w094_swap.mod",
+      "notes": "lower > upper"
+    },
+    {
+      "id": "w090_w094_init",
+      "codes": [
+        "W094"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w094_init.mod",
+      "source": "w090.rs::w090_w094_init",
+      "cluster": "w090/w094_init.mod",
+      "notes": "init outside bounds"
+    },
+    {
+      "id": "w090_w095_ot",
+      "codes": [
+        "W095"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w090/w095_ot.mod",
+      "source": "w090.rs::w090_w095_ot",
+      "cluster": "w090/w095_ot.mod",
+      "notes": "observation_trends not in varobs"
+    },
+    {
+      "id": "w100_clean_trend_rbc_gov_inv",
+      "codes": [
+        "W100",
+        "W101",
+        "W102",
+        "W103"
+      ],
+      "kind": "archive",
+      "package": "est",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "w100.rs::w100_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive no policy FAMILY"
+    },
+    {
+      "id": "w100_clean_sims_wu_2019",
+      "codes": [
+        "W100",
+        "W101",
+        "W102",
+        "W103"
+      ],
+      "kind": "archive",
+      "package": "est",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "w100.rs::w100_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive no policy FAMILY"
+    },
+    {
+      "id": "w100_clean_govt_rbc_irf_matching",
+      "codes": [
+        "W100",
+        "W101",
+        "W102",
+        "W103"
+      ],
+      "kind": "archive",
+      "package": "est",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "w100.rs::w100_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive no policy FAMILY"
+    },
+    {
+      "id": "w100_clean_lk2024",
+      "codes": [
+        "W100",
+        "W101",
+        "W102",
+        "W103"
+      ],
+      "kind": "archive",
+      "package": "est",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "w100.rs::w100_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive no policy FAMILY"
+    },
+    {
+      "id": "w100_parser_ramsey_fields",
+      "codes": [],
+      "kind": "harness",
+      "package": "est",
+      "fixture": "",
+      "source": "w100.rs::w100_parser_ramsey_fields",
+      "cluster": "",
+      "notes": "parser fields; fire is w100_w102"
+    },
+    {
+      "id": "w100_parser_optim_weights",
+      "codes": [],
+      "kind": "harness",
+      "package": "est",
+      "fixture": "",
+      "source": "w100.rs::w100_parser_optim_weights",
+      "cluster": "",
+      "notes": "parser fields; fire is w100_w103"
+    },
+    {
+      "id": "w100_ramsey",
+      "codes": [
+        "W100"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w100_ramsey.mod",
+      "source": "w100.rs::w100_ramsey",
+      "cluster": "w100/w100_ramsey.mod",
+      "notes": "ramsey_model without planner_objective"
+    },
+    {
+      "id": "w100_disc",
+      "codes": [
+        "W100"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w100_disc.mod",
+      "source": "w100.rs::w100_disc",
+      "cluster": "w100/w100_disc.mod",
+      "notes": "discretionary_policy without planner_objective"
+    },
+    {
+      "id": "w100_planner_alone",
+      "codes": [
+        "W100"
+      ],
+      "kind": "quiet",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w100_planner.mod",
+      "source": "w100.rs::w100_planner_objective_alone",
+      "cluster": "w100/w100_planner.mod",
+      "notes": "planner_objective alone"
+    },
+    {
+      "id": "w100_disc_ok",
+      "codes": [
+        "W100"
+      ],
+      "kind": "quiet",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w100_disc_ok.mod",
+      "source": "w100.rs::w100_disc_ok",
+      "cluster": "w100/w100_disc_ok.mod",
+      "notes": "discretionary_policy with objective"
+    },
+    {
+      "id": "w100_w101",
+      "codes": [
+        "W101"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w101_inst.mod",
+      "source": "w100.rs::w100_w101",
+      "cluster": "w100/w101_inst.mod",
+      "notes": "instrument not endogenous"
+    },
+    {
+      "id": "w100_w102_1p5",
+      "codes": [
+        "W102"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w102_1p5.mod",
+      "source": "w100.rs::w100_w102_1p5",
+      "cluster": "w100/w102_1p5.mod",
+      "notes": "planner_discount=1.5"
+    },
+    {
+      "id": "w100_w102_0",
+      "codes": [
+        "W102"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w102_0.mod",
+      "source": "w100.rs::w100_w102_0",
+      "cluster": "w100/w102_0.mod",
+      "notes": "planner_discount=0"
+    },
+    {
+      "id": "w100_w102_m0p1",
+      "codes": [
+        "W102"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w102_m0p1.mod",
+      "source": "w100.rs::w100_w102_m0p1",
+      "cluster": "w100/w102_m0p1.mod",
+      "notes": "planner_discount=-0.1"
+    },
+    {
+      "id": "w100_w102_1_ok",
+      "codes": [
+        "W102"
+      ],
+      "kind": "quiet",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w102_1.mod",
+      "source": "w100.rs::w100_w102_1_ok",
+      "cluster": "w100/w102_1.mod",
+      "notes": "planner_discount=1"
+    },
+    {
+      "id": "w100_ramsey_ok",
+      "codes": [
+        "W100",
+        "W101",
+        "W102"
+      ],
+      "kind": "quiet",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w100_ok.mod",
+      "source": "w100.rs::w100_ramsey_ok",
+      "cluster": "w100/w100_ok.mod",
+      "notes": "ramsey with objective, y, 0.99"
+    },
+    {
+      "id": "w100_w103_both",
+      "codes": [
+        "W103"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w103_both.mod",
+      "source": "w100.rs::w100_w103_both",
+      "cluster": "w100/w103_both.mod",
+      "notes": "osr with neither params nor weights"
+    },
+    {
+      "id": "w100_w103_weights",
+      "codes": [
+        "W103"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w103_weights.mod",
+      "source": "w100.rs::w100_w103_weights",
+      "cluster": "w100/w103_weights.mod",
+      "notes": "osr missing optim_weights"
+    },
+    {
+      "id": "w100_w103_params",
+      "codes": [
+        "W103"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w103_params.mod",
+      "source": "w100.rs::w100_w103_params",
+      "cluster": "w100/w103_params.mod",
+      "notes": "osr missing osr_params"
+    },
+    {
+      "id": "w100_osr_ok",
+      "codes": [
+        "W103"
+      ],
+      "kind": "quiet",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w103_ok.mod",
+      "source": "w100.rs::w100_osr_ok",
+      "cluster": "w100/w103_ok.mod",
+      "notes": "osr with params and weights"
+    },
+    {
+      "id": "w110_clean_trend_rbc_gov_inv",
+      "codes": [
+        "W060",
+        "W110",
+        "W111",
+        "W112"
+      ],
+      "kind": "archive",
+      "package": "est",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "w110.rs::w110_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive shocks FAMILY empty"
+    },
+    {
+      "id": "w110_clean_sims_wu_2019",
+      "codes": [
+        "W060",
+        "W110",
+        "W111",
+        "W112"
+      ],
+      "kind": "archive",
+      "package": "est",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "w110.rs::w110_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive shocks FAMILY empty"
+    },
+    {
+      "id": "w110_clean_govt_rbc_irf_matching",
+      "codes": [
+        "W060",
+        "W110",
+        "W111",
+        "W112"
+      ],
+      "kind": "archive",
+      "package": "est",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "w110.rs::w110_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive shocks FAMILY empty"
+    },
+    {
+      "id": "w110_clean_lk2024",
+      "codes": [
+        "W060",
+        "W110",
+        "W111",
+        "W112"
+      ],
+      "kind": "archive",
+      "package": "est",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "w110.rs::w110_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive shocks FAMILY empty"
+    },
+    {
+      "id": "w110_parser_clean_var_stmts",
+      "codes": [],
+      "kind": "harness",
+      "package": "est",
+      "fixture": "",
+      "source": "w110.rs::w110_parser_clean_var_stmts",
+      "cluster": "",
+      "notes": "parser on archive"
+    },
+    {
+      "id": "w110_parser_corr_1p5",
+      "codes": [],
+      "kind": "harness",
+      "package": "est",
+      "fixture": "",
+      "source": "w110.rs::w110_parser_corr_1p5",
+      "cluster": "",
+      "notes": "parser Corr; fire is w110_1p5"
+    },
+    {
+      "id": "w110_w060_drop",
+      "codes": [
+        "W060"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w110/w060_none.mod",
+      "source": "w110.rs::w110_w060_drop",
+      "cluster": "w110/w060_none.mod",
+      "notes": "varexo but no shocks block"
+    },
+    {
+      "id": "w110_1p5",
+      "codes": [
+        "W110"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w110/w110_1p5.mod",
+      "source": "w110.rs::w110_1p5",
+      "cluster": "w110/w110_1p5.mod",
+      "notes": "corr = 1.5"
+    },
+    {
+      "id": "w110_m1p2",
+      "codes": [
+        "W110"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w110/w110_m1p2.mod",
+      "source": "w110.rs::w110_m1p2",
+      "cluster": "w110/w110_m1p2.mod",
+      "notes": "corr = -1.2"
+    },
+    {
+      "id": "w110_ok",
+      "codes": [
+        "W110"
+      ],
+      "kind": "quiet",
+      "package": "est",
+      "fixture": "tests/fixtures/w110/w110_ok.mod",
+      "source": "w110.rs::w110_ok",
+      "cluster": "w110/w110_ok.mod",
+      "notes": "corr = 0.5"
+    },
+    {
+      "id": "w110_corr_abs_1",
+      "codes": [
+        "W110"
+      ],
+      "kind": "quiet",
+      "package": "est",
+      "fixture": "tests/fixtures/w110/w110_corr1.mod",
+      "source": "w110.rs::w110_corr_abs_1_ok",
+      "cluster": "w110/w110_corr1.mod",
+      "notes": "|corr| = 1"
+    },
+    {
+      "id": "w110_w111_dup_var",
+      "codes": [
+        "W111"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w110/w111_dup_var.mod",
+      "source": "w110.rs::w110_w111_dup_var",
+      "cluster": "w110/w111_dup_var.mod",
+      "notes": "var specified twice"
+    },
+    {
+      "id": "w110_w111_dup_corr",
+      "codes": [
+        "W111"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w110/w111_dup_corr.mod",
+      "source": "w110.rs::w110_w111_dup_corr",
+      "cluster": "w110/w111_dup_corr.mod",
+      "notes": "corr pair twice (order swapped)"
+    },
+    {
+      "id": "w110_w112_neg",
+      "codes": [
+        "W112"
+      ],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w110/w112_neg.mod",
+      "source": "w110.rs::w110_w112_neg",
+      "cluster": "w110/w112_neg.mod",
+      "notes": "var e = -0.01"
+    },
+    {
+      "id": "w110_w112_stderr_neg",
+      "codes": [
+        "W112"
+      ],
+      "kind": "quiet",
+      "package": "est",
+      "fixture": "tests/fixtures/w110/w112_stderr.mod",
+      "source": "w110.rs::w110_w112_stderr_neg",
+      "cluster": "w110/w112_stderr.mod",
+      "notes": "negative stderr is not W112"
+    },
+    {
+      "id": "w110_w112_cov_neg",
+      "codes": [
+        "W112"
+      ],
+      "kind": "quiet",
+      "package": "est",
+      "fixture": "tests/fixtures/w110/w112_cov.mod",
+      "source": "w110.rs::w110_w112_cov_neg",
+      "cluster": "w110/w112_cov.mod",
+      "notes": "negative covariance is not W112"
+    },
+    {
+      "id": "w120_clean_trend_rbc_gov_inv",
+      "codes": [
+        "W120",
+        "W121",
+        "W122"
+      ],
+      "kind": "archive",
+      "package": "w120",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "w120.rs::w120_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive W120 family empty"
+    },
+    {
+      "id": "w120_clean_sims_wu_2019",
+      "codes": [
+        "W120",
+        "W121",
+        "W122"
+      ],
+      "kind": "archive",
+      "package": "w120",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "w120.rs::w120_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive W120 family empty"
+    },
+    {
+      "id": "w120_clean_govt_rbc_irf_matching",
+      "codes": [
+        "W120",
+        "W121",
+        "W122"
+      ],
+      "kind": "archive",
+      "package": "w120",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "w120.rs::w120_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive W120 family empty"
+    },
+    {
+      "id": "w120_clean_lk2024",
+      "codes": [
+        "W120",
+        "W121",
+        "W122"
+      ],
+      "kind": "archive",
+      "package": "w120",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "w120.rs::w120_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive W120 family empty"
+    },
+    {
+      "id": "w120_det",
+      "codes": [
+        "W120"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w120_det.mod",
+      "source": "w120.rs::w120_det",
+      "cluster": "w120/w120_det.mod",
+      "notes": "only varexo_det + stoch_simul"
+    },
+    {
+      "id": "w120_estimation",
+      "codes": [
+        "W120"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w120_est.mod",
+      "source": "w120.rs::w120_estimation",
+      "cluster": "w120/w120_est.mod",
+      "notes": "only varexo_det + estimation"
+    },
+    {
+      "id": "w120_first",
+      "codes": [
+        "W120"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w120_first.mod",
+      "source": "w120.rs::w120_first",
+      "cluster": "w120/w120_first.mod",
+      "notes": "estimation then stoch_simul; message names first"
+    },
+    {
+      "id": "w120_case",
+      "codes": [
+        "W120"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w120_case.mod",
+      "source": "w120.rs::w120_case",
+      "cluster": "w120/w120_case.mod",
+      "notes": "Stoch_Simul spelling"
+    },
+    {
+      "id": "w120_one_varexo",
+      "codes": [
+        "W120"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w120_one.mod",
+      "source": "w120.rs::w120_one_varexo",
+      "cluster": "w120/w120_one.mod",
+      "notes": "one stochastic varexo is enough"
+    },
+    {
+      "id": "w120_simul",
+      "codes": [
+        "W120"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w120_simul.mod",
+      "source": "w120.rs::w120_simul",
+      "cluster": "w120/w120_simul.mod",
+      "notes": "simul is not a stochastic command for W120"
+    },
+    {
+      "id": "w120_comment",
+      "codes": [
+        "W120"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w120_comment.mod",
+      "source": "w120.rs::w120_comment",
+      "cluster": "w120/w120_comment.mod",
+      "notes": "stoch_simul only in a comment"
+    },
+    {
+      "id": "w121_betta",
+      "codes": [
+        "W121"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w121_lead.mod",
+      "source": "w120.rs::w121_betta",
+      "cluster": "w120/w121_lead.mod",
+      "notes": "betta(+1)"
+    },
+    {
+      "id": "w121_rhoz",
+      "codes": [
+        "W121"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w121_lag.mod",
+      "source": "w120.rs::w121_rhoz",
+      "cluster": "w120/w121_lag.mod",
+      "notes": "rhoz(-1)"
+    },
+    {
+      "id": "w121_noplus",
+      "codes": [
+        "W121"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w121_noplus.mod",
+      "source": "w120.rs::w121_noplus",
+      "cluster": "w120/w121_noplus.mod",
+      "notes": "betta(1)"
+    },
+    {
+      "id": "w121_spaces",
+      "codes": [
+        "W121"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w121_spaces.mod",
+      "source": "w120.rs::w121_spaces",
+      "cluster": "w120/w121_spaces.mod",
+      "notes": "betta ( +1 )"
+    },
+    {
+      "id": "w121_two_names",
+      "codes": [
+        "W121"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w121_two_names.mod",
+      "source": "w120.rs::w121_two_names",
+      "cluster": "w120/w121_two_names.mod",
+      "notes": "two params with leads"
+    },
+    {
+      "id": "w121_twice",
+      "codes": [
+        "W121"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w121_twice.mod",
+      "source": "w120.rs::w121_twice",
+      "cluster": "w120/w121_twice.mod",
+      "notes": "same param twice; first spelling"
+    },
+    {
+      "id": "w121_two_eq",
+      "codes": [
+        "W121"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w121_two_eq.mod",
+      "source": "w120.rs::w121_two_eq",
+      "cluster": "w120/w121_two_eq.mod",
+      "notes": "lead in two equations"
+    },
+    {
+      "id": "w121_dynamic",
+      "codes": [
+        "W121"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w121_dynamic.mod",
+      "source": "w120.rs::w121_dynamic",
+      "cluster": "w120/w121_dynamic.mod",
+      "notes": "[dynamic] equation"
+    },
+    {
+      "id": "w121_neg_call",
+      "codes": [
+        "W121"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w121_neg_call.mod",
+      "source": "w120.rs::w121_neg_call",
+      "cluster": "w120/w121_neg_call.mod",
+      "notes": "log(betta) is not a lead"
+    },
+    {
+      "id": "w121_neg_mul",
+      "codes": [
+        "W121"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w121_neg_mul.mod",
+      "source": "w120.rs::w121_neg_mul",
+      "cluster": "w120/w121_neg_mul.mod",
+      "notes": "betta*(1) is not a lead"
+    },
+    {
+      "id": "w121_neg_hash",
+      "codes": [
+        "W121"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w121_neg_hash.mod",
+      "source": "w120.rs::w121_neg_hash",
+      "cluster": "w120/w121_neg_hash.mod",
+      "notes": "# local with lead is not W121"
+    },
+    {
+      "id": "w121_neg_static",
+      "codes": [
+        "W121"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w121_neg_static.mod",
+      "source": "w120.rs::w121_neg_static",
+      "cluster": "w120/w121_neg_static.mod",
+      "notes": "static equation skipped"
+    },
+    {
+      "id": "w122_inf",
+      "codes": [
+        "W122"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_inf.mod",
+      "source": "w120.rs::w122_inf",
+      "cluster": "w120/w122_inf.mod",
+      "notes": "rhoz = inf"
+    },
+    {
+      "id": "w122_capital_inf",
+      "codes": [
+        "W122"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_Inf.mod",
+      "source": "w120.rs::w122_capital_inf",
+      "cluster": "w120/w122_Inf.mod",
+      "notes": "Inf"
+    },
+    {
+      "id": "w122_nan",
+      "codes": [
+        "W122"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_nan.mod",
+      "source": "w120.rs::w122_nan",
+      "cluster": "w120/w122_nan.mod",
+      "notes": "NaN"
+    },
+    {
+      "id": "w122_0inf",
+      "codes": [
+        "W122"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_0inf.mod",
+      "source": "w120.rs::w122_0inf",
+      "cluster": "w120/w122_0inf.mod",
+      "notes": "0*inf"
+    },
+    {
+      "id": "w122_1e400",
+      "codes": [
+        "W122"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_1e400.mod",
+      "source": "w120.rs::w122_1e400",
+      "cluster": "w120/w122_1e400.mod",
+      "notes": "1e400"
+    },
+    {
+      "id": "w122_div0",
+      "codes": [
+        "W122"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_div0.mod",
+      "source": "w120.rs::w122_div0",
+      "cluster": "w120/w122_div0.mod",
+      "notes": "1/0"
+    },
+    {
+      "id": "w122_later_finite",
+      "codes": [
+        "W122"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_later_ok.mod",
+      "source": "w120.rs::w122_later_finite",
+      "cluster": "w120/w122_later_ok.mod",
+      "notes": "Inf then finite"
+    },
+    {
+      "id": "w122_later_inf",
+      "codes": [
+        "W122"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_later_inf.mod",
+      "source": "w120.rs::w122_later_inf",
+      "cluster": "w120/w122_later_inf.mod",
+      "notes": "finite then Inf"
+    },
+    {
+      "id": "w122_before_stoch",
+      "codes": [
+        "W122"
+      ],
+      "kind": "fire",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_before.mod",
+      "source": "w120.rs::w122_before_stoch",
+      "cluster": "w120/w122_before.mod",
+      "notes": "Inf before stoch_simul"
+    },
+    {
+      "id": "w122_after_all",
+      "codes": [
+        "W122"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_after.mod",
+      "source": "w120.rs::w122_after_all",
+      "cluster": "w120/w122_after.mod",
+      "notes": "Inf after the run command is not seen"
+    },
+    {
+      "id": "w122_no_run",
+      "codes": [
+        "W122"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_norun.mod",
+      "source": "w120.rs::w122_no_run",
+      "cluster": "w120/w122_norun.mod",
+      "notes": "Inf with no run command"
+    },
+    {
+      "id": "w122_unused",
+      "codes": [
+        "W122"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_unused.mod",
+      "source": "w120.rs::w122_unused",
+      "cluster": "w120/w122_unused.mod",
+      "notes": "Inf param unused in model"
+    },
+    {
+      "id": "w122_gy",
+      "codes": [
+        "W122"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_gy.mod",
+      "source": "w120.rs::w122_gy",
+      "cluster": "w120/w122_gy.mod",
+      "notes": "Inf on a param W122 does not treat as a deep model param"
+    },
+    {
+      "id": "w122_ss",
+      "codes": [
+        "W122"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_ss.mod",
+      "source": "w120.rs::w122_ss",
+      "cluster": "w120/w122_ss.mod",
+      "notes": "Inf assigned only in SS"
+    },
+    {
+      "id": "w122_helper",
+      "codes": [
+        "W122"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_helper.mod",
+      "source": "w120.rs::w122_helper",
+      "cluster": "w120/w122_helper.mod",
+      "notes": "undeclared helper Inf"
+    },
+    {
+      "id": "w122_auto",
+      "codes": [
+        "W122"
+      ],
+      "kind": "quiet",
+      "package": "w120",
+      "fixture": "tests/fixtures/w120/w122_auto.mod",
+      "source": "w120.rs::w122_auto",
+      "cluster": "w120/w122_auto.mod",
+      "notes": "optimal_policy_discount_factor is skipped"
+    },
+    {
+      "id": "w130_clean_trend_rbc_gov_inv",
+      "codes": [
+        "W130",
+        "W131",
+        "W140",
+        "W150"
+      ],
+      "kind": "archive",
+      "package": "w130",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "source": "w130.rs::w130_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive W130 family empty (do not mutate govt_rbc for W130)"
+    },
+    {
+      "id": "w130_clean_sims_wu_2019",
+      "codes": [
+        "W130",
+        "W131",
+        "W140",
+        "W150"
+      ],
+      "kind": "archive",
+      "package": "w130",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "w130.rs::w130_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive W130 family empty (do not mutate govt_rbc for W130)"
+    },
+    {
+      "id": "w130_clean_govt_rbc_irf_matching",
+      "codes": [
+        "W130",
+        "W131",
+        "W140",
+        "W150"
+      ],
+      "kind": "archive",
+      "package": "w130",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "source": "w130.rs::w130_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive W130 family empty (do not mutate govt_rbc for W130)"
+    },
+    {
+      "id": "w130_clean_lk2024",
+      "codes": [
+        "W130",
+        "W131",
+        "W140",
+        "W150"
+      ],
+      "kind": "archive",
+      "package": "w130",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "source": "w130.rs::w130_clean_four_empty",
+      "cluster": "",
+      "notes": "clean archive W130 family empty (do not mutate govt_rbc for W130)"
+    },
+    {
+      "id": "w130_logn_before_n",
+      "codes": [
+        "W130"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w130_order.mod",
+      "source": "w130.rs::w130_logn_before_n",
+      "cluster": "w130/w130_order.mod",
+      "notes": "log_n assigned before n"
+    },
+    {
+      "id": "w130_k_before_y",
+      "codes": [
+        "W130"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w130_k_before_y.mod",
+      "source": "w130.rs::w130_k_before_y",
+      "cluster": "w130/w130_k_before_y.mod",
+      "notes": "k uses y before y is assigned"
+    },
+    {
+      "id": "w130_timed_rhs_native",
+      "codes": [
+        "W130"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w130_timed.mod",
+      "source": "w130.rs::w130_timed_rhs_native",
+      "cluster": "w130/w130_timed.mod",
+      "notes": "timed rhs; native span (Python range skipped)"
+    },
+    {
+      "id": "w131_n_zero",
+      "codes": [
+        "W131"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w131_zero.mod",
+      "source": "w130.rs::w131_n_zero",
+      "cluster": "w130/w131_zero.mod",
+      "notes": "n assigned then overwritten with 0"
+    },
+    {
+      "id": "w131_n_const",
+      "codes": [
+        "W131"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w131_const.mod",
+      "source": "w130.rs::w131_n_const",
+      "cluster": "w130/w131_const.mod",
+      "notes": "n overwritten with a constant"
+    },
+    {
+      "id": "w131_log_ok",
+      "codes": [
+        "W131"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w131_log.mod",
+      "source": "w130.rs::w131_log_ok",
+      "cluster": "w130/w131_log.mod",
+      "notes": "n = log(n) is in-place"
+    },
+    {
+      "id": "w131_exp_ok",
+      "codes": [
+        "W131"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w131_exp.mod",
+      "source": "w130.rs::w131_exp_ok",
+      "cluster": "w130/w131_exp.mod",
+      "notes": "n = exp(n)"
+    },
+    {
+      "id": "w131_lag_ok",
+      "codes": [
+        "W131"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w131_lag.mod",
+      "source": "w130.rs::w131_lag_ok",
+      "cluster": "w130/w131_lag.mod",
+      "notes": "uses n(-1) of earlier value"
+    },
+    {
+      "id": "w131_psi_param",
+      "codes": [
+        "W131"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w131_param.mod",
+      "source": "w130.rs::w131_psi_param",
+      "cluster": "w130/w131_param.mod",
+      "notes": "later assignment still uses the name as a param; not W131"
+    },
+    {
+      "id": "w131_nss_helper",
+      "codes": [
+        "W131"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w131_helper.mod",
+      "source": "w130.rs::w131_nss_helper",
+      "cluster": "w130/w131_helper.mod",
+      "notes": "helper overwrite that W131 does not flag"
+    },
+    {
+      "id": "w042_not_w130",
+      "codes": [
+        "W130"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w042_not_w130.mod",
+      "source": "w130.rs::w042_not_w130",
+      "cluster": "w130/w042_not_w130.mod",
+      "notes": "missing SS coverage is W042 not W130"
+    },
+    {
+      "id": "w150_simul",
+      "codes": [
+        "W150"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w150_simul.mod",
+      "source": "w130.rs::w150_simul",
+      "cluster": "w130/w150_simul.mod",
+      "notes": "simul;"
+    },
+    {
+      "id": "w150_simul_paren",
+      "codes": [
+        "W150"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w150_simul_paren.mod",
+      "source": "w130.rs::w150_simul_paren",
+      "cluster": "w130/w150_simul_paren.mod",
+      "notes": "simul(...)"
+    },
+    {
+      "id": "w150_two_simul",
+      "codes": [
+        "W150"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w150_two.mod",
+      "source": "w130.rs::w150_two_simul",
+      "cluster": "w130/w150_two.mod",
+      "notes": "two simul commands"
+    },
+    {
+      "id": "w150_ramsey",
+      "codes": [
+        "W150"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w150_ramsey.mod",
+      "source": "w130.rs::w150_ramsey",
+      "cluster": "w130/w150_ramsey.mod",
+      "notes": "ramsey_policy"
+    },
+    {
+      "id": "w150_aim",
+      "codes": [
+        "W150"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w150_aim.mod",
+      "source": "w130.rs::w150_aim",
+      "cluster": "w130/w150_aim.mod",
+      "notes": "aim_solver inside options"
+    },
+    {
+      "id": "w150_bytecode",
+      "codes": [
+        "W150"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w150_bytecode.mod",
+      "source": "w130.rs::w150_bytecode",
+      "cluster": "w130/w150_bytecode.mod",
+      "notes": "bytecode option"
+    },
+    {
+      "id": "w150_declared_bytecode",
+      "codes": [
+        "W150"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w150_declared.mod",
+      "source": "w130.rs::w150_declared_bytecode",
+      "cluster": "w130/w150_declared.mod",
+      "notes": "bytecode declared as a parameter is not the option"
+    },
+    {
+      "id": "w150_comment_simul",
+      "codes": [
+        "W150"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w150_comment.mod",
+      "source": "w130.rs::w150_comment_simul",
+      "cluster": "w130/w150_comment.mod",
+      "notes": "simul in a comment"
+    },
+    {
+      "id": "w150_string_bytecode",
+      "codes": [
+        "W150"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w150_string.mod",
+      "source": "w130.rs::w150_string_bytecode",
+      "cluster": "w130/w150_string.mod",
+      "notes": "bytecode in a string"
+    },
+    {
+      "id": "w150_perfect_ok",
+      "codes": [
+        "W150"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w150_perfect.mod",
+      "source": "w130.rs::w150_perfect_ok",
+      "cluster": "w130/w150_perfect.mod",
+      "notes": "perfect_foresight_* is fine"
+    },
+    {
+      "id": "w150_equation_bytecode",
+      "codes": [
+        "W150"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w150_eq.mod",
+      "source": "w130.rs::w150_equation_bytecode_native",
+      "cluster": "w130/w150_eq.mod",
+      "notes": "bytecode as an identifier in an equation is not the option"
+    },
+    {
+      "id": "w150_model_bytecode",
+      "codes": [
+        "W150"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w150_model.mod",
+      "source": "w130.rs::w150_model_bytecode",
+      "cluster": "w130/w150_model.mod",
+      "notes": "model(..., bytecode)"
+    },
+    {
+      "id": "w140_log",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_log",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "log(x)"
+    },
+    {
+      "id": "w140_exp",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_exp",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "exp"
+    },
+    {
+      "id": "w140_abs",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_abs",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "abs"
+    },
+    {
+      "id": "w140_abs_upper",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_abs_upper",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "ABS"
+    },
+    {
+      "id": "w140_max",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_max",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "max"
+    },
+    {
+      "id": "w140_min",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_min",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "min"
+    },
+    {
+      "id": "w140_sign",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_sign",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "sign"
+    },
+    {
+      "id": "w140_sin",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_sin",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "sin"
+    },
+    {
+      "id": "w140_foo",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_foo",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "unknown foo(x)"
+    },
+    {
+      "id": "w140_pow2",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_pow2",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "x^2"
+    },
+    {
+      "id": "w140_mul_vars",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_mul_vars",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "x * pi"
+    },
+    {
+      "id": "w140_div_var",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_div_var",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "2 / x"
+    },
+    {
+      "id": "w140_div_two",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_div_two",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "x / pi"
+    },
+    {
+      "id": "w140_cmp",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_cmp",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "x > 0"
+    },
+    {
+      "id": "w140_log_times",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_log_times",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "log(x)*pi"
+    },
+    {
+      "id": "w140_log_pow",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_log_pow",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "log(x)^2"
+    },
+    {
+      "id": "w140_expect_log",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_expect_log",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "EXPECTATION(1)(log(x)) still flags log"
+    },
+    {
+      "id": "w140_diff_log",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ops.mod",
+      "source": "w130.rs::w140_diff_log",
+      "cluster": "w130/w140_ops.mod",
+      "notes": "diff(log(x)) flags log"
+    },
+    {
+      "id": "w140_local_abs",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_local.mod",
+      "source": "w130.rs::w140_local_abs",
+      "cluster": "w130/w140_local.mod",
+      "notes": "# local abs(x) still W140"
+    },
+    {
+      "id": "w140_two_eqs",
+      "codes": [
+        "W140"
+      ],
+      "kind": "fire",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_two.mod",
+      "source": "w130.rs::w140_two_eqs",
+      "cluster": "w130/w140_two.mod",
+      "notes": "two nonlinear equations"
+    },
+    {
+      "id": "w140_pow1",
+      "codes": [
+        "W140"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_pow1.mod",
+      "source": "w130.rs::w140_pow1",
+      "cluster": "w130/w140_pow1.mod",
+      "notes": "x^1 is linear"
+    },
+    {
+      "id": "w140_pow0",
+      "codes": [
+        "W140"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_pow0.mod",
+      "source": "w130.rs::w140_pow0",
+      "cluster": "w130/w140_pow0.mod",
+      "notes": "x^0 is linear"
+    },
+    {
+      "id": "w140_pow1p0",
+      "codes": [
+        "W140"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_pow1p0.mod",
+      "source": "w130.rs::w140_pow1p0",
+      "cluster": "w130/w140_pow1p0.mod",
+      "notes": "x^1.0 is linear"
+    },
+    {
+      "id": "w140_mul_param",
+      "codes": [
+        "W140"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_mul_param.mod",
+      "source": "w130.rs::w140_mul_param",
+      "cluster": "w130/w140_mul_param.mod",
+      "notes": "param * var is linear"
+    },
+    {
+      "id": "w140_div_const",
+      "codes": [
+        "W140"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_div_const.mod",
+      "source": "w130.rs::w140_div_const",
+      "cluster": "w130/w140_div_const.mod",
+      "notes": "x / 2 is linear"
+    },
+    {
+      "id": "w140_ss",
+      "codes": [
+        "W140"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ss.mod",
+      "source": "w130.rs::w140_ss",
+      "cluster": "w130/w140_ss.mod",
+      "notes": "steady_state(x) is not nonlinear in this check"
+    },
+    {
+      "id": "w140_ss_log",
+      "codes": [
+        "W140"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_ss_log.mod",
+      "source": "w130.rs::w140_ss_log",
+      "cluster": "w130/w140_ss_log.mod",
+      "notes": "log(steady_state(x)) quiet"
+    },
+    {
+      "id": "w140_expect",
+      "codes": [
+        "W140"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_expect.mod",
+      "source": "w130.rs::w140_expect",
+      "cluster": "w130/w140_expect.mod",
+      "notes": "EXPECTATION(1)(x) quiet"
+    },
+    {
+      "id": "w140_diff",
+      "codes": [
+        "W140"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_diff.mod",
+      "source": "w130.rs::w140_diff",
+      "cluster": "w130/w140_diff.mod",
+      "notes": "diff(x) itself is quiet"
+    },
+    {
+      "id": "w140_log_param",
+      "codes": [
+        "W140"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_log_param.mod",
+      "source": "w130.rs::w140_log_param",
+      "cluster": "w130/w140_log_param.mod",
+      "notes": "log(param) is quiet"
+    },
+    {
+      "id": "w140_not_linear",
+      "codes": [
+        "W140"
+      ],
+      "kind": "quiet",
+      "package": "w130",
+      "fixture": "tests/fixtures/w130/w140_not_linear.mod",
+      "source": "w130.rs::w140_not_linear",
+      "cluster": "w130/w140_not_linear.mod",
+      "notes": "model; without linear"
+    },
+    {
+      "id": "e999_documented_only",
+      "codes": [
+        "E999"
+      ],
+      "kind": "documented-only",
+      "package": "other",
+      "fixture": "",
+      "source": "explain.rs::known_codes_is_exactly_the_54_rust_keys",
+      "cluster": "",
+      "notes": "in known_codes / explain; nothing emits it yet"
+    },
+    {
+      "id": "p000_timeout_harness",
+      "codes": [
+        "P000"
+      ],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "",
+      "source": "preprocessor.rs::parse_p000_timeout_message",
+      "cluster": "",
+      "notes": "preprocessor timeout / Dynare stderr; not a model"
+    },
+    {
+      "id": "other_parse_summary",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "",
+      "source": "parse_summary.rs",
+      "cluster": "",
+      "notes": "parse_summary archive dumps"
+    },
+    {
+      "id": "other_expr_walk",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "",
+      "source": "expr_walk.rs",
+      "cluster": "",
+      "notes": "expression walk on archives"
+    },
+    {
+      "id": "other_macro_expand",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "",
+      "source": "macro_expand.rs",
+      "cluster": "",
+      "notes": "macro expand on archives"
+    },
+    {
+      "id": "other_include",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "",
+      "source": "include.rs",
+      "cluster": "",
+      "notes": "include records, not codes"
+    },
+    {
+      "id": "other_format",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "",
+      "source": "format.rs",
+      "cluster": "",
+      "notes": "format fixtures and archive smoke"
+    },
+    {
+      "id": "other_list_options",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "",
+      "source": "list_options.rs",
+      "cluster": "",
+      "notes": "command option catalog JSON"
+    },
+    {
+      "id": "other_explain",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "",
+      "source": "explain.rs",
+      "cluster": "",
+      "notes": "explain markdown under tests/expected/explain"
+    },
+    {
+      "id": "other_preprocessor",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "",
+      "source": "preprocessor.rs",
+      "cluster": "",
+      "notes": "preprocessor find/run/reconcile"
+    },
+    {
+      "id": "other_lsp",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "",
+      "source": "lsp.rs",
+      "cluster": "",
+      "notes": "LSP transport on archives"
+    },
+    {
+      "id": "other_mcp",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "",
+      "source": "mcp.rs",
+      "cluster": "",
+      "notes": "MCP transport on archives"
+    },
+    {
+      "id": "other_check",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "",
+      "source": "check.rs",
+      "cluster": "",
+      "notes": "CLI check on archives; wave c may smoke one check file"
+    },
+    {
+      "id": "check_i050_archive_message",
+      "codes": [
+        "I050"
+      ],
+      "kind": "archive",
+      "package": "other",
+      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "source": "check.rs::i050_uses_recorded_rust_message",
+      "cluster": "",
+      "notes": "CLI prints recorded I050; archive not a new file"
+    },
+    {
+      "id": "check_error_fixture",
+      "codes": [
+        "E001"
+      ],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "tests/fixtures/e001/delete_model_end.mod",
+      "source": "check.rs::error_check_fixture_exits_1",
+      "cluster": "e001/delete_model_end.mod",
+      "notes": "CLI smoke: check_file emits E001; CLI prints ERROR and exits 1 (P001 when Dynare is installed)"
+    }
+  ]
+}

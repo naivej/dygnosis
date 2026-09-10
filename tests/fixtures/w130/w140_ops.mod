@@ -1,0 +1,25 @@
+// inventory: w140_log, w140_exp, w140_abs, w140_abs_upper, w140_max, w140_min, w140_sign, w140_sin, w140_foo, w140_pow2, w140_mul_vars, w140_div_var, w140_div_two, w140_cmp, w140_log_times, w140_log_pow, w140_expect_log, w140_diff_log
+var y_log y_exp y_abs y_ABS y_max y_min y_sign y_sin y_foo y_pow y_mul y_div y_div2 y_cmp y_lt y_lp y_el y_dl;
+varexo e;
+parameters betta;
+betta = 0.99;
+model(linear);
+y_log = log(y_log);
+y_exp = exp(y_exp);
+y_abs = abs(y_abs);
+y_ABS = ABS(y_ABS);
+y_max = max(y_max, 0);
+y_min = min(y_min, 0);
+y_sign = sign(y_sign);
+y_sin = sin(y_sin);
+y_foo = foo(y_foo);
+y_pow = y_pow(+1)^2;
+y_mul = y_mul * y_log;
+y_div = 2 / y_div;
+y_div2 = y_div2 / y_log;
+y_cmp = (y_cmp > 0);
+y_lt = log(y_lt)*y_log;
+y_lp = log(y_lp)^2;
+y_el = EXPECTATION(1)(log(y_el));
+y_dl = diff(log(y_dl));
+end;

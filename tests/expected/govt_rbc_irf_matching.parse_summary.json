@@ -1,0 +1,47 @@
+{
+  "endogenous": [
+    "y",
+    "c",
+    "k",
+    "n",
+    "invest",
+    "ig",
+    "kg",
+    "z",
+    "w",
+    "rk",
+    "log_y",
+    "log_c",
+    "log_k",
+    "log_kg",
+    "log_ig",
+    "log_n",
+    "log_invest"
+  ],
+  "exogenous": [
+    "eps_z",
+    "eps_ig"
+  ],
+  "parameters": [
+    "betta",
+    "gam",
+    "delta",
+    "deltag",
+    "alppha",
+    "alphag",
+    "phhi",
+    "psi",
+    "rhoz",
+    "rho_ig",
+    "gy",
+    "ig_ss"
+  ],
+  "n_model_equations": 17,
+  "n_steady_state_equations": 23,
+  "n_initval_entries": 0,
+  "is_linear": false,
+  "has_model_block": true,
+  "has_steady_state_model_block": true,
+  "has_initval_block": false,
+  "has_shocks_block": true
+}

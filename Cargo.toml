@@ -1,0 +1,23 @@
+[package]
+name = "dygnosis"
+description = "Thin Dynare analysis core — LSP and MCP for .mod files"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/naivej/dygnosis"
+
+[[bin]]
+name = "dygnosis"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+regex = "1"
+rmcp = { version = "3.2.0", features = ["server", "transport-io"] }
+schemars = "1.2.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "net"] }
+tower-lsp = "0.20"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

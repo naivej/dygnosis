@@ -1,0 +1,95 @@
+{
+  "not_a_dynare_command": {
+    "command": "not_a_dynare_command",
+    "known": false,
+    "message": "'not_a_dynare_command' is not a Dynare command in the bundled 7.1 grammar.",
+    "suggestions": []
+  },
+  "stoch_simu": {
+    "command": "stoch_simu",
+    "known": false,
+    "message": "'stoch_simu' is not a Dynare command in the bundled 7.1 grammar. Did you mean: stoch_simul?",
+    "suggestions": [
+      "stoch_simul"
+    ]
+  },
+  "estimatio": {
+    "command": "estimatio",
+    "known": false,
+    "message": "'estimatio' is not a Dynare command in the bundled 7.1 grammar. Did you mean: estimation, ms_estimation, ms_simulation?",
+    "suggestions": [
+      "estimation",
+      "ms_estimation",
+      "ms_simulation"
+    ]
+  },
+  "checkk": {
+    "command": "checkk",
+    "known": false,
+    "message": "'checkk' is not a Dynare command in the bundled 7.1 grammar. Did you mean: check?",
+    "suggestions": [
+      "check"
+    ]
+  },
+  "sensitiv": {
+    "command": "sensitiv",
+    "known": false,
+    "message": "'sensitiv' is not a Dynare command in the bundled 7.1 grammar. Did you mean: sensitivity?",
+    "suggestions": [
+      "sensitivity"
+    ]
+  },
+  "Nsam": {
+    "command": "nsam",
+    "known": false,
+    "message": "'nsam' is not a Dynare command in the bundled 7.1 grammar.",
+    "suggestions": []
+  },
+  "xyzzy": {
+    "command": "xyzzy",
+    "known": false,
+    "message": "'xyzzy' is not a Dynare command in the bundled 7.1 grammar.",
+    "suggestions": []
+  },
+  "stoch_simulx": {
+    "command": "stoch_simulx",
+    "known": false,
+    "message": "'stoch_simulx' is not a Dynare command in the bundled 7.1 grammar. Did you mean: stoch_simul?",
+    "suggestions": [
+      "stoch_simul"
+    ]
+  },
+  "var_mod": {
+    "command": "var_mod",
+    "known": false,
+    "message": "'var_mod' is not a Dynare command in the bundled 7.1 grammar. Did you mean: var_model, pac_model?",
+    "suggestions": [
+      "var_model",
+      "pac_model"
+    ]
+  },
+  "bvar": {
+    "command": "bvar",
+    "known": false,
+    "message": "'bvar' is not a Dynare command in the bundled 7.1 grammar. Did you mean: svar, bvar_irf?",
+    "suggestions": [
+      "svar",
+      "bvar_irf"
+    ]
+  },
+  "steadyy": {
+    "command": "steadyy",
+    "known": false,
+    "message": "'steadyy' is not a Dynare command in the bundled 7.1 grammar. Did you mean: steady, std?",
+    "suggestions": [
+      "steady",
+      "std"
+    ]
+  },
+  " ": {
+    "command": " ",
+    "known": false,
+    "message": "' ' is not a Dynare command in the bundled 7.1 grammar.",
+    "suggestions": []
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "endogenous": [
+    "x",
+    "pi",
+    "rs",
+    "qe",
+    "rf",
+    "theta",
+    "exr"
+  ],
+  "exogenous": [
+    "eps_f",
+    "eps_theta",
+    "eps_r",
+    "eps_q"
+  ],
+  "parameters": [
+    "betta",
+    "z",
+    "sigma",
+    "bFI",
+    "bcb",
+    "gam",
+    "zeta",
+    "rho_r",
+    "phi_pi",
+    "phi_x",
+    "rho_f",
+    "rho_theta",
+    "rho_q"
+  ],
+  "n_model_equations": 7,
+  "n_steady_state_equations": 0,
+  "n_initval_entries": 0,
+  "is_linear": true,
+  "has_model_block": true,
+  "has_steady_state_model_block": false,
+  "has_initval_block": false,
+  "has_shocks_block": true
+}

@@ -1,0 +1,2 @@
+# Inventory is asserted LF-only by tests/check_inventory.rs
+tests/fixtures/inventory.json text eol=lf

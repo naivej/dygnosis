@@ -1,0 +1,51 @@
+{
+  "endogenous": [
+    "C",
+    "N",
+    "Y",
+    "mc",
+    "W",
+    "rk",
+    "Pi",
+    "K",
+    "I",
+    "Qk",
+    "Rk",
+    "zeta",
+    "RL",
+    "R",
+    "qe",
+    "xi"
+  ],
+  "exogenous": [
+    "eps_xi"
+  ],
+  "parameters": [
+    "betta",
+    "sigma",
+    "varphi",
+    "chi",
+    "alppha",
+    "delta",
+    "epsilon",
+    "phi_p",
+    "kappa_I",
+    "zetabar",
+    "zeta_prime",
+    "phi_pi",
+    "phi_y",
+    "rho_qe",
+    "phi_qe",
+    "rho_xi",
+    "R_ss",
+    "Y_ss"
+  ],
+  "n_model_equations": 16,
+  "n_steady_state_equations": 17,
+  "n_initval_entries": 0,
+  "is_linear": false,
+  "has_model_block": true,
+  "has_steady_state_model_block": true,
+  "has_initval_block": false,
+  "has_shocks_block": true
+}
