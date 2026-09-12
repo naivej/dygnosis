@@ -32,12 +32,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "A name listed in `predetermined_variables` must also be declared as an endogenous variable in the `var` block. Dynare requires the variable to exist before it can be marked predetermined.\n\n**Fix**\n\n- Add the variable to the `var` declaration, or\n- Remove it from `predetermined_variables` if it is not actually   endogenous",
     }),
     ("E024", ExplainEntry {
-        title: "Unsupported time subscript",
-        body: "A deterministic exogenous variable is used with a lead or lag in a context where the LSP cannot safely interpret the dated value. Parameter leads/lags are accepted because Dynare treats them as fixed scalars.\n\n**Fix**\n\n- Remove the time subscript if the symbol is meant to be a fixed   scalar\n- If the dated quantity is state-dependent, model it as an   endogenous variable instead",
+        title: "Deterministic exogenous with a lead or lag",
+        body: "A deterministic exogenous variable (``varexo_det``) is used with a lead or lag. They refuse: `Exogenous deterministic variable tau cannot be given a lead or a lag.` Parameter leads/lags are accepted because Dynare treats them as fixed scalars.\n\n**Fix**\n\n- Remove the time subscript\n- If the dated quantity is state-dependent, model it as an endogenous variable instead",
     }),
     ("E025", ExplainEntry {
-        title: "Model-local variable shadows a declared symbol",
-        body: "A model-local variable defined with `#` uses the same name as a declared `var`, `varexo`, or `parameters` symbol. That hides the declared steady-state value inside the model block and can make solver diagnostics misleading.\n\n**Fix**\n\n- Rename the model-local helper, for example `#y_local = ...`\n- Or remove the declaration if the name was intended to be only   a model-local helper",
+        title: "Invalid model-local (`#`) variable",
+        body: "A model-local variable defined with `#` either reuses a declared `var`, `varexo`, or `parameters` name, or is used in an equation before its `#` definition. They refuse: `… has wrong type or was already used on the right-hand side. You cannot use it on the left-hand side of a pound ('#') expression`.\n\n**Fix**\n\n- Rename the model-local helper so it does not clash with a declared symbol\n- Move the `#` definition above its first use\n- Or remove the declaration if the name was meant to be only a model-local helper",
     }),
     ("E030", ExplainEntry {
         title: "Duplicate declaration across blocks",
@@ -169,7 +169,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W094", ExplainEntry {
         title: "estimated_params bound or initial-value inconsistency",
-        body: "An ``estimated_params`` entry has a lower bound that is not below its upper bound, or an initial value that lies outside the ``[lower, upper]`` interval. Dynare needs a non-empty bound interval containing the starting value.\n\n**Fix**\n\nOrder the bounds so that lower < upper and place the initial value inside them.",
+        body: "An ``estimated_params`` entry has a lower bound that is not below its upper bound, or an initial value that lies outside the ``[lower, upper]`` interval. This is an extra Warning: they accept inconsistent bounds at check.\n\n**Fix**\n\nOrder the bounds so that lower < upper and place the initial value inside them.",
     }),
     ("E095", ExplainEntry {
         title: "observation_trends variable not in varobs",
@@ -189,7 +189,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E103", ExplainEntry {
         title: "osr is missing osr_params or optim_weights",
-        body: "Optimal simple rules (``osr``) need an ``osr_params`` statement (the parameters to optimise). They refuse: `The osr statement requires the osr_params statement.` This check also flags a missing ``optim_weights`` block.\n\n**Fix**\n\nAdd the missing ``osr_params`` statement and/or ``optim_weights`` block.",
+        body: "Optimal simple rules (``osr``) need an ``osr_params`` statement (the parameters to optimise). They refuse when it is missing: `The osr statement requires the osr_params statement.` They also refuse when neither ``optim_weights`` nor ``planner_objective`` is present: `The osr statement requires either an optim_weights block or a planner_objective.` This check flags a missing ``osr_params`` statement and a missing ``optim_weights`` block.\n\n**Fix**\n\nAdd the missing ``osr_params`` statement and/or ``optim_weights`` block.",
     }),
     ("W110", ExplainEntry {
         title: "Shock correlation outside [-1, 1]",
