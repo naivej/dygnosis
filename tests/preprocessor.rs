@@ -47,7 +47,8 @@ fn temp_dir(tag: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("dygnosis-pp-{tag}-{}-{nanos}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("dygnosis-pp-{tag}-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -62,9 +63,9 @@ fn diag(code: &str, severity: Severity) -> Diagnostic {
 }
 
 fn preproc(success: bool, codes: &[&str]) -> PreprocessorResult {
-    PreprocessorResult {
+    preproc_diags(
         success,
-        diagnostics: codes
+        codes
             .iter()
             .map(|c| {
                 let sev = if *c == "P000" {
@@ -75,6 +76,13 @@ fn preproc(success: bool, codes: &[&str]) -> PreprocessorResult {
                 diag(c, sev)
             })
             .collect(),
+    )
+}
+
+fn preproc_diags(success: bool, diagnostics: Vec<Diagnostic>) -> PreprocessorResult {
+    PreprocessorResult {
+        success,
+        diagnostics,
         raw_stdout: String::new(),
         raw_stderr: String::new(),
         path: PathBuf::from("dynare-preprocessor"),
@@ -165,11 +173,8 @@ fn parse_error_col() {
 #[test]
 fn parse_warning_line_only() {
     let text = pad_lines(15, 20);
-    let diags = parse_preprocessor_output(
-        "WARNING: model.mod: line 10: unused variable",
-        None,
-        &text,
-    );
+    let diags =
+        parse_preprocessor_output("WARNING: model.mod: line 10: unused variable", None, &text);
     assert_eq!(diags.len(), 1);
     assert_eq!(diags[0].code, "P001");
     assert_eq!(diags[0].severity, Severity::Warning);
@@ -184,11 +189,8 @@ fn parse_warning_line_only() {
 #[test]
 fn parse_cols_end_char_is_b_not_b_minus_one() {
     let text = pad_lines(15, 20);
-    let diags = parse_preprocessor_output(
-        "ERROR: model.mod: line 10, cols 5-12: span",
-        None,
-        &text,
-    );
+    let diags =
+        parse_preprocessor_output("ERROR: model.mod: line 10, cols 5-12: span", None, &text);
     assert_eq!(diags.len(), 1);
     let index = LineIndex::new(&text);
     let start = index.position(&text, diags[0].span.start);
@@ -217,11 +219,8 @@ fn parse_cross_file_prefix() {
 #[test]
 fn parse_macro_processor() {
     let text = pad_lines(3, 8);
-    let diags = parse_preprocessor_output(
-        "ERROR in macro-processor: unexpected token",
-        None,
-        &text,
-    );
+    let diags =
+        parse_preprocessor_output("ERROR in macro-processor: unexpected token", None, &text);
     assert_eq!(diags.len(), 1);
     assert_eq!(diags[0].code, "P001");
     assert_eq!(diags[0].message, "unexpected token");
@@ -260,12 +259,8 @@ fn parse_p000_timeout_message() {
 
 #[test]
 fn structured_missing_binary_via_empty_finder() {
-    let value = run_preprocessor_structured_with_finder(
-        "var y;\n",
-        None,
-        Duration::from_secs(30),
-        || None,
-    );
+    let value =
+        run_preprocessor_structured_with_finder("var y;\n", None, Duration::from_secs(30), || None);
     assert_eq!(value["success"], false);
     assert_eq!(value["message"], MISSING_BINARY_MESSAGE);
     assert_eq!(value["diagnostics"], serde_json::json!([]));
@@ -273,7 +268,10 @@ fn structured_missing_binary_via_empty_finder() {
 
 #[test]
 fn reconcile_none_unchanged() {
-    let own = vec![diag("E001", Severity::Error), diag("W010", Severity::Warning)];
+    let own = vec![
+        diag("E001", Severity::Error),
+        diag("W010", Severity::Warning),
+    ];
     let out = reconcile_diagnostics(&own, None);
     assert_eq!(
         out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
@@ -283,7 +281,10 @@ fn reconcile_none_unchanged() {
 
 #[test]
 fn reconcile_success_drops_error_keeps_warning() {
-    let own = vec![diag("E001", Severity::Error), diag("W010", Severity::Warning)];
+    let own = vec![
+        diag("E001", Severity::Error),
+        diag("W010", Severity::Warning),
+    ];
     let pre = preproc(true, &[]);
     let out = reconcile_diagnostics(&own, Some(&pre));
     assert_eq!(
@@ -293,19 +294,77 @@ fn reconcile_success_drops_error_keeps_warning() {
 }
 
 #[test]
-fn reconcile_success_keeps_e010() {
-    let own = vec![diag("E010", Severity::Error), diag("E001", Severity::Error)];
+fn reconcile_accept_keeps_extra_warnings_and_same_ground_if_they_did_not_warn() {
+    let own = vec![
+        diag("E001", Severity::Error),
+        diag("W013", Severity::Warning),
+        diag("W010", Severity::Warning),
+        diag("W022", Severity::Warning),
+    ];
     let pre = preproc(true, &[]);
     let out = reconcile_diagnostics(&own, Some(&pre));
     assert_eq!(
         out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
-        ["E010"]
+        ["W013", "W010", "W022"]
+    );
+}
+
+#[test]
+fn reconcile_accept_hides_same_ground_warning_when_they_warned() {
+    let own = vec![
+        diag("E001", Severity::Error),
+        diag("W013", Severity::Warning),
+        diag("W010", Severity::Warning),
+        diag("W022", Severity::Warning),
+    ];
+    let pre = preproc_diags(true, vec![diag("P001", Severity::Warning)]);
+    let out = reconcile_diagnostics(&own, Some(&pre));
+    assert_eq!(
+        out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["W013", "W010", "P001"]
+    );
+}
+
+#[test]
+fn reconcile_accept_drops_every_own_error() {
+    let own = vec![
+        diag("E001", Severity::Error),
+        diag("E021", Severity::Error),
+        diag("W013", Severity::Warning),
+    ];
+    let pre = preproc(true, &[]);
+    let out = reconcile_diagnostics(&own, Some(&pre));
+    assert!(
+        out.iter().all(|d| d.severity != Severity::Error),
+        "no own Error remains on accept, got {:?}",
+        out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+    );
+    assert!(out.iter().any(|d| d.code == "W013"));
+}
+
+#[test]
+fn reconcile_refuse_drops_same_ground_errors_keeps_extra_warnings() {
+    let own = vec![
+        diag("E001", Severity::Error),
+        diag("E021", Severity::Error),
+        diag("W013", Severity::Warning),
+        diag("W070", Severity::Warning),
+        diag("W056", Severity::Warning),
+    ];
+    let pre = preproc(false, &["P001"]);
+    let out = reconcile_diagnostics(&own, Some(&pre));
+    assert_eq!(
+        out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["W013", "W070", "W056", "P001"]
     );
 }
 
 #[test]
 fn reconcile_reject_drops_e001() {
-    let own = vec![diag("E001", Severity::Error), diag("W070", Severity::Warning)];
+    let own = vec![
+        diag("E001", Severity::Error),
+        diag("W070", Severity::Warning),
+    ];
     let pre = preproc(false, &["P001"]);
     let out = reconcile_diagnostics(&own, Some(&pre));
     assert_eq!(
@@ -332,7 +391,9 @@ fn happy_path_trend_rbc_gov_inv_success() {
         return;
     };
     let text = read_mod("trend_rbc_gov_inv");
-    let source_dir = copilot_mod("trend_rbc_gov_inv").parent().map(Path::to_path_buf);
+    let source_dir = copilot_mod("trend_rbc_gov_inv")
+        .parent()
+        .map(Path::to_path_buf);
     let result = run_preprocessor(&text, &pp, source_dir.as_deref(), Duration::from_secs(30));
     assert!(
         result.success,
@@ -390,10 +451,7 @@ fn overlay_rewrite_absolute_include_remapped() {
     std::fs::write(&original, b"disk stale\n").unwrap();
     let abs = original.canonicalize().unwrap();
     let abs_s = abs.to_string_lossy();
-    let abs_s = abs_s
-        .strip_prefix(r"\\?\")
-        .unwrap_or(&abs_s)
-        .to_string();
+    let abs_s = abs_s.strip_prefix(r"\\?\").unwrap_or(&abs_s).to_string();
     let include_path = abs_s.replace('\\', "/");
     let content = format!("@#include \"{include_path}\"\n");
     let target = mirror_dir.join("helper.inc");

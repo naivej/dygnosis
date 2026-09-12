@@ -49,7 +49,7 @@ fn rust_e010(text: &str) -> Vec<Diag> {
     let index = LineIndex::new(&model.source);
     check_e010(&model)
         .into_iter()
-        .filter(|d| d.code == "E010")
+        .filter(|d| d.code == "W013")
         .map(|d| {
             let start = index.position(&model.source, d.span.start);
             let end = index.position(&model.source, d.span.end);
@@ -95,7 +95,7 @@ fn assert_span(text: &str, d: &Diag, needle: &str) {
 fn e010_unmodified_archives() {
     for name in ARCHIVES {
         let got = rust_e010(&read_mod(name));
-        assert!(got.is_empty(), "{name}: expected no E010, got {got:?}");
+        assert!(got.is_empty(), "{name}: expected no W013, got {got:?}");
     }
 }
 
@@ -104,14 +104,10 @@ fn e010_extra() {
     let text = check_mod("e010/e010_extra.mod");
     let got = rust_e010(&text);
     assert_eq!(got.len(), 1);
-    assert_eq!(got[0].code, "E010");
-    assert_eq!(got[0].severity, 1);
+    assert_eq!(got[0].code, "W013");
+    assert_eq!(got[0].severity, 2);
     assert!(got[0].message.contains("2 equation(s) but 1 endogenous"));
-    assert_span(
-        &text,
-        &got[0],
-        "model;\ny = rho * y(-1) + e;\ny = 0;\nend;",
-    );
+    assert_span(&text, &got[0], "model;\ny = rho * y(-1) + e;\ny = 0;\nend;");
 }
 
 #[test]
@@ -119,8 +115,8 @@ fn e010_linked() {
     let text = check_mod("e010/e010_linked.mod");
     let got = rust_e010(&text);
     assert_eq!(got.len(), 1);
-    assert_eq!(got[0].code, "E010");
-    assert_eq!(got[0].severity, 1);
+    assert_eq!(got[0].code, "W013");
+    assert_eq!(got[0].severity, 2);
     assert!(
         got[0].message.contains("unreferenced variable(s) z"),
         "linked message, got {}",
@@ -134,8 +130,8 @@ fn e010_missing() {
     let text = check_mod("e010/e010_missing.mod");
     let got = rust_e010(&text);
     assert_eq!(got.len(), 1);
-    assert_eq!(got[0].code, "E010");
-    assert_eq!(got[0].severity, 1);
+    assert_eq!(got[0].code, "W013");
+    assert_eq!(got[0].severity, 2);
     assert!(
         got[0].message.contains("add 1 missing equation"),
         "generic missing, got {}",

@@ -57,7 +57,7 @@ impl Diagnostic {
 ///
 /// When `check_parse` is nonempty, later families are skipped (cascade).
 /// Thin families for one parsed model. If `check_parse` is nonempty, return
-/// those E001 rows only (cascade). Otherwise concatenate E010, E020, E030,
+/// those E001 rows only (cascade). Otherwise concatenate equation-count (W013), E020, E030,
 /// shape, W010, E062–E065, W070, W090, W100, W110 (includes W060), W120, W130.
 /// E060 / E061 / W061 are workspace-only (`check_file`), not here.
 pub fn analyze(model: &Model) -> Vec<Diagnostic> {

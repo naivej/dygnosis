@@ -204,7 +204,8 @@ fn w090_exo() {
     let src = check_mod("w090/w090_exo.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W090");
+    assert_eq!(rust[0].code, "E090");
+    assert_eq!(rust[0].severity, 1);
     assert!(rust[0].message.contains("(it is an exogenous variable)"));
     assert_name_token(&src, &rust[0], 0);
 }
@@ -214,7 +215,8 @@ fn w090_param() {
     let src = check_mod("w090/w090_param.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W090");
+    assert_eq!(rust[0].code, "E090");
+    assert_eq!(rust[0].severity, 1);
     assert!(rust[0].message.contains("(it is a parameter)"));
     assert_name_token(&src, &rust[0], 0);
 }
@@ -224,7 +226,8 @@ fn w090_undecl() {
     let src = check_mod("w090/w090_undecl.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W090");
+    assert_eq!(rust[0].code, "E090");
+    assert_eq!(rust[0].severity, 1);
     assert!(!rust[0].message.contains("(it is an "));
     assert_name_token(&src, &rust[0], 0);
 }
@@ -275,7 +278,8 @@ fn w090_w093_param() {
     let src = check_mod("w090/w093_param.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W093");
+    assert_eq!(rust[0].code, "E093");
+    assert_eq!(rust[0].severity, 1);
     assert!(rust[0].message.contains("not a declared parameter"));
     assert_span(&src, &rust[0], "\nnot_a_param, 0.08, 0.01, 0.15;");
 }
@@ -285,6 +289,8 @@ fn w090_w093_stderr() {
     let src = check_mod("w090/w093_stderr.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
+    assert_eq!(rust[0].code, "E093");
+    assert_eq!(rust[0].severity, 1);
     assert!(rust[0]
         .message
         .contains("stderr 'not_a_shock' is not a declared shock or observed variable"));
@@ -296,7 +302,8 @@ fn w090_w093_corr() {
     let src = check_mod("w090/w093_corr.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 2);
-    assert!(rust.iter().all(|d| d.code == "W093"));
+    assert!(rust.iter().all(|d| d.code == "E093"));
+    assert!(rust.iter().all(|d| d.severity == 1));
     assert!(rust.iter().any(|d| d.message.contains("'foo'")));
     assert!(rust.iter().any(|d| d.message.contains("'bar'")));
     for d in &rust {
@@ -330,7 +337,8 @@ fn w090_w095_ot() {
     let src = check_mod("w090/w095_ot.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W095");
+    assert_eq!(rust[0].code, "E095");
+    assert_eq!(rust[0].severity, 1);
     let idx = src.find("y(1)").expect("y(1)");
     let index = LineIndex::new(&src);
     let start = index.position(&src, idx as u32);

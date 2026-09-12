@@ -221,9 +221,7 @@ fn e001_join_two_model_equations() {
     let text = check_mod("e001/join_two_eqs.mod");
     let got = rust_e001(&text);
     assert_eq!(got.len(), 1);
-    assert!(got[0]
-        .message
-        .contains("merged due to a missing semicolon"));
+    assert!(got[0].message.contains("merged due to a missing semicolon"));
     assert_span(&text, &got[0], "y = rho * y(-1) + e\nc = betta * c(+1)");
 }
 
@@ -292,9 +290,7 @@ fn e001_reserved_parameters_log() {
     let text = check_mod("e001/reserved_log.mod");
     let got = rust_e001(&text);
     assert_eq!(got.len(), 1);
-    assert!(got[0]
-        .message
-        .contains("Invalid Dynare identifier 'log'"));
+    assert!(got[0].message.contains("Invalid Dynare identifier 'log'"));
     assert_span_in(&text, &got[0], "parameters log;", "log");
 }
 
@@ -314,7 +310,7 @@ fn e001_cascade_missing_model_end() {
         "analyze() skips later families when E001 is present, got {:?}",
         all.iter().map(|d| &d.code).collect::<Vec<_>>()
     );
-    for skip in ["E010", "E020", "E030", "E050", "W010"] {
+    for skip in ["W013", "E020", "E030", "W054", "W010"] {
         assert!(
             !all.iter().any(|d| d.code == skip),
             "analyze() cascade should suppress {skip}, got {:?}",

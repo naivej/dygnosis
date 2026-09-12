@@ -58,8 +58,8 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
                     let name = model.name(r.name);
                     diagnostics.push(Diagnostic::new(
                         r.span,
-                        Severity::Warning,
-                        "W130",
+                        Severity::Error,
+                        "E130",
                         format!(
                             "'{name}' is used in the steady_state_model block before it is assigned. The block is evaluated top to bottom, so each variable must be assigned before use."
                         ),

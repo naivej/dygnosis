@@ -66,7 +66,7 @@ fn check_duplicate_declarations(model: &Model) -> Vec<Diagnostic> {
         let name = model.name(decl.name);
         let (severity, message) = if prev_kind == kind {
             (
-                Severity::Warning,
+                Severity::Error,
                 format!(
                     "'{name}' is declared more than once in '{kind}'. Fix: remove the redundant '{name}' from the {kind} declaration."
                 ),

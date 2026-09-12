@@ -5,7 +5,7 @@ use crate::diagnostic::{analyze, Severity, TextEdit};
 use crate::lexer::{tokenize, TokenKind};
 use crate::parser::parse;
 
-const PASS2_CODES: &[&str] = &["E020", "E030", "E010", "E050", "E051", "E052", "E053"];
+const PASS2_CODES: &[&str] = &["E020", "E030", "W013", "W054", "W055", "W056", "W057"];
 
 /// Apply `edits` to `text`. Columns are Unicode scalars (`chars().count()`).
 ///

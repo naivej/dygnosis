@@ -68,8 +68,8 @@ fn generic_e010(span: Span, n_eq: usize, n_endo: usize) -> Diagnostic {
     };
     Diagnostic {
         span,
-        severity: Severity::Error,
-        code: "E010".to_string(),
+        severity: Severity::Warning,
+        code: "W013".to_string(),
         message: format!(
             "Equation count mismatch: {n_eq} equation(s) but {n_endo} endogenous variable(s). {fix_msg}"
         ),
@@ -115,8 +115,8 @@ fn link_unused_endo(model: &Model, span: Span, n_eq: usize, n_endo: usize) -> Op
 
     Some(Diagnostic {
         span,
-        severity: Severity::Error,
-        code: "E010".to_string(),
+        severity: Severity::Warning,
+        code: "W013".to_string(),
         message,
         fix: None,
         tags: Vec::new(),

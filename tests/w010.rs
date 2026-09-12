@@ -10,7 +10,7 @@ const ARCHIVES: &[&str] = &[
     "lk2024",
 ];
 
-const FAMILY: &[&str] = &["W010", "W011", "W012", "W020", "W021", "W022"];
+const FAMILY: &[&str] = &["W010", "W011", "W012", "W020", "E021", "W022"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Diag {
@@ -155,7 +155,10 @@ fn by_code<'a>(got: &'a [Diag], code: &str) -> &'a Diag {
 fn w010_clean_archives_empty() {
     for name in ARCHIVES {
         let got = rust_family(&read_mod(name));
-        assert!(got.is_empty(), "{name}: expected no W010 family, got {got:?}");
+        assert!(
+            got.is_empty(),
+            "{name}: expected no W010 family, got {got:?}"
+        );
     }
 }
 
@@ -184,7 +187,7 @@ fn w010_and_w022_unassigned_unref_param() {
         .contains("Parameter 'orphan_p' is declared but never assigned"));
     assert_last_ident(&text, w010, "parameters rho betta orphan_p;", "orphan_p");
     let w022 = by_code(&got, "W022");
-    assert_eq!(w022.severity, 3);
+    assert_eq!(w022.severity, 2);
     assert!(w022
         .message
         .contains("Parameter 'orphan_p' is declared but never referenced"));
@@ -217,7 +220,10 @@ fn w011_missing_in_expr() {
 fn w011_latest_wins_before_steady() {
     let src = check_mod("w010/w011_later.mod");
     let got = rust_family(&src);
-    assert!(got.is_empty(), "W011 latest-wins should be empty, got {got:?}");
+    assert!(
+        got.is_empty(),
+        "W011 latest-wins should be empty, got {got:?}"
+    );
 }
 
 #[test]
@@ -226,7 +232,7 @@ fn w012_helper_before_first_block() {
     let got = rust_family(&text);
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].code, "W012");
-    assert_eq!(got[0].severity, 3);
+    assert_eq!(got[0].severity, 2);
     assert!(got[0].message.contains("helper_foo"));
     assert_span(&text, &got[0], "helper_foo = 1.5;");
 }
@@ -261,8 +267,8 @@ fn w021_unused_varexo() {
     let text = check_mod("w010/w021_exo.mod");
     let got = rust_family(&text);
     assert_eq!(got.len(), 1);
-    assert_eq!(got[0].code, "W021");
-    assert_eq!(got[0].severity, 2);
+    assert_eq!(got[0].code, "E021");
+    assert_eq!(got[0].severity, 1);
     assert!(got[0].message.contains("unused_exo"));
     assert_span_in(&text, &got[0], "varexo e unused_exo;", "unused_exo");
 }
@@ -273,7 +279,7 @@ fn w022_unused_assigned_param() {
     let got = rust_family(&text);
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].code, "W022");
-    assert_eq!(got[0].severity, 3);
+    assert_eq!(got[0].severity, 2);
     assert!(got[0].message.contains("unused_p"));
     assert_last_ident(&text, &got[0], "parameters rho betta unused_p;", "unused_p");
 }
@@ -290,7 +296,10 @@ fn w022_param_used_only_in_stderr() {
 #[test]
 fn w022_param_used_only_in_ss() {
     let got = rust_family(&check_mod("w010/w022_ss.mod"));
-    assert!(got.is_empty(), "W022 SS dummy_p should be empty, got {got:?}");
+    assert!(
+        got.is_empty(),
+        "W022 SS dummy_p should be empty, got {got:?}"
+    );
 }
 
 #[test]

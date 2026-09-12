@@ -14,7 +14,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 | `e010/` | too many or too few equations vs variables |
 | `e020/` | a name used in the model that was never declared |
 | `e030/` | the same name declared twice (for example `var` and `varexo`) |
-| `shape/` | equation or block shape: duplicate equations, missing `initval`, no steady-state block (`E050`–`E053`, `W042`, `W050`–`W053`, `I050`) |
+| `shape/` | equation or block shape: duplicate equations, missing `initval`, no steady-state block (`W054`–`W057`, `W042`, `E058`, `W051`, `W052`, `E059`, `I050`) |
 | `e060/` | `@#include` and `@#if` / `@#for` mistakes. Some cases are a **directory** of files (`cycle/`, `missing/`, `nested/`, `w061_*`), not one `.mod`. |
 | `w010/` | unused or never-assigned parameters and variables |
 | `w070/` | a parameter value that looks wrong (discount, depreciation, …) |

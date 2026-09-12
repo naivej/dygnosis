@@ -158,10 +158,18 @@ fn apply_required_e001_rows() {
         ("delete_ss_end", delete_ss_end(), "end;"),
         ("delete_shocks_end", delete_shocks_end(), "end;"),
         ("strip_var_semi", strip_var_semi(), "var y;"),
-        ("strip_last_eq_semi", strip_last_eq_semi(), "y = rho * y(-1) + e;"),
+        (
+            "strip_last_eq_semi",
+            strip_last_eq_semi(),
+            "y = rho * y(-1) + e;",
+        ),
         ("shocks_var_no_semi", shocks_var_no_semi(), "var e;"),
         ("typo_mdoel", typo_mdoel(), "model;"),
-        ("join_two_model_eqs", join_two_model_eqs(), "y = rho * y(-1) + e;"),
+        (
+            "join_two_model_eqs",
+            join_two_model_eqs(),
+            "y = rho * y(-1) + e;",
+        ),
     ];
     for (label, text, restored) in rows {
         let fixed = auto_fix(&text);
@@ -188,7 +196,10 @@ fn apply_required_e001_rows() {
 fn apply_strip_betta_semi_missing_semi_only() {
     let mutated = strip_betta_semi();
     let fixed = auto_fix(&mutated);
-    assert_ne!(fixed, mutated, "missing-`;` should be applied, got {fixed:?}");
+    assert_ne!(
+        fixed, mutated,
+        "missing-`;` should be applied, got {fixed:?}"
+    );
     assert!(
         fixed.contains("betta = 0.99;"),
         "missing-`;` should restore the semicolon; got {fixed:?}"
@@ -225,7 +236,7 @@ fn cascade_delete_model_end_is_e001_only() {
     assert_eq!(rust, vec!["E001".to_string()]);
     let all = analyze(&parse(&text));
     assert!(all.iter().all(|d| d.code == "E001"));
-    for skip in ["E010", "E020", "E030", "E050", "W010"] {
+    for skip in ["W013", "E020", "E030", "W054", "W010"] {
         assert!(
             !all.iter().any(|d| d.code == skip),
             "cascade should suppress {skip}, got {:?}",

@@ -153,7 +153,8 @@ fn w100_ramsey() {
     let src = check_mod("w100/w100_ramsey.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W100");
+    assert_eq!(rust[0].code, "E100");
+    assert_eq!(rust[0].severity, 1);
     assert!(rust[0].message.starts_with("ramsey_model requires"));
     assert_policy_span(&src, &rust[0]);
 }
@@ -163,7 +164,8 @@ fn w100_disc() {
     let src = check_mod("w100/w100_disc.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W100");
+    assert_eq!(rust[0].code, "E100");
+    assert_eq!(rust[0].severity, 1);
     assert!(rust[0].message.starts_with("discretionary_policy requires"));
     assert_policy_span(&src, &rust[0]);
 }
@@ -193,7 +195,8 @@ fn w100_w101() {
     let src = check_mod("w100/w101_inst.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W101");
+    assert_eq!(rust[0].code, "E101");
+    assert_eq!(rust[0].severity, 1);
     assert!(rust[0].message.contains("'not_endo'"));
     assert_policy_span(&src, &rust[0]);
 }
@@ -253,7 +256,8 @@ fn w100_w103_both() {
     let src = check_mod("w100/w103_both.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 2);
-    assert!(rust.iter().all(|d| d.code == "W103"));
+    assert!(rust.iter().all(|d| d.code == "E103"));
+    assert!(rust.iter().all(|d| d.severity == 1));
     assert!(rust
         .iter()
         .any(|d| d.message.contains("osr_params statement")));
@@ -270,7 +274,8 @@ fn w100_w103_weights() {
     let src = check_mod("w100/w103_weights.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W103");
+    assert_eq!(rust[0].code, "E103");
+    assert_eq!(rust[0].severity, 1);
     assert!(rust[0].message.contains("optim_weights block"));
     assert_policy_span(&src, &rust[0]);
 }
@@ -280,7 +285,8 @@ fn w100_w103_params() {
     let src = check_mod("w100/w103_params.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W103");
+    assert_eq!(rust[0].code, "E103");
+    assert_eq!(rust[0].severity, 1);
     assert!(rust[0].message.contains("osr_params statement"));
     assert_policy_span(&src, &rust[0]);
 }

@@ -129,15 +129,9 @@ fn assert_w140_ops(id: &str, needle: &str) {
     assert_eq!(w140s.len(), 18, "{id} W140 count, got {rust:?}");
     let matched: Vec<_> = w140s
         .iter()
-        .filter(|d| {
-            (d.start_line, d.start_char, d.end_line, d.end_char) == want
-        })
+        .filter(|d| (d.start_line, d.start_char, d.end_line, d.end_char) == want)
         .collect();
-    assert_eq!(
-        matched.len(),
-        1,
-        "{id} W140 at {needle:?}, got {rust:?}"
-    );
+    assert_eq!(matched.len(), 1, "{id} W140 at {needle:?}, got {rust:?}");
 }
 
 fn assert_w140_quiet(id: &str, rel: &str) {
@@ -163,7 +157,8 @@ fn w130_logn_before_n() {
     let src = check_mod("w130/w130_order.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W130");
+    assert_eq!(rust[0].code, "E130");
+    assert_eq!(rust[0].severity, 1);
     assert_eq!(
         (
             rust[0].start_line,
@@ -180,7 +175,8 @@ fn w130_k_before_y() {
     let src = check_mod("w130/w130_k_before_y.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W130");
+    assert_eq!(rust[0].code, "E130");
+    assert_eq!(rust[0].severity, 1);
     assert_eq!(
         (
             rust[0].start_line,
@@ -196,12 +192,12 @@ fn w130_k_before_y() {
 fn w130_timed_rhs_native() {
     let src = check_mod("w130/w130_timed.mod");
     let rust = rust_family(&src);
-    assert_eq!(rust.len(), 1, "native W130 on y(-1), got {rust:?}");
-    assert_eq!(rust[0].code, "W130");
-    assert_eq!(rust[0].severity, 2);
+    assert_eq!(rust.len(), 1, "native E130 on y(-1), got {rust:?}");
+    assert_eq!(rust[0].code, "E130");
+    assert_eq!(rust[0].severity, 1);
     assert!(
         rust[0].message.starts_with("'y'"),
-        "W130 on y, got {}",
+        "E130 on y, got {}",
         rust[0].message
     );
     assert_eq!(

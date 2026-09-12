@@ -57,8 +57,8 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
             };
             diagnostics.push(Diagnostic::new(
                 nonempty_or(v.span, model.varobs_span),
-                Severity::Warning,
-                "W090",
+                Severity::Error,
+                "E090",
                 format!(
                     "varobs variable '{name}' is not a declared endogenous variable{why}. Observed variables must be endogenous."
                 ),
@@ -116,8 +116,8 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
                     };
                     diagnostics.push(Diagnostic::new(
                         span,
-                        Severity::Warning,
-                        "W093",
+                        Severity::Error,
+                        "E093",
                         format!("estimated_params: '{name}' is not a declared parameter{where_}."),
                     ));
                 }
@@ -126,8 +126,8 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
                 if !exogenous.contains(&entry.name) && !endogenous.contains(&entry.name) {
                     diagnostics.push(Diagnostic::new(
                         span,
-                        Severity::Warning,
-                        "W093",
+                        Severity::Error,
+                        "E093",
                         format!(
                             "estimated_params: stderr '{name}' is not a declared shock or observed variable."
                         ),
@@ -140,8 +140,8 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
                         let symbol = model.name(symbol);
                         diagnostics.push(Diagnostic::new(
                             span,
-                            Severity::Warning,
-                            "W093",
+                            Severity::Error,
+                            "E093",
                             format!(
                                 "estimated_params: corr references '{symbol}', which is not a declared shock or variable."
                             ),
@@ -187,8 +187,8 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
         if !varobs_set.contains(name) {
             diagnostics.push(Diagnostic::new(
                 nonempty_or(*span, model.varobs_span),
-                Severity::Warning,
-                "W095",
+                Severity::Error,
+                "E095",
                 format!(
                     "observation_trends: '{}' is not listed in varobs.",
                     model.name(*name)

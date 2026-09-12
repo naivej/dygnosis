@@ -27,7 +27,7 @@ enum Commands {
     },
     /// Print markdown documentation for a diagnostic code
     Explain {
-        /// Diagnostic code (for example E010)
+        /// Diagnostic code (for example E001)
         code: Option<String>,
         /// List documented diagnostic codes
         #[arg(long)]

@@ -244,7 +244,8 @@ fn w110_w111_dup_var() {
     let src = check_mod("w110/w111_dup_var.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W111");
+    assert_eq!(rust[0].code, "E111");
+    assert_eq!(rust[0].severity, 1);
     assert!(rust[0]
         .message
         .contains("variance/standard error specified more than once"));
@@ -256,7 +257,8 @@ fn w110_w111_dup_corr() {
     let src = check_mod("w110/w111_dup_corr.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W111");
+    assert_eq!(rust[0].code, "E111");
+    assert_eq!(rust[0].severity, 1);
     assert!(
         rust[0].message.contains("'e'") && rust[0].message.contains("'u'"),
         "dup corr message should name e and u, got {}",

@@ -22,8 +22,12 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const MISSING_BINARY_MESSAGE: &str = "Dynare preprocessor binary not found. Install Dynare, or set DYNARE_PREPROCESSOR to the dynare-preprocessor executable.";
 
-const AUTHORITATIVE_CODES: &[&str] = &["E001", "E010", "E020", "E030", "E052", "E061"];
-const SURVIVES_SUCCESS: &[&str] = &["E010"];
+const SAME_GROUND_ERRORS: &[&str] = &[
+    "E001", "E020", "E021", "E023", "E024", "E025", "E030", "E058", "E059", "E060", "E061", "E062",
+    "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E111", "E130",
+];
+
+const SAME_GROUND_WARNINGS: &[&str] = &["W022", "W042", "W121", "W131", "W150"];
 
 /// Result of one preprocessor run.
 #[derive(Clone, Debug)]
@@ -125,7 +129,12 @@ pub fn run_preprocessor(
 
     let write_err = std::fs::File::create(&tmp_file).and_then(|mut f| f.write_all(text.as_bytes()));
     if let Err(err) = write_err {
-        cleanup_run(&tmp_dir, Some(&tmp_file), generated_root.as_deref(), source_dir_abs.as_deref());
+        cleanup_run(
+            &tmp_dir,
+            Some(&tmp_file),
+            generated_root.as_deref(),
+            source_dir_abs.as_deref(),
+        );
         return spawn_fail_result(preprocessor_path, &text, &err.to_string());
     }
 
@@ -171,10 +180,7 @@ pub fn run_preprocessor(
             success: false,
             diagnostics: vec![p000_diagnostic(
                 &text,
-                format!(
-                    "Dynare preprocessor timed out after {}s",
-                    timeout.as_secs()
-                ),
+                format!("Dynare preprocessor timed out after {}s", timeout.as_secs()),
             )],
             raw_stdout: String::new(),
             raw_stderr: String::new(),
@@ -190,8 +196,7 @@ pub fn run_preprocessor(
             let raw_stdout = stdout;
             let raw_stderr = stderr;
             let combined = format!("{raw_stderr}{raw_stdout}");
-            let mut diagnostics =
-                parse_preprocessor_output(&combined, Some(&tmp_file), &text);
+            let mut diagnostics = parse_preprocessor_output(&combined, Some(&tmp_file), &text);
             let code = status.code();
             let success = status.success();
             if !success && diagnostics.is_empty() {
@@ -234,14 +239,27 @@ pub fn reconcile_diagnostics(
     let Some(preproc) = preproc else {
         return own.to_vec();
     };
+    let they_warned = preproc
+        .diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Warning && d.code != "P000");
+    let they_refused = !preproc.success && preproc.diagnostics.iter().any(|d| d.code != "P000");
     let kept: Vec<Diagnostic> = if preproc.success {
         own.iter()
-            .filter(|d| d.severity != Severity::Error || SURVIVES_SUCCESS.contains(&d.code.as_str()))
+            .filter(|d| {
+                if d.severity == Severity::Error {
+                    return false;
+                }
+                if they_warned && SAME_GROUND_WARNINGS.contains(&d.code.as_str()) {
+                    return false;
+                }
+                true
+            })
             .cloned()
             .collect()
-    } else if preproc.diagnostics.iter().any(|d| d.code != "P000") {
+    } else if they_refused {
         own.iter()
-            .filter(|d| !AUTHORITATIVE_CODES.contains(&d.code.as_str()))
+            .filter(|d| !SAME_GROUND_ERRORS.contains(&d.code.as_str()))
             .cloned()
             .collect()
     } else {
@@ -384,7 +402,10 @@ pub fn parse_preprocessor_output(
     let synthetic_abs = synthetic_path.map(|p| normcase_path(&abs_path(p)));
     let mut diagnostics = Vec::new();
     let mut code_counter: u32 = 1;
-    let lines: Vec<&str> = output.split('\n').map(|l| l.trim_end_matches('\r')).collect();
+    let lines: Vec<&str> = output
+        .split('\n')
+        .map(|l| l.trim_end_matches('\r'))
+        .collect();
     let mut idx = 0;
     while idx < lines.len() {
         let stripped = lines[idx].trim();
@@ -398,8 +419,14 @@ pub fn parse_preprocessor_output(
                 .unwrap_or(1)
                 .saturating_sub(1)
                 .max(0) as u32;
-            let (col, end_line, end_col) = if let (Some(c0), Some(c1)) = (caps.get(7), caps.get(8)) {
-                let col = c0.as_str().parse::<i64>().unwrap_or(1).saturating_sub(1).max(0) as u32;
+            let (col, end_line, end_col) = if let (Some(c0), Some(c1)) = (caps.get(7), caps.get(8))
+            {
+                let col = c0
+                    .as_str()
+                    .parse::<i64>()
+                    .unwrap_or(1)
+                    .saturating_sub(1)
+                    .max(0) as u32;
                 let end_col = c1.as_str().parse::<u32>().unwrap_or(col + 1);
                 (col, line_no, end_col)
             } else {
@@ -424,8 +451,12 @@ pub fn parse_preprocessor_output(
             } else {
                 end_col
             };
-            let mut message = caps.get(9).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
-            let is_synthetic = is_synthetic_filename(filename, synthetic_path, synthetic_abs.as_deref());
+            let mut message = caps
+                .get(9)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
+            let is_synthetic =
+                is_synthetic_filename(filename, synthetic_path, synthetic_abs.as_deref());
             if !filename.is_empty() && !is_synthetic {
                 let label = diagnostic_file_label(filename, synthetic_path);
                 message = format!("[{label}:{}:{}] {message}", line_no + 1, col + 1);
@@ -493,16 +524,19 @@ pub fn parse_preprocessor_output(
                 message = causes.join("; ");
             }
             if let Some(loc) = located.as_ref() {
-                let (msg, r) =
-                    macro_location_to_range(loc, &message, synthetic_path, synthetic_abs.as_deref());
+                let (msg, r) = macro_location_to_range(
+                    loc,
+                    &message,
+                    synthetic_path,
+                    synthetic_abs.as_deref(),
+                );
                 message = msg;
                 rng = r;
             } else if let Some(r) = inline_rng {
                 rng = r;
             }
         } else if let Some(inline) = preproc_macro_inline_re().captures(&message) {
-            let (msg, r) =
-                macro_inline_to_range(&inline, synthetic_path, synthetic_abs.as_deref());
+            let (msg, r) = macro_inline_to_range(&inline, synthetic_path, synthetic_abs.as_deref());
             message = msg;
             rng = r;
         }
@@ -622,7 +656,12 @@ fn is_executable_file(path: &Path) -> bool {
 }
 
 fn p000_diagnostic(text: &str, message: String) -> Diagnostic {
-    Diagnostic::new(range_span(text, 0, 0, 0, 1), Severity::Warning, "P000", message)
+    Diagnostic::new(
+        range_span(text, 0, 0, 0, 1),
+        Severity::Warning,
+        "P000",
+        message,
+    )
 }
 
 fn spawn_fail_result(path: &Path, text: &str, err: &str) -> PreprocessorResult {
@@ -683,10 +722,7 @@ fn is_absolute_macro_path(raw: &str) -> bool {
         return true;
     }
     let b = path.as_bytes();
-    b.len() >= 3
-        && b[0].is_ascii_alphabetic()
-        && b[1] == b':'
-        && (b[2] == b'/' || b[2] == b'\\')
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')
 }
 
 fn requires_source_dir_file(mod_text: &str) -> bool {
@@ -712,11 +748,7 @@ fn include_search_directories(mod_text: &str, source_dir: Option<&Path>) -> Vec<
     let mut seen_directories: HashSet<String> = HashSet::new();
     let mut seen_files: HashSet<String> = HashSet::new();
 
-    fn add_directory(
-        path: &Path,
-        directories: &mut Vec<PathBuf>,
-        seen: &mut HashSet<String>,
-    ) {
+    fn add_directory(path: &Path, directories: &mut Vec<PathBuf>, seen: &mut HashSet<String>) {
         let absolute = abs_path(path);
         let key = normcase_path(&absolute);
         if seen.insert(key) {
@@ -831,7 +863,9 @@ fn materialize_and_run(
         match path.strip_prefix(&common_parent) {
             Ok(rel)
                 if !rel.is_absolute()
-                    && rel.components().all(|c| c.as_os_str() != std::ffi::OsStr::new("..")) =>
+                    && rel
+                        .components()
+                        .all(|c| c.as_os_str() != std::ffi::OsStr::new("..")) =>
             {
                 rel.to_path_buf()
             }
@@ -920,12 +954,8 @@ fn materialize_and_run(
     }
 
     let original_entry = files.get(entry_file).cloned().unwrap_or_default();
-    let entry_text = rewritten
-        .get(entry_file)
-        .cloned()
-        .unwrap_or_default();
-    let mut result =
-        run_preprocessor(&entry_text, preprocessor_path, Some(&entry_parent), timeout);
+    let entry_text = rewritten.get(entry_file).cloned().unwrap_or_default();
+    let mut result = run_preprocessor(&entry_text, preprocessor_path, Some(&entry_parent), timeout);
     if entry_text != original_entry {
         remap_spans_to_text(&mut result.diagnostics, &entry_text, &original_entry);
     }
@@ -1139,16 +1169,17 @@ fn macro_location_to_range(
         .max(0) as u32;
     let (end_line0, end_col0) = if let (Some(el), Some(ec)) = (loc.get(5), loc.get(6)) {
         (
-            el.as_str().parse::<i64>().unwrap_or(1).saturating_sub(1).max(0) as u32,
+            el.as_str()
+                .parse::<i64>()
+                .unwrap_or(1)
+                .saturating_sub(1)
+                .max(0) as u32,
             ec.as_str().parse::<u32>().unwrap_or(0),
         )
     } else if let Some(ec) = loc.get(4) {
         (
             line0,
-            ec.as_str()
-                .parse::<u32>()
-                .unwrap_or(col0 + 1)
-                .max(col0 + 1),
+            ec.as_str().parse::<u32>().unwrap_or(col0 + 1).max(col0 + 1),
         )
     } else {
         (line0, col0 + 1)
@@ -1192,9 +1223,7 @@ fn macro_inline_to_range(
         .get(6)
         .map(|m| m.as_str().trim().to_string())
         .unwrap_or_default();
-    message = searched_dirs_re()
-        .replace(&message, "")
-        .into_owned();
+    message = searched_dirs_re().replace(&message, "").into_owned();
     if let Some(directive) = directive {
         message = format!("{directive}: {message}");
     }
@@ -1449,9 +1478,7 @@ fn macro_directive_line_re() -> &'static Regex {
 
 fn quoted_literal_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r#""([^"\n]*)"|'([^'\n]*)'"#).expect("quoted")
-    })
+    RE.get_or_init(|| Regex::new(r#""([^"\n]*)"|'([^'\n]*)'"#).expect("quoted"))
 }
 
 fn searched_dirs_re() -> &'static Regex {

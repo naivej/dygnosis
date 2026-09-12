@@ -4,15 +4,20 @@ use std::process::Command;
 use dygnosis::explain::{explain, known_codes, render_markdown};
 
 const RUST_CODES: &[&str] = &[
-    "E001", "E010", "E020", "E023", "E024", "E025", "E030", "E050", "E051", "E052", "E053", "E060",
-    "E061", "E062", "E063", "E064", "E065", "E999", "I050", "P000", "W010", "W011", "W012", "W020",
-    "W021", "W022", "W042", "W050", "W051", "W052", "W053", "W060", "W061", "W070", "W090", "W091",
-    "W092", "W093", "W094", "W095", "W100", "W101", "W102", "W103", "W110", "W111", "W112", "W120",
-    "W121", "W122", "W130", "W131", "W140", "W150",
+    "E001", "E020", "E021", "E023", "E024", "E025", "E030", "E058", "E059", "E060", "E061", "E062",
+    "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E111", "E130", "E999",
+    "I050", "P000", "W010", "W011", "W012", "W013", "W020", "W022", "W042", "W051", "W052", "W054",
+    "W055", "W056", "W057", "W060", "W061", "W070", "W091", "W092", "W094", "W102", "W110", "W112",
+    "W120", "W121", "W122", "W131", "W140", "W150",
 ];
 
 const SKIP: &[&str] = &[
     "E040", "W040", "W041", "I041", "W071", "I070", "I071", "W080", "W081", "DYNR",
+];
+
+const VACATED: &[&str] = &[
+    "E010", "E050", "E051", "E052", "E053", "W021", "W050", "W053", "W090", "W093", "W095", "W100",
+    "W101", "W103", "W111", "W130",
 ];
 
 const FORBIDDEN: &[&str] = &[
@@ -70,7 +75,7 @@ fn thin_markdown_matches_expected() {
 
 #[test]
 fn skip_codes_are_unknown() {
-    for code in SKIP {
+    for code in SKIP.iter().chain(VACATED) {
         assert!(explain(code).is_none(), "{code} should be unknown");
         assert!(
             render_markdown(code).is_none(),
@@ -141,25 +146,26 @@ fn p_digit_codes_route_to_p000() {
 
 #[test]
 fn lookup_is_case_insensitive() {
-    assert_eq!(explain("e010").unwrap(), explain("E010").unwrap());
-    assert!(render_markdown("e010").unwrap().starts_with("### e010: "));
+    assert_eq!(explain("w013").unwrap(), explain("W013").unwrap());
+    assert!(render_markdown("w013").unwrap().starts_with("### w013: "));
     assert!(explain("dynr").is_none());
     assert!(explain("E040").is_none());
+    assert!(explain("E010").is_none());
     assert!(explain("P").is_none());
 }
 
 #[test]
 fn cli_explain_known_code() {
-    let output = dygnosis().args(["explain", "E010"]).output().unwrap();
+    let output = dygnosis().args(["explain", "W013"]).output().unwrap();
     assert_eq!(output.status.code(), Some(0));
     let stdout = stdout_text(&output);
-    assert_eq!(stdout, render_markdown("E010").unwrap() + "\n");
-    assert_eq!(stdout, expected_markdown("E010.md") + "\n");
+    assert_eq!(stdout, render_markdown("W013").unwrap() + "\n");
+    assert_eq!(stdout, expected_markdown("W013.md") + "\n");
 }
 
 #[test]
 fn cli_explain_unknown_code() {
-    for code in ["E040", "DYNR", "W071"] {
+    for code in ["E040", "DYNR", "W071", "E010"] {
         let output = dygnosis().args(["explain", code]).output().unwrap();
         assert_eq!(output.status.code(), Some(1), "{code}");
         let stderr = stderr_text(&output);
@@ -205,16 +211,16 @@ fn cli_explain_list() {
         entries.iter().map(|(c, _)| *c).collect::<Vec<_>>(),
         RUST_CODES
     );
-    for code in SKIP {
+    for code in SKIP.iter().chain(VACATED) {
         assert!(
             entries.iter().all(|(c, _)| c != code),
             "{code} present in --list"
         );
     }
-    let e010_title = explain("E010").unwrap().title;
+    let w013_title = explain("W013").unwrap().title;
     assert_eq!(
-        entries.iter().find(|(c, _)| *c == "E010").map(|(_, t)| *t),
-        Some(e010_title)
+        entries.iter().find(|(c, _)| *c == "W013").map(|(_, t)| *t),
+        Some(w013_title)
     );
     assert_eq!(
         entries.iter().find(|(c, _)| *c == "I050").map(|(_, t)| *t),

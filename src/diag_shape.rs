@@ -44,8 +44,8 @@ fn check_e050(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
             let _ = first_span;
             diagnostics.push(Diagnostic {
                 span: eq.span,
-                severity: Severity::Error,
-                code: "E050".to_string(),
+                severity: Severity::Warning,
+                code: "W054".to_string(),
                 message: format!(
                     "Duplicate equation (same as line {first_line}). Fix: remove this duplicate equation."
                 ),
@@ -115,8 +115,8 @@ fn check_e051(model: &Model) -> Vec<Diagnostic> {
             if lhs_val != rhs_val {
                 diagnostics.push(Diagnostic {
                     span: eq.span,
-                    severity: Severity::Error,
-                    code: "E051".to_string(),
+                    severity: Severity::Warning,
+                    code: "W055".to_string(),
                     message: format!(
                         "Contradictory equation '{text}' (always false). Fix: remove this equation."
                     ),
@@ -132,8 +132,8 @@ fn check_e051(model: &Model) -> Vec<Diagnostic> {
             if !lhs_norm.is_empty() && lhs_norm == rhs_norm {
                 diagnostics.push(Diagnostic {
                     span: eq.span,
-                    severity: Severity::Error,
-                    code: "E051".to_string(),
+                    severity: Severity::Warning,
+                    code: "W055".to_string(),
                     message: format!(
                         "Trivially true equation '{text}' (LHS = RHS). Fix: remove this equation."
                     ),
@@ -203,7 +203,7 @@ fn check_e052(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
                     diagnostics.push(Diagnostic {
                         span: a.span,
                         severity: Severity::Warning,
-                        code: "E052".to_string(),
+                        code: "W056".to_string(),
                         message: format!(
                             "Duplicate parameter assignment '{name} = {}' (same value as line {first_line}); the later assignment is redundant. Remove it to avoid confusion.",
                             a.expression
@@ -410,8 +410,8 @@ fn flush_e053_line(
         .trim();
     diagnostics.push(Diagnostic {
         span,
-        severity: Severity::Error,
-        code: "E053".to_string(),
+        severity: Severity::Warning,
+        code: "W057".to_string(),
         message: format!(
             "Stray equation '{shown}' outside model block (line {}). This will cause a Dynare syntax error. Fix: remove this line.",
             line + 1
@@ -718,8 +718,8 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
             if params.contains(&entry.name) {
                 diagnostics.push(Diagnostic {
                     span: entry.span,
-                    severity: Severity::Warning,
-                    code: "W053".to_string(),
+                    severity: Severity::Error,
+                    code: "E059".to_string(),
                     message: format!(
                         "Parameter '{name}' assigned in {block_name} is ignored. Assign parameters before the model block or inside steady_state_model instead."
                     ),
@@ -731,8 +731,8 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
             if !declared.contains(&entry.name) {
                 diagnostics.push(Diagnostic {
                     span: entry.span,
-                    severity: Severity::Warning,
-                    code: "W050".to_string(),
+                    severity: Severity::Error,
+                    code: "E058".to_string(),
                     message: format!("Variable '{name}' in {block_name} is not declared."),
                     fix: None,
                     tags: Vec::new(),
@@ -761,7 +761,7 @@ fn check_w051(model: &Model) -> Vec<Diagnostic> {
             let name = model.name(entry.name);
             diagnostics.push(Diagnostic {
                 span: entry.span,
-                severity: Severity::Information,
+                severity: Severity::Warning,
                 code: "W051".to_string(),
                 message: format!(
                     "Exogenous variable '{name}' is set in initval. This is unusual -- exogenous shocks are typically zero at steady state."
@@ -803,7 +803,7 @@ fn check_w052(model: &Model) -> Vec<Diagnostic> {
     };
     vec![Diagnostic {
         span: model.initval_block.unwrap_or_else(|| fallback_span(model)),
-        severity: Severity::Information,
+        severity: Severity::Warning,
         code: "W052".to_string(),
         message: format!(
             "{n} endogenous variable(s) missing from initval (will default to 0): {listed}{suffix}"

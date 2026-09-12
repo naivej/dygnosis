@@ -345,7 +345,7 @@
     {
       "id": "e010_unmodified_trend_rbc_gov_inv",
       "codes": [
-        "E010"
+        "W013"
       ],
       "kind": "archive",
       "package": "parse",
@@ -357,7 +357,7 @@
     {
       "id": "e010_unmodified_sims_wu_2019",
       "codes": [
-        "E010"
+        "W013"
       ],
       "kind": "archive",
       "package": "parse",
@@ -369,7 +369,7 @@
     {
       "id": "e010_unmodified_govt_rbc_irf_matching",
       "codes": [
-        "E010"
+        "W013"
       ],
       "kind": "archive",
       "package": "parse",
@@ -381,7 +381,7 @@
     {
       "id": "e010_unmodified_lk2024",
       "codes": [
-        "E010"
+        "W013"
       ],
       "kind": "archive",
       "package": "parse",
@@ -393,7 +393,7 @@
     {
       "id": "e010_extra",
       "codes": [
-        "E010"
+        "W013"
       ],
       "kind": "fire",
       "package": "parse",
@@ -405,7 +405,7 @@
     {
       "id": "e010_drop_log_n_linked",
       "codes": [
-        "E010"
+        "W013"
       ],
       "kind": "fire",
       "package": "parse",
@@ -417,7 +417,7 @@
     {
       "id": "e010_drop_resource_generic",
       "codes": [
-        "E010"
+        "W013"
       ],
       "kind": "fire",
       "package": "parse",
@@ -803,15 +803,15 @@
     {
       "id": "shape_clean_trend",
       "codes": [
-        "E050",
-        "E051",
-        "E052",
-        "E053",
+        "W054",
+        "W055",
+        "W056",
+        "W057",
         "W042",
-        "W050",
+        "E058",
         "W051",
         "W052",
-        "W053",
+        "E059",
         "I050"
       ],
       "kind": "archive",
@@ -836,15 +836,15 @@
     {
       "id": "shape_clean_govt",
       "codes": [
-        "E050",
-        "E051",
-        "E052",
-        "E053",
+        "W054",
+        "W055",
+        "W056",
+        "W057",
         "W042",
-        "W050",
+        "E058",
         "W051",
         "W052",
-        "W053",
+        "E059",
         "I050"
       ],
       "kind": "archive",
@@ -869,7 +869,7 @@
     {
       "id": "shape_e050_dup_eq",
       "codes": [
-        "E050"
+        "W054"
       ],
       "kind": "fire",
       "package": "shape",
@@ -881,7 +881,7 @@
     {
       "id": "shape_e051_0eq1",
       "codes": [
-        "E051"
+        "W055"
       ],
       "kind": "fire",
       "package": "shape",
@@ -893,7 +893,7 @@
     {
       "id": "shape_e051_yeqy",
       "codes": [
-        "E051"
+        "W055"
       ],
       "kind": "fire",
       "package": "shape",
@@ -905,7 +905,7 @@
     {
       "id": "shape_e052_dup_param",
       "codes": [
-        "E052"
+        "W056"
       ],
       "kind": "fire",
       "package": "shape",
@@ -917,7 +917,7 @@
     {
       "id": "shape_e053_stray",
       "codes": [
-        "E053"
+        "W057"
       ],
       "kind": "fire",
       "package": "shape",
@@ -941,7 +941,7 @@
     {
       "id": "shape_w050_undeclared_initval",
       "codes": [
-        "W050"
+        "E058"
       ],
       "kind": "fire",
       "package": "shape",
@@ -977,7 +977,7 @@
     {
       "id": "shape_w053_param_initval",
       "codes": [
-        "W053"
+        "E059"
       ],
       "kind": "fire",
       "package": "shape",
@@ -1001,7 +1001,7 @@
     {
       "id": "shape_w050_undeclared_endval",
       "codes": [
-        "W050"
+        "E058"
       ],
       "kind": "fire",
       "package": "shape",
@@ -1013,7 +1013,7 @@
     {
       "id": "shape_w053_param_endval",
       "codes": [
-        "W053"
+        "E059"
       ],
       "kind": "fire",
       "package": "shape",
@@ -1025,7 +1025,7 @@
     {
       "id": "shape_static_dynamic_not_e050",
       "codes": [
-        "E050"
+        "W054"
       ],
       "kind": "quiet",
       "package": "shape",
@@ -1395,7 +1395,7 @@
         "W011",
         "W012",
         "W020",
-        "W021",
+        "E021",
         "W022"
       ],
       "kind": "archive",
@@ -1412,7 +1412,7 @@
         "W011",
         "W012",
         "W020",
-        "W021",
+        "E021",
         "W022"
       ],
       "kind": "archive",
@@ -1429,7 +1429,7 @@
         "W011",
         "W012",
         "W020",
-        "W021",
+        "E021",
         "W022"
       ],
       "kind": "archive",
@@ -1446,7 +1446,7 @@
         "W011",
         "W012",
         "W020",
-        "W021",
+        "E021",
         "W022"
       ],
       "kind": "archive",
@@ -1556,7 +1556,7 @@
     {
       "id": "w021_unused_varexo",
       "codes": [
-        "W021"
+        "E021"
       ],
       "kind": "fire",
       "package": "w010",
@@ -1842,12 +1842,12 @@
     {
       "id": "w090_unmodified_govt",
       "codes": [
-        "W090",
+        "E090",
         "W091",
         "W092",
-        "W093",
+        "E093",
         "W094",
-        "W095"
+        "E095"
       ],
       "kind": "archive",
       "package": "est",
@@ -1859,12 +1859,12 @@
     {
       "id": "w090_clean_trend_rbc_gov_inv",
       "codes": [
-        "W090",
+        "E090",
         "W091",
         "W092",
-        "W093",
+        "E093",
         "W094",
-        "W095"
+        "E095"
       ],
       "kind": "archive",
       "package": "est",
@@ -1876,12 +1876,12 @@
     {
       "id": "w090_clean_sims_wu_2019",
       "codes": [
-        "W090",
+        "E090",
         "W091",
         "W092",
-        "W093",
+        "E093",
         "W094",
-        "W095"
+        "E095"
       ],
       "kind": "archive",
       "package": "est",
@@ -1893,12 +1893,12 @@
     {
       "id": "w090_clean_lk2024",
       "codes": [
-        "W090",
+        "E090",
         "W091",
         "W092",
-        "W093",
+        "E093",
         "W094",
-        "W095"
+        "E095"
       ],
       "kind": "archive",
       "package": "est",
@@ -1910,12 +1910,12 @@
     {
       "id": "w090_base_stripped",
       "codes": [
-        "W090",
+        "E090",
         "W091",
         "W092",
-        "W093",
+        "E093",
         "W094",
-        "W095"
+        "E095"
       ],
       "kind": "quiet",
       "package": "est",
@@ -1939,7 +1939,7 @@
     {
       "id": "w090_exo",
       "codes": [
-        "W090"
+        "E090"
       ],
       "kind": "fire",
       "package": "est",
@@ -1951,7 +1951,7 @@
     {
       "id": "w090_param",
       "codes": [
-        "W090"
+        "E090"
       ],
       "kind": "fire",
       "package": "est",
@@ -1963,7 +1963,7 @@
     {
       "id": "w090_undecl",
       "codes": [
-        "W090"
+        "E090"
       ],
       "kind": "fire",
       "package": "est",
@@ -2023,7 +2023,7 @@
     {
       "id": "w090_w093_param",
       "codes": [
-        "W093"
+        "E093"
       ],
       "kind": "fire",
       "package": "est",
@@ -2035,7 +2035,7 @@
     {
       "id": "w090_w093_stderr",
       "codes": [
-        "W093"
+        "E093"
       ],
       "kind": "fire",
       "package": "est",
@@ -2047,7 +2047,7 @@
     {
       "id": "w090_w093_corr",
       "codes": [
-        "W093"
+        "E093"
       ],
       "kind": "fire",
       "package": "est",
@@ -2083,7 +2083,7 @@
     {
       "id": "w090_w095_ot",
       "codes": [
-        "W095"
+        "E095"
       ],
       "kind": "fire",
       "package": "est",
@@ -2095,10 +2095,10 @@
     {
       "id": "w100_clean_trend_rbc_gov_inv",
       "codes": [
-        "W100",
-        "W101",
+        "E100",
+        "E101",
         "W102",
-        "W103"
+        "E103"
       ],
       "kind": "archive",
       "package": "est",
@@ -2110,10 +2110,10 @@
     {
       "id": "w100_clean_sims_wu_2019",
       "codes": [
-        "W100",
-        "W101",
+        "E100",
+        "E101",
         "W102",
-        "W103"
+        "E103"
       ],
       "kind": "archive",
       "package": "est",
@@ -2125,10 +2125,10 @@
     {
       "id": "w100_clean_govt_rbc_irf_matching",
       "codes": [
-        "W100",
-        "W101",
+        "E100",
+        "E101",
         "W102",
-        "W103"
+        "E103"
       ],
       "kind": "archive",
       "package": "est",
@@ -2140,10 +2140,10 @@
     {
       "id": "w100_clean_lk2024",
       "codes": [
-        "W100",
-        "W101",
+        "E100",
+        "E101",
         "W102",
-        "W103"
+        "E103"
       ],
       "kind": "archive",
       "package": "est",
@@ -2175,7 +2175,7 @@
     {
       "id": "w100_ramsey",
       "codes": [
-        "W100"
+        "E100"
       ],
       "kind": "fire",
       "package": "est",
@@ -2187,7 +2187,7 @@
     {
       "id": "w100_disc",
       "codes": [
-        "W100"
+        "E100"
       ],
       "kind": "fire",
       "package": "est",
@@ -2199,7 +2199,7 @@
     {
       "id": "w100_planner_alone",
       "codes": [
-        "W100"
+        "E100"
       ],
       "kind": "quiet",
       "package": "est",
@@ -2211,7 +2211,7 @@
     {
       "id": "w100_disc_ok",
       "codes": [
-        "W100"
+        "E100"
       ],
       "kind": "quiet",
       "package": "est",
@@ -2223,7 +2223,7 @@
     {
       "id": "w100_w101",
       "codes": [
-        "W101"
+        "E101"
       ],
       "kind": "fire",
       "package": "est",
@@ -2283,8 +2283,8 @@
     {
       "id": "w100_ramsey_ok",
       "codes": [
-        "W100",
-        "W101",
+        "E100",
+        "E101",
         "W102"
       ],
       "kind": "quiet",
@@ -2297,7 +2297,7 @@
     {
       "id": "w100_w103_both",
       "codes": [
-        "W103"
+        "E103"
       ],
       "kind": "fire",
       "package": "est",
@@ -2309,7 +2309,7 @@
     {
       "id": "w100_w103_weights",
       "codes": [
-        "W103"
+        "E103"
       ],
       "kind": "fire",
       "package": "est",
@@ -2321,7 +2321,7 @@
     {
       "id": "w100_w103_params",
       "codes": [
-        "W103"
+        "E103"
       ],
       "kind": "fire",
       "package": "est",
@@ -2333,7 +2333,7 @@
     {
       "id": "w100_osr_ok",
       "codes": [
-        "W103"
+        "E103"
       ],
       "kind": "quiet",
       "package": "est",
@@ -2347,7 +2347,7 @@
       "codes": [
         "W060",
         "W110",
-        "W111",
+        "E111",
         "W112"
       ],
       "kind": "archive",
@@ -2362,7 +2362,7 @@
       "codes": [
         "W060",
         "W110",
-        "W111",
+        "E111",
         "W112"
       ],
       "kind": "archive",
@@ -2377,7 +2377,7 @@
       "codes": [
         "W060",
         "W110",
-        "W111",
+        "E111",
         "W112"
       ],
       "kind": "archive",
@@ -2392,7 +2392,7 @@
       "codes": [
         "W060",
         "W110",
-        "W111",
+        "E111",
         "W112"
       ],
       "kind": "archive",
@@ -2485,7 +2485,7 @@
     {
       "id": "w110_w111_dup_var",
       "codes": [
-        "W111"
+        "E111"
       ],
       "kind": "fire",
       "package": "est",
@@ -2497,7 +2497,7 @@
     {
       "id": "w110_w111_dup_corr",
       "codes": [
-        "W111"
+        "E111"
       ],
       "kind": "fire",
       "package": "est",
@@ -3021,7 +3021,7 @@
     {
       "id": "w130_clean_trend_rbc_gov_inv",
       "codes": [
-        "W130",
+        "E130",
         "W131",
         "W140",
         "W150"
@@ -3036,7 +3036,7 @@
     {
       "id": "w130_clean_sims_wu_2019",
       "codes": [
-        "W130",
+        "E130",
         "W131",
         "W140",
         "W150"
@@ -3051,7 +3051,7 @@
     {
       "id": "w130_clean_govt_rbc_irf_matching",
       "codes": [
-        "W130",
+        "E130",
         "W131",
         "W140",
         "W150"
@@ -3066,7 +3066,7 @@
     {
       "id": "w130_clean_lk2024",
       "codes": [
-        "W130",
+        "E130",
         "W131",
         "W140",
         "W150"
@@ -3081,7 +3081,7 @@
     {
       "id": "w130_logn_before_n",
       "codes": [
-        "W130"
+        "E130"
       ],
       "kind": "fire",
       "package": "w130",
@@ -3093,7 +3093,7 @@
     {
       "id": "w130_k_before_y",
       "codes": [
-        "W130"
+        "E130"
       ],
       "kind": "fire",
       "package": "w130",
@@ -3105,7 +3105,7 @@
     {
       "id": "w130_timed_rhs_native",
       "codes": [
-        "W130"
+        "E130"
       ],
       "kind": "fire",
       "package": "w130",
@@ -3201,7 +3201,7 @@
     {
       "id": "w042_not_w130",
       "codes": [
-        "W130"
+        "E130"
       ],
       "kind": "quiet",
       "package": "w130",

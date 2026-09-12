@@ -432,9 +432,9 @@ async fn did_save_reanalyzes() {
     );
     if dygnosis::find_preprocessor(None).is_some() {
         assert!(
-            items
-                .iter()
-                .any(|d| is_p_digits(&diag_code(d)) && d.severity == Some(DiagnosticSeverity::ERROR)),
+            items.iter().any(
+                |d| is_p_digits(&diag_code(d)) && d.severity == Some(DiagnosticSeverity::ERROR)
+            ),
             "didSave with preprocessor should publish a P-digit ERROR; got {:?}",
             items.iter().map(diag_code).collect::<Vec<_>>()
         );
@@ -1565,20 +1565,20 @@ async fn range_formatting_matches_format_range() {
 }
 
 #[tokio::test]
-async fn explain_diagnostic_e010_and_unknown_e040() {
+async fn explain_diagnostic_w013_and_unknown_e040() {
     let (service, _socket) = new_service();
-    let e010 = service
+    let w013 = service
         .inner()
         .execute_command(ExecuteCommandParams {
             command: "dynare/explainDiagnostic".into(),
-            arguments: vec![serde_json::json!({"code": "E010"})],
+            arguments: vec![serde_json::json!({"code": "W013"})],
             work_done_progress_params: WorkDoneProgressParams::default(),
         })
         .await
         .expect("explain rpc")
-        .expect("e010 value");
-    let expected = dygnosis::explain::render_markdown("E010").expect("library E010");
-    assert_eq!(e010, serde_json::Value::String(expected));
+        .expect("w013 value");
+    let expected = dygnosis::explain::render_markdown("W013").expect("library W013");
+    assert_eq!(w013, serde_json::Value::String(expected));
 
     let e040 = service
         .inner()
@@ -1801,6 +1801,13 @@ async fn did_save_clean_trend_has_no_e001() {
     assert!(
         !items.iter().any(|d| diag_code(d) == "E001"),
         "clean save must not keep dropped E001; got {:?}",
+        items.iter().map(diag_code).collect::<Vec<_>>()
+    );
+    assert!(
+        !items
+            .iter()
+            .any(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
+        "clean save must not keep own Error; got {:?}",
         items.iter().map(diag_code).collect::<Vec<_>>()
     );
 }

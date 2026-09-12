@@ -26,8 +26,8 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
         if model.planner_objective_span.is_none() {
             diagnostics.push(Diagnostic::new(
                 anchor,
-                Severity::Warning,
-                "W100",
+                Severity::Error,
+                "E100",
                 format!(
                     "{} requires a planner_objective statement, which is missing.",
                     planner_command.as_str()
@@ -42,8 +42,8 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
             let name = model.name(*instrument);
             diagnostics.push(Diagnostic::new(
                 anchor,
-                Severity::Warning,
-                "W101",
+                Severity::Error,
+                "E101",
                 format!("Policy instrument '{name}' is not a declared endogenous variable."),
             ));
         }
@@ -67,16 +67,16 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
         if model.osr_params.is_empty() {
             diagnostics.push(Diagnostic::new(
                 anchor,
-                Severity::Warning,
-                "W103",
+                Severity::Error,
+                "E103",
                 "osr requires an osr_params statement listing the parameters to optimize.",
             ));
         }
         if !model.has_optim_weights {
             diagnostics.push(Diagnostic::new(
                 anchor,
-                Severity::Warning,
-                "W103",
+                Severity::Error,
+                "E103",
                 "osr requires an optim_weights block defining the objective (the weights on the target variables).",
             ));
         }

@@ -108,7 +108,7 @@ pub fn check_w012(model: &Model) -> Vec<Diagnostic> {
         let name = model.name(a.name);
         diagnostics.push(Diagnostic::new(
             a.span,
-            Severity::Information,
+            Severity::Warning,
             "W012",
             format!(
                 "'{name}' is assigned but not declared as a parameter. If it is used to compute other parameters, consider declaring it in the parameters block."
@@ -132,6 +132,7 @@ pub fn check_w020(model: &Model) -> Vec<Diagnostic> {
         &model.endogenous,
         &referenced,
         "W020",
+        Severity::Warning,
         "Endogenous variable",
         "the model block",
     )
@@ -146,7 +147,8 @@ pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
         model,
         &model.exogenous,
         &referenced,
-        "W021",
+        "E021",
+        Severity::Error,
         "Exogenous variable",
         "the model block",
     )
@@ -175,7 +177,7 @@ pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
         let name = model.name(p.name);
         diagnostics.push(Diagnostic::new(
             p.span,
-            Severity::Information,
+            Severity::Warning,
             "W022",
             format!("Parameter '{name}' is declared but never referenced in model equations."),
         ));
@@ -330,6 +332,7 @@ fn unused_decls(
     decls: &[crate::model::Decl],
     referenced: &HashSet<Name>,
     code: &str,
+    severity: Severity,
     kind: &str,
     where_: &str,
 ) -> Vec<Diagnostic> {
@@ -341,7 +344,7 @@ fn unused_decls(
         let name = model.name(d.name);
         diagnostics.push(Diagnostic::new(
             d.span,
-            Severity::Warning,
+            severity,
             code,
             format!("{kind} '{name}' is declared but never referenced in {where_}."),
         ));

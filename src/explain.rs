@@ -19,7 +19,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "Parse error",
         body: "The Dynare parser could not interpret the source. The diagnostic range points at the offending token or the nearest recoverable position.\n\n**Common causes**\n\n- Missing semicolon at the end of a declaration or equation\n- Unbalanced parentheses, braces, or block keywords\n- Malformed time subscript such as `y(1)` where `y(+1)` was meant\n- A reserved keyword used as an identifier\n\n**Fix**\n\nInspect the line cited and the line immediately preceding it. Dynare's preprocessor frequently flags the *next* line after a missing semicolon.",
     }),
-    ("E010", ExplainEntry {
+    ("W013", ExplainEntry {
         title: "Equation count does not match endogenous variable count",
         body: "The number of equations inside the `model` block must equal the number of endogenous variables declared in the `var` block. The LSP catches this within milliseconds of editing, before Dynare is invoked.\n\n**Fix**\n\n- Add a missing equation, or remove a duplicate one\n- Declare the missing endogenous variable in `var`, or remove an   extra declaration\n- Check whether a commented-out equation was intended to be   active",
     }),
@@ -43,19 +43,19 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "Duplicate declaration across blocks",
         body: "The same identifier is declared in more than one block (for example, in both `var` and `varexo`, or twice in `parameters`). Dynare requires each name to belong to exactly one symbol class.\n\n**Fix**\n\nRemove the duplicate declaration. If you intended two related but distinct symbols, rename one (the LSP's rename action propagates the change across the file).",
     }),
-    ("E050", ExplainEntry {
+    ("W054", ExplainEntry {
         title: "Duplicate equation",
         body: "Two equations inside the `model` block are textually identical. The diagnostic cites the line where the duplicate appears and the line where the first occurrence was found.\n\n**Fix**\n\nRemove the duplicate. Dynare would otherwise report an equation-count mismatch (E010) downstream.",
     }),
-    ("E051", ExplainEntry {
+    ("W055", ExplainEntry {
         title: "Contradictory equation (always false)",
         body: "An equation reduces to a tautological falsehood, for example `0 = 1`. The LSP detects this by symbolic simplification of constant-only equations.\n\n**Fix**\n\nRemove the equation, or restore a variable reference that was accidentally simplified away.",
     }),
-    ("E052", ExplainEntry {
+    ("W056", ExplainEntry {
         title: "Duplicate parameter assignment",
         body: "The same parameter is assigned a value more than once in the parameter section. Only the last assignment takes effect at runtime, so the earlier one is silently ignored — usually a bug.\n\n**Fix**\n\nRemove one of the assignments, or rename if two distinct parameters were intended.",
     }),
-    ("E053", ExplainEntry {
+    ("W057", ExplainEntry {
         title: "Stray equation outside model block",
         body: "A line that looks like a model equation appears outside the `model` ... `end;` block. Dynare's parser will reject this.\n\n**Fix**\n\nMove the equation inside the `model` block, or convert it to a parameter assignment if it belongs at the top level.",
     }),
@@ -111,7 +111,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "Endogenous variable never referenced in model",
         body: "An endogenous variable is declared in `var` but does not appear in any equation. Either remove the declaration or add the missing equation that uses the variable.",
     }),
-    ("W021", ExplainEntry {
+    ("E021", ExplainEntry {
         title: "Exogenous variable never referenced in model",
         body: "A shock declared in `varexo` does not appear in any equation. It will have no effect at runtime.",
     }),
@@ -123,7 +123,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "Endogenous variable missing from steady_state_model",
         body: "The `steady_state_model` block does not assign a value for every endogenous variable. Dynare will fall back to the `initval` value (or zero), which usually produces an inconsistent steady state.\n\n**Fix**\n\nAdd the missing assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).",
     }),
-    ("W050", ExplainEntry {
+    ("E058", ExplainEntry {
         title: "Undeclared variable in initval",
         body: "An entry in the `initval` block refers to a name that is not declared as a variable. Dynare's preprocessor will reject this.\n\n**Fix**\n\nDeclare the variable, or remove the stray `initval` entry.",
     }),
@@ -135,7 +135,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "Endogenous variable missing from initval",
         body: "The `initval` block does not provide an initial guess for every endogenous variable. The solver will start from zero for the missing entries, which may slow or prevent convergence on nonlinear models.",
     }),
-    ("W053", ExplainEntry {
+    ("E059", ExplainEntry {
         title: "Parameter assigned in initval/endval is ignored",
         body: "A parameter is assigned a value inside an `initval`/`endval` block, where Dynare ignores it. Assign parameters before the model block, or inside `steady_state_model`, instead.",
     }),
@@ -151,7 +151,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "Parameter outside its conventional range",
         body: "A parameter assignment falls outside the theoretically admissible range for its standard interpretation. The conventional-range table is opinionated but conservative: it flags values that violate the *theoretical* admissible range under the parameter's conventional meaning, not values that simply look unusual.\n\n**Common causes**\n\n- Unit error: e.g. `beta = 99` when 0.99 was meant\n- Sign error on a quantity that must be non-negative   (variance, standard deviation, depreciation rate)\n- Gross-vs-net confusion on a rate parameter\n\n**Fix**\n\nCorrect the value, or — if the calibration is intentional — ignore the warning. This is a soft check, not a structural error: Dynare will accept any numeric value.",
     }),
-    ("W090", ExplainEntry {
+    ("E090", ExplainEntry {
         title: "Observed variable is not a declared endogenous variable",
         body: "A name listed in ``varobs`` is not a declared endogenous variable. Dynare requires every observed variable to be an endogenous variable of the model.\n\n**Fix**\n\nDeclare the variable in ``var``, or remove it from ``varobs`` if it was a typo or an exogenous/parameter name.",
     }),
@@ -163,7 +163,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "Stochastic singularity",
         body: "There are more observed variables (``varobs``) than shocks (structural shocks plus measurement errors). The likelihood is then stochastically singular and estimation cannot proceed: the model cannot generate enough independent variation to match the observed series.\n\n**Fix**\n\nAdd structural shocks, add measurement errors on the observed variables (an ``stderr`` on an observed variable), or reduce the number of observed variables so that observables ≤ shocks.",
     }),
-    ("W093", ExplainEntry {
+    ("E093", ExplainEntry {
         title: "estimated_params references an undeclared symbol",
         body: "An ``estimated_params`` entry names a symbol that is not declared with the expected role: a plain entry must name a parameter, an ``stderr`` entry must name a shock or observed variable, and a ``corr`` entry must name two declared shocks or variables.\n\n**Fix**\n\nDeclare the symbol, or correct the name / entry type.",
     }),
@@ -171,15 +171,15 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "estimated_params bound or initial-value inconsistency",
         body: "An ``estimated_params`` entry has a lower bound that is not below its upper bound, or an initial value that lies outside the ``[lower, upper]`` interval. Dynare needs a non-empty bound interval containing the starting value.\n\n**Fix**\n\nOrder the bounds so that lower < upper and place the initial value inside them.",
     }),
-    ("W095", ExplainEntry {
+    ("E095", ExplainEntry {
         title: "observation_trends variable not in varobs",
         body: "A variable given a trend in ``observation_trends`` is not listed in ``varobs``. Trends are only meaningful for observed variables.\n\n**Fix**\n\nAdd the variable to ``varobs`` or remove its trend specification.",
     }),
-    ("W100", ExplainEntry {
+    ("E100", ExplainEntry {
         title: "Optimal-policy command requires a planner_objective",
         body: "``ramsey_model``, ``ramsey_policy``, and ``discretionary_policy`` optimise a planner's loss function, so they require a ``planner_objective`` statement, which is missing.\n\n**Fix**\n\nAdd a ``planner_objective <expression>;`` statement before the policy command.",
     }),
-    ("W101", ExplainEntry {
+    ("E101", ExplainEntry {
         title: "Policy instrument is not a declared endogenous variable",
         body: "An ``instruments=(...)`` entry names a symbol that is not a declared endogenous variable. Policy instruments must be endogenous variables of the model.\n\n**Fix**\n\nDeclare the instrument in ``var``, or correct the instrument name.",
     }),
@@ -187,7 +187,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "planner_discount is not a valid discount factor",
         body: "``planner_discount`` must be a discount factor in the interval (0, 1]. A value outside this range is almost certainly a mistake (for example, entering a discount rate instead of a factor).\n\n**Fix**\n\nSet ``planner_discount`` to a value such as 0.99.",
     }),
-    ("W103", ExplainEntry {
+    ("E103", ExplainEntry {
         title: "osr is missing osr_params or optim_weights",
         body: "Optimal simple rules (``osr``) optimise the values of chosen parameters to minimise a weighted objective, so they require an ``osr_params`` statement (the parameters to optimise) and an ``optim_weights`` block (the objective weights). One of these is missing.\n\n**Fix**\n\nAdd the missing ``osr_params`` statement and/or ``optim_weights`` block.",
     }),
@@ -195,7 +195,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "Shock correlation outside [-1, 1]",
         body: "A ``corr`` entry in the shocks block sets a correlation whose magnitude exceeds one. A correlation coefficient must lie in [-1, 1], and the implied covariance matrix would not be positive semidefinite.\n\n**Fix**\n\nSet the correlation to a value in [-1, 1].",
     }),
-    ("W111", ExplainEntry {
+    ("E111", ExplainEntry {
         title: "Shock variance or correlation specified more than once",
         body: "A shock's variance / standard error, or a correlation pair, is specified more than once in the shocks block. The repeated entry silently overrides the earlier one and is usually a mistake.\n\n**Fix**\n\nKeep a single specification per shock variance and per correlation pair.",
     }),
@@ -215,7 +215,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "Deep parameter assigned a non-finite value",
         body: "A parameter that is used in the model equations is assigned a non-finite value (``NaN`` or ``Inf``) while a run command (``steady``, ``stoch_simul``, ``perfect_foresight_*``, ``estimation``, ...) is present. Dynare's deep-parameter calibration check rejects ``NaN`` / ``Inf`` parameters.\n\n**Fix**\n\nAssign a finite numeric value before the run command.",
     }),
-    ("W130", ExplainEntry {
+    ("E130", ExplainEntry {
         title: "Variable used before assignment in steady_state_model",
         body: "The ``steady_state_model`` block is evaluated top to bottom as a sequence of assignments, so every variable on a right-hand side must already have been assigned above. A variable is referenced before its own assignment, which the Dynare preprocessor rejects.\n\n**Fix**\n\nReorder the assignments so each variable is computed before it is used.",
     }),

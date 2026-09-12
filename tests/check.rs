@@ -266,10 +266,7 @@ fn p_core_check_file_no_preproc() {
         let path_str = path.to_str().expect("utf-8 path");
         let text = read_mod(name);
         let diags = check_file(&text, path_str);
-        assert!(
-            !diags.is_empty(),
-            "{name} library check should emit I050"
-        );
+        assert!(!diags.is_empty(), "{name} library check should emit I050");
         assert!(
             diags.iter().all(|d| d.code == "I050"),
             "{name} library check codes: {:?}",
@@ -376,6 +373,10 @@ fn cli_trend_rbc_gov_inv_does_not_print_dropped_e001() {
         !codes.contains("E001"),
         "accepted file must not print dropped E001; got {codes:?}\n{stdout}"
     );
+    assert!(
+        !stdout.contains(": ERROR ["),
+        "accepted file must not print own Error; got {codes:?}\n{stdout}"
+    );
     assert_no_out(&stdout);
 }
 
@@ -397,8 +398,8 @@ fn swff_workspace_check_no_out() {
 
 #[test]
 fn error_check_fixture_exits_1() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/e001/delete_model_end.mod");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/e001/delete_model_end.mod");
     let path_str = path.to_str().expect("utf-8 path");
     let text = read_mod_file(&path);
     let diags = check_file(&text, path_str);
@@ -439,9 +440,8 @@ fn cli_stdout_matches_format_check_lines() {
         let path_str = tmp.to_str().expect("utf-8 path");
         let diags = check_file(&text, path_str);
         let parent = tmp.parent();
-        let pre = find_preprocessor(None).map(|pp| {
-            run_preprocessor(&text, &pp, parent, Duration::from_secs(30))
-        });
+        let pre = find_preprocessor(None)
+            .map(|pp| run_preprocessor(&text, &pp, parent, Duration::from_secs(30)));
         let reconciled = reconcile_diagnostics(&diags, pre.as_ref());
         let expected = format_check_lines(path_str, &reconciled, &text);
         let output = run_check(path_str);

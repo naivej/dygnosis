@@ -172,8 +172,10 @@ fn e030_same_kind_var() {
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].code, "E030");
-    assert_eq!(got[0].severity, 2);
-    assert!(got[0].message.contains("'y' is declared more than once in 'var'"));
+    assert_eq!(got[0].severity, 1);
+    assert!(got[0]
+        .message
+        .contains("'y' is declared more than once in 'var'"));
     assert_span_in(&text, &got[0], "var y c;", "y");
 }
 
@@ -182,10 +184,10 @@ fn e030_same_kind_var_third_compares_to_first() {
     let text = check_mod("e030/same_kind_var_third.mod");
     let got = rust_e030(&text);
     assert_eq!(got.len(), 2);
-    assert!(got.iter().all(|d| d.code == "E030" && d.severity == 2));
-    assert!(got
-        .iter()
-        .all(|d| d.message.contains("'y' is declared more than once in 'var'")));
+    assert!(got.iter().all(|d| d.code == "E030" && d.severity == 1));
+    assert!(got.iter().all(|d| d
+        .message
+        .contains("'y' is declared more than once in 'var'")));
     assert_last_ident(&text, &got[0], "var y;\nvar y;", "y");
     assert_span_in(&text, &got[1], "var y c;", "y");
 }
@@ -195,7 +197,7 @@ fn e030_same_kind_param() {
     let text = check_mod("e030/same_kind_param.mod");
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
-    assert_eq!(got[0].severity, 2);
+    assert_eq!(got[0].severity, 1);
     assert!(got[0]
         .message
         .contains("'betta' is declared more than once in 'parameters'"));

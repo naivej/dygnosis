@@ -48,8 +48,8 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                     let n = model.name(*name);
                     diagnostics.push(Diagnostic::new(
                         span,
-                        Severity::Warning,
-                        "W111",
+                        Severity::Error,
+                        "E111",
                         format!(
                             "Shock '{n}' has its variance/standard error specified more than once in the shocks block."
                         ),
@@ -78,8 +78,8 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                     let second = model.name(names[1]);
                     diagnostics.push(Diagnostic::new(
                         span,
-                        Severity::Warning,
-                        "W111",
+                        Severity::Error,
+                        "E111",
                         format!(
                             "Covariance between '{first}' and '{second}' is specified more than once in the shocks block."
                         ),
@@ -94,8 +94,8 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                     let second = model.name(*b);
                     diagnostics.push(Diagnostic::new(
                         span,
-                        Severity::Warning,
-                        "W111",
+                        Severity::Error,
+                        "E111",
                         format!(
                             "Correlation between '{first}' and '{second}' is specified more than once in the shocks block."
                         ),
