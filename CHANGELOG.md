@@ -2,32 +2,15 @@
 
 ## v0.1.1
 
-Audit against the two principles: the preprocessor is ground truth for the `.mod` language, and a diagnostic is added only if it earns a place.
+Audit of v0.1.0 against two principles:
 
-Honesty tests lock that agreement with the latest stable preprocessor (skip if it is missing). After a preprocessor run, the safety gate applies: on refuse, same-ground Errors yield to its wording; on accept, no Error of ours remains; when they warn, same-ground Warnings yield to theirs; extra Warnings stay.
+- A check is built in instead of delegated to the Dynare preprocessor if (1) it is new; (2) it powers an editor feature; or (3) it helps while typing. The audit finds no check to drop.
+- Where checks exist in both dygnosis and the preprocessor, the latter is ground truth. Severity must match (Error or Warning in both), and parity is pinned by honesty tests.
 
-MCP is the nine tools, in this order: `dynare_diagnose`, `dynare_model_info`, `dynare_compare_models`, `dynare_find_references`, `dynare_rename`, `dynare_auto_fix`, `dynare_explain`, `dynare_list_diagnostic_codes`, `dynare_list_options`. `dynare_diagnose` is the only full check. These names are gone (not aliases): `dynare_diagnose_workspace`, `dynare_parse_summary`, `dynare_find_references_workspace`, `dynare_rename_workspace`, `dynare_run_preprocessor`.
+Other changes:
 
-Diagnostic codes renamed so the letter matches severity (old → new):
-
-| Old | New |
-|-----|-----|
-| `E010` | `W013` |
-| `E050` | `W054` |
-| `E051` | `W055` |
-| `E052` | `W056` |
-| `E053` | `W057` |
-| `W021` | `E021` |
-| `W050` | `E058` |
-| `W053` | `E059` |
-| `W090` | `E090` |
-| `W093` | `E093` |
-| `W095` | `E095` |
-| `W100` | `E100` |
-| `W101` | `E101` |
-| `W103` | `E103` |
-| `W111` | `E111` |
-| `W130` | `E130` |
+- A check that exists only in dygnosis can only be a Warning or Information. A Warning means the preprocessor would accept the file, but something looks wrong.
+- MCP tools are simplified to nine.
 
 ## v0.1.0
 
