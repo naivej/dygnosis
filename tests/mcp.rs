@@ -2,30 +2,34 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use dygnosis::explain::{explain, known_codes, render_markdown};
+use dygnosis::preprocessor::{run_workspace_preprocessor, DEFAULT_TIMEOUT};
 use dygnosis::{
-    analyze, auto_fix, dynare_auto_fix, dynare_compare_models, dynare_diagnose,
-    dynare_diagnose_workspace, dynare_explain, dynare_find_references,
-    dynare_find_references_workspace, dynare_list_diagnostic_codes, dynare_list_options,
-    dynare_model_info, dynare_parse_summary, dynare_rename, dynare_rename_workspace,
-    find_preprocessor, has_structural_error, parse, reconcile_diagnostics, registered_tool_names,
-    run_preprocessor, tools_list_json,
+    analyze, auto_fix, check_e060, check_e061, check_w061, dynare_auto_fix, dynare_compare_models,
+    dynare_diagnose, dynare_explain, dynare_find_references, dynare_list_diagnostic_codes,
+    dynare_list_options, dynare_model_info, dynare_rename, find_preprocessor, has_structural_error,
+    parse, reconcile_diagnostics, registered_tool_names, run_preprocessor, tools_list_json,
+    Diagnostic, McpReference, McpWorkspaceReference, Workspace,
 };
+use serde_json::{json, Value};
 
 const RUST_TOOLS: &[&str] = &[
     "dynare_diagnose",
-    "dynare_diagnose_workspace",
-    "dynare_parse_summary",
+    "dynare_model_info",
+    "dynare_compare_models",
+    "dynare_find_references",
+    "dynare_rename",
+    "dynare_auto_fix",
     "dynare_explain",
     "dynare_list_diagnostic_codes",
     "dynare_list_options",
-    "dynare_find_references",
+];
+
+const DROPPED_TOOLS: &[&str] = &[
+    "dynare_diagnose_workspace",
+    "dynare_parse_summary",
     "dynare_find_references_workspace",
-    "dynare_rename",
     "dynare_rename_workspace",
-    "dynare_auto_fix",
     "dynare_run_preprocessor",
-    "dynare_model_info",
-    "dynare_compare_models",
 ];
 
 const OUT_TOOLS: &[&str] = &[
@@ -53,6 +57,17 @@ const P_CORE: &[&str] = &[
     "sims_wu_2019",
     "govt_rbc_irf_matching",
     "lk2024",
+];
+
+const PARSE_SUMMARY_KEYS: &[&str] = &[
+    "n_model_equations",
+    "n_steady_state_equations",
+    "n_initval_entries",
+    "is_linear",
+    "has_model_block",
+    "has_steady_state_model_block",
+    "has_initval_block",
+    "has_shocks_block",
 ];
 
 const MCP_SEVERITIES: &[&str] = &["ERROR", "WARNING", "INFORMATION", "HINT"];
@@ -110,19 +125,93 @@ fn slice_at(text: &str, line: u32, column: u32, end_column: u32) -> String {
         .collect()
 }
 
+fn codes_of(diags: &[dygnosis::McpDiagnostic]) -> Vec<String> {
+    diags.iter().map(|d| d.code.clone()).collect()
+}
+
+fn strip_out_codes(diags: impl IntoIterator<Item = Diagnostic>) -> Vec<String> {
+    diags
+        .into_iter()
+        .filter(|d| !is_out_code(&d.code))
+        .map(|d| d.code)
+        .collect()
+}
+
+/// Same families as `check_in_workspace` (analyze + E060 / E061 / W061).
+fn workspace_own(active: &str, files: &HashMap<String, String>) -> Vec<Diagnostic> {
+    let mut ws = Workspace::new();
+    for (name, content) in files {
+        ws.update_document(name, content);
+    }
+    match ws.get_effective_model(active).cloned() {
+        Some(model) => {
+            let mut diags = analyze(&model);
+            let records = ws.include_records(active).cloned().unwrap_or_default();
+            diags.extend(check_e060(&records));
+            diags.extend(check_e061(&records));
+            diags.extend(check_w061(&mut ws, active));
+            diags
+        }
+        None => {
+            let text = files.get(active).map(String::as_str).unwrap_or("");
+            analyze(&parse(text))
+        }
+    }
+}
+
+fn expected_workspace_codes(active: &str, files: &HashMap<String, String>) -> Vec<String> {
+    let own = workspace_own(active, files);
+    let diags = if let Some(pp) = find_preprocessor(None) {
+        let pre = run_workspace_preprocessor(active, files, &pp, DEFAULT_TIMEOUT);
+        reconcile_diagnostics(&own, Some(&pre))
+    } else {
+        own
+    };
+    strip_out_codes(diags)
+}
+
+fn refs_single(value: Value) -> Vec<McpReference> {
+    assert!(
+        value.as_array().is_some_and(|rows| {
+            rows.iter()
+                .all(|row| row.get("file").is_none() && row.get("end_line").is_none())
+        }),
+        "no-map refs must omit file and end_line: {value}"
+    );
+    serde_json::from_value(value).expect("McpReference array")
+}
+
+fn refs_map(value: Value) -> Vec<McpWorkspaceReference> {
+    assert!(
+        value
+            .as_array()
+            .is_some_and(|rows| rows.iter().all(|row| row.get("file").is_some())),
+        "map refs must include file: {value}"
+    );
+    serde_json::from_value(value).expect("McpWorkspaceReference array")
+}
+
+fn rename_single(value: &Value) -> &str {
+    value.as_str().expect("no-map rename is a JSON string")
+}
+
+fn rename_map(value: Value) -> HashMap<String, String> {
+    assert!(value.is_object(), "map rename is a JSON object: {value}");
+    serde_json::from_value(value).expect("rename map")
+}
+
 #[test]
-fn registered_tools_include_wave_c() {
+fn registered_tools_are_nine() {
     let names = registered_tool_names();
-    let mut got = names.clone();
-    got.sort_unstable();
-    let mut want: Vec<&str> = RUST_TOOLS.to_vec();
-    want.sort_unstable();
-    assert_eq!(got, want);
-    assert!(names.contains(&"dynare_run_preprocessor"));
-    assert!(names.contains(&"dynare_model_info"));
-    assert!(names.contains(&"dynare_compare_models"));
+    assert_eq!(names, RUST_TOOLS);
 
     let blob = serde_json::to_string(&tools_list_json()).expect("tools list json");
+    for name in DROPPED_TOOLS {
+        assert!(
+            !blob.contains(name),
+            "tools/list must not contain dropped {name}: {blob}"
+        );
+    }
     for name in OUT_TOOLS {
         assert!(
             !blob.contains(name),
@@ -141,23 +230,15 @@ fn registered_tools_include_wave_c() {
 fn diagnose_p_core_thin_codes() {
     for name in P_CORE {
         let text = read_mod(name);
-        let from_analyze: Vec<String> = analyze(&parse(&text))
-            .into_iter()
-            .filter(|d| !is_out_code(&d.code))
-            .map(|d| d.code.clone())
-            .collect();
+        let from_analyze = strip_out_codes(analyze(&parse(&text)));
         let expected: Vec<String> = if let Some(pp) = find_preprocessor(None) {
             let own = analyze(&parse(&text));
             let pre = run_preprocessor(&text, &pp, None, std::time::Duration::from_secs(30));
-            reconcile_diagnostics(&own, Some(&pre))
-                .into_iter()
-                .filter(|d| !is_out_code(&d.code))
-                .map(|d| d.code.clone())
-                .collect()
+            strip_out_codes(reconcile_diagnostics(&own, Some(&pre)))
         } else {
             from_analyze
         };
-        let diags = dynare_diagnose(&text);
+        let diags = dynare_diagnose(&text, None, None);
         for d in &diags {
             assert!(
                 MCP_SEVERITIES.contains(&d.severity.as_str()),
@@ -182,7 +263,7 @@ fn diagnose_p_core_thin_codes() {
                 d.end_column
             );
         }
-        let from_mcp: Vec<String> = diags.iter().map(|d| d.code.clone()).collect();
+        let from_mcp = codes_of(&diags);
         assert_eq!(from_mcp, expected, "diagnose codes for {name}");
         assert_no_out(&from_mcp);
     }
@@ -196,8 +277,8 @@ fn diagnose_govt_rbc_cascade_is_e001_only() {
         analyze_codes.iter().any(|c| c == "E001"),
         "analyze cascade expected E001, got {analyze_codes:?}"
     );
-    let diags = dynare_diagnose(&text);
-    let codes: Vec<String> = diags.iter().map(|d| d.code.clone()).collect();
+    let diags = dynare_diagnose(&text, None, None);
+    let codes = codes_of(&diags);
     if find_preprocessor(None).is_some() {
         assert!(
             !codes.iter().any(|c| c == "E001"),
@@ -224,15 +305,10 @@ fn diagnose_govt_rbc_cascade_is_e001_only() {
 
 #[test]
 fn diagnose_workspace_swff() {
-    let mod_path = copilot_file("swff", "swff.mod");
-    let inc_path = copilot_file("swff", "swff_params.inc");
-    let active = mod_path.to_string_lossy().into_owned();
-    let inc_key = inc_path.to_string_lossy().into_owned();
-    let mut files = HashMap::new();
-    files.insert(active.clone(), read_copilot("swff", "swff.mod"));
-    files.insert(inc_key, read_copilot("swff", "swff_params.inc"));
+    let files = swff_relative_files();
+    let text = files["swff.mod"].clone();
 
-    let diags = dynare_diagnose_workspace(&active, &files);
+    let diags = dynare_diagnose(&text, Some("swff.mod"), Some(&files));
     assert_no_out(diags.iter().map(|d| d.code.as_str()));
     for d in &diags {
         assert!(
@@ -241,24 +317,35 @@ fn diagnose_workspace_swff() {
             d.severity
         );
     }
-
-    let empty = dynare_diagnose_workspace("missing.mod", &files);
-    assert!(empty.is_empty(), "missing active_file must return []");
-}
-
-#[test]
-fn run_preprocessor_degrades_via_empty_finder() {
-    let value = dygnosis::mcp::dynare_run_preprocessor_with_finder("var y;\n", None, None, || None);
-    assert_eq!(value["success"], false);
     assert_eq!(
-        value["message"],
-        dygnosis::preprocessor::MISSING_BINARY_MESSAGE
+        codes_of(&diags),
+        expected_workspace_codes("swff.mod", &files)
     );
-    assert_eq!(value["diagnostics"], serde_json::json!([]));
+
+    let empty = dynare_diagnose(&text, None, Some(&files));
+    assert!(empty.is_empty(), "missing active_file must return []");
+    let missing = dynare_diagnose(&text, Some("missing.mod"), Some(&files));
+    assert!(missing.is_empty(), "unknown active_file must return []");
+
+    let overlay = "var y\nmodel;\ny = 1;\nend;\n";
+    assert_ne!(overlay, text);
+    let overlay_diags = dynare_diagnose(overlay, Some("swff.mod"), Some(&files));
+    let mut overlayed = files.clone();
+    overlayed.insert("swff.mod".to_string(), overlay.to_string());
+    assert_eq!(
+        codes_of(&overlay_diags),
+        expected_workspace_codes("swff.mod", &overlayed),
+        "file_content overlay must win over files[active]"
+    );
+    assert_ne!(
+        codes_of(&overlay_diags),
+        codes_of(&diags),
+        "overlay that differs from files[active] must change diagnostics"
+    );
 }
 
 #[test]
-fn parse_summary_matches_expected() {
+fn model_info_includes_parse_summary() {
     let expected_files = [
         (
             "trend_rbc_gov_inv",
@@ -277,16 +364,25 @@ fn parse_summary_matches_expected() {
     assert_eq!(expected_files.len(), P_CORE.len());
     for (name, expected_json) in expected_files {
         let text = read_mod(name);
-        let got = serde_json::to_value(dynare_parse_summary(&text)).unwrap();
-        let expected: serde_json::Value = serde_json::from_str(expected_json).unwrap();
-        assert_eq!(got, expected, "parse_summary mismatch for {name}");
+        let info = dynare_model_info(&text, None, None);
+        let expected: Value = serde_json::from_str(expected_json).unwrap();
+        for key in PARSE_SUMMARY_KEYS {
+            assert_eq!(
+                info[key], expected[key],
+                "model_info parse_summary key {key} mismatch for {name}"
+            );
+        }
+        assert!(
+            !info.as_object().expect("object").contains_key("blocks"),
+            "{name}: blocks must be absent"
+        );
     }
 }
 
 #[test]
-fn explain_e010_matches_library() {
-    let expected = render_markdown("E010").expect("E010 is documented");
-    assert_eq!(dynare_explain("E010"), expected);
+fn explain_e001_matches_library() {
+    let expected = render_markdown("E001").expect("E001 is documented");
+    assert_eq!(dynare_explain("E001"), expected);
 }
 
 #[test]
@@ -297,9 +393,9 @@ fn explain_e040_is_unknown() {
 }
 
 #[test]
-fn list_diagnostic_codes_is_54() {
+fn list_diagnostic_codes_matches_known_codes() {
     let list = dynare_list_diagnostic_codes();
-    assert_eq!(list.len(), 54);
+    assert_eq!(list.len(), known_codes().len());
     let codes: Vec<&str> = list.iter().map(|item| item.code.as_str()).collect();
     assert_eq!(codes, known_codes());
     for item in &list {
@@ -310,12 +406,12 @@ fn list_diagnostic_codes_is_54() {
 
 #[test]
 fn list_options_handler_matches_expected() {
-    let omitted: serde_json::Value =
+    let omitted: Value =
         serde_json::from_str(include_str!("expected/list_options.omitted.json")).unwrap();
     assert_eq!(dynare_list_options(None), omitted);
     assert_eq!(dynare_list_options(Some("")), omitted);
 
-    let known: serde_json::Value =
+    let known: Value =
         serde_json::from_str(include_str!("expected/list_options.known.json")).unwrap();
     let stoch = dynare_list_options(Some("stoch_simul"));
     assert_eq!(stoch, known["stoch_simul"]);
@@ -324,7 +420,7 @@ fn list_options_handler_matches_expected() {
         known["stoch_simul"]
     );
 
-    let unknown: serde_json::Value =
+    let unknown: Value =
         serde_json::from_str(include_str!("expected/list_options.unknown.json")).unwrap();
     assert_eq!(
         dynare_list_options(Some("not_a_dynare_command")),
@@ -340,9 +436,9 @@ fn list_options_handler_matches_expected() {
 fn find_references_betta_skips_comment() {
     let base = read_mod("trend_rbc_gov_inv");
     let text = format!("// betta\n{base}");
-    let hits = dynare_find_references(&text, "betta");
+    let hits = refs_single(dynare_find_references(&text, "betta", None, None));
     assert!(!hits.is_empty(), "expected betta hits, got {hits:?}");
-    assert!(dynare_find_references(&text, "").is_empty());
+    assert_eq!(dynare_find_references(&text, "", None, None), json!([]));
 
     let comment_line = 1u32;
     for hit in &hits {
@@ -361,18 +457,25 @@ fn find_references_betta_skips_comment() {
 #[test]
 fn rename_betta_to_beta_disc() {
     let text = read_mod("trend_rbc_gov_inv");
-    let out = dynare_rename(&text, "betta", "beta_disc");
+    let out_value = dynare_rename(&text, "betta", "beta_disc", None, None);
+    let out = rename_single(&out_value);
     assert!(out.contains("beta_disc"));
-    assert!(dynare_find_references(&out, "betta").is_empty());
-    assert!(!dynare_find_references(&out, "beta_disc").is_empty());
+    assert!(refs_single(dynare_find_references(out, "betta", None, None)).is_empty());
+    assert!(!refs_single(dynare_find_references(out, "beta_disc", None, None)).is_empty());
     assert_ne!(out, text);
 }
 
 #[test]
 fn rename_illegal_new_name_is_noop() {
     let text = read_mod("trend_rbc_gov_inv");
-    assert_eq!(dynare_rename(&text, "betta", "1bad"), text);
-    assert_eq!(dynare_rename(&text, "betta", "log"), text);
+    assert_eq!(
+        rename_single(&dynare_rename(&text, "betta", "1bad", None, None)),
+        text
+    );
+    assert_eq!(
+        rename_single(&dynare_rename(&text, "betta", "log", None, None)),
+        text
+    );
 }
 
 #[test]
@@ -383,7 +486,12 @@ fn find_references_workspace_swff() {
         .find(|name| files["swff.mod"].contains(name) && files["swff_params.inc"].contains(name))
         .expect("shared ident in both swff files");
 
-    let hits = dynare_find_references_workspace("swff.mod", shared, &files);
+    let hits = refs_map(dynare_find_references(
+        &files["swff.mod"],
+        shared,
+        Some("swff.mod"),
+        Some(&files),
+    ));
     let files_hit: std::collections::HashSet<&str> = hits.iter().map(|h| h.file.as_str()).collect();
     assert!(
         files_hit.contains("swff.mod"),
@@ -393,8 +501,23 @@ fn find_references_workspace_swff() {
         files_hit.contains("swff_params.inc"),
         "expected swff_params.inc hits, got {hits:?}"
     );
-    assert!(dynare_find_references_workspace("swff.mod", "", &files).is_empty());
-    assert!(dynare_find_references_workspace("missing.mod", shared, &files).is_empty());
+    assert_eq!(
+        dynare_find_references(&files["swff.mod"], "", Some("swff.mod"), Some(&files)),
+        json!([])
+    );
+    assert_eq!(
+        dynare_find_references(&files["swff.mod"], shared, None, Some(&files)),
+        json!([])
+    );
+    assert_eq!(
+        dynare_find_references(
+            &files["swff.mod"],
+            shared,
+            Some("missing.mod"),
+            Some(&files)
+        ),
+        json!([])
+    );
 }
 
 #[test]
@@ -406,7 +529,13 @@ fn rename_workspace_swff_changed_only() {
         .expect("shared ident in both swff files");
     let new_name = format!("{shared}_renamed");
 
-    let changed = dynare_rename_workspace("swff.mod", shared, &new_name, &files);
+    let changed = rename_map(dynare_rename(
+        &files["swff.mod"],
+        shared,
+        &new_name,
+        Some("swff.mod"),
+        Some(&files),
+    ));
     assert!(
         changed.contains_key("swff.mod"),
         "expected swff.mod changed, keys {:?}",
@@ -420,12 +549,55 @@ fn rename_workspace_swff_changed_only() {
     assert_eq!(changed.len(), 2);
     assert!(changed["swff.mod"].contains(&new_name));
     assert!(changed["swff_params.inc"].contains(&new_name));
-    assert!(dynare_find_references(&changed["swff.mod"], shared).is_empty());
-    assert!(dynare_find_references(&changed["swff_params.inc"], shared).is_empty());
+    assert!(refs_single(dynare_find_references(
+        &changed["swff.mod"],
+        shared,
+        None,
+        None
+    ))
+    .is_empty());
+    assert!(refs_single(dynare_find_references(
+        &changed["swff_params.inc"],
+        shared,
+        None,
+        None
+    ))
+    .is_empty());
 
-    assert!(dynare_rename_workspace("swff.mod", shared, "1bad", &files).is_empty());
-    assert!(dynare_rename_workspace("swff.mod", shared, "log", &files).is_empty());
-    assert!(dynare_rename_workspace("missing.mod", shared, &new_name, &files).is_empty());
+    assert_eq!(
+        dynare_rename(
+            &files["swff.mod"],
+            shared,
+            "1bad",
+            Some("swff.mod"),
+            Some(&files)
+        ),
+        json!({})
+    );
+    assert_eq!(
+        dynare_rename(
+            &files["swff.mod"],
+            shared,
+            "log",
+            Some("swff.mod"),
+            Some(&files)
+        ),
+        json!({})
+    );
+    assert_eq!(
+        dynare_rename(&files["swff.mod"], shared, &new_name, None, Some(&files)),
+        json!({})
+    );
+    assert_eq!(
+        dynare_rename(
+            &files["swff.mod"],
+            shared,
+            &new_name,
+            Some("missing.mod"),
+            Some(&files)
+        ),
+        json!({})
+    );
 }
 
 #[test]
@@ -461,14 +633,25 @@ fn workspace_refs_skip_unrelated_file() {
         .find(|name| files["swff.mod"].contains(name) && files["swff_params.inc"].contains(name))
         .expect("shared ident in both swff files");
 
-    let hits = dynare_find_references_workspace("swff.mod", shared, &files);
+    let hits = refs_map(dynare_find_references(
+        &files["swff.mod"],
+        shared,
+        Some("swff.mod"),
+        Some(&files),
+    ));
     assert!(
         hits.iter().all(|h| h.file != "unrelated.mod"),
         "unrelated file must be out of scope: {hits:?}"
     );
 
     let new_name = format!("{shared}_renamed");
-    let changed = dynare_rename_workspace("swff.mod", shared, &new_name, &files);
+    let changed = rename_map(dynare_rename(
+        &files["swff.mod"],
+        shared,
+        &new_name,
+        Some("swff.mod"),
+        Some(&files),
+    ));
     assert!(
         !changed.contains_key("unrelated.mod"),
         "rename must not rewrite unrelated: {:?}",
@@ -494,6 +677,9 @@ fn model_info_trend_timing_no_blocks() {
     assert!(obj.contains_key("n_mixed"));
     assert!(obj.contains_key("n_state_variables"));
     assert!(obj.contains_key("n_jumpers"));
+    for key in PARSE_SUMMARY_KEYS {
+        assert!(obj.contains_key(*key), "missing parse_summary key {key}");
+    }
     assert!(!obj.contains_key("blocks"));
     let n_endo = obj["n_endogenous"].as_u64().expect("n_endogenous");
     assert_eq!(
@@ -652,6 +838,19 @@ end;
 ";
     let info = dynare_model_info(text, None, None);
     assert_eq!(info["n_equations"].as_u64().expect("n_equations"), 1);
+    let summary_n = parse(text).summary().n_model_equations as u64;
+    assert_eq!(
+        info["n_model_equations"]
+            .as_u64()
+            .expect("n_model_equations"),
+        summary_n
+    );
+    assert_ne!(
+        info["n_equations"].as_u64().expect("n_equations"),
+        info["n_model_equations"]
+            .as_u64()
+            .expect("n_model_equations")
+    );
     assert!(!info.as_object().expect("object").contains_key("blocks"));
 }
 

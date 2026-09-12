@@ -321,7 +321,7 @@ impl Model {
     }
 }
 
-/// MCP `dynare_parse_summary` / oracle snapshot shape.
+/// Library `ParseSummary` snapshot (names, counts, and block flags).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParseSummary {
     pub endogenous: Vec<String>,

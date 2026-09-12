@@ -63,11 +63,10 @@ pub use expr::{BinOp, Expr, ExprArena, ExprId, ExprKind, IdentRef, UnOp};
 pub use format::{format_range, format_text};
 pub use include_resolver::{find_workspace_root, resolve_include_path};
 pub use mcp::{
-    dynare_auto_fix, dynare_compare_models, dynare_diagnose, dynare_diagnose_workspace,
-    dynare_explain, dynare_find_references, dynare_find_references_workspace,
-    dynare_list_diagnostic_codes, dynare_list_options, dynare_model_info, dynare_parse_summary,
-    dynare_rename, dynare_rename_workspace, dynare_run_preprocessor, registered_tool_names,
-    tools_list_json, DiagnosticCodeItem, McpDiagnostic, McpReference, McpWorkspaceReference,
+    dynare_auto_fix, dynare_compare_models, dynare_diagnose, dynare_explain,
+    dynare_find_references, dynare_list_diagnostic_codes, dynare_list_options, dynare_model_info,
+    dynare_rename, registered_tool_names, tools_list_json, DiagnosticCodeItem, McpDiagnostic,
+    McpReference, McpWorkspaceReference,
 };
 pub use model::{
     DeprecatedOption, EstimatedParam, EstimatedParamKind, IncludeDirective, IncludePathDirective,

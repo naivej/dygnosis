@@ -6,10 +6,10 @@
 use std::collections::{HashMap, HashSet};
 
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::CallToolResult;
+use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::{tool, tool_handler, tool_router, ServerHandler, ServiceExt};
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::auto_fix::auto_fix;
@@ -22,14 +22,12 @@ use crate::model_diff::compare_models;
 use crate::model_info::{classify_variable_timing, TimingClass};
 use crate::parser::parse;
 use crate::preprocessor::{
-    find_preprocessor, maybe_run_and_reconcile, missing_binary_json, reconcile_diagnostics,
-    result_to_structured, run_preprocessor_structured_with_finder, run_workspace_preprocessor,
+    find_preprocessor, maybe_run_and_reconcile, reconcile_diagnostics, run_workspace_preprocessor,
     DEFAULT_TIMEOUT,
 };
 use crate::refs::{is_legal_ident, occurrences, rename_in_text};
 use crate::span::LineIndex;
 use crate::workspace::Workspace;
-use crate::ParseSummary;
 
 const OUT_CODES: &[&str] = &[
     "E040", "W040", "W041", "I041", "W071", "I070", "I071", "W080", "W081", "DYNR",
@@ -41,12 +39,24 @@ const TOOLS: &[(&str, &str)] = &[
         "Run diagnostics on a .mod file and return code, range, severity, and message.",
     ),
     (
-        "dynare_diagnose_workspace",
-        "Run diagnostics with in-memory @#include files. active_file must be a key in files.",
+        "dynare_model_info",
+        "Summarise a .mod file: names, counts, timing, and block flags.",
     ),
     (
-        "dynare_parse_summary",
-        "Parse a .mod file and return a structured outline (names and counts).",
+        "dynare_compare_models",
+        "Compare two .mod files by names, calibrations, and equations.",
+    ),
+    (
+        "dynare_find_references",
+        "Find every whole-word use of a name. Skips comments.",
+    ),
+    (
+        "dynare_rename",
+        "Rename a name. Skips comments. Without a files map, returns the rewritten text (or the original if the new name is not a legal identifier). With a map, returns only files that changed.",
+    ),
+    (
+        "dynare_auto_fix",
+        "Apply stored diagnostic fixes to a .mod file. Leaves the text unchanged when macros would make the rewrite unsafe.",
     ),
     (
         "dynare_explain",
@@ -59,38 +69,6 @@ const TOOLS: &[(&str, &str)] = &[
     (
         "dynare_list_options",
         "List valid options for a Dynare command, or list known commands when omitted.",
-    ),
-    (
-        "dynare_find_references",
-        "Find every whole-word use of a name in a .mod file. Skips comments.",
-    ),
-    (
-        "dynare_find_references_workspace",
-        "Find every use of a name across an @#include graph. Unrelated files in the map are skipped.",
-    ),
-    (
-        "dynare_rename",
-        "Rename a name throughout a .mod file. Skips comments. Returns the original text if the new name is not a legal identifier.",
-    ),
-    (
-        "dynare_rename_workspace",
-        "Rename a name across an @#include graph. Returns only files that changed, or an empty map if nothing applies.",
-    ),
-    (
-        "dynare_auto_fix",
-        "Apply stored diagnostic fixes to a .mod file. Leaves the text unchanged when macros would make the rewrite unsafe.",
-    ),
-    (
-        "dynare_run_preprocessor",
-        "Run the local Dynare preprocessor in check mode and return its verdict, parsed diagnostics, and raw output.",
-    ),
-    (
-        "dynare_model_info",
-        "Summarise a .mod file: names, counts, and equation timing (static, predetermined, forward-looking, mixed).",
-    ),
-    (
-        "dynare_compare_models",
-        "Compare two .mod files by names, calibrations, and equations.",
     ),
 ];
 
@@ -113,16 +91,16 @@ pub struct DiagnosticCodeItem {
     pub title: String,
 }
 
-/// One hit from `dynare_find_references` (1-based; no end_line, no file).
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+/// One hit from `dynare_find_references` without a files map (1-based; no end_line, no file).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpReference {
     pub line: u32,
     pub column: u32,
     pub end_column: u32,
 }
 
-/// One hit from `dynare_find_references_workspace` (caller-supplied `file` key).
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+/// One hit from `dynare_find_references` with a files map (caller-supplied `file` key).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpWorkspaceReference {
     pub file: String,
     pub line: u32,
@@ -144,20 +122,44 @@ pub fn tools_list_json() -> Value {
     })
 }
 
-/// `analyze(&parse(text))`, then reconcile with the preprocessor when found.
-pub fn dynare_diagnose(file_content: &str) -> Vec<McpDiagnostic> {
-    let own = analyze(&parse(file_content));
-    let diags = maybe_run_and_reconcile(own, file_content, None, None);
-    diagnostics_to_json(file_content, &diags)
+/// Empty `files` is missing: single-file path.
+fn nonempty_map(files: Option<&HashMap<String, String>>) -> Option<&HashMap<String, String>> {
+    files.filter(|m| !m.is_empty())
 }
 
-/// Overlay `files` on a workspace, then `check_in_workspace` for `active_file`.
-///
-/// Returns `[]` if `active_file` is not a key in `files`.
-pub fn dynare_diagnose_workspace(
+/// Clone `files` and set `files[active_file] = file_content` (overlay).
+fn overlay_files(
+    file_content: &str,
     active_file: &str,
     files: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut workspace_files = files.clone();
+    workspace_files.insert(active_file.to_string(), file_content.to_string());
+    workspace_files
+}
+
+/// `analyze` / `check_in_workspace`, then reconcile when the binary is found.
+///
+/// No map: `file_content` is the source. With a nonempty map: `active_file` must
+/// be a key in `files` or the result is `[]`; `file_content` overwrites that key.
+pub fn dynare_diagnose(
+    file_content: &str,
+    active_file: Option<&str>,
+    files: Option<&HashMap<String, String>>,
 ) -> Vec<McpDiagnostic> {
+    let Some(files) = nonempty_map(files) else {
+        let own = analyze(&parse(file_content));
+        let diags = maybe_run_and_reconcile(own, file_content, None, None);
+        return diagnostics_to_json(file_content, &diags);
+    };
+    let Some(active) = active_file.filter(|a| files.contains_key(*a)) else {
+        return Vec::new();
+    };
+    let workspace_files = overlay_files(file_content, active, files);
+    diagnose_in_workspace(active, &workspace_files)
+}
+
+fn diagnose_in_workspace(active_file: &str, files: &HashMap<String, String>) -> Vec<McpDiagnostic> {
     let Some(text) = files.get(active_file) else {
         return Vec::new();
     };
@@ -176,40 +178,8 @@ pub fn dynare_diagnose_workspace(
     diagnostics_to_json(text, &diags)
 }
 
-/// Run the preprocessor. With a `files` map, materialize overlays first.
-pub fn dynare_run_preprocessor(
-    file_content: &str,
-    active_file: Option<&str>,
-    files: Option<&HashMap<String, String>>,
-) -> Value {
-    dynare_run_preprocessor_with_finder(file_content, active_file, files, || {
-        find_preprocessor(None)
-    })
-}
-
-pub fn dynare_run_preprocessor_with_finder(
-    file_content: &str,
-    active_file: Option<&str>,
-    files: Option<&HashMap<String, String>>,
-    find: impl FnOnce() -> Option<std::path::PathBuf>,
-) -> Value {
-    let found = find();
-    if let (Some(active_file), Some(files)) = (active_file, files) {
-        if !files.is_empty() {
-            let Some(pp) = found else {
-                return missing_binary_json();
-            };
-            let mut workspace_files = files.clone();
-            workspace_files.insert(active_file.to_string(), file_content.to_string());
-            let result =
-                run_workspace_preprocessor(active_file, &workspace_files, &pp, DEFAULT_TIMEOUT);
-            return result_to_structured(&result, file_content);
-        }
-    }
-    run_preprocessor_structured_with_finder(file_content, None, DEFAULT_TIMEOUT, || found)
-}
-
-/// Timing lists and counts from the equation AST. No `blocks` key.
+/// Timing lists and counts from the equation AST, plus ParseSummary flags.
+/// No `blocks` key.
 pub fn dynare_model_info(
     file_content: &str,
     active_file: Option<&str>,
@@ -318,6 +288,7 @@ fn model_info_json(model: &Model) -> Value {
             _ => static_vars.push(name.clone()),
         }
     }
+    let summary = model.summary();
     json!({
         "n_endogenous": endogenous.len(),
         "endogenous": endogenous,
@@ -340,12 +311,15 @@ fn model_info_json(model: &Model) -> Value {
         "n_mixed": mixed.len(),
         "n_state_variables": predetermined.len() + mixed.len(),
         "n_jumpers": forward_looking.len() + mixed.len(),
+        "n_model_equations": summary.n_model_equations,
+        "n_steady_state_equations": summary.n_steady_state_equations,
+        "n_initval_entries": summary.n_initval_entries,
+        "is_linear": summary.is_linear,
+        "has_model_block": summary.has_model_block,
+        "has_steady_state_model_block": summary.has_steady_state_model_block,
+        "has_initval_block": summary.has_initval_block,
+        "has_shocks_block": summary.has_shocks_block,
     })
-}
-
-/// `parse(text).summary()`.
-pub fn dynare_parse_summary(file_content: &str) -> ParseSummary {
-    parse(file_content).summary()
 }
 
 /// `explain::render_markdown`, or the unknown-code string using Rust `known_codes()`.
@@ -359,7 +333,7 @@ pub fn dynare_explain(code: &str) -> String {
     }
 }
 
-/// Sorted `{code, title}` for the 54 `known_codes()` keys.
+/// Sorted `{code, title}` for `known_codes()` keys.
 pub fn dynare_list_diagnostic_codes() -> Vec<DiagnosticCodeItem> {
     explain::known_codes()
         .into_iter()
@@ -377,8 +351,33 @@ pub fn dynare_list_options(command: Option<&str>) -> Value {
     serde_json::to_value(list_options(command)).expect("list_options is serializable")
 }
 
-/// Whole-word Ident occurrences → 1-based `{line, column, end_column}`.
-pub fn dynare_find_references(file_content: &str, symbol: &str) -> Vec<McpReference> {
+/// Whole-word Ident occurrences.
+///
+/// No map: `[{ line, column, end_column }]`. With a nonempty map: objects also
+/// have `file` (caller key). Missing `active_file` or empty symbol → `[]`.
+pub fn dynare_find_references(
+    file_content: &str,
+    symbol: &str,
+    active_file: Option<&str>,
+    files: Option<&HashMap<String, String>>,
+) -> Value {
+    let Some(files) = nonempty_map(files) else {
+        return serde_json::to_value(find_references_in_text(file_content, symbol))
+            .expect("find_references json");
+    };
+    let Some(active) = active_file.filter(|a| files.contains_key(*a)) else {
+        return json!([]);
+    };
+    let workspace_files = overlay_files(file_content, active, files);
+    serde_json::to_value(find_references_in_workspace(
+        active,
+        symbol,
+        &workspace_files,
+    ))
+    .expect("find_references json")
+}
+
+fn find_references_in_text(file_content: &str, symbol: &str) -> Vec<McpReference> {
     if symbol.is_empty() {
         return Vec::new();
     }
@@ -397,8 +396,7 @@ pub fn dynare_find_references(file_content: &str, symbol: &str) -> Vec<McpRefere
         .collect()
 }
 
-/// Workspace find-references: active + include family; raw overlay text; caller keys.
-pub fn dynare_find_references_workspace(
+fn find_references_in_workspace(
     active_file: &str,
     symbol: &str,
     files: &HashMap<String, String>,
@@ -429,16 +427,41 @@ pub fn dynare_find_references_workspace(
     results
 }
 
-/// Rename Ident occurrences; illegal/reserved old or new → original (Python parity).
-pub fn dynare_rename(file_content: &str, old_name: &str, new_name: &str) -> String {
+/// Rename Ident occurrences.
+///
+/// No map: JSON string (illegal / reserved / no hits → original). With a
+/// nonempty map: object of changed files only, or `{}`.
+pub fn dynare_rename(
+    file_content: &str,
+    old_name: &str,
+    new_name: &str,
+    active_file: Option<&str>,
+    files: Option<&HashMap<String, String>>,
+) -> Value {
+    let Some(files) = nonempty_map(files) else {
+        return Value::String(rename_in_single(file_content, old_name, new_name));
+    };
+    let Some(active) = active_file.filter(|a| files.contains_key(*a)) else {
+        return json!({});
+    };
+    let workspace_files = overlay_files(file_content, active, files);
+    serde_json::to_value(rename_in_workspace(
+        active,
+        old_name,
+        new_name,
+        &workspace_files,
+    ))
+    .expect("rename json")
+}
+
+fn rename_in_single(file_content: &str, old_name: &str, new_name: &str) -> String {
     if !is_legal_ident(old_name) || !is_legal_ident(new_name) {
         return file_content.to_string();
     }
     rename_in_text(file_content, old_name, new_name)
 }
 
-/// Workspace rename: only changed scoped files, or `{}`.
-pub fn dynare_rename_workspace(
+fn rename_in_workspace(
     active_file: &str,
     old_name: &str,
     new_name: &str,
@@ -620,33 +643,30 @@ fn tool_json(value: Value) -> CallToolResult {
     CallToolResult::structured(value)
 }
 
+fn tool_text(text: String) -> CallToolResult {
+    CallToolResult::success(vec![ContentBlock::text(text)])
+}
+
+/// Map args for diagnose / model_info: optional `file_content` overlay.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct IncludeMapParams {
+    #[serde(default)]
+    file_content: Option<String>,
+    #[serde(default)]
+    active_file: Option<String>,
+    #[serde(default)]
+    files: Option<HashMap<String, String>>,
+}
+
 #[derive(Clone)]
 struct DygnosisMcp;
 
-#[derive(Debug, serde::Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct FileContentParams {
     file_content: String,
 }
 
-#[derive(Debug, serde::Deserialize, JsonSchema)]
-struct RunPreprocessorParams {
-    file_content: String,
-    #[serde(default)]
-    active_file: Option<String>,
-    #[serde(default)]
-    files: Option<HashMap<String, String>>,
-}
-
-#[derive(Debug, serde::Deserialize, JsonSchema)]
-struct ModelInfoParams {
-    file_content: String,
-    #[serde(default)]
-    active_file: Option<String>,
-    #[serde(default)]
-    files: Option<HashMap<String, String>>,
-}
-
-#[derive(Debug, serde::Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct CompareModelsParams {
     file_content_a: String,
     file_content_b: String,
@@ -662,49 +682,70 @@ struct CompareModelsParams {
     files: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, serde::Deserialize, JsonSchema)]
-struct DiagnoseWorkspaceParams {
-    active_file: String,
-    files: HashMap<String, String>,
-}
-
-#[derive(Debug, serde::Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct ExplainParams {
     code: String,
 }
 
-#[derive(Debug, serde::Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct ListOptionsParams {
     #[serde(default)]
     command: Option<String>,
 }
 
-#[derive(Debug, serde::Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct FindReferencesParams {
-    file_content: String,
+    #[serde(default)]
+    file_content: Option<String>,
     symbol: String,
+    #[serde(default)]
+    active_file: Option<String>,
+    #[serde(default)]
+    files: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, serde::Deserialize, JsonSchema)]
-struct FindReferencesWorkspaceParams {
-    active_file: String,
-    symbol: String,
-    files: HashMap<String, String>,
-}
-
-#[derive(Debug, serde::Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct RenameParams {
-    file_content: String,
+    #[serde(default)]
+    file_content: Option<String>,
     old_name: String,
     new_name: String,
+    #[serde(default)]
+    active_file: Option<String>,
+    #[serde(default)]
+    files: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, serde::Deserialize, JsonSchema)]
-struct RenameWorkspaceParams {
-    active_file: String,
-    old_name: String,
-    new_name: String,
-    files: HashMap<String, String>,
+/// Source text plus map args after overlay.
+struct MappedSource<'a> {
+    content: &'a str,
+    active: Option<&'a str>,
+    files: Option<&'a HashMap<String, String>>,
+}
+
+/// `None` = missing `file_content` on the single-file path, or nonempty map
+/// without a usable `active_file`.
+fn resolve_mapped<'a>(
+    file_content: Option<&'a str>,
+    active_file: Option<&'a str>,
+    files: Option<&'a HashMap<String, String>>,
+) -> Option<MappedSource<'a>> {
+    match nonempty_map(files) {
+        None => Some(MappedSource {
+            content: file_content?,
+            active: None,
+            files: None,
+        }),
+        Some(files) => {
+            let active = active_file.filter(|a| files.contains_key(*a))?;
+            let content = file_content.unwrap_or_else(|| files[active].as_str());
+            Some(MappedSource {
+                content,
+                active: Some(active),
+                files: Some(files),
+            })
+        }
+    }
 }
 
 #[tool_router]
@@ -713,40 +754,119 @@ impl DygnosisMcp {
         name = "dynare_diagnose",
         description = "Run diagnostics on a .mod file and return code, range, severity, and message."
     )]
-    fn diagnose_tool(&self, Parameters(params): Parameters<FileContentParams>) -> CallToolResult {
-        tool_json(
-            serde_json::to_value(dynare_diagnose(&params.file_content)).expect("diagnose json"),
-        )
+    fn diagnose_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
+        let diags = match resolve_mapped(
+            params.file_content.as_deref(),
+            params.active_file.as_deref(),
+            params.files.as_ref(),
+        ) {
+            Some(src) => dynare_diagnose(src.content, src.active, src.files),
+            None => Vec::new(),
+        };
+        tool_json(serde_json::to_value(diags).expect("diagnose json"))
     }
 
     #[tool(
-        name = "dynare_diagnose_workspace",
-        description = "Run diagnostics with in-memory @#include files. active_file must be a key in files."
+        name = "dynare_model_info",
+        description = "Summarise a .mod file: names, counts, timing, and block flags."
     )]
-    fn diagnose_workspace_tool(
-        &self,
-        Parameters(params): Parameters<DiagnoseWorkspaceParams>,
-    ) -> CallToolResult {
-        tool_json(
-            serde_json::to_value(dynare_diagnose_workspace(
-                &params.active_file,
-                &params.files,
-            ))
-            .expect("diagnose_workspace json"),
-        )
+    fn model_info_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
+        let info = match nonempty_map(params.files.as_ref()) {
+            None => dynare_model_info(params.file_content.as_deref().unwrap_or(""), None, None),
+            Some(files) => match params
+                .active_file
+                .as_deref()
+                .filter(|a| files.contains_key(*a))
+            {
+                Some(active) => {
+                    let content = params
+                        .file_content
+                        .as_deref()
+                        .unwrap_or_else(|| files[active].as_str());
+                    dynare_model_info(content, Some(active), Some(files))
+                }
+                None => dynare_model_info(
+                    params.file_content.as_deref().unwrap_or(""),
+                    None,
+                    Some(files),
+                ),
+            },
+        };
+        tool_json(info)
     }
 
     #[tool(
-        name = "dynare_parse_summary",
-        description = "Parse a .mod file and return a structured outline (names and counts)."
+        name = "dynare_compare_models",
+        description = "Compare two .mod files by names, calibrations, and equations."
     )]
-    fn parse_summary_tool(
+    fn compare_models_tool(
         &self,
-        Parameters(params): Parameters<FileContentParams>,
+        Parameters(params): Parameters<CompareModelsParams>,
     ) -> CallToolResult {
-        tool_json(
-            serde_json::to_value(dynare_parse_summary(&params.file_content)).expect("summary json"),
-        )
+        tool_json(dynare_compare_models(
+            &params.file_content_a,
+            &params.file_content_b,
+            params.active_file_a.as_deref(),
+            params.active_file_b.as_deref(),
+            params.files_a.as_ref(),
+            params.files_b.as_ref(),
+            params.files.as_ref(),
+        ))
+    }
+
+    #[tool(
+        name = "dynare_find_references",
+        description = "Find every whole-word use of a name. Skips comments."
+    )]
+    fn find_references_tool(
+        &self,
+        Parameters(params): Parameters<FindReferencesParams>,
+    ) -> CallToolResult {
+        let value = match resolve_mapped(
+            params.file_content.as_deref(),
+            params.active_file.as_deref(),
+            params.files.as_ref(),
+        ) {
+            Some(src) => dynare_find_references(src.content, &params.symbol, src.active, src.files),
+            None => json!([]),
+        };
+        tool_json(value)
+    }
+
+    #[tool(
+        name = "dynare_rename",
+        description = "Rename a name. Skips comments. Without a files map, returns the rewritten text (or the original if the new name is not a legal identifier). With a map, returns only files that changed."
+    )]
+    fn rename_tool(&self, Parameters(params): Parameters<RenameParams>) -> CallToolResult {
+        match resolve_mapped(
+            params.file_content.as_deref(),
+            params.active_file.as_deref(),
+            params.files.as_ref(),
+        ) {
+            Some(src) => {
+                let result = dynare_rename(
+                    src.content,
+                    &params.old_name,
+                    &params.new_name,
+                    src.active,
+                    src.files,
+                );
+                match result {
+                    Value::String(text) => tool_text(text),
+                    other => tool_json(other),
+                }
+            }
+            None if nonempty_map(params.files.as_ref()).is_some() => tool_json(json!({})),
+            None => tool_text(String::new()),
+        }
+    }
+
+    #[tool(
+        name = "dynare_auto_fix",
+        description = "Apply stored diagnostic fixes to a .mod file. Leaves the text unchanged when macros would make the rewrite unsafe."
+    )]
+    fn auto_fix_tool(&self, Parameters(params): Parameters<FileContentParams>) -> String {
+        dynare_auto_fix(&params.file_content)
     }
 
     #[tool(
@@ -774,119 +894,6 @@ impl DygnosisMcp {
         Parameters(params): Parameters<ListOptionsParams>,
     ) -> CallToolResult {
         tool_json(dynare_list_options(params.command.as_deref()))
-    }
-
-    #[tool(
-        name = "dynare_find_references",
-        description = "Find every whole-word use of a name in a .mod file. Skips comments."
-    )]
-    fn find_references_tool(
-        &self,
-        Parameters(params): Parameters<FindReferencesParams>,
-    ) -> CallToolResult {
-        tool_json(
-            serde_json::to_value(dynare_find_references(&params.file_content, &params.symbol))
-                .expect("find_references json"),
-        )
-    }
-
-    #[tool(
-        name = "dynare_find_references_workspace",
-        description = "Find every use of a name across an @#include graph. Unrelated files in the map are skipped."
-    )]
-    fn find_references_workspace_tool(
-        &self,
-        Parameters(params): Parameters<FindReferencesWorkspaceParams>,
-    ) -> CallToolResult {
-        tool_json(
-            serde_json::to_value(dynare_find_references_workspace(
-                &params.active_file,
-                &params.symbol,
-                &params.files,
-            ))
-            .expect("find_references_workspace json"),
-        )
-    }
-
-    #[tool(
-        name = "dynare_rename",
-        description = "Rename a name throughout a .mod file. Skips comments. Returns the original text if the new name is not a legal identifier."
-    )]
-    fn rename_tool(&self, Parameters(params): Parameters<RenameParams>) -> String {
-        dynare_rename(&params.file_content, &params.old_name, &params.new_name)
-    }
-
-    #[tool(
-        name = "dynare_rename_workspace",
-        description = "Rename a name across an @#include graph. Returns only files that changed, or an empty map if nothing applies."
-    )]
-    fn rename_workspace_tool(
-        &self,
-        Parameters(params): Parameters<RenameWorkspaceParams>,
-    ) -> CallToolResult {
-        tool_json(
-            serde_json::to_value(dynare_rename_workspace(
-                &params.active_file,
-                &params.old_name,
-                &params.new_name,
-                &params.files,
-            ))
-            .expect("rename_workspace json"),
-        )
-    }
-
-    #[tool(
-        name = "dynare_auto_fix",
-        description = "Apply stored diagnostic fixes to a .mod file. Leaves the text unchanged when macros would make the rewrite unsafe."
-    )]
-    fn auto_fix_tool(&self, Parameters(params): Parameters<FileContentParams>) -> String {
-        dynare_auto_fix(&params.file_content)
-    }
-
-    #[tool(
-        name = "dynare_run_preprocessor",
-        description = "Run the local Dynare preprocessor in check mode and return its verdict, parsed diagnostics, and raw output."
-    )]
-    fn run_preprocessor_tool(
-        &self,
-        Parameters(params): Parameters<RunPreprocessorParams>,
-    ) -> CallToolResult {
-        tool_json(dynare_run_preprocessor(
-            &params.file_content,
-            params.active_file.as_deref(),
-            params.files.as_ref(),
-        ))
-    }
-
-    #[tool(
-        name = "dynare_model_info",
-        description = "Summarise a .mod file: names, counts, and equation timing (static, predetermined, forward-looking, mixed)."
-    )]
-    fn model_info_tool(&self, Parameters(params): Parameters<ModelInfoParams>) -> CallToolResult {
-        tool_json(dynare_model_info(
-            &params.file_content,
-            params.active_file.as_deref(),
-            params.files.as_ref(),
-        ))
-    }
-
-    #[tool(
-        name = "dynare_compare_models",
-        description = "Compare two .mod files by names, calibrations, and equations."
-    )]
-    fn compare_models_tool(
-        &self,
-        Parameters(params): Parameters<CompareModelsParams>,
-    ) -> CallToolResult {
-        tool_json(dynare_compare_models(
-            &params.file_content_a,
-            &params.file_content_b,
-            params.active_file_a.as_deref(),
-            params.active_file_b.as_deref(),
-            params.files_a.as_ref(),
-            params.files_b.as_ref(),
-            params.files.as_ref(),
-        ))
     }
 }
 
