@@ -1,6 +1,4 @@
-![dygnosis](media/logo_s.png)
-
-Dygnosis provides language support for Dynare. It parses the `.mod`, reports model diagnostics, and powers editor/agent features (hover, rename, format, outline, …).
+![dygnosis](media/logo_s.png) provides language support for Dynare. It parses the `.mod`, reports model diagnostics, and powers editor/agent features (hover, rename, format, outline, …).
 
 - It adds new checks beyond the Dynare preprocessor.
 - Overlap with the preprocessor is intentional when those checks power an editor feature or help while typing.
@@ -11,6 +9,8 @@ The Dynare preprocessor is searched in the following order:
 1. Editor setting (LSP only) — `preprocessorPath`
 2. Environment — `DYNARE_PREPROCESSOR` (full path to the executable)
 3. Common installs
+
+*This project is under active development.*
 
 ## How to use
 
@@ -55,14 +55,11 @@ The Dynare preprocessor is searched in the following order:
 
 ## Credits
 
-dygnosis v0.1.0 is a fork and rewrite of [LLMacro-Dynare-LSP](https://github.com/pdwhoward/LLMacro-Dynare-LSP) by Anthony Diercks, Philip Howard, and Mehrdad Samadi. Diagnostic codes, check and explain surfaces, and the thin analysis design come from that work. The original repository accompanies the working paper *LLMacro: A Language Server for Dynare — Structured Context for AI-Assisted Macroeconomic Modeling*.
+1. dygnosis v0.1.0 is a fork and rewrite of [LLMacro-Dynare-LSP](https://github.com/pdwhoward/LLMacro-Dynare-LSP) by Anthony Diercks, Philip Howard, and Mehrdad Samadi. Diagnostic codes, check and explain surfaces, and the thin analysis design come from that work. The original repository accompanies the working paper *LLMacro: A Language Server for Dynare — Structured Context for AI-Assisted Macroeconomic Modeling*.
+2. Equation-object, tag, extract, and related editor ideas are informed by [modBuilder](https://git.dynare.org/Dynare/modBuilder) (Dynare Team), a MATLAB API for building `.mod` files. Language Errors still follow the Dynare preprocessor.
+3. The agent skill under `.agents/skills/dynare-copilot/` is adapted from [EconSolider/dynare-copilot](https://github.com/EconSolider/dynare-copilot).
 
-Suggested citation of the original work:
-
-> Diercks, Anthony, Philip Howard, and Mehrdad Samadi. 2026. "LLMacro: A Language Server for Dynare." Working paper.
-
-The agent skill under `.agents/skills/dynare-copilot/` is adapted from [EconSolider/dynare-copilot](https://github.com/EconSolider/dynare-copilot).
 
 ## License
 
-[GPL-3.0-or-later](LICENSE), matching LLMacro-Dynare-LSP. The vendored dynare-copilot skill remains MIT as upstream.
+[GPL-3.0-or-later](LICENSE), matching Dynare and LLMacro-Dynare-LSP. The vendored dynare-copilot skill remains MIT as upstream.
