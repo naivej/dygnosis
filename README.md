@@ -19,6 +19,7 @@ The Dynare preprocessor is searched in the following order:
 | Command | Purpose |
 |---------|---------|
 | `dygnosis check <file.mod>` | Full diagnostics, then exit |
+| `dygnosis check <dir>` | Recurse `*.mod` (skip `+` folders); one summary line; exit 1 on errors, not warnings |
 | `dygnosis explain <CODE>` | Built-in help for a diagnostic code |
 | `dygnosis explain --list` | List all documented codes |
 | `dygnosis mcp` | Start the MCP server (stdio) |
@@ -28,7 +29,7 @@ The Dynare preprocessor is searched in the following order:
 ### Editor (LSP)
 
 - Hover (declarations, option names)
-- Outline and workspace symbols
+- Outline (endogenous grouped by timing class) and workspace symbols
 - Go to definition / type definition
 - Find references and rename (including across `@#include` files where the graph is known)
 - Completions
@@ -45,13 +46,14 @@ The Dynare preprocessor is searched in the following order:
 |------|---------|
 | `dynare_diagnose` | Full diagnostics |
 | `dynare_model_info` | Names, counts, timing, block flags |
-| `dynare_compare_models` | Diff two models |
+| `dynare_compare_models` | Diff two models by names and equation index |
 | `dynare_find_references` | Uses of a name |
 | `dynare_rename` | Rename a name |
 | `dynare_auto_fix` | Stored fixes, one file |
 | `dynare_explain` | Help for a diagnostic code |
 | `dynare_list_diagnostic_codes` | Documented codes |
 | `dynare_list_options` | Options for a command |
+| `dynare_equations` | Equations with lhs, rhs, timing, and the equation-count gap |
 
 ## Credits
 
