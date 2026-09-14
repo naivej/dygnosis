@@ -1,16 +1,15 @@
 # Changelog
 
 ## v0.2.0
-
-Honest model object: command option lists are no longer fake parse Errors, and agents (and the editor) see equations with timing instead of a blob of text.
-
-- Command option lists such as `method_of_moments(...)` are not missing-semicolon Errors (`E001`).
-- Declaring the same name twice in `var`, `varexo`, or `parameters` is Warning `W031` (the preprocessor warns and still accepts). Different types and `#` twice stay Error `E030`.
-- Model equations (index, lhs, rhs, each use’s timing) plus the equation-count gap. MCP tool `dynare_equations`. When `ramsey_model` / `ramsey_policy` / `discretionary_policy` lists N instruments, `W013` expects gap −N, not a square file.
-- `dynare_compare_models` diffs equations by index (`{index, text}`); it no longer lists shared equation text.
-- Outline groups endogenous names by timing class (predetermined, forward-looking, mixed, static).
-- `dygnosis check` walks a directory of `*.mod` files (skips `+` folders). Exit 1 on errors, not on warnings.
-- MCP `tools/list` is ten tools (the 0.1.1 nine plus `dynare_equations`).
+- **Fewer false Errors**
+  - A `method_of_moments(...)` (and other catalog commands) option list was misread as missing semicolons (`E001`). That false Error stopped later checks on the same file, so real MoM / similar work could not start. Those lists are now one statement; only a true missing `;` still fires `E001`.
+  - Declaring the same name twice in `var`, `varexo`, or `parameters` is a Warning (`W031`), matching the preprocessor. Declaring one name as two different types, or `#` twice, is still an Error (`E030`).
+- **Equations as structured objects**
+  - New MCP tool `dynare_equations`: each model equation with index, lhs, rhs, and timing at each use, plus the equation-count gap. For Ramsey / discretionary policy with N instruments, the gap check (`W013`) expects −N equations, not a square file.
+  - `dynare_compare_models` diffs equations by index; it no longer lists shared equation text.
+  - Editor outline groups endogenous names by timing (predetermined, forward-looking, mixed, static).
+- **Check many files**
+  - `dygnosis check` can take a directory of `*.mod` files (skips `+` folders). Exit code 1 only when there are Errors, not Warnings.
 
 ## v0.1.1
 
