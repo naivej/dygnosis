@@ -487,6 +487,100 @@
       "notes": "count mismatch; all vars still referenced (generic missing equation)"
     },
     {
+      "id": "e010_ramsey_gap",
+      "codes": [
+        "W013"
+      ],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e010/e010_ramsey_gap.mod",
+      "source": "e010.rs::e010_ramsey_gap_quiet",
+      "cluster": "e010/e010_ramsey_gap.mod",
+      "notes": "ramsey_model instruments N=1, delta=-1, W013 quiet"
+    },
+    {
+      "id": "e010_ramsey_policy_gap",
+      "codes": [
+        "W013"
+      ],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e010/e010_ramsey_policy_gap.mod",
+      "source": "e010.rs::e010_ramsey_policy_gap_quiet",
+      "cluster": "e010/e010_ramsey_policy_gap.mod",
+      "notes": "ramsey_policy instruments N=1, delta=-1, W013 quiet"
+    },
+    {
+      "id": "e010_disc_gap",
+      "codes": [
+        "W013"
+      ],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e010/e010_disc_gap.mod",
+      "source": "e010.rs::e010_disc_gap_quiet",
+      "cluster": "e010/e010_disc_gap.mod",
+      "notes": "discretionary_policy instruments N=1, delta=-1, W013 quiet"
+    },
+    {
+      "id": "e010_disc_square",
+      "codes": [
+        "W013"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e010/e010_disc_square.mod",
+      "source": "e010.rs::e010_disc_square_warns",
+      "cluster": "e010/e010_disc_square.mod",
+      "notes": "discretionary square with instruments; W013 −N"
+    },
+    {
+      "id": "e010_ramsey_wrong_n",
+      "codes": [
+        "W013"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e010/e010_ramsey_wrong_n.mod",
+      "source": "e010.rs::e010_ramsey_wrong_n_warns",
+      "cluster": "e010/e010_ramsey_wrong_n.mod",
+      "notes": "N=1, 3 endo, 1 eq, delta=-2; W013 −N"
+    },
+    {
+      "id": "e010_osr_square",
+      "codes": [
+        "W013"
+      ],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e010/e010_osr_square.mod",
+      "source": "e010.rs::e010_osr_square_quiet",
+      "cluster": "e010/e010_osr_square.mod",
+      "notes": "osr square with instruments; not −N, W013 quiet"
+    },
+    {
+      "id": "e010_osr_gap",
+      "codes": [
+        "W013"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e010/e010_osr_gap.mod",
+      "source": "e010.rs::e010_osr_gap_generic",
+      "cluster": "e010/e010_osr_gap.mod",
+      "notes": "osr mismatch; generic W013, no −N"
+    },
+    {
+      "id": "equations_reader",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "tests/fixtures/equations/reader.mod",
+      "source": "equations.rs::reader_skips_local_and_static_indexes",
+      "cluster": "equations/reader.mod",
+      "notes": "library equation object: named eq, lead/lag, # and [static] skip index"
+    },
+    {
       "id": "e030_unmodified_trend_rbc_gov_inv",
       "codes": [
         "E030",
@@ -2359,6 +2453,18 @@
       "notes": "ramsey with objective, y, 0.99"
     },
     {
+      "id": "w100_ok_w013",
+      "codes": [
+        "W013"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/w100/w100_ok.mod",
+      "source": "e010.rs::w100_ok_square_ramsey_warns",
+      "cluster": "w100/w100_ok.mod",
+      "notes": "square Ramsey with 1 instrument; W013 −N"
+    },
+    {
       "id": "w100_w103_both",
       "codes": [
         "E103"
@@ -3947,6 +4053,102 @@
       "source": "check.rs::error_check_fixture_exits_1",
       "cluster": "e001/delete_model_end.mod",
       "notes": "CLI smoke: check_file emits E001; CLI prints ERROR and exits 1 (P001 when Dynare is installed)"
+    },
+    {
+      "id": "check_dir_clean",
+      "codes": [],
+      "kind": "quiet",
+      "package": "other",
+      "fixture": "tests/fixtures/check_dir/clean.mod",
+      "source": "check.rs::check_dir_mixed_tree_recurses_mod_skips_plus_and_inc",
+      "cluster": "check_dir/clean.mod",
+      "notes": "recurse hit"
+    },
+    {
+      "id": "check_dir_err",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "other",
+      "fixture": "tests/fixtures/check_dir/err.mod",
+      "source": "check.rs::check_dir_mixed_tree_recurses_mod_skips_plus_and_inc",
+      "cluster": "check_dir/err.mod",
+      "notes": "codes [\"E001\"]; CLI may print P001 when Dynare is installed"
+    },
+    {
+      "id": "check_dir_warn",
+      "codes": [
+        "W010"
+      ],
+      "kind": "fire",
+      "package": "other",
+      "fixture": "tests/fixtures/check_dir/warn.mod",
+      "source": "check.rs::check_warn_and_empty_dir_warnings_do_not_fail",
+      "cluster": "check_dir/warn.mod",
+      "notes": "codes [\"W010\"]; exit 0"
+    },
+    {
+      "id": "check_dir_info",
+      "codes": [
+        "I050"
+      ],
+      "kind": "fire",
+      "package": "other",
+      "fixture": "tests/fixtures/check_dir/info.mod",
+      "source": "check.rs::check_info_and_empty_dir_i050_not_in_w_exit_0",
+      "cluster": "check_dir/info.mod",
+      "notes": "codes [\"I050\"]; {w} stays 0"
+    },
+    {
+      "id": "check_dir_nested",
+      "codes": [],
+      "kind": "quiet",
+      "package": "other",
+      "fixture": "tests/fixtures/check_dir/nested/ok.mod",
+      "source": "check.rs::check_dir_mixed_tree_recurses_mod_skips_plus_and_inc",
+      "cluster": "check_dir/nested/ok.mod",
+      "notes": "recurse"
+    },
+    {
+      "id": "check_dir_plus_skip",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "tests/fixtures/check_dir/+foo/bad.mod",
+      "source": "check.rs::check_dir_mixed_tree_recurses_mod_skips_plus_and_inc",
+      "cluster": "check_dir/+foo/bad.mod",
+      "notes": "not walked"
+    },
+    {
+      "id": "check_dir_inc_skip",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "tests/fixtures/check_dir/fragment.inc",
+      "source": "check.rs::check_dir_mixed_tree_recurses_mod_skips_plus_and_inc",
+      "cluster": "check_dir/fragment.inc",
+      "notes": "recurse skip; explicit FILE still checks"
+    },
+    {
+      "id": "check_dir_empty",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "tests/fixtures/check_dir/empty",
+      "source": "check.rs::check_empty_dir_zero_batch_exit_0",
+      "cluster": "check_dir/empty",
+      "notes": "0 file(s), 0 error(s), 0 warning(s)"
+    },
+    {
+      "id": "check_dir_mixed",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "tests/fixtures/check_dir",
+      "source": "check.rs::check_dir_mixed_tree_recurses_mod_skips_plus_and_inc",
+      "cluster": "check_dir",
+      "notes": "tree; {files} = five .mod (not +foo, not .inc)"
     }
   ]
 }

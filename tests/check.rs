@@ -48,10 +48,82 @@ fn dygnosis() -> Command {
 }
 
 fn run_check(path: &str) -> Output {
+    run_check_paths(&[path])
+}
+
+fn run_check_paths(paths: &[&str]) -> Output {
     dygnosis()
-        .args(["check", path])
+        .arg("check")
+        .args(paths)
         .output()
         .expect("dygnosis check")
+}
+
+fn check_dir_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("check_dir")
+}
+
+fn check_dir_path(rel: &str) -> PathBuf {
+    let mut path = check_dir_root();
+    for part in rel.split('/') {
+        path.push(part);
+    }
+    path
+}
+
+fn utf8_path(path: &Path) -> &str {
+    path.to_str().expect("utf-8 path")
+}
+
+/// `{files} file(s), {e} error(s), {w} warning(s)`
+fn parse_batch_summary(line: &str) -> Option<(usize, usize, usize)> {
+    let (left, w_part) = line.rsplit_once(", ")?;
+    let w: usize = w_part.strip_suffix(" warning(s)")?.parse().ok()?;
+    let (files_part, e_part) = left.split_once(", ")?;
+    let files: usize = files_part.strip_suffix(" file(s)")?.parse().ok()?;
+    let e: usize = e_part.strip_suffix(" error(s)")?.parse().ok()?;
+    Some((files, e, w))
+}
+
+fn last_stdout_line(stdout: &str) -> &str {
+    let text = stdout.strip_suffix('\n').unwrap_or(stdout);
+    text.rsplit('\n').next().unwrap_or("")
+}
+
+fn printed_error_warning_counts(stdout: &str) -> (usize, usize) {
+    let mut errors = 0usize;
+    let mut warnings = 0usize;
+    for line in stdout.lines() {
+        let Some((_, _, _, sev, _, _)) = parse_diag_line(line) else {
+            continue;
+        };
+        match sev.as_str() {
+            "ERROR" => errors += 1,
+            "WARNING" => warnings += 1,
+            _ => {}
+        }
+    }
+    (errors, warnings)
+}
+
+fn assert_batch_matches_printed(stdout: &str, files: usize) -> (usize, usize) {
+    let batch = last_stdout_line(stdout);
+    let (got_files, e, w) = parse_batch_summary(batch)
+        .unwrap_or_else(|| panic!("expected batch line, got {batch:?}\n{stdout}"));
+    assert_eq!(got_files, files, "batch {{files}}; stdout:\n{stdout}");
+    let (printed_e, printed_w) = printed_error_warning_counts(stdout);
+    assert_eq!(
+        e, printed_e,
+        "batch {{e}} must equal printed ERROR count; stdout:\n{stdout}"
+    );
+    assert_eq!(
+        w, printed_w,
+        "batch {{w}} must equal printed WARNING count; stdout:\n{stdout}"
+    );
+    (e, w)
 }
 
 fn stdout_text(output: &Output) -> String {
@@ -452,4 +524,143 @@ fn cli_stdout_matches_format_check_lines() {
         assert_exit_for_errors(&output, &stdout);
         let _ = std::fs::remove_file(&tmp);
     }
+}
+
+#[test]
+fn check_dir_mixed_tree_recurses_mod_skips_plus_and_inc() {
+    let dir = check_dir_root();
+    let dir_s = utf8_path(&dir);
+    let output = run_check(dir_s);
+    let stdout = stdout_text(&output);
+    assert!(
+        !stdout.contains("bad.mod"),
+        "+foo/bad.mod must not be walked:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("fragment.inc"),
+        "fragment.inc must not be picked by recurse:\n{stdout}"
+    );
+    let nested = check_dir_path("nested/ok.mod");
+    let nested_s = utf8_path(&nested);
+    assert!(
+        stdout.contains(nested_s),
+        "nested/ok.mod must appear as {nested_s}:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(": ERROR ["),
+        "err.mod should print ERROR:\n{stdout}"
+    );
+    let (e, _) = assert_batch_matches_printed(&stdout, 5);
+    assert!(e > 0, "err.mod prints ERROR so batch {{e}} > 0:\n{stdout}");
+    assert_eq!(exit_code(&output), 1);
+    assert_ne!(exit_code(&output), 2);
+}
+
+#[test]
+fn check_two_files_batch_left_to_right() {
+    let clean = check_dir_path("clean.mod");
+    let err = check_dir_path("err.mod");
+    let clean_s = utf8_path(&clean);
+    let err_s = utf8_path(&err);
+    let output = run_check_paths(&[clean_s, err_s]);
+    let stdout = stdout_text(&output);
+    let i_clean = stdout
+        .find(clean_s)
+        .unwrap_or_else(|| panic!("expected {clean_s} in stdout:\n{stdout}"));
+    let i_err = stdout
+        .find(err_s)
+        .unwrap_or_else(|| panic!("expected {err_s} in stdout:\n{stdout}"));
+    assert!(
+        i_clean < i_err,
+        "arguments left to right; stdout:\n{stdout}"
+    );
+    let (e, _) = assert_batch_matches_printed(&stdout, 2);
+    assert!(e > 0, "err.mod prints ERROR so batch {{e}} > 0:\n{stdout}");
+    assert_eq!(exit_code(&output), 1);
+    assert_ne!(exit_code(&output), 2);
+}
+
+#[test]
+fn check_empty_dir_zero_batch_exit_0() {
+    let empty = check_dir_path("empty");
+    let empty_s = utf8_path(&empty);
+    let output = run_check(empty_s);
+    let stdout = stdout_text(&output);
+    assert_eq!(stdout, "0 file(s), 0 error(s), 0 warning(s)\n");
+    assert!(
+        !stdout.contains("No issues found"),
+        "empty DIR must not print per-file quiet lines"
+    );
+    assert_eq!(exit_code(&output), 0);
+}
+
+#[test]
+fn check_explicit_inc_is_file_path_no_batch_line() {
+    let path = check_dir_path("fragment.inc");
+    let path_s = utf8_path(&path);
+    let output = run_check(path_s);
+    let stdout = stdout_text(&output);
+    assert_line_format(path_s, &stdout);
+    assert!(
+        stdout.contains(": ERROR ["),
+        "explicit .inc should be checked:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("file(s),"),
+        "single FILE must not print a batch line:\n{stdout}"
+    );
+    assert_eq!(exit_code(&output), 1);
+}
+
+#[test]
+fn check_info_and_empty_dir_i050_not_in_w_exit_0() {
+    let info = check_dir_path("info.mod");
+    let empty = check_dir_path("empty");
+    let info_s = utf8_path(&info);
+    let empty_s = utf8_path(&empty);
+    let output = run_check_paths(&[info_s, empty_s]);
+    let stdout = stdout_text(&output);
+    assert!(
+        stdout.contains("INFO [I050]"),
+        "expected I050 on info.mod:\n{stdout}"
+    );
+    assert_eq!(last_stdout_line(&stdout), "1 file(s), 0 error(s), 0 warning(s)");
+    let (e, w) = assert_batch_matches_printed(&stdout, 1);
+    assert_eq!(e, 0);
+    assert_eq!(w, 0);
+    assert_eq!(exit_code(&output), 0);
+}
+
+#[test]
+fn check_warn_and_empty_dir_warnings_do_not_fail() {
+    let warn = check_dir_path("warn.mod");
+    let empty = check_dir_path("empty");
+    let warn_s = utf8_path(&warn);
+    let empty_s = utf8_path(&empty);
+    let output = run_check_paths(&[warn_s, empty_s]);
+    let stdout = stdout_text(&output);
+    let (e, w) = assert_batch_matches_printed(&stdout, 1);
+    assert_eq!(e, 0, "warn.mod must not print ERROR:\n{stdout}");
+    assert!(w > 0, "warn.mod must print WARNING:\n{stdout}");
+    assert_eq!(exit_code(&output), 0);
+}
+
+#[test]
+fn check_without_paths_still_requires_one() {
+    let output = dygnosis()
+        .args(["check"])
+        .output()
+        .expect("dygnosis check");
+    let stdout = stdout_text(&output);
+    let stderr = stderr_text(&output);
+    assert!(
+        !stdout.contains("file(s),"),
+        "check with no paths must not default to '.':\n{stdout}"
+    );
+    assert!(
+        !stderr.contains("panicked"),
+        "clap must reject zero paths (not panic):\n{stderr}"
+    );
+    assert_ne!(exit_code(&output), 0);
+    assert_ne!(exit_code(&output), 101);
 }

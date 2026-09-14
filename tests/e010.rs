@@ -139,3 +139,137 @@ fn e010_missing() {
     );
     assert_span(&text, &got[0], "model;\ny = rho * y(-1) + z + e;\nend;");
 }
+
+fn assert_minus_n(d: &Diag, cmd: &str) {
+    assert_eq!(d.code, "W013");
+    assert_eq!(d.severity, 2);
+    assert!(
+        d.message.contains("expects delta = -1"),
+        "−N message, got {}",
+        d.message
+    );
+    assert!(
+        d.message.contains(cmd),
+        "message should name {cmd}, got {}",
+        d.message
+    );
+    assert!(
+        !d.message.contains("missing equation"),
+        "−N message must not use the generic missing template, got {}",
+        d.message
+    );
+    assert!(
+        !d.message.contains("duplicate/extra"),
+        "−N message must not use the generic extra template, got {}",
+        d.message
+    );
+}
+
+#[test]
+fn w100_ok_square_ramsey_warns() {
+    let text = check_mod("w100/w100_ok.mod");
+    let got = rust_e010(&text);
+    assert_eq!(
+        got.len(),
+        1,
+        "square Ramsey with 1 instrument must warn, got {got:?}"
+    );
+    assert_minus_n(&got[0], "ramsey_model");
+    assert_eq!(
+        got[0].message,
+        "Equation count mismatch: 2 equation(s) but 2 endogenous variable(s). ramsey_model with 1 instrument(s) expects delta = -1."
+    );
+}
+
+#[test]
+fn e010_ramsey_gap_quiet() {
+    let text = check_mod("e010/e010_ramsey_gap.mod");
+    let got = rust_e010(&text);
+    assert!(got.is_empty(), "Ramsey −1 should be quiet, got {got:?}");
+}
+
+#[test]
+fn e010_ramsey_policy_gap_quiet() {
+    let text = check_mod("e010/e010_ramsey_policy_gap.mod");
+    let got = rust_e010(&text);
+    assert!(
+        got.is_empty(),
+        "ramsey_policy −1 should be quiet, got {got:?}"
+    );
+}
+
+#[test]
+fn e010_disc_gap_quiet() {
+    let text = check_mod("e010/e010_disc_gap.mod");
+    let got = rust_e010(&text);
+    assert!(
+        got.is_empty(),
+        "discretionary −1 should be quiet, got {got:?}"
+    );
+}
+
+#[test]
+fn e010_disc_square_warns() {
+    let text = check_mod("e010/e010_disc_square.mod");
+    let got = rust_e010(&text);
+    assert_eq!(
+        got.len(),
+        1,
+        "square discretionary with instruments must warn, got {got:?}"
+    );
+    assert_minus_n(&got[0], "discretionary_policy");
+}
+
+#[test]
+fn e010_ramsey_wrong_n_warns() {
+    let text = check_mod("e010/e010_ramsey_wrong_n.mod");
+    let got = rust_e010(&text);
+    assert_eq!(got.len(), 1, "wrong N must warn, got {got:?}");
+    assert_minus_n(&got[0], "ramsey_model");
+    assert!(
+        got[0].message.contains("1 equation(s) but 3 endogenous"),
+        "δ is −2, got {}",
+        got[0].message
+    );
+}
+
+#[test]
+fn w100_disc_ok_and_ramsey_empty_instruments_stay_quiet() {
+    for rel in ["w100/w100_disc_ok.mod", "w100/w100_ramsey.mod"] {
+        let text = check_mod(rel);
+        let got = rust_e010(&text);
+        assert!(
+            got.is_empty(),
+            "{rel}: empty instruments, square → no W013, got {got:?}"
+        );
+    }
+}
+
+#[test]
+fn e010_osr_square_quiet() {
+    let text = check_mod("e010/e010_osr_square.mod");
+    let got = rust_e010(&text);
+    assert!(
+        got.is_empty(),
+        "osr square with instruments is not −N, got {got:?}"
+    );
+}
+
+#[test]
+fn e010_osr_gap_generic() {
+    let text = check_mod("e010/e010_osr_gap.mod");
+    let got = rust_e010(&text);
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].code, "W013");
+    assert_eq!(got[0].severity, 2);
+    assert!(
+        got[0].message.contains("add 1 missing equation"),
+        "osr mismatch uses the generic message, got {}",
+        got[0].message
+    );
+    assert!(
+        !got[0].message.contains("expects delta"),
+        "osr must not use the −N message, got {}",
+        got[0].message
+    );
+}

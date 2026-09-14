@@ -20,6 +20,7 @@ mod command_skip;
 mod diag_shape;
 pub mod diagnostic;
 pub mod e010;
+pub mod equations;
 pub mod explain;
 pub mod expr;
 pub mod format;
@@ -60,6 +61,9 @@ pub use check_w120::{check_w120, check_w120_family, check_w121, check_w122};
 pub use check_w130::check_w130;
 pub use diagnostic::{analyze, check_file, format_check_lines, Diagnostic, Severity, TextEdit};
 pub use e010::check_e010;
+pub use equations::{
+    count_gap, equations, explain_equation, CountGap, EquationIdent, EquationRow, IdentClass,
+};
 pub use expr::{BinOp, Expr, ExprArena, ExprId, ExprKind, IdentRef, UnOp};
 pub use format::{format_range, format_text};
 pub use include_resolver::{find_workspace_root, resolve_include_path};

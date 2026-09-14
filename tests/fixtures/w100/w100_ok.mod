@@ -1,4 +1,4 @@
-// inventory: w100_ramsey_ok
+// inventory: w100_ramsey_ok, w100_ok_w013
 var y c;
 varexo e;
 parameters rho betta;

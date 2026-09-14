@@ -1,3 +1,5 @@
+mod check_walk;
+
 use clap::{Parser, Subcommand};
 use dygnosis::{check_file, format_check_lines, maybe_run_and_reconcile, Severity, VERSION};
 use std::path::Path;
@@ -20,10 +22,11 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Run diagnostics on a .mod file and exit (no server)
+    /// Run diagnostics on files or directories and exit (no server)
     Check {
-        /// Path to a .mod / .inc file
-        file: String,
+        /// Files or directories
+        #[arg(required = true, num_args = 1.., value_name = "PATH")]
+        paths: Vec<String>,
     },
     /// Print markdown documentation for a diagnostic code
     Explain {
@@ -49,7 +52,7 @@ async fn main() {
 
     let cli = Cli::parse();
     match cli.command {
-        Some(Commands::Check { file }) => run_check(&file),
+        Some(Commands::Check { paths }) => run_check(&paths),
         Some(Commands::Explain { code, list }) => run_explain(code, list),
         Some(Commands::Mcp) => dygnosis::mcp::run_stdio().await,
         None if cli.tcp => dygnosis::server::run_tcp(&cli.host, cli.port).await,
@@ -57,24 +60,114 @@ async fn main() {
     }
 }
 
-fn run_check(file: &str) {
-    let text = match std::fs::read(file) {
+fn is_batch(paths: &[String]) -> bool {
+    paths.len() >= 2 || Path::new(&paths[0]).is_dir()
+}
+
+enum FileResult {
+    Printed { errors: usize, warnings: usize },
+    Unreadable,
+}
+
+fn run_check(paths: &[String]) {
+    if !is_batch(paths) {
+        match process_target(&paths[0]) {
+            FileResult::Printed { errors, .. } if errors > 0 => std::process::exit(1),
+            FileResult::Printed { .. } => {}
+            FileResult::Unreadable => std::process::exit(1),
+        }
+        return;
+    }
+
+    let mut files = 0usize;
+    let mut errors = 0usize;
+    let mut warnings = 0usize;
+    let mut fail = false;
+
+    for path in paths {
+        let p = Path::new(path);
+        if !p.exists() {
+            eprintln!("Error: File not found: {path}");
+            fail = true;
+            continue;
+        }
+        if p.is_dir() {
+            if check_walk::starts_with_plus(p) {
+                continue;
+            }
+            match check_walk::collect_mod_files(p) {
+                Ok(hits) => {
+                    for hit in hits {
+                        files += 1;
+                        match process_target(&hit) {
+                            FileResult::Printed {
+                                errors: e,
+                                warnings: w,
+                            } => {
+                                errors += e;
+                                warnings += w;
+                                if e > 0 {
+                                    fail = true;
+                                }
+                            }
+                            FileResult::Unreadable => fail = true,
+                        }
+                    }
+                }
+                Err(err) => {
+                    eprintln!("Error: Cannot read {path}: {err}");
+                    fail = true;
+                }
+            }
+        } else {
+            files += 1;
+            match process_target(path) {
+                FileResult::Printed {
+                    errors: e,
+                    warnings: w,
+                } => {
+                    errors += e;
+                    warnings += w;
+                    if e > 0 {
+                        fail = true;
+                    }
+                }
+                FileResult::Unreadable => fail = true,
+            }
+        }
+    }
+
+    println!("{files} file(s), {errors} error(s), {warnings} warning(s)");
+    if fail {
+        std::process::exit(1);
+    }
+}
+
+fn process_target(path: &str) -> FileResult {
+    let text = match std::fs::read(path) {
         Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("Error: File not found: {file}");
-            std::process::exit(1);
+            eprintln!("Error: File not found: {path}");
+            return FileResult::Unreadable;
         }
         Err(err) => {
-            eprintln!("Error: Cannot read {file}: {err}");
-            std::process::exit(1);
+            eprintln!("Error: Cannot read {path}: {err}");
+            return FileResult::Unreadable;
         }
     };
-    let abs_path = abs_path_for_workspace(file);
+    let abs_path = abs_path_for_workspace(path);
     let own = check_file(&text, &abs_path);
     let diags = maybe_run_and_reconcile(own, &text, Path::new(&abs_path).parent(), None);
-    print!("{}", format_check_lines(file, &diags, &text));
-    if diags.iter().any(|d| d.severity == Severity::Error) {
-        std::process::exit(1);
+    print!("{}", format_check_lines(path, &diags, &text));
+    FileResult::Printed {
+        errors: diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .count(),
+        warnings: diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .count(),
     }
 }
 
@@ -132,10 +225,30 @@ mod tests {
     fn check_subcommand_still_parses() {
         let cli = Cli::parse_from(["dygnosis", "check", "model.mod"]);
         match cli.command {
-            Some(Commands::Check { file }) => assert_eq!(file, "model.mod"),
+            Some(Commands::Check { paths }) => assert_eq!(paths, ["model.mod"]),
             other => panic!("expected check, got {other:?}"),
         }
         assert!(!cli.tcp);
+    }
+
+    #[test]
+    fn check_subcommand_parses_several_paths() {
+        let cli = Cli::parse_from(["dygnosis", "check", "a.mod", "dir"]);
+        match cli.command {
+            Some(Commands::Check { paths }) => {
+                assert_eq!(paths, ["a.mod", "dir"]);
+            }
+            other => panic!("expected check, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn check_subcommand_requires_a_path() {
+        let err = match Cli::try_parse_from(["dygnosis", "check"]) {
+            Err(e) => e,
+            Ok(_) => panic!("expected clap error for `check` with no paths"),
+        };
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
     }
 
     #[test]

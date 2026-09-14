@@ -21,7 +21,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W013", ExplainEntry {
         title: "Equation count does not match endogenous variable count",
-        body: "The number of equations inside the `model` block does not equal the number of endogenous variables declared in the `var` block. This is an extra Warning: they accept a non-square file at check. The LSP catches this within milliseconds of editing, before Dynare is invoked.\n\n**Fix**\n\n- Add a missing equation, or remove a duplicate one\n- Declare the missing endogenous variable in `var`, or remove an   extra declaration\n- Check whether a commented-out equation was intended to be   active",
+        body: "The number of equations inside the `model` block does not equal the number of endogenous variables declared in the `var` block. This is an extra Warning: they accept a non-square file at check. The LSP catches this within milliseconds of editing, before Dynare is invoked.\n\nWhen ramsey_model, ramsey_policy, or discretionary_policy is present and instruments= lists N unique names, the expected gap is −N, not equality; a square file still warns.\n\n**Fix**\n\n- Add a missing equation, or remove a duplicate one\n- Declare the missing endogenous variable in `var`, or remove an   extra declaration\n- Check whether a commented-out equation was intended to be   active\n- For ramsey_model / ramsey_policy / discretionary_policy with N instruments, the intended gap is −N; do not add equations only to make the file square",
     }),
     ("E020", ExplainEntry {
         title: "Undeclared identifier in model block",
