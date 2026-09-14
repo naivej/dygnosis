@@ -1,6 +1,6 @@
 //! Diagnostic code documentation.
 //!
-//! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 54
+//! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 55
 //! thin codes. `I050` and `W042` use the recorded surface rewrites in
 //! `dev_logs/0.1/0.1.0/22-c-explain.md` (do not advertise Compute Steady State).
 
@@ -40,8 +40,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "A model-local variable defined with `#` either reuses a declared `var`, `varexo`, or `parameters` name, or is used in an equation before its `#` definition. They refuse: `… has wrong type or was already used on the right-hand side. You cannot use it on the left-hand side of a pound ('#') expression`.\n\n**Fix**\n\n- Rename the model-local helper so it does not clash with a declared symbol\n- Move the `#` definition above its first use\n- Or remove the declaration if the name was meant to be only a model-local helper",
     }),
     ("E030", ExplainEntry {
-        title: "Duplicate declaration across blocks",
-        body: "The same identifier is declared in more than one block (for example, in both `var` and `varexo`, or twice in `parameters`). Dynare requires each name to belong to exactly one symbol class.\n\n**Fix**\n\nRemove the duplicate declaration. If you intended two related but distinct symbols, rename one (the LSP's rename action propagates the change across the file).",
+        title: "Duplicate declaration across types or `#` twice",
+        body: "The same identifier is declared in two different blocks (for example both `var` and `varexo`), or a model-local `#` name is defined twice. They refuse: `Symbol y declared twice with different types!` and `Local model variable foo declared twice.`\n\n**Fix**\n\nRemove the extra declaration. If you intended two related but distinct symbols, rename one.",
+    }),
+    ("W031", ExplainEntry {
+        title: "Symbol declared twice with the same type",
+        body: "The same identifier is declared more than once in `var`, `varexo`, `varexo_det`, or `parameters`. They accept and WARN `Symbol y declared twice.`\n\n**Fix**\n\nRemove the redundant declaration.",
     }),
     ("W054", ExplainEntry {
         title: "Duplicate equation",

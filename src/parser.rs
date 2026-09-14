@@ -1598,7 +1598,21 @@ impl Parser<'_> {
             "perfect_foresight_setup",
             "perfect_foresight_solver",
         ];
-        KS.iter().any(|kw| self.at_ident_ci(kw))
+        if KS.iter().any(|kw| self.at_ident_ci(kw)) {
+            return true;
+        }
+        let Some(tok) = self.tokens.get(self.i) else {
+            return false;
+        };
+        if tok.kind != TokenKind::Ident
+            || !crate::command_skip::is_parse_skip_command(tok.text(self.src))
+        {
+            return false;
+        }
+        matches!(
+            self.peek_kind(1),
+            Some(TokenKind::LParen) | Some(TokenKind::Semi)
+        )
     }
 
     fn record_issue(&mut self, issue: ParseIssue) {
@@ -1752,6 +1766,7 @@ impl Parser<'_> {
     fn record_missing_assign_semis(&mut self) {
         let src = self.src;
         let blocks = complete_block_ranges(&self.tokens, src);
+        let cmd_spans = crate::command_skip::command_stmt_spans(&self.tokens, src);
         let trailing = trailing_code_line(&self.tokens, src);
         let lines: Vec<&str> = src.split('\n').collect();
         for (i, line) in lines.iter().enumerate() {
@@ -1767,7 +1782,7 @@ impl Parser<'_> {
                     .map(|l| l.len() + 1)
                     .sum::<usize>() as u32
             };
-            if inside_span(line_start, &blocks) {
+            if inside_span(line_start, &blocks) || inside_span(line_start, &cmd_spans) {
                 continue;
             }
             let trimmed_start = line.len() - line.trim_start().len();
@@ -1804,9 +1819,11 @@ impl Parser<'_> {
                 let next_code = strip_line_comment(next).trim();
                 let follower = leading_ident(next_code).is_some_and(|id| {
                     let after = next_code[id.len()..].trim_start();
-                    after.starts_with('=') && !after.starts_with("==")
-                }) || leading_ident(next_code)
-                    .is_some_and(|id| ASSIGN_FOLLOWERS.iter().any(|f| id.eq_ignore_ascii_case(f)));
+                    (after.starts_with('=') && !after.starts_with("=="))
+                        || ASSIGN_FOLLOWERS.iter().any(|f| id.eq_ignore_ascii_case(f))
+                        || (crate::command_skip::is_parse_skip_command(id)
+                            && (after.starts_with('(') || after.starts_with(';')))
+                });
                 if follower {
                     self.model.parse_issues.push(ParseIssue {
                         kind: ParseIssueKind::MissingAssignSemi {

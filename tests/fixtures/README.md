@@ -52,7 +52,7 @@ Do not copy an archive here. Do not paste one and tweak it. Write a short origin
 - First line: `// inventory: id[, id…]`.
 - Name the file after the cluster (`w140_ops.mod`), not after an archive.
 - Put related **fire** triggers in one file when they still fire together. Keep a separate file for a quiet/control, when two triggers cannot coexist (`model(linear)` vs `model;`), or for a multi-file include graph (the inventory `fixture` is that directory).
-- `I050` on `sims_wu_2019` / `lk2024` is `archive`. `govt_rbc_irf_matching` already has E001 (`method_of_moments`); reuse that archive; do not add a W130 mutation of it.
+- `I050` on `sims_wu_2019` / `lk2024` is `archive`. govt option lists are parse-clean; do not add a W130 mutation of it.
 
 Add a row, write or reuse a `.mod`, load it from the family test. Assert codes, messages, and spans. Do not rebuild the case with in-memory string edits.
 

@@ -48,7 +48,7 @@
       "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "e001.rs::e001_clean_archive_files_are_empty",
       "cluster": "",
-      "notes": "existing E001 on method_of_moments; reuse, do not mutate for W130"
+      "notes": "govt option lists are parse-clean; no fake E001; reuse, do not mutate for W130"
     },
     {
       "id": "e001_delete_model_end",
@@ -145,6 +145,66 @@
       "source": "e001.rs::e001_join_two_param_assignments",
       "cluster": "e001/join_two_params.mod",
       "notes": "two param assignments joined by missing ;"
+    },
+    {
+      "id": "e001_cmd_option_commas",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/cmd_option_commas.mod",
+      "source": "e001.rs::e001_cmd_option_commas_is_quiet",
+      "cluster": "e001/cmd_option_commas.mod",
+      "notes": "catalog and 0.1 option-list commas are not E001"
+    },
+    {
+      "id": "auto_fix_cmd_option_commas",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/cmd_option_commas.mod",
+      "source": "e001.rs::e001_cmd_option_commas_is_quiet",
+      "cluster": "e001/cmd_option_commas.mod",
+      "notes": "auto_fix identity on option-list commas"
+    },
+    {
+      "id": "e001_assign_before_cmd",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/assign_before_cmd.mod",
+      "source": "e001.rs::e001_assign_before_cmd_still_missing_semi",
+      "cluster": "e001/assign_before_cmd.mod",
+      "notes": "missing ; before a catalog command still E001"
+    },
+    {
+      "id": "e001_cmd_name_lhs",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/cmd_name_lhs.mod",
+      "source": "e001.rs::e001_cmd_name_lhs_still_missing_semi",
+      "cluster": "e001/cmd_name_lhs.mod",
+      "notes": "catalog-name LHS still missing-; E001"
+    },
+    {
+      "id": "e001_var_cmd_name",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/var_cmd_name.mod",
+      "source": "e001.rs::e001_var_cmd_name_is_not_reserved",
+      "cluster": "e001/var_cmd_name.mod",
+      "notes": "var method_of_moments is not reserved E001"
     },
     {
       "id": "e001_shocks_var_no_semi",
@@ -262,7 +322,7 @@
       "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "auto_fix.rs::apply_matches_python_required_rows",
       "cluster": "",
-      "notes": "identity auto_fix on clean archives; govt_rbc inserts ; on MoM lines"
+      "notes": "identity auto_fix on clean archives including govt_rbc"
     },
     {
       "id": "auto_fix_clean_sims_wu_2019",
@@ -292,9 +352,9 @@
       "kind": "archive",
       "package": "parse",
       "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
-      "source": "auto_fix.rs::apply_matches_python_required_rows",
+      "source": "auto_fix.rs::apply_identity_on_clean_archives",
       "cluster": "",
-      "notes": "auto_fix on archive"
+      "notes": "identity auto_fix; no fake MoM E001"
     },
     {
       "id": "auto_fix_cascade_clean_trend",
@@ -326,9 +386,9 @@
       "kind": "archive",
       "package": "parse",
       "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
-      "source": "auto_fix.rs::cascade_govt_rbc_is_e001_only",
+      "source": "auto_fix.rs::cascade_govt_rbc_has_no_option_list_e001",
       "cluster": "",
-      "notes": "E001 only"
+      "notes": "no option-list E001; leftover Warnings allowed"
     },
     {
       "id": "auto_fix_analyze_w120_no_e001",
@@ -429,7 +489,8 @@
     {
       "id": "e030_unmodified_trend_rbc_gov_inv",
       "codes": [
-        "E030"
+        "E030",
+        "W031"
       ],
       "kind": "archive",
       "package": "parse",
@@ -441,7 +502,8 @@
     {
       "id": "e030_unmodified_sims_wu_2019",
       "codes": [
-        "E030"
+        "E030",
+        "W031"
       ],
       "kind": "archive",
       "package": "parse",
@@ -453,7 +515,8 @@
     {
       "id": "e030_unmodified_govt_rbc_irf_matching",
       "codes": [
-        "E030"
+        "E030",
+        "W031"
       ],
       "kind": "archive",
       "package": "parse",
@@ -465,7 +528,8 @@
     {
       "id": "e030_unmodified_lk2024",
       "codes": [
-        "E030"
+        "E030",
+        "W031"
       ],
       "kind": "archive",
       "package": "parse",
@@ -507,7 +571,7 @@
     {
       "id": "e030_same_kind_var",
       "codes": [
-        "E030"
+        "W031"
       ],
       "kind": "fire",
       "package": "parse",
@@ -519,7 +583,7 @@
     {
       "id": "e030_same_kind_var_third",
       "codes": [
-        "E030"
+        "W031"
       ],
       "kind": "fire",
       "package": "parse",
@@ -531,7 +595,7 @@
     {
       "id": "e030_same_kind_param",
       "codes": [
-        "E030"
+        "W031"
       ],
       "kind": "fire",
       "package": "parse",
@@ -852,7 +916,7 @@
       "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "d_e040.rs::shape_clean_govt_rbc_irf_matching",
       "cluster": "",
-      "notes": "FAMILY empty (E001 is a different family)"
+      "notes": "FAMILY empty (parse-clean; not E001 cascade)"
     },
     {
       "id": "shape_i050_lk2024",
@@ -3734,7 +3798,7 @@
       "kind": "documented-only",
       "package": "other",
       "fixture": "",
-      "source": "explain.rs::known_codes_is_exactly_the_54_rust_keys",
+      "source": "explain.rs::known_codes_is_exactly_the_55_rust_keys",
       "cluster": "",
       "notes": "in known_codes / explain; nothing emits it yet"
     },

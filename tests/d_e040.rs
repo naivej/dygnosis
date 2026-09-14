@@ -197,7 +197,7 @@ fn shape_clean_govt_rbc_irf_matching() {
     let got = rust_family(&read_mod("govt_rbc_irf_matching"));
     assert!(
         got.is_empty(),
-        "govt_rbc_irf_matching FAMILY empty (E001 cascade), got {got:?}"
+        "govt_rbc_irf_matching FAMILY empty (parse-clean), got {got:?}"
     );
 }
 

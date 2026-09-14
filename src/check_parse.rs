@@ -251,10 +251,9 @@ fn last_eq_line(src: &str, index: &LineIndex, from: u32, to: u32) -> Option<u32>
             continue;
         }
         if let Some(first) = leading_ident(stmt) {
-            if DYNARE_COMMANDS
-                .iter()
-                .any(|c| first.eq_ignore_ascii_case(c))
-            {
+            let after = stmt.trim_start()[first.len()..].trim_start();
+            // Skip command statements, not `ident =` even when ident is a catalog name.
+            if crate::command_skip::is_parse_skip_command(first) && !after.starts_with('=') {
                 continue;
             }
         }
@@ -1006,6 +1005,7 @@ fn merged_assignment_diags(
 ) -> Vec<Diagnostic> {
     let src = &model.source;
     let trailing = trailing_code_line(tokens, src, index);
+    let cmd_spans = crate::command_skip::command_stmt_spans(tokens, src);
     let mut out = Vec::new();
 
     let skip_span = |span: Span| {
@@ -1013,7 +1013,9 @@ fn merged_assignment_diags(
             d.message.contains("missing its terminating semicolon")
                 && d.span.start <= span.end
                 && span.start <= d.span.end
-        })
+        }) || cmd_spans
+            .iter()
+            .any(|r| span.start >= r.start && span.end <= r.end)
     };
 
     let mut consider = |span: Span, name: &str, context: &str| {

@@ -145,7 +145,12 @@ fn apply_fix_table() {
 
 #[test]
 fn apply_identity_on_clean_archives() {
-    for name in ["trend_rbc_gov_inv", "sims_wu_2019", "lk2024"] {
+    for name in [
+        "trend_rbc_gov_inv",
+        "sims_wu_2019",
+        "lk2024",
+        "govt_rbc_irf_matching",
+    ] {
         let text = read_mod(name);
         assert_eq!(auto_fix(&text), text, "{name} auto_fix should be identity");
     }
@@ -183,13 +188,6 @@ fn apply_required_e001_rows() {
             "{label} should clear structural error"
         );
     }
-    let govt = read_mod("govt_rbc_irf_matching");
-    let govt_fixed = auto_fix(&govt);
-    assert_ne!(
-        govt_fixed, govt,
-        "govt_rbc should insert `;` on MoM option lines"
-    );
-    assert!(govt_fixed.contains("mom_method                = irf_matching,;"));
 }
 
 #[test]
@@ -246,9 +244,14 @@ fn cascade_delete_model_end_is_e001_only() {
 }
 
 #[test]
-fn cascade_govt_rbc_is_e001_only() {
+fn cascade_govt_rbc_has_no_option_list_e001() {
     let text = read_mod("govt_rbc_irf_matching");
-    assert_eq!(rust_thin_codes(&text), vec!["E001".to_string()]);
+    let all = analyze(&parse(&text));
+    assert!(
+        !all.iter().any(|d| d.code == "E001"),
+        "govt must not emit option-list E001, got {:?}",
+        all.iter().map(|d| &d.code).collect::<Vec<_>>()
+    );
 }
 
 #[test]

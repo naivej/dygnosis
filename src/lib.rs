@@ -16,6 +16,7 @@ pub mod check_w100;
 pub mod check_w110;
 pub mod check_w120;
 pub mod check_w130;
+mod command_skip;
 mod diag_shape;
 pub mod diagnostic;
 pub mod e010;

@@ -1,4 +1,4 @@
-//! E030 duplicate-declaration and duplicate model-local `#` diagnostics.
+//! E030 different-types / duplicate `#`, and W031 same-kind duplicate declaration.
 
 use std::collections::{HashMap, HashSet};
 
@@ -64,37 +64,37 @@ fn check_duplicate_declarations(model: &Model) -> Vec<Diagnostic> {
             continue;
         };
         let name = model.name(decl.name);
-        let (severity, message) = if prev_kind == kind {
-            (
-                Severity::Error,
-                format!(
+        if prev_kind == kind {
+            diagnostics.push(Diagnostic {
+                span: decl.span,
+                severity: Severity::Warning,
+                code: "W031".to_string(),
+                message: format!(
                     "'{name}' is declared more than once in '{kind}'. Fix: remove the redundant '{name}' from the {kind} declaration."
                 ),
-            )
-        } else {
-            let hint = cross_kind_hint(
-                name,
-                prev_kind,
-                kind,
-                decl.name,
-                CrossKindUse {
-                    assigned_params: &assigned_params,
-                    timed: &timed,
-                    lhs_untimed: &lhs_untimed,
-                    shocks: &shocks,
-                    in_eqs: &in_eqs,
-                },
-            );
-            (
-                Severity::Error,
-                format!("'{name}' is declared in both '{prev_kind}' and '{kind}'.{hint}"),
-            )
-        };
+                fix: None,
+                tags: Vec::new(),
+            });
+            continue;
+        }
+        let hint = cross_kind_hint(
+            name,
+            prev_kind,
+            kind,
+            decl.name,
+            CrossKindUse {
+                assigned_params: &assigned_params,
+                timed: &timed,
+                lhs_untimed: &lhs_untimed,
+                shocks: &shocks,
+                in_eqs: &in_eqs,
+            },
+        );
         diagnostics.push(Diagnostic {
             span: decl.span,
-            severity,
+            severity: Severity::Error,
             code: "E030".to_string(),
-            message,
+            message: format!("'{name}' is declared in both '{prev_kind}' and '{kind}'.{hint}"),
             fix: None,
             tags: Vec::new(),
         });

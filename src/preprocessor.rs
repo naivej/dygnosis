@@ -27,7 +27,7 @@ const SAME_GROUND_ERRORS: &[&str] = &[
     "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E111", "E130",
 ];
 
-const SAME_GROUND_WARNINGS: &[&str] = &["W022", "W042", "W121", "W131", "W150"];
+const SAME_GROUND_WARNINGS: &[&str] = &["W022", "W031", "W042", "W121", "W131", "W150"];
 
 /// Result of one preprocessor run.
 #[derive(Clone, Debug)]

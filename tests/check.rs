@@ -281,8 +281,8 @@ fn p_core_check_file_no_preproc() {
     let text = read_mod("govt_rbc_irf_matching");
     let diags = check_file(&text, path_str);
     assert!(
-        diags.iter().any(|d| d.code == "E001"),
-        "govt_rbc_irf_matching should emit E001, got {:?}",
+        !diags.iter().any(|d| d.code == "E001"),
+        "govt_rbc_irf_matching must not emit option-list E001, got {:?}",
         diags.iter().map(|d| &d.code).collect::<Vec<_>>()
     );
     assert_no_out_or_preproc(&format_check_lines(path_str, &diags, &text));
@@ -324,15 +324,15 @@ fn i050_uses_recorded_rust_message() {
 }
 
 #[test]
-fn govt_rbc_cascade_is_e001_only() {
+fn govt_rbc_has_no_option_list_e001() {
     let path = copilot_mod("govt_rbc_irf_matching");
     let path_str = path.to_str().expect("utf-8 path");
     let text = read_mod("govt_rbc_irf_matching");
     let own = check_file(&text, path_str);
     let own_codes: Vec<&str> = own.iter().map(|d| d.code.as_str()).collect();
     assert!(
-        own_codes.contains(&"E001"),
-        "analyze/check_file cascade expected E001, got {own_codes:?}"
+        !own_codes.contains(&"E001"),
+        "check_file must not emit option-list E001, got {own_codes:?}"
     );
     for extra in ["E062", "E063", "E064", "E065"] {
         assert!(
@@ -347,11 +347,13 @@ fn govt_rbc_cascade_is_e001_only() {
     if find_preprocessor(None).is_some() {
         assert!(
             !codes.contains("E001"),
-            "CLI with preprocessor must drop E001 when Dynare accepts govt_rbc_irf_matching; got {codes:?}\n{stdout}"
+            "CLI with preprocessor must not print option-list E001; got {codes:?}\n{stdout}"
         );
     } else {
-        assert!(codes.contains("E001"), "expected E001, got {codes:?}");
-        assert_eq!(exit_code(&output), 1);
+        assert!(
+            !codes.contains("E001"),
+            "without preprocessor, fake option-list E001 must not remain; got {codes:?}\n{stdout}"
+        );
     }
     for extra in ["E062", "E063", "E064", "E065"] {
         assert!(

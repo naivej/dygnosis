@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use dygnosis::span::LineIndex;
-use dygnosis::{analyze, check_parse, has_structural_error, parse, TextEdit};
+use dygnosis::{analyze, auto_fix, check_parse, has_structural_error, parse, TextEdit};
 
 const ARCHIVES: &[&str] = &[
     "trend_rbc_gov_inv",
@@ -141,19 +141,12 @@ fn e001_clean_archive_files_are_empty() {
     for name in ARCHIVES {
         let text = read_mod(name);
         let rust = rust_e001(&text);
-        if *name != "govt_rbc_irf_matching" {
-            assert!(rust.is_empty(), "{name}: expected no E001, got {rust:?}");
-            let model = parse(&text);
-            assert!(
-                !has_structural_error(&model),
-                "{name} should not have structural errors"
-            );
-        } else {
-            assert!(
-                rust.iter().any(|d| d.code == "E001"),
-                "govt_rbc_irf_matching should emit E001, got {rust:?}"
-            );
-        }
+        assert!(rust.is_empty(), "{name}: expected no E001, got {rust:?}");
+        let model = parse(&text);
+        assert!(
+            !has_structural_error(&model),
+            "{name} should not have structural errors"
+        );
     }
 }
 
@@ -234,6 +227,56 @@ fn e001_join_two_param_assignments() {
         .message
         .contains("Parameter assignment 'betta' is missing its terminating semicolon"));
     assert_span(&text, &got[0], "betta = 0.99");
+}
+
+#[test]
+fn e001_cmd_option_commas_is_quiet() {
+    let text = check_mod("e001/cmd_option_commas.mod");
+    let got = rust_e001(&text);
+    assert!(
+        got.is_empty(),
+        "catalog and 0.1 option-list commas must not be E001, got {got:?}"
+    );
+    assert!(!has_structural_error(&parse(&text)));
+    assert_eq!(
+        auto_fix(&text),
+        text,
+        "auto_fix must be identity on option lists"
+    );
+}
+
+#[test]
+fn e001_assign_before_cmd_still_missing_semi() {
+    let text = check_mod("e001/assign_before_cmd.mod");
+    let got = missing_semi_only(rust_e001(&text));
+    assert_eq!(got.len(), 1, "assign_before_cmd: {got:?}");
+    assert_eq!(got[0].code, "E001");
+    assert!(got[0]
+        .message
+        .contains("Parameter assignment 'scale' is missing its terminating semicolon"));
+    assert_span(&text, &got[0], "scale = 1");
+}
+
+#[test]
+fn e001_cmd_name_lhs_still_missing_semi() {
+    let text = check_mod("e001/cmd_name_lhs.mod");
+    let got = missing_semi_only(rust_e001(&text));
+    assert_eq!(got.len(), 1, "cmd_name_lhs: {got:?}");
+    assert_eq!(got[0].code, "E001");
+    assert!(got[0]
+        .message
+        .contains("Parameter assignment 'data' is missing its terminating semicolon"));
+    assert_span(&text, &got[0], "data = 0.50");
+}
+
+#[test]
+fn e001_var_cmd_name_is_not_reserved() {
+    let text = check_mod("e001/var_cmd_name.mod");
+    let got = rust_e001(&text);
+    assert!(
+        got.is_empty(),
+        "var method_of_moments must not gain reserved E001, got {got:?}"
+    );
 }
 
 #[test]

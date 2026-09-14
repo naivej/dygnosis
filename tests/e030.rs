@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use dygnosis::expr::ExprKind;
 use dygnosis::span::LineIndex;
-use dygnosis::{check_e030, parse};
+use dygnosis::{analyze, check_e030, parse, Severity};
 
 const ARCHIVES: &[&str] = &[
     "trend_rbc_gov_inv",
@@ -50,7 +50,7 @@ fn rust_e030(text: &str) -> Vec<Diag> {
     let index = LineIndex::new(&model.source);
     check_e030(&model)
         .into_iter()
-        .filter(|d| d.code == "E030")
+        .filter(|d| d.code == "E030" || d.code == "W031")
         .map(|d| {
             let start = index.position(&model.source, d.span.start);
             let end = index.position(&model.source, d.span.end);
@@ -119,7 +119,10 @@ fn assert_last_ident(text: &str, d: &Diag, context: &str, ident: &str) {
 fn e030_unmodified_archives() {
     for name in ARCHIVES {
         let got = rust_e030(&read_mod(name));
-        assert!(got.is_empty(), "{name}: expected no E030, got {got:?}");
+        assert!(
+            got.is_empty(),
+            "{name}: expected no E030 or W031, got {got:?}"
+        );
     }
 }
 
@@ -171,8 +174,8 @@ fn e030_same_kind_var() {
     let text = check_mod("e030/same_kind_var.mod");
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
-    assert_eq!(got[0].code, "E030");
-    assert_eq!(got[0].severity, 1);
+    assert_eq!(got[0].code, "W031");
+    assert_eq!(got[0].severity, 2);
     assert!(got[0]
         .message
         .contains("'y' is declared more than once in 'var'"));
@@ -184,7 +187,7 @@ fn e030_same_kind_var_third_compares_to_first() {
     let text = check_mod("e030/same_kind_var_third.mod");
     let got = rust_e030(&text);
     assert_eq!(got.len(), 2);
-    assert!(got.iter().all(|d| d.code == "E030" && d.severity == 1));
+    assert!(got.iter().all(|d| d.code == "W031" && d.severity == 2));
     assert!(got.iter().all(|d| d
         .message
         .contains("'y' is declared more than once in 'var'")));
@@ -197,7 +200,8 @@ fn e030_same_kind_param() {
     let text = check_mod("e030/same_kind_param.mod");
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
-    assert_eq!(got[0].severity, 1);
+    assert_eq!(got[0].code, "W031");
+    assert_eq!(got[0].severity, 2);
     assert!(got[0]
         .message
         .contains("'betta' is declared more than once in 'parameters'"));
@@ -205,10 +209,37 @@ fn e030_same_kind_param() {
 }
 
 #[test]
+fn analyze_same_kind_named_holes_warn_w031_and_have_no_error() {
+    for rel in ["e030/same_kind_var.mod", "e030/same_kind_param.mod"] {
+        let diags = analyze(&parse(&check_mod(rel)));
+        let errors: Vec<&str> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .map(|d| d.code.as_str())
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "{rel} must not emit Error, got {errors:?}"
+        );
+        assert!(
+            diags.iter().any(|d| d.code == "W031"),
+            "{rel} must emit W031, got {:?}",
+            diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+        );
+        assert!(
+            diags.iter().all(|d| d.code != "E030"),
+            "{rel} must not emit E030, got {:?}",
+            diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
 fn e030_var_varexo_timed() {
     let text = check_mod("e030/var_varexo_timed.mod");
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
+    assert_eq!(got[0].code, "E030");
     assert_eq!(got[0].severity, 1);
     assert!(got[0]
         .message
@@ -221,6 +252,7 @@ fn e030_var_varexo_lhs() {
     let text = check_mod("e030/var_varexo_lhs.mod");
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
+    assert_eq!(got[0].code, "E030");
     assert!(got[0]
         .message
         .contains("'y' is declared in both 'var' and 'varexo'"));
@@ -232,6 +264,7 @@ fn e030_var_varexo_shock() {
     let text = check_mod("e030/var_varexo_shock.mod");
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
+    assert_eq!(got[0].code, "E030");
     assert!(got[0]
         .message
         .contains("'e' is declared in both 'var' and 'varexo'"));
@@ -244,6 +277,7 @@ fn e030_varexo_param_assigned() {
     let text = check_mod("e030/varexo_param.mod");
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
+    assert_eq!(got[0].code, "E030");
     assert!(got[0]
         .message
         .contains("'betta' is declared in both 'varexo' and 'parameters'"));
@@ -255,6 +289,7 @@ fn e030_varexo_det() {
     let text = check_mod("e030/varexo_det.mod");
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
+    assert_eq!(got[0].code, "E030");
     assert!(got[0]
         .message
         .contains("'e' is declared in both 'varexo_det' and 'varexo'"));
@@ -266,6 +301,7 @@ fn e030_model_local_dup() {
     let text = check_mod("e030/model_local_dup.mod");
     let got = rust_e030(&text);
     assert_eq!(got.len(), 1);
+    assert_eq!(got[0].code, "E030");
     assert!(got[0]
         .message
         .contains("Model-local variable 'foo' is declared twice"));

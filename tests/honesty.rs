@@ -6,15 +6,16 @@ use dygnosis::{
     analyze, check_file, parse, reconcile_diagnostics, run_preprocessor, Diagnostic, Severity,
 };
 
-const ACCEPT_ARCHIVES: &[&str] = &["trend_rbc_gov_inv", "sims_wu_2019", "lk2024"];
-
-const NAMED_HOLES: &[&str] = &[
+const ACCEPT_ARCHIVES: &[&str] = &[
+    "trend_rbc_gov_inv",
+    "sims_wu_2019",
+    "lk2024",
     "govt_rbc_irf_matching",
-    "tests/fixtures/e030/same_kind_var.mod",
-    "tests/fixtures/e030/same_kind_param.mod",
 ];
 
-const SAME_GROUND_WARNINGS: &[&str] = &["W022", "W042", "W121", "W131", "W150"];
+const NAMED_HOLES: &[&str] = &[];
+
+const SAME_GROUND_WARNINGS: &[&str] = &["W022", "W031", "W042", "W121", "W131", "W150"];
 
 fn copilot_mod(archive_dir: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -81,13 +82,9 @@ fn accepted_archives_emit_no_error() {
 
 #[test]
 fn named_holes_are_absent_from_no_error_loop() {
-    assert_eq!(
-        NAMED_HOLES,
-        &[
-            "govt_rbc_irf_matching",
-            "tests/fixtures/e030/same_kind_var.mod",
-            "tests/fixtures/e030/same_kind_param.mod",
-        ]
+    assert!(
+        NAMED_HOLES.is_empty(),
+        "0.2.0 closed the 0.1.1 named holes; got {NAMED_HOLES:?}"
     );
     for hole in NAMED_HOLES {
         assert!(
@@ -155,6 +152,49 @@ fn same_ground_warning_absent_on_quiet_archive() {
             own.iter().all(|d| d.code != *code),
             "quiet archive must not emit same-ground Warning {code}, got {:?}",
             own.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn same_kind_named_holes_accepted_reconcile_hides_w031() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    let cases = [
+        ("e030/same_kind_var.mod", "Symbol y declared twice."),
+        ("e030/same_kind_param.mod", "Symbol betta declared twice."),
+    ];
+    for (rel, wording) in cases {
+        let path = fixture(rel);
+        let path_str = path.to_str().expect("utf-8 path");
+        let text = read_fixture(rel);
+        let source_dir = path.parent().map(Path::to_path_buf);
+        let result = run_preprocessor(&text, &pp, source_dir.as_deref(), Duration::from_secs(30));
+        assert!(
+            result.success,
+            "{rel} should be accepted: {:?}",
+            result.diagnostics
+        );
+        let own = check_file(&text, path_str);
+        assert_no_error(&analyze(&parse(&text)), &format!("{rel} analyze()"));
+        assert_no_error(&own, &format!("{rel} check_file"));
+        assert!(
+            own.iter().any(|d| d.code == "W031"),
+            "{rel} own must emit W031, got {:?}",
+            own.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+        );
+        let rec = reconcile_diagnostics(&own, Some(&result));
+        assert!(
+            rec.iter().all(|d| d.code != "W031"),
+            "{rel} W031 should be hidden after reconcile: {:?}",
+            rec.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+        );
+        assert!(
+            rec.iter().any(|d| d.message.contains(wording)),
+            "{rel} should keep their wording {wording:?}, got {:?}",
+            rec.iter().map(|d| d.message.as_str()).collect::<Vec<_>>()
         );
     }
 }

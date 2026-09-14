@@ -270,26 +270,24 @@ fn diagnose_p_core_thin_codes() {
 }
 
 #[test]
-fn diagnose_govt_rbc_cascade_is_e001_only() {
+fn diagnose_govt_rbc_has_no_option_list_e001() {
     let text = read_mod("govt_rbc_irf_matching");
     let analyze_codes: Vec<String> = analyze(&parse(&text)).into_iter().map(|d| d.code).collect();
     assert!(
-        analyze_codes.iter().any(|c| c == "E001"),
-        "analyze cascade expected E001, got {analyze_codes:?}"
+        !analyze_codes.iter().any(|c| c == "E001"),
+        "analyze must not emit option-list E001, got {analyze_codes:?}"
     );
     let diags = dynare_diagnose(&text, None, None);
     let codes = codes_of(&diags);
+    assert!(
+        !codes.iter().any(|c| c == "E001"),
+        "dynare_diagnose must not emit option-list E001, got {codes:?}"
+    );
     if find_preprocessor(None).is_some() {
         assert!(
             !codes.iter().any(|c| c == "E001"),
-            "E001 should be dropped when the preprocessor ran; got {codes:?}"
+            "preprocessor path must not reintroduce option-list E001; got {codes:?}"
         );
-    } else {
-        assert!(
-            codes.contains(&"E001".to_string()),
-            "expected E001, got {codes:?}"
-        );
-        assert_eq!(codes, analyze_codes);
     }
     for extra in ["E062", "E063", "E064", "E065"] {
         assert!(
