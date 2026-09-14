@@ -1,0 +1,91 @@
+{
+  "count_gap": {
+    "delta": 0,
+    "expected_delta": null,
+    "n_endogenous": 16,
+    "n_equations": 16,
+    "unreferenced_endogenous": []
+  },
+  "equations": [
+    {
+      "index": 0,
+      "name": "F1 consumption Euler (short rate)",
+      "text": "C^(-sigma) = betta*C(+1)^(-sigma)*R/Pi(+1)"
+    },
+    {
+      "index": 1,
+      "name": "F2 labor supply",
+      "text": "chi*N^varphi = C^(-sigma)*W"
+    },
+    {
+      "index": 2,
+      "name": "F3 production",
+      "text": "Y =(xi*K(-1))^alppha*N^(1-alppha)"
+    },
+    {
+      "index": 3,
+      "name": "F4 capital rental (capital demand)",
+      "text": "rk = alppha*mc*Y/(xi*K(-1))"
+    },
+    {
+      "index": 4,
+      "name": "F5 labor demand",
+      "text": "W =(1-alppha)*mc*Y/N"
+    },
+    {
+      "index": 5,
+      "name": "F6 Rotemberg NKPC",
+      "text": "phi_p*(Pi-1)*Pi =(1-epsilon)+epsilon*mc+phi_p*betta*(C(+1)^(-sigma)/C^(-sigma))*(Pi(+1)-1)*Pi(+1)*Y(+1)/Y"
+    },
+    {
+      "index": 6,
+      "name": "F7 capital accumulation",
+      "text": "K =(1-delta)*xi*K(-1)+(1-(kappa_I/2)*(I/I(-1)-1)^2)*I"
+    },
+    {
+      "index": 7,
+      "name": "F8 investment FOC (Tobin Q)",
+      "text": "1 = Qk*(1-(kappa_I/2)*(I/I(-1)-1)^2-kappa_I*(I/I(-1)-1)*(I/I(-1)))+betta*(C(+1)^(-sigma)/C^(-sigma))*Qk(+1)*kappa_I*(I(+1)/I-1)*(I(+1)/I)^2"
+    },
+    {
+      "index": 8,
+      "name": "F9 realized return on capital",
+      "text": "Rk = xi*(rk+(1-delta)*Qk)/Qk(-1)"
+    },
+    {
+      "index": 9,
+      "name": "F10 capital Euler with term-premium wedge",
+      "text": "1+zeta = betta*(C(+1)^(-sigma)/C^(-sigma))*Rk(+1)"
+    },
+    {
+      "index": 10,
+      "name": "F11 portfolio-balance term premium",
+      "text": "zeta = zetabar-zeta_prime*qe"
+    },
+    {
+      "index": 11,
+      "name": "F12 long-term nominal rate via term premium",
+      "text": "RL = R*(1+zeta)"
+    },
+    {
+      "index": 12,
+      "name": "F15 resource constraint",
+      "text": "Y = C+I+(phi_p/2)*(Pi-1)^2*Y"
+    },
+    {
+      "index": 13,
+      "name": "F16 Taylor rule (no ZLB)",
+      "text": "R = R_ss*Pi^phi_pi*(Y/Y_ss)^phi_y"
+    },
+    {
+      "index": 14,
+      "name": "F17 QE rule",
+      "text": "qe = 0"
+    },
+    {
+      "index": 15,
+      "name": "F18 capital quality process",
+      "text": "log(xi) = rho_xi*log(xi(-1))+eps_xi"
+    }
+  ]
+}

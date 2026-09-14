@@ -4,11 +4,12 @@ use std::path::PathBuf;
 use dygnosis::explain::{explain, known_codes, render_markdown};
 use dygnosis::preprocessor::{run_workspace_preprocessor, DEFAULT_TIMEOUT};
 use dygnosis::{
-    analyze, auto_fix, check_e060, check_e061, check_w061, dynare_auto_fix, dynare_compare_models,
-    dynare_diagnose, dynare_explain, dynare_find_references, dynare_list_diagnostic_codes,
-    dynare_list_options, dynare_model_info, dynare_rename, find_preprocessor, has_structural_error,
-    parse, reconcile_diagnostics, registered_tool_names, run_preprocessor, tools_list_json,
-    Diagnostic, McpReference, McpWorkspaceReference, Workspace,
+    analyze, auto_fix, check_e060, check_e061, check_w061, count_gap, dynare_auto_fix,
+    dynare_compare_models, dynare_diagnose, dynare_equations, dynare_explain,
+    dynare_find_references, dynare_list_diagnostic_codes, dynare_list_options, dynare_model_info,
+    dynare_rename, explain_equation, find_preprocessor, has_structural_error, parse,
+    reconcile_diagnostics, registered_tool_names, run_preprocessor, tools_list_json, Diagnostic,
+    McpReference, McpWorkspaceReference, Workspace,
 };
 use serde_json::{json, Value};
 
@@ -22,6 +23,7 @@ const RUST_TOOLS: &[&str] = &[
     "dynare_explain",
     "dynare_list_diagnostic_codes",
     "dynare_list_options",
+    "dynare_equations",
 ];
 
 const DROPPED_TOOLS: &[&str] = &[
@@ -88,6 +90,52 @@ fn read_copilot(archive_dir: &str, filename: &str) -> String {
 
 fn read_mod(archive_dir: &str) -> String {
     read_copilot(archive_dir, &format!("{archive_dir}.mod"))
+}
+
+fn fixture_mod(rel: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(rel);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("fixture missing at {}: {e}", path.display()))
+        .replace("\r\n", "\n")
+}
+
+fn read_example(name: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(".agents/skills/dynare-copilot/references/examples")
+        .join(format!("{name}.mod"));
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("example missing at {}: {e}", path.display()))
+        .replace("\r\n", "\n")
+}
+
+fn expected_mcp(name: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/expected/mcp")
+        .join(name);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("expected missing at {}: {e}", path.display()))
+        .replace("\r\n", "\n")
+}
+
+fn compact_equation_list(value: &Value) -> Value {
+    let equations = value["equations"]
+        .as_array()
+        .expect("equations array")
+        .iter()
+        .map(|row| {
+            json!({
+                "index": row["index"],
+                "name": row["name"],
+                "text": row["text"],
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "count_gap": value["count_gap"],
+        "equations": equations,
+    })
 }
 
 fn is_out_code(code: &str) -> bool {
@@ -201,9 +249,11 @@ fn rename_map(value: Value) -> HashMap<String, String> {
 }
 
 #[test]
-fn registered_tools_are_nine() {
+fn registered_tools_are_ten() {
     let names = registered_tool_names();
     assert_eq!(names, RUST_TOOLS);
+    assert_eq!(names.len(), 10);
+    assert_eq!(names[9], "dynare_equations");
 
     let blob = serde_json::to_string(&tools_list_json()).expect("tools list json");
     for name in DROPPED_TOOLS {
@@ -222,6 +272,12 @@ fn registered_tools_are_nine() {
         assert!(
             !blob.contains(phrase),
             "tools/list must not contain {phrase:?}: {blob}"
+        );
+    }
+    for name in ["dynare_count_gap", "dynare_explain_equation"] {
+        assert!(
+            !blob.contains(name),
+            "tools/list must not contain {name}: {blob}"
         );
     }
 }
@@ -792,6 +848,8 @@ fn compare_models_drop_var_and_param_raw() {
     }
     assert!(!obj.contains_key("blocks"));
     assert!(!obj.contains_key("changed_steady_state_values"));
+    assert!(!obj.contains_key("common_equations"));
+    assert!(obj["markdown"].as_str().is_some());
 }
 
 #[test]
@@ -849,6 +907,10 @@ end;
             .as_u64()
             .expect("n_model_equations")
     );
+    assert_eq!(
+        info["n_equations"].as_u64().expect("n_equations"),
+        count_gap(&parse(text)).n_equations as u64
+    );
     assert!(!info.as_object().expect("object").contains_key("blocks"));
 }
 
@@ -903,4 +965,301 @@ fn compare_models_empty_files_a_falls_back_to_files() {
             .any(|row| row.get("name").and_then(|v| v.as_str()) == Some("alppha")),
         "empty files_a must fall back to files: {changed:?}"
     );
+}
+
+const COMPARE_MODEL_A: &str = r#"
+var c k;
+varexo e;
+parameters betta alpha delta;
+betta = 0.99;
+alpha = 0.33;
+delta = 0.025;
+model;
+c = betta*c(+1);
+k = (1-delta)*k(-1) + e;
+end;
+"#;
+
+const COMPARE_MODEL_B: &str = r#"
+var c n;
+varexo u;
+parameters betta rho;
+betta = 0.99;
+rho = 0.9;
+model;
+c = betta*c(+1);
+n = rho*n(-1) + u;
+end;
+"#;
+
+#[test]
+fn dynare_compare_models_indexed_equations_and_markdown() {
+    let diff = dynare_compare_models(
+        COMPARE_MODEL_A,
+        COMPARE_MODEL_B,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let obj = diff.as_object().expect("object");
+    assert!(!obj.contains_key("common_equations"));
+    let md = obj["markdown"].as_str().expect("markdown");
+    assert!(md.contains("# Model diff"));
+
+    for key in ["added_equations", "removed_equations"] {
+        let rows = obj[key].as_array().expect(key);
+        for row in rows {
+            assert!(row.get("index").is_some(), "{key} {row}");
+            assert!(row.get("text").is_some(), "{key} {row}");
+        }
+        if let Some(first) = rows.first() {
+            let idx = first["index"].as_u64().expect("index");
+            assert!(
+                md.contains(&format!("[{idx}]")),
+                "markdown must show added/removed index [{idx}]: {md}"
+            );
+        }
+    }
+    for row in obj["changed_equations"].as_array().expect("changed") {
+        assert!(row.get("index_old").is_some(), "{row}");
+        assert!(row.get("index_new").is_some(), "{row}");
+        assert!(row.get("text_old").is_some(), "{row}");
+        assert!(row.get("text_new").is_some(), "{row}");
+    }
+    let blob = diff.to_string();
+    assert!(
+        !blob.contains("c = betta*c(+1)") && !blob.contains("c=betta*c(+1)"),
+        "common Euler must be absent: {blob}"
+    );
+    let expected: Value =
+        serde_json::from_str(&expected_mcp("dynare_compare_models.a_vs_b.json")).unwrap();
+    assert_eq!(diff, expected);
+}
+
+fn assert_count_gap_shape(payload: &Value) {
+    let gap = payload["count_gap"].as_object().expect("count_gap object");
+    assert!(gap.contains_key("n_endogenous"));
+    assert!(gap.contains_key("n_equations"));
+    assert!(gap.contains_key("delta"));
+    assert!(gap.contains_key("unreferenced_endogenous"));
+    assert!(gap.contains_key("expected_delta"));
+}
+
+fn row_has_no_explain(row: &Value) {
+    assert!(
+        row.get("explain").is_none(),
+        "full list must omit explain: {row}"
+    );
+}
+
+#[test]
+fn dynare_equations_trend_rbc_gov_inv() {
+    let text = read_mod("trend_rbc_gov_inv");
+    let payload = dynare_equations(&text, None, None, None, None);
+    let obj = payload.as_object().expect("object");
+    assert!(obj.contains_key("equations"));
+    assert!(obj.contains_key("count_gap"));
+    assert!(!obj.contains_key("message"));
+    assert_count_gap_shape(&payload);
+
+    let eqs = payload["equations"].as_array().expect("equations");
+    assert_eq!(eqs[0]["index"], 0);
+    assert_eq!(eqs[0]["lhs"], "y");
+    assert_eq!(eqs[0]["idents"][2]["name"], "kg");
+    assert_eq!(eqs[0]["idents"][2]["timing"], -1);
+    assert_eq!(payload["count_gap"]["n_equations"], 16);
+    for row in eqs {
+        row_has_no_explain(row);
+        assert!(row.get("span").is_none(), "span must be omitted: {row}");
+        assert!(row.get("name").is_some(), "name required: {row}");
+        assert!(row.get("text").is_some(), "text required: {row}");
+        assert!(row.get("lhs").is_some());
+        assert!(row.get("rhs").is_some());
+        assert!(row.get("static_tag").is_some());
+        assert!(row.get("dynamic_tag").is_some());
+        assert!(row.get("idents").is_some());
+    }
+
+    let info = dynare_model_info(&text, None, None);
+    let info_obj = info.as_object().expect("model_info object");
+    assert!(
+        !info_obj.contains_key("equations"),
+        "dynare_model_info must not grow an equation list"
+    );
+    assert_eq!(info["n_equations"], payload["count_gap"]["n_equations"]);
+
+    let named = dynare_equations(&text, None, None, Some("production function"), None);
+    let named_eqs = named["equations"].as_array().expect("named equations");
+    assert_eq!(named_eqs.len(), 1);
+    assert!(named_eqs[0]
+        .get("explain")
+        .and_then(|v| v.as_str())
+        .is_some());
+
+    let expected: Value =
+        serde_json::from_str(&expected_mcp("dynare_equations.trend_rbc_gov_inv.json")).unwrap();
+    assert_eq!(payload, expected);
+}
+
+#[test]
+fn dynare_equations_reader_filters() {
+    let text = fixture_mod("equations/reader.mod");
+    let model = parse(&text);
+    let gap = count_gap(&model);
+    assert_eq!(gap.n_equations, 2);
+
+    let full = dynare_equations(&text, None, None, None, None);
+    let eqs = full["equations"].as_array().expect("equations");
+    assert_eq!(eqs.len(), 2);
+    assert_eq!(eqs[0]["index"], 0);
+    assert_eq!(eqs[1]["index"], 1);
+    assert_eq!(full["count_gap"]["n_equations"], 2);
+    assert!(full.get("message").is_none());
+    for row in eqs {
+        row_has_no_explain(row);
+    }
+
+    let by_index = dynare_equations(&text, None, None, None, Some(0));
+    let idx_rows = by_index["equations"].as_array().expect("index equations");
+    assert_eq!(idx_rows.len(), 1);
+    assert_eq!(idx_rows[0]["index"], 0);
+    assert_eq!(
+        idx_rows[0]["explain"].as_str().expect("explain"),
+        explain_equation(&dygnosis::equations(&model)[0])
+    );
+    assert_eq!(by_index["count_gap"]["n_equations"], 2);
+    assert!(by_index.get("message").is_none());
+
+    let by_name = dynare_equations(&text, None, None, Some("euler"), None);
+    let name_rows = by_name["equations"].as_array().expect("name equations");
+    assert_eq!(name_rows.len(), 1);
+    assert_eq!(name_rows[0]["name"], "euler");
+    assert_eq!(
+        name_rows[0]["explain"].as_str().expect("explain"),
+        explain_equation(&dygnosis::equations(&model)[0])
+    );
+    assert_eq!(by_name["count_gap"]["n_equations"], 2);
+
+    let unnamed = dynare_equations(&text, None, None, Some(""), None);
+    let unnamed_rows = unnamed["equations"].as_array().expect("unnamed equations");
+    assert_eq!(unnamed_rows.len(), 1);
+    assert_eq!(unnamed_rows[0]["name"], "");
+    assert!(unnamed_rows[0].get("explain").is_some());
+
+    let unknown = dynare_equations(&text, None, None, Some("no_such"), None);
+    assert_eq!(unknown["equations"], json!([]));
+    assert_eq!(unknown["message"], "no equation named 'no_such'");
+    assert_eq!(unknown["count_gap"]["n_equations"], 2);
+    assert_count_gap_shape(&unknown);
+
+    let oob = dynare_equations(&text, None, None, None, Some(9));
+    assert_eq!(oob["equations"], json!([]));
+    assert_eq!(oob["message"], "index 9 is out of range (0..2)");
+    assert_eq!(oob["count_gap"]["n_equations"], 2);
+
+    let both = dynare_equations(&text, None, None, Some("euler"), Some(0));
+    assert_eq!(both["equations"], json!([]));
+    assert_eq!(both["message"], "name and index must not both be set");
+    assert_eq!(both["count_gap"]["n_equations"], 2);
+}
+
+#[test]
+fn dynare_equations_tags_duplicate_name() {
+    let text = fixture_mod("equations/tags.mod");
+    let payload = dynare_equations(&text, None, None, Some("policy"), None);
+    let eqs = payload["equations"].as_array().expect("equations");
+    assert_eq!(eqs.len(), 2, "JC9: one tag may hit several rows: {payload}");
+    assert_eq!(eqs[0]["name"], "policy");
+    assert_eq!(eqs[1]["name"], "policy");
+    assert_ne!(eqs[0]["text"], eqs[1]["text"]);
+    assert_ne!(eqs[0]["explain"], eqs[1]["explain"]);
+    assert!(eqs[0].get("explain").and_then(|v| v.as_str()).is_some());
+    assert!(eqs[1].get("explain").and_then(|v| v.as_str()).is_some());
+    assert_eq!(payload["count_gap"]["n_equations"], 3);
+}
+
+#[test]
+fn dynare_equations_zlb_qe_after_parse_expand() {
+    let text = read_mod("zlb_qe");
+    let payload = dynare_equations(&text, None, None, None, None);
+    let eqs = payload["equations"].as_array().expect("equations");
+    let names: Vec<&str> = eqs.iter().filter_map(|row| row["name"].as_str()).collect();
+    assert!(
+        names.contains(&"F16 Taylor rule (no ZLB)"),
+        "default @#else F16 missing: {names:?}"
+    );
+    assert!(
+        !names.contains(&"F16 Taylor rule + ZLB"),
+        "ZLB-bind F16 must be absent: {names:?}"
+    );
+    let unknown = dynare_equations(&text, None, None, Some("F16 Taylor rule + ZLB"), None);
+    assert_eq!(unknown["equations"], json!([]));
+    assert_eq!(
+        unknown["message"],
+        "no equation named 'F16 Taylor rule + ZLB'"
+    );
+    let f17 = eqs
+        .iter()
+        .find(|row| row["name"].as_str() == Some("F17 QE rule"))
+        .expect("F17");
+    assert!(
+        f17["text"].as_str().expect("text").contains("qe = 0"),
+        "F17 body: {}",
+        f17["text"]
+    );
+    for row in eqs {
+        row_has_no_explain(row);
+    }
+    let expected: Value =
+        serde_json::from_str(&expected_mcp("dynare_equations.zlb_qe.list.json")).unwrap();
+    assert_eq!(compact_equation_list(&payload), expected);
+}
+
+#[test]
+fn dynare_equations_us_re09_rep_expectation() {
+    let text = read_example("US_RE09_rep");
+    let payload = dynare_equations(&text, None, None, None, None);
+    let eqs = payload["equations"].as_array().expect("equations");
+    assert!(
+        eqs.iter().any(|row| row["text"]
+            .as_str()
+            .is_some_and(|t| t.contains("EXPECTATION(-16)"))),
+        "expected EXPECTATION(-16) in some text: {payload}"
+    );
+    let expected: Value =
+        serde_json::from_str(&expected_mcp("dynare_equations.US_RE09_rep.list.json")).unwrap();
+    assert_eq!(compact_equation_list(&payload), expected);
+}
+
+#[test]
+fn dynare_equations_swff_map_matches_model_info() {
+    let files = swff_relative_files();
+    let with_map = dynare_equations(
+        &files["swff.mod"],
+        Some("swff.mod"),
+        Some(&files),
+        None,
+        None,
+    );
+    let info_map = dynare_model_info(&files["swff.mod"], Some("swff.mod"), Some(&files));
+    assert_eq!(
+        with_map["count_gap"]["n_equations"],
+        info_map["n_equations"]
+    );
+
+    let no_active = dynare_equations(&files["swff.mod"], None, Some(&files), None, None);
+    let info_no_active = dynare_model_info(&files["swff.mod"], None, Some(&files));
+    assert_eq!(
+        no_active["count_gap"]["n_equations"],
+        info_no_active["n_equations"]
+    );
+}
+
+#[test]
+fn dynare_equations_w100_ok_expected_delta() {
+    let text = fixture_mod("w100/w100_ok.mod");
+    let payload = dynare_equations(&text, None, None, None, None);
+    assert_eq!(payload["count_gap"]["expected_delta"], -1);
 }

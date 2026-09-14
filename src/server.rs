@@ -1622,14 +1622,42 @@ fn document_symbols_for(text: &str, model: &Model) -> Vec<DocumentSymbol> {
     let index = LineIndex::new(text);
     let mut symbols = Vec::new();
     if !model.endogenous.is_empty() {
-        symbols.push(group_symbol(
-            "var (endogenous)",
-            &model.endogenous,
-            model,
-            &index,
-            text,
-            SymbolKind::VARIABLE,
-        ));
+        let timing = classify_variable_timing(model);
+        let mut predetermined = Vec::new();
+        let mut forward_looking = Vec::new();
+        let mut mixed = Vec::new();
+        let mut static_vars = Vec::new();
+        for d in &model.endogenous {
+            let name = model.name(d.name);
+            let class = timing
+                .get(name)
+                .map(|t| t.class)
+                .unwrap_or(TimingClass::Static);
+            match class {
+                TimingClass::Predetermined => predetermined.push(d.clone()),
+                TimingClass::ForwardLooking => forward_looking.push(d.clone()),
+                TimingClass::Mixed => mixed.push(d.clone()),
+                TimingClass::Static => static_vars.push(d.clone()),
+            }
+        }
+        for (class, bucket) in [
+            (TimingClass::Predetermined, &predetermined),
+            (TimingClass::ForwardLooking, &forward_looking),
+            (TimingClass::Mixed, &mixed),
+            (TimingClass::Static, &static_vars),
+        ] {
+            if bucket.is_empty() {
+                continue;
+            }
+            symbols.push(group_symbol(
+                class.label(),
+                bucket,
+                model,
+                &index,
+                text,
+                SymbolKind::VARIABLE,
+            ));
+        }
     }
     if !model.exogenous.is_empty() {
         symbols.push(group_symbol(

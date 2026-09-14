@@ -1,0 +1,555 @@
+{
+  "count_gap": {
+    "delta": 0,
+    "expected_delta": null,
+    "n_endogenous": 16,
+    "n_equations": 16,
+    "unreferenced_endogenous": []
+  },
+  "equations": [
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "y",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "endogenous",
+          "name": "z",
+          "timing": 0,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "endogenous",
+          "name": "kg",
+          "timing": -1,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "parameter",
+          "name": "alphag",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "k",
+          "timing": -1,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "parameter",
+          "name": "alppha",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "n",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "parameter",
+          "name": "alppha",
+          "timing": 0
+        },
+        {
+          "class": "parameter",
+          "name": "alphag",
+          "timing": 0
+        }
+      ],
+      "index": 0,
+      "lhs": "y",
+      "name": "production function",
+      "rhs": "exp(z)*kg(-1)^alphag*k(-1)^alppha*n^(1-alppha-alphag)",
+      "static_tag": false,
+      "text": "y = exp(z)*kg(-1)^alphag*k(-1)^alppha*n^(1-alppha-alphag)"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "w",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "parameter",
+          "name": "alppha",
+          "timing": 0
+        },
+        {
+          "class": "parameter",
+          "name": "alphag",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "y",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "endogenous",
+          "name": "n",
+          "timing": 0,
+          "timing_class": "static"
+        }
+      ],
+      "index": 1,
+      "lhs": "w",
+      "name": "labor demand FOC",
+      "rhs": "(1-alppha-alphag)*y/n",
+      "static_tag": false,
+      "text": "w =(1-alppha-alphag)*y/n"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "rk",
+          "timing": 0,
+          "timing_class": "forward-looking"
+        },
+        {
+          "class": "parameter",
+          "name": "alppha",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "y",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "endogenous",
+          "name": "k",
+          "timing": -1,
+          "timing_class": "predetermined"
+        }
+      ],
+      "index": 2,
+      "lhs": "rk",
+      "name": "capital rental rate FOC",
+      "rhs": "alppha*y/k(-1)",
+      "static_tag": false,
+      "text": "rk = alppha*y/k(-1)"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "c",
+          "timing": 0,
+          "timing_class": "forward-looking"
+        },
+        {
+          "class": "parameter",
+          "name": "betta",
+          "timing": 0
+        },
+        {
+          "class": "parameter",
+          "name": "gam",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "c",
+          "timing": 1,
+          "timing_class": "forward-looking"
+        },
+        {
+          "class": "endogenous",
+          "name": "rk",
+          "timing": 1,
+          "timing_class": "forward-looking"
+        },
+        {
+          "class": "parameter",
+          "name": "delta",
+          "timing": 0
+        }
+      ],
+      "index": 3,
+      "lhs": "c^(-1)",
+      "name": "consumption Euler equation",
+      "rhs": "(betta/(1+gam))*c(+1)^(-1)*(rk(+1)+1-delta)",
+      "static_tag": false,
+      "text": "c^(-1) =(betta/(1+gam))*c(+1)^(-1)*(rk(+1)+1-delta)"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "parameter",
+          "name": "psi",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "n",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "parameter",
+          "name": "phhi",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "c",
+          "timing": 0,
+          "timing_class": "forward-looking"
+        },
+        {
+          "class": "endogenous",
+          "name": "w",
+          "timing": 0,
+          "timing_class": "static"
+        }
+      ],
+      "index": 4,
+      "lhs": "psi*n^phhi*c",
+      "name": "labor supply FOC",
+      "rhs": "w",
+      "static_tag": false,
+      "text": "psi*n^phhi*c = w"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "parameter",
+          "name": "gam",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "k",
+          "timing": 0,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "parameter",
+          "name": "delta",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "k",
+          "timing": -1,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "endogenous",
+          "name": "invest",
+          "timing": 0,
+          "timing_class": "static"
+        }
+      ],
+      "index": 5,
+      "lhs": "(1+gam)*k",
+      "name": "private capital law of motion",
+      "rhs": "(1-delta)*k(-1)+invest",
+      "static_tag": false,
+      "text": "(1+gam)*k =(1-delta)*k(-1)+invest"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "parameter",
+          "name": "gam",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "kg",
+          "timing": 0,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "parameter",
+          "name": "deltag",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "kg",
+          "timing": -1,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "endogenous",
+          "name": "ig",
+          "timing": 0,
+          "timing_class": "predetermined"
+        }
+      ],
+      "index": 6,
+      "lhs": "(1+gam)*kg",
+      "name": "public capital law of motion",
+      "rhs": "(1-deltag)*kg(-1)+ig",
+      "static_tag": false,
+      "text": "(1+gam)*kg =(1-deltag)*kg(-1)+ig"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "y",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "endogenous",
+          "name": "c",
+          "timing": 0,
+          "timing_class": "forward-looking"
+        },
+        {
+          "class": "endogenous",
+          "name": "invest",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "endogenous",
+          "name": "ig",
+          "timing": 0,
+          "timing_class": "predetermined"
+        }
+      ],
+      "index": 7,
+      "lhs": "y",
+      "name": "resource constraint",
+      "rhs": "c+invest+ig",
+      "static_tag": false,
+      "text": "y = c+invest+ig"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "z",
+          "timing": 0,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "parameter",
+          "name": "rhoz",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "z",
+          "timing": -1,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "varexo",
+          "name": "eps_z",
+          "timing": 0
+        }
+      ],
+      "index": 8,
+      "lhs": "z",
+      "name": "TFP process",
+      "rhs": "rhoz*z(-1)+eps_z",
+      "static_tag": false,
+      "text": "z = rhoz*z(-1)+eps_z"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "ig",
+          "timing": 0,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "parameter",
+          "name": "rho_ig",
+          "timing": 0
+        },
+        {
+          "class": "parameter",
+          "name": "ig_ss",
+          "timing": 0
+        },
+        {
+          "class": "parameter",
+          "name": "rho_ig",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "ig",
+          "timing": -1,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "varexo",
+          "name": "eps_ig",
+          "timing": 0
+        }
+      ],
+      "index": 9,
+      "lhs": "log(ig)",
+      "name": "government investment process",
+      "rhs": "(1-rho_ig)*log(ig_ss)+rho_ig*log(ig(-1))+eps_ig",
+      "static_tag": false,
+      "text": "log(ig) =(1-rho_ig)*log(ig_ss)+rho_ig*log(ig(-1))+eps_ig"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "log_y",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "endogenous",
+          "name": "y",
+          "timing": 0,
+          "timing_class": "static"
+        }
+      ],
+      "index": 10,
+      "lhs": "log_y",
+      "name": "log output",
+      "rhs": "log(y)",
+      "static_tag": false,
+      "text": "log_y = log(y)"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "log_c",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "endogenous",
+          "name": "c",
+          "timing": 0,
+          "timing_class": "forward-looking"
+        }
+      ],
+      "index": 11,
+      "lhs": "log_c",
+      "name": "log consumption",
+      "rhs": "log(c)",
+      "static_tag": false,
+      "text": "log_c = log(c)"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "log_k",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "endogenous",
+          "name": "k",
+          "timing": 0,
+          "timing_class": "predetermined"
+        }
+      ],
+      "index": 12,
+      "lhs": "log_k",
+      "name": "log private capital",
+      "rhs": "log(k)",
+      "static_tag": false,
+      "text": "log_k = log(k)"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "log_kg",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "endogenous",
+          "name": "kg",
+          "timing": 0,
+          "timing_class": "predetermined"
+        }
+      ],
+      "index": 13,
+      "lhs": "log_kg",
+      "name": "log public capital",
+      "rhs": "log(kg)",
+      "static_tag": false,
+      "text": "log_kg = log(kg)"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "log_ig",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "endogenous",
+          "name": "ig",
+          "timing": 0,
+          "timing_class": "predetermined"
+        }
+      ],
+      "index": 14,
+      "lhs": "log_ig",
+      "name": "log government investment",
+      "rhs": "log(ig)",
+      "static_tag": false,
+      "text": "log_ig = log(ig)"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "log_n",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "endogenous",
+          "name": "n",
+          "timing": 0,
+          "timing_class": "static"
+        }
+      ],
+      "index": 15,
+      "lhs": "log_n",
+      "name": "log labor",
+      "rhs": "log(n)",
+      "static_tag": false,
+      "text": "log_n = log(n)"
+    }
+  ]
+}

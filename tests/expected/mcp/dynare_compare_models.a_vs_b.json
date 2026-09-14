@@ -1,0 +1,43 @@
+{
+  "added_endogenous": [
+    "n"
+  ],
+  "added_equations": [
+    {
+      "index": 1,
+      "text": "n = rho*n(-1)+u"
+    }
+  ],
+  "added_exogenous": [
+    "u"
+  ],
+  "added_parameters": [
+    "rho"
+  ],
+  "changed_equations": [],
+  "changed_parameter_values": [],
+  "common_endogenous": [
+    "c"
+  ],
+  "common_exogenous": [],
+  "common_parameters": [
+    "betta"
+  ],
+  "markdown": "# Model diff\n\n## Added endogenous\n- n\n\n## Removed endogenous\n- k\n\n## Added exogenous\n- u\n\n## Removed exogenous\n- e\n\n## Added parameters\n- rho\n\n## Removed parameters\n- alpha\n- delta\n\n## Added equations\n- [1] `n = rho*n(-1)+u`\n\n## Removed equations\n- [1] `k =(1-delta)*k(-1)+e`\n",
+  "removed_endogenous": [
+    "k"
+  ],
+  "removed_equations": [
+    {
+      "index": 1,
+      "text": "k =(1-delta)*k(-1)+e"
+    }
+  ],
+  "removed_exogenous": [
+    "e"
+  ],
+  "removed_parameters": [
+    "alpha",
+    "delta"
+  ]
+}

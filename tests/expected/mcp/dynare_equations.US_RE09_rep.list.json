@@ -1,0 +1,106 @@
+{
+  "count_gap": {
+    "delta": 0,
+    "expected_delta": null,
+    "n_endogenous": 19,
+    "n_equations": 19,
+    "unreferenced_endogenous": []
+  },
+  "equations": [
+    {
+      "index": 0,
+      "name": "",
+      "text": "y = a+beta*l"
+    },
+    {
+      "index": 1,
+      "name": "",
+      "text": "z = p+(beta*(w-p)+(1-beta)*y-a)/(beta+nu*(1-beta))-(beta*nuu)/((nu-1)*(beta+nu*(1-beta)))"
+    },
+    {
+      "index": 2,
+      "name": "",
+      "text": "p = lambda*(+z++EXPECTATION(-1)(z)*((1-lambda)^(1))+EXPECTATION(-2)(z)*((1-lambda)^(2))+EXPECTATION(-3)(z)*((1-lambda)^(3))+EXPECTATION(-4)(z)*((1-lambda)^(4))+EXPECTATION(-5)(z)*((1-lambda)^(5))+EXPECTATION(-6)(z)*((1-lambda)^(6))+EXPECTATION(-7)(z)*((1-lambda)^(7))+EXPECTATION(-8)(z)*((1-lambda)^(8))+EXPECTATION(-9)(z)*((1-lambda)^(9))+EXPECTATION(-10)(z)*((1-lambda)^(10))+EXPECTATION(-11)(z)*((1-lambda)^(11))+EXPECTATION(-12)(z)*((1-lambda)^(12))+EXPECTATION(-13)(z)*((1-lambda)^(13))+EXPECTATION(-14)(z)*((1-lambda)^(14))+EXPECTATION(-15)(z)*((1-lambda)^(15))+EXPECTATION(-16)(z)*((1-lambda)^(16)))"
+    },
+    {
+      "index": 3,
+      "name": "",
+      "text": "R = i-(p(+1)-p)+R(+1)"
+    },
+    {
+      "index": 4,
+      "name": "",
+      "text": "yinfn = y(100)"
+    },
+    {
+      "index": 5,
+      "name": "",
+      "text": "zoutput = yinfn-theta*R"
+    },
+    {
+      "index": 6,
+      "name": "",
+      "text": "y = g+delta*(+zoutput++EXPECTATION(-1)(zoutput)*((1-delta)^(1))+EXPECTATION(-2)(zoutput)*((1-delta)^(2))+EXPECTATION(-3)(zoutput)*((1-delta)^(3))+EXPECTATION(-4)(zoutput)*((1-delta)^(4))+EXPECTATION(-5)(zoutput)*((1-delta)^(5))+EXPECTATION(-6)(zoutput)*((1-delta)^(6))+EXPECTATION(-7)(zoutput)*((1-delta)^(7))+EXPECTATION(-8)(zoutput)*((1-delta)^(8))+EXPECTATION(-9)(zoutput)*((1-delta)^(9))+EXPECTATION(-10)(zoutput)*((1-delta)^(10))+EXPECTATION(-11)(zoutput)*((1-delta)^(11))+EXPECTATION(-12)(zoutput)*((1-delta)^(12))+EXPECTATION(-13)(zoutput)*((1-delta)^(13))+EXPECTATION(-14)(zoutput)*((1-delta)^(14))+EXPECTATION(-15)(zoutput)*((1-delta)^(15))+EXPECTATION(-16)(zoutput)*((1-delta)^(16)))"
+    },
+    {
+      "index": 7,
+      "name": "",
+      "text": "zwage = p+gamma*(w-p)/(gamma+psi)+l/(gamma+psi)+psi*(yinfn-theta*R)/(theta*(gamma+psi))-psi*gam/((gamma+psi)*(gamma-1))"
+    },
+    {
+      "index": 8,
+      "name": "",
+      "text": "w = omega*(+zwage++EXPECTATION(-1)(zwage)*((1-omega)^(1))+EXPECTATION(-2)(zwage)*((1-omega)^(2))+EXPECTATION(-3)(zwage)*((1-omega)^(3))+EXPECTATION(-4)(zwage)*((1-omega)^(4))+EXPECTATION(-5)(zwage)*((1-omega)^(5))+EXPECTATION(-6)(zwage)*((1-omega)^(6))+EXPECTATION(-7)(zwage)*((1-omega)^(7))+EXPECTATION(-8)(zwage)*((1-omega)^(8))+EXPECTATION(-9)(zwage)*((1-omega)^(9))+EXPECTATION(-10)(zwage)*((1-omega)^(10))+EXPECTATION(-11)(zwage)*((1-omega)^(11))+EXPECTATION(-12)(zwage)*((1-omega)^(12))+EXPECTATION(-13)(zwage)*((1-omega)^(13))+EXPECTATION(-14)(zwage)*((1-omega)^(14))+EXPECTATION(-15)(zwage)*((1-omega)^(15))+EXPECTATION(-16)(zwage)*((1-omega)^(16)))"
+    },
+    {
+      "index": 9,
+      "name": "",
+      "text": "pi = p-p(-1)"
+    },
+    {
+      "index": 10,
+      "name": "",
+      "text": "i = phi_y*(y-yclas)+phi_pi*pi-eps"
+    },
+    {
+      "index": 11,
+      "name": "",
+      "text": "yclas = a+beta*psi/(1+psi)*(g+gam/(gamma-1)+nuu/(nu-1))"
+    },
+    {
+      "index": 12,
+      "name": "",
+      "text": "deltaa = a-a(-1)"
+    },
+    {
+      "index": 13,
+      "name": "",
+      "text": "outputgap = y-yclas"
+    },
+    {
+      "index": 14,
+      "name": "",
+      "text": "eps = rho_eps*eps(-1)+e_eps"
+    },
+    {
+      "index": 15,
+      "name": "",
+      "text": "deltaa = rho_deltaa*deltaa(-1)+e_deltaa"
+    },
+    {
+      "index": 16,
+      "name": "",
+      "text": "g = rho_g*g(-1)+e_g"
+    },
+    {
+      "index": 17,
+      "name": "",
+      "text": "nuu = rho_nuu*nuu(-1)+e_nuu"
+    },
+    {
+      "index": 18,
+      "name": "",
+      "text": "gam = rho_gam*gam(-1)+e_gam"
+    }
+  ]
+}

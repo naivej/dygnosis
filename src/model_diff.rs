@@ -5,7 +5,8 @@ use std::collections::{HashMap, HashSet};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::model::{Assignment, Decl, Equation, Model};
+use crate::equations::{equations, EquationRow};
+use crate::model::{Assignment, Decl, Model};
 use crate::model_info::assigned_number;
 
 const VALUE_TOL: f64 = 1e-12;
@@ -24,10 +25,17 @@ pub struct ParameterChange {
 /// Near-match pairing of one removed and one added equation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct EquationChange {
-    pub old_text: String,
-    pub new_text: String,
-    pub line_old: u32,
-    pub line_new: u32,
+    pub index_old: usize,
+    pub index_new: usize,
+    pub text_old: String,
+    pub text_new: String,
+}
+
+/// One counted equation in an add/remove list. `index` is the equation-object identity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct IndexedEquation {
+    pub index: usize,
+    pub text: String,
 }
 
 /// Structural diff. JSON has no computed steady-state keys.
@@ -43,15 +51,18 @@ pub struct ModelDiff {
     pub removed_parameters: Vec<String>,
     pub common_parameters: Vec<String>,
     pub changed_parameter_values: Vec<ParameterChange>,
-    pub added_equations: Vec<String>,
-    pub removed_equations: Vec<String>,
-    pub common_equations: Vec<String>,
+    pub added_equations: Vec<IndexedEquation>,
+    pub removed_equations: Vec<IndexedEquation>,
     pub changed_equations: Vec<EquationChange>,
 }
 
 impl ModelDiff {
     pub fn to_json(&self) -> Value {
-        serde_json::to_value(self).unwrap_or(Value::Null)
+        let mut v = serde_json::to_value(self).unwrap_or(Value::Null);
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert("markdown".to_string(), Value::String(self.to_markdown()));
+        }
+        v
     }
 
     pub fn to_markdown(&self) -> String {
@@ -95,8 +106,8 @@ impl ModelDiff {
             lines.push("## Changed equations".into());
             for e in &self.changed_equations {
                 lines.push(format!(
-                    "- L{} -> L{}: `{}` -> `{}`",
-                    e.line_old, e.line_new, e.old_text, e.new_text
+                    "- [{} -> {}]: `{}` -> `{}`",
+                    e.index_old, e.index_new, e.text_old, e.text_new
                 ));
             }
         }
@@ -105,7 +116,7 @@ impl ModelDiff {
             lines.push(String::new());
             lines.push("## Added equations".into());
             for eq in &self.added_equations {
-                lines.push(format!("- `{eq}`"));
+                lines.push(format!("- [{}] `{}`", eq.index, eq.text));
             }
         }
 
@@ -113,7 +124,7 @@ impl ModelDiff {
             lines.push(String::new());
             lines.push("## Removed equations".into());
             for eq in &self.removed_equations {
-                lines.push(format!("- `{eq}`"));
+                lines.push(format!("- [{}] `{}`", eq.index, eq.text));
             }
         }
 
@@ -138,7 +149,7 @@ pub fn compare_models(model_a: &Model, model_b: &Model) -> ModelDiff {
     let common_params: HashSet<String> = par_a.intersection(&par_b).cloned().collect();
     let changed_parameter_values = changed_params(model_a, model_b, &common_params);
 
-    let (added_eq, removed_eq, common_eq, changed_eq) = diff_equations(model_a, model_b);
+    let (added_eq, removed_eq, changed_eq) = diff_equations(model_a, model_b);
 
     ModelDiff {
         added_endogenous: sorted_diff(&end_b, &end_a),
@@ -153,7 +164,6 @@ pub fn compare_models(model_a: &Model, model_b: &Model) -> ModelDiff {
         changed_parameter_values,
         added_equations: added_eq,
         removed_equations: removed_eq,
-        common_equations: common_eq,
         changed_equations: changed_eq,
     }
 }
@@ -237,35 +247,31 @@ fn normalize_equation(text: &str) -> String {
     s.trim_end_matches(';').trim().to_string()
 }
 
-fn eq_line(model: &Model, eq: &Equation) -> u32 {
-    crate::span::LineIndex::new(&model.source)
-        .position(&model.source, eq.span.start)
-        .line
-        + 1
-}
-
 fn diff_equations(
     a: &Model,
     b: &Model,
-) -> (Vec<String>, Vec<String>, Vec<String>, Vec<EquationChange>) {
-    let mut norm_a: HashMap<String, Vec<&Equation>> = HashMap::new();
-    for eq in &a.equations {
-        let key = normalize_equation(&eq.text);
+) -> (
+    Vec<IndexedEquation>,
+    Vec<IndexedEquation>,
+    Vec<EquationChange>,
+) {
+    let mut norm_a: HashMap<String, Vec<EquationRow>> = HashMap::new();
+    for row in equations(a) {
+        let key = normalize_equation(&row.text);
         if !key.is_empty() {
-            norm_a.entry(key).or_default().push(eq);
+            norm_a.entry(key).or_default().push(row);
         }
     }
-    let mut norm_b: HashMap<String, Vec<&Equation>> = HashMap::new();
-    for eq in &b.equations {
-        let key = normalize_equation(&eq.text);
+    let mut norm_b: HashMap<String, Vec<EquationRow>> = HashMap::new();
+    for row in equations(b) {
+        let key = normalize_equation(&row.text);
         if !key.is_empty() {
-            norm_b.entry(key).or_default().push(eq);
+            norm_b.entry(key).or_default().push(row);
         }
     }
 
     let keys_a: HashSet<String> = norm_a.keys().cloned().collect();
     let keys_b: HashSet<String> = norm_b.keys().cloned().collect();
-    let common: Vec<String> = sorted_intersect(&keys_a, &keys_b);
 
     let mut leftover_removed = Vec::new();
     let mut leftover_added = Vec::new();
@@ -274,37 +280,40 @@ fn diff_equations(
         let nb = norm_b.get(key).map(|v| v.len()).unwrap_or(0);
         let shared = na.min(nb);
         if let Some(list) = norm_a.get(key) {
-            leftover_removed.extend(list.iter().skip(shared).copied());
+            leftover_removed.extend(list.iter().skip(shared).cloned());
         }
         if let Some(list) = norm_b.get(key) {
-            leftover_added.extend(list.iter().skip(shared).copied());
+            leftover_added.extend(list.iter().skip(shared).cloned());
         }
     }
 
     let (changed, leftover_removed, leftover_added) =
-        pair_changed(a, b, leftover_removed, leftover_added);
+        pair_changed(leftover_removed, leftover_added);
 
-    let added: Vec<String> = leftover_added
+    let mut added: Vec<IndexedEquation> = leftover_added
         .into_iter()
-        .map(|e| normalize_equation(&e.text))
+        .map(|e| IndexedEquation {
+            index: e.index,
+            text: e.text,
+        })
         .collect();
-    let mut added = added;
-    added.sort();
-    let mut removed: Vec<String> = leftover_removed
+    added.sort_by_key(|e| e.index);
+    let mut removed: Vec<IndexedEquation> = leftover_removed
         .into_iter()
-        .map(|e| normalize_equation(&e.text))
+        .map(|e| IndexedEquation {
+            index: e.index,
+            text: e.text,
+        })
         .collect();
-    removed.sort();
+    removed.sort_by_key(|e| e.index);
 
-    (added, removed, common, changed)
+    (added, removed, changed)
 }
 
-fn pair_changed<'a>(
-    model_a: &Model,
-    model_b: &Model,
-    removed: Vec<&'a Equation>,
-    added: Vec<&'a Equation>,
-) -> (Vec<EquationChange>, Vec<&'a Equation>, Vec<&'a Equation>) {
+fn pair_changed(
+    removed: Vec<EquationRow>,
+    added: Vec<EquationRow>,
+) -> (Vec<EquationChange>, Vec<EquationRow>, Vec<EquationRow>) {
     if removed.is_empty() || added.is_empty() {
         return (Vec::new(), removed, added);
     }
@@ -335,20 +344,20 @@ fn pair_changed<'a>(
         used_r.insert(i);
         used_a.insert(j);
         changes.push(EquationChange {
-            old_text: normalize_equation(&removed[i].text),
-            new_text: normalize_equation(&added[j].text),
-            line_old: eq_line(model_a, removed[i]),
-            line_new: eq_line(model_b, added[j]),
+            index_old: removed[i].index,
+            index_new: added[j].index,
+            text_old: removed[i].text.clone(),
+            text_new: added[j].text.clone(),
         });
     }
-    changes.sort_by_key(|c| (c.line_old, c.line_new));
-    let leftover_removed: Vec<&Equation> = removed
+    changes.sort_by_key(|c| (c.index_old, c.index_new));
+    let leftover_removed: Vec<EquationRow> = removed
         .into_iter()
         .enumerate()
         .filter(|(i, _)| !used_r.contains(i))
         .map(|(_, e)| e)
         .collect();
-    let leftover_added: Vec<&Equation> = added
+    let leftover_added: Vec<EquationRow> = added
         .into_iter()
         .enumerate()
         .filter(|(i, _)| !used_a.contains(i))
@@ -478,5 +487,85 @@ end;
         );
         assert!(!json_has_ss_key(&diff.to_json()));
         assert!(diff.to_markdown().contains("betta"));
+    }
+
+    #[test]
+    fn compare_json_has_indexed_equations_no_commons() {
+        let a = parse(MODEL_A);
+        let b = parse(MODEL_B);
+        let json = compare_models(&a, &b).to_json();
+        assert!(json.get("common_equations").is_none());
+        assert!(json.get("markdown").and_then(|v| v.as_str()).is_some());
+        for key in ["added_equations", "removed_equations"] {
+            let rows = json[key].as_array().expect(key);
+            for row in rows {
+                assert!(
+                    row.get("index").and_then(|v| v.as_u64()).is_some(),
+                    "{key} {row}"
+                );
+                assert!(
+                    row.get("text").and_then(|v| v.as_str()).is_some(),
+                    "{key} {row}"
+                );
+            }
+        }
+        let blob = json.to_string();
+        assert!(
+            !blob.contains("c = betta*c(+1)") && !blob.contains("c=betta*c(+1)"),
+            "common Euler must be absent from compare JSON: {blob}"
+        );
+        assert!(json["changed_equations"]
+            .as_array()
+            .expect("changed")
+            .is_empty());
+        let added = json["added_equations"].as_array().expect("added");
+        let removed = json["removed_equations"].as_array().expect("removed");
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0]["index"], 1);
+        assert_eq!(added[0]["text"], "n = rho*n(-1)+u");
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0]["index"], 1);
+        assert_eq!(removed[0]["text"], "k =(1-delta)*k(-1)+e");
+        let md = json["markdown"].as_str().expect("markdown");
+        assert!(md.contains("[1]"), "markdown must show indexes: {md}");
+    }
+
+    #[test]
+    fn compare_skips_locals_and_static() {
+        let base = "\
+var y x;
+model;
+# helper = 1;
+[static] x = 0;
+y = 1;
+end;
+";
+        let edited = base.replace("y = 1;", "y = 2;");
+        let json = compare_models(&parse(base), &parse(&edited)).to_json();
+        let blob = json.to_string();
+        assert!(!blob.contains("helper"), "locals must be omitted: {blob}");
+        assert!(!blob.contains("x = 0"), "[static] must be omitted: {blob}");
+        let changed = json["changed_equations"].as_array().expect("changed");
+        assert_eq!(changed.len(), 1, "{json}");
+        assert_eq!(changed[0]["index_old"], 0);
+        assert_eq!(changed[0]["index_new"], 0);
+        assert_eq!(changed[0]["text_old"].as_str().expect("old"), "y = 1");
+        assert_eq!(changed[0]["text_new"].as_str().expect("new"), "y = 2");
+        let md = json["markdown"].as_str().expect("markdown");
+        assert!(md.contains("[0 -> 0]"), "changed indexes in markdown: {md}");
+    }
+
+    #[test]
+    fn compare_near_match_keeps_index_zero() {
+        let a = "var y;\nmodel;\ny = 0.5*y(-1);\nend;\n";
+        let b = "var y;\nmodel;\ny = 0.6*y(-1);\nend;\n";
+        let json = compare_models(&parse(a), &parse(b)).to_json();
+        assert!(json.get("common_equations").is_none());
+        let changed = json["changed_equations"].as_array().expect("changed");
+        assert_eq!(changed.len(), 1, "{json}");
+        assert_eq!(changed[0]["index_old"], 0);
+        assert_eq!(changed[0]["index_new"], 0);
+        assert_eq!(json["added_equations"].as_array().unwrap().len(), 0);
+        assert_eq!(json["removed_equations"].as_array().unwrap().len(), 0);
     }
 }

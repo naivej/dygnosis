@@ -68,7 +68,7 @@ pub use expr::{BinOp, Expr, ExprArena, ExprId, ExprKind, IdentRef, UnOp};
 pub use format::{format_range, format_text};
 pub use include_resolver::{find_workspace_root, resolve_include_path};
 pub use mcp::{
-    dynare_auto_fix, dynare_compare_models, dynare_diagnose, dynare_explain,
+    dynare_auto_fix, dynare_compare_models, dynare_diagnose, dynare_equations, dynare_explain,
     dynare_find_references, dynare_list_diagnostic_codes, dynare_list_options, dynare_model_info,
     dynare_rename, registered_tool_names, tools_list_json, DiagnosticCodeItem, McpDiagnostic,
     McpReference, McpWorkspaceReference,
@@ -78,7 +78,7 @@ pub use model::{
     MacroDirective, MacroInterp, Model, ObservedVar, ParseIssue, ParseIssueKind, ParseSummary,
     PolicyCommand, ShockKind, ShockStmt, ShocksSemiFamily,
 };
-pub use model_diff::{compare_models, EquationChange, ModelDiff, ParameterChange};
+pub use model_diff::{compare_models, EquationChange, IndexedEquation, ModelDiff, ParameterChange};
 pub use model_info::{
     assigned_number, classify_variable_timing, format_structure_lens, format_timing_line,
     structure_summary, StructureSummary, TimingClass, TimingInfo,

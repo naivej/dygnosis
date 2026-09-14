@@ -581,6 +581,16 @@
       "notes": "library equation object: named eq, lead/lag, # and [static] skip index"
     },
     {
+      "id": "equations_tags_dup_name",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "tests/fixtures/equations/tags.mod",
+      "source": "mcp.rs::dynare_equations_tags_duplicate_name",
+      "cluster": "equations/tags.mod",
+      "notes": "JC9: two counted rows share [name=policy]"
+    },
+    {
       "id": "e030_unmodified_trend_rbc_gov_inv",
       "codes": [
         "E030",
@@ -4009,6 +4019,16 @@
       "source": "lsp.rs",
       "cluster": "",
       "notes": "LSP transport on archives"
+    },
+    {
+      "id": "lsp_outline_timing",
+      "codes": [],
+      "kind": "harness",
+      "package": "other",
+      "fixture": "tests/fixtures/lsp/outline_timing.mod",
+      "source": "lsp.rs::document_symbols_omit_empty_timing_groups",
+      "cluster": "lsp/outline_timing.mod",
+      "notes": "outline: mixed present, forward-looking omitted; static order w, a, u"
     },
     {
       "id": "other_mcp",

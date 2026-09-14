@@ -25,6 +25,8 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 | `w130/` | steady-state assignment order, `model(linear)`, `bytecode` / `simul` options |
 | `format/` | ugly spacing / macros / `verbatim`. Pair is `name.mod` plus `name.formatted.mod`. No `// inventory:` line. |
 | `check_dir/` | a tree for `dygnosis check DIR` (recurse `*.mod`, skip `+` directories; explicit `.inc` still as FILE) |
+| `equations/` | counted equation object (library reader + MCP duplicate `[name=]` tag) |
+| `lsp/` | document-symbol outline (timing-class groups; empty group omitted) |
 
 `e001/` files stop later checks (`analyze()` stops at a parse error). Do not use them to prove a W* warning.
 

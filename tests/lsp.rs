@@ -508,23 +508,55 @@ fn completion_labels(resp: CompletionResponse) -> Vec<String> {
 }
 
 #[allow(deprecated)]
-fn symbol_names(resp: DocumentSymbolResponse) -> Vec<String> {
-    fn walk(syms: &[DocumentSymbol], out: &mut Vec<String>) {
-        for s in syms {
-            out.push(s.name.clone());
-            if let Some(children) = &s.children {
-                walk(children, out);
-            }
-        }
-    }
+fn nested_symbols(resp: DocumentSymbolResponse) -> Vec<DocumentSymbol> {
     match resp {
-        DocumentSymbolResponse::Nested(syms) => {
-            let mut out = Vec::new();
-            walk(&syms, &mut out);
-            out
-        }
-        DocumentSymbolResponse::Flat(info) => info.into_iter().map(|s| s.name).collect(),
+        DocumentSymbolResponse::Nested(syms) => syms,
+        DocumentSymbolResponse::Flat(_) => panic!("expected Nested document symbols, got Flat"),
     }
+}
+
+fn top_level_names(syms: &[DocumentSymbol]) -> Vec<&str> {
+    syms.iter().map(|s| s.name.as_str()).collect()
+}
+
+fn child_names<'a>(syms: &'a [DocumentSymbol], parent: &str) -> Vec<&'a str> {
+    let parent_sym = syms
+        .iter()
+        .find(|s| s.name == parent)
+        .unwrap_or_else(|| panic!("missing outline parent {parent:?}"));
+    parent_sym
+        .children
+        .as_ref()
+        .map(|c| c.iter().map(|s| s.name.as_str()).collect())
+        .unwrap_or_default()
+}
+
+fn assert_no_symbol_named(syms: &[DocumentSymbol], forbidden: &str) {
+    for s in syms {
+        assert_ne!(
+            s.name.as_str(),
+            forbidden,
+            "outline still has {forbidden:?}"
+        );
+        if let Some(children) = &s.children {
+            assert_no_symbol_named(children, forbidden);
+        }
+    }
+}
+
+fn fixture_mod(rel: &str) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(rel);
+    path.canonicalize()
+        .unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()))
+}
+
+fn read_fixture_mod(rel: &str) -> String {
+    let path = fixture_mod(rel);
+    fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("fixture missing at {}: {e}", path.display()))
+        .replace("\r\n", "\n")
 }
 
 fn slice_range(text: &str, range: Range) -> String {
@@ -709,7 +741,7 @@ async fn hover_stoch_simul_option() {
 }
 
 #[tokio::test]
-async fn document_symbols_have_var_varexo_parameters() {
+async fn document_symbols_timing_class_groups() {
     let text = read_mod("trend_rbc_gov_inv");
     let uri = archive_url("trend_rbc_gov_inv");
     let (service, _socket) = new_service();
@@ -727,30 +759,81 @@ async fn document_symbols_have_var_varexo_parameters() {
         .await
         .expect("symbols rpc")
         .expect("symbols");
-    let names = symbol_names(resp);
-    let joined = names.join(" | ");
-    assert!(
-        names
-            .iter()
-            .any(|n| n.contains("var") && n.contains("endogenous"))
-            || names.iter().any(|n| n == "y" || n == "c"),
-        "outline missing var/endogenous: {joined}"
+    let nested = nested_symbols(resp);
+    assert_eq!(
+        top_level_names(&nested),
+        [
+            "predetermined",
+            "forward-looking",
+            "static",
+            "varexo (exogenous)",
+            "parameters",
+            "model",
+        ]
+    );
+    assert_no_symbol_named(&nested, "var (endogenous)");
+    assert_eq!(
+        child_names(&nested, "predetermined"),
+        ["k", "ig", "kg", "z"]
+    );
+    assert_eq!(child_names(&nested, "forward-looking"), ["c", "rk"]);
+    assert_eq!(
+        child_names(&nested, "static"),
+        ["y", "n", "invest", "w", "log_y", "log_c", "log_k", "log_kg", "log_ig", "log_n"]
     );
     assert!(
-        names
-            .iter()
-            .any(|n| n.contains("varexo") || n.contains("exogenous"))
-            || names.iter().any(|n| n.starts_with("eps_")),
-        "outline missing varexo/exogenous: {joined}"
+        nested.iter().all(|s| s.name != "mixed"),
+        "empty mixed group must be omitted"
     );
+}
+
+#[tokio::test]
+async fn document_symbols_omit_empty_timing_groups() {
+    let text = read_fixture_mod("lsp/outline_timing.mod");
+    let path = fixture_mod("lsp/outline_timing.mod");
+    let uri = file_url(&path);
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let resp = service
+        .inner()
+        .document_symbol(DocumentSymbolParams {
+            text_document: TextDocumentIdentifier { uri },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("symbols rpc")
+        .expect("symbols");
+    let nested = nested_symbols(resp);
+    assert_eq!(
+        top_level_names(&nested),
+        [
+            "predetermined",
+            "mixed",
+            "static",
+            "varexo (exogenous)",
+            "parameters",
+            "model",
+        ]
+    );
+    assert_no_symbol_named(&nested, "var (endogenous)");
     assert!(
-        names.iter().any(|n| n == "parameters" || n == "betta"),
-        "outline missing parameters: {joined}"
+        nested.iter().all(|s| s.name != "forward-looking"),
+        "empty forward-looking group must be omitted"
     );
-    assert!(
-        names.iter().any(|n| n == "model"),
-        "outline missing model equations: {joined}"
-    );
+    assert_eq!(child_names(&nested, "predetermined"), ["y"]);
+    assert_eq!(child_names(&nested, "mixed"), ["k"]);
+    assert_eq!(child_names(&nested, "static"), ["w", "a", "u"]);
+    let model = dygnosis::parse(&text);
+    let model_children = nested
+        .iter()
+        .find(|s| s.name == "model")
+        .and_then(|s| s.children.as_ref())
+        .expect("model children");
+    assert_eq!(model_children.len(), model.equations.len());
 }
 
 #[tokio::test]

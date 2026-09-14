@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use crate::auto_fix::auto_fix;
 use crate::catalog::list_options;
 use crate::diagnostic::{analyze, check_in_workspace, Diagnostic, Severity};
+use crate::equations::{count_gap, equations, explain_equation, CountGap, EquationRow};
 use crate::explain;
 use crate::include_resolver::normalize_uri;
 use crate::model::Model;
@@ -69,6 +70,10 @@ const TOOLS: &[(&str, &str)] = &[
     (
         "dynare_list_options",
         "List valid options for a Dynare command, or list known commands when omitted.",
+    ),
+    (
+        "dynare_equations",
+        "List counted model equations with lhs, rhs, idents, and the equation-count gap. Optional name or index also returns explain markdown.",
     ),
 ];
 
@@ -188,6 +193,99 @@ pub fn dynare_model_info(
     model_info_json(&mcp_parse_model(file_content, active_file, files, false))
 }
 
+/// Counted model equations plus the whole-file count gap. Optional `name` or
+/// `index` also attaches per-row explain markdown. Include map: same as
+/// `dynare_model_info` (`synthesize_missing_active = false`).
+pub fn dynare_equations(
+    file_content: &str,
+    active_file: Option<&str>,
+    files: Option<&HashMap<String, String>>,
+    name: Option<&str>,
+    index: Option<usize>,
+) -> Value {
+    let model = mcp_parse_model(file_content, active_file, files, false);
+    let rows = equations(&model);
+    let gap = count_gap(&model);
+    let mut out = json!({
+        "equations": [],
+        "count_gap": count_gap_json(&gap),
+    });
+    match (name, index) {
+        (Some(_), Some(_)) => {
+            out["message"] = json!("name and index must not both be set");
+        }
+        (None, None) => {
+            out["equations"] = Value::Array(
+                rows.iter()
+                    .map(|row| equation_row_json(row, false))
+                    .collect(),
+            );
+        }
+        (Some(want), None) => {
+            let hits: Vec<&EquationRow> = rows.iter().filter(|row| row.name == want).collect();
+            if hits.is_empty() {
+                out["message"] = json!(format!("no equation named '{want}'"));
+            } else {
+                out["equations"] = Value::Array(
+                    hits.into_iter()
+                        .map(|row| equation_row_json(row, true))
+                        .collect(),
+                );
+            }
+        }
+        (None, Some(i)) => {
+            if i >= rows.len() {
+                out["message"] = json!(format!("index {i} is out of range (0..{})", rows.len()));
+            } else {
+                out["equations"] = json!([equation_row_json(&rows[i], true)]);
+            }
+        }
+    }
+    out
+}
+
+fn count_gap_json(gap: &CountGap) -> Value {
+    json!({
+        "n_endogenous": gap.n_endogenous,
+        "n_equations": gap.n_equations,
+        "delta": gap.delta,
+        "unreferenced_endogenous": gap.unreferenced_endogenous,
+        "expected_delta": gap.expected_delta,
+    })
+}
+
+fn equation_row_json(row: &EquationRow, with_explain: bool) -> Value {
+    let idents: Vec<Value> = row
+        .idents
+        .iter()
+        .map(|id| {
+            let mut v = json!({
+                "name": id.name,
+                "timing": id.timing,
+                "class": id.class.as_str(),
+            });
+            if let Some(tc) = id.timing_class {
+                v["timing_class"] = json!(tc.label());
+            }
+            v
+        })
+        .collect();
+    let mut v = json!({
+        "index": row.index,
+        "name": row.name,
+        "text": row.text,
+        "lhs": row.lhs,
+        "rhs": row.rhs,
+        "static_tag": row.static_tag,
+        "dynamic_tag": row.dynamic_tag,
+        "idents": idents,
+    });
+    if with_explain {
+        v["explain"] = json!(explain_equation(row));
+    }
+    v
+}
+
 /// Structural `compare_models` JSON. No solver / steady-state keys.
 pub fn dynare_compare_models(
     file_content_a: &str,
@@ -296,11 +394,7 @@ fn model_info_json(model: &Model) -> Value {
         "exogenous": exogenous,
         "n_parameters": parameters.len(),
         "parameters": parameters,
-        "n_equations": model
-            .equations
-            .iter()
-            .filter(|eq| !eq.is_local && !eq.static_tag)
-            .count(),
+        "n_equations": count_gap(model).n_equations,
         "static": static_vars,
         "predetermined": predetermined,
         "forward_looking": forward_looking,
@@ -694,6 +788,20 @@ struct ListOptionsParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+struct EquationsParams {
+    #[serde(default)]
+    file_content: Option<String>,
+    #[serde(default)]
+    active_file: Option<String>,
+    #[serde(default)]
+    files: Option<HashMap<String, String>>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    index: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct FindReferencesParams {
     #[serde(default)]
     file_content: Option<String>,
@@ -894,6 +1002,45 @@ impl DygnosisMcp {
         Parameters(params): Parameters<ListOptionsParams>,
     ) -> CallToolResult {
         tool_json(dynare_list_options(params.command.as_deref()))
+    }
+
+    #[tool(
+        name = "dynare_equations",
+        description = "List counted model equations with lhs, rhs, idents, and the equation-count gap. Optional name or index also returns explain markdown."
+    )]
+    fn equations_tool(&self, Parameters(params): Parameters<EquationsParams>) -> CallToolResult {
+        let index = params.index.map(|i| i as usize);
+        let name = params.name.as_deref();
+        let payload = match nonempty_map(params.files.as_ref()) {
+            None => dynare_equations(
+                params.file_content.as_deref().unwrap_or(""),
+                None,
+                None,
+                name,
+                index,
+            ),
+            Some(files) => match params
+                .active_file
+                .as_deref()
+                .filter(|a| files.contains_key(*a))
+            {
+                Some(active) => {
+                    let content = params
+                        .file_content
+                        .as_deref()
+                        .unwrap_or_else(|| files[active].as_str());
+                    dynare_equations(content, Some(active), Some(files), name, index)
+                }
+                None => dynare_equations(
+                    params.file_content.as_deref().unwrap_or(""),
+                    None,
+                    Some(files),
+                    name,
+                    index,
+                ),
+            },
+        };
+        tool_json(payload)
     }
 }
 
