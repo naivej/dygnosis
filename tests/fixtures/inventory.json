@@ -4169,6 +4169,86 @@
       "source": "check.rs::check_dir_mixed_tree_recurses_mod_skips_plus_and_inc",
       "cluster": "check_dir",
       "notes": "tree; {files} = five .mod (not +foo, not .inc)"
+    },
+    {
+      "id": "companions_named_missing",
+      "codes": [],
+      "kind": "harness",
+      "package": "companions",
+      "fixture": "tests/fixtures/companions/named_missing.mod",
+      "source": "companions.rs::named_missing_unresolved_records_and_no_w160",
+      "cluster": "companions/named_missing.mod",
+      "notes": "named unresolved companion records; no W160 this slice"
+    },
+    {
+      "id": "companions_data_file",
+      "codes": [],
+      "kind": "harness",
+      "package": "companions",
+      "fixture": "tests/fixtures/companions/data_file.mod",
+      "source": "companions.rs::data_file_resolves_sibling_csv",
+      "cluster": "companions/data_file.mod",
+      "notes": "data(file=) resolved sibling csv"
+    },
+    {
+      "id": "companions_leftover_csv",
+      "codes": [],
+      "kind": "harness",
+      "package": "companions",
+      "fixture": "tests/fixtures/companions/leftover_csv.mod",
+      "source": "companions.rs::leftover_csv_is_datafile",
+      "cluster": "companions/leftover_csv.mod",
+      "notes": "quoted leftover csv record"
+    },
+    {
+      "id": "companions_dup_path",
+      "codes": [],
+      "kind": "harness",
+      "package": "companions",
+      "fixture": "tests/fixtures/companions/dup_path.mod",
+      "source": "companions.rs::dup_path_option_kind_wins",
+      "cluster": "companions/dup_path.mod",
+      "notes": "option plus quote same path; option kind wins"
+    },
+    {
+      "id": "companions_absent_convention",
+      "codes": [],
+      "kind": "harness",
+      "package": "companions",
+      "fixture": "tests/fixtures/companions/absent_convention.mod",
+      "source": "companions.rs::absent_convention_has_no_optional_records",
+      "cluster": "companions/absent_convention.mod",
+      "notes": "missing run_*.m / prior_restrictions / ident helper: no those records"
+    },
+    {
+      "id": "companions_ident_helper",
+      "codes": [],
+      "kind": "harness",
+      "package": "companions",
+      "fixture": "tests/fixtures/companions/ident_helper/ident_helper.mod",
+      "source": "companions.rs::ident_helper_present_is_helper_m",
+      "cluster": "companions/ident_helper",
+      "notes": "ident helper outside model resolves to sibling .m"
+    },
+    {
+      "id": "companions_ss_present",
+      "codes": [],
+      "kind": "harness",
+      "package": "companions",
+      "fixture": "tests/fixtures/companions/ss_present/ss_present.mod",
+      "source": "companions.rs::ss_present_records_convention_and_still_emits_i050",
+      "cluster": "companions/ss_present",
+      "notes": "convention _steadystate.m record; I050 still fires this slice"
+    },
+    {
+      "id": "companions_plus_pkg",
+      "codes": [],
+      "kind": "harness",
+      "package": "companions",
+      "fixture": "tests/fixtures/companions/plus_pkg/plus_pkg.mod",
+      "source": "companions.rs::plus_pkg_is_not_steady_state_file",
+      "cluster": "companions/plus_pkg",
+      "notes": "generated +FILENAME/steadystate.m is not convention SS"
     }
   ]
 }

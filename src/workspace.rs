@@ -1,14 +1,16 @@
-//! Workspace index for `@#include` resolution, cycles, and the effective model.
+//! Workspace index for `@#include` resolution, companion records, and the
+//! effective model.
 //!
-//! Overlay (editor/MCP in-memory text) beats disk. Include records (paths,
-//! spans, cycle chains, unresolved names) are stored here for slice 12; this
-//! module does not emit diagnostic codes.
+//! Overlay (editor/MCP in-memory text) beats disk. Include and companion
+//! records are stored here. This module does not emit diagnostic codes.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use crate::companion::{self, CompanionKind, CompanionRecord};
 use crate::include_resolver::{
-    normalize_separators, normalize_uri, path_key, resolve_include_path, uri_to_path,
+    normalize_separators, normalize_uri, path_key, resolve_companion_path, resolve_include_path,
+    uri_to_path,
 };
 use crate::model::{IncludeDirective, IncludePathDirective, Model};
 use crate::parser::parse;
@@ -63,6 +65,7 @@ pub struct Workspace {
     search_paths: Vec<PathBuf>,
     effective: HashMap<String, Model>,
     records: HashMap<String, IncludeRecords>,
+    companions: HashMap<String, Vec<CompanionRecord>>,
 }
 
 impl Workspace {
@@ -94,17 +97,19 @@ impl Workspace {
         );
         self.effective.remove(&key);
         self.records.remove(&key);
+        self.companions.remove(&key);
     }
 
     /// Drop this document so a later load can read disk again.
     ///
-    /// Clears every cached effective model and include-record map: other
-    /// roots may have spliced this file.
+    /// Clears every cached effective model, include-record map, and companion
+    /// cache: other roots may have spliced this file.
     pub fn remove_document(&mut self, uri: &str) {
         let key = normalize_uri(uri);
         self.docs.remove(&key);
         self.effective.clear();
         self.records.clear();
+        self.companions.clear();
     }
 
     /// Read `path` from disk (utf-8, then latin-1) unless an overlay exists.
@@ -127,6 +132,7 @@ impl Workspace {
         );
         self.effective.remove(&key);
         self.records.remove(&key);
+        self.companions.remove(&key);
         self.docs.get(&key).map(|d| &d.model)
     }
 
@@ -136,6 +142,7 @@ impl Workspace {
         }
         self.effective.clear();
         self.records.clear();
+        self.companions.clear();
     }
 
     pub fn set_search_paths(&mut self, paths: Vec<PathBuf>) {
@@ -148,6 +155,7 @@ impl Workspace {
         self.search_paths = deduped;
         self.effective.clear();
         self.records.clear();
+        self.companions.clear();
     }
 
     pub fn get_model(&self, uri: &str) -> Option<&Model> {
@@ -216,6 +224,16 @@ impl Workspace {
         self.records.get(&key)
     }
 
+    /// Companion records for the root `.mod` (convention + named mentions).
+    pub fn companion_records(&mut self, uri: &str) -> Option<&[CompanionRecord]> {
+        let key = self.ensure_loaded(uri)?;
+        if !self.companions.contains_key(&key) {
+            let records = self.build_companions(&key);
+            self.companions.insert(key.clone(), records);
+        }
+        self.companions.get(&key).map(|v| v.as_slice())
+    }
+
     fn ensure_loaded(&mut self, uri: &str) -> Option<String> {
         let key = normalize_uri(uri);
         if self.docs.contains_key(&key) {
@@ -272,6 +290,46 @@ impl Workspace {
         }
         let known = self.known_keys();
         resolve_include_path(filename, including_key, &paths, Some(&known))
+    }
+
+    fn resolve_companion_from_root(
+        &self,
+        root_key: &str,
+        name: &str,
+        extra_suffixes: &[&str],
+    ) -> Option<PathBuf> {
+        let mut paths = self.search_paths.clone();
+        if let Some(doc) = self.docs.get(root_key) {
+            paths = append_unique(&paths, &doc.includepath_dirs);
+        }
+        let known = self.known_keys();
+        resolve_companion_path(name, root_key, &paths, Some(&known), extra_suffixes)
+    }
+
+    fn build_companions(&self, root_key: &str) -> Vec<CompanionRecord> {
+        let Some(doc) = self.docs.get(root_key) else {
+            return Vec::new();
+        };
+        let source = doc.model.source.clone();
+        let model = doc.model.clone();
+        let stem = Path::new(root_key)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let convention = [
+            (
+                CompanionKind::SteadyStateFile,
+                format!("{stem}_steadystate.m"),
+            ),
+            (
+                CompanionKind::PriorRestrictions,
+                format!("{stem}_prior_restrictions.m"),
+            ),
+            (CompanionKind::RunScript, format!("run_{stem}.m")),
+        ];
+        companion::harvest(&source, &model, &convention, |name, extra| {
+            self.resolve_companion_from_root(root_key, name, extra)
+        })
     }
 
     fn walk_graph(&mut self, root_key: &str) -> IncludeRecords {

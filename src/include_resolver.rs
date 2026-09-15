@@ -105,6 +105,36 @@ pub fn resolve_include_path(
     match_unique_known_relative_path(&candidate_rel, &known)
 }
 
+/// Resolve a companion name as written, then `name + extra_suffixes` when it has no extension.
+pub fn resolve_companion_path(
+    name: &str,
+    including_file_uri_or_path: &str,
+    search_paths: &[PathBuf],
+    known_paths: Option<&HashSet<String>>,
+    extra_suffixes: &[&str],
+) -> Option<PathBuf> {
+    if let Some(path) =
+        resolve_include_path(name, including_file_uri_or_path, search_paths, known_paths)
+    {
+        return Some(path);
+    }
+    if Path::new(name).extension().is_some() {
+        return None;
+    }
+    for suffix in extra_suffixes {
+        let candidate = format!("{name}{suffix}");
+        if let Some(path) = resolve_include_path(
+            &candidate,
+            including_file_uri_or_path,
+            search_paths,
+            known_paths,
+        ) {
+            return Some(path);
+        }
+    }
+    None
+}
+
 fn matches_candidate(p: &Path, known: &HashSet<String>) -> bool {
     // A directory with the right name is not a Dynare include target.
     if p.is_file() {

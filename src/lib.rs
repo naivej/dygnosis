@@ -1,6 +1,7 @@
 //! Thin Dynare analysis library.
 //!
-//! Scope follows the 0.2.0 cut line in `dev_logs/0.2/0.2.0/masterplan.md`.
+//! Scope follows the 0.3.0 cut line in `dev_logs/0.3/0.3.0/masterplan.md`
+//! (companion records on top of the 0.2 analysis core).
 //! Dynare compute (steady state, BK, identification, MATLAB) stays out.
 
 pub mod auto_fix;
@@ -17,6 +18,7 @@ pub mod check_w110;
 pub mod check_w120;
 pub mod check_w130;
 mod command_skip;
+pub mod companion;
 mod diag_shape;
 pub mod diagnostic;
 pub mod e010;
@@ -59,6 +61,7 @@ pub use check_w100::check_w100;
 pub use check_w110::check_w110;
 pub use check_w120::{check_w120, check_w120_family, check_w121, check_w122};
 pub use check_w130::check_w130;
+pub use companion::{CompanionKind, CompanionRecord};
 pub use diagnostic::{analyze, check_file, format_check_lines, Diagnostic, Severity, TextEdit};
 pub use e010::check_e010;
 pub use equations::{
@@ -66,7 +69,7 @@ pub use equations::{
 };
 pub use expr::{BinOp, Expr, ExprArena, ExprId, ExprKind, IdentRef, UnOp};
 pub use format::{format_range, format_text};
-pub use include_resolver::{find_workspace_root, resolve_include_path};
+pub use include_resolver::{find_workspace_root, resolve_companion_path, resolve_include_path};
 pub use mcp::{
     dynare_auto_fix, dynare_compare_models, dynare_diagnose, dynare_equations, dynare_explain,
     dynare_find_references, dynare_list_diagnostic_codes, dynare_list_options, dynare_model_info,

@@ -27,6 +27,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 | `check_dir/` | a tree for `dygnosis check DIR` (recurse `*.mod`, skip `+` directories; explicit `.inc` still as FILE) |
 | `equations/` | counted equation object (library reader + MCP duplicate `[name=]` tag) |
 | `lsp/` | document-symbol outline (timing-class groups; empty group omitted) |
+| `companions/` | related files next to a `.mod` (convention SS / run script, catalog `datafile` / `mode_file`, leftover quotes, ident helpers). Records only in 0.3.0 P-companions; not W160. |
 
 `e001/` files stop later checks (`analyze()` stops at a parse error). Do not use them to prove a W* warning.
 
