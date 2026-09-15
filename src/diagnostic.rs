@@ -59,7 +59,7 @@ impl Diagnostic {
 /// Thin families for one parsed model. If `check_parse` is nonempty, return
 /// those E001 rows only (cascade). Otherwise concatenate equation-count (W013), E020, E030,
 /// shape, W010, E062–E065, W070, W090, W100, W110 (includes W060), W120, W130.
-/// E060 / E061 / W061 are workspace-only (`check_file`), not here.
+/// E060 / E061 / W061 / W160 and I050 quiet are workspace-only (`check_file`), not here.
 pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     let parse_diags = crate::check_parse::check_parse(model);
     if !parse_diags.is_empty() {
@@ -81,7 +81,7 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
-/// One-document workspace check: `analyze()` plus E060 / E061 / W061.
+/// One-document workspace check: `analyze()` plus E060 / E061 / W061 / W160 and I050 quiet.
 ///
 /// `abs_path` is the workspace key (includes resolve against that file's
 /// directory). Falls back to `analyze(&parse(text))` if setup fails.
@@ -107,6 +107,12 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<Vec<Diagnos
     diags.extend(crate::check_e060::check_e060(&records));
     diags.extend(crate::check_e060::check_e061(&records));
     diags.extend(crate::check_e060::check_w061(ws, abs_path));
+    let companions = ws
+        .companion_records(abs_path)
+        .map(|r| r.to_vec())
+        .unwrap_or_default();
+    diags.extend(crate::check_w160::check_w160(&companions));
+    crate::check_w160::quiet_i050(&mut diags, &companions);
     Some(diags)
 }
 

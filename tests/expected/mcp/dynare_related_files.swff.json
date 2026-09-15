@@ -1,0 +1,12 @@
+[
+  {
+    "filename": "swff_params.inc",
+    "kind": "include",
+    "resolved": true
+  },
+  {
+    "filename": "run_swff.m",
+    "kind": "run_script",
+    "resolved": true
+  }
+]

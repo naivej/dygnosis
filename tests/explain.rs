@@ -8,7 +8,7 @@ const RUST_CODES: &[&str] = &[
     "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E111", "E130", "E999",
     "I050", "P000", "W010", "W011", "W012", "W013", "W020", "W022", "W031", "W042", "W051", "W052",
     "W054", "W055", "W056", "W057", "W060", "W061", "W070", "W091", "W092", "W094", "W102", "W110",
-    "W112", "W120", "W121", "W122", "W131", "W140", "W150",
+    "W112", "W120", "W121", "W122", "W131", "W140", "W150", "W160",
 ];
 
 const SKIP: &[&str] = &[
@@ -57,9 +57,9 @@ fn stderr_text(output: &std::process::Output) -> String {
 }
 
 #[test]
-fn known_codes_is_exactly_the_55_rust_keys() {
+fn known_codes_is_exactly_the_56_rust_keys() {
     assert_eq!(known_codes(), RUST_CODES);
-    assert_eq!(known_codes().len(), 55);
+    assert_eq!(known_codes().len(), 56);
 }
 
 #[test]
@@ -206,7 +206,7 @@ fn cli_explain_list() {
         entries.push((code, title));
         i += 1;
     }
-    assert_eq!(entries.len(), 55);
+    assert_eq!(entries.len(), 56);
     assert_eq!(
         entries.iter().map(|(c, _)| *c).collect::<Vec<_>>(),
         RUST_CODES
@@ -233,7 +233,7 @@ fn cli_explain_list() {
     );
     assert_eq!(
         lines.get(i + 1).copied(),
-        Some("55 codes. Run `dygnosis explain <CODE>` for details.")
+        Some("56 codes. Run `dygnosis explain <CODE>` for details.")
     );
     assert!(!stdout.contains("python_dynare_lsp"));
     assert!(!stdout.contains("DYNR"));

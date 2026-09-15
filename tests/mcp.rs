@@ -1,15 +1,16 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use dygnosis::explain::{explain, known_codes, render_markdown};
 use dygnosis::preprocessor::{run_workspace_preprocessor, DEFAULT_TIMEOUT};
 use dygnosis::{
-    analyze, auto_fix, check_e060, check_e061, check_w061, count_gap, dynare_auto_fix,
+    analyze, auto_fix, check_e060, check_e061, check_w061, check_w160, count_gap, dynare_auto_fix,
     dynare_compare_models, dynare_diagnose, dynare_equations, dynare_explain,
     dynare_find_references, dynare_list_diagnostic_codes, dynare_list_options, dynare_model_info,
-    dynare_rename, explain_equation, find_preprocessor, has_structural_error, parse,
-    reconcile_diagnostics, registered_tool_names, run_preprocessor, tools_list_json, Diagnostic,
-    McpReference, McpWorkspaceReference, Workspace,
+    dynare_related_files, dynare_rename, explain_equation, find_preprocessor, has_structural_error,
+    parse, quiet_i050, reconcile_diagnostics, registered_tool_names, run_preprocessor,
+    tools_list_json,
+    Diagnostic, McpReference, McpWorkspaceReference, Workspace,
 };
 use serde_json::{json, Value};
 
@@ -24,6 +25,7 @@ const RUST_TOOLS: &[&str] = &[
     "dynare_list_diagnostic_codes",
     "dynare_list_options",
     "dynare_equations",
+    "dynare_related_files",
 ];
 
 const DROPPED_TOOLS: &[&str] = &[
@@ -159,6 +161,89 @@ fn swff_relative_files() -> HashMap<String, String> {
     files
 }
 
+fn swff_related_files() -> HashMap<String, String> {
+    let mut files = swff_relative_files();
+    files.insert("run_swff.m".to_string(), read_copilot("swff", "run_swff.m"));
+    files.insert(
+        "swff_ff_coeffs.m".to_string(),
+        read_copilot("swff", "swff_ff_coeffs.m"),
+    );
+    files
+}
+
+fn companion_fixture(rel: &str) -> (String, String, HashMap<String, String>) {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/companions")
+        .join(rel);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("fixture missing at {}: {e}", path.display()))
+        .replace("\r\n", "\n");
+    let key = path
+        .to_str()
+        .unwrap_or_else(|| panic!("non-utf8 path {}", path.display()))
+        .to_string();
+    let mut files = HashMap::new();
+    files.insert(key.clone(), text.clone());
+    (key, text, files)
+}
+
+fn compact_related(value: &Value) -> Value {
+    let rows = value.as_array().expect("related files array");
+    Value::Array(
+        rows.iter()
+            .map(|row| {
+                json!({
+                    "filename": row["filename"],
+                    "kind": row["kind"],
+                    "resolved": row["resolved"],
+                })
+            })
+            .collect(),
+    )
+}
+
+fn assert_related_shape(rows: &Value, files: &HashMap<String, String>) {
+    let arr = rows.as_array().expect("related files array");
+    for row in arr {
+        let obj = row.as_object().expect("related file object");
+        for (k, v) in obj {
+            assert!(!v.is_null(), "{k} must not be null: {row}");
+        }
+        assert!(obj.contains_key("kind"), "kind required: {row}");
+        assert!(obj.contains_key("filename"), "filename required: {row}");
+        assert!(obj.contains_key("resolved"), "resolved required: {row}");
+        let resolved = obj["resolved"].as_bool().expect("resolved bool");
+        if resolved {
+            let path = obj["path"].as_str().expect("resolved path string");
+            assert!(!path.is_empty(), "resolved path nonempty: {row}");
+            if files.contains_key(path) {
+                // caller files-map key
+            } else {
+                let base = Path::new(path)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("");
+                assert!(!base.is_empty(), "absolute path basename: {path}");
+            }
+        } else {
+            assert!(
+                !obj.contains_key("path"),
+                "omit path when unresolved: {row}"
+            );
+        }
+    }
+}
+
+fn related_row<'a>(rows: &'a Value, kind: &str, filename: &str) -> &'a Value {
+    rows.as_array()
+        .expect("array")
+        .iter()
+        .find(|row| {
+            row["kind"].as_str() == Some(kind) && row["filename"].as_str() == Some(filename)
+        })
+        .unwrap_or_else(|| panic!("missing {kind} {filename}: {rows}"))
+}
+
 fn slice_at(text: &str, line: u32, column: u32, end_column: u32) -> String {
     let line_idx = (line as usize).saturating_sub(1);
     let lines: Vec<&str> = text.split('\n').collect();
@@ -185,7 +270,7 @@ fn strip_out_codes(diags: impl IntoIterator<Item = Diagnostic>) -> Vec<String> {
         .collect()
 }
 
-/// Same families as `check_in_workspace` (analyze + E060 / E061 / W061).
+/// Same families as `check_in_workspace` (analyze + E060 / E061 / W061 + W160 / I050 quiet).
 fn workspace_own(active: &str, files: &HashMap<String, String>) -> Vec<Diagnostic> {
     let mut ws = Workspace::new();
     for (name, content) in files {
@@ -198,6 +283,12 @@ fn workspace_own(active: &str, files: &HashMap<String, String>) -> Vec<Diagnosti
             diags.extend(check_e060(&records));
             diags.extend(check_e061(&records));
             diags.extend(check_w061(&mut ws, active));
+            let companions = ws
+                .companion_records(active)
+                .map(|r| r.to_vec())
+                .unwrap_or_default();
+            diags.extend(check_w160(&companions));
+            quiet_i050(&mut diags, &companions);
             diags
         }
         None => {
@@ -249,11 +340,12 @@ fn rename_map(value: Value) -> HashMap<String, String> {
 }
 
 #[test]
-fn registered_tools_are_ten() {
+fn registered_tools_are_eleven() {
     let names = registered_tool_names();
     assert_eq!(names, RUST_TOOLS);
-    assert_eq!(names.len(), 10);
+    assert_eq!(names.len(), 11);
     assert_eq!(names[9], "dynare_equations");
+    assert_eq!(names[10], "dynare_related_files");
 
     let blob = serde_json::to_string(&tools_list_json()).expect("tools list json");
     for name in DROPPED_TOOLS {
@@ -1262,4 +1354,304 @@ fn dynare_equations_w100_ok_expected_delta() {
     let text = fixture_mod("w100/w100_ok.mod");
     let payload = dynare_equations(&text, None, None, None, None);
     assert_eq!(payload["count_gap"]["expected_delta"], -1);
+}
+
+#[test]
+fn dynare_related_files_swff_dump() {
+    let files = swff_related_files();
+    let rows = dynare_related_files(&files["swff.mod"], Some("swff.mod"), Some(&files));
+    assert_related_shape(&rows, &files);
+
+    let expected: Value =
+        serde_json::from_str(&expected_mcp("dynare_related_files.swff.json")).unwrap();
+    assert_eq!(compact_related(&rows), expected);
+
+    let inc = related_row(&rows, "include", "swff_params.inc");
+    assert_eq!(inc["path"], "swff_params.inc");
+    let run = related_row(&rows, "run_script", "run_swff.m");
+    assert_eq!(run["path"], "run_swff.m");
+
+    let arr = rows.as_array().expect("array");
+    assert!(
+        arr.iter().all(|row| {
+            !row["filename"]
+                .as_str()
+                .unwrap_or("")
+                .contains("swff_ff_coeffs")
+                && !row["path"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("swff_ff_coeffs")
+        }),
+        "swff_ff_coeffs.m is not a companion of swff.mod: {rows}"
+    );
+    for row in arr {
+        if row["filename"]
+            .as_str()
+            .is_some_and(|n| n.ends_with(".inc"))
+        {
+            assert_eq!(row["kind"], "include", ".inc is include-only: {row}");
+        }
+    }
+}
+
+#[test]
+fn dynare_related_files_missing_active_is_empty() {
+    let files = swff_related_files();
+    let text = files["swff.mod"].clone();
+    assert_eq!(dynare_related_files(&text, None, Some(&files)), json!([]));
+    assert_eq!(
+        dynare_related_files(&text, Some(""), Some(&files)),
+        json!([])
+    );
+    assert_eq!(
+        dynare_related_files(&text, Some("missing.mod"), Some(&files)),
+        json!([])
+    );
+    assert_eq!(dynare_related_files(&text, None, None), json!([]));
+    assert_eq!(
+        dynare_related_files(&text, Some("swff.mod"), None),
+        json!([])
+    );
+    let empty = HashMap::new();
+    assert_eq!(
+        dynare_related_files(&text, Some("swff.mod"), Some(&empty)),
+        json!([])
+    );
+}
+
+#[test]
+fn dynare_related_files_overlay_drops_include() {
+    let files = swff_related_files();
+    let overlay = files["swff.mod"].replacen("@#include \"swff_params.inc\"\n", "", 1);
+    assert_ne!(overlay, files["swff.mod"]);
+    let rows = dynare_related_files(&overlay, Some("swff.mod"), Some(&files));
+    assert_related_shape(&rows, &files);
+    let arr = rows.as_array().expect("array");
+    assert!(
+        arr.iter()
+            .all(|row| row["kind"].as_str() != Some("include")),
+        "overlay without include must drop the .inc: {rows}"
+    );
+    related_row(&rows, "run_script", "run_swff.m");
+}
+
+#[test]
+fn dynare_related_files_named_missing() {
+    let (key, text, files) = companion_fixture("named_missing.mod");
+    let rows = dynare_related_files(&text, Some(&key), Some(&files));
+    assert_related_shape(&rows, &files);
+    let expected = json!([
+        {"filename": "missing_data.csv", "kind": "datafile", "resolved": false},
+        {"filename": "missing_mode", "kind": "mode_file", "resolved": false},
+        {"filename": "missing_data_file.csv", "kind": "datafile", "resolved": false},
+        {"filename": "missing_gsa.mat", "kind": "datafile", "resolved": false},
+        {"filename": "missing_initval.csv", "kind": "datafile", "resolved": false},
+        {"filename": "missing_histval.csv", "kind": "datafile", "resolved": false},
+        {"filename": "missing_ext", "kind": "helper_m", "resolved": false},
+        {"filename": "missing_ext_d1", "kind": "helper_m", "resolved": false},
+        {"filename": "missing_prior", "kind": "helper_m", "resolved": false},
+        {"filename": "missing_helper.m", "kind": "helper_m", "resolved": false},
+    ]);
+    assert_eq!(compact_related(&rows), expected);
+    for banned in ["commented_data.csv", "commented_helper.m", "0", "1"] {
+        assert!(
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["filename"].as_str() != Some(banned)),
+            "must not list {banned}: {rows}"
+        );
+    }
+    for kind in ["run_script", "prior_restrictions", "steady_state_file"] {
+        assert!(
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["kind"].as_str() != Some(kind)),
+            "missing convention must not be listed as {kind}: {rows}"
+        );
+    }
+
+    let overlay = "var y;\nmodel;\ny = 1;\nend;\n";
+    let overlaid = dynare_related_files(overlay, Some(&key), Some(&files));
+    assert_eq!(
+        overlaid,
+        json!([]),
+        "overlay without named files: {overlaid}"
+    );
+}
+
+#[test]
+fn dynare_related_files_01_fixtures() {
+    let cases = [
+        (
+            "data_file.mod",
+            "datafile",
+            "data_file.csv",
+            true,
+            "data_file.csv",
+        ),
+        (
+            "leftover_csv.mod",
+            "datafile",
+            "leftover.csv",
+            true,
+            "leftover.csv",
+        ),
+        ("dup_path.mod", "datafile", "dup.csv", true, "dup.csv"),
+        (
+            "ident_helper/ident_helper.mod",
+            "helper_m",
+            "my_ss_helper",
+            true,
+            "my_ss_helper.m",
+        ),
+        (
+            "ss_present/ss_present.mod",
+            "steady_state_file",
+            "ss_present_steadystate.m",
+            true,
+            "ss_present_steadystate.m",
+        ),
+    ];
+    for (rel, kind, filename, resolved, basename) in cases {
+        let (key, text, files) = companion_fixture(rel);
+        let rows = dynare_related_files(&text, Some(&key), Some(&files));
+        assert_related_shape(&rows, &files);
+        let row = related_row(&rows, kind, filename);
+        assert_eq!(row["resolved"], resolved, "{rel}");
+        if resolved {
+            let path = row["path"].as_str().expect("path");
+            assert!(
+                !files.contains_key(path),
+                "{rel}: sibling not in files map, path should be absolute, got {path}"
+            );
+            assert!(
+                Path::new(path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.eq_ignore_ascii_case(basename)),
+                "{rel} path basename {basename}: {path}"
+            );
+        }
+        let hits: Vec<_> = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| r["filename"].as_str() == Some(filename))
+            .collect();
+        assert_eq!(hits.len(), 1, "{rel} one record for {filename}: {rows}");
+    }
+
+    let (key, text, files) = companion_fixture("absent_convention.mod");
+    let rows = dynare_related_files(&text, Some(&key), Some(&files));
+    assert_related_shape(&rows, &files);
+    for kind in [
+        "run_script",
+        "prior_restrictions",
+        "helper_m",
+        "steady_state_file",
+    ] {
+        assert!(
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["kind"].as_str() != Some(kind)),
+            "absent convention / ident helper must not list {kind}: {rows}"
+        );
+    }
+    assert!(
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["filename"].as_str() != Some("missing_ident_helper")),
+        "missing ident helper must not be listed: {rows}"
+    );
+
+    let (key, text, files) = companion_fixture("plus_pkg/plus_pkg.mod");
+    let rows = dynare_related_files(&text, Some(&key), Some(&files));
+    assert!(
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["kind"].as_str() != Some("steady_state_file")),
+        "+FILENAME/steadystate.m is not convention: {rows}"
+    );
+}
+
+#[test]
+fn dynare_related_files_nested_include_datafile_stays_off_root() {
+    let mut files = HashMap::new();
+    files.insert(
+        "root.mod".to_string(),
+        "@#include \"helper.inc\"\nvar y;\nvarexo e;\nparameters rho;\nrho = 0.5;\nmodel;\ny = rho * y(-1) + e;\nend;\n"
+            .to_string(),
+    );
+    files.insert(
+        "helper.inc".to_string(),
+        "estimation(datafile='nested_data.csv');\n".to_string(),
+    );
+    files.insert("nested_data.csv".to_string(), "y\n1\n".to_string());
+
+    let rows = dynare_related_files(&files["root.mod"], Some("root.mod"), Some(&files));
+    assert_related_shape(&rows, &files);
+    let inc = related_row(&rows, "include", "helper.inc");
+    assert_eq!(inc["resolved"], true);
+    assert_eq!(inc["path"], "helper.inc");
+    assert!(
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["filename"].as_str() != Some("nested_data.csv")
+                && row["kind"].as_str() != Some("datafile")),
+        "nested include datafile must not appear on root: {rows}"
+    );
+
+    let mut with_unresolved = files.clone();
+    with_unresolved.insert(
+        "root.mod".to_string(),
+        "@#include \"helper.inc\"\n@#include \"gone.inc\"\nvar y;\nmodel;\ny = 1;\nend;\n"
+            .to_string(),
+    );
+    let rows = dynare_related_files(
+        &with_unresolved["root.mod"],
+        Some("root.mod"),
+        Some(&with_unresolved),
+    );
+    assert_related_shape(&rows, &with_unresolved);
+    let gone = related_row(&rows, "include", "gone.inc");
+    assert_eq!(gone["resolved"], false);
+    assert!(gone.get("path").is_none());
+}
+
+#[test]
+fn dynare_related_files_synthetic_prior_and_irf() {
+    let mut files = HashMap::new();
+    files.insert(
+        "kinds.mod".to_string(),
+        "@#include \"missing.inc\"\nvar y;\nvarexo e;\nparameters rho;\nrho = 0.5;\nmodel;\ny = rho * y(-1) + e;\nend;\nestimation(irf_matching_file=trans);\n"
+            .to_string(),
+    );
+    files.insert(
+        "kinds_prior_restrictions.m".to_string(),
+        "% prior\n".to_string(),
+    );
+    files.insert("trans.m".to_string(), "% trans\n".to_string());
+    let rows = dynare_related_files(&files["kinds.mod"], Some("kinds.mod"), Some(&files));
+    assert_related_shape(&rows, &files);
+    let expected = json!([
+        {"filename": "missing.inc", "kind": "include", "resolved": false},
+        {"filename": "kinds_prior_restrictions.m", "kind": "prior_restrictions", "resolved": true},
+        {"filename": "trans", "kind": "irf_matching_file", "resolved": true},
+    ]);
+    assert_eq!(compact_related(&rows), expected);
+    assert_eq!(
+        related_row(&rows, "prior_restrictions", "kinds_prior_restrictions.m")["path"],
+        "kinds_prior_restrictions.m"
+    );
+    assert_eq!(
+        related_row(&rows, "irf_matching_file", "trans")["path"],
+        "trans.m"
+    );
 }

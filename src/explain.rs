@@ -1,6 +1,6 @@
 //! Diagnostic code documentation.
 //!
-//! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 55
+//! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 56
 //! thin codes. `I050` and `W042` use the recorded surface rewrites in
 //! `dev_logs/0.1/0.1.0/22-c-explain.md` (do not advertise Compute Steady State).
 
@@ -93,7 +93,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("I050", ExplainEntry {
         title: "No initval or steady_state_model block",
-        body: "The file declares variables and equations but does not include an `initval` or `steady_state_model` block. This check is presence only; this tool does not compute a numerical steady state.\n\n**Fix**\n\nAdd an `initval` block with initial guesses, or a `steady_state_model` block with closed-form assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).",
+        body: "The file declares variables and equations but does not include an `initval` or `steady_state_model` block. This check is presence only; this tool does not compute a numerical steady state. A sibling FILENAME_steadystate.m also counts as presence.\n\n**Fix**\n\nAdd an `initval` block with initial guesses, or a `steady_state_model` block with closed-form assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).",
     }),
     ("P000", ExplainEntry {
         title: "Dynare preprocessor diagnostic",
@@ -234,6 +234,10 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("W150", ExplainEntry {
         title: "Deprecated command or option",
         body: "A deprecated command or option is used; current Dynare warns and may remove it in a future release. Commands: ``simul`` → ``perfect_foresight_setup`` + ``perfect_foresight_solver``; ``ramsey_policy`` → ``ramsey_model`` + ``stoch_simul``. Options: ``aim_solver`` → ``dr = aim``; ``bytecode`` (being removed).\n\n**Fix**\n\nSwitch to the modern command or option form.",
+    }),
+    ("W160", ExplainEntry {
+        title: "Named companion file was not found",
+        body: "A catalog option or quoted path names a companion file that this tool could not resolve next to the `.mod` or on the search paths. This is an extra Warning: they accept a missing named file at check. Missing convention files (`FILENAME_steadystate.m`, `FILENAME_prior_restrictions.m`, `run_FILENAME.m`) and a missing identifier helper are not this code.\n\n**Fix**\n\nAdd the file next to this `.mod`, correct the path, or add its directory to the search paths.",
     }),
 ];
 

@@ -122,7 +122,7 @@ fn tiny_mod(extra: &str) -> String {
 }
 
 #[test]
-fn named_missing_unresolved_records_and_no_w160() {
+fn named_missing_unresolved_records() {
     let path = fixtures_root().join("named_missing.mod");
     let (src, recs) = companion_records(&path);
 
@@ -180,12 +180,11 @@ fn named_missing_unresolved_records_and_no_w160() {
         );
     }
 
-    assert_no_w160(&path, &src);
     let model = parse(&src);
     let analyzed = analyze(&model);
     assert!(
         !analyzed.iter().any(|d| d.code == "W160"),
-        "analyze codes {:?}",
+        "analyze must not emit W160, got {:?}",
         codes_of(&analyzed)
     );
 }
@@ -262,7 +261,7 @@ fn ident_helper_present_is_helper_m() {
 }
 
 #[test]
-fn ss_present_records_convention_and_still_emits_i050() {
+fn ss_present_records_convention_and_quiets_i050() {
     let path = fixtures_root().join("ss_present/ss_present.mod");
     let (src, recs) = companion_records(&path);
     let hits: Vec<_> = recs
@@ -282,10 +281,16 @@ fn ss_present_records_convention_and_still_emits_i050() {
         "steady"
     );
 
+    let analyzed = analyze(&parse(&src));
+    assert!(
+        analyzed.iter().any(|d| d.code == "I050"),
+        "analyze() still I050 on ss_present, got {:?}",
+        codes_of(&analyzed)
+    );
     let diags = check_file(&src, path.to_str().unwrap());
     assert!(
-        diags.iter().any(|d| d.code == "I050"),
-        "ss_present must still emit I050 this slice, got {:?}",
+        !diags.iter().any(|d| d.code == "I050"),
+        "check_file quiets I050 when _steadystate.m resolves, got {:?}",
         codes_of(&diags)
     );
     assert!(

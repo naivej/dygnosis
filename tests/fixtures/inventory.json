@@ -3914,7 +3914,7 @@
       "kind": "documented-only",
       "package": "other",
       "fixture": "",
-      "source": "explain.rs::known_codes_is_exactly_the_55_rust_keys",
+      "source": "explain.rs::known_codes_is_exactly_the_56_rust_keys",
       "cluster": "",
       "notes": "in known_codes / explain; nothing emits it yet"
     },
@@ -4172,73 +4172,87 @@
     },
     {
       "id": "companions_named_missing",
-      "codes": [],
-      "kind": "harness",
+      "codes": [
+        "W160"
+      ],
+      "kind": "fire",
       "package": "companions",
       "fixture": "tests/fixtures/companions/named_missing.mod",
-      "source": "companions.rs::named_missing_unresolved_records_and_no_w160",
+      "source": "w160.rs::named_missing_w160_matches_unresolved_records",
       "cluster": "companions/named_missing.mod",
-      "notes": "named unresolved companion records; no W160 this slice"
+      "notes": "named unresolved companions fire W160; analyze() does not"
     },
     {
       "id": "companions_data_file",
-      "codes": [],
-      "kind": "harness",
+      "codes": [
+        "W160"
+      ],
+      "kind": "quiet",
       "package": "companions",
       "fixture": "tests/fixtures/companions/data_file.mod",
-      "source": "companions.rs::data_file_resolves_sibling_csv",
+      "source": "w160.rs::resolved_and_absent_convention_have_no_w160",
       "cluster": "companions/data_file.mod",
-      "notes": "data(file=) resolved sibling csv"
+      "notes": "resolved sibling csv; no W160"
     },
     {
       "id": "companions_leftover_csv",
-      "codes": [],
-      "kind": "harness",
+      "codes": [
+        "W160"
+      ],
+      "kind": "quiet",
       "package": "companions",
       "fixture": "tests/fixtures/companions/leftover_csv.mod",
-      "source": "companions.rs::leftover_csv_is_datafile",
+      "source": "w160.rs::resolved_and_absent_convention_have_no_w160",
       "cluster": "companions/leftover_csv.mod",
-      "notes": "quoted leftover csv record"
+      "notes": "quoted leftover csv resolved; no W160"
     },
     {
       "id": "companions_dup_path",
-      "codes": [],
-      "kind": "harness",
+      "codes": [
+        "W160"
+      ],
+      "kind": "quiet",
       "package": "companions",
       "fixture": "tests/fixtures/companions/dup_path.mod",
-      "source": "companions.rs::dup_path_option_kind_wins",
+      "source": "w160.rs::resolved_and_absent_convention_have_no_w160",
       "cluster": "companions/dup_path.mod",
-      "notes": "option plus quote same path; option kind wins"
+      "notes": "one resolved record; no W160"
     },
     {
       "id": "companions_absent_convention",
-      "codes": [],
-      "kind": "harness",
+      "codes": [
+        "W160"
+      ],
+      "kind": "quiet",
       "package": "companions",
       "fixture": "tests/fixtures/companions/absent_convention.mod",
-      "source": "companions.rs::absent_convention_has_no_optional_records",
+      "source": "w160.rs::resolved_and_absent_convention_have_no_w160",
       "cluster": "companions/absent_convention.mod",
-      "notes": "missing run_*.m / prior_restrictions / ident helper: no those records"
+      "notes": "missing run_*.m / prior_restrictions / ident helper: no W160"
     },
     {
       "id": "companions_ident_helper",
-      "codes": [],
-      "kind": "harness",
+      "codes": [
+        "W160"
+      ],
+      "kind": "quiet",
       "package": "companions",
       "fixture": "tests/fixtures/companions/ident_helper/ident_helper.mod",
-      "source": "companions.rs::ident_helper_present_is_helper_m",
+      "source": "w160.rs::resolved_and_absent_convention_have_no_w160",
       "cluster": "companions/ident_helper",
-      "notes": "ident helper outside model resolves to sibling .m"
+      "notes": "ident helper present: no W160"
     },
     {
       "id": "companions_ss_present",
-      "codes": [],
-      "kind": "harness",
+      "codes": [
+        "I050"
+      ],
+      "kind": "quiet",
       "package": "companions",
       "fixture": "tests/fixtures/companions/ss_present/ss_present.mod",
-      "source": "companions.rs::ss_present_records_convention_and_still_emits_i050",
+      "source": "w160.rs::ss_present_check_file_quiets_i050_analyze_still_fires",
       "cluster": "companions/ss_present",
-      "notes": "convention _steadystate.m record; I050 still fires this slice"
+      "notes": "convention _steadystate.m quiets I050 on check_file; analyze() still I050"
     },
     {
       "id": "companions_plus_pkg",

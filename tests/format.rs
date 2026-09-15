@@ -95,10 +95,7 @@ fn trailing_comment_space_stripped() {
 fn extra_blank_lines_collapsed() {
     let src = "var y;\n\n\nmodel;\ny=1;\nend;\n";
     let out = format_text(src, "\t").expect("should format");
-    assert!(
-        !out.contains("\n\n\n"),
-        "triple blank remains: {out:?}"
-    );
+    assert!(!out.contains("\n\n\n"), "triple blank remains: {out:?}");
     assert_eq!(format_text(&out, "\t"), None);
 }
 

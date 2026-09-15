@@ -624,7 +624,10 @@ fn check_info_and_empty_dir_i050_not_in_w_exit_0() {
         stdout.contains("INFO [I050]"),
         "expected I050 on info.mod:\n{stdout}"
     );
-    assert_eq!(last_stdout_line(&stdout), "1 file(s), 0 error(s), 0 warning(s)");
+    assert_eq!(
+        last_stdout_line(&stdout),
+        "1 file(s), 0 error(s), 0 warning(s)"
+    );
     let (e, w) = assert_batch_matches_printed(&stdout, 1);
     assert_eq!(e, 0);
     assert_eq!(w, 0);
@@ -647,10 +650,7 @@ fn check_warn_and_empty_dir_warnings_do_not_fail() {
 
 #[test]
 fn check_without_paths_still_requires_one() {
-    let output = dygnosis()
-        .args(["check"])
-        .output()
-        .expect("dygnosis check");
+    let output = dygnosis().args(["check"]).output().expect("dygnosis check");
     let stdout = stdout_text(&output);
     let stderr = stderr_text(&output);
     assert!(

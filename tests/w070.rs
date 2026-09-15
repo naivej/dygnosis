@@ -205,11 +205,7 @@ fn w070_rhoz_m1() {
 
 #[test]
 fn w070_sigma_e() {
-    assert_fire(
-        "w070/w070_sigma.mod",
-        "'sigma_e' = -0.1",
-        "sigma_e = -0.1;",
-    );
+    assert_fire("w070/w070_sigma.mod", "'sigma_e' = -0.1", "sigma_e = -0.1;");
 }
 
 #[test]
@@ -239,11 +235,7 @@ fn w070_alppha_1p5() {
 
 #[test]
 fn w070_expr_sum() {
-    assert_fire(
-        "w070/w070_expr.mod",
-        "'betta' = 1.1",
-        "betta = 0.9 + 0.2;",
-    );
+    assert_fire("w070/w070_expr.mod", "'betta' = 1.1", "betta = 0.9 + 0.2;");
 }
 
 #[test]
@@ -258,10 +250,5 @@ fn w070_later_wins() {
         "later wins, got {}",
         got[0].message
     );
-    assert_span_in(
-        &text,
-        &got[0],
-        "betta = 0.99;\nbetta = 99;",
-        "betta = 99;",
-    );
+    assert_span_in(&text, &got[0], "betta = 0.99;\nbetta = 99;", "betta = 99;");
 }

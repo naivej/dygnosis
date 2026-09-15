@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.0
+- **One `.mod`, the files that make it runnable**
+  - Companion files are links: `@#include` targets, `FILENAME_steadystate.m`, `FILENAME_prior_restrictions.m`, `run_FILENAME.m` when present, catalog input files (`datafile=`, `mode_file=`, and the rest), leftover quoted `.m` / data paths, and MATLAB helpers the `.mod` calls by name when that `.m` exists.
+  - This tool does not parse MATLAB. Rename still does not edit `.m` files.
+  - A catalog option or quoted path that names a file we cannot resolve is Warning `W160`. Missing optional convention files and a missing identifier helper are not `W160`.
+  - `I050` (no `initval` / `steady_state_model`) is quiet when `FILENAME_steadystate.m` resolves. Generated `+FILENAME/steadystate.m` does not quiet it.
+  - Editor: document links and go-to on companion spans, plus existing `@#include` links.
+  - New MCP tool `dynare_related_files` (eleven tools): one list of includes and companions for the active `.mod`.
+
 ## v0.2.0
 - **Fewer false Errors**
   - A `method_of_moments(...)` (and other catalog commands) option list was misread as missing semicolons (`E001`). That false Error stopped later checks on the same file, so real MoM / similar work could not start. Those lists are now one statement; only a true missing `;` still fires `E001`.

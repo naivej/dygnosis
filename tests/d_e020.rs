@@ -143,7 +143,10 @@ fn assert_last_ident(text: &str, d: &Diag, context: &str, ident: &str) {
 fn e020_unmodified_archives() {
     for name in ARCHIVES {
         let got = rust_e020(&read_mod(name));
-        assert!(got.is_empty(), "{name}: expected no E020 family, got {got:?}");
+        assert!(
+            got.is_empty(),
+            "{name}: expected no E020 family, got {got:?}"
+        );
     }
 }
 
@@ -194,9 +197,9 @@ fn e024_timed_det_exo_tau() {
     assert_eq!(got[0].code, "E024");
     assert_eq!(got[0].severity, 1);
     assert!(
-        got[0].message.contains(
-            "Deterministic exogenous variable 'tau' cannot be used with a lead or lag."
-        ),
+        got[0]
+            .message
+            .contains("Deterministic exogenous variable 'tau' cannot be used with a lead or lag."),
         "e024 message, got {}",
         got[0].message
     );
@@ -246,7 +249,10 @@ fn mystery_call_is_not_e020() {
             .all(|d| !(d.code == "E020" && d.message.contains("'mystery'"))),
         "Call callee mystery must not be E020: {diags:?}"
     );
-    assert!(diags.is_empty(), "mystery_call: expected empty family, got {diags:?}");
+    assert!(
+        diags.is_empty(),
+        "mystery_call: expected empty family, got {diags:?}"
+    );
 }
 
 #[test]
@@ -257,7 +263,10 @@ fn comment_and_string_are_not_e020() {
         diags.iter().all(|d| !d.message.contains("'sneaky_ident'")),
         "sneaky_ident leaked into E020 family: {diags:?}"
     );
-    assert!(diags.is_empty(), "comment_string: expected empty family, got {diags:?}");
+    assert!(
+        diags.is_empty(),
+        "comment_string: expected empty family, got {diags:?}"
+    );
 }
 
 #[test]

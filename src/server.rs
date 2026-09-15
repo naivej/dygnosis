@@ -1,7 +1,7 @@
 //! LSP server (stdio). Wave a: document loop. Wave b: navigation / edit. Wave c: intel / format / commands.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde_json::{json, Value};
@@ -273,6 +273,50 @@ impl Backend {
         ))
     }
 
+    fn definition_at(&self, pos: &TextDocumentPositionParams) -> Option<GotoDefinitionResponse> {
+        let mut inner = self.lock_inner();
+        let uri = &pos.text_document.uri;
+        let doc = inner.docs.get(uri)?;
+        let text = doc.text.clone();
+        let index = LineIndex::new(&text);
+        let byte = index.offset(&text, span_pos(pos.position));
+        let covering = inner
+            .workspace
+            .companion_records(uri.as_str())
+            .map(|recs| {
+                recs.iter()
+                    .filter(|r| r.named_in.start <= byte && byte < r.named_in.end)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if !covering.is_empty() {
+            let locs: Vec<Location> = covering
+                .iter()
+                .filter_map(|r| {
+                    let path = r.path.as_ref()?;
+                    let target = Url::from_file_path(path).ok()?;
+                    Some(Location::new(
+                        target,
+                        Range::new(Position::new(0, 0), Position::new(0, 0)),
+                    ))
+                })
+                .collect();
+            return match locs.len() {
+                0 => None,
+                1 => Some(GotoDefinitionResponse::Scalar(locs.into_iter().next()?)),
+                _ => Some(GotoDefinitionResponse::Array(locs)),
+            };
+        }
+        let (word, _) = ident_at(&text, byte)?;
+        let model = inner.workspace.get_model(uri.as_str())?;
+        let decl = find_decl(model, &word)?;
+        Some(GotoDefinitionResponse::Scalar(Location::new(
+            uri.clone(),
+            span_range(&index, &text, decl.span),
+        )))
+    }
+
     fn ident_locations(&self, pos: &TextDocumentPositionParams) -> Option<Vec<Location>> {
         let inner = self.lock_inner();
         let doc = inner.docs.get(&pos.text_document.uri)?;
@@ -369,6 +413,9 @@ impl Backend {
         }
         let mut changes = HashMap::new();
         for (uri, open) in &inner.docs {
+            if !uri_is_mod_or_inc(uri) {
+                continue;
+            }
             let idx = LineIndex::new(&open.text);
             let mut spans = occurrences(&open.text, &word);
             if spans.is_empty() {
@@ -691,18 +738,21 @@ impl Backend {
     fn document_links(&self, uri: &Url) -> Option<Vec<DocumentLink>> {
         let mut inner = self.lock_inner();
         let text = inner.docs.get(uri)?.text.clone();
-        let includes = {
-            let model = inner.workspace.get_model(uri.as_str())?;
-            if model.includes.is_empty() {
-                return None;
-            }
-            model.includes.clone()
-        };
+        let includes = inner
+            .workspace
+            .get_model(uri.as_str())
+            .map(|m| m.includes.clone())
+            .unwrap_or_default();
         let index = LineIndex::new(&text);
         let records = inner
             .workspace
             .include_records(uri.as_str())
             .cloned()
+            .unwrap_or_default();
+        let companions = inner
+            .workspace
+            .companion_records(uri.as_str())
+            .map(|c| c.to_vec())
             .unwrap_or_default();
         let mut links = Vec::new();
         for inc in &includes {
@@ -720,6 +770,24 @@ impl Backend {
                 range: span_range(&index, &text, inc.span),
                 target: Some(target),
                 tooltip: Some(format!("Open {}", inc.filename)),
+                data: None,
+            });
+        }
+        for rec in &companions {
+            let Some(path) = rec.path.as_ref() else {
+                continue;
+            };
+            let Ok(target) = Url::from_file_path(path) else {
+                continue;
+            };
+            let basename = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(rec.name.as_str());
+            links.push(DocumentLink {
+                range: span_range(&index, &text, rec.named_in),
+                target: Some(target),
+                tooltip: Some(format!("{} {basename}", rec.kind.as_str())),
                 data: None,
             });
         }
@@ -1205,9 +1273,7 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        Ok(self
-            .decl_location(&params.text_document_position_params)
-            .map(GotoDefinitionResponse::Scalar))
+        Ok(self.definition_at(&params.text_document_position_params))
     }
 
     async fn goto_declaration(
@@ -1532,6 +1598,24 @@ fn is_declared_in_open(inner: &Inner, word: &str) -> bool {
             .and_then(|m| find_decl(m, word))
             .is_some()
     })
+}
+
+fn uri_is_mod_or_inc(uri: &Url) -> bool {
+    let ext = uri
+        .to_file_path()
+        .ok()
+        .and_then(|p| {
+            p.extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_ascii_lowercase())
+        })
+        .or_else(|| {
+            Path::new(uri.path())
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_ascii_lowercase())
+        });
+    matches!(ext.as_deref(), Some("mod" | "inc"))
 }
 
 fn fix_title(d: &crate::Diagnostic) -> String {

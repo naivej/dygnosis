@@ -4,6 +4,7 @@
 //! handlers.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -17,7 +18,7 @@ use crate::catalog::list_options;
 use crate::diagnostic::{analyze, check_in_workspace, Diagnostic, Severity};
 use crate::equations::{count_gap, equations, explain_equation, CountGap, EquationRow};
 use crate::explain;
-use crate::include_resolver::normalize_uri;
+use crate::include_resolver::{normalize_uri, path_key};
 use crate::model::Model;
 use crate::model_diff::compare_models;
 use crate::model_info::{classify_variable_timing, TimingClass};
@@ -74,6 +75,10 @@ const TOOLS: &[(&str, &str)] = &[
     (
         "dynare_equations",
         "List counted model equations with lhs, rhs, idents, and the equation-count gap. Optional name or index also returns explain markdown.",
+    ),
+    (
+        "dynare_related_files",
+        "List include targets and companion files for the active .mod (kind, filename, resolved, path).",
     ),
 ];
 
@@ -585,6 +590,89 @@ pub fn dynare_auto_fix(file_content: &str) -> String {
     auto_fix(file_content)
 }
 
+/// Include targets plus companions for the active `.mod`.
+///
+/// Overlay `files` map same as [`dynare_diagnose`]. Empty or missing
+/// `active_file` (or a nonempty map without that key) → `[]`.
+///
+/// Each row is `{kind, filename, resolved, path?}`. `path` is the caller
+/// `files` key when `path_key(resolved)` equals `normalize_uri` of that key;
+/// otherwise the library absolute path. Omit `path` when unresolved.
+pub fn dynare_related_files(
+    file_content: &str,
+    active_file: Option<&str>,
+    files: Option<&HashMap<String, String>>,
+) -> Value {
+    let Some(files) = nonempty_map(files) else {
+        return json!([]);
+    };
+    let Some(active) = active_file.filter(|a| !a.is_empty() && files.contains_key(*a)) else {
+        return json!([]);
+    };
+    let workspace_files = overlay_files(file_content, active, files);
+    related_files_in_workspace(active, &workspace_files)
+}
+
+fn related_files_in_workspace(active_file: &str, files: &HashMap<String, String>) -> Value {
+    let mut ws = Workspace::new();
+    for (name, content) in files {
+        ws.update_document(name, content);
+    }
+    let includes = ws.include_records(active_file).cloned().unwrap_or_default();
+    let companions = ws
+        .companion_records(active_file)
+        .map(|c| c.to_vec())
+        .unwrap_or_default();
+
+    let mut rows = Vec::new();
+    for inc in &includes.resolved {
+        rows.push(related_file_row(
+            "include",
+            &inc.filename,
+            Some(inc.path.as_path()),
+            files,
+        ));
+    }
+    for inc in &includes.unresolved {
+        rows.push(related_file_row("include", &inc.filename, None, files));
+    }
+    for rec in &companions {
+        rows.push(related_file_row(
+            rec.kind.as_str(),
+            &rec.name,
+            rec.path.as_deref(),
+            files,
+        ));
+    }
+    Value::Array(rows)
+}
+
+fn related_file_row(
+    kind: &str,
+    filename: &str,
+    resolved_path: Option<&Path>,
+    files: &HashMap<String, String>,
+) -> Value {
+    let mut row = json!({
+        "kind": kind,
+        "filename": filename,
+        "resolved": resolved_path.is_some(),
+    });
+    if let Some(path) = resolved_path {
+        row["path"] = json!(related_file_path(path, files));
+    }
+    row
+}
+
+fn related_file_path(resolved: &Path, files: &HashMap<String, String>) -> String {
+    let key = path_key(resolved);
+    files
+        .keys()
+        .find(|orig| normalize_uri(orig) == key)
+        .cloned()
+        .unwrap_or_else(|| resolved.to_string_lossy().into_owned())
+}
+
 /// MCP stdio entry. Wired from `dygnosis mcp`.
 pub async fn run_stdio() {
     use rmcp::transport::stdio;
@@ -1041,6 +1129,25 @@ impl DygnosisMcp {
             },
         };
         tool_json(payload)
+    }
+
+    #[tool(
+        name = "dynare_related_files",
+        description = "List include targets and companion files for the active .mod (kind, filename, resolved, path)."
+    )]
+    fn related_files_tool(
+        &self,
+        Parameters(params): Parameters<IncludeMapParams>,
+    ) -> CallToolResult {
+        let value = match resolve_mapped(
+            params.file_content.as_deref(),
+            params.active_file.as_deref(),
+            params.files.as_ref(),
+        ) {
+            Some(src) => dynare_related_files(src.content, src.active, src.files),
+            None => json!([]),
+        };
+        tool_json(value)
     }
 }
 

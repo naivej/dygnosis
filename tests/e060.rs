@@ -93,9 +93,9 @@ fn rust_workspace(active: &str, files: &[(&str, &str)]) -> Vec<Diag> {
 fn load_fixture_dir(dir_rel: &str) -> Vec<(String, String)> {
     let dir = fixture_path(dir_rel);
     let mut files = Vec::new();
-    for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| {
-        panic!("fixture directory missing at {}: {e}", dir.display())
-    }) {
+    for entry in std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("fixture directory missing at {}: {e}", dir.display()))
+    {
         let entry = entry.unwrap();
         let path = entry.path();
         if !path.is_file() {
@@ -284,12 +284,7 @@ fn e061_nested_missing() {
 
 #[test]
 fn e062_unterminated_if() {
-    assert_fire(
-        "e060/e062_if.mod",
-        "E062",
-        "Unterminated @#if",
-        "@#if FOO",
-    );
+    assert_fire("e060/e062_if.mod", "E062", "Unterminated @#if", "@#if FOO");
 }
 
 #[test]
@@ -363,12 +358,7 @@ fn e063_expression_skipped_when_include_present() {
 
 #[test]
 fn e063_expression_without_include() {
-    assert_fire(
-        "e060/e063_expr.mod",
-        "E063",
-        "@{UNDEF+1}",
-        "@{UNDEF+1}",
-    );
+    assert_fire("e060/e063_expr.mod", "E063", "@{UNDEF+1}", "@{UNDEF+1}");
 }
 
 #[test]
@@ -439,11 +429,7 @@ fn e065_steady_state_two_varexo() {
         got[0].message.contains("e, u"),
         "expected sorted varexo names, got {got:?}"
     );
-    assert_span(
-        &text,
-        &got[0],
-        "y = rho * y(-1) + steady_state(e + u)",
-    );
+    assert_span(&text, &got[0], "y = rho * y(-1) + steady_state(e + u)");
 }
 
 #[test]
@@ -457,11 +443,7 @@ fn e065_steady_state_uppercase() {
     let got = rust_family(&text);
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "E065");
-    assert_span(
-        &text,
-        &got[0],
-        "y = rho * y(-1) + STEADY_STATE(e)",
-    );
+    assert_span(&text, &got[0], "y = rho * y(-1) + STEADY_STATE(e)");
 }
 
 #[test]

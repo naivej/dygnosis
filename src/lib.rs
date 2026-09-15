@@ -17,6 +17,7 @@ pub mod check_w100;
 pub mod check_w110;
 pub mod check_w120;
 pub mod check_w130;
+pub mod check_w160;
 mod command_skip;
 pub mod companion;
 mod diag_shape;
@@ -61,6 +62,7 @@ pub use check_w100::check_w100;
 pub use check_w110::check_w110;
 pub use check_w120::{check_w120, check_w120_family, check_w121, check_w122};
 pub use check_w130::check_w130;
+pub use check_w160::{check_w160, quiet_i050};
 pub use companion::{CompanionKind, CompanionRecord};
 pub use diagnostic::{analyze, check_file, format_check_lines, Diagnostic, Severity, TextEdit};
 pub use e010::check_e010;
@@ -73,8 +75,8 @@ pub use include_resolver::{find_workspace_root, resolve_companion_path, resolve_
 pub use mcp::{
     dynare_auto_fix, dynare_compare_models, dynare_diagnose, dynare_equations, dynare_explain,
     dynare_find_references, dynare_list_diagnostic_codes, dynare_list_options, dynare_model_info,
-    dynare_rename, registered_tool_names, tools_list_json, DiagnosticCodeItem, McpDiagnostic,
-    McpReference, McpWorkspaceReference,
+    dynare_related_files, dynare_rename, registered_tool_names, tools_list_json,
+    DiagnosticCodeItem, McpDiagnostic, McpReference, McpWorkspaceReference,
 };
 pub use model::{
     DeprecatedOption, EstimatedParam, EstimatedParamKind, IncludeDirective, IncludePathDirective,

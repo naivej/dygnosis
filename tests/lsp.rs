@@ -559,6 +559,51 @@ fn read_fixture_mod(rel: &str) -> String {
         .replace("\r\n", "\n")
 }
 
+fn companion_open(rel: &str) -> (Url, String) {
+    let path = fixture_mod(&format!("companions/{rel}"));
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("fixture missing at {}: {e}", path.display()))
+        .replace("\r\n", "\n");
+    (file_url(&path), text)
+}
+
+fn link_params(uri: Url) -> DocumentLinkParams {
+    DocumentLinkParams {
+        text_document: TextDocumentIdentifier { uri },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    }
+}
+
+fn definition_params(uri: Url, text: &str, byte: usize) -> GotoDefinitionParams {
+    GotoDefinitionParams {
+        text_document_position_params: tdp(uri, text, byte),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    }
+}
+
+fn link_target_contains(link: &DocumentLink, needle: &str) -> bool {
+    link.target
+        .as_ref()
+        .is_some_and(|u| u.as_str().contains(needle))
+}
+
+fn byte_on_trimmed_line(text: &str, trimmed: &str) -> usize {
+    let mut off = 0usize;
+    for line in text.lines() {
+        if line.trim() == trimmed {
+            return off + line.find(trimmed).expect("trimmed needle");
+        }
+        off += line.len() + 1;
+    }
+    panic!("missing line {trimmed:?}");
+}
+
+fn zero_start_range() -> Range {
+    Range::new(Position::new(0, 0), Position::new(0, 0))
+}
+
 fn slice_range(text: &str, range: Range) -> String {
     let index = dygnosis::span::LineIndex::new(text);
     let start = index.offset(
@@ -1472,6 +1517,444 @@ async fn document_links_swff_params() {
         }),
         "links: {links:?}"
     );
+}
+
+#[tokio::test]
+async fn document_links_swff_run_script() {
+    let text = read_mod("swff");
+    let uri = archive_url("swff");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let links = service
+        .inner()
+        .document_link(link_params(uri))
+        .await
+        .expect("links rpc")
+        .expect("links");
+    let run = links
+        .iter()
+        .find(|l| link_target_contains(l, "run_swff.m"))
+        .unwrap_or_else(|| panic!("run_script link missing: {links:?}"));
+    assert_eq!(run.tooltip.as_deref(), Some("run_script run_swff.m"));
+    assert_eq!(run.range.start.line, 0);
+    assert_eq!(
+        slice_range(&text, run.range),
+        text.lines().next().expect("first line")
+    );
+    assert!(
+        links
+            .iter()
+            .all(|l| !link_target_contains(l, "swff_ff_coeffs")),
+        "swff_ff_coeffs.m is not a companion of swff.mod: {links:?}"
+    );
+}
+
+#[tokio::test]
+async fn document_links_ss_present_on_steady() {
+    let (uri, text) = companion_open("ss_present/ss_present.mod");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let links = service
+        .inner()
+        .document_link(link_params(uri))
+        .await
+        .expect("links rpc")
+        .expect("links");
+    let ss = links
+        .iter()
+        .find(|l| link_target_contains(l, "ss_present_steadystate.m"))
+        .unwrap_or_else(|| panic!("steady_state_file link missing: {links:?}"));
+    assert_eq!(
+        ss.tooltip.as_deref(),
+        Some("steady_state_file ss_present_steadystate.m")
+    );
+    assert_eq!(slice_range(&text, ss.range), "steady");
+    assert_ne!(
+        ss.range.start.line, 0,
+        "ss_present named_in is the steady command, not line 0"
+    );
+}
+
+#[tokio::test]
+async fn document_links_ident_helper() {
+    let (uri, text) = companion_open("ident_helper/ident_helper.mod");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let links = service
+        .inner()
+        .document_link(link_params(uri))
+        .await
+        .expect("links rpc")
+        .expect("links");
+    let helper = links
+        .iter()
+        .find(|l| link_target_contains(l, "my_ss_helper.m"))
+        .unwrap_or_else(|| panic!("helper_m link missing: {links:?}"));
+    assert_eq!(helper.tooltip.as_deref(), Some("helper_m my_ss_helper.m"));
+    assert_eq!(slice_range(&text, helper.range), "my_ss_helper");
+}
+
+#[tokio::test]
+async fn document_links_data_file() {
+    let (uri, text) = companion_open("data_file.mod");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let links = service
+        .inner()
+        .document_link(link_params(uri))
+        .await
+        .expect("links rpc")
+        .expect("links");
+    let data = links
+        .iter()
+        .find(|l| link_target_contains(l, "data_file.csv"))
+        .unwrap_or_else(|| panic!("datafile link missing: {links:?}"));
+    assert_eq!(data.tooltip.as_deref(), Some("datafile data_file.csv"));
+    assert_eq!(slice_range(&text, data.range), "'data_file.csv'");
+}
+
+#[tokio::test]
+async fn document_links_leftover_csv() {
+    let (uri, text) = companion_open("leftover_csv.mod");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let links = service
+        .inner()
+        .document_link(link_params(uri))
+        .await
+        .expect("links rpc")
+        .expect("links");
+    let leftover = links
+        .iter()
+        .find(|l| link_target_contains(l, "leftover.csv"))
+        .unwrap_or_else(|| panic!("leftover datafile link missing: {links:?}"));
+    assert_eq!(leftover.tooltip.as_deref(), Some("datafile leftover.csv"));
+    assert_eq!(slice_range(&text, leftover.range), "'leftover.csv'");
+}
+
+#[tokio::test]
+async fn document_links_named_missing_has_no_companion_links() {
+    let (uri, text) = companion_open("named_missing.mod");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text, 1))
+        .await;
+    let links = service
+        .inner()
+        .document_link(link_params(uri))
+        .await
+        .expect("links rpc")
+        .unwrap_or_default();
+    for banned in [
+        "missing_data.csv",
+        "missing_mode",
+        "missing_data_file.csv",
+        "missing_gsa.mat",
+        "missing_initval.csv",
+        "missing_histval.csv",
+        "missing_ext",
+        "missing_helper.m",
+    ] {
+        assert!(
+            links.iter().all(|l| !link_target_contains(l, banned)),
+            "unresolved {banned} must not be a document link: {links:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn definition_swff_first_line_jumps_to_run_script() {
+    let text = read_mod("swff");
+    let uri = archive_url("swff");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let loc = match service
+        .inner()
+        .goto_definition(definition_params(uri, &text, 0))
+        .await
+        .expect("definition rpc")
+        .expect("definition")
+    {
+        GotoDefinitionResponse::Scalar(loc) => loc,
+        other => panic!("expected Scalar run_script definition, got {other:?}"),
+    };
+    assert!(
+        loc.uri.as_str().contains("run_swff.m"),
+        "expected run_swff.m, got {}",
+        loc.uri
+    );
+    assert_eq!(loc.range, zero_start_range());
+}
+
+#[tokio::test]
+async fn definition_ss_present_steady_jumps_to_steadystate() {
+    let (uri, text) = companion_open("ss_present/ss_present.mod");
+    let byte = byte_on_trimmed_line(&text, "steady;");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let loc = match service
+        .inner()
+        .goto_definition(definition_params(uri, &text, byte))
+        .await
+        .expect("definition rpc")
+        .expect("definition")
+    {
+        GotoDefinitionResponse::Scalar(loc) => loc,
+        other => panic!("expected Scalar steady_state_file definition, got {other:?}"),
+    };
+    assert!(
+        loc.uri.as_str().contains("ss_present_steadystate.m"),
+        "expected ss_present_steadystate.m, got {}",
+        loc.uri
+    );
+    assert_eq!(loc.range, zero_start_range());
+}
+
+#[tokio::test]
+async fn definition_ident_helper_jumps_to_m() {
+    let (uri, text) = companion_open("ident_helper/ident_helper.mod");
+    let byte = text.find("my_ss_helper").expect("helper ident");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let loc = match service
+        .inner()
+        .goto_definition(definition_params(uri, &text, byte))
+        .await
+        .expect("definition rpc")
+        .expect("definition")
+    {
+        GotoDefinitionResponse::Scalar(loc) => loc,
+        other => panic!("expected Scalar helper_m definition, got {other:?}"),
+    };
+    assert!(
+        loc.uri.as_str().contains("my_ss_helper.m"),
+        "expected my_ss_helper.m, got {}",
+        loc.uri
+    );
+    assert_eq!(loc.range, zero_start_range());
+}
+
+#[tokio::test]
+async fn definition_data_file_and_leftover_csv() {
+    let (uri, text) = companion_open("data_file.mod");
+    let byte = text.find("'data_file.csv'").expect("datafile span") + 1;
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let loc = match service
+        .inner()
+        .goto_definition(definition_params(uri, &text, byte))
+        .await
+        .expect("definition rpc")
+        .expect("definition")
+    {
+        GotoDefinitionResponse::Scalar(loc) => loc,
+        other => panic!("expected Scalar datafile definition, got {other:?}"),
+    };
+    assert!(
+        loc.uri.as_str().contains("data_file.csv"),
+        "expected data_file.csv, got {}",
+        loc.uri
+    );
+    assert_eq!(loc.range, zero_start_range());
+
+    let (uri, text) = companion_open("leftover_csv.mod");
+    let byte = text.find("'leftover.csv'").expect("leftover span") + 1;
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let loc = match service
+        .inner()
+        .goto_definition(definition_params(uri, &text, byte))
+        .await
+        .expect("definition rpc")
+        .expect("definition")
+    {
+        GotoDefinitionResponse::Scalar(loc) => loc,
+        other => panic!("expected Scalar leftover definition, got {other:?}"),
+    };
+    assert!(
+        loc.uri.as_str().contains("leftover.csv"),
+        "expected leftover.csv, got {}",
+        loc.uri
+    );
+    assert_eq!(loc.range, zero_start_range());
+}
+
+#[tokio::test]
+async fn definition_named_missing_is_none() {
+    let (uri, text) = companion_open("named_missing.mod");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    for needle in ["missing_mode", "missing_ext", "'missing_data.csv'"] {
+        let byte = text
+            .find(needle)
+            .unwrap_or_else(|| panic!("missing {needle}"));
+        let resp = service
+            .inner()
+            .goto_definition(definition_params(uri.clone(), &text, byte))
+            .await
+            .expect("definition rpc");
+        assert!(
+            resp.is_none(),
+            "unresolved {needle} must not jump: {resp:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn watched_delete_drops_companion_link() {
+    let dir = std::env::temp_dir().join(format!(
+        "dygnosis-lsp-companion-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let src_mod = fixture_mod("companions/ss_present/ss_present.mod");
+    let src_ss = fixture_mod("companions/ss_present/ss_present_steadystate.m");
+    let dst_mod = dir.join("ss_present.mod");
+    let dst_ss = dir.join("ss_present_steadystate.m");
+    fs::copy(&src_mod, &dst_mod).unwrap();
+    fs::copy(&src_ss, &dst_ss).unwrap();
+    let dst_mod = dst_mod.canonicalize().unwrap();
+    let dst_ss = dst_ss.canonicalize().unwrap();
+    let text = fs::read_to_string(&dst_mod).unwrap().replace("\r\n", "\n");
+    let uri = file_url(&dst_mod);
+    let ss_uri = file_url(&dst_ss);
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text, 1))
+        .await;
+    let before = service
+        .inner()
+        .document_link(link_params(uri.clone()))
+        .await
+        .expect("links before")
+        .expect("companion link before delete");
+    assert!(
+        before
+            .iter()
+            .any(|l| link_target_contains(l, "ss_present_steadystate.m")),
+        "expected steadystate link before delete: {before:?}"
+    );
+
+    fs::remove_file(&dst_ss).unwrap();
+    service
+        .inner()
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent::new(ss_uri, FileChangeType::DELETED)],
+        })
+        .await;
+    let after = service
+        .inner()
+        .document_link(link_params(uri))
+        .await
+        .expect("links after")
+        .unwrap_or_default();
+    assert!(
+        after
+            .iter()
+            .all(|l| !link_target_contains(l, "ss_present_steadystate.m")),
+        "DELETE of companion must drop the document link: {after:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn rename_skips_open_m_buffer() {
+    let (mod_uri, mod_text) = companion_open("ident_helper/ident_helper.mod");
+    let m_path = fixture_mod("companions/ident_helper/my_ss_helper.m");
+    let m_text = fs::read_to_string(&m_path)
+        .unwrap_or_else(|e| panic!("fixture missing at {}: {e}", m_path.display()))
+        .replace("\r\n", "\n");
+    let m_uri = file_url(&m_path);
+    let byte = byte_on_trimmed_line(&mod_text, "var y;");
+    let y_byte = mod_text[byte..]
+        .find('y')
+        .map(|i| byte + i)
+        .expect("y in var y");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(mod_uri.clone(), mod_text.clone(), 1))
+        .await;
+    service
+        .inner()
+        .did_open(open_params(m_uri.clone(), m_text, 1))
+        .await;
+    let edit = service
+        .inner()
+        .rename(RenameParams {
+            text_document_position: tdp(mod_uri.clone(), &mod_text, y_byte),
+            new_name: "y_renamed".into(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("rename rpc")
+        .expect("rename edit");
+    let changes = edit.changes.expect("changes");
+    assert!(
+        changes.get(&mod_uri).is_some_and(|e| !e.is_empty()),
+        "expected edits in the .mod: {changes:?}"
+    );
+    assert!(
+        !changes.contains_key(&m_uri),
+        "rename must not put a .m URI in WorkspaceEdit: {changes:?}"
+    );
+    for uri in changes.keys() {
+        let path = uri
+            .to_file_path()
+            .unwrap_or_else(|_| PathBuf::from(uri.path()));
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        assert!(
+            ext == "mod" || ext == "inc",
+            "rename URI must be .mod or .inc, got {uri}"
+        );
+        assert!(
+            !matches!(ext.as_str(), "m" | "csv" | "mat" | "xls" | "xlsx"),
+            "forbidden companion extension in rename: {uri}"
+        );
+    }
 }
 
 #[tokio::test]

@@ -1,5 +1,6 @@
 # Rust
 /target/
+/target-*/
 
 # Preprocessor dumps from in-place json=check (not fixtures)
 tests/fixtures/**/model/
