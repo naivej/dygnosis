@@ -28,6 +28,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 | `equations/` | counted equation object (library reader + MCP duplicate `[name=]` tag) |
 | `lsp/` | document-symbol outline (timing-class groups; empty group omitted) |
 | `companions/` | related files next to a `.mod` (convention SS / run script, catalog `datafile` / `mode_file`, leftover quotes, ident helpers). Named unresolved fire W160; sibling `_steadystate.m` quiets I050. |
+| `expand/` | library `expand_report` (effective text + origin map). Not a diagnostic. |
 
 `e001/` files stop later checks (`analyze()` stops at a parse error). Do not use them to prove a W* warning.
 

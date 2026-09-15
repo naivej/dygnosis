@@ -1,0 +1,33 @@
+{
+  "effective_text": "var y ; model ; y = 1 ; y = 2 ; y = 3 ; end ;",
+  "n_equations": 3,
+  "origins": [
+    {
+      "index": 0,
+      "origin_span": {
+        "start": 80,
+        "end": 89
+      },
+      "origin_uri": "expand/whole_eq_for.mod",
+      "origin_frames": []
+    },
+    {
+      "index": 1,
+      "origin_span": {
+        "start": 80,
+        "end": 89
+      },
+      "origin_uri": "expand/whole_eq_for.mod",
+      "origin_frames": []
+    },
+    {
+      "index": 2,
+      "origin_span": {
+        "start": 80,
+        "end": 89
+      },
+      "origin_uri": "expand/whole_eq_for.mod",
+      "origin_frames": []
+    }
+  ]
+}

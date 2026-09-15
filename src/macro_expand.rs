@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use crate::lexer::{Token, TokenKind};
+use crate::span::Span;
 
 const RANGE_CAP: usize = 10_000;
 
@@ -69,64 +70,135 @@ enum Dir {
 
 struct IfFrame {
     active: bool,
+    frame_id: usize,
+    body_start: u32,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TokenTrace {
+    pub frames: Vec<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FrameRec {
+    pub kind: &'static str,
+    pub body_span: Span,
+}
+
+struct ExpandState<'a> {
+    src: &'a str,
+    defines: &'a mut HashMap<String, MacroVal>,
+    origin_stack: Vec<usize>,
+    arena: &'a mut Vec<FrameRec>,
 }
 
 pub fn expand_macros(src: &str, tokens: Vec<Token>) -> Vec<Token> {
-    let mut defines = HashMap::new();
-    expand_seq(src, &tokens, &mut defines)
+    expand_macros_traced(src, tokens).0
 }
 
-fn expand_seq(src: &str, tokens: &[Token], defines: &mut HashMap<String, MacroVal>) -> Vec<Token> {
+pub(crate) fn expand_macros_traced(
+    src: &str,
+    tokens: Vec<Token>,
+) -> (Vec<Token>, Vec<TokenTrace>, Vec<FrameRec>) {
+    let mut defines = HashMap::new();
+    let mut arena = Vec::new();
+    let (out, traces) = {
+        let mut state = ExpandState {
+            src,
+            defines: &mut defines,
+            origin_stack: Vec::new(),
+            arena: &mut arena,
+        };
+        expand_seq(&mut state, &tokens)
+    };
+    (out, traces, arena)
+}
+
+fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec<TokenTrace>) {
     let mut out = Vec::new();
+    let mut traces = Vec::new();
     let mut i = 0;
     let mut stack: Vec<IfFrame> = Vec::new();
 
     while i < tokens.len() {
         let tok = &tokens[i];
         if tok.kind == TokenKind::Eof {
-            out.push(tok.clone());
+            emit(state, &mut out, &mut traces, tok.clone());
             break;
         }
         if tok.kind == TokenKind::MacroDir {
-            match dir_kind(src, tok) {
+            match dir_kind(state.src, tok) {
                 Dir::Define => {
                     if emitting(&stack) {
-                        if let Some((name, val)) = parse_define(tok.text(src)) {
-                            defines.insert(name, val);
+                        if let Some((name, val)) = parse_define(tok.text(state.src)) {
+                            state.defines.insert(name, val);
                         }
                     }
                     i += 1;
                 }
                 Dir::Ifndef => {
-                    let cond = match dir_arg_ident(tok.text(src), "ifndef") {
-                        Some(name) => !defines.contains_key(&name),
+                    let cond = match dir_arg_ident(tok.text(state.src), "ifndef") {
+                        Some(name) => !state.defines.contains_key(&name),
                         None => false,
                     };
-                    stack.push(IfFrame { active: cond });
                     i += 1;
+                    push_if_frame(state, &mut stack, tokens, i, tok.span, "ifndef", cond);
                 }
                 Dir::If => {
-                    let cond = match dir_arg_ident(tok.text(src), "if") {
-                        Some(name) => defines.get(&name).is_some_and(MacroVal::truthy),
+                    let cond = match dir_arg_ident(tok.text(state.src), "if") {
+                        Some(name) => state.defines.get(&name).is_some_and(MacroVal::truthy),
                         None => false,
                     };
-                    stack.push(IfFrame { active: cond });
                     i += 1;
+                    push_if_frame(state, &mut stack, tokens, i, tok.span, "if", cond);
                 }
                 Dir::Else => {
-                    if let Some(frame) = stack.last_mut() {
-                        frame.active = !frame.active;
-                    }
+                    let else_span = tok.span;
                     i += 1;
+                    if let Some(frame) = stack.last_mut() {
+                        backpatch(
+                            state.arena,
+                            frame.frame_id,
+                            frame.body_start,
+                            else_span.start,
+                        );
+                        frame.active = !frame.active;
+                        let body_start = next_body_start(tokens, i, else_span.end);
+                        let frame_id = alloc_frame(state.arena, "else", body_start);
+                        frame.frame_id = frame_id;
+                        frame.body_start = body_start;
+                        if let Some(last) = state.origin_stack.last_mut() {
+                            *last = frame_id;
+                        } else {
+                            state.origin_stack.push(frame_id);
+                        }
+                    }
                 }
                 Dir::Endif => {
-                    stack.pop();
+                    let end_span = tok.span;
                     i += 1;
+                    if let Some(frame) = stack.pop() {
+                        backpatch(
+                            state.arena,
+                            frame.frame_id,
+                            frame.body_start,
+                            end_span.start,
+                        );
+                        state.origin_stack.pop();
+                    }
                 }
                 Dir::For => {
-                    let (body, next) = take_for_body(src, tokens, i);
+                    let (body, next) = take_for_body(state.src, tokens, i);
                     if emitting(&stack) {
-                        unroll_for(src, tok, body, defines, &mut out);
+                        let body_span = tokens_body_span(body);
+                        let frame_id = state.arena.len();
+                        state.arena.push(FrameRec {
+                            kind: "for",
+                            body_span,
+                        });
+                        state.origin_stack.push(frame_id);
+                        unroll_for(state, tok, body, &mut out, &mut traces);
+                        state.origin_stack.pop();
                     }
                     i = next;
                 }
@@ -138,50 +210,132 @@ fn expand_seq(src: &str, tokens: &[Token], defines: &mut HashMap<String, MacroVa
         }
         if tok.kind == TokenKind::MacroInterp {
             if emitting(&stack) {
-                if let Some(repl) = subst_interp(src, tok, defines) {
-                    out.push(repl);
+                if let Some(repl) = subst_interp(state.src, tok, state.defines) {
+                    emit(state, &mut out, &mut traces, repl);
                 }
             }
             i += 1;
             continue;
         }
         if emitting(&stack) {
-            out.push(tok.clone());
+            emit(state, &mut out, &mut traces, tok.clone());
         }
         i += 1;
     }
-    out
+    debug_assert_eq!(out.len(), traces.len());
+    (out, traces)
+}
+
+fn emit(state: &ExpandState<'_>, out: &mut Vec<Token>, traces: &mut Vec<TokenTrace>, tok: Token) {
+    traces.push(TokenTrace {
+        frames: state.origin_stack.clone(),
+    });
+    out.push(tok);
 }
 
 fn emitting(stack: &[IfFrame]) -> bool {
     stack.iter().all(|f| f.active)
 }
 
+fn next_body_start(tokens: &[Token], i: usize, fallback: u32) -> u32 {
+    tokens.get(i).map(|t| t.span.start).unwrap_or(fallback)
+}
+
+fn alloc_frame(arena: &mut Vec<FrameRec>, kind: &'static str, body_start: u32) -> usize {
+    let id = arena.len();
+    arena.push(FrameRec {
+        kind,
+        body_span: Span {
+            start: body_start,
+            end: body_start,
+        },
+    });
+    id
+}
+
+fn push_if_frame(
+    state: &mut ExpandState<'_>,
+    stack: &mut Vec<IfFrame>,
+    tokens: &[Token],
+    next_i: usize,
+    dir_span: Span,
+    kind: &'static str,
+    active: bool,
+) {
+    let body_start = next_body_start(tokens, next_i, dir_span.end);
+    let frame_id = alloc_frame(state.arena, kind, body_start);
+    stack.push(IfFrame {
+        active,
+        frame_id,
+        body_start,
+    });
+    state.origin_stack.push(frame_id);
+}
+
+fn backpatch(arena: &mut [FrameRec], frame_id: usize, body_start: u32, body_end: u32) {
+    if let Some(rec) = arena.get_mut(frame_id) {
+        rec.body_span = Span {
+            start: body_start,
+            end: body_end.max(body_start),
+        };
+    }
+}
+
+fn tokens_body_span(body: &[Token]) -> Span {
+    let mut first = None;
+    let mut last_end = 0u32;
+    for t in body {
+        if t.kind == TokenKind::Eof {
+            continue;
+        }
+        if first.is_none() {
+            first = Some(t.span.start);
+        }
+        last_end = t.span.end;
+    }
+    match first {
+        Some(start) => Span {
+            start,
+            end: last_end,
+        },
+        None => Span::default(),
+    }
+}
+
 fn unroll_for(
-    src: &str,
+    state: &mut ExpandState<'_>,
     for_tok: &Token,
     body: &[Token],
-    defines: &mut HashMap<String, MacroVal>,
     out: &mut Vec<Token>,
+    traces: &mut Vec<TokenTrace>,
 ) {
-    let Some((var, collection)) = parse_for(for_tok.text(src)) else {
+    let Some((var, collection)) = parse_for(for_tok.text(state.src)) else {
         return;
     };
-    let Some(values) = defines.get(&collection).and_then(MacroVal::range_values) else {
+    let Some(values) = state
+        .defines
+        .get(&collection)
+        .and_then(MacroVal::range_values)
+    else {
         return;
     };
-    let previous = defines.get(&var).cloned();
+    let previous = state.defines.get(&var).cloned();
     for n in values {
-        defines.insert(var.clone(), MacroVal::Int(n));
-        let expanded = expand_seq(src, body, defines);
-        out.extend(expanded.into_iter().filter(|t| t.kind != TokenKind::Eof));
+        state.defines.insert(var.clone(), MacroVal::Int(n));
+        let (expanded, expanded_traces) = expand_seq(state, body);
+        for (tok, trace) in expanded.into_iter().zip(expanded_traces) {
+            if tok.kind != TokenKind::Eof {
+                out.push(tok);
+                traces.push(trace);
+            }
+        }
     }
     match previous {
         Some(prev) => {
-            defines.insert(var, prev);
+            state.defines.insert(var, prev);
         }
         None => {
-            defines.remove(&var);
+            state.defines.remove(&var);
         }
     }
 }

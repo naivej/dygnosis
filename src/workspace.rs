@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::companion::{self, CompanionKind, CompanionRecord};
+use crate::expand::{expand_report_from_spliced, ExpandReport, SpliceSegment};
 use crate::include_resolver::{
     normalize_separators, normalize_uri, path_key, resolve_companion_path, resolve_include_path,
     uri_to_path,
@@ -64,6 +65,7 @@ pub struct Workspace {
     docs: HashMap<String, Doc>,
     search_paths: Vec<PathBuf>,
     effective: HashMap<String, Model>,
+    expand: HashMap<String, ExpandReport>,
     records: HashMap<String, IncludeRecords>,
     companions: HashMap<String, Vec<CompanionRecord>>,
 }
@@ -95,7 +97,9 @@ impl Workspace {
                 includepath_dirs,
             },
         );
-        self.effective.remove(&key);
+        // Other roots may have spliced this file.
+        self.effective.clear();
+        self.expand.clear();
         self.records.remove(&key);
         self.companions.remove(&key);
     }
@@ -108,6 +112,7 @@ impl Workspace {
         let key = normalize_uri(uri);
         self.docs.remove(&key);
         self.effective.clear();
+        self.expand.clear();
         self.records.clear();
         self.companions.clear();
     }
@@ -130,7 +135,9 @@ impl Workspace {
                 includepath_dirs,
             },
         );
-        self.effective.remove(&key);
+        // Other roots may have spliced this file.
+        self.effective.clear();
+        self.expand.clear();
         self.records.remove(&key);
         self.companions.remove(&key);
         self.docs.get(&key).map(|d| &d.model)
@@ -141,6 +148,7 @@ impl Workspace {
             self.search_paths.push(path);
         }
         self.effective.clear();
+        self.expand.clear();
         self.records.clear();
         self.companions.clear();
     }
@@ -154,6 +162,7 @@ impl Workspace {
         }
         self.search_paths = deduped;
         self.effective.clear();
+        self.expand.clear();
         self.records.clear();
         self.companions.clear();
     }
@@ -183,6 +192,16 @@ impl Workspace {
             self.effective.insert(key.clone(), model);
         }
         self.effective.get(&key)
+    }
+
+    pub fn expand_report(&mut self, uri: &str) -> Option<&ExpandReport> {
+        let key = self.ensure_loaded(uri)?;
+        if !self.expand.contains_key(&key) {
+            let (spliced, map) = self.splice_with_map(&key, &mut Vec::new(), &[]);
+            let report = expand_report_from_spliced(&spliced, &map);
+            self.expand.insert(key.clone(), report);
+        }
+        self.expand.get(&key)
     }
 
     /// Transitively included files (root excluded).
@@ -440,11 +459,20 @@ impl Workspace {
         stack: &mut Vec<String>,
         inherited_search: &[PathBuf],
     ) -> String {
+        self.splice_with_map(key, stack, inherited_search).0
+    }
+
+    fn splice_with_map(
+        &mut self,
+        key: &str,
+        stack: &mut Vec<String>,
+        inherited_search: &[PathBuf],
+    ) -> (String, Vec<SpliceSegment>) {
         if stack.iter().any(|k| k == key) {
-            return String::new();
+            return (String::new(), Vec::new());
         }
         let Some(source) = self.source_for_key(key) else {
-            return String::new();
+            return (String::new(), Vec::new());
         };
         let mut side_paths: Vec<PathBuf> = self
             .docs
@@ -453,7 +481,7 @@ impl Workspace {
             .unwrap_or_default();
         let mut all: Vec<SpliceEvent> = {
             let Some(doc) = self.docs.get(key) else {
-                return source;
+                return identity_splice(&source, Some(key.to_string()));
             };
             doc.model
                 .includes
@@ -473,7 +501,7 @@ impl Workspace {
             SpliceEvent::Include(d) => d.span.start,
             SpliceEvent::IncludePath(d) => d.span.start,
         });
-        let mut replacements: Vec<(Span, String)> = Vec::new();
+        let mut replacements: Vec<(Span, String, Vec<SpliceSegment>)> = Vec::new();
         for event in all {
             match event {
                 SpliceEvent::IncludePath(dir) => {
@@ -483,16 +511,16 @@ impl Workspace {
                 SpliceEvent::Include(dir) => {
                     let effective_paths = append_unique(inherited_search, &side_paths);
                     let resolved = self.resolve_filename(key, &dir.filename, &effective_paths);
-                    let body = match resolved {
-                        None => String::new(),
+                    let (body, nested_map) = match resolved {
+                        None => (String::new(), Vec::new()),
                         Some(path) => {
                             let resolved_key = path_key(&path);
                             if stack.iter().any(|k| k == &resolved_key) {
-                                String::new()
+                                (String::new(), Vec::new())
                             } else {
                                 stack.push(key.to_string());
                                 let nested =
-                                    self.splice_key(&resolved_key, stack, &effective_paths);
+                                    self.splice_with_map(&resolved_key, stack, &effective_paths);
                                 stack.pop();
                                 if let Some(nested_doc) = self.docs.get(&resolved_key) {
                                     side_paths =
@@ -502,11 +530,11 @@ impl Workspace {
                             }
                         }
                     };
-                    replacements.push((dir.span, body));
+                    replacements.push((dir.span, body, nested_map));
                 }
             }
         }
-        apply_replacements(&source, &replacements)
+        apply_replacements_mapped(&source, &replacements, Some(key.to_string()))
     }
 }
 
@@ -541,23 +569,87 @@ fn ordered_events(model: &Model) -> Vec<IncludeEvent> {
     events
 }
 
-fn apply_replacements(source: &str, replacements: &[(Span, String)]) -> String {
+fn identity_splice(source: &str, file: Option<String>) -> (String, Vec<SpliceSegment>) {
+    let segs = if source.is_empty() {
+        Vec::new()
+    } else {
+        vec![SpliceSegment {
+            spliced: Span::new(0, source.len()),
+            file,
+            origin: Span::new(0, source.len()),
+        }]
+    };
+    (source.to_string(), segs)
+}
+
+fn apply_replacements_mapped(
+    source: &str,
+    replacements: &[(Span, String, Vec<SpliceSegment>)],
+    file: Option<String>,
+) -> (String, Vec<SpliceSegment>) {
     let mut out = String::with_capacity(source.len());
     let mut last = 0usize;
     let mut ordered = replacements.to_vec();
-    ordered.sort_by_key(|(span, _)| span.start);
-    for (span, body) in ordered {
+    ordered.sort_by_key(|(span, _, _)| span.start);
+    let mut segments = Vec::new();
+    for (span, body, nested) in ordered {
         let start = span.start as usize;
         let end = span.end as usize;
         if start < last || end > source.len() || start > source.len() {
             continue;
         }
-        out.push_str(&source[last..start]);
+        push_root_piece(
+            &mut out,
+            &mut segments,
+            source,
+            last,
+            start,
+            file.as_deref(),
+        );
+        let offset = out.len() as u32;
+        for mut seg in nested {
+            seg.spliced.start += offset;
+            seg.spliced.end += offset;
+            if seg.spliced.start < seg.spliced.end {
+                segments.push(seg);
+            }
+        }
         out.push_str(&body);
         last = end;
     }
-    out.push_str(&source[last..]);
-    out
+    push_root_piece(
+        &mut out,
+        &mut segments,
+        source,
+        last,
+        source.len(),
+        file.as_deref(),
+    );
+    (out, segments)
+}
+
+fn push_root_piece(
+    out: &mut String,
+    segments: &mut Vec<SpliceSegment>,
+    source: &str,
+    from: usize,
+    to: usize,
+    file: Option<&str>,
+) {
+    if from >= to {
+        return;
+    }
+    let offset = out.len() as u32;
+    let len = (to - from) as u32;
+    segments.push(SpliceSegment {
+        spliced: Span {
+            start: offset,
+            end: offset + len,
+        },
+        file: file.map(str::to_string),
+        origin: Span::new(from, to),
+    });
+    out.push_str(&source[from..to]);
 }
 
 fn includepath_dirs_for(key: &str, model: &Model) -> Vec<PathBuf> {

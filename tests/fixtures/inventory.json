@@ -4263,6 +4263,46 @@
       "source": "companions.rs::plus_pkg_is_not_steady_state_file",
       "cluster": "companions/plus_pkg",
       "notes": "generated +FILENAME/steadystate.m is not convention SS"
+    },
+    {
+      "id": "expand_whole_eq_for",
+      "codes": [],
+      "kind": "harness",
+      "package": "expand",
+      "fixture": "tests/fixtures/expand/whole_eq_for.mod",
+      "source": "expand.rs::whole_eq_for_shared_body_span",
+      "cluster": "expand/whole_eq_for.mod",
+      "notes": "library expand_report; three y=@{i} copies share body span"
+    },
+    {
+      "id": "expand_nested_for",
+      "codes": [],
+      "kind": "harness",
+      "package": "expand",
+      "fixture": "tests/fixtures/expand/nested_for.mod",
+      "source": "expand.rs::nested_for_origin_frames",
+      "cluster": "expand/nested_for.mod",
+      "notes": "library expand_report; nested @#for origin_frames length 2"
+    },
+    {
+      "id": "expand_include_eq",
+      "codes": [],
+      "kind": "harness",
+      "package": "expand",
+      "fixture": "tests/fixtures/expand/include_eq.mod",
+      "source": "expand.rs::include_eq_row_origins",
+      "cluster": "expand/include_eq.mod",
+      "notes": "library expand_report; root equation + included body equation"
+    },
+    {
+      "id": "expand_include_eq_body",
+      "codes": [],
+      "kind": "harness",
+      "package": "expand",
+      "fixture": "tests/fixtures/expand/include_eq_body.inc",
+      "source": "expand.rs::include_eq_row_origins",
+      "cluster": "expand/include_eq.mod",
+      "notes": "included body for expand_include_eq; origin_uri is this .inc"
     }
   ]
 }

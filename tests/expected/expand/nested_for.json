@@ -1,0 +1,110 @@
+{
+  "effective_text": "var x ; model ; x = 1 ; x = 1 ; x = 2 ; x = 2 ; end ;",
+  "n_equations": 4,
+  "origins": [
+    {
+      "index": 0,
+      "origin_span": {
+        "start": 110,
+        "end": 119
+      },
+      "origin_uri": "expand/nested_for.mod",
+      "origin_frames": [
+        {
+          "origin_span": {
+            "start": 96,
+            "end": 128
+          },
+          "origin_uri": "expand/nested_for.mod",
+          "kind": "for"
+        },
+        {
+          "origin_span": {
+            "start": 110,
+            "end": 119
+          },
+          "origin_uri": "expand/nested_for.mod",
+          "kind": "for"
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "origin_span": {
+        "start": 110,
+        "end": 119
+      },
+      "origin_uri": "expand/nested_for.mod",
+      "origin_frames": [
+        {
+          "origin_span": {
+            "start": 96,
+            "end": 128
+          },
+          "origin_uri": "expand/nested_for.mod",
+          "kind": "for"
+        },
+        {
+          "origin_span": {
+            "start": 110,
+            "end": 119
+          },
+          "origin_uri": "expand/nested_for.mod",
+          "kind": "for"
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "origin_span": {
+        "start": 110,
+        "end": 119
+      },
+      "origin_uri": "expand/nested_for.mod",
+      "origin_frames": [
+        {
+          "origin_span": {
+            "start": 96,
+            "end": 128
+          },
+          "origin_uri": "expand/nested_for.mod",
+          "kind": "for"
+        },
+        {
+          "origin_span": {
+            "start": 110,
+            "end": 119
+          },
+          "origin_uri": "expand/nested_for.mod",
+          "kind": "for"
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "origin_span": {
+        "start": 110,
+        "end": 119
+      },
+      "origin_uri": "expand/nested_for.mod",
+      "origin_frames": [
+        {
+          "origin_span": {
+            "start": 96,
+            "end": 128
+          },
+          "origin_uri": "expand/nested_for.mod",
+          "kind": "for"
+        },
+        {
+          "origin_span": {
+            "start": 110,
+            "end": 119
+          },
+          "origin_uri": "expand/nested_for.mod",
+          "kind": "for"
+        }
+      ]
+    }
+  ]
+}

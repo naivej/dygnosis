@@ -24,6 +24,7 @@ mod diag_shape;
 pub mod diagnostic;
 pub mod e010;
 pub mod equations;
+pub mod expand;
 pub mod explain;
 pub mod expr;
 pub mod format;
@@ -69,6 +70,7 @@ pub use e010::check_e010;
 pub use equations::{
     count_gap, equations, explain_equation, CountGap, EquationIdent, EquationRow, IdentClass,
 };
+pub use expand::{expand_report, EquationOrigin, ExpandReport, OriginFrame};
 pub use expr::{BinOp, Expr, ExprArena, ExprId, ExprKind, IdentRef, UnOp};
 pub use format::{format_range, format_text};
 pub use include_resolver::{find_workspace_root, resolve_companion_path, resolve_include_path};

@@ -1,6 +1,7 @@
 //! Native recursive-descent parser over the token stream.
 
 use std::collections::HashMap;
+use std::ops::Range;
 
 use crate::expr::{BinOp, ExprId, ExprKind, UnOp};
 use crate::intern::{Interner, Name};
@@ -19,12 +20,22 @@ pub fn parse(text: &str) -> Model {
     let (includes, includepaths, macro_directives, macro_interps) =
         collect_include_dirs(&source, &raw_tokens);
     let tokens = expand_macros(&source, raw_tokens);
+    let (mut model, _ranges) = parse_expanded(&source, tokens);
+    model.includes = includes;
+    model.includepaths = includepaths;
+    model.macro_directives = macro_directives;
+    model.macro_interps = macro_interps;
+    model
+}
+
+pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, Vec<Range<usize>>) {
     let mut p = Parser {
-        src: &source,
+        src,
         tokens,
         i: 0,
         intern: Interner::default(),
         model: Model::default(),
+        eq_token_ranges: Vec::new(),
     };
     p.parse_file();
     p.model
@@ -36,15 +47,14 @@ pub fn parse(text: &str) -> Model {
     p.record_keyword_typos();
     p.record_missing_assign_semis();
     let Parser {
-        intern, mut model, ..
+        intern,
+        mut model,
+        eq_token_ranges,
+        ..
     } = p;
-    model.source = source;
+    model.source = src.to_string();
     model.intern = intern;
-    model.includes = includes;
-    model.includepaths = includepaths;
-    model.macro_directives = macro_directives;
-    model.macro_interps = macro_interps;
-    model
+    (model, eq_token_ranges)
 }
 
 const UNARY_BP: u8 = 7;
@@ -176,7 +186,7 @@ enum ExprStop {
     Semi,
 }
 
-fn normalize_newlines(text: &str) -> String {
+pub(crate) fn normalize_newlines(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let bytes = text.as_bytes();
     let mut i = 0;
@@ -397,6 +407,7 @@ struct Parser<'a> {
     i: usize,
     intern: Interner,
     model: Model,
+    eq_token_ranges: Vec<Range<usize>>,
 }
 
 impl Parser<'_> {
@@ -576,7 +587,8 @@ impl Parser<'_> {
         }
         let body_i = self.i;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
-            if let Some(eq) = self.parse_equation_statement() {
+            if let Some((eq, range)) = self.parse_equation_statement() {
+                self.eq_token_ranges.push(range);
                 self.model.equations.push(eq);
             }
         }
@@ -592,7 +604,7 @@ impl Parser<'_> {
         let start = opener_span.start;
         let body_i = self.i;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
-            if let Some(eq) = self.parse_equation_statement() {
+            if let Some((eq, _)) = self.parse_equation_statement() {
                 self.model.steady_state_equations.push(eq);
             }
         }
@@ -1363,7 +1375,7 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_equation_statement(&mut self) -> Option<Equation> {
+    fn parse_equation_statement(&mut self) -> Option<(Equation, Range<usize>)> {
         if self.at(TokenKind::Semi) {
             self.bump();
             return None;
@@ -1429,7 +1441,7 @@ impl Parser<'_> {
                 self.alloc_error(eq.span)
             });
         }
-        Some(eq)
+        Some((eq, stmt_i..stmt_end_i))
     }
 
     fn parse_expr_side(&mut self, stop: ExprStop) -> (Option<ExprId>, bool) {
@@ -2584,7 +2596,7 @@ fn line_of(src: &str, byte: u32) -> (u32, &str) {
     (line_no, &src[start..end])
 }
 
-fn join_lexemes(src: &str, tokens: &[Token]) -> String {
+pub(crate) fn join_lexemes(src: &str, tokens: &[Token]) -> String {
     let mut out = String::new();
     let mut prev: Option<TokenKind> = None;
     for tok in tokens {
