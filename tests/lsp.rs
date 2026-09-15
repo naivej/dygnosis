@@ -37,6 +37,34 @@ fn archive_url(archive_dir: &str) -> Url {
     file_url(&copilot_mod(archive_dir))
 }
 
+fn expand_fixture(name: &str) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/expand")
+        .join(name);
+    path.canonicalize()
+        .unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()))
+}
+
+fn expand_open(name: &str) -> (Url, String) {
+    let path = expand_fixture(name);
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+        .replace("\r\n", "\n");
+    (file_url(&path), text)
+}
+
+fn copilot_example(name: &str) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(".agents/skills/dynare-copilot/references/examples")
+        .join(format!("{name}.mod"));
+    path.canonicalize()
+        .unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()))
+}
+
+fn json_range(obj: &serde_json::Value) -> Range {
+    serde_json::from_value(obj.get("range").cloned().expect("range")).expect("Range")
+}
+
 fn diag_code(d: &Diagnostic) -> String {
     match &d.code {
         Some(NumberOrString::String(s)) => s.clone(),
@@ -1391,10 +1419,11 @@ fn initialize_capabilities_wave_c() {
         .expect("executeCommand")
         .commands
         .clone();
-    assert_eq!(commands.len(), 3, "commands: {commands:?}");
+    assert_eq!(commands.len(), 4, "commands: {commands:?}");
     assert!(commands.contains(&"dynare/explainDiagnostic".into()));
     assert!(commands.contains(&"dynare/compareModels".into()));
     assert!(commands.contains(&"dynare/runPreprocessor".into()));
+    assert!(commands.contains(&"dynare/showEffectiveModel".into()));
     assert!(!commands.iter().any(|c| c.contains("computeSteadyState")));
     assert!(!commands.iter().any(|c| c.contains("runDynare")));
 
@@ -2065,6 +2094,14 @@ async fn code_lens_structure_summary_no_out() {
     ] {
         assert!(!joined.contains(bad), "lens contains {bad:?}: {joined}");
     }
+    assert!(
+        !lenses.iter().any(|l| {
+            l.command
+                .as_ref()
+                .is_some_and(|c| c.command == "dynare/showEffectiveModel")
+        }),
+        "showEffectiveModel must not be a code lens"
+    );
 }
 
 #[tokio::test]
@@ -2376,4 +2413,192 @@ async fn did_save_clean_trend_has_no_e001() {
         "clean save must not keep own Error; got {:?}",
         items.iter().map(diag_code).collect::<Vec<_>>()
     );
+}
+
+async fn show_effective_payload(
+    service: &tower_lsp::LspService<dygnosis::server::Backend>,
+    uri: &Url,
+) -> serde_json::Value {
+    service
+        .inner()
+        .execute_command(ExecuteCommandParams {
+            command: "dynare/showEffectiveModel".into(),
+            arguments: vec![serde_json::json!({"uri": uri.as_str()})],
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("showEffectiveModel rpc")
+        .expect("payload")
+}
+
+#[tokio::test]
+async fn show_effective_model_whole_eq_for() {
+    let (uri, text) = expand_open("whole_eq_for.mod");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let payload = show_effective_payload(&service, &uri).await;
+    let payload_uri = payload.get("uri").and_then(|v| v.as_str()).expect("uri");
+    assert_eq!(payload_uri, uri.as_str());
+    assert!(
+        !payload_uri.contains("dygnosis-effective") && !payload_uri.starts_with("untitled:"),
+        "virtual scheme uri: {payload_uri}"
+    );
+    let effective = payload
+        .get("effective_text")
+        .and_then(|v| v.as_str())
+        .expect("effective_text");
+    assert!(effective.contains("y = 1"), "effective_text: {effective}");
+    assert!(effective.contains("y = 2"), "effective_text: {effective}");
+    assert!(effective.contains("y = 3"), "effective_text: {effective}");
+    let origins = payload
+        .get("origins")
+        .and_then(|v| v.as_array())
+        .expect("origins");
+    assert_eq!(origins.len(), 3, "origins: {origins:?}");
+    let indexes: Vec<u64> = origins
+        .iter()
+        .map(|o| o.get("index").and_then(|i| i.as_u64()).expect("index"))
+        .collect();
+    assert_eq!(indexes, vec![0, 1, 2]);
+    for origin in origins {
+        let slice = slice_range(&text, json_range(origin));
+        assert!(slice.contains("y = @{i}"), "origin slice {slice:?}");
+        assert!(!slice.contains("@#define"), "origin slice {slice:?}");
+        assert!(
+            origin.get("origin_frames").is_none(),
+            "origin_frames present: {origin}"
+        );
+        let origin_uri = origin
+            .get("origin_uri")
+            .and_then(|v| v.as_str())
+            .expect("origin_uri");
+        assert!(
+            origin_uri.contains("whole_eq_for.mod"),
+            "origin_uri {origin_uri}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn show_effective_model_include_eq() {
+    let (mod_uri, mod_text) = expand_open("include_eq.mod");
+    let (inc_uri, inc_text) = expand_open("include_eq_body.inc");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(mod_uri.clone(), mod_text, 1))
+        .await;
+    service
+        .inner()
+        .did_open(open_params(inc_uri.clone(), inc_text.clone(), 1))
+        .await;
+    let payload = show_effective_payload(&service, &mod_uri).await;
+    let effective = payload
+        .get("effective_text")
+        .and_then(|v| v.as_str())
+        .expect("effective_text");
+    assert!(effective.contains("z = 0"), "effective_text: {effective}");
+    let origins = payload
+        .get("origins")
+        .and_then(|v| v.as_array())
+        .expect("origins");
+    assert!(origins.len() >= 2, "origins: {origins:?}");
+    let row0_uri = origins[0]
+        .get("origin_uri")
+        .and_then(|v| v.as_str())
+        .expect("origins[0].origin_uri");
+    assert!(
+        row0_uri.contains("include_eq.mod"),
+        "origins[0].origin_uri {row0_uri}"
+    );
+    let row1_uri = origins[1]
+        .get("origin_uri")
+        .and_then(|v| v.as_str())
+        .expect("origins[1].origin_uri");
+    assert!(
+        row1_uri.contains("include_eq_body.inc"),
+        "origins[1].origin_uri {row1_uri}"
+    );
+    let slice = slice_range(&inc_text, json_range(&origins[1]));
+    assert!(slice.contains("z = 0"), "include origin slice {slice:?}");
+}
+
+#[tokio::test]
+async fn show_effective_model_nested_for() {
+    let (uri, text) = expand_open("nested_for.mod");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let payload = show_effective_payload(&service, &uri).await;
+    let origins = payload
+        .get("origins")
+        .and_then(|v| v.as_array())
+        .expect("origins");
+    assert_eq!(origins.len(), 4, "origins: {origins:?}");
+    for origin in origins {
+        let frames = origin
+            .get("origin_frames")
+            .and_then(|v| v.as_array())
+            .expect("origin_frames");
+        assert_eq!(frames.len(), 2, "origin_frames: {frames:?}");
+        assert!(
+            frames
+                .iter()
+                .all(|f| f.get("kind").and_then(|k| k.as_str()) == Some("for")),
+            "origin_frames: {frames:?}"
+        );
+        let inner = frames.last().expect("innermost frame");
+        let slice = slice_range(&text, json_range(inner));
+        assert!(slice.contains("x = @{i}"), "inner frame slice {slice:?}");
+        assert!(!slice.contains("@#for"), "inner frame slice {slice:?}");
+    }
+}
+
+#[tokio::test]
+async fn show_effective_model_us_re09() {
+    let path = copilot_example("US_RE09_rep");
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+        .replace("\r\n", "\n");
+    let uri = file_url(&path);
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let payload = show_effective_payload(&service, &uri).await;
+    let effective = payload
+        .get("effective_text")
+        .and_then(|v| v.as_str())
+        .expect("effective_text");
+    assert!(
+        effective.contains("EXPECTATION(-1)"),
+        "effective_text missing EXPECTATION(-1)"
+    );
+    assert!(
+        effective.contains("EXPECTATION(-16)"),
+        "effective_text missing EXPECTATION(-16)"
+    );
+    let origins = payload
+        .get("origins")
+        .and_then(|v| v.as_array())
+        .expect("origins");
+    assert_eq!(origins.len(), 19, "origins: {origins:?}");
+    let row = &origins[2];
+    assert!(
+        row.get("origin_frames").is_none(),
+        "phillips origin_frames present: {row}"
+    );
+    let slice = slice_range(&text, json_range(row));
+    assert!(slice.contains("p = lambda"), "phillips origin {slice:?}");
+    assert!(
+        slice.contains("@#for lag in lags"),
+        "phillips origin {slice:?}"
+    );
+    assert!(slice.contains("@#endfor"), "phillips origin {slice:?}");
 }

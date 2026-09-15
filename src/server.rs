@@ -11,6 +11,7 @@ use tower_lsp::{Client, ClientSocket, LanguageServer, LspService, Server};
 
 use crate::catalog::{command_options, option_doc};
 use crate::diagnostic::{check_file, check_in_workspace};
+use crate::expand::{EquationOrigin, OriginFrame};
 use crate::explain;
 use crate::format::{format_range, format_text};
 use crate::lexer::{tokenize, TokenKind};
@@ -979,6 +980,7 @@ impl Backend {
             "dynare/explainDiagnostic" => explain_command(arguments),
             "dynare/compareModels" => self.compare_command(arguments),
             "dynare/runPreprocessor" => self.run_preprocessor_command(arguments),
+            "dynare/showEffectiveModel" => self.show_effective_model_command(arguments),
             _ => json!({"error": format!("unknown command {command}"), "code": "UNKNOWN_COMMAND"}),
         }
     }
@@ -996,6 +998,29 @@ impl Backend {
             return json!({"error": format!("No parsed model for uri_b: {uri_b}"), "code": "URI_B_NOT_FOUND"});
         };
         compare_models(model_a, model_b).to_json()
+    }
+
+    fn show_effective_model_command(&self, arguments: &[Value]) -> Value {
+        let Some(uri) = extract_command_uri(arguments) else {
+            return json!({"success": false, "message": "Missing or invalid URI argument"});
+        };
+        let mut inner = self.lock_inner();
+        if !inner.docs.contains_key(&uri) {
+            return json!({"success": false, "message": "Document not available"});
+        }
+        let Some(report) = inner.workspace.expand_report(uri.as_str()).cloned() else {
+            return json!({"success": false, "message": "Document not available"});
+        };
+        let origins: Vec<Value> = report
+            .origins
+            .iter()
+            .map(|origin| equation_origin_json(&inner.workspace, origin))
+            .collect();
+        json!({
+            "uri": uri.as_str(),
+            "effective_text": report.effective_text,
+            "origins": origins,
+        })
     }
 
     fn prepare_hierarchy(
@@ -1490,6 +1515,7 @@ pub fn initialize_result() -> InitializeResult {
                     "dynare/explainDiagnostic".into(),
                     "dynare/compareModels".into(),
                     "dynare/runPreprocessor".into(),
+                    "dynare/showEffectiveModel".into(),
                 ],
                 work_done_progress_options: WorkDoneProgressOptions::default(),
             }),
@@ -1546,6 +1572,66 @@ fn span_range(index: &LineIndex, text: &str, span: Span) -> Range {
         Position::new(start.line, start.character),
         Position::new(end.line, end.character),
     )
+}
+
+fn file_url_from_path_key(path_key: &str) -> Option<Url> {
+    Url::from_file_path(Path::new(path_key)).ok()
+}
+
+fn origin_lsp_range(workspace: &Workspace, origin_uri: Option<&str>, span: Span) -> Range {
+    let text = origin_uri
+        .and_then(|u| workspace.get_source(u))
+        .unwrap_or("");
+    let index = LineIndex::new(text);
+    span_range(&index, text, span)
+}
+
+fn origin_uri_json(path_key: Option<&str>) -> Option<String> {
+    path_key
+        .and_then(file_url_from_path_key)
+        .map(|u| u.to_string())
+}
+
+fn equation_origin_json(workspace: &Workspace, origin: &EquationOrigin) -> Value {
+    let mut obj = serde_json::Map::new();
+    obj.insert("index".into(), json!(origin.index));
+    if let Some(uri) = origin_uri_json(origin.origin_uri.as_deref()) {
+        obj.insert("origin_uri".into(), json!(uri));
+    }
+    obj.insert(
+        "range".into(),
+        json!(origin_lsp_range(
+            workspace,
+            origin.origin_uri.as_deref(),
+            origin.origin_span,
+        )),
+    );
+    if !origin.origin_frames.is_empty() {
+        let frames: Vec<Value> = origin
+            .origin_frames
+            .iter()
+            .map(|frame| origin_frame_json(workspace, frame))
+            .collect();
+        obj.insert("origin_frames".into(), Value::Array(frames));
+    }
+    Value::Object(obj)
+}
+
+fn origin_frame_json(workspace: &Workspace, frame: &OriginFrame) -> Value {
+    let mut obj = serde_json::Map::new();
+    obj.insert("kind".into(), json!(frame.kind));
+    if let Some(uri) = origin_uri_json(frame.origin_uri.as_deref()) {
+        obj.insert("origin_uri".into(), json!(uri));
+    }
+    obj.insert(
+        "range".into(),
+        json!(origin_lsp_range(
+            workspace,
+            frame.origin_uri.as_deref(),
+            frame.origin_span,
+        )),
+    );
+    Value::Object(obj)
 }
 
 fn markdown_hover(value: String, range: Option<Range>) -> Hover {
