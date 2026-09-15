@@ -44,8 +44,8 @@ fn load_disk(path: &Path) -> (Workspace, String, String) {
         .unwrap_or_else(|| panic!("non-utf8 path {}", path.display()))
         .to_string();
     let mut ws = Workspace::new();
-    ws.load_from_disk(path)
-        .unwrap_or_else(|| panic!("load {}", path.display()));
+    // Overlay LF text so named_in spans match read_mod (autocrlf checkout is CRLF).
+    ws.update_document(&uri, &src);
     (ws, uri, src)
 }
 
