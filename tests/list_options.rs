@@ -94,3 +94,186 @@ fn option_doc_matches_expected() {
         "expected a COMMAND_OPTIONS name absent from OPTION_DOCS"
     );
 }
+
+const BIND_HELP: &str = "Mandatory condition evaluated in the baseline/steady-state regime to check whether the constraint becomes binding.";
+const ERROR_BIND_HELP: &str = "Optional numerical criterion for the size of the bind-constraint violation. Default: absolute value of the bind inequality.";
+const ERROR_RELAX_HELP: &str = "Optional numerical criterion for the size of the relax-constraint violation. Default: absolute value of the relax inequality.";
+const NAME_CLAUSE_HELP: &str =
+    "Quoted constraint name (name 'STRING';), used in bind/relax equation tags.";
+const RELAX_HELP: &str = "Optional condition evaluated in the binding regime to check whether the constraint is relaxed. If omitted, Dynare checks whether the bind expression is false.";
+
+fn option_names(command: &str) -> Vec<&str> {
+    command_options(command)
+        .iter()
+        .map(|(name, _)| *name)
+        .collect()
+}
+
+#[test]
+fn occbin_constraints_is_catalogued_block() {
+    assert!(is_known_command("occbin_constraints"));
+    assert!(is_known_command("OCCBIN_CONSTRAINTS"));
+
+    assert_eq!(
+        option_names("occbin_constraints"),
+        ["bind", "error_bind", "error_relax", "name", "relax"]
+    );
+
+    let payload = to_value(list_options(Some("occbin_constraints")));
+    assert_eq!(payload["command"], "occbin_constraints");
+    assert_eq!(payload["known"], true);
+    assert_eq!(payload["n_options"], 5);
+    let options = payload["options"].as_array().unwrap();
+    assert_eq!(options.len(), 5);
+    assert_eq!(options[0]["name"], "bind");
+    assert_eq!(options[0]["description"], BIND_HELP);
+    assert_eq!(options[1]["name"], "error_bind");
+    assert_eq!(options[1]["description"], ERROR_BIND_HELP);
+    assert_eq!(options[2]["name"], "error_relax");
+    assert_eq!(options[2]["description"], ERROR_RELAX_HELP);
+    assert_eq!(options[3]["name"], "name");
+    assert_eq!(options[3]["description"], NAME_CLAUSE_HELP);
+    assert_eq!(options[4]["name"], "relax");
+    assert_eq!(options[4]["description"], RELAX_HELP);
+
+    let upper = to_value(list_options(Some("OCCBIN_CONSTRAINTS")));
+    assert_eq!(upper["n_options"], 5);
+    assert_eq!(upper, payload);
+
+    let omitted = to_value(list_options(None));
+    assert_eq!(omitted["n_commands"], 63);
+    let i = omitted["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|c| c == "occbin_constraints")
+        .expect("occbin_constraints missing from omitted commands");
+    assert_eq!(omitted["commands"][i - 1], "ms_variance_decomposition");
+    assert_eq!(omitted["commands"][i], "occbin_constraints");
+    assert_eq!(omitted["commands"][i + 1], "occbin_graph");
+
+    assert!(option_doc("name").contains("M-/MEX file"));
+    assert_eq!(
+        option_doc("name"),
+        "The name of the function, which must also be the name of the M-/MEX file implementing it."
+    );
+    assert_eq!(option_doc("bind"), BIND_HELP);
+    assert_eq!(option_doc("error_bind"), ERROR_BIND_HELP);
+    assert_eq!(option_doc("error_relax"), ERROR_RELAX_HELP);
+    assert_eq!(option_doc("relax"), RELAX_HELP);
+
+    assert_eq!(option_names("occbin_graph"), ["noconstant"]);
+    assert_eq!(
+        option_names("occbin_setup"),
+        [
+            "filter_init_periods_using_particles",
+            "filter_particle_diagnostics",
+            "filter_particle_diagnostics_graph_periods",
+            "filter_particle_diagnostics_nograph",
+            "filter_particle_draw_states_from_empirical_density",
+            "filter_particle_initial_state_ergodic_simul",
+            "filter_particle_number_of_particles",
+            "filter_particle_number_of_shocks_per_particle",
+            "filter_particle_state_draws",
+            "filter_particle_state_importance_sampling_logpost_crit_threshold",
+            "filter_particle_state_importance_sampling_pkf_init",
+            "filter_particle_state_importance_sampling_slice_burnin",
+            "filter_particle_state_importance_sampling_slice_override_iteration",
+            "filter_particle_use_pkf_updated_state_threshold",
+            "filter_use_relaxation",
+            "likelihood_brute_force_extra_regime_guess",
+            "likelihood_brute_force_regime_guess",
+            "likelihood_check_ahead_periods",
+            "likelihood_curb_retrench",
+            "likelihood_first_period_binding_regime_allowed",
+            "likelihood_first_period_occbin_update",
+            "likelihood_inversion_filter",
+            "likelihood_max_check_ahead_periods",
+            "likelihood_max_kalman_iterations",
+            "likelihood_maxit",
+            "likelihood_periodic_solution",
+            "likelihood_periods",
+            "likelihood_piecewise_kalman_filter",
+            "particle_filtering",
+            "posterior_importance_sampling",
+            "posterior_importance_sampling_filter",
+            "posterior_importance_sampling_orig_dname",
+            "posterior_importance_sampling_orig_filter",
+            "posterior_importance_sampling_orig_fname",
+            "posterior_importance_sampling_sub_draws",
+            "simul_check_ahead_periods",
+            "simul_curb_retrench",
+            "simul_debug",
+            "simul_max_check_ahead_periods",
+            "simul_maxit",
+            "simul_periodic_solution",
+            "simul_periodic_solution_strict",
+            "simul_periodic_solution_threshold",
+            "simul_periods",
+            "simul_reset_check_ahead_periods",
+            "simul_reset_regime_in_new_period",
+            "smoother_check_ahead_periods",
+            "smoother_curb_retrench",
+            "smoother_debug",
+            "smoother_first_period_occbin_update",
+            "smoother_inversion_filter",
+            "smoother_max_check_ahead_periods",
+            "smoother_max_number_of_iterations",
+            "smoother_maxit",
+            "smoother_periodic_solution",
+            "smoother_periods",
+            "smoother_piecewise_kalman_filter",
+            "smoother_plot",
+        ]
+    );
+    assert_eq!(
+        option_names("occbin_solver"),
+        [
+            "simul_check_ahead_periods",
+            "simul_curb_retrench",
+            "simul_debug",
+            "simul_max_check_ahead_periods",
+            "simul_maxit",
+            "simul_periodic_solution",
+            "simul_periodic_solution_strict",
+            "simul_periodic_solution_threshold",
+            "simul_periods",
+            "simul_reset_check_ahead_periods",
+            "simul_reset_regime_in_new_period",
+        ]
+    );
+    assert_eq!(
+        option_names("occbin_write_regimes"),
+        ["filename", "periods", "simul", "smoother"]
+    );
+
+    assert!(command_options("lmmcp").is_empty());
+    assert!(!is_known_command("lmmcp"));
+    for command in [
+        "extended_path",
+        "perfect_foresight_solver",
+        "perfect_foresight_with_expectation_errors_solver",
+        "simul",
+    ] {
+        assert!(
+            command_options(command)
+                .iter()
+                .any(|(name, _)| *name == "lmmcp"),
+            "lmmcp missing on {command}"
+        );
+    }
+    for command in [
+        "occbin_constraints",
+        "occbin_graph",
+        "occbin_setup",
+        "occbin_solver",
+        "occbin_write_regimes",
+    ] {
+        assert!(
+            command_options(command)
+                .iter()
+                .all(|(name, _)| *name != "lmmcp"),
+            "lmmcp unexpectedly on {command}"
+        );
+    }
+}

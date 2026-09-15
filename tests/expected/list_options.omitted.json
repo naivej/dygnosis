@@ -1,5 +1,5 @@
 {
-  "n_commands": 62,
+  "n_commands": 63,
   "commands": [
     "bvar_density",
     "bvar_forecast",
@@ -36,6 +36,7 @@
     "ms_irf",
     "ms_simulation",
     "ms_variance_decomposition",
+    "occbin_constraints",
     "occbin_graph",
     "occbin_setup",
     "occbin_solver",

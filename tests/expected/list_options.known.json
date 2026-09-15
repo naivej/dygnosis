@@ -2712,6 +2712,33 @@
       }
     ]
   },
+  "occbin_constraints": {
+    "command": "occbin_constraints",
+    "known": true,
+    "n_options": 5,
+    "options": [
+      {
+        "name": "bind",
+        "description": "Mandatory condition evaluated in the baseline/steady-state regime to check whether the constraint becomes binding."
+      },
+      {
+        "name": "error_bind",
+        "description": "Optional numerical criterion for the size of the bind-constraint violation. Default: absolute value of the bind inequality."
+      },
+      {
+        "name": "error_relax",
+        "description": "Optional numerical criterion for the size of the relax-constraint violation. Default: absolute value of the relax inequality."
+      },
+      {
+        "name": "name",
+        "description": "Quoted constraint name (name 'STRING';), used in bind/relax equation tags."
+      },
+      {
+        "name": "relax",
+        "description": "Optional condition evaluated in the binding regime to check whether the constraint is relaxed. If omitted, Dynare checks whether the bind expression is false."
+      }
+    ]
+  },
   "occbin_graph": {
     "command": "occbin_graph",
     "known": true,
