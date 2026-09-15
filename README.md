@@ -36,6 +36,7 @@ The Dynare preprocessor is searched in the following order:
 - Format document / range
 - Code actions and auto-fix where a fix is stored
 - Folding, inlay hints, and links into `@#include` files and companions (e.g. `FILENAME_steadystate.m`)
+- Show the expanded model (`dynare/showEffectiveModel`): effective text after `@#if` / `@#for` / `@{…}` and includes, with origin jump from each counted equation
 - Quick intelligence while typing, full diagnostics on save
 
 ### Agent tools (MCP)
@@ -53,8 +54,9 @@ The Dynare preprocessor is searched in the following order:
 | `dynare_explain` | Help for a diagnostic code |
 | `dynare_list_diagnostic_codes` | Documented codes |
 | `dynare_list_options` | Options for a command |
-| `dynare_equations` | Equations with lhs, rhs, timing, and the equation-count gap |
+| `dynare_equations` | Equations with lhs, rhs, timing, origin, and the equation-count gap |
 | `dynare_related_files` | Includes and companions for the active `.mod` |
+| `dynare_expand` | Effective text after `@#if` / `@#for` / `@{…}` and includes, plus origin for each counted equation |
 
 ## Credits
 

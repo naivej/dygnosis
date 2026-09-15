@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.0
+- **Expand view**
+  - See the model after `@#if` / `@#for` / `@{…}` and includes (effective text).
+  - Jump from each counted equation to the source that wrote it (origin).
+- **MCP**
+  - `dynare_expand`: effective text and origin for each counted equation.
+  - `dynare_equations`: additive origin on each counted row.
+- **Editor**
+  - Command `dynare/showEffectiveModel`: source URI, effective text, and origins.
+
 ## v0.3.0
 - **Companion files for one `.mod`**
   - Jump from the `.mod` to companions (for example `FILENAME_steadystate.m`, a `datafile=`, a helper `.m`, `run_FILENAME.m`).

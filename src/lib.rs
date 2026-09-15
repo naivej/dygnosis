@@ -1,7 +1,7 @@
 //! Thin Dynare analysis library.
 //!
-//! Scope follows the 0.3.0 cut line in `dev_logs/0.3/0.3.0/masterplan.md`
-//! (companion records on top of the 0.2 analysis core).
+//! Scope follows the 0.4.0 cut line in `dev_logs/0.4/0.4.0/masterplan.md`
+//! (effective model / expand view).
 //! Dynare compute (steady state, BK, identification, MATLAB) stays out.
 
 pub mod auto_fix;
