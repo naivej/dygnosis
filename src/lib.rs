@@ -9,6 +9,7 @@ pub mod catalog;
 pub mod check_e020;
 pub mod check_e030;
 pub mod check_e060;
+pub mod check_occbin;
 pub mod check_parse;
 pub mod check_w010;
 pub mod check_w070;
@@ -53,6 +54,7 @@ pub use check_e060::{
     check_e060, check_e060_family, check_e060_family_on_model, check_e061, check_e062, check_e063,
     check_e064, check_e065, check_w061,
 };
+pub use check_occbin::check_occbin;
 pub use check_parse::{check_parse, has_structural_error};
 pub use check_w010::{
     check_w010, check_w010_family, check_w011, check_w012, check_w020, check_w021, check_w022,

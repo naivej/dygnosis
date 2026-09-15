@@ -1,6 +1,6 @@
 //! Diagnostic code documentation.
 //!
-//! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 56
+//! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 71
 //! thin codes. `I050` and `W042` use the recorded surface rewrites in
 //! `dev_logs/0.1/0.1.0/22-c-explain.md` (do not advertise Compute Steady State).
 
@@ -223,6 +223,62 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "Variable used before assignment in steady_state_model",
         body: "The ``steady_state_model`` block is evaluated top to bottom as a sequence of assignments, so every variable on a right-hand side must already have been assigned above. A variable is referenced before its own assignment. They refuse: `variable 'n' is undefined in the declaration of variable 'log_n'`.\n\n**Fix**\n\nReorder the assignments so each variable is computed before it is used.",
     }),
+    ("E170", ExplainEntry {
+        title: "Multiple occbin_constraints blocks",
+        body: "The file has more than one ``occbin_constraints`` block. They refuse: `Multiple 'occbin_constraints' blocks are not allowed`.\n\n**Fix**\n\nKeep a single ``occbin_constraints`` block.",
+    }),
+    ("E171", ExplainEntry {
+        title: "Too many constraints in occbin_constraints",
+        body: "An ``occbin_constraints`` block lists more than two named constraints. They refuse: `only up to two constraints are supported in 'occbin_constraints' block`.\n\n**Fix**\n\nRemove the extra constraint. OccBin supports at most two.",
+    }),
+    ("E172", ExplainEntry {
+        title: "OccBin regime is not defined",
+        body: "A model equation with ``bind`` / ``relax`` tags is missing a copy for one combination of those constraints. They refuse: `for equation 'NAME', the regime corresponding to bind='…' and relax='…' is not defined`.\n\n**Fix**\n\nAdd the missing bind or relax equation for that ``name``.",
+    }),
+    ("E173", ExplainEntry {
+        title: "bind or relax tag without a name tag",
+        body: "A model equation has a ``bind`` or ``relax`` tag but no ``name`` tag. They refuse: `An equation with a 'bind' or 'relax' tag must have a 'name' tag`.\n\n**Fix**\n\nAdd ``[name='…']`` on that equation.",
+    }),
+    ("E174", ExplainEntry {
+        title: "Missing bind expression",
+        body: "A named OccBin constraint has no ``bind`` inequality (a non-comparison such as ``bind i;`` counts as missing). They refuse: `The 'bind' expression is missing in constraint 'NAME'`.\n\n**Fix**\n\nAdd a ``bind`` inequality on that constraint.",
+    }),
+    ("E175", ExplainEntry {
+        title: "No equation for an OccBin constraint",
+        body: "An ``occbin_constraints`` name is never mentioned in a ``bind`` or ``relax`` equation tag. They refuse: `No equation has been declared for constraint 'NAME'`.\n\n**Fix**\n\nAdd a model equation tagged ``bind`` or ``relax`` with that constraint name.",
+    }),
+    ("E176", ExplainEntry {
+        title: "Constraint listed in both bind and relax",
+        body: "The same constraint name appears in both the ``bind`` and ``relax`` tags on one equation. They refuse: `The constraint 'C' is both in the 'bind' and 'relax' tags`.\n\n**Fix**\n\nKeep the name in ``bind`` or ``relax``, not both.",
+    }),
+    ("E177", ExplainEntry {
+        title: "Duplicate OccBin regime",
+        body: "Two equations with the same ``name`` tag declare the same bind/relax combination. They refuse: `The regime corresponding to bind='…' has already been declared for this equation`.\n\n**Fix**\n\nRemove the duplicate regime equation.",
+    }),
+    ("E180", ExplainEntry {
+        title: "mcp tag and perpendicular together",
+        body: "One equation has both an ``mcp`` tag and a complementarity condition after ``⟂`` / ``_|_``. They refuse: `Can't have both an 'mcp' tag and a complementarity condition after the perpendicular symbol`.\n\n**Fix**\n\nKeep one form.",
+    }),
+    ("E181", ExplainEntry {
+        title: "bind or relax is not an inequality",
+        body: "The ``bind`` or ``relax`` expression is a comparison other than ``<``, ``>``, ``<=``, or ``>=`` (for example ``==``). They refuse: `The 'bind' expression must be an inequality constraint` / `The 'relax' expression must be an inequality constraint`. A non-binary ``bind i;`` is a missing bind (E174), not this code.\n\n**Fix**\n\nWrite an inequality.",
+    }),
+    ("E182", ExplainEntry {
+        title: "Forbidden expression in occbin_constraints",
+        body: "An ``occbin_constraints`` expression uses a lead/lag, a model-local, an exogenous variable, ``EXPECTATION``, ``var_expectation``, ``pac_expectation``, ``pac_target_nonstationary``, or ``SUM()``. They refuse, for example: `Leads and lags on variables are forbidden in 'occbin_constraints'. Note that you can achieve the same effect by introducing an auxiliary variable in the model.`; `Model local variable z cannot be used in 'occbin_constraints'.`; `Exogenous variable e cannot be used in 'occbin_constraints'.`; `The 'expectation' operator is forbidden in 'occbin_constraints'.`; `The SUM() operator is forbidden in occbin_constraints block`. ``STEADY_STATE`` itself is allowed.\n\n**Fix**\n\nUse contemporaneous endogenous variables (and parameters). Introduce an auxiliary variable for leads, lags, or exogenous terms.",
+    }),
+    ("E183", ExplainEntry {
+        title: "Complementarity condition has an incorrect form",
+        body: "The condition after ``⟂`` / ``_|_`` is not an inequality on a contemporaneous endogenous variable with constant bounds. They refuse: `Complementarity condition has an incorrect form` (an extra ``: …`` detail is appended when that form can be named).\n\n**Fix**\n\nWrite an inequality such as ``i >= 0`` or ``0 <= i <= 1``.",
+    }),
+    ("E184", ExplainEntry {
+        title: "Duplicate clause in an OccBin constraint",
+        body: "A named constraint repeats ``bind``, ``relax``, ``error_bind``, or ``error_relax``. They refuse: `The '{}' clause is declared multiple times`. The last copy is what the parser keeps.\n\n**Fix**\n\nKeep a single copy of that clause.",
+    }),
+    ("E185", ExplainEntry {
+        title: "Invalid or reused OccBin constraint name",
+        body: "A ``bind`` / ``relax`` tag piece or an ``occbin_constraints`` name is not a letter-or-underscore identifier, or ``occbin_NAME_bind`` is already declared as a variable. They refuse: `The string '{}' is not a valid Occbin constraint name (contains unauthorized characters)` and `The name '{}' is already used. Please use another name for Occbin constraint '{}'`.\n\n**Fix**\n\nUse letters, digits, and underscores, and pick a name that does not collide with ``occbin_NAME_bind``.",
+    }),
     ("W131", ExplainEntry {
         title: "Variable silently overwritten in steady_state_model",
         body: "A variable is assigned more than once in the ``steady_state_model`` block and the later assignment does not use the earlier value, so the first assignment is dead. (An in-place transformation that reuses the value, such as the ``A = log(A)`` log-model idiom, is intentional and is not flagged.)\n\n**Fix**\n\nRemove the redundant assignment, or fold the two into one.",
@@ -238,6 +294,10 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("W160", ExplainEntry {
         title: "Named companion file was not found",
         body: "A catalog option or quoted path names a companion file that this tool could not resolve next to the `.mod` or on the search paths. This is an extra Warning: they accept a missing named file at check. Missing convention files (`FILENAME_steadystate.m`, `FILENAME_prior_restrictions.m`, `run_FILENAME.m`) and a missing identifier helper are not this code.\n\n**Fix**\n\nAdd the file next to this `.mod`, correct the path, or add its directory to the search paths.",
+    }),
+    ("W170", ExplainEntry {
+        title: "Obsolete mcp complementarity tag",
+        body: "A complementarity condition is written with the ``mcp`` tag and no ``⟂`` / ``_|_`` after the equation. They accept and WARN: `Specifying complementarity conditions with the 'mcp' tag is obsolete. Please consider switching to the new syntax using the perpendicular symbol.` An equation that has both forms is an Error (E180), not this Warning.\n\n**Fix**\n\nWrite the condition after ``⟂`` or ``_|_`` instead of ``[mcp=…]``.",
     }),
 ];
 

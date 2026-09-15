@@ -24,10 +24,12 @@ pub const MISSING_BINARY_MESSAGE: &str = "Dynare preprocessor binary not found. 
 
 const SAME_GROUND_ERRORS: &[&str] = &[
     "E001", "E020", "E021", "E023", "E024", "E025", "E030", "E058", "E059", "E060", "E061", "E062",
-    "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E111", "E130",
+    "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E111", "E130", "E170",
+    "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E180", "E181", "E182",
+    "E183", "E184", "E185",
 ];
 
-const SAME_GROUND_WARNINGS: &[&str] = &["W022", "W031", "W042", "W121", "W131", "W150"];
+const SAME_GROUND_WARNINGS: &[&str] = &["W022", "W031", "W042", "W121", "W131", "W150", "W170"];
 
 /// Result of one preprocessor run.
 #[derive(Clone, Debug)]

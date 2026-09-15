@@ -3926,7 +3926,7 @@
       "kind": "documented-only",
       "package": "other",
       "fixture": "",
-      "source": "explain.rs::known_codes_is_exactly_the_56_rust_keys",
+      "source": "explain.rs::known_codes_is_exactly_the_71_rust_keys",
       "cluster": "",
       "notes": "in known_codes / explain; nothing emits it yet"
     },
@@ -4355,6 +4355,212 @@
       "source": "occbin.rs::surprise_mod_sets_flag",
       "cluster": "occbin/surprise.mod",
       "notes": "library shocks(surprise) flag; no path reader"
+    },
+    {
+      "id": "e170_two_blocks",
+      "codes": [
+        "E170"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e170_two_blocks.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e170_two_blocks.mod",
+      "notes": "two occbin_constraints blocks"
+    },
+    {
+      "id": "e171_three",
+      "codes": [
+        "E171"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e171_three.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e171_three.mod",
+      "notes": "three named constraints in one block"
+    },
+    {
+      "id": "e172_missing_regime",
+      "codes": [
+        "E172"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e172_missing_regime.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e172_missing_regime.mod",
+      "notes": "bind tag without the matching relax copy"
+    },
+    {
+      "id": "e173_bind_no_name",
+      "codes": [
+        "E173"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e173_bind_no_name.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e173_bind_no_name.mod",
+      "notes": "bind tag without a name tag"
+    },
+    {
+      "id": "e174_bind_missing",
+      "codes": [
+        "E174"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e174_bind_missing.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e174_bind_missing.mod",
+      "notes": "named constraint with no bind clause"
+    },
+    {
+      "id": "e175_no_equation",
+      "codes": [
+        "E175"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e175_no_equation.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e175_no_equation.mod",
+      "notes": "constraint name never tagged bind or relax"
+    },
+    {
+      "id": "e176_bind_and_relax",
+      "codes": [
+        "E176"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e176_bind_and_relax.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e176_bind_and_relax.mod",
+      "notes": "same constraint in bind and relax on one equation"
+    },
+    {
+      "id": "e177_regime_dup",
+      "codes": [
+        "E177"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e177_regime_dup.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e177_regime_dup.mod",
+      "notes": "duplicate bind copy of the same named equation"
+    },
+    {
+      "id": "e180_mcp_perp",
+      "codes": [
+        "E180"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e180_mcp_perp.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e180_mcp_perp.mod",
+      "notes": "mcp tag and ⟂ on the same equation"
+    },
+    {
+      "id": "e181_bind_eq",
+      "codes": [
+        "E181"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e181_bind_eq.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e181_bind_eq.mod",
+      "notes": "bind i == 0 is not an inequality"
+    },
+    {
+      "id": "e182_lead",
+      "codes": [
+        "E182"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e182_lead.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e182_lead.mod",
+      "notes": "lead in occbin_constraints bind"
+    },
+    {
+      "id": "e183_perp_form",
+      "codes": [
+        "E183"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e183_perp_form.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e183_perp_form.mod",
+      "notes": "⟂ i is not an inequality"
+    },
+    {
+      "id": "e184_dup_clause",
+      "codes": [
+        "E184"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e184_dup_clause.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e184_dup_clause.mod",
+      "notes": "two bind clauses on one named constraint"
+    },
+    {
+      "id": "e185_bad_name",
+      "codes": [
+        "E185"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e185_bad_name.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/e185_bad_name.mod",
+      "notes": "bind='ELB-1' unauthorized character"
+    },
+    {
+      "id": "w170_mcp",
+      "codes": [
+        "W170"
+      ],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/w170_mcp.mod",
+      "source": "d_occbin.rs::occbin_fires",
+      "cluster": "occbin/w170_mcp.mod",
+      "notes": "obsolete mcp tag without ⟂"
+    },
+    {
+      "id": "occbin_square_quiet",
+      "codes": [
+        "E170",
+        "E171",
+        "E172",
+        "E173",
+        "E174",
+        "E175",
+        "E176",
+        "E177",
+        "E180",
+        "E181",
+        "E182",
+        "E183",
+        "E184",
+        "E185",
+        "W170"
+      ],
+      "kind": "quiet",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/square.mod",
+      "source": "d_occbin.rs::square_has_no_occbin_error",
+      "cluster": "occbin/square.mod",
+      "notes": "accepted OccBin square: no E170–E185, no W170"
     }
   ]
 }
