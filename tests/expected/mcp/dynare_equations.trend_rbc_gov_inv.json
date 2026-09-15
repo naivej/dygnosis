@@ -72,6 +72,9 @@
       },
       "rhs": "exp(z)*kg(-1)^alphag*k(-1)^alppha*n^(1-alppha-alphag)",
       "static_tag": false,
+      "tags": {
+        "name": "production function"
+      },
       "text": "y = exp(z)*kg(-1)^alphag*k(-1)^alppha*n^(1-alppha-alphag)"
     },
     {
@@ -117,6 +120,9 @@
       },
       "rhs": "(1-alppha-alphag)*y/n",
       "static_tag": false,
+      "tags": {
+        "name": "labor demand FOC"
+      },
       "text": "w =(1-alppha-alphag)*y/n"
     },
     {
@@ -157,6 +163,9 @@
       },
       "rhs": "alppha*y/k(-1)",
       "static_tag": false,
+      "tags": {
+        "name": "capital rental rate FOC"
+      },
       "text": "rk = alppha*y/k(-1)"
     },
     {
@@ -207,6 +216,9 @@
       },
       "rhs": "(betta/(1+gam))*c(+1)^(-1)*(rk(+1)+1-delta)",
       "static_tag": false,
+      "tags": {
+        "name": "consumption Euler equation"
+      },
       "text": "c^(-1) =(betta/(1+gam))*c(+1)^(-1)*(rk(+1)+1-delta)"
     },
     {
@@ -252,6 +264,9 @@
       },
       "rhs": "w",
       "static_tag": false,
+      "tags": {
+        "name": "labor supply FOC"
+      },
       "text": "psi*n^phhi*c = w"
     },
     {
@@ -297,6 +312,9 @@
       },
       "rhs": "(1-delta)*k(-1)+invest",
       "static_tag": false,
+      "tags": {
+        "name": "private capital law of motion"
+      },
       "text": "(1+gam)*k =(1-delta)*k(-1)+invest"
     },
     {
@@ -342,6 +360,9 @@
       },
       "rhs": "(1-deltag)*kg(-1)+ig",
       "static_tag": false,
+      "tags": {
+        "name": "public capital law of motion"
+      },
       "text": "(1+gam)*kg =(1-deltag)*kg(-1)+ig"
     },
     {
@@ -383,6 +404,9 @@
       },
       "rhs": "c+invest+ig",
       "static_tag": false,
+      "tags": {
+        "name": "resource constraint"
+      },
       "text": "y = c+invest+ig"
     },
     {
@@ -422,6 +446,9 @@
       },
       "rhs": "rhoz*z(-1)+eps_z",
       "static_tag": false,
+      "tags": {
+        "name": "TFP process"
+      },
       "text": "z = rhoz*z(-1)+eps_z"
     },
     {
@@ -471,6 +498,9 @@
       },
       "rhs": "(1-rho_ig)*log(ig_ss)+rho_ig*log(ig(-1))+eps_ig",
       "static_tag": false,
+      "tags": {
+        "name": "government investment process"
+      },
       "text": "log(ig) =(1-rho_ig)*log(ig_ss)+rho_ig*log(ig(-1))+eps_ig"
     },
     {
@@ -500,6 +530,9 @@
       },
       "rhs": "log(y)",
       "static_tag": false,
+      "tags": {
+        "name": "log output"
+      },
       "text": "log_y = log(y)"
     },
     {
@@ -529,6 +562,9 @@
       },
       "rhs": "log(c)",
       "static_tag": false,
+      "tags": {
+        "name": "log consumption"
+      },
       "text": "log_c = log(c)"
     },
     {
@@ -558,6 +594,9 @@
       },
       "rhs": "log(k)",
       "static_tag": false,
+      "tags": {
+        "name": "log private capital"
+      },
       "text": "log_k = log(k)"
     },
     {
@@ -587,6 +626,9 @@
       },
       "rhs": "log(kg)",
       "static_tag": false,
+      "tags": {
+        "name": "log public capital"
+      },
       "text": "log_kg = log(kg)"
     },
     {
@@ -616,6 +658,9 @@
       },
       "rhs": "log(ig)",
       "static_tag": false,
+      "tags": {
+        "name": "log government investment"
+      },
       "text": "log_ig = log(ig)"
     },
     {
@@ -645,6 +690,9 @@
       },
       "rhs": "log(n)",
       "static_tag": false,
+      "tags": {
+        "name": "log labor"
+      },
       "text": "log_n = log(n)"
     }
   ]

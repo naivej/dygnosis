@@ -1,0 +1,43 @@
+{
+  "count_gap": {
+    "delta": 0,
+    "expected_delta": null,
+    "n_endogenous": 1,
+    "n_equations": 1,
+    "unreferenced_endogenous": []
+  },
+  "equations": [
+    {
+      "complementarity": {
+        "matched": {
+          "lower_bound": "0",
+          "upper_bound": null,
+          "variable": "i"
+        },
+        "text": "i >= 0"
+      },
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "i",
+          "timing": 0,
+          "timing_class": "static"
+        }
+      ],
+      "index": 0,
+      "lhs": "i",
+      "name": "",
+      "origin": {
+        "column": 1,
+        "end_column": 15,
+        "end_line": 4,
+        "line": 4
+      },
+      "rhs": "0",
+      "static_tag": false,
+      "tags": {},
+      "text": "i = 0"
+    }
+  ]
+}

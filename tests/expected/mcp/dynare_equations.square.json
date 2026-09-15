@@ -1,0 +1,111 @@
+{
+  "count_gap": {
+    "delta": 0,
+    "expected_delta": null,
+    "n_endogenous": 2,
+    "n_equations": 2,
+    "unreferenced_endogenous": []
+  },
+  "equations": [
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "is",
+          "timing": 0,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "parameter",
+          "name": "rhos",
+          "timing": 0
+        },
+        {
+          "class": "endogenous",
+          "name": "is",
+          "timing": -1,
+          "timing_class": "predetermined"
+        },
+        {
+          "class": "varexo",
+          "name": "e",
+          "timing": 0
+        }
+      ],
+      "index": 0,
+      "lhs": "is",
+      "name": "",
+      "origin": {
+        "column": 1,
+        "end_column": 23,
+        "end_line": 7,
+        "line": 7
+      },
+      "rhs": "rhos*is(-1)+e",
+      "static_tag": false,
+      "tags": {},
+      "text": "is = rhos*is(-1)+e"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "i",
+          "timing": 0,
+          "timing_class": "static"
+        },
+        {
+          "class": "endogenous",
+          "name": "is",
+          "timing": 0,
+          "timing_class": "predetermined"
+        }
+      ],
+      "index": 1,
+      "lhs": "i",
+      "name": "policy",
+      "origin": {
+        "column": 1,
+        "end_column": 36,
+        "end_line": 8,
+        "line": 8
+      },
+      "rhs": "is",
+      "static_tag": false,
+      "tags": {
+        "name": "policy",
+        "relax": "ELB"
+      },
+      "text": "i = is"
+    },
+    {
+      "dynamic_tag": false,
+      "idents": [
+        {
+          "class": "endogenous",
+          "name": "i",
+          "timing": 0,
+          "timing_class": "static"
+        }
+      ],
+      "index": 2,
+      "lhs": "i",
+      "name": "policy",
+      "origin": {
+        "column": 1,
+        "end_column": 34,
+        "end_line": 9,
+        "line": 9
+      },
+      "rhs": "0",
+      "static_tag": false,
+      "tags": {
+        "bind": "ELB",
+        "name": "policy"
+      },
+      "text": "i = 0"
+    }
+  ]
+}

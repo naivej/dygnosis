@@ -243,6 +243,54 @@ fn assert_failure_has_no_origin_keys(payload: &Value) {
         payload.get("origin_frames").is_none(),
         "failure origin_frames: {payload}"
     );
+    assert!(
+        payload.get("tags").is_none(),
+        "failure must not invent root tags: {payload}"
+    );
+    assert!(
+        payload.get("complementarity").is_none(),
+        "failure must not invent root complementarity: {payload}"
+    );
+}
+
+fn assert_tags_object(row: &Value) {
+    let tags = row
+        .get("tags")
+        .unwrap_or_else(|| panic!("tags required: {row}"));
+    let obj = tags
+        .as_object()
+        .unwrap_or_else(|| panic!("tags must be an object: {row}"));
+    for (k, v) in obj {
+        assert!(
+            v.is_string(),
+            "tag {k} must be a string (flag tags \"\"): {v}"
+        );
+    }
+}
+
+fn assert_no_complementarity(row: &Value) {
+    assert!(
+        row.get("complementarity").is_none(),
+        "complementarity must be omitted: {row}"
+    );
+}
+
+fn assert_counted_row_keys(row: &Value) {
+    for key in [
+        "index",
+        "name",
+        "text",
+        "lhs",
+        "rhs",
+        "idents",
+        "static_tag",
+        "dynamic_tag",
+    ] {
+        assert!(row.get(key).is_some(), "{key} required: {row}");
+    }
+    assert_tags_object(row);
+    assert!(row.get("span").is_none(), "span must be omitted: {row}");
+    assert_counted_origin(row);
 }
 
 fn is_out_code(code: &str) -> bool {
@@ -1282,7 +1330,8 @@ fn dynare_equations_trend_rbc_gov_inv() {
     assert_eq!(payload["count_gap"]["n_equations"], 16);
     for row in eqs {
         row_has_no_explain(row);
-        assert_counted_origin(row);
+        assert_counted_row_keys(row);
+        assert_no_complementarity(row);
         assert!(row.get("span").is_none(), "span must be omitted: {row}");
         assert!(row.get("name").is_some(), "name required: {row}");
         assert!(row.get("text").is_some(), "text required: {row}");
@@ -1299,12 +1348,17 @@ fn dynare_equations_trend_rbc_gov_inv() {
         !info_obj.contains_key("equations"),
         "dynare_model_info must not grow an equation list"
     );
+    assert!(
+        !info_obj.contains_key("tags"),
+        "dynare_model_info must not grow tags"
+    );
     assert_eq!(info["n_equations"], payload["count_gap"]["n_equations"]);
 
     let named = dynare_equations(&text, None, None, Some("production function"), None);
     let named_eqs = named["equations"].as_array().expect("named equations");
     assert_eq!(named_eqs.len(), 1);
     assert_counted_origin(&named_eqs[0]);
+    assert_tags_object(&named_eqs[0]);
     assert!(named_eqs[0]
         .get("explain")
         .and_then(|v| v.as_str())
@@ -1329,9 +1383,19 @@ fn dynare_equations_reader_filters() {
     assert_eq!(eqs[1]["index"], 1);
     assert_eq!(full["count_gap"]["n_equations"], 2);
     assert!(full.get("message").is_none());
+    assert_eq!(eqs[0]["tags"]["name"], "euler");
+    assert_eq!(eqs[1]["tags"]["dynamic"], "");
+    assert!(eqs[1]["tags"]["dynamic"].is_string());
+    assert_ne!(eqs[1]["tags"]["dynamic"], json!(true));
+    assert!(eqs[1]["tags"]["dynamic"].as_bool().is_none());
+    assert_eq!(eqs[0]["static_tag"], false);
+    assert_eq!(eqs[0]["dynamic_tag"], false);
+    assert_eq!(eqs[1]["static_tag"], false);
+    assert_eq!(eqs[1]["dynamic_tag"], true);
     for row in eqs {
         row_has_no_explain(row);
         assert_counted_origin(row);
+        assert_tags_object(row);
     }
 
     let by_index = dynare_equations(&text, None, None, None, Some(0));
@@ -1339,6 +1403,8 @@ fn dynare_equations_reader_filters() {
     assert_eq!(idx_rows.len(), 1);
     assert_eq!(idx_rows[0]["index"], 0);
     assert_counted_origin(&idx_rows[0]);
+    assert_tags_object(&idx_rows[0]);
+    assert_eq!(idx_rows[0]["tags"]["name"], "euler");
     assert_eq!(
         idx_rows[0]["explain"].as_str().expect("explain"),
         explain_equation(&dygnosis::equations(&model)[0])
@@ -1351,6 +1417,8 @@ fn dynare_equations_reader_filters() {
     assert_eq!(name_rows.len(), 1);
     assert_eq!(name_rows[0]["name"], "euler");
     assert_counted_origin(&name_rows[0]);
+    assert_tags_object(&name_rows[0]);
+    assert_eq!(name_rows[0]["tags"]["name"], "euler");
     assert_eq!(
         name_rows[0]["explain"].as_str().expect("explain"),
         explain_equation(&dygnosis::equations(&model)[0])
@@ -1389,13 +1457,108 @@ fn dynare_equations_tags_duplicate_name() {
     assert_eq!(eqs.len(), 2, "JC9: one tag may hit several rows: {payload}");
     assert_eq!(eqs[0]["name"], "policy");
     assert_eq!(eqs[1]["name"], "policy");
+    assert_eq!(eqs[0]["tags"]["name"], "policy");
+    assert_eq!(eqs[1]["tags"]["name"], "policy");
+    assert!(eqs[0]["tags"].get("bind").is_none());
+    assert!(eqs[0]["tags"].get("relax").is_none());
+    assert!(eqs[1]["tags"].get("bind").is_none());
+    assert!(eqs[1]["tags"].get("relax").is_none());
     assert_ne!(eqs[0]["text"], eqs[1]["text"]);
     assert_ne!(eqs[0]["explain"], eqs[1]["explain"]);
     assert_counted_origin(&eqs[0]);
     assert_counted_origin(&eqs[1]);
+    assert_tags_object(&eqs[0]);
+    assert_tags_object(&eqs[1]);
     assert!(eqs[0].get("explain").and_then(|v| v.as_str()).is_some());
     assert!(eqs[1].get("explain").and_then(|v| v.as_str()).is_some());
     assert_eq!(payload["count_gap"]["n_equations"], 3);
+}
+
+#[test]
+fn dynare_equations_square() {
+    let text = fixture_mod("occbin/square.mod");
+    let payload = dynare_equations(&text, None, None, None, None);
+    let eqs = payload["equations"].as_array().expect("equations");
+    assert_eq!(eqs.len(), 3);
+    assert_eq!(payload["count_gap"]["n_equations"], 2);
+    assert_eq!(payload["count_gap"]["n_endogenous"], 2);
+    assert_eq!(payload["count_gap"]["delta"], 0);
+
+    assert_eq!(eqs[0]["name"], "");
+    assert_eq!(eqs[0]["tags"], json!({}));
+    assert_eq!(eqs[1]["name"], "policy");
+    assert_eq!(eqs[1]["tags"]["relax"], "ELB");
+    assert_eq!(eqs[1]["tags"]["name"], "policy");
+    assert_eq!(eqs[2]["name"], "policy");
+    assert_eq!(eqs[2]["tags"]["bind"], "ELB");
+    assert_eq!(eqs[2]["tags"]["name"], "policy");
+    for row in eqs {
+        row_has_no_explain(row);
+        assert_counted_row_keys(row);
+        assert_no_complementarity(row);
+        assert_no_byte_span_keys(row);
+    }
+    assert_no_byte_span_keys(&payload);
+    assert!(payload.get("occbin_constraints").is_none());
+
+    let expected: Value =
+        serde_json::from_str(&expected_mcp("dynare_equations.square.json")).unwrap();
+    assert_eq!(payload, expected);
+}
+
+#[test]
+fn dynare_equations_square_expand_split() {
+    let text = fixture_mod("occbin/square.mod");
+    let expand = dynare_expand(&text, None, None);
+    let eqs = dynare_equations(&text, None, None, None, None);
+    assert_eq!(expand["n_equations"], 3);
+    assert_eq!(eqs["count_gap"]["n_equations"], 2);
+}
+
+#[test]
+fn dynare_equations_perp() {
+    let text = fixture_mod("occbin/perp.mod");
+    let payload = dynare_equations(&text, None, None, None, None);
+    let eqs = payload["equations"].as_array().expect("equations");
+    assert_eq!(eqs.len(), 1);
+    let row = &eqs[0];
+    assert_eq!(row["text"], "i = 0");
+    assert!(
+        !row["text"].as_str().expect("text").contains('⟂'),
+        "text must not contain ⟂: {row}"
+    );
+    assert_eq!(row["lhs"], "i");
+    assert_eq!(row["rhs"], "0");
+    assert_eq!(row["tags"], json!({}));
+    let comp = row
+        .get("complementarity")
+        .unwrap_or_else(|| panic!("complementarity required: {row}"));
+    assert_eq!(comp["text"], "i >= 0");
+    assert_eq!(comp["matched"]["variable"], "i");
+    assert_eq!(comp["matched"]["lower_bound"], "0");
+    assert_eq!(comp["matched"]["upper_bound"], Value::Null);
+    assert!(comp.get("span").is_none(), "complementarity span: {comp}");
+    assert_no_byte_span_keys(&payload);
+    assert_counted_row_keys(row);
+    row_has_no_explain(row);
+
+    let expected: Value =
+        serde_json::from_str(&expected_mcp("dynare_equations.perp.json")).unwrap();
+    assert_eq!(payload, expected);
+}
+
+#[test]
+fn compact_equation_list_strips_tags() {
+    let text = read_mod("zlb_qe");
+    let payload = dynare_equations(&text, None, None, None, None);
+    let compact = compact_equation_list(&payload);
+    for row in compact["equations"].as_array().expect("compact equations") {
+        assert!(row.get("tags").is_none(), "compact must strip tags: {row}");
+        assert!(
+            row.get("complementarity").is_none(),
+            "compact must strip complementarity: {row}"
+        );
+    }
 }
 
 #[test]

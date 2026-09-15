@@ -330,6 +330,20 @@ fn equation_row_json(
         "dynamic_tag": row.dynamic_tag,
         "idents": idents,
     });
+    v["tags"] = json!(row.tags);
+    if let Some(comp) = &row.complementarity {
+        v["complementarity"] = json!({
+            "text": comp.text,
+            "matched": match &comp.matched {
+                Some(m) => json!({
+                    "variable": m.variable,
+                    "lower_bound": m.lower_bound,
+                    "upper_bound": m.upper_bound,
+                }),
+                None => json!(null),
+            },
+        });
+    }
     if let Some(origin) = origin {
         attach_origin(&mut v, origin, unit);
     }
