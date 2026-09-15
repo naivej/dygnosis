@@ -3,14 +3,14 @@ use std::path::{Path, PathBuf};
 
 use dygnosis::explain::{explain, known_codes, render_markdown};
 use dygnosis::preprocessor::{run_workspace_preprocessor, DEFAULT_TIMEOUT};
+use dygnosis::span::{LineIndex, Position};
 use dygnosis::{
     analyze, auto_fix, check_e060, check_e061, check_w061, check_w160, count_gap, dynare_auto_fix,
-    dynare_compare_models, dynare_diagnose, dynare_equations, dynare_explain,
+    dynare_compare_models, dynare_diagnose, dynare_equations, dynare_expand, dynare_explain,
     dynare_find_references, dynare_list_diagnostic_codes, dynare_list_options, dynare_model_info,
     dynare_related_files, dynare_rename, explain_equation, find_preprocessor, has_structural_error,
     parse, quiet_i050, reconcile_diagnostics, registered_tool_names, run_preprocessor,
-    tools_list_json,
-    Diagnostic, McpReference, McpWorkspaceReference, Workspace,
+    tools_list_json, Diagnostic, McpReference, McpWorkspaceReference, Workspace,
 };
 use serde_json::{json, Value};
 
@@ -26,6 +26,7 @@ const RUST_TOOLS: &[&str] = &[
     "dynare_list_options",
     "dynare_equations",
     "dynare_related_files",
+    "dynare_expand",
 ];
 
 const DROPPED_TOOLS: &[&str] = &[
@@ -127,17 +128,121 @@ fn compact_equation_list(value: &Value) -> Value {
         .expect("equations array")
         .iter()
         .map(|row| {
-            json!({
+            let mut obj = json!({
                 "index": row["index"],
                 "name": row["name"],
                 "text": row["text"],
-            })
+            });
+            if let Some(origin) = row.get("origin") {
+                obj["origin"] = origin.clone();
+            }
+            if let Some(frames) = row.get("origin_frames") {
+                obj["origin_frames"] = frames.clone();
+            }
+            obj
         })
         .collect::<Vec<_>>();
     json!({
         "count_gap": value["count_gap"],
         "equations": equations,
     })
+}
+
+fn include_eq_files() -> HashMap<String, String> {
+    let mut files = HashMap::new();
+    files.insert(
+        "include_eq.mod".to_string(),
+        fixture_mod("expand/include_eq.mod"),
+    );
+    files.insert(
+        "include_eq_body.inc".to_string(),
+        fixture_mod("expand/include_eq_body.inc"),
+    );
+    files
+}
+
+fn assert_origin_4tuple(origin: &Value) {
+    let obj = origin.as_object().expect("origin object");
+    for key in ["line", "column", "end_line", "end_column"] {
+        assert!(obj.contains_key(key), "origin missing {key}: {origin}");
+        let n = origin[key].as_u64().expect("{key} number");
+        assert!(n >= 1, "origin {key} must be 1-based, got {n}");
+    }
+    assert!(
+        !obj.contains_key("start"),
+        "origin must not have start: {origin}"
+    );
+    assert!(
+        !obj.contains_key("end"),
+        "origin must not have end: {origin}"
+    );
+}
+
+fn assert_no_byte_span_keys(value: &Value) {
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map {
+                assert!(
+                    k != "start" && k != "end",
+                    "byte key {k} must be absent: {value}"
+                );
+                assert_no_byte_span_keys(v);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                assert_no_byte_span_keys(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn slice_origin(text: &str, origin: &Value) -> String {
+    let index = LineIndex::new(text);
+    let start = index.offset(
+        text,
+        Position {
+            line: origin["line"].as_u64().expect("line") as u32 - 1,
+            character: origin["column"].as_u64().expect("column") as u32 - 1,
+        },
+    );
+    let end = index.offset(
+        text,
+        Position {
+            line: origin["end_line"].as_u64().expect("end_line") as u32 - 1,
+            character: origin["end_column"].as_u64().expect("end_column") as u32 - 1,
+        },
+    );
+    text.get(start as usize..end as usize)
+        .unwrap_or("")
+        .to_string()
+}
+
+fn assert_counted_origin(row: &Value) {
+    let origin = row.get("origin").unwrap_or_else(|| panic!("origin: {row}"));
+    assert_origin_4tuple(origin);
+    assert!(
+        row.get("origin_uri").is_none(),
+        "raw file_content must omit origin_uri: {row}"
+    );
+    assert!(
+        row.get("origin_frames").is_none(),
+        "origin_frames must be omitted when empty: {row}"
+    );
+}
+
+fn assert_failure_has_no_origin_keys(payload: &Value) {
+    assert_eq!(payload["equations"], json!([]));
+    assert!(payload.get("origin").is_none(), "failure origin: {payload}");
+    assert!(
+        payload.get("origin_uri").is_none(),
+        "failure origin_uri: {payload}"
+    );
+    assert!(
+        payload.get("origin_frames").is_none(),
+        "failure origin_frames: {payload}"
+    );
 }
 
 fn is_out_code(code: &str) -> bool {
@@ -340,12 +445,25 @@ fn rename_map(value: Value) -> HashMap<String, String> {
 }
 
 #[test]
-fn registered_tools_are_eleven() {
+fn registered_tools_are_twelve() {
     let names = registered_tool_names();
     assert_eq!(names, RUST_TOOLS);
-    assert_eq!(names.len(), 11);
+    assert_eq!(names.len(), 12);
     assert_eq!(names[9], "dynare_equations");
     assert_eq!(names[10], "dynare_related_files");
+    assert_eq!(names[11], "dynare_expand");
+
+    let list = tools_list_json();
+    let tools = list["tools"].as_array().expect("tools array");
+    assert_eq!(tools.len(), 12);
+    assert_eq!(
+        tools[9]["description"],
+        "List counted model equations with lhs, rhs, idents, origin jump, and the equation-count gap. Optional name or index also returns explain markdown."
+    );
+    assert_eq!(
+        tools[11]["description"],
+        "Return the compilation unit after include splice and macro expand, with origin jumps from each counted equation to the source that wrote it."
+    );
 
     let blob = serde_json::to_string(&tools_list_json()).expect("tools list json");
     for name in DROPPED_TOOLS {
@@ -1164,6 +1282,7 @@ fn dynare_equations_trend_rbc_gov_inv() {
     assert_eq!(payload["count_gap"]["n_equations"], 16);
     for row in eqs {
         row_has_no_explain(row);
+        assert_counted_origin(row);
         assert!(row.get("span").is_none(), "span must be omitted: {row}");
         assert!(row.get("name").is_some(), "name required: {row}");
         assert!(row.get("text").is_some(), "text required: {row}");
@@ -1185,6 +1304,7 @@ fn dynare_equations_trend_rbc_gov_inv() {
     let named = dynare_equations(&text, None, None, Some("production function"), None);
     let named_eqs = named["equations"].as_array().expect("named equations");
     assert_eq!(named_eqs.len(), 1);
+    assert_counted_origin(&named_eqs[0]);
     assert!(named_eqs[0]
         .get("explain")
         .and_then(|v| v.as_str())
@@ -1211,12 +1331,14 @@ fn dynare_equations_reader_filters() {
     assert!(full.get("message").is_none());
     for row in eqs {
         row_has_no_explain(row);
+        assert_counted_origin(row);
     }
 
     let by_index = dynare_equations(&text, None, None, None, Some(0));
     let idx_rows = by_index["equations"].as_array().expect("index equations");
     assert_eq!(idx_rows.len(), 1);
     assert_eq!(idx_rows[0]["index"], 0);
+    assert_counted_origin(&idx_rows[0]);
     assert_eq!(
         idx_rows[0]["explain"].as_str().expect("explain"),
         explain_equation(&dygnosis::equations(&model)[0])
@@ -1228,6 +1350,7 @@ fn dynare_equations_reader_filters() {
     let name_rows = by_name["equations"].as_array().expect("name equations");
     assert_eq!(name_rows.len(), 1);
     assert_eq!(name_rows[0]["name"], "euler");
+    assert_counted_origin(&name_rows[0]);
     assert_eq!(
         name_rows[0]["explain"].as_str().expect("explain"),
         explain_equation(&dygnosis::equations(&model)[0])
@@ -1238,21 +1361,22 @@ fn dynare_equations_reader_filters() {
     let unnamed_rows = unnamed["equations"].as_array().expect("unnamed equations");
     assert_eq!(unnamed_rows.len(), 1);
     assert_eq!(unnamed_rows[0]["name"], "");
+    assert_counted_origin(&unnamed_rows[0]);
     assert!(unnamed_rows[0].get("explain").is_some());
 
     let unknown = dynare_equations(&text, None, None, Some("no_such"), None);
-    assert_eq!(unknown["equations"], json!([]));
+    assert_failure_has_no_origin_keys(&unknown);
     assert_eq!(unknown["message"], "no equation named 'no_such'");
     assert_eq!(unknown["count_gap"]["n_equations"], 2);
     assert_count_gap_shape(&unknown);
 
     let oob = dynare_equations(&text, None, None, None, Some(9));
-    assert_eq!(oob["equations"], json!([]));
+    assert_failure_has_no_origin_keys(&oob);
     assert_eq!(oob["message"], "index 9 is out of range (0..2)");
     assert_eq!(oob["count_gap"]["n_equations"], 2);
 
     let both = dynare_equations(&text, None, None, Some("euler"), Some(0));
-    assert_eq!(both["equations"], json!([]));
+    assert_failure_has_no_origin_keys(&both);
     assert_eq!(both["message"], "name and index must not both be set");
     assert_eq!(both["count_gap"]["n_equations"], 2);
 }
@@ -1267,6 +1391,8 @@ fn dynare_equations_tags_duplicate_name() {
     assert_eq!(eqs[1]["name"], "policy");
     assert_ne!(eqs[0]["text"], eqs[1]["text"]);
     assert_ne!(eqs[0]["explain"], eqs[1]["explain"]);
+    assert_counted_origin(&eqs[0]);
+    assert_counted_origin(&eqs[1]);
     assert!(eqs[0].get("explain").and_then(|v| v.as_str()).is_some());
     assert!(eqs[1].get("explain").and_then(|v| v.as_str()).is_some());
     assert_eq!(payload["count_gap"]["n_equations"], 3);
@@ -1287,7 +1413,7 @@ fn dynare_equations_zlb_qe_after_parse_expand() {
         "ZLB-bind F16 must be absent: {names:?}"
     );
     let unknown = dynare_equations(&text, None, None, Some("F16 Taylor rule + ZLB"), None);
-    assert_eq!(unknown["equations"], json!([]));
+    assert_failure_has_no_origin_keys(&unknown);
     assert_eq!(
         unknown["message"],
         "no equation named 'F16 Taylor rule + ZLB'"
@@ -1303,6 +1429,7 @@ fn dynare_equations_zlb_qe_after_parse_expand() {
     );
     for row in eqs {
         row_has_no_explain(row);
+        assert_counted_origin(row);
     }
     let expected: Value =
         serde_json::from_str(&expected_mcp("dynare_equations.zlb_qe.list.json")).unwrap();
@@ -1314,15 +1441,241 @@ fn dynare_equations_us_re09_rep_expectation() {
     let text = read_example("US_RE09_rep");
     let payload = dynare_equations(&text, None, None, None, None);
     let eqs = payload["equations"].as_array().expect("equations");
+    assert_eq!(eqs.len(), 19);
+    for row in eqs {
+        assert_counted_origin(row);
+    }
     assert!(
-        eqs.iter().any(|row| row["text"]
+        eqs[2]["text"]
             .as_str()
-            .is_some_and(|t| t.contains("EXPECTATION(-16)"))),
-        "expected EXPECTATION(-16) in some text: {payload}"
+            .is_some_and(|t| t.contains("EXPECTATION(-16)")),
+        "row 2 must contain EXPECTATION(-16): {payload}"
     );
     let expected: Value =
         serde_json::from_str(&expected_mcp("dynare_equations.US_RE09_rep.list.json")).unwrap();
     assert_eq!(compact_equation_list(&payload), expected);
+}
+
+#[test]
+fn dynare_expand_whole_eq_for() {
+    let text = fixture_mod("expand/whole_eq_for.mod");
+    let payload = dynare_expand(&text, None, None);
+    assert_eq!(payload["n_equations"], 3);
+    let origins = payload["origins"].as_array().expect("origins");
+    assert_eq!(origins.len(), 3);
+    let first = &origins[0]["origin"];
+    assert_origin_4tuple(first);
+    for (i, row) in origins.iter().enumerate() {
+        assert_eq!(row["index"], i);
+        assert_eq!(row["origin"], *first);
+        assert!(row.get("origin_frames").is_none(), "frames: {row}");
+        assert!(row.get("origin_uri").is_none(), "uri: {row}");
+    }
+    let effective = payload["effective_text"].as_str().expect("effective_text");
+    assert!(effective.contains("y = 1"), "{effective}");
+    assert!(effective.contains("y = 2"), "{effective}");
+    assert!(effective.contains("y = 3"), "{effective}");
+    assert_no_byte_span_keys(&payload);
+    let expected: Value =
+        serde_json::from_str(&expected_mcp("dynare_expand.whole_eq_for.json")).unwrap();
+    assert_eq!(payload, expected);
+}
+
+#[test]
+fn dynare_expand_nested_for() {
+    let text = fixture_mod("expand/nested_for.mod");
+    let payload = dynare_expand(&text, None, None);
+    assert_eq!(payload["n_equations"], 4);
+    let origins = payload["origins"].as_array().expect("origins");
+    assert_eq!(origins.len(), 4);
+    for (i, row) in origins.iter().enumerate() {
+        assert_eq!(row["index"], i);
+        assert_origin_4tuple(&row["origin"]);
+        assert!(row.get("origin_uri").is_none(), "uri: {row}");
+        let frames = row["origin_frames"].as_array().expect("origin_frames");
+        assert_eq!(frames.len(), 2, "frames: {row}");
+        assert_eq!(frames[0]["kind"], "for");
+        assert_eq!(frames[1]["kind"], "for");
+        let inner = slice_origin(&text, &frames[1]);
+        assert!(inner.contains("x = @{i}"), "inner frame {inner:?}");
+        assert!(!inner.contains("@#for j"), "inner frame {inner:?}");
+    }
+    let expected: Value =
+        serde_json::from_str(&expected_mcp("dynare_expand.nested_for.json")).unwrap();
+    assert_eq!(payload, expected);
+}
+
+#[test]
+fn dynare_expand_include_eq_map() {
+    let files = include_eq_files();
+    let payload = dynare_expand(
+        &files["include_eq.mod"],
+        Some("include_eq.mod"),
+        Some(&files),
+    );
+    assert_eq!(payload["n_equations"], 2);
+    let origins = payload["origins"].as_array().expect("origins");
+    assert_eq!(origins.len(), 2);
+    assert_eq!(origins[0]["origin_uri"], "include_eq.mod");
+    assert_eq!(origins[1]["origin_uri"], "include_eq_body.inc");
+    let effective = payload["effective_text"].as_str().expect("effective_text");
+    assert!(effective.contains("z = 0"), "{effective}");
+    let expected: Value =
+        serde_json::from_str(&expected_mcp("dynare_expand.include_eq.json")).unwrap();
+    assert_eq!(payload, expected);
+}
+
+#[test]
+fn dynare_expand_include_eq_raw_no_splice() {
+    let text = fixture_mod("expand/include_eq.mod");
+    let payload = dynare_expand(&text, None, None);
+    let effective = payload["effective_text"].as_str().expect("effective_text");
+    assert!(
+        !effective.contains("z = 0"),
+        "raw expand spliced include: {effective}"
+    );
+    assert!(effective.contains("y = 1"), "{effective}");
+    assert_eq!(payload["n_equations"], 1);
+}
+
+#[test]
+fn dynare_expand_us_re09_rep() {
+    let text = read_example("US_RE09_rep");
+    let payload = dynare_expand(&text, None, None);
+    assert_eq!(payload["n_equations"], 19);
+    let effective = payload["effective_text"].as_str().expect("effective_text");
+    for lag in 1..=16 {
+        let needle = format!("EXPECTATION(-{lag})");
+        assert!(effective.contains(&needle), "missing {needle}");
+    }
+    let origins = payload["origins"].as_array().expect("origins");
+    assert_eq!(origins.len(), 19);
+    let phillips = &origins[2];
+    assert_eq!(phillips["index"], 2);
+    assert!(
+        phillips.get("origin_frames").is_none(),
+        "phillips frames: {phillips}"
+    );
+    assert!(phillips.get("origin_uri").is_none());
+    let slice = slice_origin(&text, &phillips["origin"]);
+    assert!(slice.contains("p = lambda"), "phillips origin {slice:?}");
+    assert!(
+        slice.contains("@#for lag in lags"),
+        "phillips origin {slice:?}"
+    );
+    assert!(slice.contains("@#endfor"), "phillips origin {slice:?}");
+    assert!(!slice.contains("// IS Curve"), "phillips origin {slice:?}");
+}
+
+#[test]
+fn dynare_expand_zlb_qe() {
+    let text = read_mod("zlb_qe");
+    let payload = dynare_expand(&text, None, None);
+    assert_eq!(payload["n_equations"], 16);
+    let effective = payload["effective_text"].as_str().expect("effective_text");
+    assert!(effective.contains("qe = 0"), "{effective}");
+    assert!(
+        !effective.contains("qe = rho_qe"),
+        "inactive QE present: {effective}"
+    );
+}
+
+#[test]
+fn dynare_expand_swff_map() {
+    let files = swff_relative_files();
+    let with_map = dynare_expand(&files["swff.mod"], Some("swff.mod"), Some(&files));
+    let effective = with_map["effective_text"].as_str().expect("effective_text");
+    assert!(effective.contains("alppha"), "{effective}");
+    assert!(
+        effective.contains("0.178678"),
+        "with-map must splice params: {effective}"
+    );
+    let origins = with_map["origins"].as_array().expect("origins");
+    let n = with_map["n_equations"].as_u64().expect("n_equations") as usize;
+    assert!(n > 0);
+    assert_eq!(origins.len(), n);
+    for row in origins {
+        assert_eq!(row["origin_uri"], "swff.mod", "{row}");
+        let uri = row["origin_uri"].as_str().expect("origin_uri");
+        assert!(!uri.ends_with(".inc"), "counted origin_uri {uri}");
+    }
+
+    let no_active = dynare_expand(&files["swff.mod"], None, Some(&files));
+    let no_text = no_active["effective_text"]
+        .as_str()
+        .expect("effective_text");
+    assert!(
+        !no_text.contains("0.178678"),
+        "without active_file must not splice: {no_text}"
+    );
+    assert!(
+        !no_text.contains("swff_params"),
+        "without active_file .inc names absent: {no_text}"
+    );
+}
+
+#[test]
+fn dynare_equations_nested_for_origin_frames() {
+    let text = fixture_mod("expand/nested_for.mod");
+    let payload = dynare_equations(&text, None, None, None, None);
+    let eqs = payload["equations"].as_array().expect("equations");
+    assert_eq!(eqs.len(), 4);
+    for row in eqs {
+        let frames = row["origin_frames"].as_array().expect("origin_frames");
+        assert_eq!(frames.len(), 2, "{row}");
+        assert_eq!(frames[0]["kind"], "for");
+        assert_eq!(frames[1]["kind"], "for");
+        assert_origin_4tuple(&row["origin"]);
+    }
+}
+
+#[test]
+fn dynare_equations_include_eq_origin_uri() {
+    let files = include_eq_files();
+    let payload = dynare_equations(
+        &files["include_eq.mod"],
+        Some("include_eq.mod"),
+        Some(&files),
+        None,
+        None,
+    );
+    let eqs = payload["equations"].as_array().expect("equations");
+    assert_eq!(eqs.len(), 2);
+    assert_eq!(eqs[0]["origin_uri"], "include_eq.mod");
+    assert_eq!(eqs[1]["origin_uri"], "include_eq_body.inc");
+}
+
+#[test]
+fn dynare_expand_n_equations_matches_count_gap() {
+    let whole = fixture_mod("expand/whole_eq_for.mod");
+    let expand_whole = dynare_expand(&whole, None, None);
+    let eqs_whole = dynare_equations(&whole, None, None, None, None);
+    assert_eq!(
+        expand_whole["n_equations"],
+        eqs_whole["count_gap"]["n_equations"]
+    );
+
+    let us = read_example("US_RE09_rep");
+    let expand_us = dynare_expand(&us, None, None);
+    let eqs_us = dynare_equations(&us, None, None, None, None);
+    assert_eq!(expand_us["n_equations"], eqs_us["count_gap"]["n_equations"]);
+
+    let zlb = read_mod("zlb_qe");
+    let expand_zlb = dynare_expand(&zlb, None, None);
+    let eqs_zlb = dynare_equations(&zlb, None, None, None, None);
+    assert_eq!(
+        expand_zlb["n_equations"],
+        eqs_zlb["count_gap"]["n_equations"]
+    );
+
+    let swff_files = swff_relative_files();
+    let swff_text = swff_files["swff.mod"].clone();
+    let expand_swff = dynare_expand(&swff_text, Some("swff.mod"), Some(&swff_files));
+    let eqs_swff = dynare_equations(&swff_text, Some("swff.mod"), Some(&swff_files), None, None);
+    assert_eq!(
+        expand_swff["n_equations"],
+        eqs_swff["count_gap"]["n_equations"]
+    );
 }
 
 #[test]

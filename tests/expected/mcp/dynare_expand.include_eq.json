@@ -1,0 +1,26 @@
+{
+  "effective_text": "var y z ; model ; y = 1 ; z = 0 ; end ;",
+  "n_equations": 2,
+  "origins": [
+    {
+      "index": 0,
+      "origin": {
+        "column": 1,
+        "end_column": 6,
+        "end_line": 4,
+        "line": 4
+      },
+      "origin_uri": "include_eq.mod"
+    },
+    {
+      "index": 1,
+      "origin": {
+        "column": 1,
+        "end_column": 6,
+        "end_line": 1,
+        "line": 1
+      },
+      "origin_uri": "include_eq_body.inc"
+    }
+  ]
+}

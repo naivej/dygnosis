@@ -17,18 +17,19 @@ use crate::auto_fix::auto_fix;
 use crate::catalog::list_options;
 use crate::diagnostic::{analyze, check_in_workspace, Diagnostic, Severity};
 use crate::equations::{count_gap, equations, explain_equation, CountGap, EquationRow};
+use crate::expand::{expand_report, EquationOrigin, ExpandReport, OriginFrame};
 use crate::explain;
 use crate::include_resolver::{normalize_uri, path_key};
 use crate::model::Model;
 use crate::model_diff::compare_models;
 use crate::model_info::{classify_variable_timing, TimingClass};
-use crate::parser::parse;
+use crate::parser::{normalize_newlines, parse};
 use crate::preprocessor::{
     find_preprocessor, maybe_run_and_reconcile, reconcile_diagnostics, run_workspace_preprocessor,
     DEFAULT_TIMEOUT,
 };
 use crate::refs::{is_legal_ident, occurrences, rename_in_text};
-use crate::span::LineIndex;
+use crate::span::{LineIndex, Span};
 use crate::workspace::Workspace;
 
 const OUT_CODES: &[&str] = &[
@@ -74,11 +75,15 @@ const TOOLS: &[(&str, &str)] = &[
     ),
     (
         "dynare_equations",
-        "List counted model equations with lhs, rhs, idents, and the equation-count gap. Optional name or index also returns explain markdown.",
+        "List counted model equations with lhs, rhs, idents, origin jump, and the equation-count gap. Optional name or index also returns explain markdown.",
     ),
     (
         "dynare_related_files",
         "List include targets and companion files for the active .mod (kind, filename, resolved, path).",
+    ),
+    (
+        "dynare_expand",
+        "Return the compilation unit after include splice and macro expand, with origin jumps from each counted equation to the source that wrote it.",
     ),
 ];
 
@@ -208,9 +213,9 @@ pub fn dynare_equations(
     name: Option<&str>,
     index: Option<usize>,
 ) -> Value {
-    let model = mcp_parse_model(file_content, active_file, files, false);
-    let rows = equations(&model);
-    let gap = count_gap(&model);
+    let unit = mcp_unit(file_content, active_file, files);
+    let rows = equations(&unit.model);
+    let gap = count_gap(&unit.model);
     let mut out = json!({
         "equations": [],
         "count_gap": count_gap_json(&gap),
@@ -222,7 +227,7 @@ pub fn dynare_equations(
         (None, None) => {
             out["equations"] = Value::Array(
                 rows.iter()
-                    .map(|row| equation_row_json(row, false))
+                    .map(|row| equation_row_json(row, origin_for(&unit, row.index), &unit, false))
                     .collect(),
             );
         }
@@ -233,7 +238,9 @@ pub fn dynare_equations(
             } else {
                 out["equations"] = Value::Array(
                     hits.into_iter()
-                        .map(|row| equation_row_json(row, true))
+                        .map(|row| {
+                            equation_row_json(row, origin_for(&unit, row.index), &unit, true)
+                        })
                         .collect(),
                 );
             }
@@ -242,11 +249,44 @@ pub fn dynare_equations(
             if i >= rows.len() {
                 out["message"] = json!(format!("index {i} is out of range (0..{})", rows.len()));
             } else {
-                out["equations"] = json!([equation_row_json(&rows[i], true)]);
+                out["equations"] = json!([equation_row_json(
+                    &rows[i],
+                    origin_for(&unit, rows[i].index),
+                    &unit,
+                    true
+                )]);
             }
         }
     }
     out
+}
+
+/// Compilation unit after include splice and macro expand, plus origin jumps.
+///
+/// Include map: same as [`dynare_model_info`] (`synthesize_missing_active = false`).
+/// No preprocessor. If a mapped `Workspace::expand_report` is `None`, returns
+/// empty `effective_text` / zero equations / empty `origins`.
+pub fn dynare_expand(
+    file_content: &str,
+    active_file: Option<&str>,
+    files: Option<&HashMap<String, String>>,
+) -> Value {
+    let unit = mcp_unit(file_content, active_file, files);
+    let origins: Vec<Value> = unit
+        .report
+        .origins
+        .iter()
+        .map(|origin| {
+            let mut v = json!({ "index": origin.index });
+            attach_origin(&mut v, origin, &unit);
+            v
+        })
+        .collect();
+    json!({
+        "effective_text": unit.report.effective_text,
+        "n_equations": unit.report.n_equations,
+        "origins": origins,
+    })
 }
 
 fn count_gap_json(gap: &CountGap) -> Value {
@@ -259,7 +299,12 @@ fn count_gap_json(gap: &CountGap) -> Value {
     })
 }
 
-fn equation_row_json(row: &EquationRow, with_explain: bool) -> Value {
+fn equation_row_json(
+    row: &EquationRow,
+    origin: Option<&EquationOrigin>,
+    unit: &McpUnit,
+    with_explain: bool,
+) -> Value {
     let idents: Vec<Value> = row
         .idents
         .iter()
@@ -285,10 +330,157 @@ fn equation_row_json(row: &EquationRow, with_explain: bool) -> Value {
         "dynamic_tag": row.dynamic_tag,
         "idents": idents,
     });
+    if let Some(origin) = origin {
+        attach_origin(&mut v, origin, unit);
+    }
     if with_explain {
         v["explain"] = json!(explain_equation(row));
     }
     v
+}
+
+struct McpUnit {
+    model: Model,
+    report: ExpandReport,
+    raw: String,
+    files: Option<HashMap<String, String>>,
+    sources: HashMap<String, String>,
+}
+
+fn mcp_unit(
+    file_content: &str,
+    active_file: Option<&str>,
+    files: Option<&HashMap<String, String>>,
+) -> McpUnit {
+    let Some(files) = nonempty_map(files) else {
+        return McpUnit::free(file_content);
+    };
+    let Some(active) = active_file.filter(|a| files.contains_key(*a)) else {
+        return McpUnit::free(file_content);
+    };
+    McpUnit::mapped(file_content, active, files)
+}
+
+impl McpUnit {
+    fn free(file_content: &str) -> Self {
+        Self {
+            model: parse(file_content),
+            report: expand_report(file_content),
+            raw: normalize_newlines(file_content),
+            files: None,
+            sources: HashMap::new(),
+        }
+    }
+
+    fn mapped(file_content: &str, active: &str, files: &HashMap<String, String>) -> Self {
+        let workspace_files = overlay_files(file_content, active, files);
+        let mut ws = Workspace::new();
+        for (name, content) in &workspace_files {
+            ws.update_document(name, content);
+        }
+        let model = ws
+            .get_effective_model(active)
+            .cloned()
+            .unwrap_or_else(|| parse(file_content));
+        let report = ws
+            .expand_report(active)
+            .cloned()
+            .unwrap_or_else(|| ExpandReport {
+                effective_text: String::new(),
+                n_equations: 0,
+                origins: Vec::new(),
+            });
+        let mut sources = HashMap::new();
+        for uri in ws.document_uris() {
+            if let Some(src) = ws.get_source(&uri) {
+                sources.insert(uri, src.to_string());
+            }
+        }
+        Self {
+            model,
+            report,
+            raw: normalize_newlines(file_content),
+            files: Some(workspace_files),
+            sources,
+        }
+    }
+
+    fn source_for(&self, origin_uri: Option<&str>) -> Option<&str> {
+        match origin_uri {
+            None => Some(self.raw.as_str()),
+            Some(uri) => {
+                if let Some(src) = self.sources.get(uri) {
+                    return Some(src.as_str());
+                }
+                let key = path_key(Path::new(uri));
+                if let Some(src) = self.sources.get(&key) {
+                    return Some(src.as_str());
+                }
+                let files = self.files.as_ref()?;
+                files
+                    .iter()
+                    .find(|(name, _)| normalize_uri(name) == key)
+                    .map(|(_, content)| content.as_str())
+            }
+        }
+    }
+
+    fn map_uri(&self, origin_uri: Option<&str>) -> Option<String> {
+        let uri = origin_uri?;
+        let files = self.files.as_ref()?;
+        Some(related_file_path(Path::new(uri), files))
+    }
+}
+
+fn origin_for(unit: &McpUnit, index: usize) -> Option<&EquationOrigin> {
+    unit.report
+        .origins
+        .get(index)
+        .filter(|origin| origin.index == index)
+}
+
+fn attach_origin(target: &mut Value, origin: &EquationOrigin, unit: &McpUnit) {
+    let Some(src) = unit.source_for(origin.origin_uri.as_deref()) else {
+        return;
+    };
+    target["origin"] = range_json(origin.origin_span, src);
+    if let Some(uri) = unit.map_uri(origin.origin_uri.as_deref()) {
+        target["origin_uri"] = json!(uri);
+    }
+    if origin.origin_frames.len() <= 1 {
+        return;
+    }
+    let mut frames = Vec::new();
+    for frame in &origin.origin_frames {
+        if let Some(v) = origin_frame_json(frame, unit) {
+            frames.push(v);
+        }
+    }
+    if frames.len() > 1 {
+        target["origin_frames"] = Value::Array(frames);
+    }
+}
+
+fn origin_frame_json(frame: &OriginFrame, unit: &McpUnit) -> Option<Value> {
+    let src = unit.source_for(frame.origin_uri.as_deref())?;
+    let mut v = range_json(frame.origin_span, src);
+    v["kind"] = json!(frame.kind);
+    if let Some(uri) = unit.map_uri(frame.origin_uri.as_deref()) {
+        v["origin_uri"] = json!(uri);
+    }
+    Some(v)
+}
+
+fn range_json(span: Span, text: &str) -> Value {
+    let index = LineIndex::new(text);
+    let start = index.position(text, span.start);
+    let end = index.position(text, span.end);
+    json!({
+        "line": start.line + 1,
+        "column": start.character + 1,
+        "end_line": end.line + 1,
+        "end_column": end.character + 1,
+    })
 }
 
 /// Structural `compare_models` JSON. No solver / steady-state keys.
@@ -1094,7 +1286,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_equations",
-        description = "List counted model equations with lhs, rhs, idents, and the equation-count gap. Optional name or index also returns explain markdown."
+        description = "List counted model equations with lhs, rhs, idents, origin jump, and the equation-count gap. Optional name or index also returns explain markdown."
     )]
     fn equations_tool(&self, Parameters(params): Parameters<EquationsParams>) -> CallToolResult {
         let index = params.index.map(|i| i as usize);
@@ -1146,6 +1338,35 @@ impl DygnosisMcp {
         ) {
             Some(src) => dynare_related_files(src.content, src.active, src.files),
             None => json!([]),
+        };
+        tool_json(value)
+    }
+
+    #[tool(
+        name = "dynare_expand",
+        description = "Return the compilation unit after include splice and macro expand, with origin jumps from each counted equation to the source that wrote it."
+    )]
+    fn expand_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
+        let value = match nonempty_map(params.files.as_ref()) {
+            None => dynare_expand(params.file_content.as_deref().unwrap_or(""), None, None),
+            Some(files) => match params
+                .active_file
+                .as_deref()
+                .filter(|a| files.contains_key(*a))
+            {
+                Some(active) => {
+                    let content = params
+                        .file_content
+                        .as_deref()
+                        .unwrap_or_else(|| files[active].as_str());
+                    dynare_expand(content, Some(active), Some(files))
+                }
+                None => dynare_expand(
+                    params.file_content.as_deref().unwrap_or(""),
+                    None,
+                    Some(files),
+                ),
+            },
         };
         tool_json(value)
     }

@@ -1,0 +1,106 @@
+{
+  "effective_text": "var x ; model ; x = 1 ; x = 1 ; x = 2 ; x = 2 ; end ;",
+  "n_equations": 4,
+  "origins": [
+    {
+      "index": 0,
+      "origin": {
+        "column": 1,
+        "end_column": 10,
+        "end_line": 8,
+        "line": 8
+      },
+      "origin_frames": [
+        {
+          "column": 1,
+          "end_column": 9,
+          "end_line": 9,
+          "kind": "for",
+          "line": 7
+        },
+        {
+          "column": 1,
+          "end_column": 10,
+          "end_line": 8,
+          "kind": "for",
+          "line": 8
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "origin": {
+        "column": 1,
+        "end_column": 10,
+        "end_line": 8,
+        "line": 8
+      },
+      "origin_frames": [
+        {
+          "column": 1,
+          "end_column": 9,
+          "end_line": 9,
+          "kind": "for",
+          "line": 7
+        },
+        {
+          "column": 1,
+          "end_column": 10,
+          "end_line": 8,
+          "kind": "for",
+          "line": 8
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "origin": {
+        "column": 1,
+        "end_column": 10,
+        "end_line": 8,
+        "line": 8
+      },
+      "origin_frames": [
+        {
+          "column": 1,
+          "end_column": 9,
+          "end_line": 9,
+          "kind": "for",
+          "line": 7
+        },
+        {
+          "column": 1,
+          "end_column": 10,
+          "end_line": 8,
+          "kind": "for",
+          "line": 8
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "origin": {
+        "column": 1,
+        "end_column": 10,
+        "end_line": 8,
+        "line": 8
+      },
+      "origin_frames": [
+        {
+          "column": 1,
+          "end_column": 9,
+          "end_line": 9,
+          "kind": "for",
+          "line": 7
+        },
+        {
+          "column": 1,
+          "end_column": 10,
+          "end_line": 8,
+          "kind": "for",
+          "line": 8
+        }
+      ]
+    }
+  ]
+}
