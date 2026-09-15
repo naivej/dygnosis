@@ -445,6 +445,8 @@ fn us_re09_equation_keys_unchanged() {
             static_tag: _,
             dynamic_tag: _,
             idents: _,
+            tags: _,
+            complementarity: _,
         } = row;
     }
 }

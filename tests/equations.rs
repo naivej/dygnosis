@@ -135,6 +135,43 @@ fn reader_explain_markdown() {
 }
 
 #[test]
+fn tags_mod_does_not_collapse_duplicate_name() {
+    let model = parse(&fixture("equations/tags.mod"));
+    let rows = equations(&model);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(count_gap(&model).n_equations, 3);
+}
+
+#[test]
+fn reader_tag_map() {
+    let model = parse(&fixture("equations/reader.mod"));
+    let rows = equations(&model);
+    assert_eq!(rows[0].tags.get("name").map(String::as_str), Some("euler"));
+
+    let static_eq = model
+        .equations
+        .iter()
+        .find(|e| e.static_tag)
+        .expect("static equation");
+    assert_eq!(
+        static_eq.tag_map.get("static").map(String::as_str),
+        Some("")
+    );
+    assert_eq!(static_eq.tags, vec!["static".to_string()]);
+
+    let dynamic_eq = model
+        .equations
+        .iter()
+        .find(|e| e.dynamic_tag)
+        .expect("dynamic equation");
+    assert_eq!(
+        dynamic_eq.tag_map.get("dynamic").map(String::as_str),
+        Some("")
+    );
+    assert_eq!(dynamic_eq.tags, vec!["dynamic".to_string()]);
+}
+
+#[test]
 fn residual_without_eq_keeps_empty_sides() {
     let model = parse("var y;\nmodel;\ny;\nend;\n");
     let rows = equations(&model);

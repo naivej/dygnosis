@@ -17,6 +17,7 @@ const BLOCK_OPENERS: &[&str] = &[
     "endval",
     "initval",
     "shocks",
+    "occbin_constraints",
     "verbatim",
     "model",
 ];

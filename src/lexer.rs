@@ -27,6 +27,7 @@ pub enum TokenKind {
     LBrack,
     RBrack,
     Hash,
+    Perpendicular,
     MacroDir,
     MacroInterp,
     Eof,
@@ -200,6 +201,14 @@ impl Lexer<'_> {
             'A'..='Z' | 'a'..='z' => {
                 self.scan_ident();
                 TokenKind::Ident
+            }
+            '⟂' => {
+                self.bump();
+                TokenKind::Perpendicular
+            }
+            '_' if self.starts("_|_") => {
+                self.pos += 3;
+                TokenKind::Perpendicular
             }
             _ => {
                 self.bump();

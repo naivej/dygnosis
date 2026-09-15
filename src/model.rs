@@ -1,5 +1,7 @@
 //! Parsed `.mod` model. This is the seam diagnostic families and transports share.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::expr::{ExprArena, ExprId, IdentRef};
@@ -33,6 +35,41 @@ pub struct Equation {
     pub dynamic_tag: bool,
     /// Lowercased `static` / `dynamic` from leading `[…]` tags (E050 tag class).
     pub tags: Vec<String>,
+    /// Every `[key]` / `[key=value]` on this equation. Flag tags store `""`.
+    pub tag_map: BTreeMap<String, String>,
+    pub complementarity: Option<Complementarity>,
+}
+
+#[derive(Clone, Debug)]
+pub struct OccbinExpr {
+    pub text: String,
+    pub span: Span,
+    pub expr: Option<ExprId>,
+}
+
+#[derive(Clone, Debug)]
+pub struct OccbinConstraint {
+    pub name: String,
+    pub name_span: Span,
+    pub bind: Option<OccbinExpr>,
+    pub relax: Option<OccbinExpr>,
+    pub error_bind: Option<OccbinExpr>,
+    pub error_relax: Option<OccbinExpr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Complementarity {
+    pub text: String,
+    pub span: Span,
+    pub matched: Option<ComplementarityTriple>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComplementarityTriple {
+    pub variable: String,
+    pub lower_bound: Option<String>,
+    pub upper_bound: Option<String>,
 }
 
 /// A name listed in `varobs`, with the identifier's span.
@@ -192,6 +229,12 @@ pub struct Model {
     pub macro_directives: Vec<MacroDirective>,
     /// Pre-expand `@{…}` interpolations (file-text order).
     pub macro_interps: Vec<MacroInterp>,
+    /// `occbin_constraints` regimes in source order (every block concatenated).
+    pub occbin_constraints: Vec<OccbinConstraint>,
+    /// One span per `occbin_constraints;` … `end;`.
+    pub occbin_constraints_blocks: Vec<Span>,
+    /// Sticky: true if any `shocks(…surprise…)` opener was seen.
+    pub shocks_surprise: bool,
 }
 
 /// A literal `@#include` filename plus the directive's byte span.

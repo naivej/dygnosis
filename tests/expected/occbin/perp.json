@@ -1,0 +1,27 @@
+{
+  "count_gap": {
+    "n_endogenous": 1,
+    "n_equations": 1,
+    "delta": 0,
+    "expected_delta": null
+  },
+  "equations": [
+    {
+      "index": 0,
+      "name": "",
+      "text": "i = 0",
+      "lhs": "i",
+      "rhs": "0",
+      "tags": {},
+      "complementarity": {
+        "text": "i >= 0",
+        "matched": {
+          "variable": "i",
+          "lower_bound": "0",
+          "upper_bound": null
+        }
+      }
+    }
+  ],
+  "occbin_constraints": []
+}

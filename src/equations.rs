@@ -1,8 +1,8 @@
 //! Counted model equations, per-use idents, and the W013 count gap.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
-use crate::model::{Equation, Model};
+use crate::model::{Complementarity, Equation, Model};
 use crate::model_info::{classify_variable_timing, TimingClass};
 use crate::span::Span;
 
@@ -19,6 +19,8 @@ pub struct EquationRow {
     pub static_tag: bool,
     pub dynamic_tag: bool,
     pub idents: Vec<EquationIdent>,
+    pub tags: BTreeMap<String, String>,
+    pub complementarity: Option<Complementarity>,
 }
 
 /// One identifier use in an equation (lhs then rhs; ident nodes only).
@@ -99,13 +101,15 @@ pub fn equations(model: &Model) -> Vec<EquationRow> {
             static_tag: eq.static_tag,
             dynamic_tag: eq.dynamic_tag,
             idents,
+            tags: eq.tag_map.clone(),
+            complementarity: eq.complementarity.clone(),
         });
     }
     rows
 }
 
 pub fn count_gap(model: &Model) -> CountGap {
-    let n_equations = equations(model).len();
+    let n_equations = collapsed_equation_count(model);
     let n_endogenous = model.endogenous.len();
     CountGap {
         n_endogenous,
@@ -151,6 +155,23 @@ pub fn explain_equation(row: &EquationRow) -> String {
 
 fn is_counted(eq: &Equation) -> bool {
     !eq.is_local && !eq.static_tag
+}
+
+fn collapsed_equation_count(model: &Model) -> usize {
+    let mut n = 0;
+    let mut seen = HashSet::new();
+    for row in equations(model) {
+        let occbin = !row.name.is_empty()
+            && (row.tags.contains_key("bind") || row.tags.contains_key("relax"));
+        if occbin {
+            if seen.insert(row.name) {
+                n += 1;
+            }
+        } else {
+            n += 1;
+        }
+    }
+    n
 }
 
 fn ident_class(model: &Model, name: crate::intern::Name) -> IdentClass {

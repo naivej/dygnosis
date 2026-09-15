@@ -13,7 +13,7 @@ const ARCHIVES: &[&str] = &[
     "bgg_financial",
 ];
 
-const PAIRS: &[&str] = &["tight_ops", "lead_lag", "macro_line", "eqeq"];
+const PAIRS: &[&str] = &["tight_ops", "lead_lag", "macro_line", "eqeq", "occbin_block"];
 
 fn copilot_mod(archive_dir: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

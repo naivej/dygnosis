@@ -1,0 +1,49 @@
+{
+  "count_gap": {
+    "n_endogenous": 2,
+    "n_equations": 2,
+    "delta": 0,
+    "expected_delta": null
+  },
+  "equations": [
+    {
+      "index": 0,
+      "name": "",
+      "text": "is = rhos*is(-1)+e",
+      "lhs": "is",
+      "rhs": "rhos*is(-1)+e",
+      "tags": {}
+    },
+    {
+      "index": 1,
+      "name": "policy",
+      "text": "i = is",
+      "lhs": "i",
+      "rhs": "is",
+      "tags": {
+        "name": "policy",
+        "relax": "ELB"
+      }
+    },
+    {
+      "index": 2,
+      "name": "policy",
+      "text": "i = 0",
+      "lhs": "i",
+      "rhs": "0",
+      "tags": {
+        "bind": "ELB",
+        "name": "policy"
+      }
+    }
+  ],
+  "occbin_constraints": [
+    {
+      "name": "ELB",
+      "bind": "i <= 0",
+      "relax": "i > is",
+      "error_bind": null,
+      "error_relax": null
+    }
+  ]
+}

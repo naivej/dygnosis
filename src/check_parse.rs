@@ -5,7 +5,14 @@ use crate::lexer::{tokenize, Token, TokenKind};
 use crate::model::{Decl, Model, ParseIssueKind, ShocksSemiFamily};
 use crate::span::{LineIndex, Span};
 
-const BLOCK_OPENERS: &[&str] = &["model", "initval", "endval", "shocks", "steady_state_model"];
+const BLOCK_OPENERS: &[&str] = &[
+    "model",
+    "initval",
+    "endval",
+    "shocks",
+    "occbin_constraints",
+    "steady_state_model",
+];
 
 const DECL_KEYWORDS: &[&str] = &[
     "varexo_det",
@@ -25,6 +32,7 @@ const DECL_OR_BLOCK: &[&str] = &[
     "initval",
     "endval",
     "shocks",
+    "occbin_constraints",
     "steady_state_model",
 ];
 

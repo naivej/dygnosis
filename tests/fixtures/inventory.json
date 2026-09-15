@@ -87,6 +87,18 @@
       "notes": "missing shocks end"
     },
     {
+      "id": "e001_delete_occbin_end",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/delete_occbin_end.mod",
+      "source": "e001.rs::e001_delete_occbin_end",
+      "cluster": "e001/delete_occbin_end.mod",
+      "notes": "missing occbin_constraints end"
+    },
+    {
       "id": "e001_strip_var_semi",
       "codes": [
         "E001"
@@ -4303,6 +4315,46 @@
       "source": "expand.rs::include_eq_row_origins",
       "cluster": "expand/include_eq.mod",
       "notes": "included body for expand_include_eq; origin_uri is this .inc"
+    },
+    {
+      "id": "occbin_square",
+      "codes": [],
+      "kind": "harness",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/square.mod",
+      "source": "occbin.rs::square_mod_structure_and_collapse",
+      "cluster": "occbin/square.mod",
+      "notes": "library OccBin structure; bind/relax pair counts as one for W013"
+    },
+    {
+      "id": "occbin_perp",
+      "codes": [],
+      "kind": "harness",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/perp.mod",
+      "source": "occbin.rs::perp_mod_records_complementarity",
+      "cluster": "occbin/perp.mod",
+      "notes": "library complementarity ⟂ recorded, not E001"
+    },
+    {
+      "id": "occbin_perp_ascii",
+      "codes": [],
+      "kind": "harness",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/perp_ascii.mod",
+      "source": "occbin.rs::perp_ascii_mod_same_recording_and_token",
+      "cluster": "occbin/perp_ascii.mod",
+      "notes": "library complementarity _|_ is Perpendicular"
+    },
+    {
+      "id": "occbin_surprise",
+      "codes": [],
+      "kind": "harness",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/surprise.mod",
+      "source": "occbin.rs::surprise_mod_sets_flag",
+      "cluster": "occbin/surprise.mod",
+      "notes": "library shocks(surprise) flag; no path reader"
     }
   ]
 }

@@ -1,6 +1,6 @@
 //! Native recursive-descent parser over the token stream.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 
 use crate::expr::{BinOp, ExprId, ExprKind, UnOp};
@@ -8,9 +8,10 @@ use crate::intern::{Interner, Name};
 use crate::lexer::{tokenize, Token, TokenKind};
 use crate::macro_expand::expand_macros;
 use crate::model::{
-    Assignment, Decl, DeprecatedOption, Equation, EstimatedParam, EstimatedParamKind,
-    IncludeDirective, IncludePathDirective, MacroDirective, MacroInterp, Model, ObservedVar,
-    ParseIssue, ParseIssueKind, PolicyCommand, ShockKind, ShockStmt, ShocksSemiFamily,
+    Assignment, Complementarity, ComplementarityTriple, Decl, DeprecatedOption, Equation,
+    EstimatedParam, EstimatedParamKind, IncludeDirective, IncludePathDirective, MacroDirective,
+    MacroInterp, Model, ObservedVar, OccbinConstraint, OccbinExpr, ParseIssue, ParseIssueKind,
+    PolicyCommand, ShockKind, ShockStmt, ShocksSemiFamily,
 };
 use crate::span::Span;
 
@@ -121,6 +122,7 @@ const ASSIGN_FOLLOWERS: &[&str] = &[
     "initval",
     "endval",
     "shocks",
+    "occbin_constraints",
     "steady_state_model",
     "steady",
     "check",
@@ -150,6 +152,7 @@ const ASSIGN_BLOCK_LIKE: &[&str] = &[
     "initval",
     "endval",
     "shocks",
+    "occbin_constraints",
     "steady_state_model",
     "end",
     "log",
@@ -168,7 +171,14 @@ const TERMINAL_COMMANDS: &[&str] = &[
     "send_endogenous_variables_to_workspace",
 ];
 
-const BLOCK_OPENERS: &[&str] = &["model", "initval", "endval", "shocks", "steady_state_model"];
+const BLOCK_OPENERS: &[&str] = &[
+    "model",
+    "initval",
+    "endval",
+    "shocks",
+    "occbin_constraints",
+    "steady_state_model",
+];
 
 const PRIOR_SHAPES: &[&str] = &[
     "beta_pdf",
@@ -440,6 +450,8 @@ impl Parser<'_> {
                 self.parse_shocks_block(true);
             } else if self.at_ident_ci("mshocks") {
                 self.parse_shocks_block(false);
+            } else if self.at_ident_ci("occbin_constraints") {
+                self.parse_occbin_constraints_block();
             } else if self.at_ident_ci("varobs") {
                 self.parse_varobs();
             } else if self.at_ident_ci("estimated_params") {
@@ -666,9 +678,148 @@ impl Parser<'_> {
         }
     }
 
+    fn parse_occbin_constraints_block(&mut self) {
+        let start = self.bump().span.start;
+        if self.at(TokenKind::LParen) {
+            self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+        }
+        let opener_end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        let opener_span = Span {
+            start,
+            end: opener_end,
+        };
+        let body_i = self.i;
+        while !self.at(TokenKind::Eof) && !self.at_block_stop() {
+            if self.at_ident_ci("name") {
+                self.parse_occbin_regime();
+            } else {
+                self.skip_until_semi();
+            }
+        }
+        if self.at_block_end() {
+            self.record_missing_final("occbin_constraints", body_i, self.i);
+        }
+        let end = self.finish_block_named("occbin_constraints", opener_span, body_i);
+        self.model
+            .occbin_constraints_blocks
+            .push(Span { start, end });
+    }
+
+    fn parse_occbin_regime(&mut self) {
+        let name_tok = self.bump();
+        if !self.at(TokenKind::String) {
+            self.skip_until_semi();
+            return;
+        }
+        let str_tok = self.bump();
+        let name = unquote_string(self.lexeme(&str_tok));
+        let name_span = str_tok.span;
+        let mut end = if self.at(TokenKind::Semi) {
+            self.tokens[self.i].span.end
+        } else {
+            str_tok.span.end
+        };
+        self.eat(TokenKind::Semi);
+        let mut bind = None;
+        let mut relax = None;
+        let mut error_bind = None;
+        let mut error_relax = None;
+        while !self.at(TokenKind::Eof) && !self.at_block_stop() {
+            let clause = if self.at_ident_ci("error_bind") {
+                Some("error_bind")
+            } else if self.at_ident_ci("error_relax") {
+                Some("error_relax")
+            } else if self.at_ident_ci("bind") {
+                Some("bind")
+            } else if self.at_ident_ci("relax") {
+                Some("relax")
+            } else {
+                None
+            };
+            let Some(clause) = clause else {
+                break;
+            };
+            self.bump();
+            let expr_i = self.i;
+            let expr_start = self.current_start();
+            let expr = self.parse_expr();
+            let expr_end_i = self.i;
+            let expr_end = self.current_start();
+            let text = join_lexemes(self.src, &self.tokens[expr_i..expr_end_i]);
+            let occ = OccbinExpr {
+                text,
+                span: Span {
+                    start: expr_start,
+                    end: expr_end,
+                },
+                expr,
+            };
+            match clause {
+                "bind" => bind = Some(occ),
+                "relax" => relax = Some(occ),
+                "error_bind" => error_bind = Some(occ),
+                "error_relax" => error_relax = Some(occ),
+                _ => {}
+            }
+            end = if self.at(TokenKind::Semi) {
+                self.tokens[self.i].span.end
+            } else {
+                expr_end
+            };
+            self.eat(TokenKind::Semi);
+        }
+        self.model.occbin_constraints.push(OccbinConstraint {
+            name,
+            name_span,
+            bind,
+            relax,
+            error_bind,
+            error_relax,
+            span: Span {
+                start: name_tok.span.start,
+                end,
+            },
+        });
+    }
+
     fn parse_shocks_block(&mut self, record_stmts: bool) {
-        let opener_span = self.bump_plain_opener();
-        let start = opener_span.start;
+        let is_shocks = self.at_ident_ci("shocks");
+        let start = self.bump().span.start;
+        if self.at(TokenKind::LParen) {
+            if is_shocks {
+                let mut k = self.i + 1;
+                let mut depth = 1;
+                while k < self.tokens.len() && depth > 0 {
+                    match self.tokens[k].kind {
+                        TokenKind::LParen => depth += 1,
+                        TokenKind::RParen => depth -= 1,
+                        TokenKind::Ident
+                            if self.tokens[k]
+                                .text(self.src)
+                                .eq_ignore_ascii_case("surprise") =>
+                        {
+                            self.model.shocks_surprise = true;
+                        }
+                        _ => {}
+                    }
+                    k += 1;
+                }
+            }
+            self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+        }
+        let opener_end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        let opener_span = Span {
+            start,
+            end: opener_end,
+        };
         let body_i = self.i;
         let body_end_i = self.consume_until_end();
         self.record_missing_end_if_unclosed("shocks", opener_span, body_i, body_end_i);
@@ -1389,11 +1540,13 @@ impl Parser<'_> {
         let mut static_tag = false;
         let mut dynamic_tag = false;
         let mut tags = Vec::new();
+        let mut tag_map = BTreeMap::new();
         while self.at(TokenKind::LBrack) {
-            let (s, d, t) = self.skip_tag();
+            let (s, d, t, m) = self.parse_tag();
             static_tag |= s;
             dynamic_tag |= d;
             tags.extend(t);
+            tag_map.extend(m);
         }
         let is_local = self.at(TokenKind::Hash);
         if is_local {
@@ -1409,6 +1562,27 @@ impl Parser<'_> {
             (None, true)
         };
 
+        let eq_end_i = self.i;
+        let mut complementarity = None;
+        if self.at(TokenKind::Perpendicular) {
+            self.bump();
+            let comp_i = self.i;
+            let comp_start = self.current_start();
+            let comp_expr = self.parse_expr();
+            let comp_end_i = self.i;
+            let comp_end = self.current_start();
+            let text = join_lexemes(self.src, &self.tokens[comp_i..comp_end_i]);
+            let matched = comp_expr.and_then(|id| self.match_complementarity(id));
+            complementarity = Some(Complementarity {
+                text,
+                span: Span {
+                    start: comp_start,
+                    end: comp_end,
+                },
+                matched,
+            });
+        }
+
         if !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) && !self.at_block_stop() {
             self.skip_to_stmt_end();
         }
@@ -1416,7 +1590,7 @@ impl Parser<'_> {
         let stmt_end = self.current_start();
         self.eat(TokenKind::Semi);
 
-        let raw = join_lexemes(self.src, &self.tokens[stmt_i..stmt_end_i]);
+        let raw = join_lexemes(self.src, &self.tokens[stmt_i..eq_end_i]);
         let mut eq = equation_from_statement(
             &raw,
             Span {
@@ -1429,6 +1603,8 @@ impl Parser<'_> {
         eq.static_tag = static_tag;
         eq.dynamic_tag = dynamic_tag;
         eq.tags = tags;
+        eq.tag_map = tag_map;
+        eq.complementarity = complementarity;
         eq.lhs_expr = Some(if lhs_ok {
             lhs_expr.unwrap_or_else(|| self.alloc_error(eq.span))
         } else {
@@ -1450,11 +1626,15 @@ impl Parser<'_> {
             ExprStop::EqOrSemi => {
                 self.at(TokenKind::Eq)
                     || self.at(TokenKind::Semi)
+                    || self.at(TokenKind::Perpendicular)
                     || self.at(TokenKind::Eof)
                     || self.at_block_stop()
             }
             ExprStop::Semi => {
-                self.at(TokenKind::Semi) || self.at(TokenKind::Eof) || self.at_block_stop()
+                self.at(TokenKind::Semi)
+                    || self.at(TokenKind::Perpendicular)
+                    || self.at(TokenKind::Eof)
+                    || self.at_block_stop()
             }
         };
         if !clean {
@@ -1467,17 +1647,25 @@ impl Parser<'_> {
     fn at_side_empty(&self, stop: ExprStop) -> bool {
         match stop {
             ExprStop::EqOrSemi => {
-                self.at(TokenKind::Eq) || self.at(TokenKind::Semi) || self.at_block_stop()
+                self.at(TokenKind::Eq)
+                    || self.at(TokenKind::Semi)
+                    || self.at(TokenKind::Perpendicular)
+                    || self.at_block_stop()
             }
-            ExprStop::Semi => self.at(TokenKind::Semi) || self.at_block_stop(),
+            ExprStop::Semi => {
+                self.at(TokenKind::Semi)
+                    || self.at(TokenKind::Perpendicular)
+                    || self.at_block_stop()
+            }
         }
     }
 
-    fn skip_tag(&mut self) -> (bool, bool, Vec<String>) {
+    fn parse_tag(&mut self) -> (bool, bool, Vec<String>, BTreeMap<String, String>) {
         self.bump();
         let mut static_tag = false;
         let mut dynamic_tag = false;
-        let mut tags = Vec::new();
+        let mut flags = Vec::new();
+        let mut map = BTreeMap::new();
         while !self.at(TokenKind::Eof)
             && !self.at(TokenKind::RBrack)
             && !self.at(TokenKind::Semi)
@@ -1485,19 +1673,33 @@ impl Parser<'_> {
         {
             if self.at(TokenKind::Ident) {
                 let tok = self.bump();
-                if self.lexeme(&tok).eq_ignore_ascii_case("static") {
-                    static_tag = true;
-                    tags.push("static".to_string());
-                } else if self.lexeme(&tok).eq_ignore_ascii_case("dynamic") {
-                    dynamic_tag = true;
-                    tags.push("dynamic".to_string());
+                let key = self.lexeme(&tok).to_ascii_lowercase();
+                let mut value = String::new();
+                if self.at(TokenKind::Eq) {
+                    self.bump();
+                    if self.at(TokenKind::String) {
+                        let v = self.bump();
+                        value = unquote_string(self.lexeme(&v));
+                    } else if self.at(TokenKind::Ident) || self.at(TokenKind::Number) {
+                        let v = self.bump();
+                        value = self.lexeme(&v).to_string();
+                    }
                 }
+                if key == "static" {
+                    static_tag = true;
+                    flags.push("static".to_string());
+                }
+                if key == "dynamic" {
+                    dynamic_tag = true;
+                    flags.push("dynamic".to_string());
+                }
+                map.insert(key, value);
             } else {
                 self.bump();
             }
         }
         self.eat(TokenKind::RBrack);
-        (static_tag, dynamic_tag, tags)
+        (static_tag, dynamic_tag, flags, map)
     }
 
     fn skip_to_stmt_end(&mut self) {
@@ -1569,6 +1771,7 @@ impl Parser<'_> {
             "initval",
             "endval",
             "shocks",
+            "occbin_constraints",
             "steady_state_model",
         ];
         KS.iter().any(|kw| self.at_ident_ci(kw))
@@ -1592,6 +1795,7 @@ impl Parser<'_> {
             "initval",
             "endval",
             "shocks",
+            "occbin_constraints",
             "steady_state_model",
             "steady",
             "check",
@@ -2245,6 +2449,7 @@ impl Parser<'_> {
                     | TokenKind::Comma
                     | TokenKind::RParen
                     | TokenKind::RBrack
+                    | TokenKind::Perpendicular
             )
         ) || self.at_block_stop()
     }
@@ -2385,6 +2590,114 @@ impl Parser<'_> {
 
     fn lexeme<'a>(&'a self, tok: &'a Token) -> &'a str {
         tok.text(self.src)
+    }
+
+    fn match_complementarity(&self, id: ExprId) -> Option<ComplementarityTriple> {
+        let ExprKind::Binary { op, lhs, rhs } = &self.model.exprs.get(id).kind else {
+            return None;
+        };
+        let op = *op;
+        let lhs = *lhs;
+        let rhs = *rhs;
+        if !is_cmp(op) {
+            return None;
+        }
+        if let ExprKind::Binary {
+            op: inner_op,
+            lhs: inner_l,
+            rhs: inner_r,
+        } = &self.model.exprs.get(lhs).kind
+        {
+            let inner_op = *inner_op;
+            let inner_l = *inner_l;
+            let inner_r = *inner_r;
+            if is_cmp(inner_op) {
+                if !same_cmp_dir(inner_op, op) {
+                    return None;
+                }
+                if self.is_endo_now(inner_r)
+                    && self.is_constant_bound(inner_l)
+                    && self.is_constant_bound(rhs)
+                {
+                    let variable = self.endo_name(inner_r);
+                    let (lower, upper) = if is_less(op) {
+                        (self.bound_text(inner_l), self.bound_text(rhs))
+                    } else {
+                        (self.bound_text(rhs), self.bound_text(inner_l))
+                    };
+                    return Some(ComplementarityTriple {
+                        variable,
+                        lower_bound: Some(lower),
+                        upper_bound: Some(upper),
+                    });
+                }
+                return None;
+            }
+        }
+        if self.is_endo_now(lhs) && self.is_constant_bound(rhs) {
+            let bound = self.bound_text(rhs);
+            let (lower_bound, upper_bound) = if is_greater(op) {
+                (Some(bound), None)
+            } else {
+                (None, Some(bound))
+            };
+            return Some(ComplementarityTriple {
+                variable: self.endo_name(lhs),
+                lower_bound,
+                upper_bound,
+            });
+        }
+        if self.is_constant_bound(lhs) && self.is_endo_now(rhs) {
+            let bound = self.bound_text(lhs);
+            let (lower_bound, upper_bound) = if is_greater(op) {
+                (None, Some(bound))
+            } else {
+                (Some(bound), None)
+            };
+            return Some(ComplementarityTriple {
+                variable: self.endo_name(rhs),
+                lower_bound,
+                upper_bound,
+            });
+        }
+        None
+    }
+
+    fn is_endo_now(&self, id: ExprId) -> bool {
+        match &self.model.exprs.get(id).kind {
+            ExprKind::Ident { name, timing, .. } if *timing == 0 => {
+                self.model.endogenous.iter().any(|d| d.name == *name)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_constant_bound(&self, id: ExprId) -> bool {
+        !self.model.exprs.walk_idents(id).any(|r| {
+            self.model.endogenous.iter().any(|d| d.name == r.name)
+                || self.model.exogenous.iter().any(|d| d.name == r.name)
+                || self.model
+                    .deterministic_exogenous
+                    .iter()
+                    .any(|d| d.name == r.name)
+        })
+    }
+
+    fn bound_text(&self, id: ExprId) -> String {
+        let span = self.model.exprs.get(id).span;
+        let start = span.start as usize;
+        let end = (span.end as usize).min(self.src.len());
+        if start >= end || start > self.src.len() {
+            return String::new();
+        }
+        collapse_ws(&self.src[start..end])
+    }
+
+    fn endo_name(&self, id: ExprId) -> String {
+        match &self.model.exprs.get(id).kind {
+            ExprKind::Ident { name, .. } => self.intern.get(*name).to_string(),
+            _ => String::new(),
+        }
     }
 }
 
@@ -2678,7 +2991,38 @@ fn equation_from_statement(raw: &str, span: Span) -> Option<Equation> {
         static_tag: false,
         dynamic_tag: false,
         tags: Vec::new(),
+        tag_map: BTreeMap::new(),
+        complementarity: None,
     })
+}
+
+fn unquote_string(s: &str) -> String {
+    let s = s.trim();
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'\'' && *bytes.last().unwrap() == b'\'')
+            || (bytes[0] == b'"' && *bytes.last().unwrap() == b'"'))
+    {
+        s[1..s.len() - 1].to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+fn is_cmp(op: BinOp) -> bool {
+    matches!(op, BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge)
+}
+
+fn is_less(op: BinOp) -> bool {
+    matches!(op, BinOp::Lt | BinOp::Le)
+}
+
+fn is_greater(op: BinOp) -> bool {
+    matches!(op, BinOp::Gt | BinOp::Ge)
+}
+
+fn same_cmp_dir(a: BinOp, b: BinOp) -> bool {
+    (is_less(a) && is_less(b)) || (is_greater(a) && is_greater(b))
 }
 
 fn strip_leading_tags(raw: &str) -> (String, String) {

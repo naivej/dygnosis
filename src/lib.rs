@@ -81,9 +81,10 @@ pub use mcp::{
     DiagnosticCodeItem, McpDiagnostic, McpReference, McpWorkspaceReference,
 };
 pub use model::{
-    DeprecatedOption, EstimatedParam, EstimatedParamKind, IncludeDirective, IncludePathDirective,
-    MacroDirective, MacroInterp, Model, ObservedVar, ParseIssue, ParseIssueKind, ParseSummary,
-    PolicyCommand, ShockKind, ShockStmt, ShocksSemiFamily,
+    Complementarity, ComplementarityTriple, DeprecatedOption, EstimatedParam, EstimatedParamKind,
+    IncludeDirective, IncludePathDirective, MacroDirective, MacroInterp, Model, ObservedVar,
+    OccbinConstraint, OccbinExpr, ParseIssue, ParseIssueKind, ParseSummary, PolicyCommand,
+    ShockKind, ShockStmt, ShocksSemiFamily,
 };
 pub use model_diff::{compare_models, EquationChange, IndexedEquation, ModelDiff, ParameterChange};
 pub use model_info::{

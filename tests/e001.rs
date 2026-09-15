@@ -180,6 +180,15 @@ fn e001_delete_shocks_end() {
 }
 
 #[test]
+fn e001_delete_occbin_end() {
+    assert_fire(
+        "e001/delete_occbin_end.mod",
+        "Missing 'end;' for 'occbin_constraints'",
+        "occbin_constraints;",
+    );
+}
+
+#[test]
 fn e001_strip_var_semicolon() {
     assert_fire(
         "e001/strip_var_semi.mod",
