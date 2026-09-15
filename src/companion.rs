@@ -78,8 +78,8 @@ pub(crate) fn first_line_span(src: &str) -> Span {
 /// Command that loads the convention file, or the first line if that command is absent.
 ///
 /// `FILENAME_steadystate.m` is used from `steady`. `FILENAME_prior_restrictions.m`
-/// is loaded when `estimation` or `method_of_moments` runs. `run_FILENAME.m` is a
-/// MATLAB driver, not a `.mod` command — first line.
+/// is called from `estimation`; 7.1 `method_of_moments` only `isfile`s it.
+/// `run_FILENAME.m` is a MATLAB driver, not a `.mod` command — first line.
 fn convention_named_in(
     kind: CompanionKind,
     source: &str,

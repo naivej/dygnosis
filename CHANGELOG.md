@@ -1,13 +1,12 @@
 # Changelog
 
 ## v0.3.0
-- **One `.mod`, the files that make it runnable**
-  - Companion files are links: `@#include` targets, `FILENAME_steadystate.m`, `FILENAME_prior_restrictions.m`, `run_FILENAME.m` when present, catalog input files (`datafile=`, `mode_file=`, and the rest), leftover quoted `.m` / data paths, and MATLAB helpers the `.mod` calls by name when that `.m` exists.
-  - This tool does not parse MATLAB. Rename still does not edit `.m` files.
-  - A catalog option or quoted path that names a file we cannot resolve is Warning `W160`. Missing optional convention files and a missing identifier helper are not `W160`.
-  - `I050` (no `initval` / `steady_state_model`) is quiet when `FILENAME_steadystate.m` resolves. Generated `+FILENAME/steadystate.m` does not quiet it.
-  - Editor: document links and go-to on companion spans, plus existing `@#include` links.
-  - New MCP tool `dynare_related_files` (eleven tools): one list of includes and companions for the active `.mod`.
+- **Companion files for one `.mod`**
+  - Jump from the `.mod` to companions (for example `FILENAME_steadystate.m`, a `datafile=`, a helper `.m`, `run_FILENAME.m`).
+  - MCP: `dynare_related_files` (includes and companions).
+- **Check changes**
+  - `W160` when a named data file or helper path does not resolve.
+  - `I050` (no `initval` / `steady_state_model` block) is quiet when `FILENAME_steadystate.m` is present.
 
 ## v0.2.0
 - **Fewer false Errors**

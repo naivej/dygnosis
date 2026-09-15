@@ -4,8 +4,6 @@
 - Overlap with the preprocessor is intentional when those checks power an editor feature or help while typing.
 - It does not build in every preprocessor check; it invokes the preprocessor instead.
 
-A Dynare project is one `.mod` plus the files that make it runnable (`@#include`, `FILENAME_steadystate.m`, named data files, helpers, `run_FILENAME.m`). Companions are links, not a MATLAB parse. A named companion that does not resolve is Warning `W160`. `I050` is quiet when `FILENAME_steadystate.m` resolves.
-
 The Dynare preprocessor is searched in the following order:
 
 1. Editor setting (LSP only) — `preprocessorPath`
@@ -33,11 +31,11 @@ The Dynare preprocessor is searched in the following order:
 - Hover (declarations, option names)
 - Outline (endogenous grouped by timing class) and workspace symbols
 - Go to definition / type definition
-- Find references and rename (including across `@#include` files where the graph is known; not into `.m`)
+- Find references and rename (including across `@#include` files where the graph is known)
 - Completions
 - Format document / range
 - Code actions and auto-fix where a fix is stored
-- Folding, inlay hints, and links into included files and companions
+- Folding, inlay hints, and links into `@#include` files and companions (e.g. `FILENAME_steadystate.m`)
 - Quick intelligence while typing, full diagnostics on save
 
 ### Agent tools (MCP)
