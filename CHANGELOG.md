@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5.0
+- **Occasional constraints (OccBin)**
+  - Parse `occbin_constraints` (name / bind / relax / error_*).
+  - Keep every source bind/relax equation; count a named pair as one for the equation-count gap.
+  - Store all equation tag keys (`bind`, `relax`, `mcp`, `static`, `dynamic`, …). Flag tags are empty strings.
+  - Parse complementarity `⟂` / `_|_` on a model equation.
+- **Check**
+  - Structural OccBin Errors they refuse at check (duplicate blocks, more than two constraints, missing regime / bind / name, …).
+  - Warning when an `mcp` tag is used instead of `⟂` (they warn and accept).
+- **Catalog / MCP**
+  - `dynare_list_options` knows `occbin_constraints`.
+  - `dynare_equations` rows include `tags` and, when present, complementarity.
+
 ## v0.4.0
 - **Expand view**
   - See the model after `@#if` / `@#for` / `@{…}` and includes (effective text).
