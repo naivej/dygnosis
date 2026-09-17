@@ -178,7 +178,7 @@ fn e030_same_kind_var() {
     assert_eq!(got[0].severity, 2);
     assert!(got[0]
         .message
-        .contains("'y' is declared more than once in 'var'"));
+        .contains("Symbol y declared twice"));
     assert_span_in(&text, &got[0], "var y c;", "y");
 }
 
@@ -190,7 +190,7 @@ fn e030_same_kind_var_third_compares_to_first() {
     assert!(got.iter().all(|d| d.code == "W031" && d.severity == 2));
     assert!(got.iter().all(|d| d
         .message
-        .contains("'y' is declared more than once in 'var'")));
+        .contains("Symbol y declared twice")));
     assert_last_ident(&text, &got[0], "var y;\nvar y;", "y");
     assert_span_in(&text, &got[1], "var y c;", "y");
 }
@@ -204,7 +204,7 @@ fn e030_same_kind_param() {
     assert_eq!(got[0].severity, 2);
     assert!(got[0]
         .message
-        .contains("'betta' is declared more than once in 'parameters'"));
+        .contains("Symbol betta declared twice"));
     assert_span_in(&text, &got[0], "parameters rho betta;", "betta");
 }
 
@@ -243,7 +243,7 @@ fn e030_var_varexo_timed() {
     assert_eq!(got[0].severity, 1);
     assert!(got[0]
         .message
-        .contains("'c' is declared in both 'var' and 'varexo'"));
+        .contains("Symbol c declared twice with different types"));
     assert_span_in(&text, &got[0], "varexo e c;", "c");
 }
 
@@ -255,7 +255,7 @@ fn e030_var_varexo_lhs() {
     assert_eq!(got[0].code, "E030");
     assert!(got[0]
         .message
-        .contains("'y' is declared in both 'var' and 'varexo'"));
+        .contains("Symbol y declared twice with different types"));
     assert_span_in(&text, &got[0], "varexo e y;", "y");
 }
 
@@ -267,8 +267,7 @@ fn e030_var_varexo_shock() {
     assert_eq!(got[0].code, "E030");
     assert!(got[0]
         .message
-        .contains("'e' is declared in both 'var' and 'varexo'"));
-    assert!(got[0].message.contains("referenced in the shocks block"));
+        .contains("Symbol e declared twice with different types"));
     assert_last_ident(&text, &got[0], "varexo e;", "e");
 }
 
@@ -280,7 +279,7 @@ fn e030_varexo_param_assigned() {
     assert_eq!(got[0].code, "E030");
     assert!(got[0]
         .message
-        .contains("'betta' is declared in both 'varexo' and 'parameters'"));
+        .contains("Symbol betta declared twice with different types"));
     assert_span_in(&text, &got[0], "parameters rho betta;", "betta");
 }
 
@@ -292,7 +291,7 @@ fn e030_varexo_det() {
     assert_eq!(got[0].code, "E030");
     assert!(got[0]
         .message
-        .contains("'e' is declared in both 'varexo_det' and 'varexo'"));
+        .contains("Symbol e declared twice with different types"));
     assert_last_ident(&text, &got[0], "varexo e;", "e");
 }
 
@@ -304,7 +303,7 @@ fn e030_model_local_dup() {
     assert_eq!(got[0].code, "E030");
     assert!(got[0]
         .message
-        .contains("Model-local variable 'foo' is declared twice"));
+        .contains("Local model variable foo declared twice"));
     assert_span_in(&text, &got[0], "# foo = 2;", "foo");
 }
 

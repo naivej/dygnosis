@@ -59,7 +59,7 @@ impl Diagnostic {
 /// Thin families for one parsed model. If `check_parse` is nonempty, return
 /// those E001 rows only (cascade). Otherwise concatenate equation-count (W013), E020, E030,
 /// OccBin, shape, W010, E062–E065, W070, W090, W100, W110 (includes W060), W120, W130.
-/// E060 / E061 / W061 / W160 and I050 quiet are workspace-only (`check_file`), not here.
+/// W062 / E061 / W061 / W160 and I050 quiet are workspace-only (`check_file`), not here.
 pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     let parse_diags = crate::check_parse::check_parse(model);
     if !parse_diags.is_empty() {
@@ -82,7 +82,7 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
-/// One-document workspace check: `analyze()` plus E060 / E061 / W061 / W160 and I050 quiet.
+/// One-document workspace check: `analyze()` plus W062 / E061 / W061 / W160 and I050 quiet.
 ///
 /// `abs_path` is the workspace key (includes resolve against that file's
 /// directory). Falls back to `analyze(&parse(text))` if setup fails.

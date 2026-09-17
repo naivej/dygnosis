@@ -50,9 +50,7 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                         span,
                         Severity::Error,
                         "E111",
-                        format!(
-                            "Shock '{n}' has its variance/standard error specified more than once in the shocks block."
-                        ),
+                        format!("shocks: variance or stderr of shock on {n} declared twice"),
                     ));
                 }
                 seen.insert(key);
@@ -81,7 +79,7 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                         Severity::Error,
                         "E111",
                         format!(
-                            "Covariance between '{first}' and '{second}' is specified more than once in the shocks block."
+                            "shocks: covariance or correlation shock on variable pair ({first}, {second}) declared twice"
                         ),
                     ));
                 }
@@ -97,7 +95,7 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                         Severity::Error,
                         "E111",
                         format!(
-                            "Correlation between '{first}' and '{second}' is specified more than once in the shocks block."
+                            "shocks: covariance or correlation shock on variable pair ({first}, {second}) declared twice"
                         ),
                     ));
                 }

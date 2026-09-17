@@ -61,13 +61,13 @@ fn check_blocks(model: &Model, out: &mut Vec<Diagnostic>) {
         out.push(error(
             blocks[1],
             "E170",
-            "Multiple 'occbin_constraints' blocks are not allowed. Keep a single block.",
+            "Multiple 'occbin_constraints' blocks are not allowed",
         ));
     } else if blocks.len() == 1 && model.occbin_constraints.len() > 2 {
         out.push(error(
             model.occbin_constraints[2].span,
             "E171",
-            "Only up to two constraints are supported in 'occbin_constraints'. Remove the extra constraint.",
+            "only up to two constraints are supported in 'occbin_constraints' block",
         ));
     }
 }
@@ -80,7 +80,7 @@ fn check_constraint_rows(model: &Model, out: &mut Vec<Diagnostic>) {
                 c.name_span,
                 "E185",
                 format!(
-                    "The string '{}' is not a valid Occbin constraint name (contains unauthorized characters). Use letters, digits, and underscores.",
+                    "The string '{}' is not a valid Occbin constraint name (contains unauthorized characters)",
                     c.name
                 ),
             ));
@@ -91,7 +91,7 @@ fn check_constraint_rows(model: &Model, out: &mut Vec<Diagnostic>) {
                 c.name_span,
                 "E185",
                 format!(
-                    "The name '{param}' is already used. Use another name for OccBin constraint '{}'.",
+                    "The name '{param}' is already used. Please use another name for Occbin constraint '{}'",
                     c.name
                 ),
             ));
@@ -101,7 +101,7 @@ fn check_constraint_rows(model: &Model, out: &mut Vec<Diagnostic>) {
                 c.name_span,
                 "E175",
                 format!(
-                    "No equation has been declared for constraint '{}'. Add a model equation tagged bind or relax with that name.",
+                    "No equation has been declared for constraint '{}'",
                     c.name
                 ),
             ));
@@ -112,7 +112,7 @@ fn check_constraint_rows(model: &Model, out: &mut Vec<Diagnostic>) {
                     span,
                     "E174",
                     format!(
-                        "The 'bind' expression is missing in constraint '{}'. Add a bind inequality.",
+                        "The 'bind' expression is missing in constraint '{}'",
                         c.name
                     ),
                 ));
@@ -255,7 +255,7 @@ fn check_duplicate_clauses(
                     tok.span,
                     "E184",
                     format!(
-                        "The '{clause}' clause is declared multiple times. Keep a single '{clause}' in this constraint."
+                        "The '{clause}' clause is declared multiple times"
                     ),
                 ));
             }
@@ -447,7 +447,7 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
                     eq.span,
                     "E176",
                     format!(
-                        "The constraint '{c}' is both in the 'bind' and 'relax' tags. Use one or the other on this equation."
+                        "The constraint '{c}' is both in the 'bind' and 'relax' tags"
                     ),
                 ));
             }
@@ -456,7 +456,7 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
             out.push(error(
                 eq.span,
                 "E180",
-                "Can't have both an 'mcp' tag and a complementarity condition after the perpendicular symbol. Keep one form.",
+                "Can't have both an 'mcp' tag and a complementarity condition after the perpendicular symbol",
             ));
         } else if eq.tag_map.contains_key("mcp") && eq.complementarity.is_none() {
             let mut d = Diagnostic::new(
@@ -473,7 +473,7 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
                 out.push(error(
                     comp.span,
                     "E183",
-                    "Complementarity condition has an incorrect form. Use an inequality on a contemporaneous endogenous, with constant bounds.",
+                    "Complementarity condition has an incorrect form",
                 ));
             }
         }
@@ -508,7 +508,7 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
                 eq.span,
                 "E177",
                 format!(
-                    "The regime corresponding to {rendering} has already been declared for this equation. Remove the duplicate."
+                    "The regime corresponding to {rendering} has already been declared for this equation"
                 ),
             ));
         }
@@ -524,7 +524,7 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
                 span,
                 "E172",
                 format!(
-                    "For equation '{eq_name}', the regime corresponding to {rendering} is not defined. Add the missing bind/relax equation."
+                    "for equation '{eq_name}', the regime corresponding to {rendering} is not defined"
                 ),
             ));
         }
@@ -541,7 +541,7 @@ fn check_tag_pieces(model: &Model, eq: &Equation, key: &str, out: &mut Vec<Diagn
                 eq.span,
                 "E185",
                 format!(
-                    "The string '{piece}' is not a valid Occbin constraint name (contains unauthorized characters). Use letters, digits, and underscores."
+                    "The string '{piece}' is not a valid Occbin constraint name (contains unauthorized characters)"
                 ),
             ));
         } else {
@@ -551,7 +551,7 @@ fn check_tag_pieces(model: &Model, eq: &Equation, key: &str, out: &mut Vec<Diagn
                     eq.span,
                     "E185",
                     format!(
-                        "The name '{param}' is already used. Use another name for OccBin constraint '{piece}'."
+                        "The name '{param}' is already used. Please use another name for Occbin constraint '{piece}'"
                     ),
                 ));
             }

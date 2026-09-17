@@ -75,7 +75,6 @@ pub fn check_w121(model: &Model) -> Vec<Diagnostic> {
                 continue;
             }
             let name = model.name(r.name);
-            let index_text = timing_index(&model.source, timing_span);
             diagnostics.push(Diagnostic::new(
                 Span {
                     start: r.span.start,
@@ -84,7 +83,7 @@ pub fn check_w121(model: &Model) -> Vec<Diagnostic> {
                 Severity::Warning,
                 "W121",
                 format!(
-                    "Parameter '{name}' is used with a lead/lag ('{name}({index_text})'). Parameters are time-invariant; this is usually a variable mis-declared as a parameter, or a stray time index."
+                    "The following parameter(s) are used with a lead or a lag: {name}"
                 ),
             ));
         }
@@ -185,18 +184,6 @@ fn run_commands(source: &str) -> Vec<CommandTok> {
             span: tok.span,
         })
         .collect()
-}
-
-fn timing_index(source: &str, timing_span: Span) -> String {
-    let raw = source
-        .get(timing_span.start as usize..timing_span.end as usize)
-        .unwrap_or("");
-    let inner = raw
-        .trim()
-        .strip_prefix('(')
-        .and_then(|s| s.strip_suffix(')'))
-        .unwrap_or(raw);
-    inner.trim().to_string()
 }
 
 fn used_in_model(model: &Model) -> HashSet<Name> {

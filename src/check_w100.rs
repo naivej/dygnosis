@@ -17,23 +17,18 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
     let anchor = model.policy_command_span.unwrap_or(FALLBACK);
     let mut diagnostics = Vec::new();
 
-    let planner_command = model
+    if model
         .policy_commands
         .iter()
-        .copied()
-        .find(|c| c.is_planner());
-    if let Some(planner_command) = planner_command {
-        if model.planner_objective_span.is_none() {
-            diagnostics.push(Diagnostic::new(
-                anchor,
-                Severity::Error,
-                "E100",
-                format!(
-                    "{} requires a planner_objective statement, which is missing.",
-                    planner_command.as_str()
-                ),
-            ));
-        }
+        .any(|c| c.is_planner())
+        && model.planner_objective_span.is_none()
+    {
+        diagnostics.push(Diagnostic::new(
+            anchor,
+            Severity::Error,
+            "E100",
+            "A planner_objective statement must be used with a ramsey_model, a ramsey_policy, osr, or a discretionary_policy statement and vice versa",
+        ));
     }
 
     let endogenous = names(&model.endogenous);
@@ -69,15 +64,15 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
                 anchor,
                 Severity::Error,
                 "E103",
-                "osr requires an osr_params statement listing the parameters to optimize.",
+                "The osr statement requires the osr_params statement",
             ));
         }
-        if !model.has_optim_weights {
+        if !model.has_optim_weights && model.planner_objective_span.is_none() {
             diagnostics.push(Diagnostic::new(
                 anchor,
                 Severity::Error,
                 "E103",
-                "osr requires an optim_weights block defining the objective (the weights on the target variables).",
+                "The osr statement requires either an optim_weights block or a planner_objective",
             ));
         }
     }

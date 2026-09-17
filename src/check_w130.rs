@@ -56,12 +56,15 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
                     && flagged_use_before.insert(r.name)
                 {
                     let name = model.name(r.name);
+                    let lhs = ss_lhs_ident(model, eq)
+                        .map(|n| model.name(n).to_string())
+                        .unwrap_or_else(|| name.to_string());
                     diagnostics.push(Diagnostic::new(
                         r.span,
                         Severity::Error,
                         "E130",
                         format!(
-                            "'{name}' is used in the steady_state_model block before it is assigned. The block is evaluated top to bottom, so each variable must be assigned before use."
+                            "variable '{name}' is undefined in the declaration of variable '{lhs}'"
                         ),
                     ));
                 }
@@ -80,7 +83,7 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
                         Severity::Warning,
                         "W131",
                         format!(
-                            "'{name}' is assigned more than once in the steady_state_model block; the later assignment silently overrides the earlier one."
+                            "in the 'steady_state_model' block, variable '{name}' is declared twice"
                         ),
                     ));
                 }
@@ -292,13 +295,13 @@ fn check_w150(model: &Model) -> Vec<Diagnostic> {
     for &span in &model.simul_spans {
         diagnostics.push(deprecated(
             span,
-            "'simul' is deprecated. Use 'perfect_foresight_setup' followed by 'perfect_foresight_solver'.",
+            "'simul' is deprecated. Please use 'perfect_foresight_setup' and 'perfect_foresight_solver' instead.",
         ));
     }
     if let Some(span) = model.ramsey_policy_span {
         diagnostics.push(deprecated(
             span,
-            "'ramsey_policy' is deprecated. Use 'ramsey_model' followed by 'stoch_simul'.",
+            "'ramsey_policy' is deprecated. Please use 'ramsey_model', 'stoch_simul', and 'evaluate_planner_objective' instead.",
         ));
     }
 
@@ -327,10 +330,10 @@ fn check_w150(model: &Model) -> Vec<Diagnostic> {
         }
         let message = match option {
             DeprecatedOption::AimSolver => {
-                "The 'aim_solver' option is deprecated; use 'dr = aim' instead."
+                "The 'aim_solver' option is deprecated. It has been superseded by the 'dr=aim' option."
             }
             DeprecatedOption::Bytecode => {
-                "The 'bytecode' option is deprecated and will be removed in a future Dynare release."
+                "the 'bytecode' option is deprecated and will be removed in a future release of Dynare."
             }
         };
         diagnostics.push(deprecated(*span, message));

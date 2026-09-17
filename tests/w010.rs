@@ -190,7 +190,7 @@ fn w010_and_w022_unassigned_unref_param() {
     assert_eq!(w022.severity, 2);
     assert!(w022
         .message
-        .contains("Parameter 'orphan_p' is declared but never referenced"));
+        .contains("Parameter(s) orphan_p not used in the model"));
     assert_last_ident(&text, w022, "parameters rho betta orphan_p;", "orphan_p");
 }
 

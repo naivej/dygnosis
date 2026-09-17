@@ -482,45 +482,16 @@ fn check_w042(model: &Model) -> Vec<Diagnostic> {
         return Vec::new();
     }
 
-    if !model.equations.is_empty() {
-        let mut alpha = missing;
-        alpha.sort();
-        let n = alpha.len();
-        let listed = alpha.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
-        let suffix = if n > 5 {
-            format!(" (and {} more)", n - 5)
-        } else {
-            String::new()
-        };
-        return vec![Diagnostic {
-            span: model.ss_block.unwrap_or_else(|| fallback_span(model)),
+    let span_block = model.ss_block;
+    missing
+        .into_iter()
+        .map(|name| Diagnostic {
+            span: span_block.unwrap_or_else(|| fallback_span(model)),
             severity: Severity::Warning,
             code: "W042".to_string(),
-            message: format!(
-                "{n} endogenous variable(s) missing from steady_state_model: {listed}{suffix}"
-            ),
+            message: format!("variable '{name}' is not assigned a value"),
             fix: None,
             tags: Vec::new(),
-        }];
-    }
-
-    let span_block = model.ss_block;
-    model
-        .endogenous
-        .iter()
-        .filter(|d| !assigned.contains(model.name(d.name)))
-        .map(|d| {
-            let name = model.name(d.name);
-            Diagnostic {
-                span: span_block.unwrap_or(d.span),
-                severity: Severity::Warning,
-                code: "W042".to_string(),
-                message: format!(
-                    "Endogenous variable '{name}' has no assignment in the steady_state_model block."
-                ),
-                fix: None,
-                tags: Vec::new(),
-            }
         })
         .collect()
 }
@@ -720,9 +691,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
                     span: entry.span,
                     severity: Severity::Error,
                     code: "E059".to_string(),
-                    message: format!(
-                        "Parameter '{name}' assigned in {block_name} is ignored. Assign parameters before the model block or inside steady_state_model instead."
-                    ),
+                    message: format!("{name} is neither endogenous or exogenous."),
                     fix: None,
                     tags: Vec::new(),
                 });

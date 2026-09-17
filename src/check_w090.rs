@@ -190,7 +190,7 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
                 Severity::Error,
                 "E095",
                 format!(
-                    "observation_trends: '{}' is not listed in varobs.",
+                    "variable {} in observation_trends block is not an observed variable",
                     model.name(*name)
                 ),
             ));

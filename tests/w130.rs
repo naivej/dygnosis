@@ -196,7 +196,7 @@ fn w130_timed_rhs_native() {
     assert_eq!(rust[0].code, "E130");
     assert_eq!(rust[0].severity, 1);
     assert!(
-        rust[0].message.starts_with("'y'"),
+        rust[0].message.starts_with("variable 'y'"),
         "E130 on y, got {}",
         rust[0].message
     );

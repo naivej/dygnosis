@@ -19,6 +19,25 @@ use crate::workspace::{split_includepath_argument, Workspace};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Catching step passed to the official preprocessor (`json=`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[doc(hidden)]
+pub enum JsonStage {
+    /// `json=check` (parse + check). Honesty for 0.5 emit uses this.
+    Check,
+    /// `json=transform`. Reserved for written-clash honesty (05).
+    Transform,
+}
+
+impl JsonStage {
+    fn as_arg(self) -> &'static str {
+        match self {
+            Self::Check => "json=check",
+            Self::Transform => "json=transform",
+        }
+    }
+}
+
 /// Result of one preprocessor run.
 ///
 /// Codes such as `P000` / `P001` here are spawn-parse labels, not product codes.
@@ -93,6 +112,7 @@ pub fn run_preprocessor(
     preprocessor_path: &Path,
     source_dir: Option<&Path>,
     timeout: Duration,
+    stage: JsonStage,
 ) -> PreprocessorResult {
     let mut text = text.to_string();
     if let Some(stripped) = text.strip_prefix('\u{feff}') {
@@ -137,7 +157,7 @@ pub fn run_preprocessor(
     let include_dirs = include_search_directories(&text, source_dir_abs.as_deref());
     let mut cmd = Command::new(preprocessor_path);
     cmd.arg(&tmp_file)
-        .arg("json=check")
+        .arg(stage.as_arg())
         .arg("onlyjson")
         .arg("nopreprocessoroutput");
     for dir in &include_dirs {
@@ -836,7 +856,13 @@ fn materialize_and_run(
 
     let original_entry = files.get(entry_file).cloned().unwrap_or_default();
     let entry_text = rewritten.get(entry_file).cloned().unwrap_or_default();
-    let mut result = run_preprocessor(&entry_text, preprocessor_path, Some(&entry_parent), timeout);
+    let mut result = run_preprocessor(
+        &entry_text,
+        preprocessor_path,
+        Some(&entry_parent),
+        timeout,
+        JsonStage::Check,
+    );
     if entry_text != original_entry {
         remap_spans_to_text(&mut result.diagnostics, &entry_text, &original_entry);
     }

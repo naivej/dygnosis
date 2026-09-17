@@ -434,7 +434,7 @@ fn strip_out_codes(diags: impl IntoIterator<Item = Diagnostic>) -> Vec<String> {
         .collect()
 }
 
-/// Same families as `check_in_workspace` (analyze + E060 / E061 / W061 + W160 / I050 quiet).
+/// Same families as `check_in_workspace` (analyze + W062 / E061 / W061 + W160 / I050 quiet).
 fn workspace_own(active: &str, files: &HashMap<String, String>) -> Vec<Diagnostic> {
     let mut ws = Workspace::new();
     for (name, content) in files {

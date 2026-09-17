@@ -363,7 +363,7 @@ fn swff_run_script_not_ff_coeffs_not_inc() {
     assert!(
         !analyzed
             .iter()
-            .any(|d| d.code == "E060" || d.code == "E061"),
+            .any(|d| d.code == "W062" || d.code == "E061"),
         "analyze(parse(swff)) must stay records-only, got {:?}",
         codes_of(&analyzed)
     );

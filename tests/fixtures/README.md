@@ -15,7 +15,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 | `e020/` | a name used in the model that was never declared |
 | `e030/` | the same name declared twice (for example `var` and `varexo`) |
 | `shape/` | equation or block shape: duplicate equations, missing `initval`, no steady-state block (`W054`–`W057`, `W042`, `E058`, `W051`, `W052`, `E059`, `I050`) |
-| `e060/` | `@#include` and `@#if` / `@#for` mistakes. Some cases are a **directory** of files (`cycle/`, `missing/`, `nested/`, `w061_*`), not one `.mod`. |
+| `e060/` | `@#include` and `@#if` / `@#for` mistakes. Cycle is extra Warning `W062`. Some cases are a **directory** of files (`cycle/`, `missing/`, `nested/`, `w061_*`), not one `.mod`. |
 | `w010/` | unused or never-assigned parameters and variables |
 | `w070/` | a parameter value that looks wrong (discount, depreciation, …) |
 | `w090/` | estimation and observed variables |
@@ -35,7 +35,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 
 ## Inventory
 
-[`inventory.json`](inventory.json) is the list of triggers. One row per trigger, not one row per code letter. Every **emit** and **added** `known_codes()` key has a row (`E999` is `documented-only`). Skip keys (`E186`–`E190`, `W186`, `S001`–`S060`) have none. Out codes (`E040`, `W040`, `W041`, `I041`, `W071`, `I070`, `I071`, `W080`, `W081`, `DYNR`) have none.
+[`inventory.json`](inventory.json) is the list of triggers. One row per trigger, not one row per code letter. Every **emit** and **added** `known_codes()` key has a row (`E999` is `documented-only`). Skip keys (`E186`–`E190`, `W186`, `S001`–`S060`) have none. Out / vacated codes (`E040`, `W040`, `W041`, `I041`, `W071`, `I070`, `I071`, `W080`, `W081`, `DYNR`, `E060`) have none.
 
 | Field | Meaning |
 |-------|---------|

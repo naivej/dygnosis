@@ -33,6 +33,8 @@ pub struct UnresolvedInclude {
     pub span: Span,
     /// Basename of the nested file that named this target. `None` on a root miss.
     pub included_from: Option<String>,
+    /// Directories that were searched for this include.
+    pub searched: Vec<String>,
 }
 
 /// One include cycle, canonicalized so rotations are not reported twice.
@@ -397,10 +399,21 @@ impl Workspace {
                         self.resolve_filename(current_key, &dir.filename, &effective_paths);
                     match resolved {
                         None => {
+                            let mut searched = Vec::new();
+                            if let Some(parent) = Path::new(current_key).parent() {
+                                searched.push(parent.display().to_string());
+                            }
+                            for p in &effective_paths {
+                                let s = p.display().to_string();
+                                if !searched.iter().any(|d| d == &s) {
+                                    searched.push(s);
+                                }
+                            }
                             records.unresolved.push(UnresolvedInclude {
                                 filename: dir.filename,
                                 span: root_span.unwrap_or(dir.span),
                                 included_from: root_span.map(|_| file_basename(current_key)),
+                                searched,
                             });
                         }
                         Some(path) => {

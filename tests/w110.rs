@@ -248,7 +248,7 @@ fn w110_w111_dup_var() {
     assert_eq!(rust[0].severity, 1);
     assert!(rust[0]
         .message
-        .contains("variance/standard error specified more than once"));
+        .contains("variance or stderr of shock on"));
     assert_stmt_span(&src, &rust[0], "w111_dup_var");
 }
 
@@ -260,14 +260,14 @@ fn w110_w111_dup_corr() {
     assert_eq!(rust[0].code, "E111");
     assert_eq!(rust[0].severity, 1);
     assert!(
-        rust[0].message.contains("'e'") && rust[0].message.contains("'u'"),
+        rust[0].message.contains("u") && rust[0].message.contains("e"),
         "dup corr message should name e and u, got {}",
         rust[0].message
     );
     assert!(
         rust[0]
             .message
-            .starts_with("Correlation between 'u' and 'e'"),
+            .contains("covariance or correlation shock on variable pair (u, e)"),
         "second pair order, got {}",
         rust[0].message
     );

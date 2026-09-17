@@ -1217,7 +1217,7 @@
     {
       "id": "e060_clean_swff",
       "codes": [
-        "E060",
+        "W062",
         "E061",
         "E062",
         "E063",
@@ -1235,7 +1235,7 @@
     {
       "id": "e060_clean_zlb_qe",
       "codes": [
-        "E060",
+        "W062",
         "E061",
         "E062",
         "E063",
@@ -1253,7 +1253,7 @@
     {
       "id": "e060_clean_US_RE09_rep",
       "codes": [
-        "E060",
+        "W062",
         "E061",
         "E062",
         "E063",
@@ -1271,7 +1271,7 @@
     {
       "id": "e060_cycle",
       "codes": [
-        "E060"
+        "W062"
       ],
       "kind": "fire",
       "package": "include",
@@ -2533,6 +2533,18 @@
       "source": "w100.rs::w100_osr_ok",
       "cluster": "w100/w103_ok.mod",
       "notes": "osr with params and weights"
+    },
+    {
+      "id": "w100_osr_planner_quiet",
+      "codes": [
+        "E103"
+      ],
+      "kind": "quiet",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/w103_planner.mod",
+      "source": "w100.rs::w100_osr_planner_quiet",
+      "cluster": "w100/w103_planner.mod",
+      "notes": "osr + osr_params + planner_objective, no optim_weights"
     },
     {
       "id": "w110_clean_trend_rbc_gov_inv",

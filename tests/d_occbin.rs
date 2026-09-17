@@ -28,7 +28,7 @@ const FIRES: &[Fire] = &[
         rel: "occbin/e171_three.mod",
         code: "E171",
         severity: Severity::Error,
-        message: "Only up to two constraints are supported",
+        message: "only up to two constraints are supported",
         needle: "name 'IRR'",
     },
     Fire {

@@ -221,7 +221,7 @@ fn w121_noplus() {
     rust.sort();
     assert_eq!(rust.len(), 1);
     assert!(
-        rust[0].message.contains("'betta(1)'"),
+        rust[0].message.contains("betta"),
         "no plus, got {}",
         rust[0].message
     );
@@ -235,7 +235,7 @@ fn w121_spaces() {
     rust.sort();
     assert_eq!(rust.len(), 1);
     assert!(
-        rust[0].message.contains("'betta(+1)'"),
+        rust[0].message.contains("betta"),
         "spaces still +1, got {}",
         rust[0].message
     );
@@ -257,7 +257,7 @@ fn w121_twice() {
     rust.sort();
     assert_eq!(rust.len(), 1);
     assert!(
-        rust[0].message.contains("'betta(+1)'"),
+        rust[0].message.contains("betta"),
         "first hit spelling, got {}",
         rust[0].message
     );

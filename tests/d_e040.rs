@@ -294,7 +294,7 @@ fn shape_w042_missing_ss_coverage() {
     assert_eq!(got[0].severity, 2);
     assert!(got[0]
         .message
-        .contains("1 endogenous variable(s) missing from steady_state_model: c"));
+        .contains("variable 'c' is not assigned a value"));
     assert_span(&text, &got[0], "steady_state_model;\ny = 0;\nend;");
 }
 
@@ -361,7 +361,7 @@ fn shape_w053_param_in_initval() {
     assert_eq!(e059.severity, 1);
     assert!(e059
         .message
-        .contains("Parameter 'betta' assigned in initval"));
+        .contains("betta is neither endogenous or exogenous"));
     assert_span(&text, e059, "betta = 0.5;");
     let w052 = find_code(&got, "W052");
     assert_eq!(w052.severity, 2);
@@ -406,7 +406,7 @@ fn shape_w053_param_in_endval() {
     assert_eq!(got[0].severity, 1);
     assert!(got[0]
         .message
-        .contains("Parameter 'betta' assigned in endval"));
+        .contains("betta is neither endogenous or exogenous"));
     assert_span(&text, &got[0], "betta = 0.5;");
 }
 

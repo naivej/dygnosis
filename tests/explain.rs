@@ -5,7 +5,7 @@ use dygnosis::explain::{explain, known_codes, render_markdown, ExplainKind};
 use dygnosis::{analyze, check_file, parse};
 
 const RUST_CODES: &[&str] = &[
-    "E001", "E020", "E021", "E023", "E024", "E025", "E030", "E058", "E059", "E060", "E061", "E062",
+    "E001", "E020", "E021", "E023", "E024", "E025", "E030", "E058", "E059", "E061", "E062",
     "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E111", "E130", "E170",
     "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E180", "E181", "E182", "E183", "E184",
     "E185", "E186", "E187", "E188", "E189", "E190", "E999", "I050", "S001", "S002", "S003", "S004",
@@ -15,17 +15,17 @@ const RUST_CODES: &[&str] = &[
     "S041", "S042", "S043", "S044", "S045", "S046", "S047", "S048", "S049", "S050", "S051", "S052",
     "S053", "S054", "S055", "S056", "S057", "S058", "S059", "S060", "W010", "W011", "W012", "W013",
     "W020", "W022", "W031", "W042", "W051", "W052", "W054", "W055", "W056", "W057", "W060", "W061",
-    "W070", "W091", "W092", "W094", "W102", "W110", "W112", "W120", "W121", "W122", "W131", "W140",
-    "W150", "W160", "W170", "W186",
+    "W062", "W070", "W091", "W092", "W094", "W102", "W110", "W112", "W120", "W121", "W122", "W131",
+    "W140", "W150", "W160", "W170", "W186",
 ];
 
 const THIN_CODES: &[&str] = &[
-    "E001", "E020", "E021", "E023", "E024", "E025", "E030", "E058", "E059", "E060", "E061", "E062",
+    "E001", "E020", "E021", "E023", "E024", "E025", "E030", "E058", "E059", "E061", "E062",
     "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E111", "E130", "E170",
     "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E180", "E181", "E182", "E183", "E184",
     "E185", "E999", "I050", "W010", "W011", "W012", "W013", "W020", "W022", "W031", "W042", "W051",
-    "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W070", "W091", "W092", "W094", "W102",
-    "W110", "W112", "W120", "W121", "W122", "W131", "W140", "W150", "W160", "W170",
+    "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094",
+    "W102", "W110", "W112", "W120", "W121", "W122", "W131", "W140", "W150", "W160", "W170",
 ];
 
 const EMIT: &[&str] = &[
@@ -36,8 +36,8 @@ const EMIT: &[&str] = &[
 ];
 
 const ADDED: &[&str] = &[
-    "E060", "E999", "I050", "W010", "W011", "W012", "W013", "W020", "W051", "W052", "W054", "W055",
-    "W056", "W057", "W060", "W061", "W070", "W091", "W092", "W094", "W102", "W110", "W112", "W120",
+    "E999", "I050", "W010", "W011", "W012", "W013", "W020", "W051", "W052", "W054", "W055", "W056",
+    "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094", "W102", "W110", "W112", "W120",
     "W122", "W140", "W160",
 ];
 
@@ -55,8 +55,12 @@ const OUT: &[&str] = &[
 ];
 
 const VACATED: &[&str] = &[
-    "E010", "E050", "E051", "E052", "E053", "W021", "W050", "W053", "W090", "W093", "W095", "W100",
-    "W101", "W103", "W111", "W130",
+    "E010", "E050", "E051", "E052", "E053", "E060", "W021", "W050", "W053", "W090", "W093", "W095",
+    "W100", "W101", "W103", "W111", "W130",
+];
+
+const WARRANT_CODES: &[&str] = &[
+    "E001", "E020", "E023", "E058", "E062", "E090", "E093", "E101", "W170",
 ];
 
 const FORBIDDEN: &[&str] = &[
@@ -170,7 +174,8 @@ fn explain_kinds_are_emit_skip_added() {
         assert_eq!(entry.kind, ExplainKind::Skip, "{code}");
         assert_eq!(entry.kind.as_str(), "skip", "{code}");
     }
-    assert_eq!(explain("E060").unwrap().kind, ExplainKind::Added);
+    assert!(explain("E060").is_none());
+    assert_eq!(explain("W062").unwrap().kind, ExplainKind::Added);
     assert_eq!(explain("E186").unwrap().kind, ExplainKind::Skip);
     assert_eq!(explain("W013").unwrap().kind, ExplainKind::Added);
     assert_eq!(explain("W186").unwrap().kind, ExplainKind::Skip);
@@ -374,6 +379,37 @@ fn cli_explain_list() {
     assert!(!stdout.contains("DYNR"));
     assert!(!stdout.contains("P000"));
     assert!(!stdout.contains("omit"));
+}
+
+#[test]
+fn warrant_heading_only_on_warrant_codes() {
+    for code in THIN_CODES {
+        let md = render_markdown(code).expect(code);
+        let has = md.contains("**Warrant**");
+        let should = WARRANT_CODES.contains(code);
+        assert_eq!(
+            has, should,
+            "{code}: Warrant heading present={has}, expected={should}"
+        );
+        if should {
+            assert!(
+                md.contains("They refuse:")
+                    || md.contains("They report")
+                    || md.contains("They accept and WARN:")
+                    || md.contains("`Unknown symbol")
+                    || md.contains("bison")
+                    || md.contains("perpendicular symbol"),
+                "{code} warrant body must still quote their string",
+            );
+        }
+    }
+    for code in SKIP_KEYS {
+        let md = render_markdown(code).expect(code);
+        assert!(
+            !md.contains("**Warrant**"),
+            "{code} skip markdown must not have a Warrant heading"
+        );
+    }
 }
 
 #[test]

@@ -33,7 +33,7 @@ fn check_e023(model: &Model) -> Vec<Diagnostic> {
             severity: Severity::Error,
             code: "E023".to_string(),
             message: format!(
-                "Predetermined variable '{name}' is not declared as an endogenous variable. Fix: add '{name}' to the 'var' declaration or remove it from 'predetermined_variables'."
+                "Predetermined variable '{name}' is not declared as an endogenous variable."
             ),
             fix: None,
             tags: Vec::new(),
@@ -68,7 +68,7 @@ fn check_e024(model: &Model) -> Vec<Diagnostic> {
                 severity: Severity::Error,
                 code: "E024".to_string(),
                 message: format!(
-                    "Deterministic exogenous variable '{name}' cannot be used with a lead or lag. Fix: remove the time subscript from '{name}'."
+                    "Exogenous deterministic variable {name} cannot be given a lead or a lag"
                 ),
                 fix: None,
                 tags: Vec::new(),
@@ -124,7 +124,7 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
                 severity: Severity::Error,
                 code: "E025".to_string(),
                 message: format!(
-                    "Model-local variable '{name}' is used before its # definition. Fix: move the definition above this use."
+                    "{name} has wrong type or was already used on the right-hand side. You cannot use it on the left-hand side of a pound ('#') expression"
                 ),
                 fix: None,
                 tags: Vec::new(),
@@ -154,7 +154,7 @@ fn shadowing_diag(model: &Model, name: Name, span: Span) -> Diagnostic {
         severity: Severity::Error,
         code: "E025".to_string(),
         message: format!(
-            "Model-local variable '{name}' shadows a declared Dynare symbol. Fix: rename the model-local variable or remove the duplicate declaration."
+            "{name} has wrong type or was already used on the right-hand side. You cannot use it on the left-hand side of a pound ('#') expression"
         ),
         fix: None,
         tags: Vec::new(),

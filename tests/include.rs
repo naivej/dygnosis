@@ -65,7 +65,7 @@ fn tmp_unique() -> PathBuf {
 fn no_include_codes(model: &dygnosis::Model) {
     let codes: Vec<_> = analyze(model).into_iter().map(|d| d.code).collect();
     for banned in [
-        "E060", "E061", "E062", "E063", "E064", "E065", "W060", "W061",
+        "E061", "E062", "E063", "E064", "E065", "W060", "W061", "W062",
     ] {
         assert!(
             !codes.iter().any(|c| c == banned),

@@ -143,15 +143,22 @@ pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
         return Vec::new();
     }
     let referenced = model_eq_refs(model);
-    unused_decls(
-        model,
-        &model.exogenous,
-        &referenced,
-        "E021",
-        Severity::Error,
-        "Exogenous variable",
-        "the model block",
-    )
+    let mut diagnostics = Vec::new();
+    for d in &model.exogenous {
+        if referenced.contains(&d.name) {
+            continue;
+        }
+        let name = model.name(d.name);
+        diagnostics.push(Diagnostic::new(
+            d.span,
+            Severity::Error,
+            "E021",
+            format!(
+                "{name} not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior."
+            ),
+        ));
+    }
+    diagnostics
 }
 
 pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
@@ -179,7 +186,7 @@ pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
             p.span,
             Severity::Warning,
             "W022",
-            format!("Parameter '{name}' is declared but never referenced in model equations."),
+            format!("Parameter(s) {name} not used in the model"),
         ));
     }
     diagnostics

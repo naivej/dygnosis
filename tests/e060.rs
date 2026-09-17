@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use dygnosis::span::LineIndex;
-use dygnosis::{check_e060_family, check_e060_family_on_model, parse, Workspace};
+use dygnosis::{analyze, check_e060_family, check_e060_family_on_model, parse, Workspace};
 
-const FAMILY: &[&str] = &["E060", "E061", "E062", "E063", "E064", "E065", "W061"];
+const FAMILY: &[&str] = &["E061", "E062", "E063", "E064", "E065", "W061", "W062"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Diag {
@@ -181,7 +181,7 @@ fn assert_quiet(rel: &str) {
     let got = rust_family(&check_mod(rel));
     assert!(
         got.is_empty(),
-        "{rel}: expected no E060 family, got {got:?}"
+        "{rel}: expected no include family, got {got:?}"
     );
 }
 
@@ -228,7 +228,7 @@ fn e060_clean_fixtures_empty() {
         let rust = rust_family(&text);
         assert!(
             rust.is_empty(),
-            "clean {label} should have no E060 family, got {rust:?}"
+            "clean {label} should have no include family, got {rust:?}"
         );
         if label == "swff" {
             let model = parse(&text);
@@ -254,9 +254,18 @@ fn e060_cycle() {
     assert_workspace_fire(
         "e060/cycle",
         "a.mod",
-        "E060",
+        "W062",
         "a.mod -> b.inc -> a.mod",
         "@#include \"b.inc\"",
+    );
+    let text = check_mod("e060/cycle/a.mod");
+    let got = rust_fixture_dir("e060/cycle", "a.mod");
+    assert_eq!(got[0].severity, 2, "cycle must be Warning, got {got:?}");
+    let analyzed = analyze(&parse(&text));
+    assert!(
+        analyzed.iter().all(|d| d.code != "W062"),
+        "analyze() must not emit W062, got {:?}",
+        analyzed.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 
@@ -277,7 +286,7 @@ fn e061_nested_missing() {
         "e060/nested",
         "nested_main.mod",
         "E061",
-        "missing_nested.inc (included from nested_helper.inc)",
+        "Could not open missing_nested.inc",
         "@#include \"nested_helper.inc\"",
     );
 }
@@ -348,7 +357,7 @@ fn e062_commented_endif_is_not_e062() {
 
 #[test]
 fn e063_undef_simple() {
-    assert_fire("e060/e063_undef.mod", "E063", "@{UNDEF}", "@{UNDEF}");
+    assert_fire("e060/e063_undef.mod", "E063", "Unknown variable UNDEF", "@{UNDEF}");
 }
 
 #[test]
@@ -358,7 +367,7 @@ fn e063_expression_skipped_when_include_present() {
 
 #[test]
 fn e063_expression_without_include() {
-    assert_fire("e060/e063_expr.mod", "E063", "@{UNDEF+1}", "@{UNDEF+1}");
+    assert_fire("e060/e063_expr.mod", "E063", "Unknown variable UNDEF", "@{UNDEF+1}");
 }
 
 #[test]
@@ -368,7 +377,7 @@ fn e063_defined_before_use() {
 
 #[test]
 fn e063_for_var_not_known_after_endfor() {
-    assert_fire("e060/e063_for.mod", "E063", "@{i}", "@{i}");
+    assert_fire("e060/e063_for.mod", "E063", "Unknown variable i", "@{i}");
 }
 
 #[test]
@@ -378,7 +387,7 @@ fn e064_error_quoted() {
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "E064");
     assert!(
-        got[0].message.contains(": boom."),
+        got[0].message.contains(": boom"),
         "expected boom message, got {got:?}"
     );
     assert_span(&text, &got[0], "@#error \"boom\"");
@@ -390,7 +399,7 @@ fn e064_error_no_argument() {
     let got = rust_family(&text);
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "E064");
-    assert_eq!(got[0].message, "Macro @#error triggered.");
+    assert_eq!(got[0].message, "Macro-processing error");
     assert_span(&text, &got[0], "@#error");
 }
 
@@ -399,7 +408,7 @@ fn e064_spaced_error_directive() {
     assert_fire(
         "e060/e064_spaced.mod",
         "E064",
-        ": spaced.",
+        ": spaced",
         "@# error \"spaced\"",
     );
 }

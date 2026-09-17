@@ -155,7 +155,7 @@ fn w100_ramsey() {
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "E100");
     assert_eq!(rust[0].severity, 1);
-    assert!(rust[0].message.starts_with("ramsey_model requires"));
+    assert!(rust[0].message.starts_with("A planner_objective statement must be used"));
     assert_policy_span(&src, &rust[0]);
 }
 
@@ -166,7 +166,7 @@ fn w100_disc() {
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "E100");
     assert_eq!(rust[0].severity, 1);
-    assert!(rust[0].message.starts_with("discretionary_policy requires"));
+    assert!(rust[0].message.starts_with("A planner_objective statement must be used"));
     assert_policy_span(&src, &rust[0]);
 }
 
@@ -260,10 +260,10 @@ fn w100_w103_both() {
     assert!(rust.iter().all(|d| d.severity == 1));
     assert!(rust
         .iter()
-        .any(|d| d.message.contains("osr_params statement")));
+        .any(|d| d.message.contains("The osr statement requires the osr_params statement")));
     assert!(rust
         .iter()
-        .any(|d| d.message.contains("optim_weights block")));
+        .any(|d| d.message.contains("optim_weights block or a planner_objective")));
     for d in &rust {
         assert_policy_span(&src, d);
     }
@@ -276,7 +276,7 @@ fn w100_w103_weights() {
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "E103");
     assert_eq!(rust[0].severity, 1);
-    assert!(rust[0].message.contains("optim_weights block"));
+    assert!(rust[0].message.contains("optim_weights block or a planner_objective"));
     assert_policy_span(&src, &rust[0]);
 }
 
@@ -298,5 +298,15 @@ fn w100_osr_ok() {
     assert!(
         rust.is_empty(),
         "osr with params and weights should be empty, got {rust:?}"
+    );
+}
+
+#[test]
+fn w100_osr_planner_quiet() {
+    let src = check_mod("w100/w103_planner.mod");
+    let rust = rust_family(&src);
+    assert!(
+        rust.iter().all(|d| d.code != "E103"),
+        "osr + osr_params + planner_objective should not E103, got {rust:?}"
     );
 }

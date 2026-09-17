@@ -1,4 +1,4 @@
-//! E060–E065 / W061 include and macro-file-text diagnostics.
+//! E061–E065 / W061 / W062 include and macro-file-text diagnostics.
 //!
 //! Walks recorded include records, `MacroDir` / `MacroInterp` lists, and
 //! `ExprKind::SteadyState` — not a regex port of `diagnostics.py`.
@@ -73,11 +73,9 @@ pub fn check_e060(records: &IncludeRecords) -> Vec<Diagnostic> {
                 .join(" -> ");
             Diagnostic::new(
                 cycle.span,
-                Severity::Error,
-                "E060",
-                format!(
-                    "Circular @#include detected: {chain}. Fix: break the cycle by removing one of the @#include directives along this chain."
-                ),
+                Severity::Warning,
+                "W062",
+                format!("Circular @#include detected: {chain}."),
             )
         })
         .collect()
@@ -88,17 +86,24 @@ pub fn check_e061(records: &IncludeRecords) -> Vec<Diagnostic> {
         .unresolved
         .iter()
         .map(|u| {
-            let target = match &u.included_from {
-                Some(parent) => format!("{} (included from {parent})", u.filename),
-                None => u.filename.clone(),
-            };
             Diagnostic::new(
                 u.span,
                 Severity::Error,
                 "E061",
-                format!(
-                    "Cannot resolve @#include target '{target}'. Searched the directory of the including file and the workspace search paths. Fix: correct the path, add the missing file, or add its containing directory to the language server's search paths."
-                ),
+                {
+                    let mut msg = format!(
+                        "Could not open {}. The following directories were searched",
+                        u.filename
+                    );
+                    if !u.searched.is_empty() {
+                        msg.push(':');
+                        for dir in &u.searched {
+                            msg.push_str("\n   * ");
+                            msg.push_str(dir);
+                        }
+                    }
+                    msg
+                },
             )
         })
         .collect()
@@ -211,17 +216,13 @@ pub fn check_e063(model: &Model) -> Vec<Diagnostic> {
             continue;
         }
         let message = if is_simple_ident(expr) {
-            format!(
-                "Undefined macro interpolation '@{{{expr}}}'. Fix: define '{expr}' with @#define before this line, or remove the macro interpolation."
-            )
+            format!("Unknown variable {expr}")
         } else {
             if has_includes {
                 continue;
             }
             let unknown_joined = unknown.join(", ");
-            format!(
-                "Undefined macro name(s) in interpolation '@{{{expr}}}': {unknown_joined}. Fix: define them with @#define before this line, or remove the macro interpolation."
-            )
+            format!("Unknown variable {unknown_joined}")
         };
         diagnostics.push(Diagnostic::new(
             interp.span,
@@ -242,9 +243,9 @@ pub fn check_e064(model: &Model) -> Vec<Diagnostic> {
             let raw = directive.argument.as_deref().unwrap_or("");
             let message = strip_error_arg(raw);
             let text = if message.is_empty() {
-                "Macro @#error triggered.".to_string()
+                "Macro-processing error".to_string()
             } else {
-                format!("Macro @#error triggered: {message}.")
+                format!("Macro-processing error: {message}")
             };
             diagnostics.push(Diagnostic::new(
                 directive.span,
@@ -290,7 +291,7 @@ pub fn check_e065(model: &Model) -> Vec<Diagnostic> {
                 Severity::Error,
                 "E065",
                 format!(
-                    "Invalid steady_state() operand: exogenous variable(s) {joined} cannot be used inside steady_state()."
+                    "Exogenous variables are not allowed in the context of the STEADY_STATE() operator: {joined}."
                 ),
             ));
         }

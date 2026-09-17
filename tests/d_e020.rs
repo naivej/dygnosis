@@ -199,7 +199,7 @@ fn e024_timed_det_exo_tau() {
     assert!(
         got[0]
             .message
-            .contains("Deterministic exogenous variable 'tau' cannot be used with a lead or lag."),
+            .contains("Exogenous deterministic variable tau cannot be given a lead or a lag"),
         "e024 message, got {}",
         got[0].message
     );
@@ -216,7 +216,7 @@ fn e025_use_before_def() {
     assert!(
         got[0]
             .message
-            .contains("Model-local variable 'foo' is used before its # definition."),
+            .contains("foo has wrong type or was already used on the right-hand side"),
         "e025 use-before message, got {}",
         got[0].message
     );
@@ -233,7 +233,7 @@ fn e025_shadow_declared_y() {
     assert!(
         got[0]
             .message
-            .contains("Model-local variable 'y' shadows a declared Dynare symbol."),
+            .contains("y has wrong type or was already used on the right-hand side"),
         "e025 shadow message, got {}",
         got[0].message
     );

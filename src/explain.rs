@@ -43,7 +43,7 @@ pub struct ExplainEntry {
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
-        body: "The Dynare parser could not interpret the source. The diagnostic range points at the offending token or the nearest recoverable position.\n\n**Common causes**\n\n- Missing semicolon at the end of a declaration or equation\n- Unbalanced parentheses, braces, or block keywords\n- Malformed time subscript such as `y(1)` where `y(+1)` was meant\n- A reserved keyword used as an identifier\n\n**Fix**\n\nInspect the line cited and the line immediately preceding it. Dynare's preprocessor frequently flags the *next* line after a missing semicolon.",
+        body: "The Dynare parser could not interpret the source. The diagnostic range points at the offending token or the nearest recoverable position. They refuse with a generic bison `ERROR` at a location.\n\n**Warrant**\n\nThe editor names the missing construct and points at a usable range; their bison location is often the next token.\n\n**Common causes**\n\n- Missing semicolon at the end of a declaration or equation\n- Unbalanced parentheses, braces, or block keywords\n- Malformed time subscript such as `y(1)` where `y(+1)` was meant\n- A reserved keyword used as an identifier\n\n**Fix**\n\nInspect the line cited and the line immediately preceding it. Dynare's preprocessor frequently flags the *next* line after a missing semicolon.",
         kind: ExplainKind::Emit,
     }),
     ("W013", ExplainEntry {
@@ -53,12 +53,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E020", ExplainEntry {
         title: "Undeclared identifier in model block",
-        body: "An identifier appears in the `model` block but is not declared as a `var`, `varexo`, or `parameters` symbol. The diagnostic names the exact identifier and the equation it appears in.\n\n**Fix**\n\n- Add the identifier to the appropriate declaration block\n- Correct a typo (the LSP suggests close matches when available)\n- If the symbol is a local helper, define it in the parameter   section before use",
+        body: "An identifier appears in the `model` block but is not declared as a `var`, `varexo`, or `parameters` symbol. They refuse: `Unknown symbol: alpph`.\n\n**Warrant**\n\nThe editor sentence names the undeclared identifier in the equation and may include a Did-you-mean suggestion; their string is the generic `Unknown symbol`.\n\n**Fix**\n\n- Add the identifier to the appropriate declaration block\n- Correct a typo (the LSP suggests close matches when available)\n- If the symbol is a local helper, define it in the parameter   section before use",
         kind: ExplainKind::Emit,
     }),
     ("E023", ExplainEntry {
         title: "Predetermined variable not declared endogenous",
-        body: "A name listed in `predetermined_variables` must also be declared as an endogenous variable in the `var` block. Dynare requires the variable to exist before it can be marked predetermined.\n\n**Fix**\n\n- Add the variable to the `var` declaration, or\n- Remove it from `predetermined_variables` if it is not actually   endogenous",
+        body: "A name listed in `predetermined_variables` must also be declared as an endogenous variable in the `var` block. They refuse: `Unknown symbol: e`.\n\n**Warrant**\n\nThe editor names the `predetermined_variables` role; their parse string is the generic `Unknown symbol`.\n\n**Fix**\n\n- Add the variable to the `var` declaration, or\n- Remove it from `predetermined_variables` if it is not actually   endogenous",
         kind: ExplainKind::Emit,
     }),
     ("E024", ExplainEntry {
@@ -101,34 +101,34 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "A line that looks like a model equation appears outside the `model` ... `end;` block. This is an extra Warning: they accept a stray top-level equation such as `0 = 1` at check.\n\n**Fix**\n\nMove the equation inside the `model` block, or convert it to a parameter assignment if it belongs at the top level.",
         kind: ExplainKind::Added,
     }),
-    ("E060", ExplainEntry {
+    ("W062", ExplainEntry {
         title: "Circular @#include detected",
-        body: "Two or more files reach themselves through the chain of `@#include` directives. Dynare's macro preprocessor expands includes inline, so a cycle would either loop forever or — in the real preprocessor — be rejected with a hard error. The language server reports the cycle as a chain of file names: `a.mod -> b.mod -> a.mod`.\n\n**Common causes**\n\n- A submodel was refactored and now includes its parent\n- Two helper files cross-include each other for shared\n  parameters or steady-state definitions\n- A copy-paste mistake duplicated the include in the wrong\n  direction\n\n**Fix**\n\nBreak the cycle by removing one `@#include` along the chain. If both files genuinely need a shared block, extract that block into a third file and have both parents include it.",
+        body: "Two or more files reach themselves through the chain of `@#include` directives. This is an extra Warning: they have no named include-cycle ERROR (`@#include` re-enters parse). The language server reports the cycle as a chain of file names: `a.mod -> b.mod -> a.mod`.\n\n**Common causes**\n\n- A submodel was refactored and now includes its parent\n- Two helper files cross-include each other for shared\n  parameters or steady-state definitions\n- A copy-paste mistake duplicated the include in the wrong\n  direction\n\n**Fix**\n\nBreak the cycle by removing one `@#include` along the chain. If both files genuinely need a shared block, extract that block into a third file and have both parents include it.",
         kind: ExplainKind::Added,
     }),
     ("E061", ExplainEntry {
-        title: "Cannot resolve @#include target",
-        body: "An `@#include` directive names a file that the language server could not find. It looked in the directory of the including file first, then in each configured workspace search path, and ran out of candidates.\n\n**Common causes**\n\n- A typo in the filename\n- The included file lives in a directory that isn't on the   language server's search paths\n- The file was renamed or moved without updating the   directive\n\n**Fix**\n\nCorrect the filename, add the missing file, or extend the search paths so the directory containing the include is visible to the LSP.",
+        title: "Could not open @#include target",
+        body: "An `@#include` directive names a file that could not be opened. They refuse: `Could not open F. The following directories were searched` (then the directories actually searched).\n\n**Common causes**\n\n- A typo in the filename\n- The included file lives in a directory that isn't on the   language server's search paths\n- The file was renamed or moved without updating the   directive\n\n**Fix**\n\nCorrect the filename, add the missing file, or extend the search paths so the directory containing the include is visible.",
         kind: ExplainKind::Emit,
     }),
     ("E062", ExplainEntry {
         title: "Unmatched macro block",
-        body: "A Dynare macro `@#if` block has no matching `@#endif`, or a `@#for` block has no matching `@#endfor`. Dynare's preprocessor expands these directives at build time and will reject unbalanced control flow.\n\n**Common causes**\n\n- A copy-paste deleted the closing directive\n- Mismatched closers — `@#endif` accidentally written for   a `@#for`, or vice versa\n- A nested block missing its inner closer\n\n**Fix**\n\nAdd the missing `@#endif` or `@#endfor` at the appropriate scope, or remove the stray closer. Each `@#if` needs its own `@#endif`; each `@#for` its own `@#endfor`.",
+        body: "A Dynare macro `@#if` block has no matching `@#endif`, or a `@#for` block has no matching `@#endfor`. They refuse with a generic bison syntax `ERROR`.\n\n**Warrant**\n\nThe editor names the unmatched opener or stray closer and points at that directive; their bison location does not.\n\n**Common causes**\n\n- A copy-paste deleted the closing directive\n- Mismatched closers — `@#endif` accidentally written for   a `@#for`, or vice versa\n- A nested block missing its inner closer\n\n**Fix**\n\nAdd the missing `@#endif` or `@#endfor` at the appropriate scope, or remove the stray closer. Each `@#if` needs its own `@#endif`; each `@#for` its own `@#endfor`.",
         kind: ExplainKind::Emit,
     }),
     ("E063", ExplainEntry {
         title: "Undefined macro interpolation",
-        body: "An active line still contains an unresolved `@{NAME}` macro interpolation after the language server applied the simple `@#define` substitutions it can evaluate. Dynare's macro preprocessor cannot produce valid model code unless that macro name is defined in scope.\n\n**Fix**\n\nDefine the macro with `@#define NAME = value` before the line that uses it, correct the macro name, or remove the interpolation.",
+        body: "An active line still contains an unresolved `@{NAME}` macro interpolation. They refuse: `Unknown variable N`.\n\n**Fix**\n\nDefine the macro with `@#define NAME = value` before the line that uses it, correct the macro name, or remove the interpolation.",
         kind: ExplainKind::Emit,
     }),
     ("E064", ExplainEntry {
         title: "Macro error directive",
-        body: "An active Dynare macro `@#error` directive was reached. Dynare's macro preprocessor stops when this directive is active.\n\n**Fix**\n\nRemove the `@#error` directive, or guard it behind a macro condition that is false for this model variant.",
+        body: "An active Dynare macro `@#error` directive was reached. They refuse: `Macro-processing error` plus the user message from the directive.\n\n**Fix**\n\nRemove the `@#error` directive, or guard it behind a macro condition that is false for this model variant.",
         kind: ExplainKind::Emit,
     }),
     ("E065", ExplainEntry {
         title: "Invalid steady_state operand",
-        body: "The `steady_state(...)` operator must refer to model endogenous or parameter expressions, not exogenous shocks. Exogenous variables are not valid operands for this Dynare operator.\n\n**Fix**\n\nRemove the exogenous variable from `steady_state(...)`, replace it with the intended endogenous or parameter expression, or rewrite the equation so the shock enters outside the operator.",
+        body: "The `steady_state(...)` operator must not contain exogenous shocks. They refuse: `Exogenous variables are not allowed in the context of the STEADY_STATE() operator.`\n\n**Fix**\n\nRemove the exogenous variable from `steady_state(...)`, replace it with the intended endogenous or parameter expression, or rewrite the equation so the shock enters outside the operator.",
         kind: ExplainKind::Emit,
     }),
     ("E999", ExplainEntry {
@@ -163,22 +163,22 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E021", ExplainEntry {
         title: "Exogenous variable never referenced in model",
-        body: "A shock declared in `varexo` does not appear in any equation. They refuse: `unused_exo not used in model block`. The `nostrict` option bypasses that check.",
+        body: "A shock declared in `varexo` does not appear in any equation. They refuse: `unused_exo not used in model block. To bypass this error, use the nostrict option. This may lead to crashes or unexpected behavior.`",
         kind: ExplainKind::Emit,
     }),
     ("W022", ExplainEntry {
         title: "Parameter declared but never referenced in model equations",
-        body: "A parameter is declared and assigned but does not appear in any model equation. Often the result of stripping an equation but forgetting to remove the parameter.",
+        body: "A parameter is declared and assigned but does not appear in any model equation. They WARN: `Parameter(s) unused_p not used in the model`.",
         kind: ExplainKind::Emit,
     }),
     ("W042", ExplainEntry {
         title: "Endogenous variable missing from steady_state_model",
-        body: "The `steady_state_model` block does not assign a value for every endogenous variable. Dynare will fall back to the `initval` value (or zero), which usually produces an inconsistent steady state.\n\n**Fix**\n\nAdd the missing assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).",
+        body: "The `steady_state_model` block does not assign a value for every endogenous variable. They WARN: `variable 'c' is not assigned a value`. Dynare will fall back to the `initval` value (or zero).\n\n**Fix**\n\nAdd the missing assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).",
         kind: ExplainKind::Emit,
     }),
     ("E058", ExplainEntry {
         title: "Undeclared variable in initval",
-        body: "An entry in the `initval` block refers to a name that is not declared as a variable. They refuse: `Unknown symbol: undeclared_zzz`.\n\n**Fix**\n\nDeclare the variable, or remove the stray `initval` entry.",
+        body: "An entry in the `initval` block refers to a name that is not declared as a variable. They refuse: `Unknown symbol: undeclared_zzz`.\n\n**Warrant**\n\nThe editor names the undeclared `initval` / `endval` entry; their string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the variable, or remove the stray `initval` entry.",
         kind: ExplainKind::Emit,
     }),
     ("W051", ExplainEntry {
@@ -213,7 +213,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E090", ExplainEntry {
         title: "Observed variable is not a declared endogenous variable",
-        body: "A name listed in ``varobs`` is not a declared endogenous variable. They refuse: `e is not endogenous.`\n\n**Fix**\n\nDeclare the variable in ``var``, or remove it from ``varobs`` if it was a typo or an exogenous/parameter name.",
+        body: "A name listed in ``varobs`` is not a declared endogenous variable. They refuse: `e is not endogenous.`\n\n**Warrant**\n\nThe editor names the ``varobs`` role and, when the name is already declared as something else, says so; their string is only `N is not endogenous.`\n\n**Fix**\n\nDeclare the variable in ``var``, or remove it from ``varobs`` if it was a typo or an exogenous/parameter name.",
         kind: ExplainKind::Emit,
     }),
     ("W091", ExplainEntry {
@@ -228,7 +228,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E093", ExplainEntry {
         title: "estimated_params references an undeclared symbol",
-        body: "An ``estimated_params`` entry names a symbol that is not declared with the expected role: a plain entry must name a parameter, an ``stderr`` entry must name a shock or observed variable, and a ``corr`` entry must name two declared shocks or variables. They refuse: `Unknown symbol: not_a_param`.\n\n**Fix**\n\nDeclare the symbol, or correct the name / entry type.",
+        body: "An ``estimated_params`` entry names a symbol that is not declared with the expected role: a plain entry must name a parameter, an ``stderr`` entry must name a shock or observed variable, and a ``corr`` entry must name two declared shocks or variables. They refuse: `Unknown symbol: not_a_param`.\n\n**Warrant**\n\nThe editor names the ``estimated_params`` role (parameter, stderr, or corr); their string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the symbol, or correct the name / entry type.",
         kind: ExplainKind::Emit,
     }),
     ("W094", ExplainEntry {
@@ -243,12 +243,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E100", ExplainEntry {
         title: "Optimal-policy command requires a planner_objective",
-        body: "``ramsey_model``, ``ramsey_policy``, and ``discretionary_policy`` optimise a planner's loss function. They refuse when ``planner_objective`` is missing: `A planner_objective statement must be used with a ramsey_model… and vice versa.`\n\n**Fix**\n\nAdd a ``planner_objective <expression>;`` statement before the policy command.",
+        body: "``ramsey_model``, ``ramsey_policy``, and ``discretionary_policy`` optimise a planner's loss function. They refuse when ``planner_objective`` is missing: `A planner_objective statement must be used with a ramsey_model, a ramsey_policy, osr, or a discretionary_policy statement and vice versa`.\n\n**Fix**\n\nAdd a ``planner_objective <expression>;`` statement before the policy command.",
         kind: ExplainKind::Emit,
     }),
     ("E101", ExplainEntry {
         title: "Policy instrument is not a declared endogenous variable",
-        body: "An ``instruments=(...)`` entry names a symbol that is not a declared endogenous variable. They refuse: `Unknown symbol: not_endo`.\n\n**Fix**\n\nDeclare the instrument in ``var``, or correct the instrument name.",
+        body: "An ``instruments=(...)`` entry names a symbol that is not a declared endogenous variable. They refuse: `Unknown symbol: not_endo`.\n\n**Warrant**\n\nThe editor names the policy instrument; their string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the instrument in ``var``, or correct the instrument name.",
         kind: ExplainKind::Emit,
     }),
     ("W102", ExplainEntry {
@@ -258,7 +258,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E103", ExplainEntry {
         title: "osr is missing osr_params or optim_weights",
-        body: "Optimal simple rules (``osr``) need an ``osr_params`` statement (the parameters to optimise). They refuse when it is missing: `The osr statement requires the osr_params statement.` They also refuse when neither ``optim_weights`` nor ``planner_objective`` is present: `The osr statement requires either an optim_weights block or a planner_objective.` This check flags a missing ``osr_params`` statement and a missing ``optim_weights`` block.\n\n**Fix**\n\nAdd the missing ``osr_params`` statement and/or ``optim_weights`` block.",
+        body: "Optimal simple rules (``osr``) need an ``osr_params`` statement (the parameters to optimise). They refuse when it is missing: `The osr statement requires the osr_params statement.` They also refuse when neither ``optim_weights`` nor ``planner_objective`` is present: `The osr statement requires either an optim_weights block or a planner_objective.`\n\n**Fix**\n\nAdd the missing ``osr_params`` statement, and either an ``optim_weights`` block or a ``planner_objective``.",
         kind: ExplainKind::Emit,
     }),
     ("W110", ExplainEntry {
@@ -268,7 +268,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E111", ExplainEntry {
         title: "Shock variance or correlation specified more than once",
-        body: "A shock's variance / standard error, or a correlation pair, is specified more than once in the shocks block. They refuse: `shocks: variance or stderr of shock on e declared twice`.\n\n**Fix**\n\nKeep a single specification per shock variance and per correlation pair.",
+        body: "A shock's variance / standard error, or a correlation pair, is specified more than once in the shocks block. They refuse: `shocks: variance or stderr of shock on e declared twice` and `shocks: covariance or correlation shock on variable pair (e, u) declared twice`.\n\n**Fix**\n\nKeep a single specification per shock variance and per correlation pair.",
         kind: ExplainKind::Emit,
     }),
     ("W112", ExplainEntry {
@@ -283,7 +283,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W121", ExplainEntry {
         title: "Parameter used with a lead or lag",
-        body: "A declared parameter appears with a time subscript such as ``beta(+1)`` or ``rho(-1)`` in the model block. Parameters are time-invariant constants, so a lead/lag on one is meaningless and almost always means the symbol should have been declared as a variable, or that the time index is stray.\n\n**Fix**\n\nRemove the time index, or declare the symbol with ``var`` / ``varexo`` if it really is a variable.",
+        body: "A declared parameter appears with a time subscript such as ``beta(+1)`` or ``rho(-1)`` in the model block. They WARN: `The following parameter(s) are used with a lead or a lag: betta`.\n\n**Fix**\n\nRemove the time index, or declare the symbol with ``var`` / ``varexo`` if it really is a variable.",
         kind: ExplainKind::Emit,
     }),
     ("W122", ExplainEntry {
@@ -293,7 +293,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E130", ExplainEntry {
         title: "Variable used before assignment in steady_state_model",
-        body: "The ``steady_state_model`` block is evaluated top to bottom as a sequence of assignments, so every variable on a right-hand side must already have been assigned above. A variable is referenced before its own assignment. They refuse: `variable 'n' is undefined in the declaration of variable 'log_n'`.\n\n**Fix**\n\nReorder the assignments so each variable is computed before it is used.",
+        body: "The ``steady_state_model`` block is evaluated top to bottom as a sequence of assignments, so every variable on a right-hand side must already have been assigned above. They refuse: `variable 'n' is undefined in the declaration of variable 'log_n'`.\n\n**Fix**\n\nReorder the assignments so each variable is computed before it is used.",
         kind: ExplainKind::Emit,
     }),
     ("E170", ExplainEntry {
@@ -368,7 +368,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W131", ExplainEntry {
         title: "Variable silently overwritten in steady_state_model",
-        body: "A variable is assigned more than once in the ``steady_state_model`` block and the later assignment does not use the earlier value, so the first assignment is dead. (An in-place transformation that reuses the value, such as the ``A = log(A)`` log-model idiom, is intentional and is not flagged.)\n\n**Fix**\n\nRemove the redundant assignment, or fold the two into one.",
+        body: "A variable is assigned more than once in the ``steady_state_model`` block and the later assignment does not use the earlier value. They WARN: `in the 'steady_state_model' block, variable 'n' is declared twice`. (An in-place transformation that reuses the value, such as the ``A = log(A)`` log-model idiom, is intentional and is not flagged.)\n\n**Fix**\n\nRemove the redundant assignment, or fold the two into one.",
         kind: ExplainKind::Emit,
     }),
     ("W140", ExplainEntry {
@@ -378,7 +378,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W150", ExplainEntry {
         title: "Deprecated command or option",
-        body: "A deprecated command or option is used; current Dynare warns and may remove it in a future release. Commands: ``simul`` → ``perfect_foresight_setup`` + ``perfect_foresight_solver``; ``ramsey_policy`` → ``ramsey_model`` + ``stoch_simul``. Options: ``aim_solver`` → ``dr = aim``; ``bytecode`` (being removed).\n\n**Fix**\n\nSwitch to the modern command or option form.",
+        body: "A deprecated command or option is used. They WARN: `The 'simul' statement is deprecated. Please use 'perfect_foresight_setup' and 'perfect_foresight_solver' instead.`; `The 'ramsey_policy' statement is deprecated. Please use 'ramsey_model', 'stoch_simul', and 'evaluate_planner_objective' instead.`; `The 'aim_solver' option is deprecated. It has been superseded by the 'dr=aim' option.`; `the 'bytecode' option is deprecated and will be removed in a future release of Dynare.`\n\n**Fix**\n\nSwitch to the modern command or option form.",
         kind: ExplainKind::Emit,
     }),
     ("W160", ExplainEntry {
@@ -388,7 +388,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W170", ExplainEntry {
         title: "Obsolete mcp complementarity tag",
-        body: "A complementarity condition is written with the ``mcp`` tag and no ``⟂`` / ``_|_`` after the equation. They accept and WARN: `Specifying complementarity conditions with the 'mcp' tag is obsolete. Please consider switching to the new syntax using the perpendicular symbol.` An equation that has both forms is an Error (E180), not this Warning.\n\n**Fix**\n\nWrite the condition after ``⟂`` or ``_|_`` instead of ``[mcp=…]``.",
+        body: "A complementarity condition is written with the ``mcp`` tag and no ``⟂`` / ``_|_`` after the equation. They accept and WARN: `Specifying complementarity conditions with the 'mcp' tag is obsolete. Please consider switching to the new syntax using the perpendicular symbol.` An equation that has both forms is an Error (E180), not this Warning.\n\n**Warrant**\n\nThe editor keeps the shorter `Use ⟂ or _|_ after the equation` line instead of their longer `Please consider switching…` sentence.\n\n**Fix**\n\nWrite the condition after ``⟂`` or ``_|_`` instead of ``[mcp=…]``.",
         kind: ExplainKind::Emit,
     }),
     ("E186", ExplainEntry {
