@@ -2572,14 +2572,12 @@ impl Parser<'_> {
     fn record_skipped_block_opener(&mut self) {
         let tok = self.tokens[self.i].clone();
         let lex = self.lexeme(&tok);
-        if lex.eq_ignore_ascii_case("shock_paths") {
-            if self.model.shock_paths_span.is_none() {
-                self.model.shock_paths_span = Some(tok.span);
-            }
-        } else if lex.eq_ignore_ascii_case("perfect_foresight_controlled_paths") {
-            if self.model.perfect_foresight_controlled_paths_span.is_none() {
-                self.model.perfect_foresight_controlled_paths_span = Some(tok.span);
-            }
+        if lex.eq_ignore_ascii_case("shock_paths") && self.model.shock_paths_span.is_none() {
+            self.model.shock_paths_span = Some(tok.span);
+        } else if lex.eq_ignore_ascii_case("perfect_foresight_controlled_paths")
+            && self.model.perfect_foresight_controlled_paths_span.is_none()
+        {
+            self.model.perfect_foresight_controlled_paths_span = Some(tok.span);
         }
     }
 
