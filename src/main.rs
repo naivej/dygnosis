@@ -186,8 +186,10 @@ fn run_explain(code: Option<String>, list: bool) {
         let codes = dygnosis::explain::known_codes();
         println!("Documented diagnostic codes:");
         for c in &codes {
-            let title = dygnosis::explain::explain(c).map(|e| e.title).unwrap_or("");
-            println!("  {c:<6}  {title}");
+            let (kind, title) = dygnosis::explain::explain(c)
+                .map(|e| (e.kind.as_str(), e.title))
+                .unwrap_or(("", ""));
+            println!("  {c:<6}  {kind:<5}  {title}");
         }
         println!(
             "\n{} codes. Run `dygnosis explain <CODE>` for details.",

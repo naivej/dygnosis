@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use dygnosis::explain::known_codes;
+use dygnosis::explain::{explain, known_codes, ExplainKind};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -56,20 +56,46 @@ fn check_inventory() {
         );
     }
 
-    let known: HashSet<&str> = known_codes().into_iter().collect();
     let mut codes_in_rows: HashSet<String> = HashSet::new();
     for row in &inv.rows {
         codes_in_rows.extend(row.codes.iter().cloned());
     }
-    let missing_codes: Vec<&str> = known
-        .iter()
-        .copied()
-        .filter(|c| !codes_in_rows.contains(*c))
-        .collect();
+    let mut missing_emit_added: Vec<&str> = Vec::new();
+    let mut skip_with_rows: Vec<&str> = Vec::new();
+    for code in known_codes() {
+        let kind = explain(code)
+            .unwrap_or_else(|| panic!("{code} in known_codes() without explain"))
+            .kind;
+        let has_row = codes_in_rows.contains(code);
+        match kind {
+            ExplainKind::Skip => {
+                if has_row {
+                    skip_with_rows.push(code);
+                }
+            }
+            ExplainKind::Emit | ExplainKind::Added => {
+                if !has_row {
+                    missing_emit_added.push(code);
+                }
+            }
+        }
+    }
     assert!(
-        missing_codes.is_empty(),
-        "known_codes() with zero inventory rows: {missing_codes:?}"
+        missing_emit_added.is_empty(),
+        "emit/added known_codes() with zero inventory rows: {missing_emit_added:?}"
     );
+    assert!(
+        skip_with_rows.is_empty(),
+        "skip keys must have zero inventory rows: {skip_with_rows:?}"
+    );
+    for code in [
+        "E040", "W040", "W041", "I041", "W071", "I070", "I071", "W080", "W081", "DYNR",
+    ] {
+        assert!(
+            !codes_in_rows.contains(code),
+            "Out code {code} must have no inventory row"
+        );
+    }
 
     let template = inv
         .rows

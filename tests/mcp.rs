@@ -698,12 +698,25 @@ fn explain_e040_is_unknown() {
 #[test]
 fn list_diagnostic_codes_matches_known_codes() {
     let list = dynare_list_diagnostic_codes();
+    assert_eq!(list.len(), 136);
     assert_eq!(list.len(), known_codes().len());
     let codes: Vec<&str> = list.iter().map(|item| item.code.as_str()).collect();
     assert_eq!(codes, known_codes());
     for item in &list {
-        let title = explain(&item.code).map(|e| e.title).unwrap_or("");
-        assert_eq!(item.title, title, "title mismatch for {}", item.code);
+        let entry = explain(&item.code).unwrap_or_else(|| panic!("{}", item.code));
+        assert_eq!(item.title, entry.title, "title mismatch for {}", item.code);
+        assert_eq!(
+            item.kind,
+            entry.kind.as_str(),
+            "kind mismatch for {}",
+            item.code
+        );
+        assert!(
+            matches!(item.kind.as_str(), "emit" | "skip" | "added"),
+            "kind token for {}: {}",
+            item.code,
+            item.kind
+        );
     }
 }
 

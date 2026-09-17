@@ -100,6 +100,7 @@ pub struct McpDiagnostic {
 pub struct DiagnosticCodeItem {
     pub code: String,
     pub title: String,
+    pub kind: String,
 }
 
 /// One hit from `dynare_find_references` without a files map (1-based; no end_line, no file).
@@ -626,15 +627,19 @@ pub fn dynare_explain(code: &str) -> String {
     }
 }
 
-/// Sorted `{code, title}` for `known_codes()` keys.
+/// Sorted `{code, title, kind}` for `known_codes()` keys.
 pub fn dynare_list_diagnostic_codes() -> Vec<DiagnosticCodeItem> {
     explain::known_codes()
         .into_iter()
-        .map(|code| DiagnosticCodeItem {
-            code: code.to_string(),
-            title: explain::explain(code)
-                .map(|e| e.title.to_string())
-                .unwrap_or_default(),
+        .map(|code| {
+            let entry = explain::explain(code);
+            DiagnosticCodeItem {
+                code: code.to_string(),
+                title: entry.map(|e| e.title.to_string()).unwrap_or_default(),
+                kind: entry
+                    .map(|e| e.kind.as_str().to_string())
+                    .unwrap_or_default(),
+            }
         })
         .collect()
 }
