@@ -48,12 +48,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W013", ExplainEntry {
         title: "Equation count does not match endogenous variable count",
-        body: "The number of equations inside the `model` block does not equal the number of endogenous variables declared in the `var` block. This is an extra Warning: they accept a non-square file at check. The LSP catches this within milliseconds of editing, before Dynare is invoked.\n\nWhen ramsey_model, ramsey_policy, or discretionary_policy is present and instruments= lists N unique names, the expected gap is −N, not equality; a square file still warns.\n\n**Fix**\n\n- Add a missing equation, or remove a duplicate one\n- Declare the missing endogenous variable in `var`, or remove an   extra declaration\n- Check whether a commented-out equation was intended to be   active\n- For ramsey_model / ramsey_policy / discretionary_policy with N instruments, the intended gap is −N; do not add equations only to make the file square",
+        body: "The number of equations inside the `model` block does not equal the number of endogenous variables declared in the `var` block.\n\nWhen ramsey_model, ramsey_policy, or discretionary_policy is present and instruments= lists N unique names, the expected gap is −N, not equality; a square file still warns.\n\n**Fix**\n\n- Add a missing equation, or remove a duplicate one\n- Declare the missing endogenous variable in `var`, or remove an   extra declaration\n- Check whether a commented-out equation was intended to be   active\n- For ramsey_model / ramsey_policy / discretionary_policy with N instruments, the intended gap is −N; do not add equations only to make the file square",
         kind: ExplainKind::Added,
     }),
     ("E020", ExplainEntry {
         title: "Undeclared identifier in model block",
-        body: "An identifier appears in the `model` block but is not declared as a `var`, `varexo`, or `parameters` symbol. They refuse: `Unknown symbol: alpph`.\n\n**Warrant**\n\nThe editor sentence names the undeclared identifier in the equation and may include a Did-you-mean suggestion; their string is the generic `Unknown symbol`.\n\n**Fix**\n\n- Add the identifier to the appropriate declaration block\n- Correct a typo (the LSP suggests close matches when available)\n- If the symbol is a local helper, define it in the parameter   section before use",
+        body: "An identifier appears in the `model` block but is not declared as a `var`, `varexo`, or `parameters` symbol. They refuse: `Unknown symbol: alpph`.\n\n**Warrant**\n\nThe editor sentence names the undeclared identifier in the equation and may include a Did-you-mean suggestion; their string is the generic `Unknown symbol`.\n\n**Fix**\n\n- Add the identifier to the appropriate declaration block\n- Correct a typo (a close-match suggestion may appear)\n- If the symbol is a local helper, define it in the parameter   section before use",
         kind: ExplainKind::Emit,
     }),
     ("E023", ExplainEntry {
@@ -83,32 +83,32 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W054", ExplainEntry {
         title: "Duplicate equation",
-        body: "Two equations inside the `model` block are textually identical. The diagnostic cites the line where the duplicate appears and the line where the first occurrence was found. This is an extra Warning: they accept duplicate equations. A duplicate can also show up as our equation-count Warning `W013`.\n\n**Fix**\n\nRemove the duplicate.",
+        body: "Two equations inside the `model` block are textually identical. The diagnostic cites the line where the duplicate appears and the line where the first occurrence was found. A duplicate can also show up as the equation-count Warning `W013`.\n\n**Fix**\n\nRemove the duplicate.",
         kind: ExplainKind::Added,
     }),
     ("W055", ExplainEntry {
         title: "Contradictory equation (always false)",
-        body: "An equation reduces to a tautological falsehood, for example `0 = 1`. The LSP detects this by symbolic simplification of constant-only equations. This is an extra Warning: they accept `0 = 1` at check.\n\n**Fix**\n\nRemove the equation, or restore a variable reference that was accidentally simplified away.",
+        body: "An equation reduces to a tautological falsehood, for example `0 = 1`.\n\n**Fix**\n\nRemove the equation, or restore a variable reference that was accidentally simplified away.",
         kind: ExplainKind::Added,
     }),
     ("W056", ExplainEntry {
         title: "Duplicate parameter assignment",
-        body: "The same parameter is assigned a value more than once in the parameter section. This is an extra Warning: they accept; the last assignment wins.\n\n**Fix**\n\nRemove one of the assignments, or rename if two distinct parameters were intended.",
+        body: "The same parameter is assigned a value more than once in the parameter section. The last assignment wins.\n\n**Fix**\n\nRemove one of the assignments, or rename if two distinct parameters were intended.",
         kind: ExplainKind::Added,
     }),
     ("W057", ExplainEntry {
         title: "Stray equation outside model block",
-        body: "A line that looks like a model equation appears outside the `model` ... `end;` block. This is an extra Warning: they accept a stray top-level equation such as `0 = 1` at check.\n\n**Fix**\n\nMove the equation inside the `model` block, or convert it to a parameter assignment if it belongs at the top level.",
+        body: "A line that looks like a model equation appears outside the `model` ... `end;` block.\n\n**Fix**\n\nMove the equation inside the `model` block, or convert it to a parameter assignment if it belongs at the top level.",
         kind: ExplainKind::Added,
     }),
     ("W062", ExplainEntry {
         title: "Circular @#include detected",
-        body: "Two or more files reach themselves through the chain of `@#include` directives. This is an extra Warning: they have no named include-cycle ERROR (`@#include` re-enters parse). The language server reports the cycle as a chain of file names: `a.mod -> b.mod -> a.mod`.\n\n**Common causes**\n\n- A submodel was refactored and now includes its parent\n- Two helper files cross-include each other for shared\n  parameters or steady-state definitions\n- A copy-paste mistake duplicated the include in the wrong\n  direction\n\n**Fix**\n\nBreak the cycle by removing one `@#include` along the chain. If both files genuinely need a shared block, extract that block into a third file and have both parents include it.",
+        body: "Two or more files include each other in a loop. The message names the chain, for example `a.mod -> b.mod -> a.mod`.\n\n**Common causes**\n\n- A submodel was refactored and now includes its parent\n- Two helper files cross-include each other for shared\n  parameters or steady-state definitions\n- A copy-paste mistake duplicated the include in the wrong\n  direction\n\n**Fix**\n\nBreak the cycle by removing one `@#include` along the chain. If both files genuinely need a shared block, extract that block into a third file and have both parents include it.",
         kind: ExplainKind::Added,
     }),
     ("E061", ExplainEntry {
         title: "Could not open @#include target",
-        body: "An `@#include` directive names a file that could not be opened. They refuse: `Could not open F. The following directories were searched` (then the directories actually searched).\n\n**Common causes**\n\n- A typo in the filename\n- The included file lives in a directory that isn't on the   language server's search paths\n- The file was renamed or moved without updating the   directive\n\n**Fix**\n\nCorrect the filename, add the missing file, or extend the search paths so the directory containing the include is visible.",
+        body: "An `@#include` directive names a file that could not be opened. They refuse: `Could not open F. The following directories were searched` (then the directories actually searched).\n\n**Common causes**\n\n- A typo in the filename\n- The included file lives in a directory that isn't on the search paths\n- The file was renamed or moved without updating the   directive\n\n**Fix**\n\nCorrect the filename, add the missing file, or extend the search paths so the directory containing the include is visible.",
         kind: ExplainKind::Emit,
     }),
     ("E062", ExplainEntry {
@@ -133,7 +133,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E999", ExplainEntry {
         title: "Additional errors truncated",
-        body: "More diagnostics were produced than the server displays at once. Fix the visible errors first; the next analysis pass will surface anything that was previously hidden.",
+        body: "More diagnostics were produced than are shown at once. Fix the visible errors first; the next analysis pass will surface anything that was previously hidden.",
         kind: ExplainKind::Added,
     }),
     ("I050", ExplainEntry {
@@ -203,12 +203,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W061", ExplainEntry {
         title: "Ambiguous include parent context",
-        body: "The active include file is reachable from more than one parent model, so the language server cannot safely infer which parent declarations and block context should apply.\n\n**Fix**\n\nOpen or run the intended parent `.mod` file, or provide only that parent and its include closure when calling workspace tools.",
+        body: "The active include file is reachable from more than one parent model, so the editor cannot tell which parent's declarations apply.\n\n**Fix**\n\nOpen the intended parent `.mod` file.",
         kind: ExplainKind::Added,
     }),
     ("W070", ExplainEntry {
         title: "Parameter outside its conventional range",
-        body: "A parameter assignment falls outside the theoretically admissible range for its standard interpretation. The conventional-range table is opinionated but conservative: it flags values that violate the *theoretical* admissible range under the parameter's conventional meaning, not values that simply look unusual.\n\n**Common causes**\n\n- Unit error: e.g. `beta = 99` when 0.99 was meant\n- Sign error on a quantity that must be non-negative   (variance, standard deviation, depreciation rate)\n- Gross-vs-net confusion on a rate parameter\n\n**Fix**\n\nCorrect the value, or — if the calibration is intentional — ignore the warning. This is a soft check, not a structural error: Dynare will accept any numeric value.",
+        body: "A parameter assignment falls outside the theoretically admissible range for its standard interpretation. The conventional-range table is opinionated but conservative: it flags values that violate the *theoretical* admissible range under the parameter's conventional meaning, not values that simply look unusual.\n\n**Common causes**\n\n- Unit error: e.g. `beta = 99` when 0.99 was meant\n- Sign error on a quantity that must be non-negative   (variance, standard deviation, depreciation rate)\n- Gross-vs-net confusion on a rate parameter\n\n**Fix**\n\nCorrect the value, or — if the calibration is intentional — ignore the warning.",
         kind: ExplainKind::Added,
     }),
     ("E090", ExplainEntry {
@@ -233,7 +233,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W094", ExplainEntry {
         title: "estimated_params bound or initial-value inconsistency",
-        body: "An ``estimated_params`` entry has a lower bound that is not below its upper bound, or an initial value that lies outside the ``[lower, upper]`` interval. This is an extra Warning: they accept inconsistent bounds at check.\n\n**Fix**\n\nOrder the bounds so that lower < upper and place the initial value inside them.",
+        body: "An ``estimated_params`` entry has a lower bound that is not below its upper bound, or an initial value that lies outside the ``[lower, upper]`` interval.\n\n**Fix**\n\nOrder the bounds so that lower < upper and place the initial value inside them.",
         kind: ExplainKind::Added,
     }),
     ("E095", ExplainEntry {
@@ -273,12 +273,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W112", ExplainEntry {
         title: "Negative shock variance",
-        body: "A shocks-block ``var e = ...`` entry sets a variance that folds to a negative constant. A variance is a squared quantity and should be non-negative. This is an extra Warning: they accept a negative ``var e`` at check.\n\n(The ``stderr`` form is not flagged: Dynare squares the standard error, so a negative ``stderr`` still yields a valid variance.)\n\n**Fix**\n\nUse a non-negative value. Recall the ``var`` form sets the variance, i.e. the standard error *squared* (e.g. ``var e = 0.01^2;``).",
+        body: "A shocks-block ``var e = ...`` entry sets a variance that folds to a negative constant. A variance is a squared quantity and should be non-negative.\n\n(The ``stderr`` form is not flagged: a negative standard error is squared, so the variance is still positive.)\n\n**Fix**\n\nUse a non-negative value. Recall the ``var`` form sets the variance, i.e. the standard error *squared* (e.g. ``var e = 0.01^2;``).",
         kind: ExplainKind::Added,
     }),
     ("W120", ExplainEntry {
         title: "Stochastic command with no stochastic exogenous variable",
-        body: "``stoch_simul`` / ``estimation`` drive the model with stochastic shocks, but the model declares no stochastic ``varexo``. ``varexo_det`` declarations are deterministic and do not count as stochastic shocks. This is an extra Warning: they accept ``stoch_simul`` / ``estimation`` with no stochastic ``varexo`` at check.\n\n**Fix**\n\nDeclare at least one stochastic exogenous variable (a dummy ``varexo`` plus a shocks-block entry is enough if the model is otherwise deterministic).",
+        body: "``stoch_simul`` / ``estimation`` drive the model with stochastic shocks, but the model declares no stochastic ``varexo``. ``varexo_det`` declarations are deterministic and do not count as stochastic shocks.\n\n**Fix**\n\nDeclare at least one stochastic exogenous variable (a dummy ``varexo`` plus a shocks-block entry is enough if the model is otherwise deterministic).",
         kind: ExplainKind::Added,
     }),
     ("W121", ExplainEntry {
@@ -288,7 +288,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W122", ExplainEntry {
         title: "Deep parameter assigned a non-finite value",
-        body: "A parameter that is used in the model equations is assigned a non-finite value (``NaN`` or ``Inf``) while a run command (``steady``, ``stoch_simul``, ``perfect_foresight_*``, ``estimation``, ...) is present. This is an extra Warning: they accept ``Inf`` / ``NaN`` at check.\n\n**Fix**\n\nAssign a finite numeric value before the run command.",
+        body: "A parameter that is used in the model equations is assigned a non-finite value (``NaN`` or ``Inf``) while a run command (``steady``, ``stoch_simul``, ``perfect_foresight_*``, ``estimation``, ...) is present.\n\n**Fix**\n\nAssign a finite numeric value before the run command.",
         kind: ExplainKind::Added,
     }),
     ("E130", ExplainEntry {
@@ -373,7 +373,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W140", ExplainEntry {
         title: "Nonlinear operator in a linear model",
-        body: "The model is declared ``linear`` (``model(linear);``) but an equation applies a nonlinear operator to a variable. Examples include variable-dependent functions (such as ``log(y)`` or ``abs(e)``), products or ratios involving multiple variables (``c*k`` or ``a/y``), powers involving variables (``k^2``), and comparisons. This is an extra Warning: they accept a nonlinear operator in ``model(linear)`` at check.\n\n**Fix**\n\nRemove the ``linear`` option, or rewrite the equation without the nonlinear operator.",
+        body: "The model is declared ``linear`` (``model(linear);``) but an equation applies a nonlinear operator to a variable. Examples include variable-dependent functions (such as ``log(y)`` or ``abs(e)``), products or ratios involving multiple variables (``c*k`` or ``a/y``), powers involving variables (``k^2``), and comparisons.\n\n**Fix**\n\nRemove the ``linear`` option, or rewrite the equation without the nonlinear operator.",
         kind: ExplainKind::Added,
     }),
     ("W150", ExplainEntry {
@@ -383,7 +383,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W160", ExplainEntry {
         title: "Named companion file was not found",
-        body: "A catalog option or quoted path names a companion file that this tool could not resolve next to the `.mod` or on the search paths. This is an extra Warning: they accept a missing named file at check. Missing convention files (`FILENAME_steadystate.m`, `FILENAME_prior_restrictions.m`, `run_FILENAME.m`) and a missing identifier helper are not this code.\n\n**Fix**\n\nAdd the file next to this `.mod`, correct the path, or add its directory to the search paths.",
+        body: "A named option or quoted path points at a companion file that was not found next to the `.mod` or on the search paths. Missing convention files (`FILENAME_steadystate.m`, `FILENAME_prior_restrictions.m`, `run_FILENAME.m`) and a missing identifier helper are not this warning.\n\n**Fix**\n\nAdd the file next to this `.mod`, correct the path, or add its directory to the search paths.",
         kind: ExplainKind::Added,
     }),
     ("W170", ExplainEntry {
