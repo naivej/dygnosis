@@ -200,8 +200,10 @@ pub struct Model {
     pub policy_commands: Vec<PolicyCommand>,
     /// Identifier span of the first policy command (not the `(options)`).
     pub policy_command_span: Option<Span>,
-    /// Whole `planner_objective …;` statement if present.
+    /// Whole `planner_objective …;` statement if present (first).
     pub planner_objective_span: Option<Span>,
+    /// Every `planner_objective …;` statement, file order.
+    pub planner_objective_spans: Vec<Span>,
     /// Unique, first-seen, from `instruments=(…)` on any policy command.
     pub instruments: Vec<Name>,
     /// First `planner_discount` option that folds; later options do not overwrite.
@@ -235,6 +237,24 @@ pub struct Model {
     pub occbin_constraints_blocks: Vec<Span>,
     /// Sticky: true if any `shocks(…surprise…)` opener was seen.
     pub shocks_surprise: bool,
+    /// First `surprise` option identifier on `shocks(…)`.
+    pub shocks_surprise_span: Option<Span>,
+    /// First `shock_paths` opener.
+    pub shock_paths_span: Option<Span>,
+    /// First `perfect_foresight_controlled_paths` opener.
+    pub perfect_foresight_controlled_paths_span: Option<Span>,
+    /// First `identification` command identifier.
+    pub identification_span: Option<Span>,
+    /// First `perfect_foresight_solver` identifier.
+    pub perfect_foresight_solver_span: Option<Span>,
+    /// First `perfect_foresight_with_expectation_errors_solver` identifier.
+    pub pfee_solver_span: Option<Span>,
+    /// First `extended_path` identifier.
+    pub extended_path_span: Option<Span>,
+    /// First `method_of_moments` identifier.
+    pub method_of_moments_span: Option<Span>,
+    /// First `sensitivity` command identifier.
+    pub sensitivity_span: Option<Span>,
 }
 
 /// A literal `@#include` filename plus the directive's byte span.

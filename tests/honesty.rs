@@ -2,9 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use dygnosis::preprocessor::find_preprocessor;
-use dygnosis::{
-    analyze, check_file, parse, run_preprocessor, Diagnostic, JsonStage, Severity,
-};
+use dygnosis::{analyze, check_file, parse, run_preprocessor, Diagnostic, JsonStage, Severity};
 
 const ACCEPT_ARCHIVES: &[&str] = &[
     "trend_rbc_gov_inv",
@@ -28,6 +26,7 @@ struct HonestyRow {
     kind: HonestyKind,
     their_needle: &'static str,
     our_needle: &'static str,
+    stage: JsonStage,
 }
 
 const HONESTY_FIRE: &[HonestyRow] = &[
@@ -39,6 +38,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "syntax error",
         our_needle: "end",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E020",
@@ -48,6 +48,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Unknown symbol",
         our_needle: "Undeclared identifier",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E021",
@@ -57,6 +58,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "not used in model block",
         our_needle: "not used in model block",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E023",
@@ -66,6 +68,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Unknown symbol",
         our_needle: "Predetermined variable",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E024",
@@ -75,6 +78,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "cannot be given a lead or a lag",
         our_needle: "cannot be given a lead or a lag",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E025",
@@ -84,6 +88,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "has wrong type or was already used",
         our_needle: "has wrong type or was already used",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E030",
@@ -93,6 +98,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "declared twice with different types",
         our_needle: "declared twice with different types",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E058",
@@ -102,6 +108,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Unknown symbol",
         our_needle: "is not declared",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E059",
@@ -111,6 +118,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "neither endogenous or exogenous",
         our_needle: "neither endogenous or exogenous",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E061",
@@ -120,6 +128,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Could not open",
         our_needle: "Could not open",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E062",
@@ -129,6 +138,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "syntax error",
         our_needle: "Unterminated",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E063",
@@ -138,6 +148,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Unknown variable",
         our_needle: "Unknown variable",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E064",
@@ -147,6 +158,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Macro-processing error",
         our_needle: "Macro-processing error",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E065",
@@ -156,6 +168,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "STEADY_STATE",
         our_needle: "STEADY_STATE",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E090",
@@ -165,6 +178,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "is not endogenous",
         our_needle: "is not a declared endogenous",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E093",
@@ -174,6 +188,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Unknown symbol",
         our_needle: "estimated_params",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E095",
@@ -183,6 +198,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "is not an observed variable",
         our_needle: "is not an observed variable",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E100",
@@ -192,6 +208,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "planner_objective statement must be used",
         our_needle: "planner_objective statement must be used",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E101",
@@ -201,6 +218,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Unknown symbol",
         our_needle: "Policy instrument",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E103",
@@ -210,6 +228,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "The osr statement requires",
         our_needle: "The osr statement requires",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E111",
@@ -219,6 +238,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "variance or stderr of shock",
         our_needle: "variance or stderr of shock",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E130",
@@ -228,6 +248,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "is undefined in the declaration",
         our_needle: "is undefined in the declaration",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E170",
@@ -237,6 +258,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Multiple 'occbin_constraints' blocks are not allowed",
         our_needle: "Multiple 'occbin_constraints' blocks are not allowed",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E171",
@@ -246,6 +268,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "only up to two constraints are supported",
         our_needle: "only up to two constraints are supported",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E172",
@@ -255,6 +278,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "is not defined",
         our_needle: "is not defined",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E173",
@@ -264,6 +288,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "must have a 'name' tag",
         our_needle: "must have a 'name' tag",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E174",
@@ -273,6 +298,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "The 'bind' expression is missing",
         our_needle: "The 'bind' expression is missing",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E175",
@@ -282,6 +308,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "No equation has been declared for constraint",
         our_needle: "No equation has been declared for constraint",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E176",
@@ -291,6 +318,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "is both in the 'bind' and 'relax' tags",
         our_needle: "is both in the 'bind' and 'relax' tags",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E177",
@@ -300,6 +328,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "has already been declared for this equation",
         our_needle: "has already been declared for this equation",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E180",
@@ -309,6 +338,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Can't have both an 'mcp' tag",
         our_needle: "Can't have both an 'mcp' tag",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E181",
@@ -318,6 +348,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "must be an inequality constraint",
         our_needle: "must be an inequality constraint",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E182",
@@ -327,6 +358,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Leads and lags on variables are forbidden",
         our_needle: "Leads and lags on variables are forbidden",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E183",
@@ -336,6 +368,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Complementarity condition has an incorrect form",
         our_needle: "Complementarity condition has an incorrect form",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E184",
@@ -345,6 +378,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "clause is declared multiple times",
         our_needle: "clause is declared multiple times",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "E185",
@@ -354,6 +388,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "unauthorized characters",
         our_needle: "unauthorized characters",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "W022",
@@ -361,6 +396,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         kind: HonestyKind::Warning,
         their_needle: "not used in the model",
         our_needle: "not used in the model",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "W031",
@@ -368,6 +404,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         kind: HonestyKind::Warning,
         their_needle: "Symbol y declared twice",
         our_needle: "Symbol y declared twice",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "W042",
@@ -375,6 +412,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         kind: HonestyKind::Warning,
         their_needle: "is not assigned a value",
         our_needle: "is not assigned a value",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "W121",
@@ -382,6 +420,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         kind: HonestyKind::Warning,
         their_needle: "used with a lead or a lag",
         our_needle: "used with a lead or a lag",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "W131",
@@ -389,6 +428,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         kind: HonestyKind::Warning,
         their_needle: "is declared twice",
         our_needle: "is declared twice",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "W150",
@@ -396,6 +436,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         kind: HonestyKind::Warning,
         their_needle: "deprecated",
         our_needle: "deprecated",
+        stage: JsonStage::Check,
     },
     HonestyRow {
         code: "W170",
@@ -403,6 +444,113 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         kind: HonestyKind::Warning,
         their_needle: "obsolete",
         our_needle: "obsolete",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E178",
+        fixture: "occbin/e178_surprise.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the 'shocks(surprise)' block can only be used in conjunction with the 'occbin_constraints' block.",
+        our_needle: "the 'shocks(surprise)' block can only be used in conjunction with the 'occbin_constraints' block.",
+        stage: JsonStage::Transform,
+    },
+    HonestyRow {
+        code: "E179",
+        fixture: "clash/e179_identification.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the 'occbin_constraints' block is not compatible with commands other than 'estimation', 'stoch_simul', and 'calib_smoother'.",
+        our_needle: "the 'occbin_constraints' block is not compatible with commands other than 'estimation', 'stoch_simul', and 'calib_smoother'.",
+        stage: JsonStage::Transform,
+    },
+    HonestyRow {
+        code: "E104",
+        fixture: "clash/e104_two_planner.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "there can only be one planner_objective statement",
+        our_needle: "there can only be one planner_objective statement",
+        stage: JsonStage::Transform,
+    },
+    HonestyRow {
+        code: "E026",
+        fixture: "clash/e026_varexo_det_simul.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "A .mod file cannot contain both one of {perfect_foresight_solver, simul, perfect_foresight_with_expectation_errors_solver} and varexo_det declaration (all exogenous variables are deterministic in this case)",
+        our_needle: "A .mod file cannot contain both one of {perfect_foresight_solver, simul, perfect_foresight_with_expectation_errors_solver} and varexo_det declaration (all exogenous variables are deterministic in this case)",
+        stage: JsonStage::Transform,
+    },
+    HonestyRow {
+        code: "E027",
+        fixture: "clash/e027_ramsey_varexo_det.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "ramsey_model and ramsey_policy are incompatible with deterministic exogenous variables",
+        our_needle: "ramsey_model and ramsey_policy are incompatible with deterministic exogenous variables",
+        stage: JsonStage::Transform,
+    },
+    HonestyRow {
+        code: "E028",
+        fixture: "clash/e028_identification_varexo_det.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "identification is incompatible with deterministic exogenous variables",
+        our_needle: "identification is incompatible with deterministic exogenous variables",
+        stage: JsonStage::Transform,
+    },
+    HonestyRow {
+        code: "E113",
+        fixture: "clash/e113_shock_paths_shocks.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the 'shock_paths' block cannot be used in conjunction with either 'shocks', 'mshocks', 'endval' or 'perfect_foresight_controlled_paths' blocks.",
+        our_needle: "the 'shock_paths' block cannot be used in conjunction with either 'shocks', 'mshocks', 'endval' or 'perfect_foresight_controlled_paths' blocks.",
+        stage: JsonStage::Transform,
+    },
+];
+
+struct ClashQuiet {
+    code: &'static str,
+    fixture: &'static str,
+}
+
+const HONESTY_CLASH_QUIET: &[ClashQuiet] = &[
+    ClashQuiet {
+        code: "E178",
+        fixture: "occbin/square.mod",
+    },
+    ClashQuiet {
+        code: "E179",
+        fixture: "occbin/square.mod",
+    },
+    ClashQuiet {
+        code: "E104",
+        fixture: "clash/e104_two_planner_osr_quiet.mod",
+    },
+    ClashQuiet {
+        code: "E026",
+        fixture: "clash/e026_varexo_det_alone_quiet.mod",
+    },
+    ClashQuiet {
+        code: "E027",
+        fixture: "w100/w100_ok.mod",
+    },
+    ClashQuiet {
+        code: "E028",
+        fixture: "clash/e028_identification_alone_quiet.mod",
+    },
+    ClashQuiet {
+        code: "E113",
+        fixture: "clash/e113_shock_paths_alone_quiet.mod",
     },
 ];
 
@@ -444,6 +592,7 @@ fn spawn(
     text: &str,
     path: &Path,
     pp: &Path,
+    stage: JsonStage,
 ) -> dygnosis::preprocessor::PreprocessorResult {
     let source_dir = path.parent().map(Path::to_path_buf);
     run_preprocessor(
@@ -451,14 +600,17 @@ fn spawn(
         pp,
         source_dir.as_deref(),
         Duration::from_secs(30),
-        JsonStage::Check,
+        stage,
     )
 }
 
 fn they_mention(result: &dygnosis::preprocessor::PreprocessorResult, needle: &str) -> bool {
     result.raw_stderr.contains(needle)
         || result.raw_stdout.contains(needle)
-        || result.diagnostics.iter().any(|d| d.message.contains(needle))
+        || result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains(needle))
 }
 
 fn assert_no_p_digits(diags: &[Diagnostic], label: &str) {
@@ -498,7 +650,7 @@ fn accepted_archives_emit_no_error() {
         let text = read_mod(name);
         let path = copilot_mod(name);
         let path_str = path.to_str().expect("utf-8 path");
-        let result = spawn(&text, &path, &pp);
+        let result = spawn(&text, &path, &pp, JsonStage::Check);
         assert!(
             result.success,
             "{name} should be accepted: {:?}",
@@ -534,7 +686,7 @@ fn equation_count_is_warning_they_accept() {
     let path = fixture("e010/e010_extra.mod");
     let path_str = path.to_str().expect("utf-8 path");
     let text = read_path(&path);
-    let result = spawn(&text, &path, &pp);
+    let result = spawn(&text, &path, &pp, JsonStage::Check);
     assert!(
         result.success,
         "e010_extra.mod should be accepted: {:?}",
@@ -558,7 +710,7 @@ fn same_ground_warning_absent_on_quiet_archive() {
     let text = read_mod("trend_rbc_gov_inv");
     let path = copilot_mod("trend_rbc_gov_inv");
     let path_str = path.to_str().expect("utf-8 path");
-    let result = spawn(&text, &path, &pp);
+    let result = spawn(&text, &path, &pp, JsonStage::Check);
     assert!(
         result.success,
         "trend_rbc_gov_inv should be accepted: {:?}",
@@ -585,22 +737,29 @@ fn honesty_fire_table() {
         let path = honesty_mod_path(row.fixture);
         let path_str = path.to_str().expect("utf-8 path");
         let text = read_path(&path);
-        let result = spawn(&text, &path, &pp);
+        let result = spawn(&text, &path, &pp, row.stage);
         let own_file = check_file(&text, path_str);
         let own_codes: Vec<&str> = own_file.iter().map(|d| d.code.as_str()).collect();
         if own_file.iter().any(|d| {
             let rest = d.code.strip_prefix('P').unwrap_or("");
             !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
         }) {
-            failures.push(format!("{} check_file has P-digit code: {own_codes:?}", row.fixture));
+            failures.push(format!(
+                "{} check_file has P-digit code: {own_codes:?}",
+                row.fixture
+            ));
         }
         let has_own = |diags: &[Diagnostic]| diags.iter().any(|d| d.code == row.code);
         match row.kind {
             HonestyKind::Error { workspace_only } => {
                 if result.success {
                     failures.push(format!(
-                        "{} should be refused at json=check: stdout {:?} stderr {:?} diags {:?}",
-                        row.fixture, result.raw_stdout, result.raw_stderr, result.diagnostics
+                        "{} should be refused at {:?}: stdout {:?} stderr {:?} diags {:?}",
+                        row.fixture,
+                        row.stage,
+                        result.raw_stdout,
+                        result.raw_stderr,
+                        result.diagnostics
                     ));
                 }
                 if !has_own(&own_file) {
@@ -609,7 +768,10 @@ fn honesty_fire_table() {
                         row.fixture, row.code
                     ));
                 } else {
-                    let ours = own_file.iter().find(|d| d.code == row.code).expect(row.code);
+                    let ours = own_file
+                        .iter()
+                        .find(|d| d.code == row.code)
+                        .expect(row.code);
                     if !ours.message.contains(row.our_needle) {
                         failures.push(format!(
                             "{} own {} missing {:?}: {}",
@@ -624,7 +786,10 @@ fn honesty_fire_table() {
                             "{} analyze() must emit {}, got {:?}",
                             row.fixture,
                             row.code,
-                            own_analyze.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+                            own_analyze
+                                .iter()
+                                .map(|d| d.code.as_str())
+                                .collect::<Vec<_>>()
                         ));
                     }
                 }
@@ -693,7 +858,8 @@ fn extra_cycle_warning_is_library_only() {
     );
     let own = check_file(&text, path_str);
     assert!(
-        own.iter().any(|d| d.code == "W062" && d.severity == Severity::Warning),
+        own.iter()
+            .any(|d| d.code == "W062" && d.severity == Severity::Warning),
         "check_file on cycle a.mod must emit W062 Warning, got {:?}",
         own.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
@@ -709,7 +875,7 @@ fn e103_planner_objective_without_optim_weights_is_quiet() {
     let path = fixture("w100/w103_planner.mod");
     let path_str = path.to_str().expect("utf-8 path");
     let text = read_path(&path);
-    let result = spawn(&text, &path, &pp);
+    let result = spawn(&text, &path, &pp, JsonStage::Check);
     assert!(
         result.success,
         "osr + osr_params + planner_objective should be accepted: stderr {:?} diags {:?}",
@@ -733,15 +899,21 @@ fn occbin_square_is_quiet() {
     let path = fixture("occbin/square.mod");
     let path_str = path.to_str().expect("utf-8 path");
     let text = read_path(&path);
-    let result = spawn(&text, &path, &pp);
+    let result = spawn(&text, &path, &pp, JsonStage::Check);
     assert!(
         result.success,
-        "occbin/square.mod should be accepted: {:?}",
+        "occbin/square.mod should be accepted at check: {:?}",
         result.diagnostics
     );
+    let transformed = spawn(&text, &path, &pp, JsonStage::Transform);
+    assert!(
+        transformed.success,
+        "occbin/square.mod should be accepted at transform: stdout {:?} stderr {:?}",
+        transformed.raw_stdout, transformed.raw_stderr
+    );
     let occbin_errors = [
-        "E170", "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E180", "E181", "E182",
-        "E183", "E184", "E185",
+        "E170", "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E178", "E179", "E180",
+        "E181", "E182", "E183", "E184", "E185",
     ];
     for own in [&analyze(&parse(&text)), &check_file(&text, path_str)] {
         let errors: Vec<_> = own
@@ -754,4 +926,39 @@ fn occbin_square_is_quiet() {
             "square.mod must not emit OccBin Error, got {errors:?}"
         );
     }
+}
+
+#[test]
+fn clash_quiet_at_transform() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    let mut failures: Vec<String> = Vec::new();
+    for row in HONESTY_CLASH_QUIET {
+        let path = fixture(row.fixture);
+        let path_str = path.to_str().expect("utf-8 path");
+        let text = read_path(&path);
+        let result = spawn(&text, &path, &pp, JsonStage::Transform);
+        if !result.success {
+            failures.push(format!(
+                "{} should be accepted at transform for {}: stdout {:?} stderr {:?}",
+                row.fixture, row.code, result.raw_stdout, result.raw_stderr
+            ));
+        }
+        let own = check_file(&text, path_str);
+        if own.iter().any(|d| d.code == row.code) {
+            failures.push(format!(
+                "{} must not emit {}, got {:?}",
+                row.fixture,
+                row.code,
+                own.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "clash quiet transform failed:\n{}",
+        failures.join("\n")
+    );
 }

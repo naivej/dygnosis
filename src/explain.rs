@@ -2,8 +2,8 @@
 //!
 //! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 70
 //! codes shipped through 0.5.0, then kind `emit` / `skip` / `added`.
-//! 136 keys = 43 emit + 27 added + 66 skip. Catalog **0.5.1** Errors
-//! (D-clash / D-check) are not keys yet.
+//! 143 keys = 50 emit + 27 added + 66 skip. Catalog **0.5.1** D-clash Errors
+//! (E026–E028, E104, E113, E178, E179) are emit. D-check is not keys yet.
 //! `I050` and `W042` use the recorded surface rewrites in
 //! `dev_logs/0.1/0.1.0/22-c-explain.md` (do not advertise Compute Steady State).
 
@@ -39,7 +39,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 136 keys: 43 emit + 27 added + 66 skip.
+// 143 keys: 50 emit + 27 added + 66 skip.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -69,6 +69,21 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E025", ExplainEntry {
         title: "Invalid model-local (`#`) variable",
         body: "A model-local variable defined with `#` either reuses a declared `var`, `varexo`, or `parameters` name, or is used in an equation before its `#` definition. They refuse: `… has wrong type or was already used on the right-hand side. You cannot use it on the left-hand side of a pound ('#') expression`.\n\n**Fix**\n\n- Rename the model-local helper so it does not clash with a declared symbol\n- Move the `#` definition above its first use\n- Or remove the declaration if the name was meant to be only a model-local helper",
+        kind: ExplainKind::Emit,
+    }),
+    ("E026", ExplainEntry {
+        title: "varexo_det with a perfect-foresight solver",
+        body: "A ``varexo_det`` declaration cannot appear with ``simul``, ``perfect_foresight_solver``, or ``perfect_foresight_with_expectation_errors_solver``. They refuse: `A .mod file cannot contain both one of {perfect_foresight_solver, simul, perfect_foresight_with_expectation_errors_solver} and varexo_det declaration (all exogenous variables are deterministic in this case)`.\n\n**Fix**\n\nRemove the ``varexo_det`` declaration (use ``varexo``), or drop the perfect-foresight solver.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E027", ExplainEntry {
+        title: "varexo_det with Ramsey",
+        body: "``ramsey_model`` and ``ramsey_policy`` cannot be used with deterministic exogenous variables. They refuse: `ramsey_model and ramsey_policy are incompatible with deterministic exogenous variables`.\n\n**Fix**\n\nRemove the ``varexo_det`` declaration, or drop the Ramsey command.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E028", ExplainEntry {
+        title: "varexo_det with identification",
+        body: "The ``identification`` command cannot be used with deterministic exogenous variables. They refuse: `identification is incompatible with deterministic exogenous variables`.\n\n**Fix**\n\nRemove the ``varexo_det`` declaration, or drop ``identification``.",
         kind: ExplainKind::Emit,
     }),
     ("E030", ExplainEntry {
@@ -261,6 +276,11 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "Optimal simple rules (``osr``) need an ``osr_params`` statement (the parameters to optimise). They refuse when it is missing: `The osr statement requires the osr_params statement.` They also refuse when neither ``optim_weights`` nor ``planner_objective`` is present: `The osr statement requires either an optim_weights block or a planner_objective.`\n\n**Fix**\n\nAdd the missing ``osr_params`` statement, and either an ``optim_weights`` block or a ``planner_objective``.",
         kind: ExplainKind::Emit,
     }),
+    ("E104", ExplainEntry {
+        title: "More than one planner_objective with Ramsey",
+        body: "With ``ramsey_model`` or ``ramsey_policy``, only one ``planner_objective`` statement is allowed. They refuse: `there can only be one planner_objective statement`.\n\n**Fix**\n\nKeep a single ``planner_objective``.",
+        kind: ExplainKind::Emit,
+    }),
     ("W110", ExplainEntry {
         title: "Shock correlation outside [-1, 1]",
         body: "A ``corr`` entry in the shocks block sets a correlation whose magnitude exceeds one. A correlation coefficient must lie in [-1, 1], and the implied covariance matrix would not be positive semidefinite.\n\n**Fix**\n\nSet the correlation to a value in [-1, 1].",
@@ -269,6 +289,11 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E111", ExplainEntry {
         title: "Shock variance or correlation specified more than once",
         body: "A shock's variance / standard error, or a correlation pair, is specified more than once in the shocks block. They refuse: `shocks: variance or stderr of shock on e declared twice` and `shocks: covariance or correlation shock on variable pair (e, u) declared twice`.\n\n**Fix**\n\nKeep a single specification per shock variance and per correlation pair.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E113", ExplainEntry {
+        title: "shock_paths with shocks, mshocks, endval, or controlled paths",
+        body: "A ``shock_paths`` block cannot appear with ``shocks``, ``mshocks``, ``endval``, or ``perfect_foresight_controlled_paths``. They refuse: `the 'shock_paths' block cannot be used in conjunction with either 'shocks', 'mshocks', 'endval' or 'perfect_foresight_controlled_paths' blocks.`.\n\n**Fix**\n\nKeep ``shock_paths`` and drop the other block, or drop ``shock_paths``.",
         kind: ExplainKind::Emit,
     }),
     ("W112", ExplainEntry {
@@ -334,6 +359,16 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E177", ExplainEntry {
         title: "Duplicate OccBin regime",
         body: "Two equations with the same ``name`` tag declare the same bind/relax combination. They refuse: `The regime corresponding to bind='…' has already been declared for this equation`.\n\n**Fix**\n\nRemove the duplicate regime equation.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E178", ExplainEntry {
+        title: "shocks(surprise) without occbin_constraints",
+        body: "A ``shocks(surprise)`` block requires an ``occbin_constraints`` block. They refuse: `the 'shocks(surprise)' block can only be used in conjunction with the 'occbin_constraints' block.`.\n\n**Fix**\n\nAdd ``occbin_constraints``, or drop the ``surprise`` option.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E179", ExplainEntry {
+        title: "occbin_constraints with an incompatible command",
+        body: "An ``occbin_constraints`` block can only be used with ``estimation``, ``stoch_simul``, and ``calib_smoother``. They refuse: `the 'occbin_constraints' block is not compatible with commands other than 'estimation', 'stoch_simul', and 'calib_smoother'.`.\n\n**Fix**\n\nRemove the incompatible command, or drop ``occbin_constraints``.",
         kind: ExplainKind::Emit,
     }),
     ("E180", ExplainEntry {

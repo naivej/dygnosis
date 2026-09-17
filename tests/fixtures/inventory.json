@@ -3938,7 +3938,7 @@
       "kind": "documented-only",
       "package": "other",
       "fixture": "",
-      "source": "explain.rs::known_codes_is_exactly_the_136_rust_keys",
+      "source": "explain.rs::known_codes_is_exactly_the_143_rust_keys",
       "cluster": "",
       "notes": "in known_codes / explain; nothing emits it yet"
     },
@@ -4354,7 +4354,7 @@
       "fixture": "tests/fixtures/occbin/surprise.mod",
       "source": "occbin.rs::surprise_mod_sets_flag",
       "cluster": "occbin/surprise.mod",
-      "notes": "library shocks(surprise) flag; no path reader"
+      "notes": "library shocks(surprise) flag; analyze emits E178; honesty fire is occbin/e178_surprise.mod"
     },
     {
       "id": "e170_two_blocks",
@@ -4547,6 +4547,8 @@
         "E175",
         "E176",
         "E177",
+        "E178",
+        "E179",
         "E180",
         "E181",
         "E182",
@@ -4560,7 +4562,117 @@
       "fixture": "tests/fixtures/occbin/square.mod",
       "source": "d_occbin.rs::square_has_no_occbin_error",
       "cluster": "occbin/square.mod",
-      "notes": "accepted OccBin square: no E170–E185, no W170"
+      "notes": "accepted OccBin square: no E170–E185, no W170, no written-clash Errors"
+    },
+    {
+      "id": "e026_varexo_det_simul",
+      "codes": ["E026"],
+      "kind": "fire",
+      "package": "clash",
+      "fixture": "tests/fixtures/clash/e026_varexo_det_simul.mod",
+      "source": "d_clash.rs::e026_varexo_det_simul",
+      "cluster": "clash/e026_varexo_det_simul.mod",
+      "notes": "varexo_det + simul"
+    },
+    {
+      "id": "e027_ramsey_varexo_det",
+      "codes": ["E027"],
+      "kind": "fire",
+      "package": "clash",
+      "fixture": "tests/fixtures/clash/e027_ramsey_varexo_det.mod",
+      "source": "d_clash.rs::e027_ramsey_varexo_det",
+      "cluster": "clash/e027_ramsey_varexo_det.mod",
+      "notes": "ramsey_model + varexo_det"
+    },
+    {
+      "id": "e028_identification_varexo_det",
+      "codes": ["E028"],
+      "kind": "fire",
+      "package": "clash",
+      "fixture": "tests/fixtures/clash/e028_identification_varexo_det.mod",
+      "source": "d_clash.rs::e028_identification_varexo_det",
+      "cluster": "clash/e028_identification_varexo_det.mod",
+      "notes": "identification + varexo_det"
+    },
+    {
+      "id": "e104_two_planner",
+      "codes": ["E104"],
+      "kind": "fire",
+      "package": "clash",
+      "fixture": "tests/fixtures/clash/e104_two_planner.mod",
+      "source": "d_clash.rs::e104_two_planner_with_ramsey",
+      "cluster": "clash/e104_two_planner.mod",
+      "notes": "two planner_objective with ramsey_model"
+    },
+    {
+      "id": "e113_shock_paths_shocks",
+      "codes": ["E113"],
+      "kind": "fire",
+      "package": "clash",
+      "fixture": "tests/fixtures/clash/e113_shock_paths_shocks.mod",
+      "source": "d_clash.rs::e113_shock_paths_with_shocks",
+      "cluster": "clash/e113_shock_paths_shocks.mod",
+      "notes": "shock_paths + shocks"
+    },
+    {
+      "id": "e178_surprise",
+      "codes": ["E178"],
+      "kind": "fire",
+      "package": "occbin",
+      "fixture": "tests/fixtures/occbin/e178_surprise.mod",
+      "source": "d_clash.rs::e178_surprise_without_occbin",
+      "cluster": "occbin/e178_surprise.mod",
+      "notes": "shocks(surprise) periods/values without occbin_constraints"
+    },
+    {
+      "id": "e179_identification",
+      "codes": ["E179"],
+      "kind": "fire",
+      "package": "clash",
+      "fixture": "tests/fixtures/clash/e179_identification.mod",
+      "source": "d_clash.rs::e179_occbin_identification",
+      "cluster": "clash/e179_identification.mod",
+      "notes": "occbin_constraints + identification"
+    },
+    {
+      "id": "e026_varexo_det_alone_quiet",
+      "codes": ["E026"],
+      "kind": "quiet",
+      "package": "clash",
+      "fixture": "tests/fixtures/clash/e026_varexo_det_alone_quiet.mod",
+      "source": "d_clash.rs::e026_varexo_det_without_solver_is_quiet",
+      "cluster": "clash/e026_varexo_det_alone_quiet.mod",
+      "notes": "varexo_det without PF/simul/PFEE"
+    },
+    {
+      "id": "e028_identification_alone_quiet",
+      "codes": ["E028"],
+      "kind": "quiet",
+      "package": "clash",
+      "fixture": "tests/fixtures/clash/e028_identification_alone_quiet.mod",
+      "source": "d_clash.rs::e028_identification_without_varexo_det_is_quiet",
+      "cluster": "clash/e028_identification_alone_quiet.mod",
+      "notes": "identification without varexo_det"
+    },
+    {
+      "id": "e104_two_planner_osr_quiet",
+      "codes": ["E104"],
+      "kind": "quiet",
+      "package": "clash",
+      "fixture": "tests/fixtures/clash/e104_two_planner_osr_quiet.mod",
+      "source": "d_clash.rs::e104_two_planner_with_osr_is_quiet",
+      "cluster": "clash/e104_two_planner_osr_quiet.mod",
+      "notes": "two planner_objective with osr only"
+    },
+    {
+      "id": "e113_shock_paths_alone_quiet",
+      "codes": ["E113"],
+      "kind": "quiet",
+      "package": "clash",
+      "fixture": "tests/fixtures/clash/e113_shock_paths_alone_quiet.mod",
+      "source": "d_clash.rs::e113_shock_paths_alone_is_quiet",
+      "cluster": "clash/e113_shock_paths_alone_quiet.mod",
+      "notes": "shock_paths without shocks/mshocks/endval/controlled paths"
     }
   ]
 }

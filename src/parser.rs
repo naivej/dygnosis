@@ -468,6 +468,7 @@ impl Parser<'_> {
             } else if let Some(command) = self.at_policy_command() {
                 self.parse_policy_command(command);
             } else if self.at_skipped_block() {
+                self.record_skipped_block_opener();
                 self.skip_block();
             } else if self.at_ident("end") {
                 self.bump();
@@ -803,6 +804,9 @@ impl Parser<'_> {
                                 .eq_ignore_ascii_case("surprise") =>
                         {
                             self.model.shocks_surprise = true;
+                            if self.model.shocks_surprise_span.is_none() {
+                                self.model.shocks_surprise_span = Some(self.tokens[k].span);
+                            }
                         }
                         _ => {}
                     }
@@ -1008,8 +1012,10 @@ impl Parser<'_> {
             self.current_start()
         };
         self.eat(TokenKind::Semi);
+        let span = Span { start, end };
+        self.model.planner_objective_spans.push(span);
         if self.model.planner_objective_span.is_none() {
-            self.model.planner_objective_span = Some(Span { start, end });
+            self.model.planner_objective_span = Some(span);
         }
     }
 
@@ -2476,9 +2482,8 @@ impl Parser<'_> {
             if !saw_ident && self.at(TokenKind::Ident) {
                 saw_ident = true;
                 let tok = self.tokens[self.i].clone();
-                if self.lexeme(&tok).eq_ignore_ascii_case("simul") {
-                    self.model.simul_spans.push(tok.span);
-                }
+                let lex = self.lexeme(&tok).to_string();
+                self.record_top_command(&lex, tok.span);
             }
             if self.at(TokenKind::LParen) {
                 let from = self.i;
@@ -2539,6 +2544,45 @@ impl Parser<'_> {
         }
     }
 
+    fn record_top_command(&mut self, lex: &str, span: Span) {
+        if lex.eq_ignore_ascii_case("simul") {
+            self.model.simul_spans.push(span);
+            return;
+        }
+        let dest = if lex.eq_ignore_ascii_case("identification") {
+            &mut self.model.identification_span
+        } else if lex.eq_ignore_ascii_case("perfect_foresight_solver") {
+            &mut self.model.perfect_foresight_solver_span
+        } else if lex.eq_ignore_ascii_case("perfect_foresight_with_expectation_errors_solver") {
+            &mut self.model.pfee_solver_span
+        } else if lex.eq_ignore_ascii_case("extended_path") {
+            &mut self.model.extended_path_span
+        } else if lex.eq_ignore_ascii_case("method_of_moments") {
+            &mut self.model.method_of_moments_span
+        } else if lex.eq_ignore_ascii_case("sensitivity") {
+            &mut self.model.sensitivity_span
+        } else {
+            return;
+        };
+        if dest.is_none() {
+            *dest = Some(span);
+        }
+    }
+
+    fn record_skipped_block_opener(&mut self) {
+        let tok = self.tokens[self.i].clone();
+        let lex = self.lexeme(&tok);
+        if lex.eq_ignore_ascii_case("shock_paths") {
+            if self.model.shock_paths_span.is_none() {
+                self.model.shock_paths_span = Some(tok.span);
+            }
+        } else if lex.eq_ignore_ascii_case("perfect_foresight_controlled_paths") {
+            if self.model.perfect_foresight_controlled_paths_span.is_none() {
+                self.model.perfect_foresight_controlled_paths_span = Some(tok.span);
+            }
+        }
+    }
+
     fn at(&self, kind: TokenKind) -> bool {
         self.tokens.get(self.i).is_some_and(|t| t.kind == kind)
     }
@@ -2550,6 +2594,7 @@ impl Parser<'_> {
             "model_replace",
             "heteroskedastic_shocks",
             "shock_paths",
+            "perfect_foresight_controlled_paths",
             "conditional_forecast_paths",
         ];
         BLOCKS.iter().any(|kw| self.at_ident_ci(kw))
@@ -2676,7 +2721,8 @@ impl Parser<'_> {
         !self.model.exprs.walk_idents(id).any(|r| {
             self.model.endogenous.iter().any(|d| d.name == r.name)
                 || self.model.exogenous.iter().any(|d| d.name == r.name)
-                || self.model
+                || self
+                    .model
                     .deterministic_exogenous
                     .iter()
                     .any(|d| d.name == r.name)

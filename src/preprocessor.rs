@@ -25,7 +25,7 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub enum JsonStage {
     /// `json=check` (parse + check). Honesty for 0.5 emit uses this.
     Check,
-    /// `json=transform`. Reserved for written-clash honesty (05).
+    /// `json=transform`. Written-clash honesty (05 D-clash).
     Transform,
 }
 

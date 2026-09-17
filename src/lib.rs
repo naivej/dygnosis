@@ -6,6 +6,7 @@
 
 pub mod auto_fix;
 pub mod catalog;
+pub mod check_clash;
 pub mod check_e020;
 pub mod check_e030;
 pub mod check_e060;
@@ -48,6 +49,7 @@ pub use auto_fix::{apply_fix, auto_fix};
 pub use catalog::{
     command_options, is_known_command, list_options, option_doc, ListOptions, NamedOption,
 };
+pub use check_clash::check_clash;
 pub use check_e020::check_e020;
 pub use check_e030::check_e030;
 pub use check_e060::{

@@ -4,8 +4,8 @@ use dygnosis::span::LineIndex;
 use dygnosis::{analyze, check_occbin, parse, Diagnostic, Severity};
 
 const OCCBIN_ERRORS: &[&str] = &[
-    "E170", "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E180", "E181",
-    "E182", "E183", "E184", "E185",
+    "E170", "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E180", "E181", "E182", "E183",
+    "E184", "E185",
 ];
 
 struct Fire {
@@ -258,8 +258,13 @@ fn surprise_has_no_occbin_error() {
         .filter(|c| analyzed.iter().any(|d| d.code == *c))
         .collect::<Vec<_>>();
     assert!(
+        analyzed.iter().any(|d| d.code == "E178"),
+        "surprise.mod must emit E178, got {:?}",
+        codes_of(&analyzed)
+    );
+    assert!(
         occbin.is_empty(),
-        "surprise.mod must not emit E170–E185, got {occbin:?} from {:?}",
+        "surprise.mod must not emit E170–E177/E180–E185, got {occbin:?} from {:?}",
         codes_of(&analyzed)
     );
     assert!(
