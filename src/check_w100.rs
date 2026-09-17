@@ -9,24 +9,83 @@ use crate::span::Span;
 
 const FALLBACK: Span = Span { start: 0, end: 1 };
 
+const E100_MSG: &str = "A planner_objective statement must be used with a ramsey_model, a ramsey_policy, osr, or a discretionary_policy statement and vice versa.";
+const E202_MSG: &str = "You cannot use the discretionary_policy command when you use either ramsey_model or ramsey_policy and vice versa";
+const E203_MSG: &str =
+    "A ramsey_constraints block requires the presence of a ramsey_model or ramsey_policy statement";
+const E204_MSG: &str =
+    "The osr statement cannot have both optim_weights and a planner_objective; they are mutually exclusive.";
+const E215_MSG: &str = "discretionary_policy: the instruments option is required.";
+
 pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
-    if model.policy_commands.is_empty() {
-        return Vec::new();
-    }
-
-    let anchor = model.policy_command_span.unwrap_or(FALLBACK);
     let mut diagnostics = Vec::new();
+    let has_ramsey = model.policy_commands.iter().any(|c| {
+        matches!(
+            c,
+            PolicyCommand::RamseyModel | PolicyCommand::RamseyPolicy
+        )
+    });
+    let has_disc = model
+        .policy_commands
+        .contains(&PolicyCommand::DiscretionaryPolicy);
+    let has_osr = model.policy_commands.contains(&PolicyCommand::Osr);
+    let has_planner = model.planner_objective_span.is_some();
+    let policy_anchor = model.policy_command_span.unwrap_or(FALLBACK);
 
-    if model.policy_commands.iter().any(|c| c.is_planner())
-        && model.planner_objective_span.is_none()
-    {
+    if has_disc && has_ramsey {
         diagnostics.push(Diagnostic::new(
-            anchor,
+            model.discretionary_policy_span.unwrap_or(policy_anchor),
             Severity::Error,
-            "E100",
-            "A planner_objective statement must be used with a ramsey_model, a ramsey_policy, osr, or a discretionary_policy statement and vice versa",
+            "E202",
+            E202_MSG,
         ));
     }
+
+    if (has_ramsey || has_disc) && !has_planner {
+        diagnostics.push(Diagnostic::new(
+            policy_anchor,
+            Severity::Error,
+            "E100",
+            E100_MSG,
+        ));
+    } else if has_planner && !(has_ramsey || has_disc || has_osr) {
+        diagnostics.push(Diagnostic::new(
+            model.planner_objective_span.unwrap_or(FALLBACK),
+            Severity::Error,
+            "E100",
+            E100_MSG,
+        ));
+    }
+
+    if let Some(span) = model.ramsey_constraints_span {
+        if !has_ramsey {
+            diagnostics.push(Diagnostic::new(span, Severity::Error, "E203", E203_MSG));
+        }
+    }
+
+    if has_osr && model.has_optim_weights && has_planner {
+        diagnostics.push(Diagnostic::new(
+            policy_anchor,
+            Severity::Error,
+            "E204",
+            E204_MSG,
+        ));
+    }
+
+    if has_disc && !model.discretionary_has_instruments_option {
+        diagnostics.push(Diagnostic::new(
+            model.discretionary_policy_span.unwrap_or(policy_anchor),
+            Severity::Error,
+            "E215",
+            E215_MSG,
+        ));
+    }
+
+    if model.policy_commands.is_empty() {
+        return diagnostics;
+    }
+
+    let anchor = policy_anchor;
 
     let endogenous = names(&model.endogenous);
     for instrument in &model.instruments {

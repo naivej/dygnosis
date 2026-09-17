@@ -13,7 +13,7 @@ const ACCEPT_ARCHIVES: &[&str] = &[
 
 const NAMED_HOLES: &[&str] = &[];
 
-const SAME_GROUND_WARNINGS: &[&str] = &["W022", "W031", "W042", "W121", "W131", "W150", "W170"];
+const SAME_GROUND_WARNINGS: &[&str] = &["W022", "W031", "W042", "W121", "W131", "W150", "W170", "W200"];
 
 enum HonestyKind {
     Error { workspace_only: bool },
@@ -516,6 +516,204 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         our_needle: "the 'shock_paths' block cannot be used in conjunction with either 'shocks', 'mshocks', 'endval' or 'perfect_foresight_controlled_paths' blocks.",
         stage: JsonStage::Transform,
     },
+    HonestyRow {
+        code: "E200",
+        fixture: "d_check/e200_write_latex.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "write_latex_steady_state_model statement without a steady_state_model",
+        our_needle: "write_latex_steady_state_model statement without a steady_state_model",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E201",
+        fixture: "d_check/e201_zero_eq.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "At least one model equation must be declared",
+        our_needle: "At least one model equation must be declared",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E202",
+        fixture: "w100/e202_disc_ramsey.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You cannot use the discretionary_policy command when you use either ramsey_model",
+        our_needle: "You cannot use the discretionary_policy command when you use either ramsey_model",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E203",
+        fixture: "w100/e203_ramsey_constraints.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "ramsey_constraints block requires the presence of a ramsey_model",
+        our_needle: "ramsey_constraints block requires the presence of a ramsey_model",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E204",
+        fixture: "w100/e204_osr_both.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "cannot have both optim_weights and a planner_objective",
+        our_needle: "cannot have both optim_weights and a planner_objective",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E205",
+        fixture: "d_check/e205_pf_stoch.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "cannot mix perfect foresight context with stochastic context",
+        our_needle: "cannot mix perfect foresight context with stochastic context",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E206",
+        fixture: "d_check/e206_use_dll_bytecode.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "'use_dll' option is not compatible with 'bytecode'",
+        our_needle: "'use_dll' option is not compatible with 'bytecode'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E207",
+        fixture: "d_check/e207_no_static.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "no_static option is incompatible",
+        our_needle: "no_static option is incompatible",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E208",
+        fixture: "d_check/e208_static_dynamic.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "equations marked [static] must be equal to the number of equations marked [dynamic]",
+        our_needle: "equations marked [static] must be equal to the number of equations marked [dynamic]",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E209",
+        fixture: "d_check/e209_tags_ramsey.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "marking equations as [static] or [dynamic] is not possible",
+        our_needle: "marking equations as [static] or [dynamic] is not possible",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W200",
+        fixture: "d_check/w200_stoch_abs.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "unsuitable for a stochastic context",
+        our_needle: "unsuitable for a stochastic context",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E210",
+        fixture: "d_check/e210_linear_abs.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "on an endogenous variable",
+        our_needle: "on an endogenous variable",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E211",
+        fixture: "d_check/e211_linear_exo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "on an exogenous variable in a non-perfect-foresight context",
+        our_needle: "on an exogenous variable in a non-perfect-foresight context",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E212",
+        fixture: "d_check/e212_estimated_shock.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "also appear in the expressions defining the variance/covariance matrix of shocks",
+        our_needle: "also appear in the expressions defining the variance/covariance matrix of shocks",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E213",
+        fixture: "d_check/e213_pf_order.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "perfect_foresight_setup' command must come before 'perfect_foresight_solver",
+        our_needle: "perfect_foresight_setup' command must come before 'perfect_foresight_solver",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E214",
+        fixture: "d_check/e214_pfee_order.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "perfect_foresight_with_expectation_errors_setup' command must come before",
+        our_needle: "perfect_foresight_with_expectation_errors_setup' command must come before",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E215",
+        fixture: "w100/w100_disc_ok.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "discretionary_policy: the instruments option is required",
+        our_needle: "discretionary_policy: the instruments option is required",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E216",
+        fixture: "d_check/e216_extended_path.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the 'periods' option of 'extended_path' is mandatory",
+        our_needle: "the 'periods' option of 'extended_path' is mandatory",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E217",
+        fixture: "d_check/e217_initval_after_endval.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "an 'initval' block cannot appear after an 'endval' block",
+        our_needle: "an 'initval' block cannot appear after an 'endval' block",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E218",
+        fixture: "d_check/e218_all_values.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You have not set the following exogenous variables in initval",
+        our_needle: "You have not set the following exogenous variables in initval",
+        stage: JsonStage::Check,
+    },
 ];
 
 struct ClashQuiet {
@@ -699,6 +897,35 @@ fn equation_count_is_warning_they_accept() {
         .expect("own W013 on e010_extra.mod");
     assert_eq!(w013.severity, Severity::Warning);
     assert_no_p_digits(&own, "e010_extra.mod check_file");
+}
+
+#[test]
+fn linear_log_is_warning_they_accept() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    let path = fixture("d_check/w140_linear_log.mod");
+    let path_str = path.to_str().expect("utf-8 path");
+    let text = read_path(&path);
+    let result = spawn(&text, &path, &pp, JsonStage::Check);
+    assert!(
+        result.success,
+        "w140_linear_log.mod should be accepted: stderr {:?} diags {:?}",
+        result.raw_stderr, result.diagnostics
+    );
+    let own = check_file(&text, path_str);
+    let w140 = own
+        .iter()
+        .find(|d| d.code == "W140")
+        .expect("own W140 on w140_linear_log.mod");
+    assert_eq!(w140.severity, Severity::Warning);
+    assert!(
+        own.iter().all(|d| d.code != "E210" && d.code != "E211"),
+        "log in model(linear) must not be E210/E211, got {:?}",
+        own.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+    );
+    assert_no_p_digits(&own, "w140_linear_log.mod check_file");
 }
 
 #[test]

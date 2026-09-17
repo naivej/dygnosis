@@ -71,6 +71,7 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     out.extend(crate::check_e030::check_e030(model));
     out.extend(crate::check_occbin::check_occbin(model));
     out.extend(crate::check_clash::check_clash(model));
+    out.extend(crate::check_context::check_context(model));
     out.extend(crate::diag_shape::check_shape(model));
     out.extend(crate::check_w010::check_w010_family(model));
     out.extend(crate::check_e060::check_e060_family_on_model(model));

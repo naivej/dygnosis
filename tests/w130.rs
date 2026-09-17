@@ -122,16 +122,28 @@ fn assert_native_range(text: &str, d: &Diag, needle: &str) {
 }
 
 fn assert_w140_ops(id: &str, needle: &str) {
+    assert_linear_code(id, needle, "W140");
+}
+
+fn assert_e210_ops(id: &str, needle: &str) {
+    assert_linear_code(id, needle, "E210");
+}
+
+fn assert_linear_code(id: &str, needle: &str, code: &str) {
     let src = check_mod("w130/w140_ops.mod");
     let rust = rust_family(&src);
     let want = range_of(&src, needle);
-    let w140s: Vec<_> = rust.iter().filter(|d| d.code == "W140").collect();
-    assert_eq!(w140s.len(), 18, "{id} W140 count, got {rust:?}");
-    let matched: Vec<_> = w140s
+    let matched: Vec<_> = rust
         .iter()
-        .filter(|d| (d.start_line, d.start_char, d.end_line, d.end_char) == want)
+        .filter(|d| {
+            d.code == code && (d.start_line, d.start_char, d.end_line, d.end_char) == want
+        })
         .collect();
-    assert_eq!(matched.len(), 1, "{id} W140 at {needle:?}, got {rust:?}");
+    assert_eq!(
+        matched.len(),
+        1,
+        "{id} {code} at {needle:?}, got {rust:?}"
+    );
 }
 
 fn assert_w140_quiet(id: &str, rel: &str) {
@@ -381,27 +393,27 @@ fn w140_exp() {
 
 #[test]
 fn w140_abs() {
-    assert_w140_ops("w140_abs", "abs(y_abs)");
+    assert_e210_ops("w140_abs", "abs(y_abs)");
 }
 
 #[test]
 fn w140_abs_upper() {
-    assert_w140_ops("w140_ABS", "ABS(y_ABS)");
+    assert_e210_ops("w140_ABS", "ABS(y_ABS)");
 }
 
 #[test]
 fn w140_max() {
-    assert_w140_ops("w140_max", "max(y_max, 0)");
+    assert_e210_ops("w140_max", "max(y_max, 0)");
 }
 
 #[test]
 fn w140_min() {
-    assert_w140_ops("w140_min", "min(y_min, 0)");
+    assert_e210_ops("w140_min", "min(y_min, 0)");
 }
 
 #[test]
 fn w140_sign() {
-    assert_w140_ops("w140_sign", "sign(y_sign)");
+    assert_e210_ops("w140_sign", "sign(y_sign)");
 }
 
 #[test]
@@ -461,7 +473,7 @@ fn w140_div_two() {
 
 #[test]
 fn w140_cmp() {
-    assert_w140_ops("w140_cmp", "y_cmp > 0");
+    assert_e210_ops("w140_cmp", "y_cmp > 0");
 }
 
 #[test]
@@ -509,7 +521,7 @@ fn w140_local_abs() {
     let src = check_mod("w130/w140_local.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W140");
+    assert_eq!(rust[0].code, "E210");
     assert_native_range(&src, &rust[0], "abs(x)");
 }
 
@@ -529,9 +541,11 @@ fn w140_two_eqs() {
     let src = check_mod("w130/w140_two.mod");
     let rust = rust_family(&src);
     let w140s: Vec<_> = rust.iter().filter(|d| d.code == "W140").collect();
-    assert_eq!(w140s.len(), 2, "two W140, got {rust:?}");
+    let e210s: Vec<_> = rust.iter().filter(|d| d.code == "E210").collect();
+    assert_eq!(w140s.len(), 1, "one W140 for log, got {rust:?}");
+    assert_eq!(e210s.len(), 1, "one E210 for abs, got {rust:?}");
     assert_native_range(&src, w140s[0], "log(x)");
-    assert_native_range(&src, w140s[1], "abs(pi)");
+    assert_native_range(&src, e210s[0], "abs(pi)");
 }
 
 #[test]

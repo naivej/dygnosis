@@ -162,8 +162,8 @@ fn w100_ramsey() {
 }
 
 #[test]
-fn w100_disc() {
-    let src = check_mod("w100/w100_disc.mod");
+fn w100_planner_objective_alone() {
+    let src = check_mod("w100/w100_planner.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "E100");
@@ -171,16 +171,19 @@ fn w100_disc() {
     assert!(rust[0]
         .message
         .starts_with("A planner_objective statement must be used"));
-    assert_policy_span(&src, &rust[0]);
 }
 
 #[test]
-fn w100_planner_objective_alone() {
-    let src = check_mod("w100/w100_planner.mod");
+fn w100_disc() {
+    let src = check_mod("w100/w100_disc.mod");
     let rust = rust_family(&src);
     assert!(
-        rust.is_empty(),
-        "planner_objective without a policy command should be empty, got {rust:?}"
+        rust.iter().any(|d| d.code == "E100"),
+        "expected E100, got {rust:?}"
+    );
+    assert!(
+        rust.iter().any(|d| d.code == "E215"),
+        "expected E215, got {rust:?}"
     );
 }
 
@@ -188,9 +191,47 @@ fn w100_planner_objective_alone() {
 fn w100_disc_ok() {
     let src = check_mod("w100/w100_disc_ok.mod");
     let rust = rust_family(&src);
+    assert_eq!(rust.len(), 1, "expected E215 only, got {rust:?}");
+    assert_eq!(rust[0].code, "E215");
+    assert!(rust[0]
+        .message
+        .contains("discretionary_policy: the instruments option is required"));
+}
+
+#[test]
+fn e202_disc_and_ramsey() {
+    let src = check_mod("w100/e202_disc_ramsey.mod");
+    let rust = rust_family(&src);
     assert!(
-        rust.is_empty(),
-        "discretionary_policy with planner_objective should be empty, got {rust:?}"
+        rust.iter().any(|d| d.code == "E202"),
+        "expected E202, got {rust:?}"
+    );
+    assert!(
+        rust.iter().all(|d| d.code != "E103"),
+        "E202 file must not be E103, got {rust:?}"
+    );
+}
+
+#[test]
+fn e203_ramsey_constraints_without_ramsey() {
+    let src = check_mod("w100/e203_ramsey_constraints.mod");
+    let rust = rust_family(&src);
+    assert_eq!(rust.len(), 1, "expected E203, got {rust:?}");
+    assert_eq!(rust[0].code, "E203");
+    assert!(rust[0].message.contains("ramsey_constraints"));
+}
+
+#[test]
+fn e204_osr_both_not_e103() {
+    let src = check_mod("w100/e204_osr_both.mod");
+    let rust = rust_family(&src);
+    assert!(
+        rust.iter().any(|d| d.code == "E204"),
+        "expected E204, got {rust:?}"
+    );
+    assert!(
+        rust.iter().all(|d| d.code != "E103"),
+        "osr both is E204 not E103, got {rust:?}"
     );
 }
 

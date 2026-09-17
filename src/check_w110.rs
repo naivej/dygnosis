@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::intern::Name;
-use crate::model::{Decl, Model, ShockKind};
+use crate::model::{Decl, EstimatedParamKind, Model, ShockKind};
 use crate::span::Span;
 
 const FALLBACK: Span = Span { start: 0, end: 1 };
@@ -12,6 +12,7 @@ const FALLBACK: Span = Span { start: 0, end: 1 };
 pub fn check_w110(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = check_w060(model);
     diagnostics.extend(check_shock_stmts(model));
+    diagnostics.extend(check_e212(model));
     diagnostics
 }
 
@@ -85,6 +86,7 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                 }
                 seen.insert(key);
             }
+            ShockKind::Skew(_) => {}
             ShockKind::Corr { a, b } => {
                 let key = SeenKey::Corr(sorted_names(model, &[*a, *b]));
                 if seen.contains(&key) {
@@ -119,6 +121,53 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
         }
     }
     diagnostics
+}
+
+fn check_e212(model: &Model) -> Vec<Diagnostic> {
+    let estimated: HashSet<Name> = model
+        .estimated_params
+        .iter()
+        .filter(|p| p.kind == EstimatedParamKind::Param)
+        .filter(|p| !model.name(p.name).eq_ignore_ascii_case("dsge_prior_weight"))
+        .map(|p| p.name)
+        .collect();
+    if estimated.is_empty() {
+        return Vec::new();
+    }
+    let param_names: HashSet<Name> = model.parameters.iter().map(|d| d.name).collect();
+    let mut hits: Vec<Name> = Vec::new();
+    for stmt in &model.shock_stmts {
+        let Some(id) = stmt.rhs_expr else {
+            continue;
+        };
+        for r in model.exprs.walk_idents(id) {
+            if estimated.contains(&r.name) && param_names.contains(&r.name) && !hits.contains(&r.name)
+            {
+                hits.push(r.name);
+            }
+        }
+    }
+    if hits.is_empty() {
+        return Vec::new();
+    }
+    hits.sort_by(|a, b| model.name(*a).cmp(model.name(*b)));
+    let listed = hits
+        .iter()
+        .map(|n| model.name(*n))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let span = model
+        .estimated_params_span
+        .or(model.shocks_block)
+        .unwrap_or(FALLBACK);
+    vec![Diagnostic::new(
+        span,
+        Severity::Error,
+        "E212",
+        format!(
+            "some estimated parameters ({listed}) also appear in the expressions defining the variance/covariance matrix of shocks; this is not allowed."
+        ),
+    )]
 }
 
 fn stochastic_exo(model: &Model) -> Vec<&Decl> {

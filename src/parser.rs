@@ -446,10 +446,8 @@ impl Parser<'_> {
                 self.parse_initval_block();
             } else if self.at_ident_ci("endval") {
                 self.parse_endval_block();
-            } else if self.at_ident_ci("shocks") {
+            } else if self.at_ident_ci("shocks") || self.at_ident_ci("mshocks") {
                 self.parse_shocks_block(true);
-            } else if self.at_ident_ci("mshocks") {
-                self.parse_shocks_block(false);
             } else if self.at_ident_ci("occbin_constraints") {
                 self.parse_occbin_constraints_block();
             } else if self.at_ident_ci("varobs") {
@@ -582,6 +580,7 @@ impl Parser<'_> {
             let from = self.i;
             let opt = self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
             self.record_deprecated_options_in_range(from, self.i);
+            self.record_model_option_flags(from, self.i);
             linear = self.src[opt.start as usize..opt.end as usize]
                 .to_ascii_lowercase()
                 .contains("linear");
@@ -629,7 +628,7 @@ impl Parser<'_> {
     }
 
     fn parse_initval_block(&mut self) {
-        let opener_span = self.bump_plain_opener();
+        let opener_span = self.bump_init_end_opener(true);
         let start = opener_span.start;
         let body_i = self.i;
         let body_end_i = self.consume_until_end();
@@ -662,7 +661,7 @@ impl Parser<'_> {
     }
 
     fn parse_endval_block(&mut self) {
-        let opener_span = self.bump_plain_opener();
+        let opener_span = self.bump_init_end_opener(false);
         let start = opener_span.start;
         let body_i = self.i;
         let body_end_i = self.consume_until_end();
@@ -918,16 +917,28 @@ impl Parser<'_> {
         if command == PolicyCommand::RamseyPolicy && self.model.ramsey_policy_span.is_none() {
             self.model.ramsey_policy_span = Some(tok.span);
         }
-        if self.at(TokenKind::LParen) {
-            self.parse_policy_options();
+        if command == PolicyCommand::DiscretionaryPolicy
+            && self.model.discretionary_policy_span.is_none()
+        {
+            self.model.discretionary_policy_span = Some(tok.span);
+        }
+        let saw_instruments = if self.at(TokenKind::LParen) {
+            self.parse_policy_options()
+        } else {
+            false
+        };
+        if command == PolicyCommand::DiscretionaryPolicy {
+            self.model.discretionary_has_instruments_option |= saw_instruments;
         }
         self.eat(TokenKind::Semi);
     }
 
-    fn parse_policy_options(&mut self) {
+    fn parse_policy_options(&mut self) -> bool {
         self.bump();
+        let mut saw_instruments = false;
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) && !self.at(TokenKind::Semi) {
             if self.at_ident_ci("instruments") && self.peek_kind(1) == Some(TokenKind::Eq) {
+                saw_instruments = true;
                 self.bump();
                 self.bump();
                 self.collect_instruments();
@@ -959,6 +970,7 @@ impl Parser<'_> {
             }
         }
         self.eat(TokenKind::RParen);
+        saw_instruments
     }
 
     fn collect_instruments(&mut self) {
@@ -1239,6 +1251,31 @@ impl Parser<'_> {
         Span { start, end }
     }
 
+    fn bump_init_end_opener(&mut self, is_initval: bool) -> Span {
+        let start = self.bump().span.start;
+        if self.at(TokenKind::LParen) {
+            let from = self.i;
+            self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+            if self.option_ident_in_range(from, self.i, "all_values_required") {
+                if is_initval {
+                    self.model.initval_all_values_required = true;
+                } else {
+                    self.model.endval_all_values_required = true;
+                }
+            }
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        let span = Span { start, end };
+        if is_initval && self.model.endval_block.is_some() {
+            self.model.initval_after_endval_span.get_or_insert(span);
+        }
+        span
+    }
+
     fn collect_shock_vars(&mut self, start_i: usize, end_i: usize) {
         let mut i = start_i;
         while i < end_i {
@@ -1282,6 +1319,8 @@ impl Parser<'_> {
                 self.parse_shock_var_stmt(end_i);
             } else if self.at_ident_ci("corr") {
                 self.parse_shock_corr_stmt(end_i);
+            } else if self.at_ident_ci("skew") {
+                self.parse_shock_skew_stmt(end_i);
             } else {
                 while self.i < end_i && !self.at(TokenKind::Semi) {
                     self.bump();
@@ -1309,13 +1348,19 @@ impl Parser<'_> {
                 self.bump();
             }
         }
-        let rhs = if self.at(TokenKind::Eq) {
+        let (mut rhs_expr, rhs) = if self.at(TokenKind::Eq) {
             self.bump();
             self.parse_folded_rhs()
         } else {
-            None
+            (None, None)
         };
         let end = self.finish_shock_stmt(end_i);
+        if rhs_expr.is_none() && names.len() == 1 && self.i < end_i && self.at_ident_ci("stderr") {
+            self.bump();
+            let (expr, _) = self.parse_folded_rhs();
+            rhs_expr = expr;
+            self.finish_shock_stmt(end_i);
+        }
         if names.is_empty() {
             return;
         }
@@ -1327,6 +1372,7 @@ impl Parser<'_> {
         self.model.shock_stmts.push(ShockStmt {
             kind,
             rhs,
+            rhs_expr,
             span: Span { start, end },
         });
     }
@@ -1345,11 +1391,11 @@ impl Parser<'_> {
             }
         }
         let has_eq = self.at(TokenKind::Eq);
-        let rhs = if has_eq {
+        let (rhs_expr, rhs) = if has_eq {
             self.bump();
             self.parse_folded_rhs()
         } else {
-            None
+            (None, None)
         };
         let end = self.finish_shock_stmt(end_i);
         if names.len() < 2 || !has_eq {
@@ -1361,14 +1407,50 @@ impl Parser<'_> {
                 b: names[1],
             },
             rhs,
+            rhs_expr,
             span: Span { start, end },
         });
     }
 
-    fn parse_folded_rhs(&mut self) -> Option<f64> {
-        let id = self.parse_expr()?;
+    fn parse_shock_skew_stmt(&mut self, end_i: usize) {
+        let start = self.current_start();
+        self.bump();
+        let mut names = Vec::new();
+        while self.i < end_i && !self.at(TokenKind::Eq) && !self.at(TokenKind::Semi) {
+            if self.at(TokenKind::Ident) {
+                let tok = self.bump();
+                let lex = self.lexeme(&tok).to_string();
+                names.push(self.intern.intern(&lex));
+            } else {
+                self.bump();
+            }
+        }
+        let has_eq = self.at(TokenKind::Eq);
+        let (rhs_expr, rhs) = if has_eq {
+            self.bump();
+            self.parse_folded_rhs()
+        } else {
+            (None, None)
+        };
+        let end = self.finish_shock_stmt(end_i);
+        if names.is_empty() || !has_eq {
+            return;
+        }
+        self.model.shock_stmts.push(ShockStmt {
+            kind: ShockKind::Skew(names),
+            rhs,
+            rhs_expr,
+            span: Span { start, end },
+        });
+    }
+
+    fn parse_folded_rhs(&mut self) -> (Option<ExprId>, Option<f64>) {
+        let Some(id) = self.parse_expr() else {
+            return (None, None);
+        };
         let known = self.fold_known_params();
-        self.fold_expr(id, &known).filter(|v| v.is_finite())
+        let folded = self.fold_expr(id, &known).filter(|v| v.is_finite());
+        (Some(id), folded)
     }
 
     fn finish_shock_stmt(&mut self, end_i: usize) -> u32 {
@@ -2478,17 +2560,26 @@ impl Parser<'_> {
 
     fn skip_until_semi(&mut self) {
         let mut saw_ident = false;
+        let mut opener: Option<String> = None;
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             if !saw_ident && self.at(TokenKind::Ident) {
                 saw_ident = true;
                 let tok = self.tokens[self.i].clone();
                 let lex = self.lexeme(&tok).to_string();
                 self.record_top_command(&lex, tok.span);
+                opener = Some(lex);
             }
             if self.at(TokenKind::LParen) {
                 let from = self.i;
                 self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
                 self.record_deprecated_options_in_range(from, self.i);
+                if opener
+                    .as_deref()
+                    .is_some_and(|s| s.eq_ignore_ascii_case("extended_path"))
+                    && self.option_ident_in_range(from, self.i, "periods")
+                {
+                    self.model.extended_path_has_periods = true;
+                }
                 continue;
             }
             self.bump();
@@ -2561,6 +2652,22 @@ impl Parser<'_> {
             &mut self.model.method_of_moments_span
         } else if lex.eq_ignore_ascii_case("sensitivity") {
             &mut self.model.sensitivity_span
+        } else if lex.eq_ignore_ascii_case("check") {
+            &mut self.model.check_span
+        } else if lex.eq_ignore_ascii_case("steady") {
+            &mut self.model.steady_span
+        } else if lex.eq_ignore_ascii_case("stoch_simul") {
+            &mut self.model.stoch_simul_span
+        } else if lex.eq_ignore_ascii_case("estimation") {
+            &mut self.model.estimation_span
+        } else if lex.eq_ignore_ascii_case("calib_smoother") {
+            &mut self.model.calib_smoother_span
+        } else if lex.eq_ignore_ascii_case("perfect_foresight_setup") {
+            &mut self.model.perfect_foresight_setup_span
+        } else if lex.eq_ignore_ascii_case("perfect_foresight_with_expectation_errors_setup") {
+            &mut self.model.pfee_setup_span
+        } else if lex.eq_ignore_ascii_case("write_latex_steady_state_model") {
+            &mut self.model.write_latex_steady_state_model_span
         } else {
             return;
         };
@@ -2569,15 +2676,40 @@ impl Parser<'_> {
         }
     }
 
+    fn record_model_option_flags(&mut self, from: usize, to: usize) {
+        let hits: Vec<(String, Span)> = self.tokens[from..to.min(self.tokens.len())]
+            .iter()
+            .filter(|t| t.kind == TokenKind::Ident)
+            .map(|t| (t.text(self.src).to_string(), t.span))
+            .collect();
+        for (lex, span) in hits {
+            if lex.eq_ignore_ascii_case("use_dll") && self.model.use_dll_span.is_none() {
+                self.model.use_dll_span = Some(span);
+            } else if lex.eq_ignore_ascii_case("no_static") && self.model.no_static_span.is_none() {
+                self.model.no_static_span = Some(span);
+            }
+        }
+    }
+
+    fn option_ident_in_range(&self, from: usize, to: usize, name: &str) -> bool {
+        self.tokens[from..to.min(self.tokens.len())]
+            .iter()
+            .any(|t| t.kind == TokenKind::Ident && t.text(self.src).eq_ignore_ascii_case(name))
+    }
+
     fn record_skipped_block_opener(&mut self) {
         let tok = self.tokens[self.i].clone();
-        let lex = self.lexeme(&tok);
+        let lex = self.lexeme(&tok).to_string();
         if lex.eq_ignore_ascii_case("shock_paths") && self.model.shock_paths_span.is_none() {
             self.model.shock_paths_span = Some(tok.span);
         } else if lex.eq_ignore_ascii_case("perfect_foresight_controlled_paths")
             && self.model.perfect_foresight_controlled_paths_span.is_none()
         {
             self.model.perfect_foresight_controlled_paths_span = Some(tok.span);
+        } else if lex.eq_ignore_ascii_case("ramsey_constraints")
+            && self.model.ramsey_constraints_span.is_none()
+        {
+            self.model.ramsey_constraints_span = Some(tok.span);
         }
     }
 
@@ -2593,6 +2725,7 @@ impl Parser<'_> {
             "heteroskedastic_shocks",
             "shock_paths",
             "perfect_foresight_controlled_paths",
+            "ramsey_constraints",
             "conditional_forecast_paths",
         ];
         BLOCKS.iter().any(|kw| self.at_ident_ci(kw))
@@ -3449,5 +3582,97 @@ mod tests {
         assert_eq!(model.equations[1].tags, vec!["dynamic".to_string()]);
         assert!(model.equations[1].dynamic_tag);
         assert!(!model.equations[1].static_tag);
+    }
+
+    #[test]
+    fn model_options_use_dll_bytecode_no_static_linear() {
+        let model = parse(
+            "var y; varexo e; model(use_dll, bytecode, no_static, linear); y = e; end;",
+        );
+        assert!(model.is_linear);
+        assert!(model.use_dll_span.is_some());
+        assert!(model.no_static_span.is_some());
+        assert!(model
+            .deprecated_option_spans
+            .iter()
+            .any(|(o, _)| *o == DeprecatedOption::Bytecode));
+    }
+
+    #[test]
+    fn extended_path_periods_flag() {
+        let without = parse("var y; varexo e; model; y = e; end; extended_path;");
+        assert!(without.extended_path_span.is_some());
+        assert!(!without.extended_path_has_periods);
+        let with = parse("var y; varexo e; model; y = e; end; extended_path(periods=10);");
+        assert!(with.extended_path_span.is_some());
+        assert!(with.extended_path_has_periods);
+    }
+
+    #[test]
+    fn initval_all_values_required_and_after_endval() {
+        let req = parse(
+            "var y; varexo e; model; y = e; end; initval(all_values_required); y = 0; end;",
+        );
+        assert!(req.initval_all_values_required);
+        assert!(!req.endval_all_values_required);
+        assert!(req.initval_after_endval_span.is_none());
+        let order = parse(
+            "var y; varexo e; model; y = e; end; endval; y = 0; end; initval; y = 0; end;",
+        );
+        assert!(order.endval_block.is_some());
+        assert!(order.initval_block.is_some());
+        assert!(order.initval_after_endval_span.is_some());
+    }
+
+    #[test]
+    fn write_latex_and_run_command_spans() {
+        let model = parse(
+            "var y; varexo e; model; y = e; end; write_latex_steady_state_model; check; steady; stoch_simul; estimation; calib_smoother; perfect_foresight_setup; perfect_foresight_solver; perfect_foresight_with_expectation_errors_setup; perfect_foresight_with_expectation_errors_solver;",
+        );
+        assert!(model.write_latex_steady_state_model_span.is_some());
+        assert!(model.check_span.is_some());
+        assert!(model.steady_span.is_some());
+        assert!(model.stoch_simul_span.is_some());
+        assert!(model.estimation_span.is_some());
+        assert!(model.calib_smoother_span.is_some());
+        assert!(model.perfect_foresight_setup_span.is_some());
+        assert!(model.perfect_foresight_solver_span.is_some());
+        assert!(model.pfee_setup_span.is_some());
+        assert!(model.pfee_solver_span.is_some());
+    }
+
+    #[test]
+    fn ramsey_constraints_skipped_as_block() {
+        let model = parse(
+            "var y; varexo e; model; y = e; end; ramsey_constraints; y > 0; end; stoch_simul;",
+        );
+        assert!(model.ramsey_constraints_span.is_some());
+        assert!(model.stoch_simul_span.is_some());
+    }
+
+    #[test]
+    fn shock_stderr_keeps_expr() {
+        let model = parse(
+            "var y; varexo e; parameters rho; rho = 0.5; model; y = e; end; shocks; var e; stderr rho; end;",
+        );
+        assert_eq!(model.shock_stmts.len(), 1);
+        assert!(model.shock_stmts[0].rhs_expr.is_some());
+        assert!(model.shock_stmts[0].rhs.is_none());
+        match &model.shock_stmts[0].kind {
+            ShockKind::Var(n) => assert_eq!(model.name(*n), "e"),
+            other => panic!("expected Var, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn discretionary_instruments_option_present_vs_absent() {
+        let src = "var y; varexo e; model; y = e; end; planner_objective y; ";
+        let absent = parse(&format!("{src}discretionary_policy;"));
+        assert!(!absent.discretionary_has_instruments_option);
+        let present = parse(&format!("{src}discretionary_policy(instruments=(y));"));
+        assert!(present.discretionary_has_instruments_option);
+        let empty = parse(&format!("{src}discretionary_policy(instruments=());"));
+        assert!(empty.discretionary_has_instruments_option);
+        assert!(empty.instruments.is_empty());
     }
 }

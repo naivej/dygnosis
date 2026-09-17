@@ -30,6 +30,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 | `companions/` | related files next to a `.mod` (convention SS / run script, catalog `datafile` / `mode_file`, leftover quotes, ident helpers). Named unresolved fire W160; sibling `_steadystate.m` quiets I050. |
 | `expand/` | library `expand_report` (effective text + origin map). Not a diagnostic. |
 | `clash/` | written-clash fires (`E026`–`E028`, `E104`, `E113`, `E179`) and their quiets |
+| `d_check/` | check-class fires (`E200`–`E218`, `W200`) and their quiets |
 | `occbin/` | library OccBin structure (`occbin_constraints`, tag map, `⟂` / `_|_`, `shocks(surprise)`) and D-occbin fire files (`E170`–`E177`, `E180`–`E185`, `W170`). `e178_surprise.mod` is the E178 honesty fire (`periods`/`values`). |
 
 `e001/` files stop later checks (`analyze()` stops at a parse error). Do not use them to prove a W* warning.

@@ -26,6 +26,8 @@ pub(crate) fn check_shape(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_w050_w053(model));
     out.extend(check_w051(model));
     out.extend(check_w052(model));
+    out.extend(check_e217(model));
+    out.extend(check_e218(model));
     out
 }
 
@@ -790,4 +792,82 @@ fn fallback_span(model: &Model) -> Span {
         .map(|c| c.len_utf8())
         .unwrap_or(1);
     Span::new(0, end)
+}
+
+fn check_e217(model: &Model) -> Vec<Diagnostic> {
+    let Some(span) = model.initval_after_endval_span else {
+        return Vec::new();
+    };
+    vec![Diagnostic::new(
+        span,
+        Severity::Error,
+        "E217",
+        "an 'initval' block cannot appear after an 'endval' block",
+    )]
+}
+
+fn check_e218(model: &Model) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    if model.initval_all_values_required {
+        out.extend(missing_init_end_values(
+            model,
+            &model.initval,
+            model.initval_block.unwrap_or_else(|| fallback_span(model)),
+            "initval",
+        ));
+    }
+    if model.endval_all_values_required {
+        out.extend(missing_init_end_values(
+            model,
+            &model.endval,
+            model.endval_block.unwrap_or_else(|| fallback_span(model)),
+            "endval",
+        ));
+    }
+    out
+}
+
+fn missing_init_end_values(
+    model: &Model,
+    entries: &[crate::model::Assignment],
+    span: Span,
+    block: &str,
+) -> Vec<Diagnostic> {
+    let set: HashSet<crate::intern::Name> = entries.iter().map(|a| a.name).collect();
+    let mut out = Vec::new();
+    let missing_endo: Vec<&str> = model
+        .endogenous
+        .iter()
+        .filter(|d| !set.contains(&d.name))
+        .map(|d| model.name(d.name))
+        .collect();
+    if !missing_endo.is_empty() {
+        out.push(Diagnostic::new(
+            span,
+            Severity::Error,
+            "E218",
+            format!(
+                "You have not set the following endogenous variables in {block}: {}",
+                missing_endo.join(" ")
+            ),
+        ));
+    }
+    let missing_exo: Vec<&str> = model
+        .exogenous
+        .iter()
+        .filter(|d| !set.contains(&d.name))
+        .map(|d| model.name(d.name))
+        .collect();
+    if !missing_exo.is_empty() {
+        out.push(Diagnostic::new(
+            span,
+            Severity::Error,
+            "E218",
+            format!(
+                "You have not set the following exogenous variables in {block}: {}",
+                missing_exo.join(" ")
+            ),
+        ));
+    }
+    out
 }

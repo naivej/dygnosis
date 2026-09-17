@@ -2,8 +2,8 @@
 //!
 //! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 70
 //! codes shipped through 0.5.0, then kind `emit` / `skip` / `added`.
-//! 143 keys = 50 emit + 27 added + 66 skip. Catalog **0.5.1** D-clash Errors
-//! (E026–E028, E104, E113, E178, E179) are emit. D-check is not keys yet.
+//! 163 keys = 70 emit + 27 added + 66 skip. Catalog **0.5.1** D-clash and
+//! D-check Errors are emit.
 //! `I050` and `W042` use the recorded surface rewrites in
 //! `dev_logs/0.1/0.1.0/22-c-explain.md` (do not advertise Compute Steady State).
 
@@ -39,7 +39,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 143 keys: 50 emit + 27 added + 66 skip.
+// 163 keys: 70 emit + 27 added + 66 skip.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -257,8 +257,8 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Emit,
     }),
     ("E100", ExplainEntry {
-        title: "Optimal-policy command requires a planner_objective",
-        body: "``ramsey_model``, ``ramsey_policy``, and ``discretionary_policy`` optimise a planner's loss function. They refuse when ``planner_objective`` is missing: `A planner_objective statement must be used with a ramsey_model, a ramsey_policy, osr, or a discretionary_policy statement and vice versa`.\n\n**Fix**\n\nAdd a ``planner_objective <expression>;`` statement before the policy command.",
+        title: "planner_objective and optimal-policy commands go together",
+        body: "``planner_objective`` must appear with ``ramsey_model``, ``ramsey_policy``, ``osr``, or ``discretionary_policy``, and those commands (except ``osr``) need ``planner_objective``. They refuse either missing direction: `A planner_objective statement must be used with a ramsey_model, a ramsey_policy, osr, or a discretionary_policy statement and vice versa.`\n\n**Fix**\n\nAdd the missing ``planner_objective <expression>;``, or add a matching policy command.",
         kind: ExplainKind::Emit,
     }),
     ("E101", ExplainEntry {
@@ -408,7 +408,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W140", ExplainEntry {
         title: "Nonlinear operator in a linear model",
-        body: "The model is declared ``linear`` (``model(linear);``) but an equation applies a nonlinear operator to a variable. Examples include variable-dependent functions (such as ``log(y)`` or ``abs(e)``), products or ratios involving multiple variables (``c*k`` or ``a/y``), powers involving variables (``k^2``), and comparisons.\n\n**Fix**\n\nRemove the ``linear`` option, or rewrite the equation without the nonlinear operator.",
+        body: "The model is declared ``linear`` (``model(linear);``) but an equation applies an operator Dynare still accepts at check, such as ``log``, ``exp``, products, division, or powers, to a variable. Official refuses for ``abs`` / ``max`` / ``min`` / ``sign`` / comparisons are ``E210`` (endogenous) and ``E211`` (exogenous, non-perfect-foresight).\n\n**Fix**\n\nRemove the ``linear`` option, or rewrite the equation without the nonlinear operator.",
         kind: ExplainKind::Added,
     }),
     ("W150", ExplainEntry {
@@ -424,6 +424,106 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("W170", ExplainEntry {
         title: "Obsolete mcp complementarity tag",
         body: "A complementarity condition is written with the ``mcp`` tag and no ``⟂`` / ``_|_`` after the equation. They accept and WARN: `Specifying complementarity conditions with the 'mcp' tag is obsolete. Please consider switching to the new syntax using the perpendicular symbol.` An equation that has both forms is an Error (E180), not this Warning.\n\n**Warrant**\n\nThe editor keeps the shorter `Use ⟂ or _|_ after the equation` line instead of their longer `Please consider switching…` sentence.\n\n**Fix**\n\nWrite the condition after ``⟂`` or ``_|_`` instead of ``[mcp=…]``.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E200", ExplainEntry {
+        title: "write_latex_steady_state_model without steady_state_model",
+        body: "They refuse: `You cannot have a write_latex_steady_state_model statement without a steady_state_model block.`\n\n**Fix**\n\nAdd a ``steady_state_model`` block, or drop ``write_latex_steady_state_model``.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E201", ExplainEntry {
+        title: "No model equation with a run command",
+        body: "They refuse: `At least one model equation must be declared!` when the file has no non-``#`` model equation and a ``check``, perfect-foresight solver, PFEE solver, or stochastic command is present.\n\n**Fix**\n\nAdd at least one model equation, or drop the run command.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E202", ExplainEntry {
+        title: "discretionary_policy with Ramsey",
+        body: "They refuse: `You cannot use the discretionary_policy command when you use either ramsey_model or ramsey_policy and vice versa`.\n\n**Fix**\n\nKeep either discretionary policy or Ramsey, not both.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E203", ExplainEntry {
+        title: "ramsey_constraints without Ramsey",
+        body: "They refuse: `A ramsey_constraints block requires the presence of a ramsey_model or ramsey_policy statement`.\n\n**Fix**\n\nAdd ``ramsey_model`` or ``ramsey_policy``, or drop ``ramsey_constraints``.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E204", ExplainEntry {
+        title: "osr has both optim_weights and planner_objective",
+        body: "They refuse: `The osr statement cannot have both optim_weights and a planner_objective; they are mutually exclusive.`\n\n**Fix**\n\nKeep either ``optim_weights`` or ``planner_objective``, not both.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E205", ExplainEntry {
+        title: "Perfect-foresight and stochastic commands in the same file",
+        body: "They refuse: `A .mod file cannot contain both one of {perfect_foresight_solver, simul, perfect_foresight_with_expectation_errors_solver} and one of {stoch_simul, estimation, osr, ramsey_policy, discretionary_policy}. This is not possible: one cannot mix perfect foresight context with stochastic context in the same file.`\n\n**Fix**\n\nKeep either the perfect-foresight solver or the stochastic command, not both.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E206", ExplainEntry {
+        title: "model use_dll with bytecode",
+        body: "They refuse: `In 'model' block, 'use_dll' option is not compatible with 'bytecode'`.\n\n**Fix**\n\nDrop ``use_dll`` or drop ``bytecode``.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E207", ExplainEntry {
+        title: "no_static with a stochastic, steady, or check command",
+        body: "They refuse: `no_static option is incompatible with stoch_simul, estimation, osr, ramsey_policy, discretionary_policy, steady and check commands`.\n\n**Fix**\n\nDrop ``no_static``, or drop the incompatible command.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E208", ExplainEntry {
+        title: "[static] and [dynamic] equation counts differ",
+        body: "They refuse: `the number of equations marked [static] must be equal to the number of equations marked [dynamic]`.\n\n**Fix**\n\nGive each ``[static]`` equation a matching ``[dynamic]`` equation, or drop the tags.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E209", ExplainEntry {
+        title: "[static]/[dynamic] tags with Ramsey or discretionary policy",
+        body: "They refuse: `marking equations as [static] or [dynamic] is not possible with ramsey_model, ramsey_policy or discretionary_policy`.\n\n**Fix**\n\nDrop the tags, or drop the Ramsey / discretionary command.",
+        kind: ExplainKind::Emit,
+    }),
+    ("W200", ExplainEntry {
+        title: "Nonsmooth operator in a stochastic context",
+        body: "They WARN: `you are using a function (max, min, abs, sign) or an operator (<, >, <=, >=, ==, !=) which is unsuitable for a stochastic context; see the reference manual, section about \"Expressions\", for more details.`\n\n**Fix**\n\nRewrite without those operators, or drop the stochastic command if the file is meant to be perfect foresight.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E210", ExplainEntry {
+        title: "Nonsmooth operator on an endogenous in a linear model",
+        body: "They refuse: `you have declared your model 'linear' but you are using a function (max, min, abs, sign) or an operator (<, >, <=, >=, ==, !=) on an endogenous variable.`\n\n**Fix**\n\nDrop ``linear``, or rewrite without that operator on endogenous variables.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E211", ExplainEntry {
+        title: "Nonsmooth operator on an exogenous in a linear non-PF model",
+        body: "They refuse: `you have declared your model 'linear' but you are using a function (max, min, abs, sign) or an operator (<, >, <=, >=, ==, !=) on an exogenous variable in a non-perfect-foresight context.`\n\n**Fix**\n\nDrop ``linear``, add a perfect-foresight solver, or rewrite without that operator on exogenous variables.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E212", ExplainEntry {
+        title: "Estimated parameter used in a shock expression",
+        body: "They refuse: `some estimated parameters (…) also appear in the expressions defining the variance/covariance matrix of shocks; this is not allowed.`\n\n**Fix**\n\nUse a calibrated parameter in the shocks block, or drop that name from ``estimated_params``.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E213", ExplainEntry {
+        title: "perfect_foresight_solver before setup",
+        body: "They refuse: `A 'perfect_foresight_setup' command must come before 'perfect_foresight_solver'`.\n\n**Fix**\n\nPut ``perfect_foresight_setup;`` before ``perfect_foresight_solver;``.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E214", ExplainEntry {
+        title: "PFEE solver before PFEE setup",
+        body: "They refuse: `A 'perfect_foresight_with_expectation_errors_setup' command must come before 'perfect_foresight_with_expectation_errors_solver'`.\n\n**Fix**\n\nPut the PFEE setup command before the PFEE solver.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E215", ExplainEntry {
+        title: "discretionary_policy without instruments",
+        body: "They refuse: `discretionary_policy: the instruments option is required.`\n\n**Fix**\n\nAdd ``instruments=(…)`` on ``discretionary_policy``.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E216", ExplainEntry {
+        title: "extended_path without periods",
+        body: "They refuse: `the 'periods' option of 'extended_path' is mandatory`.\n\n**Fix**\n\nWrite ``extended_path(periods=…);``.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E217", ExplainEntry {
+        title: "initval after endval",
+        body: "They refuse: `an 'initval' block cannot appear after an 'endval' block`.\n\n**Fix**\n\nMove ``initval`` before ``endval``, or drop one of the blocks.",
+        kind: ExplainKind::Emit,
+    }),
+    ("E218", ExplainEntry {
+        title: "initval/endval all_values_required is incomplete",
+        body: "They refuse: `You have not set the following endogenous/exogenous variables in initval/endval` (four variants naming the missing symbols).\n\n**Fix**\n\nAssign every endogenous and exogenous in that block, or drop ``all_values_required``.",
         kind: ExplainKind::Emit,
     }),
     ("E186", ExplainEntry {

@@ -18,7 +18,9 @@ const MATH_BUILTINS: &[&str] = &[
 
 pub fn check_w130(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = check_ss_order(model);
-    diagnostics.extend(check_w140(model));
+    diagnostics.extend(check_static_dynamic_tags(model));
+    diagnostics.extend(check_w200(model));
+    diagnostics.extend(check_linear_ops(model));
     diagnostics.extend(check_w150(model));
     diagnostics
 }
@@ -103,36 +105,116 @@ fn ss_lhs_ident(model: &Model, eq: &Equation) -> Option<Name> {
     }
 }
 
-fn check_w140(model: &Model) -> Vec<Diagnostic> {
+const E208_MSG: &str =
+    "the number of equations marked [static] must be equal to the number of equations marked [dynamic]";
+const E209_MSG: &str = "marking equations as [static] or [dynamic] is not possible with ramsey_model, ramsey_policy or discretionary_policy";
+const W200_MSG: &str = r#"you are using a function (max, min, abs, sign) or an operator (<, >, <=, >=, ==, !=) which is unsuitable for a stochastic context; see the reference manual, section about "Expressions", for more details."#;
+const E210_MSG: &str = "you have declared your model 'linear' but you are using a function (max, min, abs, sign) or an operator (<, >, <=, >=, ==, !=) on an endogenous variable.";
+const E211_MSG: &str = "you have declared your model 'linear' but you are using a function (max, min, abs, sign) or an operator (<, >, <=, >=, ==, !=) on an exogenous variable in a non-perfect-foresight context.";
+
+fn check_static_dynamic_tags(model: &Model) -> Vec<Diagnostic> {
+    let n_static = model.equations.iter().filter(|eq| eq.static_tag).count();
+    let n_dynamic = model.equations.iter().filter(|eq| eq.dynamic_tag).count();
+    let mut diagnostics = Vec::new();
+    if n_static != n_dynamic {
+        let span = model
+            .equations
+            .iter()
+            .find(|eq| eq.static_tag || eq.dynamic_tag)
+            .map(|eq| eq.span)
+            .or(model.model_block)
+            .unwrap_or(Span { start: 0, end: 1 });
+        diagnostics.push(Diagnostic::new(span, Severity::Error, "E208", E208_MSG));
+    }
+    if n_static > 0 || n_dynamic > 0 {
+        let ramsey_or_disc = model.policy_commands.iter().any(|c| {
+            matches!(
+                c,
+                crate::model::PolicyCommand::RamseyModel
+                    | crate::model::PolicyCommand::RamseyPolicy
+                    | crate::model::PolicyCommand::DiscretionaryPolicy
+            )
+        });
+        if ramsey_or_disc {
+            let span = model
+                .policy_command_span
+                .or(model.model_block)
+                .unwrap_or(Span { start: 0, end: 1 });
+            diagnostics.push(Diagnostic::new(span, Severity::Error, "E209", E209_MSG));
+        }
+    }
+    diagnostics
+}
+
+fn check_w200(model: &Model) -> Vec<Diagnostic> {
+    if !model.is_stochastic_context() {
+        return Vec::new();
+    }
+    for eq in &model.equations {
+        if eq.is_local {
+            continue;
+        }
+        for id in [eq.lhs_expr, eq.rhs_expr].into_iter().flatten() {
+            if let Some(span) = first_nonsmooth(model, id) {
+                return vec![Diagnostic::new(
+                    span,
+                    Severity::Warning,
+                    "W200",
+                    W200_MSG,
+                )];
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn check_linear_ops(model: &Model) -> Vec<Diagnostic> {
     if !model.is_linear {
         return Vec::new();
     }
-    let mut vars: HashSet<Name> = model
-        .endogenous
+    let endo: HashSet<Name> = model.endogenous.iter().map(|d| d.name).collect();
+    let exo: HashSet<Name> = model
+        .exogenous
         .iter()
-        .chain(&model.exogenous)
         .chain(&model.deterministic_exogenous)
         .map(|d| d.name)
         .collect();
+    let mut vars: HashSet<Name> = endo.union(&exo).copied().collect();
     if vars.is_empty() {
         return Vec::new();
     }
 
+    let pf = model.is_pf_solver_context();
     let index = LineIndex::new(&model.source);
     let mut seen: HashSet<(u32, String)> = HashSet::new();
     let mut diagnostics = Vec::new();
     for eq in &model.equations {
-        if let Some((operator, span)) = equation_operator(model, eq, &vars) {
+        if let Some((kind, operator, span)) = linear_hit(model, eq, &endo, &exo, &vars) {
             let line = index.position(&model.source, eq.span.start).line;
-            if seen.insert((line, operator.clone())) {
-                diagnostics.push(Diagnostic::new(
+            if !seen.insert((line, operator.clone())) {
+                continue;
+            }
+            match kind {
+                LinearHit::EndoNonsmooth => diagnostics.push(Diagnostic::new(
+                    span,
+                    Severity::Error,
+                    "E210",
+                    E210_MSG,
+                )),
+                LinearHit::ExoNonsmooth if !pf => diagnostics.push(Diagnostic::new(
+                    span,
+                    Severity::Error,
+                    "E211",
+                    E211_MSG,
+                )),
+                LinearHit::ExoNonsmooth | LinearHit::Extra => diagnostics.push(Diagnostic::new(
                     span,
                     Severity::Warning,
                     "W140",
                     format!(
                         "Model is declared 'linear' but applies the nonlinear operator '{operator}' to a variable. Dynare requires the equations of a 'linear' model to be linear in the variables; drop 'linear' or linearise the equation."
                     ),
-                ));
+                )),
             }
         }
         if eq.is_local {
@@ -146,16 +228,108 @@ fn check_w140(model: &Model) -> Vec<Diagnostic> {
     diagnostics
 }
 
-fn equation_operator(model: &Model, eq: &Equation, vars: &HashSet<Name>) -> Option<(String, Span)> {
+enum LinearHit {
+    EndoNonsmooth,
+    ExoNonsmooth,
+    Extra,
+}
+
+fn linear_hit(
+    model: &Model,
+    eq: &Equation,
+    endo: &HashSet<Name>,
+    exo: &HashSet<Name>,
+    vars: &HashSet<Name>,
+) -> Option<(LinearHit, String, Span)> {
     for id in [eq.lhs_expr, eq.rhs_expr].into_iter().flatten() {
-        if let Some(hit) = first_special_call(model, id, vars) {
-            return Some(hit);
+        if let Some((target, span)) = first_nonsmooth_on_type(model, id, endo, exo) {
+            let kind = if target == NonsmoothOn::Endo {
+                LinearHit::EndoNonsmooth
+            } else {
+                LinearHit::ExoNonsmooth
+            };
+            return Some((kind, "nonsmooth".to_string(), span));
         }
-        if let Some(hit) = first_operator(model, id, vars) {
-            return Some(hit);
+        if let Some((operator, span)) = equation_operator_at(model, id, vars) {
+            return Some((LinearHit::Extra, operator, span));
         }
     }
     None
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NonsmoothOn {
+    Endo,
+    Exo,
+}
+
+fn first_nonsmooth(model: &Model, id: ExprId) -> Option<Span> {
+    first_nonsmooth_on_type(model, id, &HashSet::new(), &HashSet::new()).map(|(_, span)| span)
+}
+
+fn first_nonsmooth_on_type(
+    model: &Model,
+    id: ExprId,
+    endo: &HashSet<Name>,
+    exo: &HashSet<Name>,
+) -> Option<(NonsmoothOn, Span)> {
+    let expr = model.exprs.get(id);
+    match &expr.kind {
+        ExprKind::Call { callee, args } => {
+            let c = model.name(*callee);
+            if is_special(c) {
+                if endo.is_empty() && exo.is_empty() {
+                    return Some((NonsmoothOn::Endo, expr.span));
+                }
+                if args.iter().any(|a| has_variable(model, *a, endo)) {
+                    return Some((NonsmoothOn::Endo, expr.span));
+                }
+                if args.iter().any(|a| has_variable(model, *a, exo)) {
+                    return Some((NonsmoothOn::Exo, expr.span));
+                }
+            }
+            for a in args {
+                if let Some(hit) = first_nonsmooth_on_type(model, *a, endo, exo) {
+                    return Some(hit);
+                }
+            }
+            None
+        }
+        ExprKind::Binary { op, lhs, rhs } if is_nonsmooth_cmp(*op) => {
+            if endo.is_empty() && exo.is_empty() {
+                return Some((NonsmoothOn::Endo, expr.span));
+            }
+            if has_variable(model, *lhs, endo) || has_variable(model, *rhs, endo) {
+                return Some((NonsmoothOn::Endo, expr.span));
+            }
+            if has_variable(model, *lhs, exo) || has_variable(model, *rhs, exo) {
+                return Some((NonsmoothOn::Exo, expr.span));
+            }
+            first_nonsmooth_on_type(model, *lhs, endo, exo)
+                .or_else(|| first_nonsmooth_on_type(model, *rhs, endo, exo))
+        }
+        ExprKind::Unary { arg, .. } | ExprKind::Expectation { arg, .. } => {
+            first_nonsmooth_on_type(model, *arg, endo, exo)
+        }
+        ExprKind::Binary { lhs, rhs, .. } => first_nonsmooth_on_type(model, *lhs, endo, exo)
+            .or_else(|| first_nonsmooth_on_type(model, *rhs, endo, exo)),
+        ExprKind::SteadyState { .. }
+        | ExprKind::Ident { .. }
+        | ExprKind::Number
+        | ExprKind::String
+        | ExprKind::Error => None,
+    }
+}
+
+fn is_nonsmooth_cmp(op: BinOp) -> bool {
+    matches!(
+        op,
+        BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::EqEq | BinOp::Ne
+    )
+}
+
+fn equation_operator_at(model: &Model, id: ExprId, vars: &HashSet<Name>) -> Option<(String, Span)> {
+    first_special_call(model, id, vars).or_else(|| first_operator(model, id, vars))
 }
 
 fn first_special_call(model: &Model, id: ExprId, vars: &HashSet<Name>) -> Option<(String, Span)> {

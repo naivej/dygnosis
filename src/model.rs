@@ -132,24 +132,28 @@ pub struct EstimatedParam {
     pub span: Span,
 }
 
-/// One `var` / `corr` statement inside a `shocks` block (`stderr` is omitted).
+/// One `var` / `corr` / `stderr` / `skew` statement inside a `shocks` block.
 #[derive(Clone, Debug)]
 pub struct ShockStmt {
     pub kind: ShockKind,
     /// Folded RHS (`var name = expr` / `corr a, b = expr`). `None` if missing or unevaluable.
     pub rhs: Option<f64>,
-    /// From `var`/`corr` through the statement `;`.
+    /// Parsed RHS expression (`var`/`corr`/`stderr`/`skew`), including unevaluable names.
+    pub rhs_expr: Option<ExprId>,
+    /// From `var`/`corr`/`skew` through the statement `;` (includes a following `stderr`).
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
 pub enum ShockKind {
-    /// `var name` (optional `= variance`).
+    /// `var name` (optional `= variance` or following `stderr expr`).
     Var(Name),
     /// `var n1, n2, … = covariance` (two or more names, source order).
     Cov(Vec<Name>),
     /// `corr a, b = expr`.
     Corr { a: Name, b: Name },
+    /// `skew a = expr` or `skew a, b, c = expr`.
+    Skew(Vec<Name>),
 }
 
 #[derive(Clone, Debug)]
@@ -216,6 +220,8 @@ pub struct Model {
     pub simul_spans: Vec<Span>,
     /// Identifier span of the first `ramsey_policy`.
     pub ramsey_policy_span: Option<Span>,
+    /// Identifier span of the first `discretionary_policy`.
+    pub discretionary_policy_span: Option<Span>,
     /// `aim_solver` / `bytecode` identifier spans in `model(…)` and command `(…)` option lists.
     pub deprecated_option_spans: Vec<(DeprecatedOption, Span)>,
     pub exprs: ExprArena,
@@ -255,6 +261,38 @@ pub struct Model {
     pub method_of_moments_span: Option<Span>,
     /// First `sensitivity` command identifier.
     pub sensitivity_span: Option<Span>,
+    /// `use_dll` identifier in `model(…)`.
+    pub use_dll_span: Option<Span>,
+    /// `no_static` identifier in `model(…)`.
+    pub no_static_span: Option<Span>,
+    /// First `check` command identifier.
+    pub check_span: Option<Span>,
+    /// First `steady` command identifier.
+    pub steady_span: Option<Span>,
+    /// First `stoch_simul` command identifier.
+    pub stoch_simul_span: Option<Span>,
+    /// First `estimation` command identifier.
+    pub estimation_span: Option<Span>,
+    /// First `calib_smoother` command identifier.
+    pub calib_smoother_span: Option<Span>,
+    /// First `perfect_foresight_setup` identifier.
+    pub perfect_foresight_setup_span: Option<Span>,
+    /// First `perfect_foresight_with_expectation_errors_setup` identifier.
+    pub pfee_setup_span: Option<Span>,
+    /// First `write_latex_steady_state_model` identifier.
+    pub write_latex_steady_state_model_span: Option<Span>,
+    /// `periods` appears in the first `extended_path(…)` option list.
+    pub extended_path_has_periods: bool,
+    /// First `ramsey_constraints` opener.
+    pub ramsey_constraints_span: Option<Span>,
+    /// `initval(all_values_required)`.
+    pub initval_all_values_required: bool,
+    /// `endval(all_values_required)`.
+    pub endval_all_values_required: bool,
+    /// First `initval` opener that follows an `endval` block.
+    pub initval_after_endval_span: Option<Span>,
+    /// `instruments=` was present on a `discretionary_policy` (list may be empty).
+    pub discretionary_has_instruments_option: bool,
 }
 
 /// A literal `@#include` filename plus the directive's byte span.
@@ -341,6 +379,34 @@ pub enum ShocksSemiFamily {
 impl Model {
     pub fn name(&self, name: Name) -> &str {
         self.intern.get(name)
+    }
+
+    /// `ModFileStructure::isStochasticContext`, plus `ramsey_policy` (sets `stoch_simul_present`).
+    pub fn is_stochastic_context(&self) -> bool {
+        self.stoch_simul_span.is_some()
+            || self.estimation_span.is_some()
+            || self.policy_commands.contains(&PolicyCommand::Osr)
+            || self
+                .policy_commands
+                .contains(&PolicyCommand::DiscretionaryPolicy)
+            || self.calib_smoother_span.is_some()
+            || self.identification_span.is_some()
+            || self.method_of_moments_span.is_some()
+            || self.sensitivity_span.is_some()
+            || self.extended_path_span.is_some()
+            || self.ramsey_policy_span.is_some()
+    }
+
+    /// PF/PFEE **solver** context (`simul` counts). Setup alone does not.
+    pub fn is_pf_solver_context(&self) -> bool {
+        self.perfect_foresight_solver_span.is_some()
+            || self.pfee_solver_span.is_some()
+            || !self.simul_spans.is_empty()
+    }
+
+    /// Non-`#` model equations, including `[static]`.
+    pub fn non_local_equation_count(&self) -> usize {
+        self.equations.iter().filter(|eq| !eq.is_local).count()
     }
 
     /// Identifier refs in `eq`, walking `lhs_expr` then `rhs_expr`.

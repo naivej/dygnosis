@@ -2367,7 +2367,8 @@
     {
       "id": "w100_disc",
       "codes": [
-        "E100"
+        "E100",
+        "E215"
       ],
       "kind": "fire",
       "package": "est",
@@ -2381,24 +2382,24 @@
       "codes": [
         "E100"
       ],
-      "kind": "quiet",
+      "kind": "fire",
       "package": "est",
       "fixture": "tests/fixtures/w100/w100_planner.mod",
       "source": "w100.rs::w100_planner_objective_alone",
       "cluster": "w100/w100_planner.mod",
-      "notes": "planner_objective alone"
+      "notes": "planner_objective without a policy command"
     },
     {
       "id": "w100_disc_ok",
       "codes": [
-        "E100"
+        "E215"
       ],
-      "kind": "quiet",
+      "kind": "fire",
       "package": "est",
       "fixture": "tests/fixtures/w100/w100_disc_ok.mod",
       "source": "w100.rs::w100_disc_ok",
       "cluster": "w100/w100_disc_ok.mod",
-      "notes": "discretionary_policy with objective"
+      "notes": "discretionary_policy with planner, no instruments option"
     },
     {
       "id": "w100_w101",
@@ -3585,7 +3586,7 @@
     {
       "id": "w140_abs",
       "codes": [
-        "W140"
+        "E210"
       ],
       "kind": "fire",
       "package": "w130",
@@ -3597,7 +3598,7 @@
     {
       "id": "w140_abs_upper",
       "codes": [
-        "W140"
+        "E210"
       ],
       "kind": "fire",
       "package": "w130",
@@ -3609,7 +3610,7 @@
     {
       "id": "w140_max",
       "codes": [
-        "W140"
+        "E210"
       ],
       "kind": "fire",
       "package": "w130",
@@ -3621,7 +3622,7 @@
     {
       "id": "w140_min",
       "codes": [
-        "W140"
+        "E210"
       ],
       "kind": "fire",
       "package": "w130",
@@ -3633,7 +3634,7 @@
     {
       "id": "w140_sign",
       "codes": [
-        "W140"
+        "E210"
       ],
       "kind": "fire",
       "package": "w130",
@@ -3717,7 +3718,7 @@
     {
       "id": "w140_cmp",
       "codes": [
-        "W140"
+        "E210"
       ],
       "kind": "fire",
       "package": "w130",
@@ -3777,19 +3778,20 @@
     {
       "id": "w140_local_abs",
       "codes": [
-        "W140"
+        "E210"
       ],
       "kind": "fire",
       "package": "w130",
       "fixture": "tests/fixtures/w130/w140_local.mod",
       "source": "w130.rs::w140_local_abs",
       "cluster": "w130/w140_local.mod",
-      "notes": "# local abs(x) still W140"
+      "notes": "# local abs(x) is E210"
     },
     {
       "id": "w140_two_eqs",
       "codes": [
-        "W140"
+        "W140",
+        "E210"
       ],
       "kind": "fire",
       "package": "w130",
@@ -3938,7 +3940,7 @@
       "kind": "documented-only",
       "package": "other",
       "fixture": "",
-      "source": "explain.rs::known_codes_is_exactly_the_143_rust_keys",
+      "source": "explain.rs::known_codes_is_exactly_the_163_rust_keys",
       "cluster": "",
       "notes": "in known_codes / explain; nothing emits it yet"
     },
@@ -4673,6 +4675,226 @@
       "source": "d_clash.rs::e113_shock_paths_alone_is_quiet",
       "cluster": "clash/e113_shock_paths_alone_quiet.mod",
       "notes": "shock_paths without shocks/mshocks/endval/controlled paths"
+    },
+    {
+      "id": "e200_write_latex",
+      "codes": ["E200"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e200_write_latex.mod",
+      "source": "d_check.rs::e200_write_latex_without_ssm",
+      "cluster": "d_check/e200_write_latex.mod",
+      "notes": "write_latex_steady_state_model without steady_state_model"
+    },
+    {
+      "id": "e201_zero_eq",
+      "codes": ["E201"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e201_zero_eq.mod",
+      "source": "d_check.rs::e201_zero_eq_with_check",
+      "cluster": "d_check/e201_zero_eq.mod",
+      "notes": "only # local then check"
+    },
+    {
+      "id": "e201_empty_quiet",
+      "codes": ["E201"],
+      "kind": "quiet",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e201_empty_quiet.mod",
+      "source": "d_check.rs::e201_empty_model_without_run_is_quiet",
+      "cluster": "d_check/e201_empty_quiet.mod",
+      "notes": "only # local, no run command"
+    },
+    {
+      "id": "e202_disc_ramsey",
+      "codes": ["E202"],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/e202_disc_ramsey.mod",
+      "source": "w100.rs::e202_disc_and_ramsey",
+      "cluster": "w100/e202_disc_ramsey.mod",
+      "notes": "discretionary_policy and ramsey_model together"
+    },
+    {
+      "id": "e203_ramsey_constraints",
+      "codes": ["E203"],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/e203_ramsey_constraints.mod",
+      "source": "w100.rs::e203_ramsey_constraints_without_ramsey",
+      "cluster": "w100/e203_ramsey_constraints.mod",
+      "notes": "ramsey_constraints without ramsey_model/policy"
+    },
+    {
+      "id": "e204_osr_both",
+      "codes": ["E204"],
+      "kind": "fire",
+      "package": "est",
+      "fixture": "tests/fixtures/w100/e204_osr_both.mod",
+      "source": "w100.rs::e204_osr_both_not_e103",
+      "cluster": "w100/e204_osr_both.mod",
+      "notes": "osr with both optim_weights and planner_objective"
+    },
+    {
+      "id": "e205_pf_stoch",
+      "codes": ["E205"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e205_pf_stoch.mod",
+      "source": "d_check.rs::e205_pf_and_stoch",
+      "cluster": "d_check/e205_pf_stoch.mod",
+      "notes": "perfect_foresight_setup+solver and stoch_simul"
+    },
+    {
+      "id": "e206_use_dll_bytecode",
+      "codes": ["E206"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e206_use_dll_bytecode.mod",
+      "source": "d_check.rs::e206_use_dll_bytecode",
+      "cluster": "d_check/e206_use_dll_bytecode.mod",
+      "notes": "model use_dll and bytecode"
+    },
+    {
+      "id": "e207_no_static",
+      "codes": ["E207"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e207_no_static.mod",
+      "source": "d_check.rs::e207_no_static",
+      "cluster": "d_check/e207_no_static.mod",
+      "notes": "no_static with check/stoch"
+    },
+    {
+      "id": "e208_static_dynamic",
+      "codes": ["E208"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e208_static_dynamic.mod",
+      "source": "d_check.rs::e208_static_dynamic_count",
+      "cluster": "d_check/e208_static_dynamic.mod",
+      "notes": "[static] count != [dynamic] count"
+    },
+    {
+      "id": "e209_tags_ramsey",
+      "codes": ["E209"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e209_tags_ramsey.mod",
+      "source": "d_check.rs::e209_tags_with_ramsey",
+      "cluster": "d_check/e209_tags_ramsey.mod",
+      "notes": "[static]/[dynamic] with ramsey_model"
+    },
+    {
+      "id": "w200_stoch_abs",
+      "codes": ["W200"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/w200_stoch_abs.mod",
+      "source": "d_check.rs::w200_stoch_abs",
+      "cluster": "d_check/w200_stoch_abs.mod",
+      "notes": "stoch_simul with abs"
+    },
+    {
+      "id": "e210_linear_abs",
+      "codes": ["E210"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e210_linear_abs.mod",
+      "source": "d_check.rs::e210_linear_abs_endo",
+      "cluster": "d_check/e210_linear_abs.mod",
+      "notes": "model(linear) abs on endogenous; honesty primary"
+    },
+    {
+      "id": "e211_linear_exo",
+      "codes": ["E211"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e211_linear_exo.mod",
+      "source": "d_check.rs::e211_linear_abs_exo",
+      "cluster": "d_check/e211_linear_exo.mod",
+      "notes": "model(linear) abs on exogenous, no PF solver"
+    },
+    {
+      "id": "w140_linear_log",
+      "codes": ["W140"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/w140_linear_log.mod",
+      "source": "d_check.rs::w140_log_stays_warning",
+      "cluster": "d_check/w140_linear_log.mod",
+      "notes": "model(linear) log stays added Warning"
+    },
+    {
+      "id": "e212_estimated_shock",
+      "codes": ["E212"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e212_estimated_shock.mod",
+      "source": "d_check.rs::e212_estimated_in_shock_expr",
+      "cluster": "d_check/e212_estimated_shock.mod",
+      "notes": "estimated parameter in shock stderr expression"
+    },
+    {
+      "id": "e213_pf_order",
+      "codes": ["E213"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e213_pf_order.mod",
+      "source": "d_check.rs::e213_solver_before_setup",
+      "cluster": "d_check/e213_pf_order.mod",
+      "notes": "perfect_foresight_solver before setup"
+    },
+    {
+      "id": "e214_pfee_order",
+      "codes": ["E214"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e214_pfee_order.mod",
+      "source": "d_check.rs::e214_pfee_solver_before_setup",
+      "cluster": "d_check/e214_pfee_order.mod",
+      "notes": "PFEE solver before PFEE setup"
+    },
+    {
+      "id": "e216_extended_path",
+      "codes": ["E216"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e216_extended_path.mod",
+      "source": "d_check.rs::e216_extended_path_periods",
+      "cluster": "d_check/e216_extended_path.mod",
+      "notes": "extended_path without periods"
+    },
+    {
+      "id": "e217_initval_after_endval",
+      "codes": ["E217"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e217_initval_after_endval.mod",
+      "source": "d_check.rs::e217_initval_after_endval",
+      "cluster": "d_check/e217_initval_after_endval.mod",
+      "notes": "initval after endval"
+    },
+    {
+      "id": "e218_all_values",
+      "codes": ["E218"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e218_all_values.mod",
+      "source": "d_check.rs::e218_all_values_required",
+      "cluster": "d_check/e218_all_values.mod",
+      "notes": "initval(all_values_required) missing exogenous"
+    },
+    {
+      "id": "e218_histval_quiet",
+      "codes": ["E218"],
+      "kind": "quiet",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/e218_histval_quiet.mod",
+      "source": "d_check.rs::e218_histval_does_not_fire",
+      "cluster": "d_check/e218_histval_quiet.mod",
+      "notes": "histval(all_values_required) is skip 0.6"
     }
   ]
 }
