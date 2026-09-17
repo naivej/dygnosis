@@ -1,7 +1,7 @@
 //! Thin Dynare analysis library.
 //!
-//! Scope follows the 0.5.0 cut line in `dev_logs/0.5/0.5.0/masterplan.md`
-//! (occasional constraints / OccBin).
+//! Scope follows the 0.5.1 cut line in `dev_logs/0.5/0.5.1/masterplan.md`
+//! (second preprocessor: written clash and check-class refuses on the file you edit).
 //! Dynare compute (steady state, BK, identification, MATLAB) stays out.
 
 pub mod auto_fix;

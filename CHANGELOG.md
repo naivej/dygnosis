@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5.1
+- **Second preprocessor**
+  - Diagnostics while typing and on save come from dygnosis only. It no longer runs the official Dynare preprocessor or overlays that run as `P###`.
+  - Dynare’s preprocessor is still the ground truth for refuse/warn before MATLAB. Honesty tests spawn Dynare 7.1 when it is installed; the product does not.
+- **Written clash**
+  - Errors Dynare refuses only after transform, when the file you edit is enough to decide: `shocks(surprise)` without `occbin_constraints` (`E178`), `occbin_constraints` with an incompatible command (`E179`), `varexo_det` clashes, two `planner_objective` statements with Ramsey, `shock_paths` mixed with `shocks` / `mshocks` / `endval` / controlled paths.
+- **Check-class**
+  - Errors Dynare refuses at check on syntax we already parse: empty model with a run command, perfect-foresight mixed with stochastic context, `model(linear)` nonsmooth ops, policy clashes, solver before setup, `initval`/`endval` order and `all_values_required`.
+  - Warning Dynare also emits: nonsmooth ops in a stochastic context (`W200`). Isolated `log` in `model(linear)` stays extra Warning (`W140`).
+- **Explain**
+  - `dygnosis explain --list` marks each code **emit**, **skip**, or **added**.
+  - Include-cycle is extra Warning (`W062`), not Error.
+
 ## v0.5.0
 - **Occasional constraints (OccBin)**
   - Parse `occbin_constraints` (name / bind / relax / error_*).

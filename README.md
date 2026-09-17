@@ -1,16 +1,18 @@
 ![dygnosis](media/logo_s.png) provides language support for Dynare. It parses the `.mod`, reports model diagnostics, and powers editor/agent features (hover, rename, format, outline, …).
 
-- It adds new checks beyond the Dynare preprocessor.
-- Overlap with the preprocessor is intentional when those checks power an editor feature or help while typing.
-- It does not build in every preprocessor check; it invokes the preprocessor instead.
-
-The Dynare preprocessor is searched in the following order:
-
-1. Editor setting (LSP only) — `preprocessorPath`
-2. Environment — `DYNARE_PREPROCESSOR` (full path to the executable)
-3. Common installs
-
 *This project is under active development.*
+
+## Why not the Dynare preprocessor
+
+Dynare’s preprocessor reads a `.mod` and writes MATLAB or Octave code. Dygnosis is a second preprocessor for the same language. It stops before MATLAB. It does not run Dynare’s preprocessor.
+
+**Difference.** The model in the editor is the `.mod` you write. Before MATLAB, Dynare’s preprocessor rewrites equations: it adds helper variables, inlines `#` locals, and substitutes constants. That rewritten form is not a file you edit, and Dygnosis does not show it. Dygnosis adds checks Dynare does not do, and it reports problems while you type.
+
+**Parity.** Dynare’s preprocessor is still the ground truth for whether a file is refused or warned before MATLAB. Dygnosis does not emit an Error on a file Dynare would accept at that point.
+
+**Limitation.** Some Dynare refusals exist only after that rewrite. If Dygnosis cannot point at the original `.mod`, it stays silent.
+
+`dygnosis explain --list` lists every documented code as **emit** (we report it), **skip** (documented, not emitted yet), or **added** (ours; Dynare never reports it). `dygnosis explain <CODE>` prints help for one code.
 
 ## How to use
 
@@ -21,7 +23,7 @@ The Dynare preprocessor is searched in the following order:
 | `dygnosis check <file.mod>` | Full diagnostics, then exit |
 | `dygnosis check <dir>` | Recurse `*.mod` (skip `+` folders); one summary line; exit 1 on errors, not warnings |
 | `dygnosis explain <CODE>` | Built-in help for a diagnostic code |
-| `dygnosis explain --list` | List all documented codes |
+| `dygnosis explain --list` | List documented codes (emit / skip / added) |
 | `dygnosis mcp` | Start the MCP server (stdio) |
 | `dygnosis` | Start the language server (stdio) |
 | `dygnosis --tcp` | Language server over TCP (debug only; default `127.0.0.1:2087`) |
@@ -37,7 +39,7 @@ The Dynare preprocessor is searched in the following order:
 - Code actions and auto-fix where a fix is stored
 - Folding, inlay hints, and links into `@#include` files and companions (e.g. `FILENAME_steadystate.m`)
 - Show the expanded model (`dynare/showEffectiveModel`): effective text after `@#if` / `@#for` / `@{…}` and includes, with origin jump from each counted equation
-- Quick intelligence while typing, full diagnostics on save
+- Diagnostics while typing and on save
 
 ### Agent tools (MCP)
 
@@ -52,7 +54,7 @@ The Dynare preprocessor is searched in the following order:
 | `dynare_rename` | Rename a name |
 | `dynare_auto_fix` | Stored fixes, one file |
 | `dynare_explain` | Help for a diagnostic code |
-| `dynare_list_diagnostic_codes` | Documented codes |
+| `dynare_list_diagnostic_codes` | Documented codes (emit / skip / added) |
 | `dynare_list_options` | Options for a command (including the `occbin_constraints` block) |
 | `dynare_equations` | Equations with lhs, rhs, timing, tags, complementarity, origin, and the equation-count gap |
 | `dynare_related_files` | Includes and companions for the active `.mod` |
