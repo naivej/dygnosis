@@ -73,20 +73,16 @@ fn has_ramsey(model: &Model) -> bool {
 }
 
 fn e179_span(model: &Model) -> Option<Span> {
-    if model.policy_commands.contains(&PolicyCommand::Osr) {
-        return model
-            .policy_command_span
-            .or(model.occbin_constraints_blocks.first().copied());
-    }
-    if has_ramsey(model) {
-        return model
-            .policy_command_span
-            .or(model.occbin_constraints_blocks.first().copied());
-    }
-    if model
-        .policy_commands
-        .contains(&PolicyCommand::DiscretionaryPolicy)
-    {
+    let policy_clash = model.policy_commands.iter().any(|c| {
+        matches!(
+            c,
+            PolicyCommand::Osr
+                | PolicyCommand::RamseyModel
+                | PolicyCommand::RamseyPolicy
+                | PolicyCommand::DiscretionaryPolicy
+        )
+    });
+    if policy_clash {
         return model
             .policy_command_span
             .or(model.occbin_constraints_blocks.first().copied());
