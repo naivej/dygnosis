@@ -3,12 +3,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use dygnosis::preprocessor::{
-    find_preprocessor, find_preprocessor_from, parse_preprocessor_output, reconcile_diagnostics,
-    rewrite_supplied_absolute_includes, run_preprocessor, run_preprocessor_structured_with_finder,
-    windows_common_candidates, PreprocessorResult, MISSING_BINARY_MESSAGE,
+    find_preprocessor, find_preprocessor_from, parse_preprocessor_output,
+    rewrite_supplied_absolute_includes, run_preprocessor, windows_common_candidates,
 };
 use dygnosis::span::LineIndex;
-use dygnosis::{check_file, Diagnostic, Severity};
+use dygnosis::{check_file, Severity};
 
 fn copilot_mod(archive_dir: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -51,43 +50,6 @@ fn temp_dir(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!("dygnosis-pp-{tag}-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
-}
-
-fn diag(code: &str, severity: Severity) -> Diagnostic {
-    Diagnostic::new(
-        dygnosis::span::Span::new(0, 1),
-        severity,
-        code,
-        format!("{code} message"),
-    )
-}
-
-fn preproc(success: bool, codes: &[&str]) -> PreprocessorResult {
-    preproc_diags(
-        success,
-        codes
-            .iter()
-            .map(|c| {
-                let sev = if *c == "P000" {
-                    Severity::Warning
-                } else {
-                    Severity::Error
-                };
-                diag(c, sev)
-            })
-            .collect(),
-    )
-}
-
-fn preproc_diags(success: bool, diagnostics: Vec<Diagnostic>) -> PreprocessorResult {
-    PreprocessorResult {
-        success,
-        diagnostics,
-        raw_stdout: String::new(),
-        raw_stderr: String::new(),
-        path: PathBuf::from("dynare-preprocessor"),
-        exit_code: Some(if success { 0 } else { 1 }),
-    }
 }
 
 fn pad_lines(n: usize, width: usize) -> String {
@@ -255,133 +217,6 @@ fn parse_p000_timeout_message() {
         "Dynare preprocessor timed out after 1s"
     );
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn structured_missing_binary_via_empty_finder() {
-    let value =
-        run_preprocessor_structured_with_finder("var y;\n", None, Duration::from_secs(30), || None);
-    assert_eq!(value["success"], false);
-    assert_eq!(value["message"], MISSING_BINARY_MESSAGE);
-    assert_eq!(value["diagnostics"], serde_json::json!([]));
-}
-
-#[test]
-fn reconcile_none_unchanged() {
-    let own = vec![
-        diag("E001", Severity::Error),
-        diag("W010", Severity::Warning),
-    ];
-    let out = reconcile_diagnostics(&own, None);
-    assert_eq!(
-        out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
-        ["E001", "W010"]
-    );
-}
-
-#[test]
-fn reconcile_success_drops_error_keeps_warning() {
-    let own = vec![
-        diag("E001", Severity::Error),
-        diag("W010", Severity::Warning),
-    ];
-    let pre = preproc(true, &[]);
-    let out = reconcile_diagnostics(&own, Some(&pre));
-    assert_eq!(
-        out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
-        ["W010"]
-    );
-}
-
-#[test]
-fn reconcile_accept_keeps_extra_warnings_and_same_ground_if_they_did_not_warn() {
-    let own = vec![
-        diag("E001", Severity::Error),
-        diag("W013", Severity::Warning),
-        diag("W010", Severity::Warning),
-        diag("W022", Severity::Warning),
-    ];
-    let pre = preproc(true, &[]);
-    let out = reconcile_diagnostics(&own, Some(&pre));
-    assert_eq!(
-        out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
-        ["W013", "W010", "W022"]
-    );
-}
-
-#[test]
-fn reconcile_accept_hides_same_ground_warning_when_they_warned() {
-    let own = vec![
-        diag("E001", Severity::Error),
-        diag("W013", Severity::Warning),
-        diag("W010", Severity::Warning),
-        diag("W022", Severity::Warning),
-    ];
-    let pre = preproc_diags(true, vec![diag("P001", Severity::Warning)]);
-    let out = reconcile_diagnostics(&own, Some(&pre));
-    assert_eq!(
-        out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
-        ["W013", "W010", "P001"]
-    );
-}
-
-#[test]
-fn reconcile_accept_drops_every_own_error() {
-    let own = vec![
-        diag("E001", Severity::Error),
-        diag("E021", Severity::Error),
-        diag("W013", Severity::Warning),
-    ];
-    let pre = preproc(true, &[]);
-    let out = reconcile_diagnostics(&own, Some(&pre));
-    assert!(
-        out.iter().all(|d| d.severity != Severity::Error),
-        "no own Error remains on accept, got {:?}",
-        out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-    );
-    assert!(out.iter().any(|d| d.code == "W013"));
-}
-
-#[test]
-fn reconcile_refuse_drops_same_ground_errors_keeps_extra_warnings() {
-    let own = vec![
-        diag("E001", Severity::Error),
-        diag("E021", Severity::Error),
-        diag("W013", Severity::Warning),
-        diag("W070", Severity::Warning),
-        diag("W056", Severity::Warning),
-    ];
-    let pre = preproc(false, &["P001"]);
-    let out = reconcile_diagnostics(&own, Some(&pre));
-    assert_eq!(
-        out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
-        ["W013", "W070", "W056", "P001"]
-    );
-}
-
-#[test]
-fn reconcile_reject_drops_e001() {
-    let own = vec![
-        diag("E001", Severity::Error),
-        diag("W070", Severity::Warning),
-    ];
-    let pre = preproc(false, &["P001"]);
-    let out = reconcile_diagnostics(&own, Some(&pre));
-    assert_eq!(
-        out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
-        ["W070", "P001"]
-    );
-}
-
-#[test]
-fn reconcile_only_p000_keeps_own() {
-    let own = vec![diag("E001", Severity::Error)];
-    let pre = preproc(false, &["P000"]);
-    let out = reconcile_diagnostics(&own, Some(&pre));
-    assert_eq!(
-        out.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
-        ["E001", "P000"]
-    );
 }
 
 #[test]

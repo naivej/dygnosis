@@ -1,7 +1,7 @@
 mod check_walk;
 
 use clap::{Parser, Subcommand};
-use dygnosis::{check_file, format_check_lines, maybe_run_and_reconcile, Severity, VERSION};
+use dygnosis::{check_file, format_check_lines, Severity, VERSION};
 use std::path::Path;
 
 #[derive(Parser)]
@@ -156,8 +156,7 @@ fn process_target(path: &str) -> FileResult {
         }
     };
     let abs_path = abs_path_for_workspace(path);
-    let own = check_file(&text, &abs_path);
-    let diags = maybe_run_and_reconcile(own, &text, Path::new(&abs_path).parent(), None);
+    let diags = check_file(&text, &abs_path);
     print!("{}", format_check_lines(path, &diags, &text));
     FileResult::Printed {
         errors: diags

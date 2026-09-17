@@ -24,10 +24,6 @@ use crate::model::Model;
 use crate::model_diff::compare_models;
 use crate::model_info::{classify_variable_timing, TimingClass};
 use crate::parser::{normalize_newlines, parse};
-use crate::preprocessor::{
-    find_preprocessor, maybe_run_and_reconcile, reconcile_diagnostics, run_workspace_preprocessor,
-    DEFAULT_TIMEOUT,
-};
 use crate::refs::{is_legal_ident, occurrences, rename_in_text};
 use crate::span::{LineIndex, Span};
 use crate::workspace::Workspace;
@@ -153,7 +149,7 @@ fn overlay_files(
     workspace_files
 }
 
-/// `analyze` / `check_in_workspace`, then reconcile when the binary is found.
+/// `analyze` / `check_in_workspace` only. Product MCP does not spawn Dynare.
 ///
 /// No map: `file_content` is the source. With a nonempty map: `active_file` must
 /// be a key in `files` or the result is `[]`; `file_content` overwrites that key.
@@ -163,8 +159,7 @@ pub fn dynare_diagnose(
     files: Option<&HashMap<String, String>>,
 ) -> Vec<McpDiagnostic> {
     let Some(files) = nonempty_map(files) else {
-        let own = analyze(&parse(file_content));
-        let diags = maybe_run_and_reconcile(own, file_content, None, None);
+        let diags = analyze(&parse(file_content));
         return diagnostics_to_json(file_content, &diags);
     };
     let Some(active) = active_file.filter(|a| files.contains_key(*a)) else {
@@ -183,14 +178,7 @@ fn diagnose_in_workspace(active_file: &str, files: &HashMap<String, String>) -> 
         ws.update_document(name, content);
     }
     let own = check_in_workspace(&mut ws, active_file);
-    let diags = match find_preprocessor(None) {
-        Some(pp) => {
-            let pre = run_workspace_preprocessor(active_file, files, &pp, DEFAULT_TIMEOUT);
-            reconcile_diagnostics(&own, Some(&pre))
-        }
-        None => own,
-    };
-    diagnostics_to_json(text, &diags)
+    diagnostics_to_json(text, &own)
 }
 
 /// Timing lists and counts from the equation AST, plus ParseSummary flags.

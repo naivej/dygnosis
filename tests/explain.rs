@@ -7,7 +7,7 @@ const RUST_CODES: &[&str] = &[
     "E001", "E020", "E021", "E023", "E024", "E025", "E030", "E058", "E059", "E060", "E061", "E062",
     "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E111", "E130", "E170",
     "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E180", "E181", "E182",
-    "E183", "E184", "E185", "E999", "I050", "P000", "W010", "W011", "W012", "W013", "W020", "W022",
+    "E183", "E184", "E185", "E999", "I050", "W010", "W011", "W012", "W013", "W020", "W022",
     "W031", "W042", "W051", "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W070", "W091",
     "W092", "W094", "W102", "W110", "W112", "W120", "W121", "W122", "W131", "W140", "W150", "W160",
     "W170",
@@ -59,9 +59,9 @@ fn stderr_text(output: &std::process::Output) -> String {
 }
 
 #[test]
-fn known_codes_is_exactly_the_71_rust_keys() {
+fn known_codes_is_exactly_the_70_rust_keys() {
     assert_eq!(known_codes(), RUST_CODES);
-    assert_eq!(known_codes().len(), 71);
+    assert_eq!(known_codes().len(), 70);
 }
 
 #[test]
@@ -127,23 +127,18 @@ fn w042_matches_recorded_rewrite() {
 }
 
 #[test]
-fn p_digit_codes_route_to_p000() {
-    let p000 = explain("P000").unwrap();
-    assert_eq!(explain("P001").unwrap(), p000);
-    assert_eq!(explain("P123").unwrap(), p000);
-    assert_eq!(explain("p001").unwrap(), p000);
-    assert_eq!(explain("p000").unwrap(), p000);
-
-    let p001 = render_markdown("P001").unwrap();
-    assert_eq!(p001, expected_markdown("P001.md"));
-    assert!(p001.starts_with("### P001: "));
-    assert!(p001.contains(p000.body));
-    assert_eq!(
-        render_markdown("P000").unwrap(),
-        format!("### P000: {}\n\n{}\n", p000.title, p000.body)
-    );
-    assert!(render_markdown("p001").unwrap().starts_with("### p001: "));
-    assert!(!known_codes().contains(&"P001"));
+fn p_codes_are_unknown() {
+    for code in ["P000", "P001", "P123", "p001", "p000"] {
+        assert!(explain(code).is_none(), "{code} should be unknown");
+        assert!(
+            render_markdown(code).is_none(),
+            "{code} should have no markdown"
+        );
+        assert!(
+            !known_codes().iter().any(|c| c.eq_ignore_ascii_case(code)),
+            "{code} must not be a catalog key"
+        );
+    }
 }
 
 #[test]
@@ -167,7 +162,7 @@ fn cli_explain_known_code() {
 
 #[test]
 fn cli_explain_unknown_code() {
-    for code in ["E040", "DYNR", "W071", "E010"] {
+    for code in ["E040", "DYNR", "W071", "E010", "P001"] {
         let output = dygnosis().args(["explain", code]).output().unwrap();
         assert_eq!(output.status.code(), Some(1), "{code}");
         let stderr = stderr_text(&output);
@@ -208,7 +203,7 @@ fn cli_explain_list() {
         entries.push((code, title));
         i += 1;
     }
-    assert_eq!(entries.len(), 71);
+    assert_eq!(entries.len(), 70);
     assert_eq!(
         entries.iter().map(|(c, _)| *c).collect::<Vec<_>>(),
         RUST_CODES
@@ -235,7 +230,7 @@ fn cli_explain_list() {
     );
     assert_eq!(
         lines.get(i + 1).copied(),
-        Some("71 codes. Run `dygnosis explain <CODE>` for details.")
+        Some("70 codes. Run `dygnosis explain <CODE>` for details.")
     );
     assert!(!stdout.contains("python_dynare_lsp"));
     assert!(!stdout.contains("DYNR"));
@@ -250,11 +245,3 @@ fn cli_explain_missing_code_lists() {
     assert_eq!(listed.stdout, missing.stdout);
 }
 
-#[test]
-fn cli_explain_p001_keeps_caller_heading() {
-    let output = dygnosis().args(["explain", "P001"]).output().unwrap();
-    assert_eq!(output.status.code(), Some(0));
-    let stdout = stdout_text(&output);
-    assert_eq!(stdout, expected_markdown("P001.md") + "\n");
-    assert!(stdout.starts_with("### P001: "));
-}

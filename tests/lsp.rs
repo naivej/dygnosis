@@ -458,20 +458,17 @@ async fn did_save_reanalyzes() {
             .await
             .expect("pull after save"),
     );
-    if dygnosis::find_preprocessor(None).is_some() {
-        assert!(
-            items.iter().any(
-                |d| is_p_digits(&diag_code(d)) && d.severity == Some(DiagnosticSeverity::ERROR)
-            ),
-            "didSave with preprocessor should publish a P-digit ERROR; got {:?}",
-            items.iter().map(diag_code).collect::<Vec<_>>()
-        );
-    } else {
-        assert!(
-            items.iter().any(|d| diag_code(d) == "E001"),
-            "didSave mutation should publish E001"
-        );
-    }
+    assert_thin_codes(&items);
+    assert!(
+        items.iter().any(|d| diag_code(d) == "E001"),
+        "didSave mutation should publish own E001 even when the binary is present; got {:?}",
+        items.iter().map(diag_code).collect::<Vec<_>>()
+    );
+    assert!(
+        !items.iter().any(|d| is_p_digits(&diag_code(d))),
+        "didSave must stay own-only; got {:?}",
+        items.iter().map(diag_code).collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]
@@ -1419,11 +1416,11 @@ fn initialize_capabilities_wave_c() {
         .expect("executeCommand")
         .commands
         .clone();
-    assert_eq!(commands.len(), 4, "commands: {commands:?}");
+    assert_eq!(commands.len(), 3, "commands: {commands:?}");
     assert!(commands.contains(&"dynare/explainDiagnostic".into()));
     assert!(commands.contains(&"dynare/compareModels".into()));
-    assert!(commands.contains(&"dynare/runPreprocessor".into()));
     assert!(commands.contains(&"dynare/showEffectiveModel".into()));
+    assert!(!commands.contains(&"dynare/runPreprocessor".into()));
     assert!(!commands.iter().any(|c| c.contains("computeSteadyState")));
     assert!(!commands.iter().any(|c| c.contains("runDynare")));
 
@@ -2072,19 +2069,13 @@ async fn code_lens_structure_summary_no_out() {
         joined.contains("endogenous") && joined.contains("varexo"),
         "lenses: {joined}"
     );
-    let pre = lenses
-        .iter()
-        .find(|l| {
+    assert!(
+        !lenses.iter().any(|l| {
             l.command
                 .as_ref()
                 .is_some_and(|c| c.command == "dynare/runPreprocessor")
-        })
-        .expect("runPreprocessor lens");
-    let pre_cmd = pre.command.as_ref().unwrap();
-    assert_eq!(pre_cmd.title, "Run preprocessor");
-    assert_eq!(
-        pre_cmd.arguments.as_ref(),
-        Some(&vec![serde_json::json!({"uri": uri.as_str()})])
+        }),
+        "runPreprocessor must not be a code lens; titles: {joined}"
     );
     for bad in [
         "Compute Steady State",
@@ -2349,35 +2340,6 @@ async fn call_hierarchy_prepare_on_endogenous() {
     assert!(
         outgoing.iter().any(|c| c.to.name == "k"),
         "outgoing missing k: {outgoing:?}"
-    );
-}
-
-#[tokio::test]
-async fn run_preprocessor_command_trend_success() {
-    let Some(_) = dygnosis::find_preprocessor(None) else {
-        return;
-    };
-    let text = read_mod("trend_rbc_gov_inv");
-    let uri = archive_url("trend_rbc_gov_inv");
-    let (service, _socket) = new_service();
-    service
-        .inner()
-        .did_open(open_params(uri.clone(), text, 1))
-        .await;
-    let value = service
-        .inner()
-        .execute_command(ExecuteCommandParams {
-            command: "dynare/runPreprocessor".into(),
-            arguments: vec![serde_json::json!({"uri": uri.as_str()})],
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .expect("runPreprocessor rpc")
-        .expect("payload");
-    assert_eq!(
-        value.get("success").and_then(|v| v.as_bool()),
-        Some(true),
-        "payload: {value}"
     );
 }
 

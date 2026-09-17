@@ -1,6 +1,6 @@
 //! Diagnostic code documentation.
 //!
-//! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 71
+//! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 70
 //! thin codes. `I050` and `W042` use the recorded surface rewrites in
 //! `dev_logs/0.1/0.1.0/22-c-explain.md` (do not advertise Compute Steady State).
 
@@ -94,10 +94,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("I050", ExplainEntry {
         title: "No initval or steady_state_model block",
         body: "The file declares variables and equations but does not include an `initval` or `steady_state_model` block. This check is presence only; this tool does not compute a numerical steady state. A sibling FILENAME_steadystate.m also counts as presence.\n\n**Fix**\n\nAdd an `initval` block with initial guesses, or a `steady_state_model` block with closed-form assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).",
-    }),
-    ("P000", ExplainEntry {
-        title: "Dynare preprocessor diagnostic",
-        body: "A message emitted by the external Dynare preprocessor (``dynare-preprocessor`` binary) when it parses the file. Codes prefixed ``P`` come from the preprocessor, not from this language server's static analysis.  The message text and source location are passed through directly.\n\n**Common reasons**\n\n- A genuine syntax error the preprocessor caught\n- A semantic error involving ``check``, ``stoch_simul``,   or other runtime statements\n- The preprocessor binary timed out (``P000``: timeout)\n\n**Fix**\n\nRead the underlying message; the preprocessor's error reporting points at the source location.  For timeouts, consider whether the model is too large for the configured timeout or whether a non-terminating macro loop is present.",
     }),
     ("W010", ExplainEntry {
         title: "Parameter declared but never assigned",
@@ -306,29 +302,17 @@ fn entry_map() -> &'static HashMap<&'static str, ExplainEntry> {
     MAP.get_or_init(|| ENTRIES.iter().copied().collect())
 }
 
-fn is_preprocessor_code(key: &str) -> bool {
-    let rest = match key.as_bytes() {
-        [b'P', rest @ ..] => rest,
-        _ => return false,
-    };
-    !rest.is_empty() && rest.iter().all(u8::is_ascii_digit)
-}
-
 /// Return `{title, body}` for a diagnostic code, or `None`.
 ///
-/// Lookup is case-insensitive. `P` + digits (`P001`, `P123`, …) routes to
-/// the `P000` preprocessor-passthrough entry.
+/// Lookup is case-insensitive.
 pub fn explain(code: &str) -> Option<ExplainEntry> {
-    let mut key = code.to_ascii_uppercase();
-    if is_preprocessor_code(&key) {
-        key = "P000".to_string();
-    }
+    let key = code.to_ascii_uppercase();
     entry_map().get(key.as_str()).copied()
 }
 
 /// Render the explanation as a single markdown string, or `None`.
 ///
-/// Heading uses the caller's `code` string (`P001` keeps `### P001: …`).
+/// Heading uses the caller's `code` string.
 pub fn render_markdown(code: &str) -> Option<String> {
     let entry = explain(code)?;
     Some(format!("### {code}: {}\n\n{}\n", entry.title, entry.body))

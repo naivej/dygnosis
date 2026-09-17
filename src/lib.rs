@@ -94,10 +94,8 @@ pub use model_info::{
     structure_summary, StructureSummary, TimingClass, TimingInfo,
 };
 pub use parser::parse;
-pub use preprocessor::{
-    find_preprocessor, maybe_run_and_reconcile, reconcile_diagnostics, run_preprocessor,
-    run_preprocessor_structured, PreprocessorResult,
-};
+#[doc(hidden)]
+pub use preprocessor::{find_preprocessor, run_preprocessor, PreprocessorResult};
 pub use refs::{ident_at, is_legal_ident, occurrences, option_command_at, rename_in_text};
 pub use workspace::{CycleRecord, IncludeRecords, ResolvedInclude, UnresolvedInclude, Workspace};
 

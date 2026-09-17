@@ -1,6 +1,6 @@
-//! Dynare preprocessor discovery, run, parse, and reconcile.
+//! Honesty spawn: discover, run, and parse the official Dynare preprocessor.
 //!
-//! Transports call this after `analyze` / `check_file`. Those stay preprocessor-free.
+//! Product transports do not spawn. `analyze` / `check_file` stay preprocessor-free.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
@@ -10,7 +10,6 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use regex::Regex;
-use serde_json::{json, Value};
 
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::include_resolver::{normalize_uri, uri_to_path};
@@ -20,19 +19,11 @@ use crate::workspace::{split_includepath_argument, Workspace};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-pub const MISSING_BINARY_MESSAGE: &str = "Dynare preprocessor binary not found. Install Dynare, or set DYNARE_PREPROCESSOR to the dynare-preprocessor executable.";
-
-const SAME_GROUND_ERRORS: &[&str] = &[
-    "E001", "E020", "E021", "E023", "E024", "E025", "E030", "E058", "E059", "E060", "E061", "E062",
-    "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E111", "E130", "E170",
-    "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E180", "E181", "E182",
-    "E183", "E184", "E185",
-];
-
-const SAME_GROUND_WARNINGS: &[&str] = &["W022", "W031", "W042", "W121", "W131", "W150", "W170"];
-
 /// Result of one preprocessor run.
+///
+/// Codes such as `P000` / `P001` here are spawn-parse labels, not product codes.
 #[derive(Clone, Debug)]
+#[doc(hidden)]
 pub struct PreprocessorResult {
     pub success: bool,
     pub diagnostics: Vec<Diagnostic>,
@@ -43,6 +34,7 @@ pub struct PreprocessorResult {
 }
 
 /// Search order: configured file → `DYNARE_PREPROCESSOR` → common installs.
+#[doc(hidden)]
 pub fn find_preprocessor(configured_path: Option<&Path>) -> Option<PathBuf> {
     let env = std::env::var_os("DYNARE_PREPROCESSOR").map(PathBuf::from);
     find_preprocessor_from(
@@ -53,6 +45,7 @@ pub fn find_preprocessor(configured_path: Option<&Path>) -> Option<PathBuf> {
 }
 
 /// Injectable discovery for tests (does not walk a real Dynare install).
+#[doc(hidden)]
 pub fn find_preprocessor_from(
     configured_path: Option<&Path>,
     env_path: Option<&Path>,
@@ -94,6 +87,7 @@ pub fn windows_common_candidates(listings: &[(PathBuf, Vec<String>)]) -> Vec<Pat
     out
 }
 
+#[doc(hidden)]
 pub fn run_preprocessor(
     text: &str,
     preprocessor_path: &Path,
@@ -233,92 +227,6 @@ pub fn run_preprocessor(
     outcome
 }
 
-/// Combine own diagnostics with a preprocessor verdict.
-pub fn reconcile_diagnostics(
-    own: &[Diagnostic],
-    preproc: Option<&PreprocessorResult>,
-) -> Vec<Diagnostic> {
-    let Some(preproc) = preproc else {
-        return own.to_vec();
-    };
-    let they_warned = preproc
-        .diagnostics
-        .iter()
-        .any(|d| d.severity == Severity::Warning && d.code != "P000");
-    let they_refused = !preproc.success && preproc.diagnostics.iter().any(|d| d.code != "P000");
-    let kept: Vec<Diagnostic> = if preproc.success {
-        own.iter()
-            .filter(|d| {
-                if d.severity == Severity::Error {
-                    return false;
-                }
-                if they_warned && SAME_GROUND_WARNINGS.contains(&d.code.as_str()) {
-                    return false;
-                }
-                true
-            })
-            .cloned()
-            .collect()
-    } else if they_refused {
-        own.iter()
-            .filter(|d| !SAME_GROUND_ERRORS.contains(&d.code.as_str()))
-            .cloned()
-            .collect()
-    } else {
-        own.to_vec()
-    };
-    let mut out = kept;
-    out.extend(preproc.diagnostics.iter().cloned());
-    out
-}
-
-/// Find the binary (if any), run it, and reconcile. Missing binary leaves `own` unchanged.
-pub fn maybe_run_and_reconcile(
-    own: Vec<Diagnostic>,
-    text: &str,
-    source_dir: Option<&Path>,
-    configured_path: Option<&Path>,
-) -> Vec<Diagnostic> {
-    match find_preprocessor(configured_path) {
-        None => own,
-        Some(path) => {
-            let pre = run_preprocessor(text, &path, source_dir, DEFAULT_TIMEOUT);
-            reconcile_diagnostics(&own, Some(&pre))
-        }
-    }
-}
-
-pub fn run_preprocessor_structured(
-    text: &str,
-    source_dir: Option<&Path>,
-    timeout: Duration,
-    configured_path: Option<&Path>,
-) -> Value {
-    run_preprocessor_structured_with_finder(text, source_dir, timeout, || {
-        find_preprocessor(configured_path)
-    })
-}
-
-pub fn run_preprocessor_structured_with_finder(
-    text: &str,
-    source_dir: Option<&Path>,
-    timeout: Duration,
-    find: impl FnOnce() -> Option<PathBuf>,
-) -> Value {
-    let Some(path) = find() else {
-        return missing_binary_json();
-    };
-    result_to_structured(&run_preprocessor(text, &path, source_dir, timeout), text)
-}
-
-pub fn missing_binary_json() -> Value {
-    json!({
-        "success": false,
-        "message": MISSING_BINARY_MESSAGE,
-        "diagnostics": [],
-    })
-}
-
 /// Point absolute `@#include` paths at their temp-mirror copies.
 pub fn rewrite_supplied_absolute_includes(
     content: &str,
@@ -380,6 +288,7 @@ pub fn rewrite_supplied_absolute_includes(
 }
 
 /// Materialize a `files` map in a temp tree, rewrite absolute includes, run.
+#[doc(hidden)]
 pub fn run_workspace_preprocessor(
     entry_file: &str,
     files: &HashMap<String, String>,
@@ -396,6 +305,7 @@ pub fn run_workspace_preprocessor(
     outcome
 }
 
+#[doc(hidden)]
 pub fn parse_preprocessor_output(
     output: &str,
     synthetic_path: Option<&Path>,
@@ -553,37 +463,6 @@ pub fn parse_preprocessor_output(
         diagnostics.push(Diagnostic::new(span, severity, code, message));
     }
     diagnostics
-}
-
-pub fn result_to_structured(result: &PreprocessorResult, model_text: &str) -> Value {
-    json!({
-        "success": result.success,
-        "exit_code": result.exit_code,
-        "diagnostics": result.diagnostics.iter().map(|d| diagnostic_to_struct(d, model_text)).collect::<Vec<_>>(),
-        "raw_stdout": result.raw_stdout,
-        "raw_stderr": result.raw_stderr,
-    })
-}
-
-pub fn diagnostic_to_struct(d: &Diagnostic, model_text: &str) -> Value {
-    let index = LineIndex::new(model_text);
-    let start = index.position(model_text, d.span.start);
-    json!({
-        "line": start.line + 1,
-        "column": start.character + 1,
-        "severity": severity_name(d.severity),
-        "message": d.message,
-        "code": d.code,
-    })
-}
-
-fn severity_name(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Error => "ERROR",
-        Severity::Warning => "WARNING",
-        Severity::Information => "INFORMATION",
-        Severity::Hint => "HINT",
-    }
 }
 
 fn common_install_candidates() -> Vec<PathBuf> {

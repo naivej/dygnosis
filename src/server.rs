@@ -21,10 +21,6 @@ use crate::model_info::{
     assigned_number, classify_variable_timing, format_structure_lens, format_timing_line,
     structure_summary, TimingClass,
 };
-use crate::preprocessor::{
-    find_preprocessor, reconcile_diagnostics, result_to_structured, run_preprocessor,
-    run_workspace_preprocessor, DEFAULT_TIMEOUT, MISSING_BINARY_MESSAGE,
-};
 use crate::refs::{ident_at, is_legal_ident, occurrences, option_command_at};
 use crate::span::{LineIndex, Span};
 use crate::workspace::Workspace;
@@ -82,7 +78,6 @@ struct Inner {
     docs: HashMap<Url, OpenDoc>,
     workspace: Workspace,
     format_indent_unit: String,
-    preprocessor_path: Option<String>,
     search_paths: Vec<PathBuf>,
 }
 
@@ -92,7 +87,6 @@ impl Default for Inner {
             docs: HashMap::new(),
             workspace: Workspace::new(),
             format_indent_unit: "\t".into(),
-            preprocessor_path: None,
             search_paths: Vec::new(),
         }
     }
@@ -137,74 +131,6 @@ impl Backend {
             },
         );
         (uri, version, diagnostics)
-    }
-
-    fn save_reconcile(&self, uri: Url, text: String, version: i32) -> (Url, i32, Vec<Diagnostic>) {
-        let (configured, source_dir, own, files) = {
-            let mut inner = self.lock_inner();
-            inner.workspace.update_document(uri.as_str(), &text);
-            let own = check_in_workspace(&mut inner.workspace, uri.as_str());
-            let configured = inner.preprocessor_path.clone();
-            let source_dir = uri.to_file_path().ok().and_then(|p| file_parent_dir(&p));
-            let files = open_overlay_files(&inner, &uri, &text);
-            (configured, source_dir, own, files)
-        };
-        let configured_path = configured.as_ref().map(PathBuf::from);
-        let pre = find_preprocessor(configured_path.as_deref()).map(|pp| {
-            if files.len() > 1 {
-                run_workspace_preprocessor(uri.as_str(), &files, &pp, DEFAULT_TIMEOUT)
-            } else {
-                run_preprocessor(&text, &pp, source_dir.as_deref(), DEFAULT_TIMEOUT)
-            }
-        });
-        let library = reconcile_diagnostics(&own, pre.as_ref());
-        let diagnostics = library_to_lsp(&text, &library);
-        {
-            let mut inner = self.lock_inner();
-            inner.docs.insert(
-                uri.clone(),
-                OpenDoc {
-                    text,
-                    version,
-                    diagnostics: diagnostics.clone(),
-                    library,
-                },
-            );
-        }
-        (uri, version, diagnostics)
-    }
-
-    fn run_preprocessor_command(&self, arguments: &[Value]) -> Value {
-        let Some(uri) = extract_command_uri(arguments) else {
-            return json!({"success": false, "message": "Missing or invalid URI argument"});
-        };
-        let (text, configured, source_dir, files) = {
-            let inner = self.lock_inner();
-            let Some(doc) = inner.docs.get(&uri) else {
-                return json!({"success": false, "message": "Document not available"});
-            };
-            let configured = inner.preprocessor_path.clone();
-            let source_dir = uri.to_file_path().ok().and_then(|p| file_parent_dir(&p));
-            let files = open_overlay_files(&inner, &uri, &doc.text);
-            (doc.text.clone(), configured, source_dir, files)
-        };
-        let configured_path = configured.as_ref().map(PathBuf::from);
-        let Some(pp) = find_preprocessor(configured_path.as_deref()) else {
-            return json!({
-                "success": false,
-                "message": MISSING_BINARY_MESSAGE,
-                "exit_code": null,
-                "diagnostics": [],
-                "raw_stdout": "",
-                "raw_stderr": "",
-            });
-        };
-        let result = if files.len() > 1 {
-            run_workspace_preprocessor(uri.as_str(), &files, &pp, DEFAULT_TIMEOUT)
-        } else {
-            run_preprocessor(&text, &pp, source_dir.as_deref(), DEFAULT_TIMEOUT)
-        };
-        result_to_structured(&result, &text)
     }
 
     fn pull_items(&self, uri: &Url) -> Vec<Diagnostic> {
@@ -519,16 +445,6 @@ impl Backend {
         if let Some(value) = obj.get("formatIndent") {
             if let Some(unit) = parse_format_indent(value) {
                 inner.format_indent_unit = unit;
-            }
-        }
-        if let Some(value) = obj.get("preprocessorPath") {
-            if let Some(s) = value.as_str() {
-                let trimmed = s.trim();
-                inner.preprocessor_path = if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                };
             }
         }
         let mut paths_changed = false;
@@ -925,26 +841,15 @@ impl Backend {
         let summary = structure_summary(model);
         let title = format_structure_lens(&summary);
         let range = Range::new(Position::new(start.line, 0), Position::new(start.line, 0));
-        Some(vec![
-            CodeLens {
-                range,
-                command: Some(Command {
-                    title,
-                    command: String::new(),
-                    arguments: None,
-                }),
-                data: None,
-            },
-            CodeLens {
-                range,
-                command: Some(Command {
-                    title: "Run preprocessor".into(),
-                    command: "dynare/runPreprocessor".into(),
-                    arguments: Some(vec![json!({"uri": uri.as_str()})]),
-                }),
-                data: None,
-            },
-        ])
+        Some(vec![CodeLens {
+            range,
+            command: Some(Command {
+                title,
+                command: String::new(),
+                arguments: None,
+            }),
+            data: None,
+        }])
     }
 
     fn format_document(&self, uri: &Url) -> Option<Vec<TextEdit>> {
@@ -979,7 +884,6 @@ impl Backend {
         match command {
             "dynare/explainDiagnostic" => explain_command(arguments),
             "dynare/compareModels" => self.compare_command(arguments),
-            "dynare/runPreprocessor" => self.run_preprocessor_command(arguments),
             "dynare/showEffectiveModel" => self.show_effective_model_command(arguments),
             _ => json!({"error": format!("unknown command {command}"), "code": "UNKNOWN_COMMAND"}),
         }
@@ -1187,7 +1091,7 @@ impl LanguageServer for Backend {
             (None, Some((text, version))) => (text, version),
             (None, None) => return,
         };
-        let (uri, version, diagnostics) = self.save_reconcile(uri, text, version);
+        let (uri, version, diagnostics) = self.upsert(uri, text, version);
         self.client
             .publish_diagnostics(uri, diagnostics, Some(version))
             .await;
@@ -1411,15 +1315,6 @@ impl LanguageServer for Backend {
     }
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
-        if params.command == "dynare/runPreprocessor" {
-            let value = self.run_preprocessor_command(&params.arguments);
-            if value.get("message").and_then(|v| v.as_str()) == Some(MISSING_BINARY_MESSAGE) {
-                self.client
-                    .show_message(MessageType::WARNING, MISSING_BINARY_MESSAGE)
-                    .await;
-            }
-            return Ok(Some(value));
-        }
         Ok(Some(self.execute(&params.command, &params.arguments)))
     }
 
@@ -1514,7 +1409,6 @@ pub fn initialize_result() -> InitializeResult {
                 commands: vec![
                     "dynare/explainDiagnostic".into(),
                     "dynare/compareModels".into(),
-                    "dynare/runPreprocessor".into(),
                     "dynare/showEffectiveModel".into(),
                 ],
                 work_done_progress_options: WorkDoneProgressOptions::default(),
@@ -1980,24 +1874,6 @@ fn lsp_tags(tags: &[i32]) -> Option<Vec<DiagnosticTag>> {
 
 fn is_dropped_code(code: &str) -> bool {
     OUT_CODES.contains(&code)
-}
-
-fn file_parent_dir(path: &std::path::Path) -> Option<PathBuf> {
-    let parent = if path.is_dir() {
-        path.to_path_buf()
-    } else {
-        path.parent()?.to_path_buf()
-    };
-    parent.is_dir().then_some(parent)
-}
-
-fn open_overlay_files(inner: &Inner, uri: &Url, text: &str) -> HashMap<String, String> {
-    let mut files = HashMap::new();
-    for (u, d) in &inner.docs {
-        files.insert(u.as_str().to_string(), d.text.clone());
-    }
-    files.insert(uri.as_str().to_string(), text.to_string());
-    files
 }
 
 fn extract_command_uri(arguments: &[Value]) -> Option<Url> {

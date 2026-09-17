@@ -2,15 +2,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use dygnosis::explain::{explain, known_codes, render_markdown};
-use dygnosis::preprocessor::{run_workspace_preprocessor, DEFAULT_TIMEOUT};
 use dygnosis::span::{LineIndex, Position};
 use dygnosis::{
     analyze, auto_fix, check_e060, check_e061, check_w061, check_w160, count_gap, dynare_auto_fix,
     dynare_compare_models, dynare_diagnose, dynare_equations, dynare_expand, dynare_explain,
     dynare_find_references, dynare_list_diagnostic_codes, dynare_list_options, dynare_model_info,
-    dynare_related_files, dynare_rename, explain_equation, find_preprocessor, has_structural_error,
-    parse, quiet_i050, reconcile_diagnostics, registered_tool_names, run_preprocessor,
-    tools_list_json, Diagnostic, McpReference, McpWorkspaceReference, Workspace,
+    dynare_related_files, dynare_rename, explain_equation, has_structural_error, parse, quiet_i050,
+    registered_tool_names, tools_list_json, Diagnostic, McpReference, McpWorkspaceReference,
+    Workspace,
 };
 use serde_json::{json, Value};
 
@@ -297,10 +296,22 @@ fn is_out_code(code: &str) -> bool {
     OUT_CODES.contains(&code)
 }
 
-fn assert_no_out(codes: impl IntoIterator<Item = impl AsRef<str>>) {
+fn is_p_digits(code: &str) -> bool {
+    let rest = match code.strip_prefix('P') {
+        Some(r) => r,
+        None => return false,
+    };
+    !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
+}
+
+fn assert_no_out_or_preproc(codes: impl IntoIterator<Item = impl AsRef<str>>) {
     for code in codes {
         let code = code.as_ref();
         assert!(!is_out_code(code), "MCP must drop Out code {code}");
+        assert!(
+            !is_p_digits(code),
+            "MCP must not emit preprocessor code {code}"
+        );
     }
 }
 
@@ -452,14 +463,7 @@ fn workspace_own(active: &str, files: &HashMap<String, String>) -> Vec<Diagnosti
 }
 
 fn expected_workspace_codes(active: &str, files: &HashMap<String, String>) -> Vec<String> {
-    let own = workspace_own(active, files);
-    let diags = if let Some(pp) = find_preprocessor(None) {
-        let pre = run_workspace_preprocessor(active, files, &pp, DEFAULT_TIMEOUT);
-        reconcile_diagnostics(&own, Some(&pre))
-    } else {
-        own
-    };
-    strip_out_codes(diags)
+    strip_out_codes(workspace_own(active, files))
 }
 
 fn refs_single(value: Value) -> Vec<McpReference> {
@@ -544,14 +548,7 @@ fn registered_tools_are_twelve() {
 fn diagnose_p_core_thin_codes() {
     for name in P_CORE {
         let text = read_mod(name);
-        let from_analyze = strip_out_codes(analyze(&parse(&text)));
-        let expected: Vec<String> = if let Some(pp) = find_preprocessor(None) {
-            let own = analyze(&parse(&text));
-            let pre = run_preprocessor(&text, &pp, None, std::time::Duration::from_secs(30));
-            strip_out_codes(reconcile_diagnostics(&own, Some(&pre)))
-        } else {
-            from_analyze
-        };
+        let expected = strip_out_codes(analyze(&parse(&text)));
         let diags = dynare_diagnose(&text, None, None);
         for d in &diags {
             assert!(
@@ -579,7 +576,7 @@ fn diagnose_p_core_thin_codes() {
         }
         let from_mcp = codes_of(&diags);
         assert_eq!(from_mcp, expected, "diagnose codes for {name}");
-        assert_no_out(&from_mcp);
+        assert_no_out_or_preproc(&from_mcp);
     }
 }
 
@@ -597,12 +594,6 @@ fn diagnose_govt_rbc_has_no_option_list_e001() {
         !codes.iter().any(|c| c == "E001"),
         "dynare_diagnose must not emit option-list E001, got {codes:?}"
     );
-    if find_preprocessor(None).is_some() {
-        assert!(
-            !codes.iter().any(|c| c == "E001"),
-            "preprocessor path must not reintroduce option-list E001; got {codes:?}"
-        );
-    }
     for extra in ["E062", "E063", "E064", "E065"] {
         assert!(
             !codes.iter().any(|c| c == extra),
@@ -621,7 +612,7 @@ fn diagnose_workspace_swff() {
     let text = files["swff.mod"].clone();
 
     let diags = dynare_diagnose(&text, Some("swff.mod"), Some(&files));
-    assert_no_out(diags.iter().map(|d| d.code.as_str()));
+    assert_no_out_or_preproc(diags.iter().map(|d| d.code.as_str()));
     for d in &diags {
         assert!(
             MCP_SEVERITIES.contains(&d.severity.as_str()),

@@ -3,11 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use dygnosis::span::Span;
-use dygnosis::{
-    check_file, find_preprocessor, format_check_lines, reconcile_diagnostics, run_preprocessor,
-    Diagnostic, Severity,
-};
-use std::time::Duration;
+use dygnosis::{check_file, format_check_lines, Diagnostic, Severity};
 
 const ARCHIVES: &[&str] = &[
     "trend_rbc_gov_inv",
@@ -368,7 +364,7 @@ fn p_core_cli_line_format_and_exit() {
         let output = run_check(path_str);
         let stdout = stdout_text(&output);
         assert_line_format(path_str, &stdout);
-        assert_no_out(&stdout);
+        assert_no_out_or_preproc(&stdout);
         assert_exit_for_errors(&output, &stdout);
         if stdout.starts_with("No issues found in ") {
             assert_eq!(stdout, format!("No issues found in {path_str}\n"));
@@ -415,18 +411,11 @@ fn govt_rbc_has_no_option_list_e001() {
     let output = run_check(path_str);
     let stdout = stdout_text(&output);
     let codes = printed_codes(&stdout);
-    assert_no_out(&stdout);
-    if find_preprocessor(None).is_some() {
-        assert!(
-            !codes.contains("E001"),
-            "CLI with preprocessor must not print option-list E001; got {codes:?}\n{stdout}"
-        );
-    } else {
-        assert!(
-            !codes.contains("E001"),
-            "without preprocessor, fake option-list E001 must not remain; got {codes:?}\n{stdout}"
-        );
-    }
+    assert_no_out_or_preproc(&stdout);
+    assert!(
+        !codes.contains("E001"),
+        "CLI must not print option-list E001; got {codes:?}\n{stdout}"
+    );
     for extra in ["E062", "E063", "E064", "E065"] {
         assert!(
             !codes.contains(extra),
@@ -485,11 +474,11 @@ fn error_check_fixture_exits_1() {
     let output = run_check(path_str);
     let stdout = stdout_text(&output);
     assert!(
-        stdout.contains(": ERROR ["),
-        "expected an ERROR line (library E001; CLI may print P001 when Dynare is installed):\n{stdout}"
+        stdout.contains("ERROR [E001]"),
+        "expected own ERROR [E001]; got:\n{stdout}"
     );
     assert_eq!(exit_code(&output), 1);
-    assert_no_out(&stdout);
+    assert_no_out_or_preproc(&stdout);
 }
 
 #[test]
@@ -513,14 +502,11 @@ fn cli_stdout_matches_format_check_lines() {
         std::fs::write(&tmp, text.as_bytes()).expect("write temp");
         let path_str = tmp.to_str().expect("utf-8 path");
         let diags = check_file(&text, path_str);
-        let parent = tmp.parent();
-        let pre = find_preprocessor(None)
-            .map(|pp| run_preprocessor(&text, &pp, parent, Duration::from_secs(30)));
-        let reconciled = reconcile_diagnostics(&diags, pre.as_ref());
-        let expected = format_check_lines(path_str, &reconciled, &text);
+        let expected = format_check_lines(path_str, &diags, &text);
         let output = run_check(path_str);
         let stdout = stdout_text(&output);
         assert_eq!(stdout, expected, "CLI wire mismatch for {name}");
+        assert_no_out_or_preproc(&stdout);
         assert_exit_for_errors(&output, &stdout);
         let _ = std::fs::remove_file(&tmp);
     }

@@ -2,9 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use dygnosis::preprocessor::find_preprocessor;
-use dygnosis::{
-    analyze, check_file, parse, reconcile_diagnostics, run_preprocessor, Diagnostic, Severity,
-};
+use dygnosis::{analyze, check_file, parse, run_preprocessor, Diagnostic, Severity};
 
 const ACCEPT_ARCHIVES: &[&str] = &[
     "trend_rbc_gov_inv",
@@ -42,6 +40,17 @@ fn read_fixture(rel: &str) -> String {
         .replace("\r\n", "\n")
 }
 
+fn assert_no_p_digits(diags: &[Diagnostic], label: &str) {
+    for d in diags {
+        let rest = d.code.strip_prefix('P').unwrap_or("");
+        assert!(
+            rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()),
+            "{label} must not contain P-digit code, got {}",
+            d.code
+        );
+    }
+}
+
 fn assert_no_error(own: &[Diagnostic], label: &str) {
     let errors: Vec<_> = own
         .iter()
@@ -77,6 +86,8 @@ fn accepted_archives_emit_no_error() {
         );
         assert_no_error(&analyze(&parse(&text)), &format!("{name} analyze()"));
         assert_no_error(&check_file(&text, path_str), &format!("{name} check_file"));
+        assert_no_p_digits(&analyze(&parse(&text)), &format!("{name} analyze()"));
+        assert_no_p_digits(&check_file(&text, path_str), &format!("{name} check_file"));
     }
 }
 
@@ -116,18 +127,7 @@ fn equation_count_is_warning_they_accept() {
         .find(|d| d.code == "W013")
         .expect("own W013 on e010_extra.mod");
     assert_eq!(w013.severity, Severity::Warning);
-    let rec = reconcile_diagnostics(&own, Some(&result));
-    assert!(
-        rec.iter()
-            .filter(|d| !d.code.starts_with('P'))
-            .all(|d| d.severity != Severity::Error),
-        "after reconcile, no own Error should remain: {:?}",
-        rec.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-    );
-    assert!(
-        rec.iter().any(|d| d.code == "W013"),
-        "extra Warning W013 should stay after reconcile"
-    );
+    assert_no_p_digits(&own, "e010_extra.mod check_file");
 }
 
 #[test]
@@ -157,16 +157,16 @@ fn same_ground_warning_absent_on_quiet_archive() {
 }
 
 #[test]
-fn same_kind_named_holes_accepted_reconcile_hides_w031() {
+fn same_kind_named_holes_accepted_own_w031_stays() {
     let Some(pp) = find_preprocessor(None) else {
         eprintln!("skipping honesty: dynare-preprocessor not found");
         return;
     };
     let cases = [
-        ("e030/same_kind_var.mod", "Symbol y declared twice."),
-        ("e030/same_kind_param.mod", "Symbol betta declared twice."),
+        "e030/same_kind_var.mod",
+        "e030/same_kind_param.mod",
     ];
-    for (rel, wording) in cases {
+    for rel in cases {
         let path = fixture(rel);
         let path_str = path.to_str().expect("utf-8 path");
         let text = read_fixture(rel);
@@ -185,17 +185,13 @@ fn same_kind_named_holes_accepted_reconcile_hides_w031() {
             "{rel} own must emit W031, got {:?}",
             own.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
         );
-        let rec = reconcile_diagnostics(&own, Some(&result));
         assert!(
-            rec.iter().all(|d| d.code != "W031"),
-            "{rel} W031 should be hidden after reconcile: {:?}",
-            rec.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+            own.iter()
+                .filter(|d| d.code == "W031")
+                .all(|d| d.severity == Severity::Warning),
+            "{rel} W031 must stay Warning, not Error"
         );
-        assert!(
-            rec.iter().any(|d| d.message.contains(wording)),
-            "{rel} should keep their wording {wording:?}, got {:?}",
-            rec.iter().map(|d| d.message.as_str()).collect::<Vec<_>>()
-        );
+        assert_no_p_digits(&own, &format!("{rel} check_file"));
     }
 }
 
@@ -279,17 +275,7 @@ fn occbin_honesty_when_preprocessor_present() {
         "w170_mcp.mod own must emit W170, got {:?}",
         own.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
-    let rec = reconcile_diagnostics(&own, Some(&result));
-    assert!(
-        rec.iter().all(|d| d.code != "W170"),
-        "W170 should be hidden after reconcile: {:?}",
-        rec.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-    );
-    assert!(
-        rec.iter().any(|d| d.message.contains("obsolete")),
-        "should keep their wording containing obsolete, got {:?}",
-        rec.iter().map(|d| d.message.as_str()).collect::<Vec<_>>()
-    );
+    assert_no_p_digits(&own, "w170_mcp.mod check_file");
 
     let path = fixture("occbin/e185_bad_name.mod");
     let path_str = path.to_str().expect("utf-8 path");
@@ -307,16 +293,15 @@ fn occbin_honesty_when_preprocessor_present() {
         "e185_bad_name.mod own must emit E185, got {:?}",
         own.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
-    let rec = reconcile_diagnostics(&own, Some(&result));
+    assert_no_p_digits(&own, "e185_bad_name.mod check_file");
     assert!(
-        rec.iter().all(|d| d.code != "E185"),
-        "E185 should be hidden after reconcile: {:?}",
-        rec.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-    );
-    assert!(
-        rec.iter()
-            .any(|d| d.message.contains("unauthorized characters")),
-        "should keep their wording containing unauthorized characters, got {:?}",
-        rec.iter().map(|d| d.message.as_str()).collect::<Vec<_>>()
+        result.raw_stderr.contains("unauthorized characters")
+            || result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("unauthorized characters")),
+        "they should refuse with unauthorized characters, got stderr {:?} diags {:?}",
+        result.raw_stderr,
+        result.diagnostics
     );
 }

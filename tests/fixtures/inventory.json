@@ -3926,21 +3926,9 @@
       "kind": "documented-only",
       "package": "other",
       "fixture": "",
-      "source": "explain.rs::known_codes_is_exactly_the_71_rust_keys",
+      "source": "explain.rs::known_codes_is_exactly_the_70_rust_keys",
       "cluster": "",
       "notes": "in known_codes / explain; nothing emits it yet"
-    },
-    {
-      "id": "p000_timeout_harness",
-      "codes": [
-        "P000"
-      ],
-      "kind": "harness",
-      "package": "other",
-      "fixture": "",
-      "source": "preprocessor.rs::parse_p000_timeout_message",
-      "cluster": "",
-      "notes": "preprocessor timeout / Dynare stderr; not a model"
     },
     {
       "id": "other_parse_summary",
@@ -4084,7 +4072,7 @@
       "fixture": "tests/fixtures/e001/delete_model_end.mod",
       "source": "check.rs::error_check_fixture_exits_1",
       "cluster": "e001/delete_model_end.mod",
-      "notes": "CLI smoke: check_file emits E001; CLI prints ERROR and exits 1 (P001 when Dynare is installed)"
+      "notes": "CLI smoke: check_file emits E001; CLI prints ERROR [E001] and exits 1"
     },
     {
       "id": "check_dir_clean",
@@ -4106,7 +4094,7 @@
       "fixture": "tests/fixtures/check_dir/err.mod",
       "source": "check.rs::check_dir_mixed_tree_recurses_mod_skips_plus_and_inc",
       "cluster": "check_dir/err.mod",
-      "notes": "codes [\"E001\"]; CLI may print P001 when Dynare is installed"
+      "notes": "codes [\"E001\"]"
     },
     {
       "id": "check_dir_warn",
