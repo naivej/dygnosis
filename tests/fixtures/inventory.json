@@ -4797,6 +4797,16 @@
       "notes": "stoch_simul with abs"
     },
     {
+      "id": "w200_stoch_local",
+      "codes": ["W200"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/w200_stoch_local.mod",
+      "source": "d_check.rs::w200_stoch_abs_in_local",
+      "cluster": "d_check/w200_stoch_local.mod",
+      "notes": "stoch_simul with abs only in a # local"
+    },
+    {
       "id": "e210_linear_abs",
       "codes": ["E210"],
       "kind": "fire",
@@ -4825,6 +4835,16 @@
       "source": "d_check.rs::w140_log_stays_warning",
       "cluster": "d_check/w140_linear_log.mod",
       "notes": "model(linear) log stays added Warning"
+    },
+    {
+      "id": "w140_linear_exo_pf",
+      "codes": ["W140"],
+      "kind": "fire",
+      "package": "d_check",
+      "fixture": "tests/fixtures/d_check/w140_linear_exo_pf.mod",
+      "source": "d_check.rs::w140_linear_abs_exo_with_pf",
+      "cluster": "d_check/w140_linear_exo_pf.mod",
+      "notes": "model(linear) abs on exogenous with PF solver stays W140 extra"
     },
     {
       "id": "e212_estimated_shock",

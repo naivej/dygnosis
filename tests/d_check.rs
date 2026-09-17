@@ -113,6 +113,14 @@ fn w200_stoch_abs() {
 }
 
 #[test]
+fn w200_stoch_abs_in_local() {
+    let got = diags("d_check/w200_stoch_local.mod");
+    assert!(find(&got, "W200")
+        .message
+        .contains("unsuitable for a stochastic context"));
+}
+
+#[test]
 fn e210_linear_abs_endo() {
     let got = diags("d_check/e210_linear_abs.mod");
     assert!(find(&got, "E210")
@@ -134,6 +142,19 @@ fn e211_linear_abs_exo() {
 fn w140_log_stays_warning() {
     let got = diags("d_check/w140_linear_log.mod");
     find(&got, "W140");
+    quiet(&got, "E210");
+    quiet(&got, "E211");
+}
+
+#[test]
+fn w140_linear_abs_exo_with_pf() {
+    let got = diags("d_check/w140_linear_exo_pf.mod");
+    let w140 = find(&got, "W140");
+    assert!(
+        w140.message.contains("nonlinear operator 'abs'"),
+        "PF + linear + abs(exo) is W140 extra with the real op, got {}",
+        w140.message
+    );
     quiet(&got, "E210");
     quiet(&got, "E211");
 }

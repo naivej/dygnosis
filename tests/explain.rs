@@ -402,13 +402,13 @@ fn warrant_heading_only_on_warrant_codes() {
         );
         if should {
             assert!(
-                md.contains("They refuse:")
-                    || md.contains("They report")
-                    || md.contains("They accept and WARN:")
+                md.contains("Dynare refuses:")
+                    || md.contains("Dynare reports")
+                    || md.contains("Dynare accepts and warns:")
                     || md.contains("`Unknown symbol")
                     || md.contains("bison")
                     || md.contains("perpendicular symbol"),
-                "{code} warrant body must still quote their string",
+                "{code} warrant body must still quote Dynare's string",
             );
         }
     }

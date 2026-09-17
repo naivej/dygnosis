@@ -150,18 +150,12 @@ fn check_w200(model: &Model) -> Vec<Diagnostic> {
     if !model.is_stochastic_context() {
         return Vec::new();
     }
+    // Official `isUnaryOpUsed` / `isBinaryOpUsed` walk the whole DataTree,
+    // including `#` model-local RHS nodes.
     for eq in &model.equations {
-        if eq.is_local {
-            continue;
-        }
         for id in [eq.lhs_expr, eq.rhs_expr].into_iter().flatten() {
             if let Some(span) = first_nonsmooth(model, id) {
-                return vec![Diagnostic::new(
-                    span,
-                    Severity::Warning,
-                    "W200",
-                    W200_MSG,
-                )];
+                return vec![Diagnostic::new(span, Severity::Warning, "W200", W200_MSG)];
             }
         }
     }
@@ -242,13 +236,13 @@ fn linear_hit(
     vars: &HashSet<Name>,
 ) -> Option<(LinearHit, String, Span)> {
     for id in [eq.lhs_expr, eq.rhs_expr].into_iter().flatten() {
-        if let Some((target, span)) = first_nonsmooth_on_type(model, id, endo, exo) {
+        if let Some((target, operator, span)) = first_nonsmooth_on_type(model, id, endo, exo) {
             let kind = if target == NonsmoothOn::Endo {
                 LinearHit::EndoNonsmooth
             } else {
                 LinearHit::ExoNonsmooth
             };
-            return Some((kind, "nonsmooth".to_string(), span));
+            return Some((kind, operator, span));
         }
         if let Some((operator, span)) = equation_operator_at(model, id, vars) {
             return Some((LinearHit::Extra, operator, span));
@@ -264,7 +258,7 @@ enum NonsmoothOn {
 }
 
 fn first_nonsmooth(model: &Model, id: ExprId) -> Option<Span> {
-    first_nonsmooth_on_type(model, id, &HashSet::new(), &HashSet::new()).map(|(_, span)| span)
+    first_nonsmooth_on_type(model, id, &HashSet::new(), &HashSet::new()).map(|(_, _, span)| span)
 }
 
 fn first_nonsmooth_on_type(
@@ -272,20 +266,21 @@ fn first_nonsmooth_on_type(
     id: ExprId,
     endo: &HashSet<Name>,
     exo: &HashSet<Name>,
-) -> Option<(NonsmoothOn, Span)> {
+) -> Option<(NonsmoothOn, String, Span)> {
     let expr = model.exprs.get(id);
     match &expr.kind {
         ExprKind::Call { callee, args } => {
             let c = model.name(*callee);
             if is_special(c) {
+                let operator = c.to_ascii_lowercase();
                 if endo.is_empty() && exo.is_empty() {
-                    return Some((NonsmoothOn::Endo, expr.span));
+                    return Some((NonsmoothOn::Endo, operator, expr.span));
                 }
                 if args.iter().any(|a| has_variable(model, *a, endo)) {
-                    return Some((NonsmoothOn::Endo, expr.span));
+                    return Some((NonsmoothOn::Endo, operator, expr.span));
                 }
                 if args.iter().any(|a| has_variable(model, *a, exo)) {
-                    return Some((NonsmoothOn::Exo, expr.span));
+                    return Some((NonsmoothOn::Exo, operator, expr.span));
                 }
             }
             for a in args {
@@ -296,14 +291,15 @@ fn first_nonsmooth_on_type(
             None
         }
         ExprKind::Binary { op, lhs, rhs } if is_nonsmooth_cmp(*op) => {
+            let operator = nonsmooth_cmp_op(*op).to_string();
             if endo.is_empty() && exo.is_empty() {
-                return Some((NonsmoothOn::Endo, expr.span));
+                return Some((NonsmoothOn::Endo, operator, expr.span));
             }
             if has_variable(model, *lhs, endo) || has_variable(model, *rhs, endo) {
-                return Some((NonsmoothOn::Endo, expr.span));
+                return Some((NonsmoothOn::Endo, operator, expr.span));
             }
             if has_variable(model, *lhs, exo) || has_variable(model, *rhs, exo) {
-                return Some((NonsmoothOn::Exo, expr.span));
+                return Some((NonsmoothOn::Exo, operator, expr.span));
             }
             first_nonsmooth_on_type(model, *lhs, endo, exo)
                 .or_else(|| first_nonsmooth_on_type(model, *rhs, endo, exo))
@@ -326,6 +322,18 @@ fn is_nonsmooth_cmp(op: BinOp) -> bool {
         op,
         BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::EqEq | BinOp::Ne
     )
+}
+
+fn nonsmooth_cmp_op(op: BinOp) -> &'static str {
+    match op {
+        BinOp::Lt => "<",
+        BinOp::Gt => ">",
+        BinOp::Le => "<=",
+        BinOp::Ge => ">=",
+        BinOp::EqEq => "==",
+        BinOp::Ne => "!=",
+        _ => "comparison",
+    }
 }
 
 fn equation_operator_at(model: &Model, id: ExprId, vars: &HashSet<Name>) -> Option<(String, Span)> {
