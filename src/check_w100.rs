@@ -17,10 +17,7 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
     let anchor = model.policy_command_span.unwrap_or(FALLBACK);
     let mut diagnostics = Vec::new();
 
-    if model
-        .policy_commands
-        .iter()
-        .any(|c| c.is_planner())
+    if model.policy_commands.iter().any(|c| c.is_planner())
         && model.planner_objective_span.is_none()
     {
         diagnostics.push(Diagnostic::new(

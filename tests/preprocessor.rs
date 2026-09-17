@@ -208,7 +208,13 @@ fn parse_p000_timeout_message() {
         std::fs::set_permissions(&path, perms).unwrap();
         path
     };
-    let result = run_preprocessor("var y;\n", &sleeper, None, Duration::from_secs(1), JsonStage::Check);
+    let result = run_preprocessor(
+        "var y;\n",
+        &sleeper,
+        None,
+        Duration::from_secs(1),
+        JsonStage::Check,
+    );
     assert!(!result.success);
     assert_eq!(result.diagnostics.len(), 1);
     assert_eq!(result.diagnostics[0].code, "P000");
@@ -229,7 +235,13 @@ fn happy_path_trend_rbc_gov_inv_success() {
     let source_dir = copilot_mod("trend_rbc_gov_inv")
         .parent()
         .map(Path::to_path_buf);
-    let result = run_preprocessor(&text, &pp, source_dir.as_deref(), Duration::from_secs(30), JsonStage::Check);
+    let result = run_preprocessor(
+        &text,
+        &pp,
+        source_dir.as_deref(),
+        Duration::from_secs(30),
+        JsonStage::Check,
+    );
     assert!(
         result.success,
         "trend_rbc_gov_inv should be accepted: {:?}",
@@ -246,7 +258,13 @@ fn happy_path_delete_model_end_rejects_with_non_p000() {
     let src = read_mod("trend_rbc_gov_inv");
     let mutated = src.replacen("log_n = log(n);\n\nend;", "log_n = log(n);\n", 1);
     assert_ne!(src, mutated);
-    let result = run_preprocessor(&mutated, &pp, None, Duration::from_secs(30), JsonStage::Check);
+    let result = run_preprocessor(
+        &mutated,
+        &pp,
+        None,
+        Duration::from_secs(30),
+        JsonStage::Check,
+    );
     assert!(!result.success);
     assert!(
         result.diagnostics.iter().any(|d| d.code != "P000"),
@@ -263,7 +281,13 @@ fn happy_path_swff_source_dir_does_not_false_fail() {
     };
     let text = read_mod("swff");
     let source_dir = copilot_mod("swff").parent().map(Path::to_path_buf);
-    let result = run_preprocessor(&text, &pp, source_dir.as_deref(), Duration::from_secs(30), JsonStage::Check);
+    let result = run_preprocessor(
+        &text,
+        &pp,
+        source_dir.as_deref(),
+        Duration::from_secs(30),
+        JsonStage::Check,
+    );
     let joined: String = result
         .diagnostics
         .iter()

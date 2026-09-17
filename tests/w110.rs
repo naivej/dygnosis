@@ -246,9 +246,7 @@ fn w110_w111_dup_var() {
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "E111");
     assert_eq!(rust[0].severity, 1);
-    assert!(rust[0]
-        .message
-        .contains("variance or stderr of shock on"));
+    assert!(rust[0].message.contains("variance or stderr of shock on"));
     assert_stmt_span(&src, &rust[0], "w111_dup_var");
 }
 

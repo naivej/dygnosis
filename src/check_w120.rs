@@ -82,9 +82,7 @@ pub fn check_w121(model: &Model) -> Vec<Diagnostic> {
                 },
                 Severity::Warning,
                 "W121",
-                format!(
-                    "The following parameter(s) are used with a lead or a lag: {name}"
-                ),
+                format!("The following parameter(s) are used with a lead or a lag: {name}"),
             ));
         }
     }

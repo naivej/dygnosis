@@ -155,7 +155,9 @@ fn w100_ramsey() {
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "E100");
     assert_eq!(rust[0].severity, 1);
-    assert!(rust[0].message.starts_with("A planner_objective statement must be used"));
+    assert!(rust[0]
+        .message
+        .starts_with("A planner_objective statement must be used"));
     assert_policy_span(&src, &rust[0]);
 }
 
@@ -166,7 +168,9 @@ fn w100_disc() {
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "E100");
     assert_eq!(rust[0].severity, 1);
-    assert!(rust[0].message.starts_with("A planner_objective statement must be used"));
+    assert!(rust[0]
+        .message
+        .starts_with("A planner_objective statement must be used"));
     assert_policy_span(&src, &rust[0]);
 }
 
@@ -258,12 +262,12 @@ fn w100_w103_both() {
     assert_eq!(rust.len(), 2);
     assert!(rust.iter().all(|d| d.code == "E103"));
     assert!(rust.iter().all(|d| d.severity == 1));
-    assert!(rust
-        .iter()
-        .any(|d| d.message.contains("The osr statement requires the osr_params statement")));
-    assert!(rust
-        .iter()
-        .any(|d| d.message.contains("optim_weights block or a planner_objective")));
+    assert!(rust.iter().any(|d| d
+        .message
+        .contains("The osr statement requires the osr_params statement")));
+    assert!(rust.iter().any(|d| d
+        .message
+        .contains("optim_weights block or a planner_objective")));
     for d in &rust {
         assert_policy_span(&src, d);
     }
@@ -276,7 +280,9 @@ fn w100_w103_weights() {
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "E103");
     assert_eq!(rust[0].severity, 1);
-    assert!(rust[0].message.contains("optim_weights block or a planner_objective"));
+    assert!(rust[0]
+        .message
+        .contains("optim_weights block or a planner_objective"));
     assert_policy_span(&src, &rust[0]);
 }
 

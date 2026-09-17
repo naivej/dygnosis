@@ -357,7 +357,12 @@ fn e062_commented_endif_is_not_e062() {
 
 #[test]
 fn e063_undef_simple() {
-    assert_fire("e060/e063_undef.mod", "E063", "Unknown variable UNDEF", "@{UNDEF}");
+    assert_fire(
+        "e060/e063_undef.mod",
+        "E063",
+        "Unknown variable UNDEF",
+        "@{UNDEF}",
+    );
 }
 
 #[test]
@@ -367,7 +372,12 @@ fn e063_expression_skipped_when_include_present() {
 
 #[test]
 fn e063_expression_without_include() {
-    assert_fire("e060/e063_expr.mod", "E063", "Unknown variable UNDEF", "@{UNDEF+1}");
+    assert_fire(
+        "e060/e063_expr.mod",
+        "E063",
+        "Unknown variable UNDEF",
+        "@{UNDEF+1}",
+    );
 }
 
 #[test]

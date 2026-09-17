@@ -176,9 +176,7 @@ fn e030_same_kind_var() {
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].code, "W031");
     assert_eq!(got[0].severity, 2);
-    assert!(got[0]
-        .message
-        .contains("Symbol y declared twice"));
+    assert!(got[0].message.contains("Symbol y declared twice"));
     assert_span_in(&text, &got[0], "var y c;", "y");
 }
 
@@ -188,9 +186,9 @@ fn e030_same_kind_var_third_compares_to_first() {
     let got = rust_e030(&text);
     assert_eq!(got.len(), 2);
     assert!(got.iter().all(|d| d.code == "W031" && d.severity == 2));
-    assert!(got.iter().all(|d| d
-        .message
-        .contains("Symbol y declared twice")));
+    assert!(got
+        .iter()
+        .all(|d| d.message.contains("Symbol y declared twice")));
     assert_last_ident(&text, &got[0], "var y;\nvar y;", "y");
     assert_span_in(&text, &got[1], "var y c;", "y");
 }
@@ -202,9 +200,7 @@ fn e030_same_kind_param() {
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].code, "W031");
     assert_eq!(got[0].severity, 2);
-    assert!(got[0]
-        .message
-        .contains("Symbol betta declared twice"));
+    assert!(got[0].message.contains("Symbol betta declared twice"));
     assert_span_in(&text, &got[0], "parameters rho betta;", "betta");
 }
 

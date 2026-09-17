@@ -86,25 +86,20 @@ pub fn check_e061(records: &IncludeRecords) -> Vec<Diagnostic> {
         .unresolved
         .iter()
         .map(|u| {
-            Diagnostic::new(
-                u.span,
-                Severity::Error,
-                "E061",
-                {
-                    let mut msg = format!(
-                        "Could not open {}. The following directories were searched",
-                        u.filename
-                    );
-                    if !u.searched.is_empty() {
-                        msg.push(':');
-                        for dir in &u.searched {
-                            msg.push_str("\n   * ");
-                            msg.push_str(dir);
-                        }
+            Diagnostic::new(u.span, Severity::Error, "E061", {
+                let mut msg = format!(
+                    "Could not open {}. The following directories were searched",
+                    u.filename
+                );
+                if !u.searched.is_empty() {
+                    msg.push(':');
+                    for dir in &u.searched {
+                        msg.push_str("\n   * ");
+                        msg.push_str(dir);
                     }
-                    msg
-                },
-            )
+                }
+                msg
+            })
         })
         .collect()
 }

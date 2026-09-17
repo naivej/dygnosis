@@ -100,10 +100,7 @@ fn check_constraint_rows(model: &Model, out: &mut Vec<Diagnostic>) {
             out.push(error(
                 c.name_span,
                 "E175",
-                format!(
-                    "No equation has been declared for constraint '{}'",
-                    c.name
-                ),
+                format!("No equation has been declared for constraint '{}'", c.name),
             ));
         }
         match bind_root(model, c) {
@@ -254,9 +251,7 @@ fn check_duplicate_clauses(
                 out.push(error(
                     tok.span,
                     "E184",
-                    format!(
-                        "The '{clause}' clause is declared multiple times"
-                    ),
+                    format!("The '{clause}' clause is declared multiple times"),
                 ));
             }
             while i < in_block.len() && in_block[i].kind != TokenKind::Semi {
@@ -446,9 +441,7 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
                 out.push(error(
                     eq.span,
                     "E176",
-                    format!(
-                        "The constraint '{c}' is both in the 'bind' and 'relax' tags"
-                    ),
+                    format!("The constraint '{c}' is both in the 'bind' and 'relax' tags"),
                 ));
             }
         }
