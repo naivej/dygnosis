@@ -63,7 +63,7 @@ const TOOLS: &[(&str, &str)] = &[
     ),
     (
         "dynare_list_diagnostic_codes",
-        "List documented diagnostic codes and their titles.",
+        "List all diagnostic codes, classified as shared, skipped, or added relative to Dynare.",
     ),
     (
         "dynare_list_options",
@@ -100,6 +100,7 @@ pub struct McpDiagnostic {
 pub struct DiagnosticCodeItem {
     pub code: String,
     pub title: String,
+    /// `shared`, `skipped`, or `added` relative to Dynare.
     pub kind: String,
 }
 
@@ -1274,7 +1275,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_list_diagnostic_codes",
-        description = "List documented diagnostic codes and their titles."
+        description = "List all diagnostic codes, classified as shared, skipped, or added relative to Dynare."
     )]
     fn list_diagnostic_codes_tool(&self) -> CallToolResult {
         tool_json(serde_json::to_value(dynare_list_diagnostic_codes()).expect("list codes json"))

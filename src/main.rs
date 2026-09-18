@@ -32,7 +32,7 @@ enum Commands {
     Explain {
         /// Diagnostic code (for example E001)
         code: Option<String>,
-        /// List documented diagnostic codes
+        /// List all diagnostic codes, classified as shared, skipped, or added relative to Dynare
         #[arg(long)]
         list: bool,
     },
@@ -184,12 +184,12 @@ fn abs_path_for_workspace(path: &str) -> String {
 fn run_explain(code: Option<String>, list: bool) {
     if list || code.is_none() {
         let codes = dygnosis::explain::known_codes();
-        println!("Documented diagnostic codes:");
+        println!("Diagnostic codes and their relation to Dynare:");
         for c in &codes {
             let (kind, title) = dygnosis::explain::explain(c)
                 .map(|e| (e.kind.as_str(), e.title))
                 .unwrap_or(("", ""));
-            println!("  {c:<6}  {kind:<5}  {title}");
+            println!("  {c:<6}  {kind:<7}  {title}");
         }
         println!(
             "\n{} codes. Run `dygnosis explain <CODE>` for details.",

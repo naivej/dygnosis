@@ -32,7 +32,7 @@ const THIN_CODES: &[&str] = &[
     "W131", "W140", "W150", "W160", "W170", "W200",
 ];
 
-const EMIT: &[&str] = &[
+const SHARED: &[&str] = &[
     "E001", "E020", "E021", "E023", "E024", "E025", "E026", "E027", "E028", "E030", "E058", "E059",
     "E061", "E062", "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E104",
     "E111", "E113", "E130", "E170", "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E178",
@@ -122,7 +122,7 @@ fn read_mod(archive_dir: &str) -> String {
 
 #[test]
 fn known_codes_is_exactly_the_163_rust_keys() {
-    assert_eq!(EMIT.len(), 70);
+    assert_eq!(SHARED.len(), 70);
     assert_eq!(ADDED.len(), 27);
     assert_eq!(SKIP_KEYS.len(), 66);
     assert_eq!(THIN_CODES.len(), 97);
@@ -167,11 +167,11 @@ fn skip_markdown_matches_expected() {
 }
 
 #[test]
-fn explain_kinds_are_emit_skip_added() {
-    for code in EMIT {
+fn explain_kinds_are_shared_skipped_added() {
+    for code in SHARED {
         let entry = explain(code).unwrap_or_else(|| panic!("{code}"));
-        assert_eq!(entry.kind, ExplainKind::Emit, "{code}");
-        assert_eq!(entry.kind.as_str(), "emit", "{code}");
+        assert_eq!(entry.kind, ExplainKind::Shared, "{code}");
+        assert_eq!(entry.kind.as_str(), "shared", "{code}");
     }
     for code in ADDED {
         let entry = explain(code).unwrap_or_else(|| panic!("{code}"));
@@ -180,15 +180,15 @@ fn explain_kinds_are_emit_skip_added() {
     }
     for code in SKIP_KEYS {
         let entry = explain(code).unwrap_or_else(|| panic!("{code}"));
-        assert_eq!(entry.kind, ExplainKind::Skip, "{code}");
-        assert_eq!(entry.kind.as_str(), "skip", "{code}");
+        assert_eq!(entry.kind, ExplainKind::Skipped, "{code}");
+        assert_eq!(entry.kind.as_str(), "skipped", "{code}");
     }
     assert!(explain("E060").is_none());
     assert_eq!(explain("W062").unwrap().kind, ExplainKind::Added);
-    assert_eq!(explain("E186").unwrap().kind, ExplainKind::Skip);
+    assert_eq!(explain("E186").unwrap().kind, ExplainKind::Skipped);
     assert_eq!(explain("W013").unwrap().kind, ExplainKind::Added);
-    assert_eq!(explain("W186").unwrap().kind, ExplainKind::Skip);
-    assert_eq!(explain("s001").unwrap().kind, ExplainKind::Skip);
+    assert_eq!(explain("W186").unwrap().kind, ExplainKind::Skipped);
+    assert_eq!(explain("s001").unwrap().kind, ExplainKind::Skipped);
 }
 
 #[test]
@@ -324,7 +324,7 @@ fn cli_explain_list() {
     assert_eq!(output.status.code(), Some(0));
     let stdout = stdout_text(&output);
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines[0], "Documented diagnostic codes:");
+    assert_eq!(lines[0], "Diagnostic codes and their relation to Dynare:");
 
     let mut entries = Vec::new();
     let mut i = 1;
@@ -333,17 +333,17 @@ fn cli_explain_list() {
         assert!(line.starts_with("  "), "{line:?}");
         let rest = &line[2..];
         assert!(
-            rest.len() >= 15,
+            rest.len() >= 17,
             "list line too short for column layout: {line:?}"
         );
         let code = rest[..6].trim_end();
         assert_eq!(&rest[6..8], "  ", "column gap mismatch: {line:?}");
-        let kind = rest[8..13].trim_end();
-        assert_eq!(&rest[13..15], "  ", "kind column gap mismatch: {line:?}");
-        let title = &rest[15..];
+        let kind = rest[8..15].trim_end();
+        assert_eq!(&rest[15..17], "  ", "kind column gap mismatch: {line:?}");
+        let title = &rest[17..];
         assert!(
-            matches!(kind, "emit" | "skip" | "added"),
-            "kind token must be emit/skip/added: {line:?}"
+            matches!(kind, "shared" | "skipped" | "added"),
+            "kind token must be shared/skipped/added: {line:?}"
         );
         entries.push((code, kind, title));
         i += 1;
@@ -363,17 +363,17 @@ fn cli_explain_list() {
     assert_eq!(w013.1, "added");
     assert_eq!(w013.2, explain("W013").unwrap().title);
     let e001 = entries.iter().find(|(c, _, _)| *c == "E001").unwrap();
-    assert_eq!(e001.1, "emit");
+    assert_eq!(e001.1, "shared");
     let e186 = entries.iter().find(|(c, _, _)| *c == "E186").unwrap();
-    assert_eq!(e186.1, "skip");
+    assert_eq!(e186.1, "skipped");
     assert_eq!(e186.2, "Unused endogenous after substitution");
     let i050 = entries.iter().find(|(c, _, _)| *c == "I050").unwrap();
     assert_eq!(i050.1, "added");
     assert_eq!(i050.2, "No initval or steady_state_model block");
     let s001 = entries.iter().find(|(c, _, _)| *c == "S001").unwrap();
-    assert_eq!(s001.1, "skip");
+    assert_eq!(s001.1, "skipped");
     let w186 = entries.iter().find(|(c, _, _)| *c == "W186").unwrap();
-    assert_eq!(w186.1, "skip");
+    assert_eq!(w186.1, "skipped");
     assert_eq!(w186.2, "Possible auxiliary name in a symbol list");
     assert_eq!(
         lines.get(i).copied(),

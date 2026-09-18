@@ -712,7 +712,7 @@ fn list_diagnostic_codes_matches_known_codes() {
             item.code
         );
         assert!(
-            matches!(item.kind.as_str(), "emit" | "skip" | "added"),
+            matches!(item.kind.as_str(), "shared" | "skipped" | "added"),
             "kind token for {}: {}",
             item.code,
             item.kind

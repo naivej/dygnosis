@@ -60,33 +60,33 @@ fn check_inventory() {
     for row in &inv.rows {
         codes_in_rows.extend(row.codes.iter().cloned());
     }
-    let mut missing_emit_added: Vec<&str> = Vec::new();
-    let mut skip_with_rows: Vec<&str> = Vec::new();
+    let mut missing_shared_added: Vec<&str> = Vec::new();
+    let mut skipped_with_rows: Vec<&str> = Vec::new();
     for code in known_codes() {
         let kind = explain(code)
             .unwrap_or_else(|| panic!("{code} in known_codes() without explain"))
             .kind;
         let has_row = codes_in_rows.contains(code);
         match kind {
-            ExplainKind::Skip => {
+            ExplainKind::Skipped => {
                 if has_row {
-                    skip_with_rows.push(code);
+                    skipped_with_rows.push(code);
                 }
             }
-            ExplainKind::Emit | ExplainKind::Added => {
+            ExplainKind::Shared | ExplainKind::Added => {
                 if !has_row {
-                    missing_emit_added.push(code);
+                    missing_shared_added.push(code);
                 }
             }
         }
     }
     assert!(
-        missing_emit_added.is_empty(),
-        "emit/added known_codes() with zero inventory rows: {missing_emit_added:?}"
+        missing_shared_added.is_empty(),
+        "shared/added known_codes() with zero inventory rows: {missing_shared_added:?}"
     );
     assert!(
-        skip_with_rows.is_empty(),
-        "skip keys must have zero inventory rows: {skip_with_rows:?}"
+        skipped_with_rows.is_empty(),
+        "skipped keys must have zero inventory rows: {skipped_with_rows:?}"
     );
     for code in [
         "E040", "W040", "W041", "I041", "W071", "I070", "I071", "W080", "W081", "DYNR",
