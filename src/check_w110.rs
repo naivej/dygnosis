@@ -12,6 +12,7 @@ const FALLBACK: Span = Span { start: 0, end: 1 };
 pub fn check_w110(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = check_w060(model);
     diagnostics.extend(check_shock_stmts(model));
+    diagnostics.extend(check_shock_types(model));
     diagnostics.extend(check_e212(model));
     diagnostics
 }
@@ -43,7 +44,7 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
     for stmt in &model.shock_stmts {
         let span = nonempty(stmt.span);
         match &stmt.kind {
-            ShockKind::Var(name) => {
+            ShockKind::Var(name) | ShockKind::Stderr(name) => {
                 let key = SeenKey::Var(*name);
                 if seen.contains(&key) {
                     let n = model.name(*name);
@@ -55,7 +56,7 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                     ));
                 }
                 seen.insert(key);
-                if let Some(v) = stmt.rhs {
+                if let (ShockKind::Var(_), Some(v)) = (&stmt.kind, stmt.rhs) {
                     if v < 0.0 {
                         let n = model.name(*name);
                         diagnostics.push(Diagnostic::new(
@@ -121,6 +122,102 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
         }
     }
     diagnostics
+}
+
+fn check_shock_types(model: &Model) -> Vec<Diagnostic> {
+    let det: HashSet<Name> = model
+        .deterministic_exogenous
+        .iter()
+        .map(|d| d.name)
+        .collect();
+    let exo: HashSet<Name> = model
+        .exogenous
+        .iter()
+        .map(|d| d.name)
+        .filter(|n| !det.contains(n))
+        .collect();
+    let obs: HashSet<Name> = model.varobs.iter().map(|v| v.name).collect();
+    let mut out = Vec::new();
+    for stmt in &model.shock_stmts {
+        let span = nonempty(stmt.span);
+        match &stmt.kind {
+            ShockKind::Var(name) => {
+                if !exo.contains(name) && !obs.contains(name) {
+                    let n = model.name(*name);
+                    out.push(Diagnostic::new(
+                        span,
+                        Severity::Error,
+                        "E266",
+                        format!(
+                            "shocks: setting a variance on '{n}' is not allowed, because it is neither an exogenous variable nor an observed endogenous variable"
+                        ),
+                    ));
+                }
+            }
+            ShockKind::Stderr(name) => {
+                if !exo.contains(name) && !obs.contains(name) {
+                    let n = model.name(*name);
+                    out.push(Diagnostic::new(
+                        span,
+                        Severity::Error,
+                        "E267",
+                        format!(
+                            "shocks: setting a standard error on '{n}' is not allowed, because it is neither an exogenous variable nor an observed endogenous variable"
+                        ),
+                    ));
+                }
+            }
+            ShockKind::Cov(names) if names.len() >= 2 => {
+                let a = names[0];
+                let b = names[1];
+                let both_exo = exo.contains(&a) && exo.contains(&b);
+                let both_obs = obs.contains(&a) && obs.contains(&b);
+                if !both_exo && !both_obs {
+                    out.push(Diagnostic::new(
+                        span,
+                        Severity::Error,
+                        "E268",
+                        format!(
+                            "shocks: setting a covariance between '{}' and '{}'is not allowed; covariances can only be specified for exogenous or observed endogenous variables of same type",
+                            model.name(a),
+                            model.name(b)
+                        ),
+                    ));
+                }
+            }
+            ShockKind::Corr { a, b } => {
+                let both_exo = exo.contains(a) && exo.contains(b);
+                let both_obs = obs.contains(a) && obs.contains(b);
+                if !both_exo && !both_obs {
+                    out.push(Diagnostic::new(
+                        span,
+                        Severity::Error,
+                        "E269",
+                        format!(
+                            "shocks: setting a correlation between '{}' and '{}'is not allowed; correlations can only be specified for exogenous or observed endogenous variables of same type",
+                            model.name(*a),
+                            model.name(*b)
+                        ),
+                    ));
+                }
+            }
+            ShockKind::Skew(names) if names.iter().any(|n| !exo.contains(n)) => {
+                let a = names.first().map(|n| model.name(*n)).unwrap_or("");
+                let b = names.get(1).map(|n| model.name(*n)).unwrap_or(a);
+                let c = names.get(2).map(|n| model.name(*n)).unwrap_or(a);
+                out.push(Diagnostic::new(
+                    span,
+                    Severity::Error,
+                    "E270",
+                    format!(
+                        "shocks: setting skewness for '{a}', '{b}', '{c}' is not allowed; skewness can only be specified for exogenous variables"
+                    ),
+                ));
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 fn check_e212(model: &Model) -> Vec<Diagnostic> {

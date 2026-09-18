@@ -58,7 +58,7 @@ impl Diagnostic {
 /// When `check_parse` is nonempty, later families are skipped (cascade).
 /// Thin families for one parsed model. If `check_parse` is nonempty, return
 /// those E001 rows only (cascade). Otherwise concatenate equation-count (W013), E020, E030,
-/// OccBin, written clash, estimation, shape, W010, E062–E065, W070, W090, W100, W110 (includes W060), W120, W130, symbol lists.
+/// OccBin, written clash, estimation, shape, W010, E062–E065, W070, W090, W100, W110 (includes W060), W120, W130, symbol lists, D-block.
 /// W062 / E061 / W061 / W160 and I050 quiet are workspace-only (`check_file`), not here.
 pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     let parse_diags = crate::check_parse::check_parse(model);
@@ -78,11 +78,13 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     out.extend(crate::check_e060::check_e060_family_on_model(model));
     out.extend(crate::check_w070::check_w070(model));
     out.extend(crate::check_w090::check_w090(model));
+    out.extend(crate::check_estimated_params::check_estimated_params(model));
     out.extend(crate::check_w100::check_w100(model));
     out.extend(crate::check_w110::check_w110(model));
     out.extend(crate::check_w120::check_w120_family(model));
     out.extend(crate::check_w130::check_w130(model));
     out.extend(crate::check_symbol_list::check_symbol_list(model));
+    out.extend(crate::check_d_block::check_d_block(model));
     out
 }
 

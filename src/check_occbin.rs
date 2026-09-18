@@ -22,6 +22,101 @@ fn error(span: Span, code: &str, message: impl Into<String>) -> Diagnostic {
     Diagnostic::new(span, Severity::Error, code, message)
 }
 
+fn check_mcp_form(model: &Model, eq: &Equation, out: &mut Vec<Diagnostic>) {
+    let Some(value) = eq.tag_map.get("mcp") else {
+        return;
+    };
+    let tokens: Vec<Token> = tokenize(value)
+        .into_iter()
+        .filter(|t| t.kind != TokenKind::Eof)
+        .collect();
+    let ineq = tokens.iter().position(|t| {
+        matches!(
+            t.kind,
+            TokenKind::Lt | TokenKind::Gt | TokenKind::Le | TokenKind::Ge
+        )
+    });
+    let Some(i) = ineq else {
+        out.push(error(
+            eq.span,
+            "E265",
+            "'mcp' tag does not contain an inequality",
+        ));
+        return;
+    };
+    let lhs = &tokens[..i];
+    let rhs = &tokens[i + 1..];
+    if !mcp_lhs_is_var(lhs) {
+        out.push(error(
+            eq.span,
+            "E262",
+            "Left-hand side of expression in 'mcp' tag is not a variable",
+        ));
+        return;
+    }
+    let name = lhs[0].text(value);
+    let endo = model.endogenous.iter().any(|d| model.name(d.name) == name);
+    let declared = endo
+        || model.exogenous.iter().any(|d| model.name(d.name) == name)
+        || model.parameters.iter().any(|d| model.name(d.name) == name);
+    if !declared {
+        out.push(error(
+            eq.span,
+            "E262",
+            "Left-hand side of expression in 'mcp' tag is not a variable",
+        ));
+        return;
+    }
+    if !endo {
+        out.push(error(
+            eq.span,
+            "E263",
+            "Left-hand side of expression in 'mcp' tag is not an endogenous variable",
+        ));
+        return;
+    }
+    if !mcp_rhs_is_constant(rhs, value) {
+        out.push(error(
+            eq.span,
+            "E264",
+            "Right-hand side of expression in 'mcp' tag should be a constant",
+        ));
+    }
+}
+
+fn mcp_lhs_is_var(tokens: &[Token]) -> bool {
+    if tokens.is_empty() || tokens[0].kind != TokenKind::Ident {
+        return false;
+    }
+    if tokens.len() == 1 {
+        return true;
+    }
+    // ident ( signed_integer )
+    if tokens.len() >= 4
+        && tokens[1].kind == TokenKind::LParen
+        && (tokens[2].kind == TokenKind::Number
+            || tokens[2].kind == TokenKind::Plus
+            || tokens[2].kind == TokenKind::Minus)
+        && tokens.last().is_some_and(|t| t.kind == TokenKind::RParen)
+    {
+        return true;
+    }
+    false
+}
+
+fn mcp_rhs_is_constant(tokens: &[Token], _src: &str) -> bool {
+    match tokens {
+        [t] if t.kind == TokenKind::Number => true,
+        [sign, t]
+            if matches!(sign.kind, TokenKind::Plus | TokenKind::Minus)
+                && t.kind == TokenKind::Number =>
+        {
+            true
+        }
+        _ => false,
+    }
+}
+
 fn split_names(s: &str) -> Vec<&str> {
     s.split(',').filter(|p| !p.is_empty()).collect()
 }
@@ -445,6 +540,13 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
                 ));
             }
         }
+        for (key, span) in &eq.tag_twice {
+            out.push(error(
+                *span,
+                "E256",
+                format!("Tag '{key}' cannot be used twice for the same equation"),
+            ));
+        }
         if eq.tag_map.contains_key("mcp") && eq.complementarity.is_some() {
             out.push(error(
                 eq.span,
@@ -460,6 +562,7 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
             );
             d.tags.push(2);
             out.push(d);
+            check_mcp_form(model, eq, out);
         }
         if let Some(comp) = eq.complementarity.as_ref() {
             if comp.matched.is_none() {

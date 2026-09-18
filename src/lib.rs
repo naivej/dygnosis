@@ -8,9 +8,11 @@ pub mod auto_fix;
 pub mod catalog;
 pub mod check_clash;
 pub mod check_context;
+pub mod check_d_block;
 pub mod check_estimation;
 pub mod check_symbol_list;
 pub mod check_e020;
+pub mod check_estimated_params;
 pub mod check_e030;
 pub mod check_e060;
 pub mod check_occbin;
@@ -54,9 +56,11 @@ pub use catalog::{
 };
 pub use check_clash::check_clash;
 pub use check_context::check_context;
+pub use check_d_block::check_d_block;
 pub use check_estimation::check_estimation;
 pub use check_symbol_list::check_symbol_list;
 pub use check_e020::check_e020;
+pub use check_estimated_params::check_estimated_params;
 pub use check_e030::check_e030;
 pub use check_e060::{
     check_e060, check_e060_family, check_e060_family_on_model, check_e061, check_e062, check_e063,

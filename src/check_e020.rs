@@ -12,7 +12,6 @@ pub fn check_e020(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_e024(model));
     out.extend(check_e025(model));
     out.extend(check_undeclared_equations(model));
-    out.extend(check_shocks_e020(model));
     out
 }
 
@@ -207,6 +206,11 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
             if visible.contains(&r.name) || pound.contains(&r.name) {
                 continue;
             }
+            if model.mod_file_locals.contains(&r.name)
+                || model.external_function_names.contains(&r.name)
+            {
+                continue;
+            }
             if ref_name == "_" || ref_name.ends_with("__") {
                 continue;
             }
@@ -343,34 +347,6 @@ fn undeclared_diag(
         fix: None,
         tags: Vec::new(),
     }
-}
-
-fn check_shocks_e020(model: &Model) -> Vec<Diagnostic> {
-    let Some(span) = model.shocks_block else {
-        return Vec::new();
-    };
-    if model.shocks_vars.is_empty() {
-        return Vec::new();
-    }
-    let exo: HashSet<Name> = model.exogenous.iter().map(|d| d.name).collect();
-    let mut diagnostics = Vec::new();
-    for &name in &model.shocks_vars {
-        if exo.contains(&name) {
-            continue;
-        }
-        let name = model.name(name);
-        diagnostics.push(Diagnostic {
-            span,
-            severity: Severity::Error,
-            code: "E020".to_string(),
-            message: format!(
-                "Shock '{name}' referenced in shocks block but not declared in 'varexo'. Fix: add '{name}' to a 'varexo' declaration."
-            ),
-            fix: None,
-            tags: Vec::new(),
-        });
-    }
-    diagnostics
 }
 
 fn visible_names(model: &Model, eq: &Equation) -> HashSet<Name> {

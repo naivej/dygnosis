@@ -2,9 +2,9 @@
 //!
 //! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 70
 //! codes shipped through 0.5.0, then kind `shared` / `skipped` / `added`.
-//! 170 keys = 94 shared + 27 added + 49 skipped. Catalog **0.5.1** D-clash and
-//! D-check Errors are shared; **0.5.2** D-walk rows add 24 shared keys and drop
-//! the 17 `S###` keys they replace.
+//! 201 keys = 140 shared + 27 added + 34 skipped. Catalog **0.5.1** D-clash and
+//! D-check Errors are shared; **0.5.2** D-walk and D-block rows add shared keys and drop
+//! the `S###` keys they replace.
 //! `I050` and `W042` use the recorded surface rewrites in
 //! `dev_logs/0.1/0.1.0/22-c-explain.md` (do not advertise Compute Steady State).
 
@@ -40,7 +40,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 170 keys: 94 shared + 27 added + 49 skipped.
+// 201 keys: 140 shared + 27 added + 34 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -244,7 +244,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E093", ExplainEntry {
         title: "estimated_params references an undeclared symbol",
-        body: "An ``estimated_params`` entry names a symbol that is not declared with the expected role: a plain entry must name a parameter, an ``stderr`` entry must name a shock or observed variable, and a ``corr`` entry must name two declared shocks or variables. Dynare refuses: `Unknown symbol: not_a_param`.\n\n**Warrant**\n\nThe editor names the ``estimated_params`` role (parameter, stderr, or corr); Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the symbol, or correct the name / entry type.",
+        body: "An ``estimated_params`` entry names a symbol that is not declared with the expected role: a plain entry must name a parameter, an ``stderr`` or ``skew`` entry must name a shock or observed variable, and a ``corr`` entry must name two declared shocks or variables. Dynare refuses: `Unknown symbol: not_a_param` (unknown ``skew`` is `in `estimated_params' block, unknown symbol: {name}`).\n\n**Warrant**\n\nThe editor names the ``estimated_params`` role (parameter, stderr, corr, or skew); Dynare's string is the generic `Unknown symbol` or the estimated-params unknown-symbol line.\n\n**Fix**\n\nDeclare the symbol, or correct the name / entry type.",
         kind: ExplainKind::Shared,
     }),
     ("W094", ExplainEntry {
@@ -647,6 +647,236 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "``stoch_simul``'s symbol list names the same variable more than once; Dynare keeps the first occurrence. Dynare accepts and warns: `In stoch_simul: {name} found more than once in symbol list. Removing all but first occurrence.`\n\n**Fix**\n\nRemove the duplicate entry.",
         kind: ExplainKind::Shared,
     }),
+    ("E241", ExplainEntry {
+        title: "histval completeness",
+        body: "``histval(all_values_required)`` is missing an assignment for an endogenous or exogenous variable. Dynare refuses: `You have not set the following endogenous variables in histval: {names}` / `You have not set the following exogenous variables in endval: {names}` (their exo line says ``endval``).\n\n**Fix**\n\nGive every endogenous and exogenous variable a ``histval`` assignment, or drop ``all_values_required``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E242", ExplainEntry {
+        title: "histval lag greater than zero",
+        body: "A ``histval`` assignment uses a positive lag. Dynare refuses: `histval: the lag on {name} should be less than or equal to 0`.\n\n**Fix**\n\nUse a lag of 0 or less.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E243", ExplainEntry {
+        title: "histval pair declared twice",
+        body: "The same ``(name, lag)`` pair appears twice in ``histval``. Dynare refuses: `hist_val: ({name}, {lag}) declared twice`.\n\n**Fix**\n\nKeep one assignment for that pair.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E244", ExplainEntry {
+        title: "Duplicate symbol in estimated_params",
+        body: "A plain parameter is listed twice in one ``estimated_params`` / ``estimated_params_init`` / ``estimated_params_bounds`` block. Dynare refuses: `in `{block}' block, the symbol {name} is declared twice.`\n\n**Fix**\n\nKeep one entry for that symbol in the block.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E245", ExplainEntry {
+        title: "Duplicate stderr in estimated_params",
+        body: "The same ``stderr`` name is listed twice in one estimated-params block. Dynare refuses: `in `{block}' block, the stderr of {name} is declared twice.`\n\n**Fix**\n\nKeep one ``stderr`` entry for that name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E246", ExplainEntry {
+        title: "Duplicate correlation in estimated_params",
+        body: "The same correlation pair is listed twice in one estimated-params block (order-insensitive). Dynare refuses: `in `{block}' block, the correlation between {a} and {b} is declared twice.`\n\n**Fix**\n\nKeep one ``corr`` entry for that pair.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E247", ExplainEntry {
+        title: "Duplicate skewness in estimated_params",
+        body: "The same ``skew`` name is listed twice in one estimated-params block. Dynare refuses: `in `{block}' block, the skewness of {name} is declared twice.`\n\n**Fix**\n\nKeep one ``skew`` entry for that name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E248", ExplainEntry {
+        title: "Estimated parameter value used in the same block",
+        body: "A parameter declared in the same estimated-params block appears in another entry's init, bounds, or prior expressions. Dynare refuses: `in `{block}' block, the value of estimated parameter {used} is used in the declaration for {target}. This behaviour is undefined.`\n\n**Fix**\n\nDo not refer to another estimated parameter's value in the same block.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E249", ExplainEntry {
+        title: "Skewness on a non-exogenous name",
+        body: "``estimated_params`` lists ``skew`` on a name that is not exogenous. Dynare refuses: `in `estimated_params' block, skewness can only be specified for exogenous variables, not for '{name}'.`\n\n**Fix**\n\nUse ``skew`` only on a ``varexo`` name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E250", ExplainEntry {
+        title: "Beta prior with mean and std 0.5",
+        body: "An ``estimated_params`` beta prior has mean and standard deviation both 0.5. Dynare refuses: `The prior density is not defined for the beta distribution when the mean = standard deviation = 0.5.`\n\n**Fix**\n\nChange the mean or the standard deviation so they are not both 0.5.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E251", ExplainEntry {
+        title: "Exogenous variable in planner_objective",
+        body: "``planner_objective`` uses an exogenous or undeclared name. Dynare refuses: `You cannot include exogenous variables (or variables of undeclared type) in the planner objective. Please define an auxiliary endogenous variable like eps_aux=epsilon and use it instead of the varexo.`\n\n**Fix**\n\nReplace the exogenous name with an auxiliary endogenous variable.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E252", ExplainEntry {
+        title: "Lead or lag in planner_objective",
+        body: "``planner_objective`` uses a lead or lag. Dynare refuses: `Leads and lags on variables are forbidden in 'planner_objective'.`\n\n**Fix**\n\nWrite the objective in contemporaneous variables.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E253", ExplainEntry {
+        title: "Model-local in planner_objective",
+        body: "``planner_objective`` uses a ``#`` model-local name. Dynare refuses: `Model local variable {name} cannot be used in 'planner_objective'.`\n\n**Fix**\n\nUse a declared endogenous variable instead of the model-local.",
+        kind: ExplainKind::Shared,
+    }),
+    ("W203", ExplainEntry {
+        title: "Several osr_params statements",
+        body: "The file has more than one ``osr_params`` statement. Dynare accepts and warns: `You have more than one osr_params statement in the .mod file.`\n\n**Fix**\n\nKeep a single ``osr_params`` statement.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E254", ExplainEntry {
+        title: "osr_params_bounds before osr_params",
+        body: "``osr_params_bounds`` appears and there is no earlier ``osr_params`` statement. Dynare refuses: `you must have an osr_params statement before the osr_params_bounds block.`\n\n**Fix**\n\nPut ``osr_params`` above ``osr_params_bounds``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E255", ExplainEntry {
+        title: "osr_params_bounds name is not a parameter",
+        body: "A name in ``osr_params_bounds`` is not a parameter. Dynare refuses: `{name} must be a parameter to be used in the osr_bounds block`.\n\n**Fix**\n\nList only declared parameters.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E256", ExplainEntry {
+        title: "Equation tag used twice",
+        body: "The same tag key appears twice on one equation. Dynare refuses: `Tag '{key}' cannot be used twice for the same equation`.\n\n**Fix**\n\nKeep one copy of that tag.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E257", ExplainEntry {
+        title: "Default equation tag collides with existing name",
+        body: "An equation has no ``name`` tag, and both the LHS identifier and the 1-based equation index are already used as ``name`` values. Dynare refuses: `Error creating default equation tag: cannot assign default tag to equation number {n} because it is already in use`.\n\n**Fix**\n\nGive the equation an explicit ``[name=…]`` that does not collide.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E258", ExplainEntry {
+        title: "Several varobs statements",
+        body: "The file has more than one ``varobs`` statement. Dynare refuses: `varobs: you cannot have several 'varobs' statements in the same MOD file`.\n\n**Fix**\n\nKeep a single ``varobs`` statement.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E259", ExplainEntry {
+        title: "Several varexobs statements",
+        body: "The file has more than one ``varexobs`` statement. Dynare refuses: `varexobs: you cannot have several 'varexobs' statements in the same MOD file`.\n\n**Fix**\n\nKeep a single ``varexobs`` statement.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E260", ExplainEntry {
+        title: "varexobs name is not exogenous",
+        body: "A ``varexobs`` name is not an exogenous variable. Dynare refuses: `varexobs: {name} is not an exogenous variable`.\n\n**Fix**\n\nList only ``varexo`` names, or declare the name as exogenous.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E261", ExplainEntry {
+        title: "observation_trends name declared twice",
+        body: "The same leading name appears twice in ``observation_trends``. Dynare refuses: `observation_trends: {name} declared twice`.\n\n**Fix**\n\nKeep one trend line for that name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E262", ExplainEntry {
+        title: "mcp left-hand side is not a variable",
+        body: "The ``mcp`` tag's left-hand side is not a variable. Dynare refuses: `Left-hand side of expression in 'mcp' tag is not a variable`.\n\n**Fix**\n\nWrite an inequality whose left-hand side is a declared variable.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E263", ExplainEntry {
+        title: "mcp left-hand side is not endogenous",
+        body: "The ``mcp`` tag's left-hand side is a declared name that is not endogenous. Dynare refuses: `Left-hand side of expression in 'mcp' tag is not an endogenous variable`.\n\n**Fix**\n\nUse an endogenous variable on the left-hand side.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E264", ExplainEntry {
+        title: "mcp right-hand side is not a constant",
+        body: "The ``mcp`` tag's right-hand side is not a numeric constant. Dynare refuses: `Right-hand side of expression in 'mcp' tag should be a constant`.\n\n**Fix**\n\nUse a number on the right-hand side.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E265", ExplainEntry {
+        title: "mcp tag has no inequality",
+        body: "The ``mcp`` tag has no ``<`` or ``>``. Dynare refuses: `'mcp' tag does not contain an inequality`.\n\n**Fix**\n\nWrite an inequality such as ``y > 0``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E266", ExplainEntry {
+        title: "shocks variance on the wrong type",
+        body: "``shocks`` sets a variance on a name that is neither exogenous nor observed endogenous. Dynare refuses: `shocks: setting a variance on '{name}' is not allowed, because it is neither an exogenous variable nor an observed endogenous variable`.\n\n**Fix**\n\nSet variances on ``varexo`` or ``varobs`` names.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E267", ExplainEntry {
+        title: "shocks standard error on the wrong type",
+        body: "``shocks`` sets a standard error on a name that is neither exogenous nor observed endogenous. Dynare refuses: `shocks: setting a standard error on '{name}' is not allowed, because it is neither an exogenous variable nor an observed endogenous variable`.\n\n**Fix**\n\nSet standard errors on ``varexo`` or ``varobs`` names.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E268", ExplainEntry {
+        title: "shocks covariance on mixed types",
+        body: "``shocks`` sets a covariance on a pair that is not both exogenous or both observed endogenous. Dynare refuses: `shocks: setting a covariance between '{a}' and '{b}'is not allowed; covariances can only be specified for exogenous or observed endogenous variables of same type`.\n\n**Fix**\n\nUse two exogenous names or two observed endogenous names.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E269", ExplainEntry {
+        title: "shocks correlation on mixed types",
+        body: "``shocks`` sets a correlation on a pair that is not both exogenous or both observed endogenous. Dynare refuses: `shocks: setting a correlation between '{a}' and '{b}'is not allowed; correlations can only be specified for exogenous or observed endogenous variables of same type`.\n\n**Fix**\n\nUse two exogenous names or two observed endogenous names.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E270", ExplainEntry {
+        title: "shocks skewness on a non-exogenous name",
+        body: "``shocks`` sets skewness on a name that is not exogenous. Dynare refuses: `shocks: setting skewness for '{a}', '{b}', '{c}' is not allowed; skewness can only be specified for exogenous variables`.\n\n**Fix**\n\nUse ``skew`` only on ``varexo`` names.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E271", ExplainEntry {
+        title: "Option declared twice in one list",
+        body: "The same option identifier appears twice in one ``(…)`` list. Dynare refuses: `option {name} declared twice`.\n\n**Fix**\n\nKeep one copy of that option in the list.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E272", ExplainEntry {
+        title: "static equation with dynamics",
+        body: "An equation tagged ``[static]`` contains a lead, lag, ``EXPECTATION``, ``diff``, or ``STEADY_STATE``. Dynare refuses: `An equation tagged [static] cannot contain leads, lags, expectations, diff or STEADY_STATE operators`.\n\n**Fix**\n\nRemove the dynamics, or drop the ``[static]`` tag.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E273", ExplainEntry {
+        title: "generate_irfs element name repeated",
+        body: "A ``generate_irfs`` element name is used more than once. Dynare refuses: `Names in the generate_irfs block must be unique but you entered '{name}' more than once.`\n\n**Fix**\n\nGive each element a distinct name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E274", ExplainEntry {
+        title: "generate_irfs exogenous set twice",
+        body: "The same exogenous name is set twice inside one ``generate_irfs`` element. Dynare refuses: `You have set the exogenous variable {name} twice.`\n\n**Fix**\n\nKeep one setting for that exogenous name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E275", ExplainEntry {
+        title: "Namespace-qualified symbol",
+        body: "An expression uses ``ident.ident`` outside a skipped ``shock_paths`` body. Dynare refuses: `Namespace-qualified symbol {ns}.{name} not allowed in this context`.\n\n**Fix**\n\nUse a declared symbol without a namespace prefix.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E276", ExplainEntry {
+        title: "log of interned numeric zero",
+        body: "``log`` or ``ln`` is applied to interned numeric 0 while the expression is built. Dynare refuses: `log(0) not defined!`.\n\n**Fix**\n\nDo not take the log of a literal zero.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E277", ExplainEntry {
+        title: "log10 of interned numeric zero",
+        body: "``log10`` is applied to interned numeric 0 while the expression is built. Dynare refuses: `log10(0) not defined!`.\n\n**Fix**\n\nDo not take log10 of a literal zero.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E278", ExplainEntry {
+        title: "Division by interned numeric zero",
+        body: "A division denominator folds to interned numeric 0 while the expression is built. Dynare refuses: `Division by zero when forming ({num})/({den}); denominator simplified to 0 (possibly after substituting a variable set to 0).`\n\n**Fix**\n\nChange the denominator so it is not zero.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E279", ExplainEntry {
+        title: "external_function name used as a variable outside model",
+        body: "A name declared with ``external_function(name=…)`` is used as a bare variable outside ``model``. Dynare refuses: `Symbol '{name}' is the name of a MATLAB/Octave function, and cannot be used as a variable.`\n\n**Fix**\n\nCall the function with arguments, or use a different name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E280", ExplainEntry {
+        title: "external_function name used as a variable inside model",
+        body: "A name declared with ``external_function(name=…)`` is used as a bare variable inside ``model``. Dynare refuses: `Symbol {name} is a function name external to Dynare. It cannot be used like a variable without input argument inside model.`\n\n**Fix**\n\nCall the function with arguments, or use a different name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E281", ExplainEntry {
+        title: "Mod-file local used inside model",
+        body: "A name auto-declared outside ``model`` is used inside ``model``. Dynare refuses: `Variable {name} not allowed inside model declaration. Its scope is only outside model.`\n\n**Fix**\n\nDeclare the name as ``var``, ``varexo``, or ``parameters`` if it belongs in the model.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E282", ExplainEntry {
+        title: "Model-local used outside model",
+        body: "A ``#`` model-local name is used outside ``model`` (not in initval/endval/histval). Dynare refuses: `Variable {name} not allowed outside model declaration. Its scope is only inside model.`\n\n**Fix**\n\nKeep the name inside ``model``, or declare it as a parameter.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E283", ExplainEntry {
+        title: "@#if condition is not bool or number",
+        body: "An ``@#if`` condition is not a boolean or a number. Dynare refuses: `The condition must evaluate to a boolean or a double`.\n\n**Fix**\n\nUse a boolean or numeric condition.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E284", ExplainEntry {
+        title: "@#for tuple arity mismatch",
+        body: "An ``@#for`` tuple has a different size from the index list. Dynare refuses: `Encountered tuple of size {n} but only have {m} index variables`.\n\n**Fix**\n\nMatch the number of index names to the tuple size.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E285", ExplainEntry {
+        title: "Macro + operand type mismatch",
+        body: "A macro ``+`` combines operands of incompatible types. Dynare refuses: `Type mismatch for operands of + operator`.\n\n**Fix**\n\nAdd numbers to numbers, or change the operands.",
+        kind: ExplainKind::Shared,
+    }),
     ("E186", ExplainEntry {
         title: "Unused endogenous after substitution",
         body: "Dynare refuses: `Error: <name> not used in the model block`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
@@ -732,11 +962,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "Dynare refuses: `unknown pac_model / no matching pac_target_info`. Catching step: transform (rewrite). Owner: skip-rewrite 0.8 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S015", ExplainEntry {
-        title: "Default equation tag collides with existing name",
-        body: "Dynare refuses: `Error creating default equation tag…`. Catching step: transform (written clash). Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
     ("S016", ExplainEntry {
         title: "exclude_eqs, include_eqs, model_remove, or model_replace",
         body: "Dynare refuses: `various exclude_eqs / model_remove…`. Catching step: transform (written clash). Owner: skip 0.6 E. This code is never emitted.",
@@ -747,39 +972,9 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "Dynare refuses: `'<cmd>' … is not supported for heterogeneous models`. Catching step: check. Owner: skip 0.9 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S028", ExplainEntry {
-        title: "Duplicate or invalid estimated_params entry",
-        body: "Dynare refuses: `in '<block>' block…`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S029", ExplainEntry {
-        title: "Multiple osr_params statements",
-        body: "Dynare warns: `WARNING: You have more than one osr_params statement`. Catching step: check. Owner: skip 0.6 W. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S030", ExplainEntry {
-        title: "osr_params_bounds before osr_params",
-        body: "Dynare refuses: `you must have an osr_params statement before the osr_params_bounds block`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S031", ExplainEntry {
-        title: "Exogenous variable in planner_objective",
-        body: "Dynare refuses: `You cannot include exogenous variables … in the planner objective`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
     ("S032", ExplainEntry {
         title: "method_of_moments option error",
         body: "Dynare refuses: `MoM messages`. Catching step: check. Owner: skip 0.7 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S033", ExplainEntry {
-        title: "histval(all_values_required) incomplete",
-        body: "Dynare refuses: `You have not set the following endogenous/exogenous variables in initval/endval`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S034", ExplainEntry {
-        title: "shocks variance or correlation on the wrong type",
-        body: "Dynare refuses: `shocks: setting a variance/standard error on '…' is not allowed…`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S035", ExplainEntry {
@@ -832,16 +1027,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "Dynare refuses: `ERROR: Can't open <file> / Unsupported variable type for …`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S049", ExplainEntry {
-        title: "Constant-fold log(0) or division by zero",
-        body: "Dynare refuses: `ERROR: log(0) not defined! / log10(0) not defined! / Division by zero`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S050", ExplainEntry {
-        title: "Option declared twice or empty vector",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
     ("S051", ExplainEntry {
         title: "change_type, statement-local clash, or several ramsey_*",
         body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
@@ -860,36 +1045,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("S054", ExplainEntry {
         title: "Heterogeneity dimension unknown or twice",
         body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.9 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S055", ExplainEntry {
-        title: "mcp form errors beyond E180 and W170",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S056", ExplainEntry {
-        title: "Equation tag twice",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S057", ExplainEntry {
-        title: "varobs, varexobs, or observation_trends declared twice",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S058", ExplainEntry {
-        title: "Planner objective lead, lag, or model-local",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S059", ExplainEntry {
-        title: "Macro type mismatch, @#for tuple, or @#if not bool",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S060", ExplainEntry {
-        title: "MATLAB function name used as a variable",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
 ];

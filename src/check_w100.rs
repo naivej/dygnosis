@@ -81,6 +81,61 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
         ));
     }
 
+    if model.osr_params_statement_count >= 2 {
+        diagnostics.push(Diagnostic::new(
+            model
+                .osr_params_second_span
+                .or(model.osr_params_span)
+                .unwrap_or(FALLBACK),
+            Severity::Warning,
+            "W203",
+            "You have more than one osr_params statement in the .mod file.",
+        ));
+    }
+
+    if model.osr_params_bounds_span.is_some() {
+        let bounds_start = model.osr_params_bounds_span.map(|s| s.start).unwrap_or(0);
+        let params_after = match model.osr_params_span {
+            None => true,
+            Some(s) => s.start > bounds_start,
+        };
+        if params_after {
+            diagnostics.push(Diagnostic::new(
+                model.osr_params_bounds_span.unwrap_or(FALLBACK),
+                Severity::Error,
+                "E254",
+                "you must have an osr_params statement before the osr_params_bounds block.",
+            ));
+        }
+    }
+
+    if let Some(id) = model.planner_objective_expr {
+        let endo: HashSet<Name> = model.endogenous.iter().map(|d| d.name).collect();
+        let params: HashSet<Name> = model.parameters.iter().map(|d| d.name).collect();
+        let locals: HashSet<Name> = model
+            .equations
+            .iter()
+            .filter(|eq| eq.is_local)
+            .filter_map(|eq| {
+                eq.lhs_expr.and_then(|e| match &model.exprs.get(e).kind {
+                    crate::expr::ExprKind::Ident { name, .. } => Some(*name),
+                    _ => None,
+                })
+            })
+            .collect();
+        let exo_in_planner = model.exprs.walk_idents(id).any(|r| {
+            !endo.contains(&r.name) && !params.contains(&r.name) && !locals.contains(&r.name)
+        });
+        if exo_in_planner {
+            diagnostics.push(Diagnostic::new(
+                model.planner_objective_span.unwrap_or(FALLBACK),
+                Severity::Error,
+                "E251",
+                "You cannot include exogenous variables (or variables of undeclared type) in the planner objective. Please define an auxiliary endogenous variable like eps_aux=epsilon and use it instead of the varexo.",
+            ));
+        }
+    }
+
     if let Some((n, span)) = model.discretionary_order {
         if n > 1 {
             diagnostics.push(Diagnostic::new(

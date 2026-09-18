@@ -1,17 +1,18 @@
 //! Native recursive-descent parser over the token stream.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 use std::ops::Range;
 
 use crate::expr::{BinOp, ExprId, ExprKind, UnOp};
 use crate::intern::{Interner, Name};
 use crate::lexer::{tokenize, Token, TokenKind};
-use crate::macro_expand::expand_macros;
+use crate::macro_expand::expand_macros_full;
 use crate::model::{
     Assignment, CommandSymbol, Complementarity, ComplementarityTriple, Decl, DeprecatedOption,
-    Equation, EstimatedParam, EstimatedParamKind, EstimationDsgeVarStmt, IncludeDirective,
-    IncludePathDirective, MacroDirective, MacroInterp, Model, ObservedVar, OccbinConstraint,
-    OccbinExpr, ParseIssue, ParseIssueKind, PolicyCommand, ShockKind, ShockStmt, ShocksSemiFamily,
+    Equation, EstimatedParam, EstimatedParamKind, EstimationDsgeVarStmt, GenerateIrfsElement,
+    HistvalEntry, IncludeDirective, IncludePathDirective, MacroDirective, MacroInterp, Model,
+    ObservedVar, OccbinConstraint, OccbinExpr, OsrBound, ParseIssue, ParseIssueKind, PolicyCommand,
+    ShockKind, ShockStmt, ShocksSemiFamily,
 };
 use crate::span::Span;
 
@@ -20,12 +21,13 @@ pub fn parse(text: &str) -> Model {
     let raw_tokens = tokenize(&source);
     let (includes, includepaths, macro_directives, macro_interps) =
         collect_include_dirs(&source, &raw_tokens);
-    let tokens = expand_macros(&source, raw_tokens);
+    let (tokens, macro_type_errors) = expand_macros_full(&source, raw_tokens);
     let (mut model, _ranges) = parse_expanded(&source, tokens);
     model.includes = includes;
     model.includepaths = includepaths;
     model.macro_directives = macro_directives;
     model.macro_interps = macro_interps;
+    model.macro_type_errors = macro_type_errors;
     model
 }
 
@@ -38,6 +40,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, Vec<Range
         model: Model::default(),
         eq_token_ranges: Vec::new(),
         symbol_list_id: 1,
+        in_model: false,
     };
     p.parse_file();
     p.model
@@ -65,6 +68,14 @@ struct TopOption {
     eq: bool,
     value_lex: String,
     value_span: Span,
+}
+
+struct ParsedTag {
+    static_tag: bool,
+    dynamic_tag: bool,
+    flags: Vec<String>,
+    map: BTreeMap<String, String>,
+    twice: Vec<(String, Span)>,
 }
 
 fn parse_int_lexeme(lex: &str) -> Option<i32> {
@@ -256,9 +267,14 @@ const BLOCK_OPENERS: &[&str] = &[
     "model",
     "initval",
     "endval",
+    "histval",
     "shocks",
     "occbin_constraints",
     "steady_state_model",
+    "estimated_params_init",
+    "estimated_params_bounds",
+    "osr_params_bounds",
+    "generate_irfs",
 ];
 
 const PRIOR_SHAPES: &[&str] = &[
@@ -271,6 +287,13 @@ const PRIOR_SHAPES: &[&str] = &[
     "uniform_pdf",
     "weibull_pdf",
 ];
+
+#[derive(Clone, Copy)]
+enum EstimatedParamsTarget {
+    Params,
+    Init,
+    Bounds,
+}
 
 enum ExprStop {
     EqOrSemi,
@@ -502,6 +525,7 @@ struct Parser<'a> {
     /// Bumped once per statement that lists names, so `CommandSymbol::list_id`
     /// groups one statement's list.
     symbol_list_id: u32,
+    in_model: bool,
 }
 
 impl Parser<'_> {
@@ -523,27 +547,41 @@ impl Parser<'_> {
                 let decls = self.parse_declaration("predetermined_variables");
                 self.model.predetermined.extend(decls);
             } else if self.at_ident_ci("model") {
+                self.in_model = true;
                 self.parse_model_block();
+                self.in_model = false;
             } else if self.at_ident_ci("steady_state_model") {
                 self.parse_ss_block();
             } else if self.at_ident_ci("initval") {
                 self.parse_initval_block();
             } else if self.at_ident_ci("endval") {
                 self.parse_endval_block();
+            } else if self.at_ident_ci("histval") {
+                self.parse_histval_block();
             } else if self.at_ident_ci("shocks") || self.at_ident_ci("mshocks") {
                 self.parse_shocks_block(true);
             } else if self.at_ident_ci("occbin_constraints") {
                 self.parse_occbin_constraints_block();
             } else if self.at_ident_ci("varobs") {
                 self.parse_varobs();
+            } else if self.at_ident_ci("varexobs") {
+                self.parse_varexobs();
+            } else if self.at_ident_ci("estimated_params_init") {
+                self.parse_estimated_params_init_block();
+            } else if self.at_ident_ci("estimated_params_bounds") {
+                self.parse_estimated_params_bounds_block();
             } else if self.at_ident_ci("estimated_params") {
                 self.parse_estimated_params_block();
             } else if self.at_ident_ci("observation_trends") {
                 self.parse_observation_trends_block();
             } else if self.at_ident_ci("planner_objective") {
                 self.parse_planner_objective();
+            } else if self.at_ident_ci("osr_params_bounds") {
+                self.parse_osr_params_bounds();
             } else if self.at_ident_ci("osr_params") {
                 self.parse_osr_params();
+            } else if self.at_ident_ci("generate_irfs") {
+                self.parse_generate_irfs_block();
             } else if self.at_ident_ci("optim_weights") {
                 self.model.has_optim_weights = true;
                 self.skip_block();
@@ -665,6 +703,7 @@ impl Parser<'_> {
             let opt = self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
             self.record_deprecated_options_in_range(from, self.i);
             self.record_model_option_flags(from, self.i);
+            self.record_option_twice(from, self.i);
             linear = self.src[opt.start as usize..opt.end as usize]
                 .to_ascii_lowercase()
                 .contains("linear");
@@ -760,6 +799,200 @@ impl Parser<'_> {
                 self.model.endval.push(a);
             }
         }
+    }
+
+    fn parse_histval_block(&mut self) {
+        let opener_span = self.bump_histval_opener();
+        let start = opener_span.start;
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed("histval", opener_span, body_i, body_end_i);
+        let end = self.block_end_after_consume();
+        if self.model.histval_block.is_none() {
+            self.model.histval_block = Some(Span { start, end });
+        }
+        let saved = self.i;
+        self.i = body_i;
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                continue;
+            }
+            let before = self.i;
+            if let Some(entry) = self.parse_histval_entry(body_end_i) {
+                self.model.histval.push(entry);
+            }
+            if self.i <= before {
+                self.bump();
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+    }
+
+    fn bump_histval_opener(&mut self) -> Span {
+        let start = self.bump().span.start;
+        if self.at(TokenKind::LParen) {
+            let from = self.i;
+            self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+            self.record_option_twice(from, self.i);
+            if self.option_ident_in_range(from, self.i, "all_values_required") {
+                self.model.histval_all_values_required = true;
+            }
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        Span { start, end }
+    }
+
+    fn parse_histval_entry(&mut self, end_i: usize) -> Option<HistvalEntry> {
+        if self.i >= end_i || !self.at(TokenKind::Ident) {
+            return None;
+        }
+        let name_tok = self.bump();
+        let lexeme = self.lexeme(&name_tok).to_string();
+        let name = self.intern.intern(&lexeme);
+        if !self.at(TokenKind::LParen) {
+            return None;
+        }
+        let (lag, _) = self.parse_signed_int_in_parens();
+        self.eat(TokenKind::Eq);
+        let expr = self.parse_expr();
+        let end = self.finish_shock_stmt(end_i);
+        Some(HistvalEntry {
+            name,
+            lag,
+            span: Span {
+                start: name_tok.span.start,
+                end,
+            },
+            expr,
+        })
+    }
+
+    fn parse_osr_params_bounds(&mut self) {
+        let opener_span = self.bump_plain_opener();
+        let start = opener_span.start;
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed("osr_params_bounds", opener_span, body_i, body_end_i);
+        let end = self.current_start();
+        if self.model.osr_params_bounds_span.is_none() {
+            self.model.osr_params_bounds_span = Some(Span { start, end });
+        }
+        let saved = self.i;
+        self.i = body_i;
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                continue;
+            }
+            let before = self.i;
+            if let Some(bound) = self.parse_osr_bound(body_end_i) {
+                self.model.osr_params_bounds.push(bound);
+            }
+            if self.i <= before {
+                self.bump();
+            }
+        }
+        self.i = saved;
+    }
+
+    fn parse_osr_bound(&mut self, end_i: usize) -> Option<OsrBound> {
+        if self.i >= end_i || !self.at(TokenKind::Ident) {
+            return None;
+        }
+        let name_tok = self.bump();
+        let lexeme = self.lexeme(&name_tok).to_string();
+        let name = self.intern.intern(&lexeme);
+        self.eat(TokenKind::Comma);
+        let lower = self.parse_expr();
+        self.eat(TokenKind::Comma);
+        let upper = self.parse_expr();
+        let end = self.finish_shock_stmt(end_i);
+        Some(OsrBound {
+            name,
+            span: Span {
+                start: name_tok.span.start,
+                end,
+            },
+            lower,
+            upper,
+        })
+    }
+
+    fn parse_generate_irfs_block(&mut self) {
+        let opener_span = self.bump_plain_opener();
+        let start = opener_span.start;
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed("generate_irfs", opener_span, body_i, body_end_i);
+        let end = self.current_start();
+        if self.model.generate_irfs_span.is_none() {
+            self.model.generate_irfs_span = Some(Span { start, end });
+        }
+        let saved = self.i;
+        self.i = body_i;
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                continue;
+            }
+            let before = self.i;
+            if let Some(el) = self.parse_generate_irfs_element(body_end_i) {
+                self.model.generate_irfs.push(el);
+            }
+            if self.i <= before {
+                self.bump();
+            }
+        }
+        self.i = saved;
+    }
+
+    fn parse_generate_irfs_element(&mut self, end_i: usize) -> Option<GenerateIrfsElement> {
+        if self.i >= end_i || !self.at(TokenKind::Ident) {
+            return None;
+        }
+        let name_tok = self.bump();
+        let lexeme = self.lexeme(&name_tok).to_string();
+        let name = self.intern.intern(&lexeme);
+        let mut exos = Vec::new();
+        while self.i < end_i && !self.at(TokenKind::Semi) {
+            if self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            if self.at(TokenKind::Ident) {
+                let exo_tok = self.bump();
+                let exo_lex = self.lexeme(&exo_tok).to_string();
+                let exo = self.intern.intern(&exo_lex);
+                self.eat(TokenKind::Eq);
+                if self.at(TokenKind::Plus) || self.at(TokenKind::Minus) {
+                    self.bump();
+                }
+                if self.at(TokenKind::Number) {
+                    self.bump();
+                }
+                exos.push((exo, exo_tok.span));
+                continue;
+            }
+            self.bump();
+        }
+        let end = self.finish_shock_stmt(end_i);
+        Some(GenerateIrfsElement {
+            name,
+            span: Span {
+                start: name_tok.span.start,
+                end,
+            },
+            exos,
+        })
     }
 
     fn parse_occbin_constraints_block(&mut self) {
@@ -924,6 +1157,7 @@ impl Parser<'_> {
     fn parse_varobs(&mut self) {
         let start = self.current_start();
         self.bump();
+        self.model.varobs_statement_count += 1;
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
             if self.at(TokenKind::Comma) || self.at(TokenKind::Latex) {
                 self.bump();
@@ -951,8 +1185,52 @@ impl Parser<'_> {
             self.current_start()
         };
         self.eat(TokenKind::Semi);
+        let span = Span { start, end };
         if self.model.varobs_span.is_none() {
-            self.model.varobs_span = Some(Span { start, end });
+            self.model.varobs_span = Some(span);
+        }
+        if self.model.varobs_statement_count == 2 {
+            self.model.varobs_second_span = Some(span);
+        }
+    }
+
+    fn parse_varexobs(&mut self) {
+        let start = self.current_start();
+        self.bump();
+        self.model.varexobs_statement_count += 1;
+        while !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
+            if self.at(TokenKind::Comma) || self.at(TokenKind::Latex) {
+                self.bump();
+                continue;
+            }
+            if self.at(TokenKind::LParen) {
+                self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                continue;
+            }
+            if self.at(TokenKind::Ident) {
+                let tok = self.bump();
+                let name = self.lexeme(&tok).to_string();
+                let id = self.intern.intern(&name);
+                self.model.varexobs.push(ObservedVar {
+                    name: id,
+                    span: tok.span,
+                });
+                continue;
+            }
+            self.bump();
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.tokens[self.i].span.end
+        } else {
+            self.current_start()
+        };
+        self.eat(TokenKind::Semi);
+        let span = Span { start, end };
+        if self.model.varexobs_span.is_none() {
+            self.model.varexobs_span = Some(span);
+        }
+        if self.model.varexobs_statement_count == 2 {
+            self.model.varexobs_second_span = Some(span);
         }
     }
 
@@ -964,7 +1242,54 @@ impl Parser<'_> {
         self.record_missing_end_if_unclosed("estimated_params", opener_span, body_i, body_end_i);
         let end = self.current_start();
         self.model.estimated_params_span = Some(Span { start, end });
-        self.collect_estimated_params(body_i, body_end_i, opener_span.end);
+        self.collect_estimated_params(
+            body_i,
+            body_end_i,
+            opener_span.end,
+            EstimatedParamsTarget::Params,
+        );
+    }
+
+    fn parse_estimated_params_init_block(&mut self) {
+        let opener_span = self.bump_estimated_params_init_opener();
+        let start = opener_span.start;
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed(
+            "estimated_params_init",
+            opener_span,
+            body_i,
+            body_end_i,
+        );
+        let end = self.current_start();
+        self.model.estimated_params_init_span = Some(Span { start, end });
+        self.collect_estimated_params(
+            body_i,
+            body_end_i,
+            opener_span.end,
+            EstimatedParamsTarget::Init,
+        );
+    }
+
+    fn parse_estimated_params_bounds_block(&mut self) {
+        let opener_span = self.bump_plain_opener();
+        let start = opener_span.start;
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed(
+            "estimated_params_bounds",
+            opener_span,
+            body_i,
+            body_end_i,
+        );
+        let end = self.current_start();
+        self.model.estimated_params_bounds_span = Some(Span { start, end });
+        self.collect_estimated_params(
+            body_i,
+            body_end_i,
+            opener_span.end,
+            EstimatedParamsTarget::Bounds,
+        );
     }
 
     fn parse_observation_trends_block(&mut self) {
@@ -1065,6 +1390,7 @@ impl Parser<'_> {
         }
         self.eat(TokenKind::RParen);
         self.record_policy_option_flags(command, from, self.i);
+        self.record_option_twice(from, self.i);
         saw_instruments
     }
 
@@ -1106,6 +1432,7 @@ impl Parser<'_> {
     fn parse_planner_objective(&mut self) {
         let start = self.current_start();
         self.bump();
+        let expr = self.parse_expr();
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::LParen) {
                 self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
@@ -1124,12 +1451,17 @@ impl Parser<'_> {
         if self.model.planner_objective_span.is_none() {
             self.model.planner_objective_span = Some(span);
         }
+        if self.model.planner_objective_expr.is_none() {
+            self.model.planner_objective_expr = expr;
+        }
     }
 
     fn parse_osr_params(&mut self) {
         self.symbol_list_id += 1;
         let list_id = self.symbol_list_id;
+        let start = self.current_start();
         self.bump();
+        self.model.osr_params_statement_count += 1;
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::Ident) {
                 let tok = self.tokens[self.i].clone();
@@ -1148,7 +1480,17 @@ impl Parser<'_> {
                 self.bump();
             }
         }
+        let end = if self.at(TokenKind::Semi) {
+            self.tokens[self.i].span.end
+        } else {
+            self.current_start()
+        };
         self.eat(TokenKind::Semi);
+        if self.model.osr_params_span.is_none() {
+            self.model.osr_params_span = Some(Span { start, end });
+        } else if self.model.osr_params_second_span.is_none() {
+            self.model.osr_params_second_span = Some(Span { start, end });
+        }
     }
 
     fn fold_known_params(&self) -> HashMap<Name, f64> {
@@ -1171,6 +1513,9 @@ impl Parser<'_> {
     }
 
     fn fold_expr(&self, id: ExprId, known: &HashMap<Name, f64>) -> Option<f64> {
+        if let Some(v) = self.model.exprs.get(id).interned {
+            return Some(v);
+        }
         match &self.model.exprs.get(id).kind {
             ExprKind::Number => {
                 let span = self.model.exprs.get(id).span;
@@ -1210,7 +1555,13 @@ impl Parser<'_> {
         }
     }
 
-    fn collect_estimated_params(&mut self, start_i: usize, end_i: usize, body_start: u32) {
+    fn collect_estimated_params(
+        &mut self,
+        start_i: usize,
+        end_i: usize,
+        body_start: u32,
+        target: EstimatedParamsTarget,
+    ) {
         let mut i = start_i;
         let mut entry_start = body_start;
         while i < end_i {
@@ -1233,7 +1584,13 @@ impl Parser<'_> {
                     start: entry_start,
                     end: entry_end,
                 };
-                self.model.estimated_params.push(entry);
+                match target {
+                    EstimatedParamsTarget::Params => self.model.estimated_params.push(entry),
+                    EstimatedParamsTarget::Init => self.model.estimated_params_init.push(entry),
+                    EstimatedParamsTarget::Bounds => {
+                        self.model.estimated_params_bounds.push(entry)
+                    }
+                }
             }
             entry_start = entry_end;
             i += 1;
@@ -1258,6 +1615,10 @@ impl Parser<'_> {
             let (name, next) = next_ident(&self.tokens, self.src, i, end_i)?;
             i = next;
             (EstimatedParamKind::Stderr, name, None)
+        } else if first.eq_ignore_ascii_case("skew") {
+            let (name, next) = next_ident(&self.tokens, self.src, i, end_i)?;
+            i = next;
+            (EstimatedParamKind::Skew, name, None)
         } else if first.eq_ignore_ascii_case("corr") {
             let (name, next) = next_ident(&self.tokens, self.src, i, end_i)?;
             i = next;
@@ -1273,42 +1634,65 @@ impl Parser<'_> {
         let name = self.intern.intern(&name);
         let corr_with = corr_with.map(|n| self.intern.intern(&n));
 
-        let mut nums = Vec::new();
+        let saved = self.i;
+        self.i = i;
+        let mut value_exprs = Vec::new();
         loop {
-            while i < end_i && self.tokens[i].kind == TokenKind::Comma {
-                i += 1;
+            while self.i < end_i && self.at(TokenKind::Comma) {
+                self.bump();
             }
-            if i >= end_i {
+            if self.i >= end_i || self.at(TokenKind::Semi) {
                 break;
             }
-            if self.tokens[i].kind == TokenKind::Ident {
-                let ident = self.tokens[i].text(self.src);
+            if self.at(TokenKind::Ident) {
+                let ident = self.lexeme(&self.tokens[self.i]).to_string();
                 if PRIOR_SHAPES.iter().any(|s| ident.eq_ignore_ascii_case(s)) {
                     break;
                 }
             }
-            match parse_ep_float(&self.tokens, self.src, i, end_i) {
-                Some((val, next)) => {
-                    nums.push(val);
-                    i = next;
-                }
+            match self.parse_expr() {
+                Some(id) => value_exprs.push(id),
                 None => break,
             }
         }
+        let mut prior_beta = false;
+        let mut mean_expr = None;
+        let mut std_expr = None;
+        if self.i < end_i && self.at(TokenKind::Ident) {
+            let ident = self.lexeme(&self.tokens[self.i]).to_string();
+            if PRIOR_SHAPES.iter().any(|s| ident.eq_ignore_ascii_case(s)) {
+                prior_beta = ident.eq_ignore_ascii_case("beta_pdf");
+                self.bump();
+                while self.i < end_i && self.at(TokenKind::Comma) {
+                    self.bump();
+                }
+                mean_expr = self.parse_expr();
+                while self.i < end_i && self.at(TokenKind::Comma) {
+                    self.bump();
+                }
+                std_expr = self.parse_expr();
+            }
+        }
+        self.i = saved;
 
-        let init = nums.first().copied();
-        let (lower, upper) = if nums.len() >= 3 {
-            (Some(nums[1]), Some(nums[2]))
-        } else {
-            (None, None)
-        };
+        let known = self.fold_known_params();
+        let fold = |id: Option<ExprId>| id.and_then(|e| self.fold_expr(e, &known));
+        let init_expr = value_exprs.first().copied();
+        let lower_expr = value_exprs.get(1).copied();
+        let upper_expr = value_exprs.get(2).copied();
         Some(EstimatedParam {
             name,
             kind,
             corr_with,
-            init,
-            lower,
-            upper,
+            init: fold(init_expr),
+            lower: fold(lower_expr),
+            upper: fold(upper_expr),
+            init_expr,
+            lower_expr,
+            upper_expr,
+            mean_expr,
+            std_expr,
+            prior_beta,
             span: Span { start: 0, end: 0 },
         })
     }
@@ -1331,6 +1715,8 @@ impl Parser<'_> {
                         let id = self.intern.intern(&name);
                         if !self.model.observation_trends.iter().any(|(n, _)| *n == id) {
                             self.model.observation_trends.push((id, span));
+                        } else {
+                            self.model.observation_trends_dups.push((id, span));
                         }
                         break;
                     }
@@ -1346,7 +1732,32 @@ impl Parser<'_> {
     fn bump_plain_opener(&mut self) -> Span {
         let start = self.bump().span.start;
         if self.at(TokenKind::LParen) {
+            let from = self.i;
             self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+            self.record_option_twice(from, self.i);
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        Span { start, end }
+    }
+
+    fn bump_estimated_params_init_opener(&mut self) -> Span {
+        let start = self.bump().span.start;
+        if self.at(TokenKind::LParen) {
+            let from = self.i;
+            self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+            self.record_option_twice(from, self.i);
+            let opts = top_options(&self.tokens, self.src, from, self.i);
+            for opt in opts {
+                if opt.ident.eq_ignore_ascii_case("use_calibration")
+                    && self.model.estimated_params_init_use_calibration.is_none()
+                {
+                    self.model.estimated_params_init_use_calibration = Some(opt.span);
+                }
+            }
         }
         let end = if self.at(TokenKind::Semi) {
             self.bump().span.end
@@ -1368,6 +1779,7 @@ impl Parser<'_> {
                     self.model.endval_all_values_required = true;
                 }
             }
+            self.record_option_twice(from, self.i);
         }
         let end = if self.at(TokenKind::Semi) {
             self.bump().span.end
@@ -1459,17 +1871,21 @@ impl Parser<'_> {
         } else {
             (None, None)
         };
-        let end = self.finish_shock_stmt(end_i);
+        let mut end = self.finish_shock_stmt(end_i);
+        let mut is_stderr = false;
         if rhs_expr.is_none() && names.len() == 1 && self.i < end_i && self.at_ident_ci("stderr") {
             self.bump();
             let (expr, _) = self.parse_folded_rhs();
             rhs_expr = expr;
-            self.finish_shock_stmt(end_i);
+            end = self.finish_shock_stmt(end_i);
+            is_stderr = true;
         }
         if names.is_empty() {
             return;
         }
-        let kind = if names.len() == 1 {
+        let kind = if is_stderr {
+            ShockKind::Stderr(names[0])
+        } else if names.len() == 1 {
             ShockKind::Var(names[0])
         } else {
             ShockKind::Cov(names)
@@ -1734,12 +2150,14 @@ impl Parser<'_> {
         let mut dynamic_tag = false;
         let mut tags = Vec::new();
         let mut tag_map = BTreeMap::new();
+        let mut tag_twice = Vec::new();
         while self.at(TokenKind::LBrack) {
-            let (s, d, t, m) = self.parse_tag();
-            static_tag |= s;
-            dynamic_tag |= d;
-            tags.extend(t);
-            tag_map.extend(m);
+            let tag = self.parse_tag();
+            static_tag |= tag.static_tag;
+            dynamic_tag |= tag.dynamic_tag;
+            tags.extend(tag.flags);
+            tag_twice.extend(tag.twice);
+            tag_map.extend(tag.map);
         }
         let is_local = self.at(TokenKind::Hash);
         if is_local {
@@ -1797,6 +2215,7 @@ impl Parser<'_> {
         eq.dynamic_tag = dynamic_tag;
         eq.tags = tags;
         eq.tag_map = tag_map;
+        eq.tag_twice = tag_twice;
         eq.complementarity = complementarity;
         eq.lhs_expr = Some(if lhs_ok {
             lhs_expr.unwrap_or_else(|| self.alloc_error(eq.span))
@@ -1853,12 +2272,13 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_tag(&mut self) -> (bool, bool, Vec<String>, BTreeMap<String, String>) {
+    fn parse_tag(&mut self) -> ParsedTag {
         self.bump();
         let mut static_tag = false;
         let mut dynamic_tag = false;
         let mut flags = Vec::new();
         let mut map = BTreeMap::new();
+        let mut twice = Vec::new();
         while !self.at(TokenKind::Eof)
             && !self.at(TokenKind::RBrack)
             && !self.at(TokenKind::Semi)
@@ -1886,13 +2306,22 @@ impl Parser<'_> {
                     dynamic_tag = true;
                     flags.push("dynamic".to_string());
                 }
+                if map.contains_key(&key) {
+                    twice.push((key.clone(), tok.span));
+                }
                 map.insert(key, value);
             } else {
                 self.bump();
             }
         }
         self.eat(TokenKind::RBrack);
-        (static_tag, dynamic_tag, flags, map)
+        ParsedTag {
+            static_tag,
+            dynamic_tag,
+            flags,
+            map,
+            twice,
+        }
     }
 
     fn skip_to_stmt_end(&mut self) {
@@ -2447,6 +2876,28 @@ impl Parser<'_> {
         let tok = self.bump();
         let lexeme = self.lexeme(&tok).to_string();
         let name = self.intern.intern(&lexeme);
+        if self.at(TokenKind::Dot) && self.peek_kind(1) == Some(TokenKind::Ident) {
+            self.bump();
+            let rhs = self.bump();
+            let rhs_lex = self.lexeme(&rhs).to_string();
+            let span = Span {
+                start: tok.span.start,
+                end: rhs.span.end,
+            };
+            self.model
+                .namespace_qualified
+                .push((format!("{lexeme}.{rhs_lex}"), span));
+            return self.alloc(ExprKind::Error, span);
+        }
+        let becoming_call = self.at(TokenKind::LParen) && !self.looks_like_timing();
+        if !self.in_model
+            && !becoming_call
+            && !is_builtin_function(&lexeme)
+            && !self.is_known_symbol(name)
+            && !self.model.mod_file_locals.contains(&name)
+        {
+            self.model.mod_file_locals.push(name);
+        }
         if !self.at(TokenKind::LParen) {
             return self.alloc(
                 ExprKind::Ident {
@@ -2577,6 +3028,18 @@ impl Parser<'_> {
         (sign * mag, Span { start, end })
     }
 
+    fn is_known_symbol(&self, name: Name) -> bool {
+        self.model
+            .endogenous
+            .iter()
+            .chain(&self.model.exogenous)
+            .chain(&self.model.deterministic_exogenous)
+            .chain(&self.model.parameters)
+            .chain(&self.model.predetermined)
+            .any(|d| d.name == name)
+            || self.model.mod_file_locals.contains(&name)
+    }
+
     fn looks_like_timing(&self) -> bool {
         if !self.at(TokenKind::LParen) {
             return false;
@@ -2648,7 +3111,105 @@ impl Parser<'_> {
     }
 
     fn alloc(&mut self, kind: ExprKind, span: Span) -> ExprId {
-        self.model.exprs.alloc(kind, span)
+        let interned = match &kind {
+            ExprKind::Number => self
+                .src
+                .get(span.start as usize..span.end as usize)
+                .and_then(|raw| raw.parse::<f64>().ok())
+                .filter(|v| v.is_finite()),
+            ExprKind::Unary { op, arg } => self.interned_value(*arg).map(|v| match op {
+                UnOp::Pos => v,
+                UnOp::Neg => -v,
+            }),
+            ExprKind::Binary { op, lhs, rhs } => {
+                let l = self.interned_value(*lhs);
+                let r = self.interned_value(*rhs);
+                match (*op, l, r) {
+                    (BinOp::Add, Some(a), Some(b)) => Some(a + b),
+                    (BinOp::Sub, Some(a), Some(b)) => Some(a - b),
+                    (BinOp::Mul, Some(a), Some(b)) => Some(a * b),
+                    (BinOp::Div, Some(a), Some(b)) if b != 0.0 => Some(a / b),
+                    (BinOp::Pow, Some(a), Some(b)) => Some(a.powf(b)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let interned = interned.filter(|v| v.is_finite());
+        let id = self.model.exprs.alloc_interned(kind, span, interned);
+        self.note_const_fold_errors(id);
+        id
+    }
+
+    fn interned_value(&self, id: ExprId) -> Option<f64> {
+        self.model.exprs.get(id).interned
+    }
+
+    fn interned_display(&self, id: ExprId) -> String {
+        match self.interned_value(id) {
+            Some(0.0) => "0".to_string(),
+            Some(1.0) => "1".to_string(),
+            Some(v) if v.fract() == 0.0 && v.abs() < 1e15 => format!("{}", v as i64),
+            Some(v) => format!("{v}"),
+            None => {
+                let span = self.expr_span(id);
+                self.src
+                    .get(span.start as usize..span.end as usize)
+                    .unwrap_or("?")
+                    .to_string()
+            }
+        }
+    }
+
+    fn note_const_fold_errors(&mut self, id: ExprId) {
+        let span = self.expr_span(id);
+        let log_zero = match &self.model.exprs.get(id).kind {
+            ExprKind::Call { callee, args } if args.len() == 1 => {
+                let arg = args[0];
+                let name = self.intern.get(*callee).to_string();
+                Some((name, arg))
+            }
+            _ => None,
+        };
+        if let Some((name, arg)) = log_zero {
+            if self.interned_value(arg) == Some(0.0) {
+                if name.eq_ignore_ascii_case("log") || name.eq_ignore_ascii_case("ln") {
+                    self.model.const_fold_errors.push((
+                        span,
+                        "E276",
+                        "log(0) not defined!".to_string(),
+                    ));
+                } else if name.eq_ignore_ascii_case("log10") {
+                    self.model.const_fold_errors.push((
+                        span,
+                        "E277",
+                        "log10(0) not defined!".to_string(),
+                    ));
+                }
+            }
+            return;
+        }
+        let div_zero = match &self.model.exprs.get(id).kind {
+            ExprKind::Binary {
+                op: BinOp::Div,
+                lhs,
+                rhs,
+            } => Some((*lhs, *rhs)),
+            _ => None,
+        };
+        if let Some((lhs, rhs)) = div_zero {
+            if self.interned_value(rhs) == Some(0.0) {
+                let num = self.interned_display(lhs);
+                let den = self.interned_display(rhs);
+                self.model.const_fold_errors.push((
+                    span,
+                    "E278",
+                    format!(
+                        "Division by zero when forming ({num})/({den}); denominator simplified to 0 (possibly after substituting a variable set to 0)."
+                    ),
+                ));
+            }
+        }
     }
 
     fn alloc_error(&mut self, span: Span) -> ExprId {
@@ -2683,6 +3244,7 @@ impl Parser<'_> {
                 self.record_deprecated_options_in_range(from, self.i);
                 if let Some(cmd) = opener.as_deref() {
                     self.record_skip_command_options(cmd, from, self.i);
+                    self.record_option_twice(from, self.i);
                     if cmd.eq_ignore_ascii_case("extended_path")
                         && self.option_ident_in_range(from, self.i, "periods")
                     {
@@ -2715,6 +3277,16 @@ impl Parser<'_> {
         let mut stmt_estimated = None;
         let mut stmt_calibrated = None;
         for opt in &opts {
+            if opener.eq_ignore_ascii_case("external_function")
+                && opt.ident.eq_ignore_ascii_case("name")
+                && opt.eq
+                && !opt.value_lex.is_empty()
+            {
+                let id = self.intern.intern(&opt.value_lex);
+                if !self.model.external_function_names.contains(&id) {
+                    self.model.external_function_names.push(id);
+                }
+            }
             if opt.ident.eq_ignore_ascii_case("restriction_fname")
                 && self.model.restriction_fname_span.is_none()
             {
@@ -2908,6 +3480,19 @@ impl Parser<'_> {
             .collect();
         for (lex, span) in hits {
             self.record_deprecated_option_ident(&lex, span);
+        }
+    }
+
+    fn record_option_twice(&mut self, from: usize, to: usize) {
+        let opts = top_options(&self.tokens, self.src, from, to);
+        let mut seen: HashMap<String, Span> = HashMap::new();
+        for opt in opts {
+            let key = opt.ident.to_ascii_lowercase();
+            if let Entry::Vacant(e) = seen.entry(key) {
+                e.insert(opt.span);
+            } else {
+                self.model.option_twice.push((opt.ident, opt.span));
+            }
         }
     }
 
@@ -3222,37 +3807,6 @@ fn next_ident(tokens: &[Token], src: &str, mut i: usize, end_i: usize) -> Option
     Some((tokens[i].text(src).to_string(), i + 1))
 }
 
-fn parse_ep_float(tokens: &[Token], src: &str, i: usize, end_i: usize) -> Option<(f64, usize)> {
-    if i >= end_i {
-        return None;
-    }
-    let mut j = i;
-    let mut sign = 1.0;
-    match tokens[j].kind {
-        TokenKind::Plus => {
-            j += 1;
-        }
-        TokenKind::Minus => {
-            sign = -1.0;
-            j += 1;
-        }
-        _ => {}
-    }
-    if j >= end_i {
-        return None;
-    }
-    match tokens[j].kind {
-        TokenKind::Number => {
-            let val: f64 = tokens[j].text(src).parse().ok()?;
-            Some((sign * val, j + 1))
-        }
-        TokenKind::Ident if tokens[j].text(src).eq_ignore_ascii_case("inf") => {
-            Some((sign * f64::INFINITY, j + 1))
-        }
-        _ => None,
-    }
-}
-
 fn opener_at(tokens: &[Token], src: &str, i: usize) -> Option<(String, Span, usize)> {
     let tok = tokens.get(i)?;
     if tok.kind != TokenKind::Ident {
@@ -3477,6 +4031,7 @@ fn equation_from_statement(raw: &str, span: Span) -> Option<Equation> {
         dynamic_tag: false,
         tags: Vec::new(),
         tag_map: BTreeMap::new(),
+        tag_twice: Vec::new(),
         complementarity: None,
     })
 }
@@ -3967,8 +4522,8 @@ mod tests {
         assert!(model.shock_stmts[0].rhs_expr.is_some());
         assert!(model.shock_stmts[0].rhs.is_none());
         match &model.shock_stmts[0].kind {
-            ShockKind::Var(n) => assert_eq!(model.name(*n), "e"),
-            other => panic!("expected Var, got {other:?}"),
+            ShockKind::Stderr(n) => assert_eq!(model.name(*n), "e"),
+            other => panic!("expected Stderr, got {other:?}"),
         }
     }
 

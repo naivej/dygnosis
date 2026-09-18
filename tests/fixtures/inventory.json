@@ -544,7 +544,7 @@
       "fixture": "tests/fixtures/e010/e010_disc_square.mod",
       "source": "e010.rs::e010_disc_square_warns",
       "cluster": "e010/e010_disc_square.mod",
-      "notes": "discretionary square with instruments; W013 −N"
+      "notes": "discretionary square with instruments; W013 \u2212N"
     },
     {
       "id": "e010_ramsey_wrong_n",
@@ -556,7 +556,7 @@
       "fixture": "tests/fixtures/e010/e010_ramsey_wrong_n.mod",
       "source": "e010.rs::e010_ramsey_wrong_n_warns",
       "cluster": "e010/e010_ramsey_wrong_n.mod",
-      "notes": "N=1, 3 endo, 1 eq, delta=-2; W013 −N"
+      "notes": "N=1, 3 endo, 1 eq, delta=-2; W013 \u2212N"
     },
     {
       "id": "e010_osr_square",
@@ -568,7 +568,7 @@
       "fixture": "tests/fixtures/e010/e010_osr_square.mod",
       "source": "e010.rs::e010_osr_square_quiet",
       "cluster": "e010/e010_osr_square.mod",
-      "notes": "osr square with instruments; not −N, W013 quiet"
+      "notes": "osr square with instruments; not \u2212N, W013 quiet"
     },
     {
       "id": "e010_osr_gap",
@@ -580,7 +580,7 @@
       "fixture": "tests/fixtures/e010/e010_osr_gap.mod",
       "source": "e010.rs::e010_osr_gap_generic",
       "cluster": "e010/e010_osr_gap.mod",
-      "notes": "osr mismatch; generic W013, no −N"
+      "notes": "osr mismatch; generic W013, no \u2212N"
     },
     {
       "id": "equations_reader",
@@ -2485,7 +2485,7 @@
       "fixture": "tests/fixtures/w100/w100_ok.mod",
       "source": "e010.rs::w100_ok_square_ramsey_warns",
       "cluster": "w100/w100_ok.mod",
-      "notes": "square Ramsey with 1 instrument; W013 −N"
+      "notes": "square Ramsey with 1 instrument; W013 \u2212N"
     },
     {
       "id": "w100_w103_both",
@@ -4336,7 +4336,7 @@
       "fixture": "tests/fixtures/occbin/perp.mod",
       "source": "occbin.rs::perp_mod_records_complementarity",
       "cluster": "occbin/perp.mod",
-      "notes": "library complementarity ⟂ recorded, not E001"
+      "notes": "library complementarity \u27c2 recorded, not E001"
     },
     {
       "id": "occbin_perp_ascii",
@@ -4464,7 +4464,7 @@
       "fixture": "tests/fixtures/occbin/e180_mcp_perp.mod",
       "source": "d_occbin.rs::occbin_fires",
       "cluster": "occbin/e180_mcp_perp.mod",
-      "notes": "mcp tag and ⟂ on the same equation"
+      "notes": "mcp tag and \u27c2 on the same equation"
     },
     {
       "id": "e181_bind_eq",
@@ -4500,7 +4500,7 @@
       "fixture": "tests/fixtures/occbin/e183_perp_form.mod",
       "source": "d_occbin.rs::occbin_fires",
       "cluster": "occbin/e183_perp_form.mod",
-      "notes": "⟂ i is not an inequality"
+      "notes": "\u27c2 i is not an inequality"
     },
     {
       "id": "e184_dup_clause",
@@ -4536,7 +4536,7 @@
       "fixture": "tests/fixtures/occbin/w170_mcp.mod",
       "source": "d_occbin.rs::occbin_fires",
       "cluster": "occbin/w170_mcp.mod",
-      "notes": "obsolete mcp tag without ⟂"
+      "notes": "obsolete mcp tag without \u27c2"
     },
     {
       "id": "occbin_square_quiet",
@@ -4564,11 +4564,13 @@
       "fixture": "tests/fixtures/occbin/square.mod",
       "source": "d_occbin.rs::square_has_no_occbin_error",
       "cluster": "occbin/square.mod",
-      "notes": "accepted OccBin square: no E170–E185, no W170, no written-clash Errors"
+      "notes": "accepted OccBin square: no E170\u2013E185, no W170, no written-clash Errors"
     },
     {
       "id": "e026_varexo_det_simul",
-      "codes": ["E026"],
+      "codes": [
+        "E026"
+      ],
       "kind": "fire",
       "package": "clash",
       "fixture": "tests/fixtures/clash/e026_varexo_det_simul.mod",
@@ -4578,7 +4580,9 @@
     },
     {
       "id": "e027_ramsey_varexo_det",
-      "codes": ["E027"],
+      "codes": [
+        "E027"
+      ],
       "kind": "fire",
       "package": "clash",
       "fixture": "tests/fixtures/clash/e027_ramsey_varexo_det.mod",
@@ -4588,7 +4592,9 @@
     },
     {
       "id": "e028_identification_varexo_det",
-      "codes": ["E028"],
+      "codes": [
+        "E028"
+      ],
       "kind": "fire",
       "package": "clash",
       "fixture": "tests/fixtures/clash/e028_identification_varexo_det.mod",
@@ -4598,7 +4604,9 @@
     },
     {
       "id": "e104_two_planner",
-      "codes": ["E104"],
+      "codes": [
+        "E104"
+      ],
       "kind": "fire",
       "package": "clash",
       "fixture": "tests/fixtures/clash/e104_two_planner.mod",
@@ -4608,7 +4616,9 @@
     },
     {
       "id": "e113_shock_paths_shocks",
-      "codes": ["E113"],
+      "codes": [
+        "E113"
+      ],
       "kind": "fire",
       "package": "clash",
       "fixture": "tests/fixtures/clash/e113_shock_paths_shocks.mod",
@@ -4618,7 +4628,9 @@
     },
     {
       "id": "e178_surprise",
-      "codes": ["E178"],
+      "codes": [
+        "E178"
+      ],
       "kind": "fire",
       "package": "occbin",
       "fixture": "tests/fixtures/occbin/e178_surprise.mod",
@@ -4628,7 +4640,9 @@
     },
     {
       "id": "e179_identification",
-      "codes": ["E179"],
+      "codes": [
+        "E179"
+      ],
       "kind": "fire",
       "package": "clash",
       "fixture": "tests/fixtures/clash/e179_identification.mod",
@@ -4638,7 +4652,9 @@
     },
     {
       "id": "e026_varexo_det_alone_quiet",
-      "codes": ["E026"],
+      "codes": [
+        "E026"
+      ],
       "kind": "quiet",
       "package": "clash",
       "fixture": "tests/fixtures/clash/e026_varexo_det_alone_quiet.mod",
@@ -4648,7 +4664,9 @@
     },
     {
       "id": "e028_identification_alone_quiet",
-      "codes": ["E028"],
+      "codes": [
+        "E028"
+      ],
       "kind": "quiet",
       "package": "clash",
       "fixture": "tests/fixtures/clash/e028_identification_alone_quiet.mod",
@@ -4658,7 +4676,9 @@
     },
     {
       "id": "e104_two_planner_osr_quiet",
-      "codes": ["E104"],
+      "codes": [
+        "E104"
+      ],
       "kind": "quiet",
       "package": "clash",
       "fixture": "tests/fixtures/clash/e104_two_planner_osr_quiet.mod",
@@ -4668,7 +4688,9 @@
     },
     {
       "id": "e113_shock_paths_alone_quiet",
-      "codes": ["E113"],
+      "codes": [
+        "E113"
+      ],
       "kind": "quiet",
       "package": "clash",
       "fixture": "tests/fixtures/clash/e113_shock_paths_alone_quiet.mod",
@@ -4678,7 +4700,9 @@
     },
     {
       "id": "e200_write_latex",
-      "codes": ["E200"],
+      "codes": [
+        "E200"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e200_write_latex.mod",
@@ -4688,7 +4712,9 @@
     },
     {
       "id": "e201_zero_eq",
-      "codes": ["E201"],
+      "codes": [
+        "E201"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e201_zero_eq.mod",
@@ -4698,7 +4724,9 @@
     },
     {
       "id": "e201_empty_quiet",
-      "codes": ["E201"],
+      "codes": [
+        "E201"
+      ],
       "kind": "quiet",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e201_empty_quiet.mod",
@@ -4708,7 +4736,9 @@
     },
     {
       "id": "e202_disc_ramsey",
-      "codes": ["E202"],
+      "codes": [
+        "E202"
+      ],
       "kind": "fire",
       "package": "est",
       "fixture": "tests/fixtures/w100/e202_disc_ramsey.mod",
@@ -4718,7 +4748,9 @@
     },
     {
       "id": "e203_ramsey_constraints",
-      "codes": ["E203"],
+      "codes": [
+        "E203"
+      ],
       "kind": "fire",
       "package": "est",
       "fixture": "tests/fixtures/w100/e203_ramsey_constraints.mod",
@@ -4728,7 +4760,9 @@
     },
     {
       "id": "e204_osr_both",
-      "codes": ["E204"],
+      "codes": [
+        "E204"
+      ],
       "kind": "fire",
       "package": "est",
       "fixture": "tests/fixtures/w100/e204_osr_both.mod",
@@ -4738,7 +4772,9 @@
     },
     {
       "id": "e205_pf_stoch",
-      "codes": ["E205"],
+      "codes": [
+        "E205"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e205_pf_stoch.mod",
@@ -4748,7 +4784,9 @@
     },
     {
       "id": "e206_use_dll_bytecode",
-      "codes": ["E206"],
+      "codes": [
+        "E206"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e206_use_dll_bytecode.mod",
@@ -4758,7 +4796,9 @@
     },
     {
       "id": "e207_no_static",
-      "codes": ["E207"],
+      "codes": [
+        "E207"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e207_no_static.mod",
@@ -4768,7 +4808,9 @@
     },
     {
       "id": "e208_static_dynamic",
-      "codes": ["E208"],
+      "codes": [
+        "E208"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e208_static_dynamic.mod",
@@ -4778,7 +4820,9 @@
     },
     {
       "id": "e209_tags_ramsey",
-      "codes": ["E209"],
+      "codes": [
+        "E209"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e209_tags_ramsey.mod",
@@ -4788,7 +4832,9 @@
     },
     {
       "id": "w200_stoch_abs",
-      "codes": ["W200"],
+      "codes": [
+        "W200"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/w200_stoch_abs.mod",
@@ -4798,7 +4844,9 @@
     },
     {
       "id": "w200_stoch_local",
-      "codes": ["W200"],
+      "codes": [
+        "W200"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/w200_stoch_local.mod",
@@ -4808,7 +4856,9 @@
     },
     {
       "id": "e210_linear_abs",
-      "codes": ["E210"],
+      "codes": [
+        "E210"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e210_linear_abs.mod",
@@ -4818,7 +4868,9 @@
     },
     {
       "id": "e211_linear_exo",
-      "codes": ["E211"],
+      "codes": [
+        "E211"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e211_linear_exo.mod",
@@ -4828,7 +4880,9 @@
     },
     {
       "id": "w140_linear_log",
-      "codes": ["W140"],
+      "codes": [
+        "W140"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/w140_linear_log.mod",
@@ -4838,7 +4892,9 @@
     },
     {
       "id": "w140_linear_exo_pf",
-      "codes": ["W140"],
+      "codes": [
+        "W140"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/w140_linear_exo_pf.mod",
@@ -4848,7 +4904,9 @@
     },
     {
       "id": "e212_estimated_shock",
-      "codes": ["E212"],
+      "codes": [
+        "E212"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e212_estimated_shock.mod",
@@ -4858,7 +4916,9 @@
     },
     {
       "id": "e213_pf_order",
-      "codes": ["E213"],
+      "codes": [
+        "E213"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e213_pf_order.mod",
@@ -4868,7 +4928,9 @@
     },
     {
       "id": "e214_pfee_order",
-      "codes": ["E214"],
+      "codes": [
+        "E214"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e214_pfee_order.mod",
@@ -4878,7 +4940,9 @@
     },
     {
       "id": "e216_extended_path",
-      "codes": ["E216"],
+      "codes": [
+        "E216"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e216_extended_path.mod",
@@ -4888,7 +4952,9 @@
     },
     {
       "id": "e217_initval_after_endval",
-      "codes": ["E217"],
+      "codes": [
+        "E217"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e217_initval_after_endval.mod",
@@ -4898,7 +4964,9 @@
     },
     {
       "id": "e218_all_values",
-      "codes": ["E218"],
+      "codes": [
+        "E218"
+      ],
       "kind": "fire",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e218_all_values.mod",
@@ -4908,7 +4976,9 @@
     },
     {
       "id": "e218_histval_quiet",
-      "codes": ["E218"],
+      "codes": [
+        "E218"
+      ],
       "kind": "quiet",
       "package": "d_check",
       "fixture": "tests/fixtures/d_check/e218_histval_quiet.mod",
@@ -4918,7 +4988,9 @@
     },
     {
       "id": "e219_dsge_prior_weight_declared",
-      "codes": ["E219"],
+      "codes": [
+        "E219"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e219_dsge_prior_weight_declared.mod",
@@ -4928,7 +5000,9 @@
     },
     {
       "id": "e220_bayesian_irf_counts",
-      "codes": ["E220"],
+      "codes": [
+        "E220"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e220_bayesian_irf_counts.mod",
@@ -4938,7 +5012,9 @@
     },
     {
       "id": "e221_shocks_lt_varobs",
-      "codes": ["E221"],
+      "codes": [
+        "E221"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e221_shocks_lt_varobs.mod",
@@ -4948,7 +5024,9 @@
     },
     {
       "id": "e222_dsge_var_missing_weight",
-      "codes": ["E222"],
+      "codes": [
+        "E222"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e222_dsge_var_missing_weight.mod",
@@ -4958,7 +5036,9 @@
     },
     {
       "id": "e223_weight_and_calibrated",
-      "codes": ["E223"],
+      "codes": [
+        "E223"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e223_weight_and_calibrated.mod",
@@ -4968,7 +5048,9 @@
     },
     {
       "id": "e224_weight_without_dsge_var",
-      "codes": ["E224"],
+      "codes": [
+        "E224"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e224_weight_without_dsge_var.mod",
@@ -4978,7 +5060,9 @@
     },
     {
       "id": "e225_dsge_varlag_without_dsge_var",
-      "codes": ["E225"],
+      "codes": [
+        "E225"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e225_dsge_varlag_without_dsge_var.mod",
@@ -4988,7 +5072,9 @@
     },
     {
       "id": "e226_two_estimation_dsge_var",
-      "codes": ["E226"],
+      "codes": [
+        "E226"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e226_two_estimation_dsge_var.mod",
@@ -4998,7 +5084,9 @@
     },
     {
       "id": "e227_estimation_no_data",
-      "codes": ["E227"],
+      "codes": [
+        "E227"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e227_estimation_no_data.mod",
@@ -5008,7 +5096,9 @@
     },
     {
       "id": "e228_mode_file_use_calibration",
-      "codes": ["E228"],
+      "codes": [
+        "E228"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e228_mode_file_use_calibration.mod",
@@ -5018,7 +5108,9 @@
     },
     {
       "id": "e229_mh_tune_jscale_mh_jscale",
-      "codes": ["E229"],
+      "codes": [
+        "E229"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e229_mh_tune_jscale_mh_jscale.mod",
@@ -5028,7 +5120,9 @@
     },
     {
       "id": "e230_mh_tune_guess_alone",
-      "codes": ["E230"],
+      "codes": [
+        "E230"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e230_mh_tune_guess_alone.mod",
@@ -5038,7 +5132,9 @@
     },
     {
       "id": "e231_gmf_proposal_montecarlo",
-      "codes": ["E231"],
+      "codes": [
+        "E231"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e231_gmf_proposal_montecarlo.mod",
@@ -5048,7 +5144,9 @@
     },
     {
       "id": "e232_gmf_distribution_montecarlo",
-      "codes": ["E232"],
+      "codes": [
+        "E232"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e232_gmf_distribution_montecarlo.mod",
@@ -5058,7 +5156,9 @@
     },
     {
       "id": "e233_estimated_planner_discount",
-      "codes": ["E233"],
+      "codes": [
+        "E233"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e233_estimated_planner_discount.mod",
@@ -5068,7 +5168,9 @@
     },
     {
       "id": "e234_prior_function_no_function",
-      "codes": ["E234"],
+      "codes": [
+        "E234"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e234_prior_function_no_function.mod",
@@ -5078,7 +5180,9 @@
     },
     {
       "id": "e235_disc_order",
-      "codes": ["E235"],
+      "codes": [
+        "E235"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e235_disc_order.mod",
@@ -5088,7 +5192,9 @@
     },
     {
       "id": "e236_identification_order",
-      "codes": ["E236"],
+      "codes": [
+        "E236"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e236_identification_order.mod",
@@ -5098,7 +5204,9 @@
     },
     {
       "id": "e237_max_dim_cova_group",
-      "codes": ["E237"],
+      "codes": [
+        "E237"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e237_max_dim_cova_group.mod",
@@ -5108,7 +5216,9 @@
     },
     {
       "id": "e238_stoch_simul_filters",
-      "codes": ["E238"],
+      "codes": [
+        "E238"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e238_stoch_simul_filters.mod",
@@ -5118,7 +5228,9 @@
     },
     {
       "id": "e239_stoch_simul_z",
-      "codes": ["E239"],
+      "codes": [
+        "E239"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e239_stoch_simul_z.mod",
@@ -5128,7 +5240,9 @@
     },
     {
       "id": "e240_stoch_simul_rho",
-      "codes": ["E240"],
+      "codes": [
+        "E240"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/e240_stoch_simul_rho.mod",
@@ -5138,7 +5252,9 @@
     },
     {
       "id": "w201_restriction_fname",
-      "codes": ["W201"],
+      "codes": [
+        "W201"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/w201_restriction_fname.mod",
@@ -5148,7 +5264,9 @@
     },
     {
       "id": "w202_stoch_simul_dup",
-      "codes": ["W202"],
+      "codes": [
+        "W202"
+      ],
       "kind": "fire",
       "package": "d_walk",
       "fixture": "tests/fixtures/d_walk/w202_stoch_simul_dup.mod",
@@ -5158,13 +5276,567 @@
     },
     {
       "id": "e028_sensitivity_varexo_det",
-      "codes": ["E028"],
+      "codes": [
+        "E028"
+      ],
       "kind": "fire",
       "package": "clash",
       "fixture": "tests/fixtures/clash/e028_sensitivity_varexo_det.mod",
       "source": "d_clash.rs::e028_sensitivity_varexo_det",
       "cluster": "clash/e028_sensitivity_varexo_det.mod",
       "notes": "sensitivity(identification=1) + varexo_det"
+    },
+    {
+      "id": "e241_histval_missing_exo",
+      "codes": [
+        "E241"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e241_histval_missing_exo.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e241_histval_missing_exo.mod",
+      "notes": "histval completeness missing exo (endval typo)"
+    },
+    {
+      "id": "e242_histval_lag",
+      "codes": [
+        "E242"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e242_histval_lag.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e242_histval_lag.mod",
+      "notes": "histval positive lag"
+    },
+    {
+      "id": "e243_histval_dup",
+      "codes": [
+        "E243"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e243_histval_dup.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e243_histval_dup.mod",
+      "notes": "histval duplicate pair"
+    },
+    {
+      "id": "e244_estimated_params_dup",
+      "codes": [
+        "E244"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e244_estimated_params_dup.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e244_estimated_params_dup.mod",
+      "notes": "duplicate estimated_params symbol"
+    },
+    {
+      "id": "e245_estimated_params_stderr_dup",
+      "codes": [
+        "E245"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e245_estimated_params_stderr_dup.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e245_estimated_params_stderr_dup.mod",
+      "notes": "duplicate estimated_params stderr"
+    },
+    {
+      "id": "e246_estimated_params_corr_dup",
+      "codes": [
+        "E246"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e246_estimated_params_corr_dup.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e246_estimated_params_corr_dup.mod",
+      "notes": "duplicate estimated_params corr"
+    },
+    {
+      "id": "e247_estimated_params_skew_dup",
+      "codes": [
+        "E247"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e247_estimated_params_skew_dup.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e247_estimated_params_skew_dup.mod",
+      "notes": "duplicate estimated_params skew"
+    },
+    {
+      "id": "e248_estimated_params_value_used",
+      "codes": [
+        "E248"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e248_estimated_params_value_used.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e248_estimated_params_value_used.mod",
+      "notes": "estimated parameter value used in the same block"
+    },
+    {
+      "id": "e249_estimated_params_skew_endo",
+      "codes": [
+        "E249"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e249_estimated_params_skew_endo.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e249_estimated_params_skew_endo.mod",
+      "notes": "skew on endogenous in estimated_params"
+    },
+    {
+      "id": "e250_beta_half_half",
+      "codes": [
+        "E250"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e250_beta_half_half.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e250_beta_half_half.mod",
+      "notes": "beta prior mean = std = 0.5"
+    },
+    {
+      "id": "e251_planner_exo",
+      "codes": [
+        "E251"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e251_planner_exo.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e251_planner_exo.mod",
+      "notes": "exo in planner_objective"
+    },
+    {
+      "id": "e252_planner_lead",
+      "codes": [
+        "E252"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e252_planner_lead.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e252_planner_lead.mod",
+      "notes": "lead in planner_objective"
+    },
+    {
+      "id": "e253_planner_local",
+      "codes": [
+        "E253"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e253_planner_local.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e253_planner_local.mod",
+      "notes": "model-local in planner_objective"
+    },
+    {
+      "id": "w203_osr_params_twice",
+      "codes": [
+        "W203"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/w203_osr_params_twice.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/w203_osr_params_twice.mod",
+      "notes": "several osr_params statements"
+    },
+    {
+      "id": "e254_osr_bounds_before",
+      "codes": [
+        "E254"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e254_osr_bounds_before.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e254_osr_bounds_before.mod",
+      "notes": "osr_params_bounds before osr_params"
+    },
+    {
+      "id": "e255_osr_bounds_not_param",
+      "codes": [
+        "E255"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e255_osr_bounds_not_param.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e255_osr_bounds_not_param.mod",
+      "notes": "osr_params_bounds name is not a parameter"
+    },
+    {
+      "id": "e256_tag_twice",
+      "codes": [
+        "E256"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e256_tag_twice.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e256_tag_twice.mod",
+      "notes": "equation tag twice"
+    },
+    {
+      "id": "e257_default_eq_tag",
+      "codes": [
+        "E257"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e257_default_eq_tag.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e257_default_eq_tag.mod",
+      "notes": "default equation tag collision"
+    },
+    {
+      "id": "e258_several_varobs",
+      "codes": [
+        "E258"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e258_several_varobs.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e258_several_varobs.mod",
+      "notes": "several varobs statements"
+    },
+    {
+      "id": "e259_several_varexobs",
+      "codes": [
+        "E259"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e259_several_varexobs.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e259_several_varexobs.mod",
+      "notes": "several varexobs statements"
+    },
+    {
+      "id": "e260_varexobs_not_exo",
+      "codes": [
+        "E260"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e260_varexobs_not_exo.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e260_varexobs_not_exo.mod",
+      "notes": "varexobs name is not exogenous"
+    },
+    {
+      "id": "e261_trends_twice",
+      "codes": [
+        "E261"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e261_trends_twice.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e261_trends_twice.mod",
+      "notes": "observation_trends name twice"
+    },
+    {
+      "id": "e262_mcp_lhs_not_var",
+      "codes": [
+        "E262"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e262_mcp_lhs_not_var.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e262_mcp_lhs_not_var.mod",
+      "notes": "mcp LHS not a variable"
+    },
+    {
+      "id": "e263_mcp_lhs_not_endo",
+      "codes": [
+        "E263"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e263_mcp_lhs_not_endo.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e263_mcp_lhs_not_endo.mod",
+      "notes": "mcp LHS not endogenous"
+    },
+    {
+      "id": "e264_mcp_rhs_not_const",
+      "codes": [
+        "E264"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e264_mcp_rhs_not_const.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e264_mcp_rhs_not_const.mod",
+      "notes": "mcp RHS not a constant"
+    },
+    {
+      "id": "e265_mcp_no_inequality",
+      "codes": [
+        "E265"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e265_mcp_no_inequality.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e265_mcp_no_inequality.mod",
+      "notes": "mcp has no inequality"
+    },
+    {
+      "id": "e266_shock_var_param",
+      "codes": [
+        "E266"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e266_shock_var_param.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e266_shock_var_param.mod",
+      "notes": "shocks variance on a parameter"
+    },
+    {
+      "id": "e267_shock_stderr_param",
+      "codes": [
+        "E267"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e267_shock_stderr_param.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e267_shock_stderr_param.mod",
+      "notes": "shocks stderr on a parameter"
+    },
+    {
+      "id": "e268_shock_cov_mixed",
+      "codes": [
+        "E268"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e268_shock_cov_mixed.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e268_shock_cov_mixed.mod",
+      "notes": "shocks covariance mixed types"
+    },
+    {
+      "id": "e269_shock_corr_mixed",
+      "codes": [
+        "E269"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e269_shock_corr_mixed.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e269_shock_corr_mixed.mod",
+      "notes": "shocks correlation mixed types"
+    },
+    {
+      "id": "e270_shock_skew_endo",
+      "codes": [
+        "E270"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e270_shock_skew_endo.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e270_shock_skew_endo.mod",
+      "notes": "shocks skewness on endogenous"
+    },
+    {
+      "id": "e271_option_twice",
+      "codes": [
+        "E271"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e271_option_twice.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e271_option_twice.mod",
+      "notes": "option declared twice in one list"
+    },
+    {
+      "id": "e272_static_lag",
+      "codes": [
+        "E272"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e272_static_lag.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e272_static_lag.mod",
+      "notes": "static equation with a lag"
+    },
+    {
+      "id": "e273_generate_irfs_name",
+      "codes": [
+        "E273"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e273_generate_irfs_name.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e273_generate_irfs_name.mod",
+      "notes": "generate_irfs element name repeated"
+    },
+    {
+      "id": "e274_generate_irfs_exo",
+      "codes": [
+        "E274"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e274_generate_irfs_exo.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e274_generate_irfs_exo.mod",
+      "notes": "generate_irfs exo set twice"
+    },
+    {
+      "id": "e275_namespace",
+      "codes": [
+        "E275"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e275_namespace.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e275_namespace.mod",
+      "notes": "namespace-qualified symbol"
+    },
+    {
+      "id": "e276_log_zero",
+      "codes": [
+        "E276"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e276_log_zero.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e276_log_zero.mod",
+      "notes": "log of interned 0"
+    },
+    {
+      "id": "e277_log10_zero",
+      "codes": [
+        "E277"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e277_log10_zero.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e277_log10_zero.mod",
+      "notes": "log10 of interned 0"
+    },
+    {
+      "id": "e278_div_zero",
+      "codes": [
+        "E278"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e278_div_zero.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e278_div_zero.mod",
+      "notes": "division by interned 0"
+    },
+    {
+      "id": "e279_external_fn_outside",
+      "codes": [
+        "E279"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e279_external_fn_outside.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e279_external_fn_outside.mod",
+      "notes": "external_function name as variable outside model"
+    },
+    {
+      "id": "e280_external_fn_inside",
+      "codes": [
+        "E280"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e280_external_fn_inside.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e280_external_fn_inside.mod",
+      "notes": "external_function name as variable inside model"
+    },
+    {
+      "id": "e281_mod_file_local",
+      "codes": [
+        "E281"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e281_mod_file_local.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e281_mod_file_local.mod",
+      "notes": "mod-file local used inside model"
+    },
+    {
+      "id": "e282_model_local_outside",
+      "codes": [
+        "E282"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e282_model_local_outside.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e282_model_local_outside.mod",
+      "notes": "model-local used outside model"
+    },
+    {
+      "id": "e283_if_string",
+      "codes": [
+        "E283"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e283_if_string.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e283_if_string.mod",
+      "notes": "@#if string is not bool"
+    },
+    {
+      "id": "e284_for_tuple",
+      "codes": [
+        "E284"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e284_for_tuple.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e284_for_tuple.mod",
+      "notes": "@#for tuple arity mismatch"
+    },
+    {
+      "id": "e285_plus_type",
+      "codes": [
+        "E285"
+      ],
+      "kind": "fire",
+      "package": "d_block",
+      "fixture": "tests/fixtures/d_block/e285_plus_type.mod",
+      "source": "d_block.rs",
+      "cluster": "d_block/e285_plus_type.mod",
+      "notes": "macro + type mismatch"
     }
   ]
 }

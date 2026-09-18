@@ -37,6 +37,8 @@ pub struct Equation {
     pub tags: Vec<String>,
     /// Every `[key]` / `[key=value]` on this equation. Flag tags store `""`.
     pub tag_map: BTreeMap<String, String>,
+    /// Tag keys that appeared twice on this equation (`[name='a', name='b']`).
+    pub tag_twice: Vec<(String, Span)>,
     pub complementarity: Option<Complementarity>,
 }
 
@@ -84,6 +86,7 @@ pub enum EstimatedParamKind {
     Param,
     Stderr,
     Corr,
+    Skew,
 }
 
 /// File-level optimal-policy command (`ramsey_model` / `ramsey_policy` /
@@ -129,6 +132,12 @@ pub struct EstimatedParam {
     pub init: Option<f64>,
     pub lower: Option<f64>,
     pub upper: Option<f64>,
+    pub init_expr: Option<ExprId>,
+    pub lower_expr: Option<ExprId>,
+    pub upper_expr: Option<ExprId>,
+    pub mean_expr: Option<ExprId>,
+    pub std_expr: Option<ExprId>,
+    pub prior_beta: bool,
     pub span: Span,
 }
 
@@ -146,8 +155,10 @@ pub struct ShockStmt {
 
 #[derive(Clone, Debug)]
 pub enum ShockKind {
-    /// `var name` (optional `= variance` or following `stderr expr`).
+    /// `var name = expr` (variance).
     Var(Name),
+    /// `var name; stderr expr`.
+    Stderr(Name),
     /// `var n1, n2, … = covariance` (two or more names, source order).
     Cov(Vec<Name>),
     /// `corr a, b = expr`.
@@ -353,6 +364,74 @@ pub struct Model {
     pub restriction_fname_span: Option<Span>,
     /// Trailing / `osr_params` symbol-list names.
     pub command_symbols: Vec<CommandSymbol>,
+    /// `histval;` … `end;` (first block).
+    pub histval_block: Option<Span>,
+    /// `histval(all_values_required)`.
+    pub histval_all_values_required: bool,
+    pub histval: Vec<HistvalEntry>,
+    /// Parsed `estimated_params_init` entries (not `estimated_params`).
+    pub estimated_params_init: Vec<EstimatedParam>,
+    pub estimated_params_init_span: Option<Span>,
+    /// Parsed `estimated_params_bounds` entries.
+    pub estimated_params_bounds: Vec<EstimatedParam>,
+    pub estimated_params_bounds_span: Option<Span>,
+    pub osr_params_bounds: Vec<OsrBound>,
+    /// Opener span of the first `osr_params_bounds` block.
+    pub osr_params_bounds_span: Option<Span>,
+    /// First `osr_params` statement (whole statement).
+    pub osr_params_span: Option<Span>,
+    pub osr_params_second_span: Option<Span>,
+    pub osr_params_statement_count: u32,
+    /// First `planner_objective` expression (first-wins).
+    pub planner_objective_expr: Option<ExprId>,
+    pub varexobs: Vec<ObservedVar>,
+    pub varexobs_span: Option<Span>,
+    pub varexobs_statement_count: u32,
+    pub varexobs_second_span: Option<Span>,
+    pub varobs_statement_count: u32,
+    pub varobs_second_span: Option<Span>,
+    /// Later `observation_trends` leading names that repeat an earlier one.
+    pub observation_trends_dups: Vec<(Name, Span)>,
+    pub generate_irfs: Vec<GenerateIrfsElement>,
+    pub generate_irfs_span: Option<Span>,
+    /// Second occurrence of an option ident in one `(…)` list.
+    pub option_twice: Vec<(String, Span)>,
+    /// `ident.ident` in a parsed expression (`"self.y"`).
+    pub namespace_qualified: Vec<(String, Span)>,
+    /// Interned-0 fold errors while building (span, code, 7.1 message).
+    pub const_fold_errors: Vec<(Span, &'static str, String)>,
+    /// `external_function(name=…)` identifiers (command body otherwise skipped).
+    pub external_function_names: Vec<Name>,
+    /// Auto-declared names from non-model expressions.
+    pub mod_file_locals: Vec<Name>,
+    /// Macro type errors from expansion (`@#if` not bool, `@#for` tuple, `+` mismatch).
+    pub macro_type_errors: Vec<(Span, &'static str, String)>,
+}
+
+/// `histval` assignment `name(lag) = expr`.
+#[derive(Clone, Debug)]
+pub struct HistvalEntry {
+    pub name: Name,
+    pub lag: i32,
+    pub span: Span,
+    pub expr: Option<ExprId>,
+}
+
+/// One `NAME, lower, upper;` in `osr_params_bounds`.
+#[derive(Clone, Debug)]
+pub struct OsrBound {
+    pub name: Name,
+    pub span: Span,
+    pub lower: Option<ExprId>,
+    pub upper: Option<ExprId>,
+}
+
+/// One `NAME, exo = number, …;` in `generate_irfs`.
+#[derive(Clone, Debug)]
+pub struct GenerateIrfsElement {
+    pub name: Name,
+    pub span: Span,
+    pub exos: Vec<(Name, Span)>,
 }
 
 /// One name in a trailing command list or `osr_params`.

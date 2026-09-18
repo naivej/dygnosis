@@ -30,6 +30,8 @@ pub enum TokenKind {
     Perpendicular,
     MacroDir,
     MacroInterp,
+    /// `.` that is not the start of a number (`.5` stays Number).
+    Dot,
     Eof,
 }
 
@@ -197,6 +199,10 @@ impl Lexer<'_> {
             '.' if self.peek_nth(1).is_some_and(|c| c.is_ascii_digit()) => {
                 self.scan_number();
                 TokenKind::Number
+            }
+            '.' => {
+                self.bump();
+                TokenKind::Dot
             }
             'A'..='Z' | 'a'..='z' => {
                 self.scan_ident();
@@ -439,6 +445,21 @@ mod tests {
         assert_eq!(
             &src[tokens[4].span.start as usize..tokens[4].span.end as usize],
             "bar"
+        );
+    }
+
+    #[test]
+    fn dot_that_is_not_a_number_is_a_token() {
+        let ks: Vec<_> = tokenize("self.y .5").iter().map(|t| t.kind).collect();
+        assert_eq!(
+            ks,
+            [
+                TokenKind::Ident,
+                TokenKind::Dot,
+                TokenKind::Ident,
+                TokenKind::Number,
+                TokenKind::Eof,
+            ]
         );
     }
 }

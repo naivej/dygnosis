@@ -66,6 +66,8 @@ pub enum ExprKind {
 pub struct Expr {
     pub kind: ExprKind,
     pub span: Span,
+    /// Finite numeric value when this node is interned-0 foldable (JC7).
+    pub interned: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -75,8 +77,16 @@ pub struct ExprArena {
 
 impl ExprArena {
     pub fn alloc(&mut self, kind: ExprKind, span: Span) -> ExprId {
+        self.alloc_interned(kind, span, None)
+    }
+
+    pub fn alloc_interned(&mut self, kind: ExprKind, span: Span, interned: Option<f64>) -> ExprId {
         let id = ExprId(self.nodes.len() as u32);
-        self.nodes.push(Expr { kind, span });
+        self.nodes.push(Expr {
+            kind,
+            span,
+            interned,
+        });
         id
     }
 

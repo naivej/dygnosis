@@ -1,7 +1,11 @@
 //! Written-clash Errors they refuse at transform (`json=transform`).
 
+use std::collections::HashSet;
+
 use crate::diagnostic::{Diagnostic, Severity};
-use crate::model::{Model, PolicyCommand};
+use crate::expr::ExprKind;
+use crate::intern::Name;
+use crate::model::{Equation, Model, PolicyCommand};
 use crate::span::Span;
 
 const FALLBACK: Span = Span { start: 0, end: 1 };
@@ -93,6 +97,8 @@ pub fn check_clash(model: &Model) -> Vec<Diagnostic> {
         }
     }
 
+    out.extend(check_default_eq_tag(model));
+
     out
 }
 
@@ -159,4 +165,62 @@ fn e179_span(model: &Model) -> Option<Span> {
 
 fn push(out: &mut Vec<Diagnostic>, span: Span, code: &str, message: &str) {
     out.push(Diagnostic::new(span, Severity::Error, code, message));
+}
+
+fn check_default_eq_tag(model: &Model) -> Vec<Diagnostic> {
+    let endo: HashSet<Name> = model.endogenous.iter().map(|d| d.name).collect();
+    let mut used: HashSet<String> = HashSet::new();
+    for eq in &model.equations {
+        if eq.is_local {
+            continue;
+        }
+        if let Some(n) = eq.tag_map.get("name") {
+            if !n.is_empty() {
+                used.insert(n.clone());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut index = 0usize;
+    for eq in &model.equations {
+        if eq.is_local {
+            continue;
+        }
+        index += 1;
+        if eq.tag_map.get("name").is_some_and(|n| !n.is_empty()) {
+            continue;
+        }
+        let lhs = lhs_ident(model, eq)
+            .filter(|n| endo.contains(n))
+            .map(|n| model.name(n).to_string());
+        let lhs_ok = lhs.as_ref().is_some_and(|s| !used.contains(s));
+        if lhs_ok {
+            if let Some(s) = lhs {
+                used.insert(s);
+            }
+            continue;
+        }
+        let idx = index.to_string();
+        if !used.contains(&idx) {
+            used.insert(idx);
+            continue;
+        }
+        out.push(Diagnostic::new(
+            eq.span,
+            Severity::Error,
+            "E257",
+            format!(
+                "Error creating default equation tag: cannot assign default tag to equation number {index} because it is already in use"
+            ),
+        ));
+    }
+    out
+}
+
+fn lhs_ident(model: &Model, eq: &Equation) -> Option<Name> {
+    let id = eq.lhs_expr?;
+    match &model.exprs.get(id).kind {
+        ExprKind::Ident { name, .. } => Some(*name),
+        _ => None,
+    }
 }

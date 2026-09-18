@@ -103,10 +103,10 @@ fn assert_stmt_span(text: &str, d: &Diag, label: &str) {
         "{label} {}: range should run through ';', got {s:?}",
         d.code
     );
-    assert_eq!(
-        s.matches(';').count(),
-        1,
-        "{label} {}: statement span should contain one ';', got {s:?}",
+    let n_semi = s.matches(';').count();
+    assert!(
+        n_semi == 1 || (n_semi == 2 && s.to_ascii_lowercase().contains("stderr")),
+        "{label} {}: statement span should contain one ';' (or var+stderr), got {s:?}",
         d.code
     );
     assert!(
@@ -161,7 +161,7 @@ fn w110_parser_clean_var_stmts() {
         .shock_stmts
         .iter()
         .map(|s| match &s.kind {
-            ShockKind::Var(n) => model.name(*n),
+            ShockKind::Var(n) | ShockKind::Stderr(n) => model.name(*n),
             other => panic!("expected Var, got {other:?}"),
         })
         .collect();

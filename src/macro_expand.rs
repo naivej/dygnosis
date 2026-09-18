@@ -7,6 +7,9 @@ use crate::span::Span;
 
 const RANGE_CAP: usize = 10_000;
 
+type MacroTypeError = (Span, &'static str, String);
+type ExpandTracedFull = (Vec<Token>, Vec<TokenTrace>, Vec<FrameRec>, Vec<MacroTypeError>);
+
 #[derive(Clone, Debug)]
 enum MacroVal {
     Int(i64),
@@ -20,30 +23,6 @@ impl MacroVal {
             MacroVal::Int(n) => n.to_string(),
             MacroVal::Range { start, end } => format!("{start}:{end}"),
             MacroVal::Text(s) => s.clone(),
-        }
-    }
-
-    fn truthy(&self) -> bool {
-        match self {
-            MacroVal::Int(n) => *n != 0,
-            MacroVal::Range { start, end } => start <= end,
-            MacroVal::Text(s) => {
-                let t = s.trim();
-                if t.is_empty() {
-                    return false;
-                }
-                let lower = t.to_ascii_lowercase();
-                if matches!(lower.as_str(), "0" | "false" | "no") {
-                    return false;
-                }
-                if let Ok(n) = t.parse::<i64>() {
-                    return n != 0;
-                }
-                if let Ok(f) = t.parse::<f64>() {
-                    return f != 0.0;
-                }
-                true
-            }
         }
     }
 
@@ -90,28 +69,44 @@ struct ExpandState<'a> {
     defines: &'a mut HashMap<String, MacroVal>,
     origin_stack: Vec<usize>,
     arena: &'a mut Vec<FrameRec>,
+    type_errors: &'a mut Vec<MacroTypeError>,
 }
 
 pub fn expand_macros(src: &str, tokens: Vec<Token>) -> Vec<Token> {
-    expand_macros_traced(src, tokens).0
+    expand_macros_full(src, tokens).0
+}
+
+pub fn expand_macros_full(
+    src: &str,
+    tokens: Vec<Token>,
+) -> (Vec<Token>, Vec<(Span, &'static str, String)>) {
+    let (out, _, _, errors) = expand_macros_traced_full(src, tokens);
+    (out, errors)
 }
 
 pub(crate) fn expand_macros_traced(
     src: &str,
     tokens: Vec<Token>,
 ) -> (Vec<Token>, Vec<TokenTrace>, Vec<FrameRec>) {
+    let (out, traces, arena, _) = expand_macros_traced_full(src, tokens);
+    (out, traces, arena)
+}
+
+fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull {
     let mut defines = HashMap::new();
     let mut arena = Vec::new();
+    let mut type_errors = Vec::new();
     let (out, traces) = {
         let mut state = ExpandState {
             src,
             defines: &mut defines,
             origin_stack: Vec::new(),
             arena: &mut arena,
+            type_errors: &mut type_errors,
         };
         expand_seq(&mut state, &tokens)
     };
-    (out, traces, arena)
+    (out, traces, arena, type_errors)
 }
 
 fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec<TokenTrace>) {
@@ -130,8 +125,18 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
             match dir_kind(state.src, tok) {
                 Dir::Define => {
                     if emitting(&stack) {
-                        if let Some((name, val)) = parse_define(tok.text(state.src)) {
-                            state.defines.insert(name, val);
+                        match parse_define_eval(tok.text(state.src), state.defines) {
+                            Ok(Some((name, val))) => {
+                                state.defines.insert(name, val);
+                            }
+                            Ok(None) => {}
+                            Err(()) => {
+                                state.type_errors.push((
+                                    tok.span,
+                                    "E285",
+                                    "Type mismatch for operands of + operator".to_string(),
+                                ));
+                            }
                         }
                     }
                     i += 1;
@@ -145,10 +150,7 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                     push_if_frame(state, &mut stack, tokens, i, tok.span, "ifndef", cond);
                 }
                 Dir::If => {
-                    let cond = match dir_arg_ident(tok.text(state.src), "if") {
-                        Some(name) => state.defines.get(&name).is_some_and(MacroVal::truthy),
-                        None => false,
-                    };
+                    let cond = eval_if_condition(state, tok);
                     i += 1;
                     push_if_frame(state, &mut stack, tokens, i, tok.span, "if", cond);
                 }
@@ -190,6 +192,7 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                 Dir::For => {
                     let (body, next) = take_for_body(state.src, tokens, i);
                     if emitting(&stack) {
+                        check_for_tuple(state, tok);
                         let body_span = tokens_body_span(body);
                         let frame_id = state.arena.len();
                         state.arena.push(FrameRec {
@@ -409,14 +412,213 @@ fn directive_name(text: &str) -> &str {
     }
 }
 
-fn parse_define(text: &str) -> Option<(String, MacroVal)> {
-    let rest = strip_kw(text, "define")?;
+fn eval_if_condition(state: &mut ExpandState<'_>, tok: &Token) -> bool {
+    let Some(arg) = strip_kw(tok.text(state.src), "if") else {
+        return false;
+    };
+    let arg = arg.trim();
+    if arg.is_empty() {
+        return false;
+    }
+    if looks_like_string_or_array(arg) {
+        state.type_errors.push((
+            tok.span,
+            "E283",
+            "The condition must evaluate to a boolean or a double".to_string(),
+        ));
+        return false;
+    }
+    if let Some(name) = ident_only(arg) {
+        match state.defines.get(&name) {
+            Some(v) => match v.as_condition() {
+                Some(b) => b,
+                None => {
+                    state.type_errors.push((
+                        tok.span,
+                        "E283",
+                        "The condition must evaluate to a boolean or a double".to_string(),
+                    ));
+                    false
+                }
+            },
+            None => false,
+        }
+    } else if let Ok(n) = arg.parse::<i64>() {
+        n != 0
+    } else if let Ok(f) = arg.parse::<f64>() {
+        f != 0.0
+    } else if matches!(arg.to_ascii_lowercase().as_str(), "true" | "false") {
+        arg.eq_ignore_ascii_case("true")
+    } else {
+        state.type_errors.push((
+            tok.span,
+            "E283",
+            "The condition must evaluate to a boolean or a double".to_string(),
+        ));
+        false
+    }
+}
+
+fn looks_like_string_or_array(s: &str) -> bool {
+    let t = s.trim();
+    t.starts_with('"') || t.starts_with('\'') || t.starts_with('[')
+}
+
+fn ident_only(s: &str) -> Option<String> {
+    let n = ident_len(s)?;
+    if n == s.len() {
+        Some(s.to_string())
+    } else {
+        None
+    }
+}
+
+impl MacroVal {
+    fn as_condition(&self) -> Option<bool> {
+        match self {
+            MacroVal::Int(n) => Some(*n != 0),
+            MacroVal::Range { .. } => None,
+            MacroVal::Text(s) => {
+                let t = s.trim();
+                let lower = t.to_ascii_lowercase();
+                if matches!(lower.as_str(), "true" | "false") {
+                    return Some(lower == "true");
+                }
+                if let Ok(n) = t.parse::<i64>() {
+                    return Some(n != 0);
+                }
+                if let Ok(f) = t.parse::<f64>() {
+                    return Some(f != 0.0);
+                }
+                None
+            }
+        }
+    }
+}
+
+fn parse_define_eval(
+    text: &str,
+    defines: &HashMap<String, MacroVal>,
+) -> Result<Option<(String, MacroVal)>, ()> {
+    let Some(rest) = strip_kw(text, "define") else {
+        return Ok(None);
+    };
     let rest = rest.trim_start();
-    let n = ident_len(rest)?;
+    let Some(n) = ident_len(rest) else {
+        return Ok(None);
+    };
     let name = rest[..n].to_string();
-    let rest = rest[n..].trim_start().strip_prefix('=')?.trim_start();
-    let val = parse_macro_value(rest)?;
-    Some((name, val))
+    let Some(rest) = rest[n..].trim_start().strip_prefix('=') else {
+        return Ok(None);
+    };
+    let rest = rest.trim_start();
+    if let Some((left, right)) = split_plus(rest) {
+        let l = eval_macro_atom(left, defines);
+        let r = eval_macro_atom(right, defines);
+        return match (l, r) {
+            (Ok(MacroVal::Int(a)), Ok(MacroVal::Int(b))) => {
+                Ok(Some((name, MacroVal::Int(a + b))))
+            }
+            (Ok(_), Ok(_)) => Err(()),
+            _ => Ok(None),
+        };
+    }
+    Ok(parse_macro_value(rest).map(|val| (name, val)))
+}
+
+fn split_plus(s: &str) -> Option<(&str, &str)> {
+    let mut depth = 0i32;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            '+' if depth == 0 => {
+                let left = s[..i].trim();
+                let right = s[i + 1..].trim();
+                if !left.is_empty() && !right.is_empty() {
+                    return Some((left, right));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn eval_macro_atom(s: &str, defines: &HashMap<String, MacroVal>) -> Result<MacroVal, ()> {
+    let s = s.trim();
+    if let Some(inner) = strip_quotes(s) {
+        return Ok(MacroVal::Text(inner.to_string()));
+    }
+    if let Ok(n) = s.parse::<i64>() {
+        return Ok(MacroVal::Int(n));
+    }
+    if let Some(v) = defines.get(s) {
+        return Ok(v.clone());
+    }
+    parse_macro_value(s).ok_or(())
+}
+
+fn strip_quotes(s: &str) -> Option<&str> {
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'\'' && *bytes.last()? == b'\'')
+            || (bytes[0] == b'"' && *bytes.last()? == b'"'))
+    {
+        Some(&s[1..s.len() - 1])
+    } else {
+        None
+    }
+}
+
+fn check_for_tuple(state: &mut ExpandState<'_>, tok: &Token) {
+    let Some(rest) = strip_kw(tok.text(state.src), "for") else {
+        return;
+    };
+    let rest = rest.trim_start();
+    if !rest.starts_with('(') {
+        return;
+    }
+    let Some(close) = rest.find(')') else {
+        return;
+    };
+    let names = rest[1..close]
+        .split(',')
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .count();
+    let after = rest[close + 1..].trim_start();
+    let Some(after) = strip_word(after, "in") else {
+        return;
+    };
+    let after = after.trim_start();
+    if !after.starts_with('[') {
+        return;
+    };
+    if let Some(n) = first_tuple_size(after) {
+        if n != names {
+            state.type_errors.push((
+                tok.span,
+                "E284",
+                format!("Encountered tuple of size {n} but only have {names} index variables"),
+            ));
+        }
+    }
+}
+
+fn first_tuple_size(s: &str) -> Option<usize> {
+    let inner = s.trim().strip_prefix('[')?.strip_suffix(']')?;
+    let inner = inner.trim();
+    let start = inner.find('(')?;
+    let end = inner[start..].find(')')?;
+    let tuple = &inner[start + 1..start + end];
+    Some(
+        tuple
+            .split(',')
+            .map(|p| p.trim())
+            .filter(|p| !p.is_empty())
+            .count(),
+    )
 }
 
 fn parse_for(text: &str) -> Option<(String, String)> {

@@ -66,6 +66,27 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
         }
     }
 
+    if model.varobs_statement_count >= 2 {
+        diagnostics.push(Diagnostic::new(
+            model.varobs_second_span.unwrap_or(span_or_fallback(model.varobs_span)),
+            Severity::Error,
+            "E258",
+            "varobs: you cannot have several 'varobs' statements in the same MOD file",
+        ));
+    }
+
+    for (name, span) in &model.observation_trends_dups {
+        diagnostics.push(Diagnostic::new(
+            nonempty_or(*span, model.observation_trends_span),
+            Severity::Error,
+            "E261",
+            format!(
+                "observation_trends: {} declared twice",
+                model.name(*name)
+            ),
+        ));
+    }
+
     let mut obs_seen = HashSet::new();
     let mut n_obs = 0usize;
     for v in &model.varobs {
@@ -147,6 +168,21 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
                             ),
                         ));
                     }
+                }
+            }
+            EstimatedParamKind::Skew => {
+                let declared = endogenous.contains(&entry.name)
+                    || exogenous.contains(&entry.name)
+                    || parameters.contains(&entry.name);
+                if !declared {
+                    diagnostics.push(Diagnostic::new(
+                        span,
+                        Severity::Error,
+                        "E093",
+                        format!(
+                            "estimated_params: skew '{name}' is not a declared shock or observed variable."
+                        ),
+                    ));
                 }
             }
         }

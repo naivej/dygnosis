@@ -28,6 +28,7 @@ pub(crate) fn check_shape(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_w052(model));
     out.extend(check_e217(model));
     out.extend(check_e218(model));
+    out.extend(check_e241(model));
     out
 }
 
@@ -711,6 +712,30 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
             }
         }
     }
+    for entry in &model.histval {
+        let name = model.name(entry.name);
+        if params.contains(&entry.name) {
+            diagnostics.push(Diagnostic {
+                span: entry.span,
+                severity: Severity::Error,
+                code: "E059".to_string(),
+                message: format!("{name} is neither endogenous or exogenous."),
+                fix: None,
+                tags: Vec::new(),
+            });
+            continue;
+        }
+        if !declared.contains(&entry.name) {
+            diagnostics.push(Diagnostic {
+                span: entry.span,
+                severity: Severity::Error,
+                code: "E058".to_string(),
+                message: format!("Variable '{name}' in histval is not declared."),
+                fix: None,
+                tags: Vec::new(),
+            });
+        }
+    }
     diagnostics
 }
 
@@ -822,6 +847,50 @@ fn check_e218(model: &Model) -> Vec<Diagnostic> {
             &model.endval,
             model.endval_block.unwrap_or_else(|| fallback_span(model)),
             "endval",
+        ));
+    }
+    out
+}
+
+fn check_e241(model: &Model) -> Vec<Diagnostic> {
+    if !model.histval_all_values_required {
+        return Vec::new();
+    }
+    let set: HashSet<Name> = model.histval.iter().map(|e| e.name).collect();
+    let span = model.histval_block.unwrap_or_else(|| fallback_span(model));
+    let mut out = Vec::new();
+    let missing_endo: Vec<&str> = model
+        .endogenous
+        .iter()
+        .filter(|d| !set.contains(&d.name))
+        .map(|d| model.name(d.name))
+        .collect();
+    if !missing_endo.is_empty() {
+        out.push(Diagnostic::new(
+            span,
+            Severity::Error,
+            "E241",
+            format!(
+                "You have not set the following endogenous variables in histval: {}",
+                missing_endo.join(" ")
+            ),
+        ));
+    }
+    let missing_exo: Vec<&str> = model
+        .exogenous
+        .iter()
+        .filter(|d| !set.contains(&d.name))
+        .map(|d| model.name(d.name))
+        .collect();
+    if !missing_exo.is_empty() {
+        out.push(Diagnostic::new(
+            span,
+            Severity::Error,
+            "E241",
+            format!(
+                "You have not set the following exogenous variables in endval: {}",
+                missing_exo.join(" ")
+            ),
         ));
     }
     out

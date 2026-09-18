@@ -940,6 +940,464 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         our_needle: "found more than once in symbol list",
         stage: JsonStage::Check,
     },
+    HonestyRow {
+        code: "E241",
+        fixture: "d_block/e241_histval_missing_exo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "exogenous variables in endval",
+        our_needle: "exogenous variables in endval",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E242",
+        fixture: "d_block/e242_histval_lag.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the lag on y should be less than or equal to 0",
+        our_needle: "the lag on y should be less than or equal to 0",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E243",
+        fixture: "d_block/e243_histval_dup.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "hist_val: (y, 0) declared twice",
+        our_needle: "hist_val: (y, 0) declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E244",
+        fixture: "d_block/e244_estimated_params_dup.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the symbol rho is declared twice",
+        our_needle: "the symbol rho is declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E245",
+        fixture: "d_block/e245_estimated_params_stderr_dup.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the stderr of e is declared twice",
+        our_needle: "the stderr of e is declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E246",
+        fixture: "d_block/e246_estimated_params_corr_dup.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the correlation between e and e2 is declared twice",
+        our_needle: "the correlation between e and e2 is declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E247",
+        fixture: "d_block/e247_estimated_params_skew_dup.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the skewness of e is declared twice",
+        our_needle: "the skewness of e is declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E248",
+        fixture: "d_block/e248_estimated_params_value_used.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the value of estimated parameter rho is used",
+        our_needle: "the value of estimated parameter rho is used",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E249",
+        fixture: "d_block/e249_estimated_params_skew_endo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "skewness can only be specified for exogenous variables",
+        our_needle: "skewness can only be specified for exogenous variables",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E250",
+        fixture: "d_block/e250_beta_half_half.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "mean = standard deviation = 0.5",
+        our_needle: "mean = standard deviation = 0.5",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E251",
+        fixture: "d_block/e251_planner_exo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You cannot include exogenous variables",
+        our_needle: "You cannot include exogenous variables",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E252",
+        fixture: "d_block/e252_planner_lead.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Leads and lags on variables are forbidden in 'planner_objective'",
+        our_needle: "Leads and lags on variables are forbidden in 'planner_objective'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E253",
+        fixture: "d_block/e253_planner_local.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "cannot be used in 'planner_objective'",
+        our_needle: "cannot be used in 'planner_objective'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W203",
+        fixture: "d_block/w203_osr_params_twice.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "more than one osr_params statement",
+        our_needle: "more than one osr_params statement",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E254",
+        fixture: "d_block/e254_osr_bounds_before.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "osr_params statement before the osr_params_bounds block",
+        our_needle: "osr_params statement before the osr_params_bounds block",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E255",
+        fixture: "d_block/e255_osr_bounds_not_param.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "must be a parameter to be used in the osr_bounds block",
+        our_needle: "must be a parameter to be used in the osr_bounds block",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E256",
+        fixture: "d_block/e256_tag_twice.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Tag 'name' cannot be used twice",
+        our_needle: "Tag 'name' cannot be used twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E257",
+        fixture: "d_block/e257_default_eq_tag.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Error creating default equation tag",
+        our_needle: "Error creating default equation tag",
+        stage: JsonStage::Transform,
+    },
+    HonestyRow {
+        code: "E258",
+        fixture: "d_block/e258_several_varobs.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "several 'varobs' statements",
+        our_needle: "several 'varobs' statements",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E259",
+        fixture: "d_block/e259_several_varexobs.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "several 'varexobs' statements",
+        our_needle: "several 'varexobs' statements",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E260",
+        fixture: "d_block/e260_varexobs_not_exo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "varexobs: y is not an exogenous variable",
+        our_needle: "varexobs: y is not an exogenous variable",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E261",
+        fixture: "d_block/e261_trends_twice.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "observation_trends: y declared twice",
+        our_needle: "observation_trends: y declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E262",
+        fixture: "d_block/e262_mcp_lhs_not_var.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "mcp' tag is not a variable",
+        our_needle: "mcp' tag is not a variable",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E263",
+        fixture: "d_block/e263_mcp_lhs_not_endo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "not an endogenous variable",
+        our_needle: "not an endogenous variable",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E264",
+        fixture: "d_block/e264_mcp_rhs_not_const.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "should be a constant",
+        our_needle: "should be a constant",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E265",
+        fixture: "d_block/e265_mcp_no_inequality.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "does not contain an inequality",
+        our_needle: "does not contain an inequality",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E266",
+        fixture: "d_block/e266_shock_var_param.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "setting a variance on 'rho'",
+        our_needle: "setting a variance on 'rho'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E267",
+        fixture: "d_block/e267_shock_stderr_param.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "setting a standard error on 'rho'",
+        our_needle: "setting a standard error on 'rho'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E268",
+        fixture: "d_block/e268_shock_cov_mixed.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "setting a covariance between",
+        our_needle: "setting a covariance between",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E269",
+        fixture: "d_block/e269_shock_corr_mixed.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "setting a correlation between",
+        our_needle: "setting a correlation between",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E270",
+        fixture: "d_block/e270_shock_skew_endo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "skewness can only be specified for exogenous variables",
+        our_needle: "skewness can only be specified for exogenous variables",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E271",
+        fixture: "d_block/e271_option_twice.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "option dsge_var declared twice",
+        our_needle: "option dsge_var declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E272",
+        fixture: "d_block/e272_static_lag.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "An equation tagged [static] cannot contain",
+        our_needle: "An equation tagged [static] cannot contain",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E273",
+        fixture: "d_block/e273_generate_irfs_name.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "generate_irfs block must be unique",
+        our_needle: "generate_irfs block must be unique",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E274",
+        fixture: "d_block/e274_generate_irfs_exo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You have set the exogenous variable",
+        our_needle: "You have set the exogenous variable",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E275",
+        fixture: "d_block/e275_namespace.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Namespace-qualified symbol",
+        our_needle: "Namespace-qualified symbol",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E276",
+        fixture: "d_block/e276_log_zero.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "log(0) not defined!",
+        our_needle: "log(0) not defined!",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E277",
+        fixture: "d_block/e277_log10_zero.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "log10(0) not defined!",
+        our_needle: "log10(0) not defined!",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E278",
+        fixture: "d_block/e278_div_zero.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Division by zero when forming",
+        our_needle: "Division by zero when forming",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E279",
+        fixture: "d_block/e279_external_fn_outside.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "name of a MATLAB/Octave function",
+        our_needle: "name of a MATLAB/Octave function",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E280",
+        fixture: "d_block/e280_external_fn_inside.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "function name external to Dynare",
+        our_needle: "function name external to Dynare",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E281",
+        fixture: "d_block/e281_mod_file_local.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "not allowed inside model declaration",
+        our_needle: "not allowed inside model declaration",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E282",
+        fixture: "d_block/e282_model_local_outside.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "not allowed outside model declaration. Its scope is only inside model",
+        our_needle: "not allowed outside model declaration. Its scope is only inside model",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E283",
+        fixture: "d_block/e283_if_string.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "must evaluate to a boolean or a double",
+        our_needle: "must evaluate to a boolean or a double",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E284",
+        fixture: "d_block/e284_for_tuple.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Encountered tuple of size",
+        our_needle: "Encountered tuple of size",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E285",
+        fixture: "d_block/e285_plus_type.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Type mismatch for operands of +",
+        our_needle: "Type mismatch for operands of +",
+        stage: JsonStage::Check,
+    },
 ];
 
 struct ClashQuiet {
