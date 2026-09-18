@@ -69,6 +69,28 @@ pub fn check_context(model: &Model) -> Vec<Diagnostic> {
         push(&mut out, span, "E216", E216_MSG);
     }
 
+    if let Some((n, span)) = model.identification_order {
+        if !(1..=3).contains(&n) {
+            push(
+                &mut out,
+                span,
+                "E236",
+                "the order option of identification command must be between 1 and 3",
+            );
+        }
+    }
+
+    if let Some((n, span)) = model.max_dim_cova_group {
+        if n <= 0 {
+            push(
+                &mut out,
+                span,
+                "E237",
+                "The max_dim_cova_group option to identification only accepts integers > 0.",
+            );
+        }
+    }
+
     out
 }
 

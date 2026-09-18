@@ -81,6 +81,17 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
         ));
     }
 
+    if let Some((n, span)) = model.discretionary_order {
+        if n > 1 {
+            diagnostics.push(Diagnostic::new(
+                span,
+                Severity::Error,
+                "E235",
+                "discretionary_policy: order > 1 is not yet implemented",
+            ));
+        }
+    }
+
     if model.policy_commands.is_empty() {
         return diagnostics;
     }

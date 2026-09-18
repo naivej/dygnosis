@@ -714,6 +714,232 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         our_needle: "You have not set the following exogenous variables in initval",
         stage: JsonStage::Check,
     },
+    HonestyRow {
+        code: "E220",
+        fixture: "d_walk/e220_bayesian_irf_counts.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "bayesian_irf option is passed to the estimation",
+        our_needle: "bayesian_irf option is passed to the estimation",
+        stage: JsonStage::Transform,
+    },
+    HonestyRow {
+        code: "E221",
+        fixture: "d_walk/e221_shocks_lt_varobs.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "greater than or equal to the number of observed variables",
+        our_needle: "greater than or equal to the number of observed variables",
+        stage: JsonStage::Transform,
+    },
+    HonestyRow {
+        code: "E222",
+        fixture: "d_walk/e222_dsge_var_missing_weight.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "dsge_prior_weight must be referenced in the estimated_params block",
+        our_needle: "dsge_prior_weight must be referenced in the estimated_params block",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E223",
+        fixture: "d_walk/e223_weight_and_calibrated.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the prior weight cannot be calibrated",
+        our_needle: "the prior weight cannot be calibrated",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E224",
+        fixture: "d_walk/e224_weight_without_dsge_var.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the dsge_var option must be passed to the estimation statement",
+        our_needle: "the dsge_var option must be passed to the estimation statement",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E225",
+        fixture: "d_walk/e225_dsge_varlag_without_dsge_var.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "requires a dsge_var option to be passed if the dsge_varlag option is passed",
+        our_needle: "requires a dsge_var option to be passed if the dsge_varlag option is passed",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E226",
+        fixture: "d_walk/e226_two_estimation_dsge_var.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "cannot take more than one dsge_var option",
+        our_needle: "cannot take more than one dsge_var option",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E227",
+        fixture: "d_walk/e227_estimation_no_data.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "requires a data file to be supplied via the datafile option",
+        our_needle: "requires a data file to be supplied via the datafile option",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E228",
+        fixture: "d_walk/e228_mode_file_use_calibration.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "incompatible with the use_calibration option",
+        our_needle: "incompatible with the use_calibration option",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E229",
+        fixture: "d_walk/e229_mh_tune_jscale_mh_jscale.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "mh_tune_jscale and mh_jscale options",
+        our_needle: "mh_tune_jscale and mh_jscale options",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E230",
+        fixture: "d_walk/e230_mh_tune_guess_alone.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "mh_tune_guess in estimation statement cannot be used without",
+        our_needle: "mh_tune_guess in estimation statement cannot be used without",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E231",
+        fixture: "d_walk/e231_gmf_proposal_montecarlo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "incompatible with proposal_approximation=montecarlo",
+        our_needle: "incompatible with proposal_approximation=montecarlo",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E232",
+        fixture: "d_walk/e232_gmf_distribution_montecarlo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "incompatible with distribution_approximation=montecarlo",
+        our_needle: "incompatible with distribution_approximation=montecarlo",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E233",
+        fixture: "d_walk/e233_estimated_planner_discount.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "that appears in the discount factor of the planner",
+        our_needle: "that appears in the discount factor of the planner",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E234",
+        fixture: "d_walk/e234_prior_function_no_function.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "require the 'function' option",
+        our_needle: "require the 'function' option",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E235",
+        fixture: "d_walk/e235_disc_order.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "discretionary_policy: order > 1 is not yet implemented",
+        our_needle: "discretionary_policy: order > 1 is not yet implemented",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E236",
+        fixture: "d_walk/e236_identification_order.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "order option of identification command must be between 1 and 3",
+        our_needle: "order option of identification command must be between 1 and 3",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E237",
+        fixture: "d_walk/e237_max_dim_cova_group.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "max_dim_cova_group option to identification only accepts integers > 0",
+        our_needle: "max_dim_cova_group option to identification only accepts integers > 0",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E238",
+        fixture: "d_walk/e238_stoch_simul_filters.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "stoch_simul: can only use one of HP, one-sided HP, and bandpass filters",
+        our_needle: "stoch_simul: can only use one of HP, one-sided HP, and bandpass filters",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E239",
+        fixture: "d_walk/e239_stoch_simul_z.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Variable z was not declared",
+        our_needle: "Variable z was not declared",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "d_walk/e240_stoch_simul_rho.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "is not one of {endogenous}",
+        our_needle: "is not one of {endogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W201",
+        fixture: "d_walk/w201_restriction_fname.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "restriction_fname is now deprecated",
+        our_needle: "restriction_fname is now deprecated",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W202",
+        fixture: "d_walk/w202_stoch_simul_dup.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "found more than once in symbol list",
+        our_needle: "found more than once in symbol list",
+        stage: JsonStage::Check,
+    },
 ];
 
 struct ClashQuiet {

@@ -212,6 +212,8 @@ pub struct Model {
     pub instruments: Vec<Name>,
     /// First `planner_discount` option that folds; later options do not overwrite.
     pub planner_discount: Option<f64>,
+    /// First `planner_discount` expression (first-wins; beside the folded float).
+    pub planner_discount_expr: Option<ExprId>,
     /// Names from `osr_params …;`.
     pub osr_params: Vec<Name>,
     /// True iff an `optim_weights;` … `end;` block is present.
@@ -293,6 +295,83 @@ pub struct Model {
     pub initval_after_endval_span: Option<Span>,
     /// `instruments=` was present on a `discretionary_policy` (list may be empty).
     pub discretionary_has_instruments_option: bool,
+    /// First `data` command identifier (not `database`).
+    pub data_span: Option<Span>,
+    /// First `prior_function` command identifier.
+    pub prior_function_span: Option<Span>,
+    /// First `posterior_function` command identifier.
+    pub posterior_function_span: Option<Span>,
+    /// `function=` seen on `prior_function` / `posterior_function` (sticky OR).
+    pub prior_function_has_function: bool,
+    /// `(…)` seen on `prior_function` / `posterior_function` (sticky OR).
+    pub prior_function_has_parens: bool,
+    /// `use_calibration` on `estimated_params_init`.
+    pub estimated_params_init_use_calibration: Option<Span>,
+    /// First bare `dsge_var` on `estimation`.
+    pub dsge_var_estimated: Option<Span>,
+    /// First `dsge_var=` on `estimation`.
+    pub dsge_var_calibrated: Option<Span>,
+    /// Per `estimation` statement that listed a `dsge_var` form.
+    pub estimation_dsge_var_stmts: Vec<EstimationDsgeVarStmt>,
+    /// First `dsge_varlag` on `estimation`.
+    pub dsge_varlag_span: Option<Span>,
+    /// First `bayesian_irf` on `estimation`.
+    pub bayesian_irf_span: Option<Span>,
+    /// First `datafile=` on `estimation`.
+    pub estimation_datafile_span: Option<Span>,
+    /// First `dataseries=` on `estimation` (recorded; not an E227 gate).
+    pub estimation_dataseries_span: Option<Span>,
+    /// First `mode_file=` on `estimation`.
+    pub estimation_mode_file_span: Option<Span>,
+    /// First `mh_tune_jscale` on `estimation` (bare or `=`).
+    pub mh_tune_jscale_span: Option<Span>,
+    /// First `mh_jscale=` on `estimation`.
+    pub mh_jscale_span: Option<Span>,
+    /// First `mh_tune_guess=` on `estimation`.
+    pub mh_tune_guess_span: Option<Span>,
+    /// First `filter_algorithm=gmf` on `estimation`.
+    pub filter_algorithm_gmf_span: Option<Span>,
+    /// First `proposal_approximation=montecarlo` on `estimation`.
+    pub proposal_approximation_montecarlo_span: Option<Span>,
+    /// First `distribution_approximation=montecarlo` on `estimation`.
+    pub distribution_approximation_montecarlo_span: Option<Span>,
+    /// `sensitivity(identification=1)` option span (does not set `identification_span`).
+    pub sensitivity_identification_eq_1: Option<Span>,
+    /// `identification(order=N)` number and its span.
+    pub identification_order: Option<(i32, Span)>,
+    /// `identification(max_dim_cova_group=N)` number and its span.
+    pub max_dim_cova_group: Option<(i32, Span)>,
+    /// `discretionary_policy(order=N)` number and its span.
+    pub discretionary_order: Option<(i32, Span)>,
+    /// First `hp_filter` on `stoch_simul`.
+    pub stoch_simul_hp_filter: Option<Span>,
+    /// First `one_sided_hp_filter` on `stoch_simul`.
+    pub stoch_simul_one_sided_hp_filter: Option<Span>,
+    /// First `bandpass_filter` on `stoch_simul`.
+    pub stoch_simul_bandpass_filter: Option<Span>,
+    /// First `restriction_fname` option identifier.
+    pub restriction_fname_span: Option<Span>,
+    /// Trailing / `osr_params` symbol-list names.
+    pub command_symbols: Vec<CommandSymbol>,
+}
+
+/// One name in a trailing command list or `osr_params`.
+#[derive(Clone, Debug)]
+pub struct CommandSymbol {
+    pub command: String,
+    pub name: Name,
+    pub span: Span,
+    /// Statement this name was listed on. Duplicate detection is per statement:
+    /// Dynare calls `removeDuplicates` on one statement's list, so the same name
+    /// on two `stoch_simul` statements is not a duplicate.
+    pub list_id: u32,
+}
+
+/// `dsge_var` forms on one `estimation` statement.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EstimationDsgeVarStmt {
+    pub estimated: Option<Span>,
+    pub calibrated: Option<Span>,
 }
 
 /// A literal `@#include` filename plus the directive's byte span.

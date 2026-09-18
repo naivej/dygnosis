@@ -2,8 +2,9 @@
 //!
 //! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 70
 //! codes shipped through 0.5.0, then kind `shared` / `skipped` / `added`.
-//! 163 keys = 70 shared + 27 added + 66 skipped. Catalog **0.5.1** D-clash and
-//! D-check Errors are shared.
+//! 170 keys = 94 shared + 27 added + 49 skipped. Catalog **0.5.1** D-clash and
+//! D-check Errors are shared; **0.5.2** D-walk rows add 24 shared keys and drop
+//! the 17 `S###` keys they replace.
 //! `I050` and `W042` use the recorded surface rewrites in
 //! `dev_logs/0.1/0.1.0/22-c-explain.md` (do not advertise Compute Steady State).
 
@@ -39,7 +40,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 163 keys: 70 shared + 27 added + 66 skipped.
+// 170 keys: 94 shared + 27 added + 49 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -83,7 +84,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E028", ExplainEntry {
         title: "varexo_det with identification",
-        body: "The ``identification`` command cannot be used with deterministic exogenous variables. Dynare refuses: `identification is incompatible with deterministic exogenous variables`.\n\n**Fix**\n\nRemove the ``varexo_det`` declaration, or drop ``identification``.",
+        body: "The ``identification`` command, or the ``sensitivity(identification=1)`` option, cannot be used with deterministic exogenous variables. Dynare refuses: `identification is incompatible with deterministic exogenous variables`.\n\n**Fix**\n\nRemove the ``varexo_det`` declaration, or drop ``identification`` (or the ``identification=1`` option on ``sensitivity``).",
         kind: ExplainKind::Shared,
     }),
     ("E030", ExplainEntry {
@@ -526,6 +527,126 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "``initval`` or ``endval`` was opened with ``all_values_required`` but some variables have no assignment. Dynare refuses: `You have not set the following endogenous variables in initval:`; `You have not set the following exogenous variables in initval:`; `You have not set the following endogenous variables in endval:`; `You have not set the following exogenous variables in endval:`.\n\n**Fix**\n\nAssign every endogenous and exogenous in that block, or drop ``all_values_required``.",
         kind: ExplainKind::Shared,
     }),
+    ("E219", ExplainEntry {
+        title: "dsge_prior_weight declared with dsge_var",
+        body: "``estimation`` passes the ``dsge_var`` option while ``dsge_prior_weight`` is already declared as a model variable or parameter. Dynare refuses: `dsge_prior_weight should not be declared as a model variable / parameter when the dsge_var option is passed to the estimation statement.`\n\n**Fix**\n\nRemove the ``dsge_prior_weight`` declaration; the ``dsge_var`` option declares it implicitly.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E220", ExplainEntry {
+        title: "DSGE-VAR bayesian_irf shock count",
+        body: "``estimation`` estimates a DSGE-VAR and passes ``bayesian_irf``, but the number of shocks differs from the number of observed variables. Dynare refuses: `When estimating a DSGE-Var and the bayesian_irf option is passed to the estimation statement, the number of shocks must equal the number of observed variables.`\n\n**Fix**\n\nAdjust the ``varexo`` or ``varobs`` lists so the two counts are equal.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E221", ExplainEntry {
+        title: "DSGE-VAR fewer shocks than observed variables",
+        body: "``estimation`` estimates a DSGE-VAR without ``bayesian_irf``, and the number of shocks is smaller than the number of observed variables. Dynare refuses: `When estimating a DSGE-Var, the number of shocks must be greater than or equal to the number of observed variables.`\n\n**Fix**\n\nAdd shocks (``varexo``) until the shock count is at least the ``varobs`` count.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E222", ExplainEntry {
+        title: "dsge_prior_weight missing from estimated_params",
+        body: "``estimation`` estimates the DSGE-VAR prior weight (bare ``dsge_var``) but ``dsge_prior_weight`` is not listed in ``estimated_params``. Dynare refuses: `When estimating a DSGE-VAR model and estimating the weight of the prior, dsge_prior_weight must be referenced in the estimated_params block.`\n\n**Fix**\n\nAdd ``dsge_prior_weight`` to ``estimated_params``, or calibrate the weight with ``dsge_var=…``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E223", ExplainEntry {
+        title: "dsge_prior_weight estimated with calibrated dsge_var",
+        body: "``dsge_prior_weight`` is in ``estimated_params`` while ``estimation`` calibrates the weight with ``dsge_var=…``. Dynare refuses: `If dsge_prior_weight is in the estimated_params block, the prior weight cannot be calibrated via the dsge_var option in the estimation statement.`\n\n**Fix**\n\nKeep one form: estimate the weight with a bare ``dsge_var``, or remove ``dsge_prior_weight`` from ``estimated_params``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E224", ExplainEntry {
+        title: "dsge_prior_weight estimated without dsge_var",
+        body: "``dsge_prior_weight`` is in ``estimated_params`` but no ``estimation`` statement passes ``dsge_var``. Dynare refuses: `If dsge_prior_weight is in the estimated_params block, the dsge_var option must be passed to the estimation statement.`\n\n**Fix**\n\nAdd ``dsge_var`` to the estimation statement, or remove ``dsge_prior_weight`` from ``estimated_params``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E225", ExplainEntry {
+        title: "dsge_varlag without dsge_var",
+        body: "``estimation`` passes ``dsge_varlag`` without ``dsge_var``. Dynare refuses: `The estimation statement requires a dsge_var option to be passed if the dsge_varlag option is passed.`\n\n**Fix**\n\nAdd ``dsge_var`` (or ``dsge_var=…``), or drop ``dsge_varlag``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E226", ExplainEntry {
+        title: "More than one dsge_var across estimation statements",
+        body: "One ``estimation`` statement estimates the DSGE-VAR prior weight (bare ``dsge_var``) and another calibrates it (``dsge_var=…``). Dynare refuses: `An estimation statement cannot take more than one dsge_var option.`\n\n**Fix**\n\nUse the same form of ``dsge_var`` everywhere: estimate the weight, or calibrate it once.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E227", ExplainEntry {
+        title: "estimation without a data file",
+        body: "``estimation`` has neither a ``datafile`` option nor a ``data`` statement. Dynare refuses: `The estimation statement requires a data file to be supplied via the datafile option.`\n\n**Fix**\n\nAdd ``datafile='…'``, or supply the observations with a ``data`` statement.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E228", ExplainEntry {
+        title: "mode_file with estimated_params_init(use_calibration)",
+        body: "``estimation`` passes ``mode_file`` while ``estimated_params_init`` was opened with ``use_calibration``. Dynare refuses: `The mode_file option of the estimation statement is incompatible with the use_calibration option of the estimated_params_init block.`\n\n**Fix**\n\nDrop the ``mode_file`` option, or drop ``use_calibration`` from the ``estimated_params_init`` block.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E229", ExplainEntry {
+        title: "mh_tune_jscale with mh_jscale",
+        body: "``estimation`` passes both ``mh_tune_jscale`` and ``mh_jscale``. Dynare refuses: `The mh_tune_jscale and mh_jscale options of the estimation statement are incompatible.`\n\n**Fix**\n\nKeep one of the two: tune the scale, or set it.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E230", ExplainEntry {
+        title: "mh_tune_guess without mh_tune_jscale",
+        body: "``estimation`` passes ``mh_tune_guess`` without ``mh_tune_jscale``. Dynare refuses: `The option mh_tune_guess in estimation statement cannot be used without option mh_tune_jscale.`\n\n**Fix**\n\nAdd ``mh_tune_jscale``, or drop ``mh_tune_guess``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E231", ExplainEntry {
+        title: "filter_algorithm=gmf with proposal_approximation=montecarlo",
+        body: "``estimation`` passes ``filter_algorithm=gmf`` together with ``proposal_approximation=montecarlo``. Dynare refuses: `The filter_algorithm=gmf option is incompatible with proposal_approximation=montecarlo in the estimation statement.`\n\n**Fix**\n\nChange the filter algorithm, or the proposal approximation.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E232", ExplainEntry {
+        title: "filter_algorithm=gmf with distribution_approximation=montecarlo",
+        body: "``estimation`` passes ``filter_algorithm=gmf`` together with ``distribution_approximation=montecarlo``. Dynare refuses: `The filter_algorithm=gmf option is incompatible with distribution_approximation=montecarlo in the estimation statement.`\n\n**Fix**\n\nChange the filter algorithm, or the distribution approximation.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E233", ExplainEntry {
+        title: "Estimated parameter in planner_discount",
+        body: "A parameter listed in ``estimated_params`` appears in the ``planner_discount`` expression. Dynare refuses: `It is not possible to estimate a parameter ({name}) that appears in the discount factor of the planner (i.e. in the 'planner_discount' option).`\n\n**Fix**\n\nCalibrate that parameter, or use a discount factor that does not contain it.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E234", ExplainEntry {
+        title: "prior_function or posterior_function without function",
+        body: "``prior_function`` or ``posterior_function`` was given an option list without a ``function`` option. Dynare refuses: `both the 'prior_function' and 'posterior_function' commands require the 'function' option`\n\n**Fix**\n\nAdd ``function=…`` to the command, or write the command without an option list to use the default function.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E235", ExplainEntry {
+        title: "discretionary_policy order greater than 1",
+        body: "``discretionary_policy`` was given an order greater than 1. Dynare refuses: `discretionary_policy: order > 1 is not yet implemented`\n\n**Fix**\n\nUse ``order=1``, or drop the option.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E236", ExplainEntry {
+        title: "identification order not in 1..3",
+        body: "``identification`` was given an order outside 1 to 3. Dynare refuses: `the order option of identification command must be between 1 and 3`\n\n**Fix**\n\nSet ``order`` to 1, 2, or 3.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E237", ExplainEntry {
+        title: "identification max_dim_cova_group is 0",
+        body: "``identification`` was given ``max_dim_cova_group=0``. Dynare refuses: `The max_dim_cova_group option to identification only accepts integers > 0.`\n\n**Fix**\n\nUse a positive integer.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E238", ExplainEntry {
+        title: "Multiple HP or bandpass filters",
+        body: "``stoch_simul`` used more than one of ``hp_filter``, ``one_sided_hp_filter``, and ``bandpass_filter``. Dynare refuses: `stoch_simul: can only use one of HP, one-sided HP, and bandpass filters`\n\n**Fix**\n\nKeep a single filter option.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E239", ExplainEntry {
+        title: "Undeclared name in a command symbol list",
+        body: "A trailing symbol list on ``stoch_simul``, ``estimation``, ``calib_smoother``, ``ramsey_policy``, ``discretionary_policy``, ``osr``, or the ``osr_params`` statement names a symbol that is not declared. Dynare refuses: `{cmd}: Variable {name} was not declared.`\n\n**Fix**\n\nDeclare the symbol, or remove it from the list.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E240", ExplainEntry {
+        title: "Wrong type in a command symbol list",
+        body: "A trailing symbol list names a declared symbol of the wrong type: those lists hold endogenous variables, and ``osr_params`` holds parameters. Dynare refuses: `{cmd}: Variable {name} is not one of {endogenous}` (``{parameter}`` for ``osr_params``).\n\n**Fix**\n\nUse a symbol of the type the command accepts, or remove it from the list.",
+        kind: ExplainKind::Shared,
+    }),
+    ("W201", ExplainEntry {
+        title: "restriction_fname is deprecated",
+        body: "The ``restriction_fname`` option is used. Dynare accepts and warns: `restriction_fname is now deprecated, and may be removed in a future version of Dynare. Use svar_identification instead.`\n\n**Fix**\n\nUse ``svar_identification`` instead of ``restriction_fname``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("W202", ExplainEntry {
+        title: "Symbol listed twice in a stoch_simul list",
+        body: "``stoch_simul``'s symbol list names the same variable more than once; Dynare keeps the first occurrence. Dynare accepts and warns: `In stoch_simul: {name} found more than once in symbol list. Removing all but first occurrence.`\n\n**Fix**\n\nRemove the duplicate entry.",
+        kind: ExplainKind::Shared,
+    }),
     ("E186", ExplainEntry {
         title: "Unused endogenous after substitution",
         body: "Dynare refuses: `Error: <name> not used in the model block`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
@@ -556,11 +677,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "Dynare warns: `WARNING: symbol_list variable … possible auxiliary variable name`. Catching step: check. Owner: skip-rewrite W. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S001", ExplainEntry {
-        title: "dsge_prior_weight already declared with dsge_var",
-        body: "Dynare refuses: `dsge_prior_weight should not be declared as a model variable / parameter when the dsge_var option is passed`. Catching step: transform (written clash). Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
     ("S002", ExplainEntry {
         title: "shocks(learnt_in) without PFEE setup and solver",
         body: "Dynare refuses: `'shocks(learnt_in=…)' block can only be used in conjunction with…`. Catching step: transform (written clash). Owner: skip 0.11 E. This code is never emitted.",
@@ -579,16 +695,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("S005", ExplainEntry {
         title: "shock_paths(learnt_in) without PFEE setup and solver",
         body: "Dynare refuses: `'shock_paths(learnt_in=…)'…`. Catching step: transform (written clash). Owner: skip 0.11 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S006", ExplainEntry {
-        title: "DSGE-VAR bayesian_irf shock count",
-        body: "Dynare refuses: `When estimating a DSGE-Var and the bayesian_irf option… the number of shocks must equal…`. Catching step: transform (written clash). Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S007", ExplainEntry {
-        title: "DSGE-VAR fewer shocks than observed variables",
-        body: "Dynare refuses: `number of shocks must be greater than or equal to the number of observed variables`. Catching step: transform (written clash). Owner: skip 0.6 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S008", ExplainEntry {
@@ -636,59 +742,9 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "Dynare refuses: `various exclude_eqs / model_remove…`. Catching step: transform (written clash). Owner: skip 0.6 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S017", ExplainEntry {
-        title: "dsge_prior_weight missing from estimated_params",
-        body: "Dynare refuses: `dsge_prior_weight must be referenced in the estimated_params block`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S018", ExplainEntry {
-        title: "dsge_prior_weight estimated with calibrated dsge_var",
-        body: "Dynare refuses: `the prior weight cannot be calibrated via the dsge_var option`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S019", ExplainEntry {
-        title: "dsge_prior_weight estimated without dsge_var",
-        body: "Dynare refuses: `the dsge_var option must be passed to the estimation statement`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
     ("S020", ExplainEntry {
         title: "Heterogeneity with an unsupported command or option",
         body: "Dynare refuses: `'<cmd>' … is not supported for heterogeneous models`. Catching step: check. Owner: skip 0.9 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S021", ExplainEntry {
-        title: "discretionary_policy order greater than 1",
-        body: "Dynare refuses: `order > 1 is not yet implemented`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S022", ExplainEntry {
-        title: "Undeclared or wrong-type name in a command symbol list",
-        body: "Dynare refuses: `<cmd>: Variable X was not declared / is not one of {…}`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S023", ExplainEntry {
-        title: "Multiple HP or bandpass filters",
-        body: "Dynare refuses: `can only use one of HP, one-sided HP, and bandpass filters`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S024", ExplainEntry {
-        title: "estimation dsge_varlag without dsge_var",
-        body: "Dynare refuses: `DSGE-VAR option messages`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S025", ExplainEntry {
-        title: "estimation without a data file",
-        body: "Dynare refuses: `requires a data file to be supplied via the datafile option`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S026", ExplainEntry {
-        title: "estimation option clash",
-        body: "Dynare refuses: `estimation option messages`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S027", ExplainEntry {
-        title: "prior_function or posterior_function without function",
-        body: "Dynare refuses: `require the 'function' option`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S028", ExplainEntry {
@@ -761,24 +817,9 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "Dynare refuses: `various ms_* / data / prior ERROR`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S042", ExplainEntry {
-        title: "identification order not in 1..3",
-        body: "Dynare refuses: `the order option of identification command must be between 1 and 3`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S043", ExplainEntry {
-        title: "restriction_fname is deprecated",
-        body: "Dynare warns: `WARNING: restriction_fname is now deprecated`. Catching step: parse. Owner: skip 0.6 W. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
     ("S044", ExplainEntry {
         title: "@#includepath is not a directory",
         body: "Dynare refuses: `ERROR in macro-processor: … does not evaluate to a valid directory`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S045", ExplainEntry {
-        title: "Symbol listed twice on a command",
-        body: "Dynare warns: `WARNING: In <cmd>: X found more than once in symbol list`. Catching step: parse. Owner: skip 0.6 W. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S046", ExplainEntry {
@@ -789,11 +830,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("S047", ExplainEntry {
         title: "load_params_and_steady_state cannot open file",
         body: "Dynare refuses: `ERROR: Can't open <file> / Unsupported variable type for …`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S048", ExplainEntry {
-        title: "identification max_dim_cova_group is 0",
-        body: "Dynare refuses: `The max_dim_cova_group option to identification only accepts integers > 0`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S049", ExplainEntry {

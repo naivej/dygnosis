@@ -22,7 +22,47 @@ pub fn check_w130(model: &Model) -> Vec<Diagnostic> {
     diagnostics.extend(check_w200(model));
     diagnostics.extend(check_linear_ops(model));
     diagnostics.extend(check_w150(model));
+    diagnostics.extend(check_e238(model));
+    diagnostics.extend(check_w201(model));
     diagnostics
+}
+
+fn check_e238(model: &Model) -> Vec<Diagnostic> {
+    let n = [
+        model.stoch_simul_hp_filter,
+        model.stoch_simul_one_sided_hp_filter,
+        model.stoch_simul_bandpass_filter,
+    ]
+    .into_iter()
+    .flatten()
+    .count();
+    if n <= 1 {
+        return Vec::new();
+    }
+    let span = model
+        .stoch_simul_hp_filter
+        .or(model.stoch_simul_one_sided_hp_filter)
+        .or(model.stoch_simul_bandpass_filter)
+        .or(model.stoch_simul_span)
+        .unwrap_or(Span { start: 0, end: 1 });
+    vec![Diagnostic::new(
+        span,
+        Severity::Error,
+        "E238",
+        "stoch_simul: can only use one of HP, one-sided HP, and bandpass filters",
+    )]
+}
+
+fn check_w201(model: &Model) -> Vec<Diagnostic> {
+    let Some(span) = model.restriction_fname_span else {
+        return Vec::new();
+    };
+    vec![Diagnostic::new(
+        span,
+        Severity::Warning,
+        "W201",
+        "restriction_fname is now deprecated, and may be removed in a future version of Dynare. Use svar_identification instead.",
+    )]
 }
 
 fn check_ss_order(model: &Model) -> Vec<Diagnostic> {

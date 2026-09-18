@@ -4915,6 +4915,256 @@
       "source": "d_check.rs::e218_histval_does_not_fire",
       "cluster": "d_check/e218_histval_quiet.mod",
       "notes": "histval(all_values_required) is skip 0.6"
+    },
+    {
+      "id": "e219_dsge_prior_weight_declared",
+      "codes": ["E219"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e219_dsge_prior_weight_declared.mod",
+      "source": "d_walk.rs::e219_declared_dsge_prior_weight_with_dsge_var",
+      "cluster": "d_walk/e219_dsge_prior_weight_declared.mod",
+      "notes": "dsge_prior_weight declared while estimation passes dsge_var"
+    },
+    {
+      "id": "e220_bayesian_irf_counts",
+      "codes": ["E220"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e220_bayesian_irf_counts.mod",
+      "source": "d_walk.rs::e220_bayesian_irf_unequal_counts",
+      "cluster": "d_walk/e220_bayesian_irf_counts.mod",
+      "notes": "DSGE-VAR bayesian_irf with shocks not equal to observed"
+    },
+    {
+      "id": "e221_shocks_lt_varobs",
+      "codes": ["E221"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e221_shocks_lt_varobs.mod",
+      "source": "d_walk.rs::e221_shocks_lt_varobs",
+      "cluster": "d_walk/e221_shocks_lt_varobs.mod",
+      "notes": "DSGE-VAR with fewer shocks than observed variables"
+    },
+    {
+      "id": "e222_dsge_var_missing_weight",
+      "codes": ["E222"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e222_dsge_var_missing_weight.mod",
+      "source": "d_walk.rs::e222_through_e234_estimation_check",
+      "cluster": "d_walk/e222_dsge_var_missing_weight.mod",
+      "notes": "estimated dsge_var without dsge_prior_weight in estimated_params"
+    },
+    {
+      "id": "e223_weight_and_calibrated",
+      "codes": ["E223"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e223_weight_and_calibrated.mod",
+      "source": "d_walk.rs::e222_through_e234_estimation_check",
+      "cluster": "d_walk/e223_weight_and_calibrated.mod",
+      "notes": "dsge_prior_weight estimated while dsge_var is calibrated"
+    },
+    {
+      "id": "e224_weight_without_dsge_var",
+      "codes": ["E224"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e224_weight_without_dsge_var.mod",
+      "source": "d_walk.rs::e222_through_e234_estimation_check",
+      "cluster": "d_walk/e224_weight_without_dsge_var.mod",
+      "notes": "dsge_prior_weight estimated with no dsge_var option"
+    },
+    {
+      "id": "e225_dsge_varlag_without_dsge_var",
+      "codes": ["E225"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e225_dsge_varlag_without_dsge_var.mod",
+      "source": "d_walk.rs::e222_through_e234_estimation_check",
+      "cluster": "d_walk/e225_dsge_varlag_without_dsge_var.mod",
+      "notes": "dsge_varlag without dsge_var"
+    },
+    {
+      "id": "e226_two_estimation_dsge_var",
+      "codes": ["E226"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e226_two_estimation_dsge_var.mod",
+      "source": "d_walk.rs::e222_through_e234_estimation_check",
+      "cluster": "d_walk/e226_two_estimation_dsge_var.mod",
+      "notes": "estimated and calibrated dsge_var across two estimation statements"
+    },
+    {
+      "id": "e227_estimation_no_data",
+      "codes": ["E227"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e227_estimation_no_data.mod",
+      "source": "d_walk.rs::e227_datafile_or_data_opener_quiet_database_does_not_silence",
+      "cluster": "d_walk/e227_estimation_no_data.mod",
+      "notes": "estimation without datafile option or data statement"
+    },
+    {
+      "id": "e228_mode_file_use_calibration",
+      "codes": ["E228"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e228_mode_file_use_calibration.mod",
+      "source": "d_walk.rs::e222_through_e234_estimation_check",
+      "cluster": "d_walk/e228_mode_file_use_calibration.mod",
+      "notes": "mode_file with estimated_params_init(use_calibration)"
+    },
+    {
+      "id": "e229_mh_tune_jscale_mh_jscale",
+      "codes": ["E229"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e229_mh_tune_jscale_mh_jscale.mod",
+      "source": "d_walk.rs::e222_through_e234_estimation_check",
+      "cluster": "d_walk/e229_mh_tune_jscale_mh_jscale.mod",
+      "notes": "mh_tune_jscale with mh_jscale"
+    },
+    {
+      "id": "e230_mh_tune_guess_alone",
+      "codes": ["E230"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e230_mh_tune_guess_alone.mod",
+      "source": "d_walk.rs::e222_through_e234_estimation_check",
+      "cluster": "d_walk/e230_mh_tune_guess_alone.mod",
+      "notes": "mh_tune_guess without mh_tune_jscale"
+    },
+    {
+      "id": "e231_gmf_proposal_montecarlo",
+      "codes": ["E231"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e231_gmf_proposal_montecarlo.mod",
+      "source": "d_walk.rs::e222_through_e234_estimation_check",
+      "cluster": "d_walk/e231_gmf_proposal_montecarlo.mod",
+      "notes": "filter_algorithm=gmf with proposal_approximation=montecarlo"
+    },
+    {
+      "id": "e232_gmf_distribution_montecarlo",
+      "codes": ["E232"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e232_gmf_distribution_montecarlo.mod",
+      "source": "d_walk.rs::e222_through_e234_estimation_check",
+      "cluster": "d_walk/e232_gmf_distribution_montecarlo.mod",
+      "notes": "filter_algorithm=gmf with distribution_approximation=montecarlo"
+    },
+    {
+      "id": "e233_estimated_planner_discount",
+      "codes": ["E233"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e233_estimated_planner_discount.mod",
+      "source": "d_walk.rs::e222_through_e234_estimation_check",
+      "cluster": "d_walk/e233_estimated_planner_discount.mod",
+      "notes": "estimated parameter used in planner_discount"
+    },
+    {
+      "id": "e234_prior_function_no_function",
+      "codes": ["E234"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e234_prior_function_no_function.mod",
+      "source": "d_walk.rs::e222_through_e234_estimation_check",
+      "cluster": "d_walk/e234_prior_function_no_function.mod",
+      "notes": "prior_function option list without function"
+    },
+    {
+      "id": "e235_disc_order",
+      "codes": ["E235"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e235_disc_order.mod",
+      "source": "d_walk.rs::e235_through_w201_policy_ident_filters",
+      "cluster": "d_walk/e235_disc_order.mod",
+      "notes": "discretionary_policy with order greater than 1"
+    },
+    {
+      "id": "e236_identification_order",
+      "codes": ["E236"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e236_identification_order.mod",
+      "source": "d_walk.rs::e235_through_w201_policy_ident_filters",
+      "cluster": "d_walk/e236_identification_order.mod",
+      "notes": "identification order outside 1..3"
+    },
+    {
+      "id": "e237_max_dim_cova_group",
+      "codes": ["E237"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e237_max_dim_cova_group.mod",
+      "source": "d_walk.rs::e235_through_w201_policy_ident_filters",
+      "cluster": "d_walk/e237_max_dim_cova_group.mod",
+      "notes": "identification max_dim_cova_group set to 0"
+    },
+    {
+      "id": "e238_stoch_simul_filters",
+      "codes": ["E238"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e238_stoch_simul_filters.mod",
+      "source": "d_walk.rs::e235_through_w201_policy_ident_filters",
+      "cluster": "d_walk/e238_stoch_simul_filters.mod",
+      "notes": "stoch_simul with hp_filter and bandpass_filter"
+    },
+    {
+      "id": "e239_stoch_simul_z",
+      "codes": ["E239"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e239_stoch_simul_z.mod",
+      "source": "d_walk.rs::e239_e240_w202_symbol_lists",
+      "cluster": "d_walk/e239_stoch_simul_z.mod",
+      "notes": "stoch_simul symbol list names an undeclared variable"
+    },
+    {
+      "id": "e240_stoch_simul_rho",
+      "codes": ["E240"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/e240_stoch_simul_rho.mod",
+      "source": "d_walk.rs::e239_e240_w202_symbol_lists",
+      "cluster": "d_walk/e240_stoch_simul_rho.mod",
+      "notes": "stoch_simul symbol list names a parameter"
+    },
+    {
+      "id": "w201_restriction_fname",
+      "codes": ["W201"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/w201_restriction_fname.mod",
+      "source": "d_walk.rs::e235_through_w201_policy_ident_filters",
+      "cluster": "d_walk/w201_restriction_fname.mod",
+      "notes": "restriction_fname option is deprecated"
+    },
+    {
+      "id": "w202_stoch_simul_dup",
+      "codes": ["W202"],
+      "kind": "fire",
+      "package": "d_walk",
+      "fixture": "tests/fixtures/d_walk/w202_stoch_simul_dup.mod",
+      "source": "d_walk.rs::e239_e240_w202_symbol_lists",
+      "cluster": "d_walk/w202_stoch_simul_dup.mod",
+      "notes": "stoch_simul symbol list repeats a variable"
+    },
+    {
+      "id": "e028_sensitivity_varexo_det",
+      "codes": ["E028"],
+      "kind": "fire",
+      "package": "clash",
+      "fixture": "tests/fixtures/clash/e028_sensitivity_varexo_det.mod",
+      "source": "d_clash.rs::e028_sensitivity_varexo_det",
+      "cluster": "clash/e028_sensitivity_varexo_det.mod",
+      "notes": "sensitivity(identification=1) + varexo_det"
     }
   ]
 }

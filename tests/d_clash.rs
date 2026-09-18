@@ -138,6 +138,39 @@ fn e028_identification_without_varexo_det_is_quiet() {
 }
 
 #[test]
+fn e028_sensitivity_varexo_det() {
+    let diags = analyze(&parse(&fixture("clash/e028_sensitivity_varexo_det.mod")));
+    let d = find(&diags, "E028");
+    assert!(d
+        .message
+        .contains("identification is incompatible with deterministic exogenous variables"));
+}
+
+#[test]
+fn e028_sensitivity_without_identification_eq_1_is_quiet() {
+    let diags = analyze(&parse(
+        "var y; varexo_det tau; parameters rho; rho = 0.5; model; y = rho * y(-1) + tau; end; sensitivity;",
+    ));
+    assert!(
+        diags.iter().all(|d| d.code != "E028"),
+        "got {:?}",
+        codes(&diags)
+    );
+}
+
+#[test]
+fn e028_sensitivity_identification_eq_1_without_varexo_det_is_quiet() {
+    let diags = analyze(&parse(
+        "var y; varexo e; parameters rho; rho = 0.5; model; y = rho * y(-1) + e; end; sensitivity(identification=1);",
+    ));
+    assert!(
+        diags.iter().all(|d| d.code != "E028"),
+        "got {:?}",
+        codes(&diags)
+    );
+}
+
+#[test]
 fn e178_surprise_without_occbin() {
     let diags = analyze(&parse(&fixture("occbin/e178_surprise.mod")));
     let d = find(&diags, "E178");

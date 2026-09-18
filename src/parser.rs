@@ -8,10 +8,10 @@ use crate::intern::{Interner, Name};
 use crate::lexer::{tokenize, Token, TokenKind};
 use crate::macro_expand::expand_macros;
 use crate::model::{
-    Assignment, Complementarity, ComplementarityTriple, Decl, DeprecatedOption, Equation,
-    EstimatedParam, EstimatedParamKind, IncludeDirective, IncludePathDirective, MacroDirective,
-    MacroInterp, Model, ObservedVar, OccbinConstraint, OccbinExpr, ParseIssue, ParseIssueKind,
-    PolicyCommand, ShockKind, ShockStmt, ShocksSemiFamily,
+    Assignment, CommandSymbol, Complementarity, ComplementarityTriple, Decl, DeprecatedOption,
+    Equation, EstimatedParam, EstimatedParamKind, EstimationDsgeVarStmt, IncludeDirective,
+    IncludePathDirective, MacroDirective, MacroInterp, Model, ObservedVar, OccbinConstraint,
+    OccbinExpr, ParseIssue, ParseIssueKind, PolicyCommand, ShockKind, ShockStmt, ShocksSemiFamily,
 };
 use crate::span::Span;
 
@@ -37,6 +37,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, Vec<Range
         intern: Interner::default(),
         model: Model::default(),
         eq_token_ranges: Vec::new(),
+        symbol_list_id: 1,
     };
     p.parse_file();
     p.model
@@ -56,6 +57,86 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, Vec<Range
     model.source = src.to_string();
     model.intern = intern;
     (model, eq_token_ranges)
+}
+
+struct TopOption {
+    ident: String,
+    span: Span,
+    eq: bool,
+    value_lex: String,
+    value_span: Span,
+}
+
+fn parse_int_lexeme(lex: &str) -> Option<i32> {
+    lex.parse::<i32>().ok()
+}
+
+fn is_trailing_symbol_command(cmd: &str) -> bool {
+    cmd.eq_ignore_ascii_case("stoch_simul")
+        || cmd.eq_ignore_ascii_case("estimation")
+        || cmd.eq_ignore_ascii_case("calib_smoother")
+}
+
+fn top_options(tokens: &[Token], src: &str, from: usize, to: usize) -> Vec<TopOption> {
+    let mut out = Vec::new();
+    let mut i = from;
+    let mut depth: i32 = 0;
+    let end = to.min(tokens.len());
+    while i < end {
+        match tokens[i].kind {
+            TokenKind::LParen => {
+                depth += 1;
+                i += 1;
+            }
+            TokenKind::RParen => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            TokenKind::Ident if depth == 1 => {
+                let ident = tokens[i].text(src).to_string();
+                let span = tokens[i].span;
+                i += 1;
+                let eq = i < end && tokens[i].kind == TokenKind::Eq;
+                let mut value_lex = String::new();
+                let mut value_span = span;
+                if eq {
+                    i += 1;
+                    if i < end {
+                        match tokens[i].kind {
+                            TokenKind::Comma | TokenKind::RParen => {}
+                            TokenKind::LParen => {
+                                value_span = tokens[i].span;
+                                let mut d = 1;
+                                i += 1;
+                                while i < end && d > 0 {
+                                    match tokens[i].kind {
+                                        TokenKind::LParen => d += 1,
+                                        TokenKind::RParen => d -= 1,
+                                        _ => {}
+                                    }
+                                    i += 1;
+                                }
+                            }
+                            _ => {
+                                value_lex = tokens[i].text(src).to_string();
+                                value_span = tokens[i].span;
+                                i += 1;
+                            }
+                        }
+                    }
+                }
+                out.push(TopOption {
+                    ident,
+                    span,
+                    eq,
+                    value_lex,
+                    value_span,
+                });
+            }
+            _ => i += 1,
+        }
+    }
+    out
 }
 
 const UNARY_BP: u8 = 7;
@@ -418,6 +499,9 @@ struct Parser<'a> {
     intern: Interner,
     model: Model,
     eq_token_ranges: Vec<Range<usize>>,
+    /// Bumped once per statement that lists names, so `CommandSymbol::list_id`
+    /// groups one statement's list.
+    symbol_list_id: u32,
 }
 
 impl Parser<'_> {
@@ -923,17 +1007,24 @@ impl Parser<'_> {
             self.model.discretionary_policy_span = Some(tok.span);
         }
         let saw_instruments = if self.at(TokenKind::LParen) {
-            self.parse_policy_options()
+            self.parse_policy_options(command)
         } else {
             false
         };
         if command == PolicyCommand::DiscretionaryPolicy {
             self.model.discretionary_has_instruments_option |= saw_instruments;
         }
+        if matches!(
+            command,
+            PolicyCommand::RamseyPolicy | PolicyCommand::DiscretionaryPolicy | PolicyCommand::Osr
+        ) {
+            self.collect_trailing_symbols(command.as_str());
+        }
         self.eat(TokenKind::Semi);
     }
 
-    fn parse_policy_options(&mut self) -> bool {
+    fn parse_policy_options(&mut self, command: PolicyCommand) -> bool {
+        let from = self.i;
         self.bump();
         let mut saw_instruments = false;
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) && !self.at(TokenKind::Semi) {
@@ -948,8 +1039,11 @@ impl Parser<'_> {
                 self.bump();
                 self.bump();
                 let expr = self.parse_expr();
-                if self.model.planner_discount.is_none() {
-                    if let Some(id) = expr {
+                if let Some(id) = expr {
+                    if self.model.planner_discount_expr.is_none() {
+                        self.model.planner_discount_expr = Some(id);
+                    }
+                    if self.model.planner_discount.is_none() {
                         let known = self.fold_known_params();
                         if let Some(v) = self.fold_expr(id, &known).filter(|v| v.is_finite()) {
                             self.model.planner_discount = Some(v);
@@ -957,9 +1051,9 @@ impl Parser<'_> {
                     }
                 }
             } else if self.at(TokenKind::LParen) {
-                let from = self.i;
+                let nested = self.i;
                 self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
-                self.record_deprecated_options_in_range(from, self.i);
+                self.record_deprecated_options_in_range(nested, self.i);
             } else {
                 if self.at(TokenKind::Ident) {
                     let tok = self.tokens[self.i].clone();
@@ -970,6 +1064,7 @@ impl Parser<'_> {
             }
         }
         self.eat(TokenKind::RParen);
+        self.record_policy_option_flags(command, from, self.i);
         saw_instruments
     }
 
@@ -1032,13 +1127,23 @@ impl Parser<'_> {
     }
 
     fn parse_osr_params(&mut self) {
+        self.symbol_list_id += 1;
+        let list_id = self.symbol_list_id;
         self.bump();
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::Ident) {
-                let tok = self.bump();
-                let name = self.lexeme(&tok).to_string();
-                let id = self.intern.intern(&name);
+                let tok = self.tokens[self.i].clone();
+                let lex = self.lexeme(&tok).to_string();
+                let span = tok.span;
+                self.bump();
+                let id = self.intern.intern(&lex);
                 self.model.osr_params.push(id);
+                self.model.command_symbols.push(CommandSymbol {
+                    command: "osr".to_string(),
+                    name: id,
+                    span,
+                    list_id,
+                });
             } else {
                 self.bump();
             }
@@ -2559,6 +2664,7 @@ impl Parser<'_> {
     }
 
     fn skip_until_semi(&mut self) {
+        self.symbol_list_id += 1;
         let mut saw_ident = false;
         let mut opener: Option<String> = None;
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
@@ -2568,23 +2674,219 @@ impl Parser<'_> {
                 let lex = self.lexeme(&tok).to_string();
                 self.record_top_command(&lex, tok.span);
                 opener = Some(lex);
+                self.bump();
+                continue;
             }
             if self.at(TokenKind::LParen) {
                 let from = self.i;
                 self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
                 self.record_deprecated_options_in_range(from, self.i);
-                if opener
-                    .as_deref()
-                    .is_some_and(|s| s.eq_ignore_ascii_case("extended_path"))
-                    && self.option_ident_in_range(from, self.i, "periods")
-                {
-                    self.model.extended_path_has_periods = true;
+                if let Some(cmd) = opener.as_deref() {
+                    self.record_skip_command_options(cmd, from, self.i);
+                    if cmd.eq_ignore_ascii_case("extended_path")
+                        && self.option_ident_in_range(from, self.i, "periods")
+                    {
+                        self.model.extended_path_has_periods = true;
+                    }
                 }
+                continue;
+            }
+            if self.at(TokenKind::Ident)
+                && opener
+                    .as_deref()
+                    .is_some_and(is_trailing_symbol_command)
+            {
+                let cmd = opener.as_deref().unwrap().to_string();
+                self.push_command_symbol(&cmd);
                 continue;
             }
             self.bump();
         }
         self.eat(TokenKind::Semi);
+    }
+
+    fn record_skip_command_options(&mut self, opener: &str, from: usize, to: usize) {
+        if opener.eq_ignore_ascii_case("prior_function")
+            || opener.eq_ignore_ascii_case("posterior_function")
+        {
+            self.model.prior_function_has_parens = true;
+        }
+        let opts = top_options(&self.tokens, self.src, from, to);
+        let mut stmt_estimated = None;
+        let mut stmt_calibrated = None;
+        for opt in &opts {
+            if opt.ident.eq_ignore_ascii_case("restriction_fname")
+                && self.model.restriction_fname_span.is_none()
+            {
+                self.model.restriction_fname_span = Some(opt.span);
+            }
+            if opener.eq_ignore_ascii_case("estimation") {
+                if opt.ident.eq_ignore_ascii_case("dsge_var") {
+                    if opt.eq {
+                        if stmt_calibrated.is_none() {
+                            stmt_calibrated = Some(opt.span);
+                        }
+                    } else if stmt_estimated.is_none() {
+                        stmt_estimated = Some(opt.span);
+                    }
+                } else if opt.ident.eq_ignore_ascii_case("dsge_varlag")
+                    && self.model.dsge_varlag_span.is_none()
+                {
+                    self.model.dsge_varlag_span = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("bayesian_irf")
+                    && self.model.bayesian_irf_span.is_none()
+                {
+                    self.model.bayesian_irf_span = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("datafile")
+                    && opt.eq
+                    && self.model.estimation_datafile_span.is_none()
+                {
+                    self.model.estimation_datafile_span = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("dataseries")
+                    && opt.eq
+                    && self.model.estimation_dataseries_span.is_none()
+                {
+                    self.model.estimation_dataseries_span = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("mode_file")
+                    && opt.eq
+                    && self.model.estimation_mode_file_span.is_none()
+                {
+                    self.model.estimation_mode_file_span = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("mh_tune_jscale")
+                    && self.model.mh_tune_jscale_span.is_none()
+                {
+                    self.model.mh_tune_jscale_span = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("mh_jscale")
+                    && opt.eq
+                    && self.model.mh_jscale_span.is_none()
+                {
+                    self.model.mh_jscale_span = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("mh_tune_guess")
+                    && opt.eq
+                    && self.model.mh_tune_guess_span.is_none()
+                {
+                    self.model.mh_tune_guess_span = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("filter_algorithm")
+                    && opt.value_lex.eq_ignore_ascii_case("gmf")
+                    && self.model.filter_algorithm_gmf_span.is_none()
+                {
+                    self.model.filter_algorithm_gmf_span = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("proposal_approximation")
+                    && opt.value_lex.eq_ignore_ascii_case("montecarlo")
+                    && self.model.proposal_approximation_montecarlo_span.is_none()
+                {
+                    self.model.proposal_approximation_montecarlo_span = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("distribution_approximation")
+                    && opt.value_lex.eq_ignore_ascii_case("montecarlo")
+                    && self.model.distribution_approximation_montecarlo_span.is_none()
+                {
+                    self.model.distribution_approximation_montecarlo_span = Some(opt.span);
+                }
+            } else if opener.eq_ignore_ascii_case("sensitivity") {
+                if opt.ident.eq_ignore_ascii_case("identification")
+                    && opt.eq
+                    && opt.value_lex == "1"
+                    && self.model.sensitivity_identification_eq_1.is_none()
+                {
+                    self.model.sensitivity_identification_eq_1 = Some(opt.span);
+                }
+            } else if opener.eq_ignore_ascii_case("identification") {
+                if opt.ident.eq_ignore_ascii_case("order") {
+                    if let Some(n) = parse_int_lexeme(&opt.value_lex) {
+                        if self.model.identification_order.is_none() {
+                            self.model.identification_order = Some((n, opt.value_span));
+                        }
+                    }
+                } else if opt.ident.eq_ignore_ascii_case("max_dim_cova_group") {
+                    if let Some(n) = parse_int_lexeme(&opt.value_lex) {
+                        if self.model.max_dim_cova_group.is_none() {
+                            self.model.max_dim_cova_group = Some((n, opt.value_span));
+                        }
+                    }
+                }
+            } else if opener.eq_ignore_ascii_case("stoch_simul") {
+                if opt.ident.eq_ignore_ascii_case("hp_filter")
+                    && self.model.stoch_simul_hp_filter.is_none()
+                {
+                    self.model.stoch_simul_hp_filter = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("one_sided_hp_filter")
+                    && self.model.stoch_simul_one_sided_hp_filter.is_none()
+                {
+                    self.model.stoch_simul_one_sided_hp_filter = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("bandpass_filter")
+                    && self.model.stoch_simul_bandpass_filter.is_none()
+                {
+                    self.model.stoch_simul_bandpass_filter = Some(opt.span);
+                }
+            } else if (opener.eq_ignore_ascii_case("prior_function")
+                || opener.eq_ignore_ascii_case("posterior_function"))
+                && opt.ident.eq_ignore_ascii_case("function")
+                && opt.eq
+            {
+                self.model.prior_function_has_function = true;
+            } else if opener.eq_ignore_ascii_case("estimated_params_init")
+                && opt.ident.eq_ignore_ascii_case("use_calibration")
+                && self.model.estimated_params_init_use_calibration.is_none()
+            {
+                self.model.estimated_params_init_use_calibration = Some(opt.span);
+            }
+        }
+        if opener.eq_ignore_ascii_case("estimation")
+            && (stmt_estimated.is_some() || stmt_calibrated.is_some())
+        {
+            if self.model.dsge_var_estimated.is_none() {
+                self.model.dsge_var_estimated = stmt_estimated;
+            }
+            if self.model.dsge_var_calibrated.is_none() {
+                self.model.dsge_var_calibrated = stmt_calibrated;
+            }
+            self.model
+                .estimation_dsge_var_stmts
+                .push(EstimationDsgeVarStmt {
+                    estimated: stmt_estimated,
+                    calibrated: stmt_calibrated,
+                });
+        }
+    }
+
+    fn record_policy_option_flags(&mut self, command: PolicyCommand, from: usize, to: usize) {
+        if command != PolicyCommand::DiscretionaryPolicy || self.model.discretionary_order.is_some()
+        {
+            return;
+        }
+        for opt in top_options(&self.tokens, self.src, from, to) {
+            if opt.ident.eq_ignore_ascii_case("order") {
+                if let Some(n) = parse_int_lexeme(&opt.value_lex) {
+                    self.model.discretionary_order = Some((n, opt.value_span));
+                    break;
+                }
+            }
+        }
+    }
+
+    fn collect_trailing_symbols(&mut self, command: &str) {
+        self.symbol_list_id += 1;
+        while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Ident) {
+                self.push_command_symbol(command);
+            } else {
+                self.bump();
+            }
+        }
+    }
+
+    fn push_command_symbol(&mut self, command: &str) {
+        let tok = self.tokens[self.i].clone();
+        let lex = self.lexeme(&tok).to_string();
+        let span = tok.span;
+        self.bump();
+        let name = self.intern.intern(&lex);
+        self.model.command_symbols.push(CommandSymbol {
+            command: command.to_string(),
+            name,
+            span,
+            list_id: self.symbol_list_id,
+        });
     }
 
     fn record_deprecated_option_ident(&mut self, lex: &str, span: Span) {
@@ -2668,6 +2970,12 @@ impl Parser<'_> {
             &mut self.model.pfee_setup_span
         } else if lex.eq_ignore_ascii_case("write_latex_steady_state_model") {
             &mut self.model.write_latex_steady_state_model_span
+        } else if lex.eq_ignore_ascii_case("data") {
+            &mut self.model.data_span
+        } else if lex.eq_ignore_ascii_case("prior_function") {
+            &mut self.model.prior_function_span
+        } else if lex.eq_ignore_ascii_case("posterior_function") {
+            &mut self.model.posterior_function_span
         } else {
             return;
         };
