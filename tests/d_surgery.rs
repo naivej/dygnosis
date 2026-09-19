@@ -1,12 +1,15 @@
-//! P-parse family locks: `model_remove` / `model_replace` are parsed, so the model
-//! object is post-removal, and the shapes 7.1 refuses at parse carry **E001**.
+//! Equation-surgery family locks: parse (0.5.3 01) and diagnostics (0.5.3 02).
 //!
-//! The removal mirrors 7.1's parse-time `removeEquations`: matching equations leave
-//! `Model::equations` (with a record in `Model::equation_surgery`). For
-//! `model_remove` — and only there — a removed equation's endogenous becomes an
-//! exogenous while it is still used, or leaves the model otherwise; a
-//! `model_replace` removal keeps every type, as 7.1 does.
+//! `model_remove` / `model_replace` are parsed and applied while parsing, so the
+//! model object is post-removal. For `model_remove` — and only there — a removed
+//! equation's endogenous becomes an exogenous while it is still used, or leaves the
+//! model otherwise; a `model_replace` removal keeps every type, as 7.1 does.
+//!
+//! The statement refuses carry their own codes (E335–E337, plus E256 for a repeated
+//! tag key); the malformed shapes are **E001**. A double-quoted string is lexer junk
+//! wherever the grammar reads a string (verbatim bodies excepted).
 
+use dygnosis::model::Model;
 use dygnosis::{analyze, check_file, parse, Diagnostic};
 
 const QUIET: &[&str] = &[
@@ -15,6 +18,55 @@ const QUIET: &[&str] = &[
     "d_surgery/quiet_remove_many.mod",
     "d_surgery/quiet_replace.mod",
     "d_surgery/quiet_tag_forms.mod",
+    "d_surgery/quiet_dropped_symbol.mod",
+];
+
+/// One locked fire: fixture, code, and the mapped part of their message.
+struct Fire {
+    fixture: &'static str,
+    code: &'static str,
+    message: &'static str,
+}
+
+const FIRES: &[Fire] = &[
+    Fire {
+        fixture: "d_surgery/e335_tag_not_found.mod",
+        code: "E335",
+        message: "The equations specified by name=nosuchtag were not found.",
+    },
+    Fire {
+        fixture: "d_surgery/e336_no_lhs_variable.mod",
+        code: "E336",
+        message: "Equation 1 has been excluded but it does not have a single variable on its left-hand side or an `endogenous` tag",
+    },
+    Fire {
+        fixture: "d_surgery/e337_excluded_twice.mod",
+        code: "E337",
+        message: "Variable c was excluded twice via a model_remove or model_replace statement, or via the include_eqs or exclude_eqs option",
+    },
+    Fire {
+        fixture: "d_surgery/e256_tag_twice_surgery.mod",
+        code: "E256",
+        message: "Tag 'name' cannot be used twice for the same equation",
+    },
+    Fire {
+        fixture: "d_surgery/e314_filter_dropped.mod",
+        code: "E314",
+        message: "filter_initial_state: variable c does not appear in the model with the lag -1",
+    },
+    Fire {
+        fixture: "d_surgery/e208_static_after_remove.mod",
+        code: "E208",
+        message: "the number of equations marked [static] must be equal to the number of equations marked [dynamic]",
+    },
+];
+
+/// Every shape 7.1 refuses at the lexer with `character unrecognized by lexer`.
+const DOUBLE_QUOTED: &[&str] = &[
+    "d_surgery/e001_double_quoted_equation_tag.mod",
+    "d_surgery/e001_double_quoted_bvar.mod",
+    "d_surgery/e001_double_quoted_shock_group.mod",
+    "d_surgery/e001_double_quoted_tag.mod",
 ];
 
 fn fixture(rel: &str) -> String {
@@ -39,21 +91,32 @@ fn codes(diags: &[Diagnostic]) -> Vec<&str> {
     diags.iter().map(|d| d.code.as_str()).collect()
 }
 
-fn e001_message(rel: &str) -> String {
-    let diags = analyze(&parse(&fixture(rel)));
+fn find<'a>(diags: &'a [Diagnostic], code: &str) -> &'a Diagnostic {
     diags
         .iter()
-        .find(|d| d.code == "E001")
-        .unwrap_or_else(|| panic!("{rel}: expected E001, got {:?}", codes(&diags)))
+        .find(|d| d.code == code)
+        .unwrap_or_else(|| panic!("expected {code}, got {:?}", codes(diags)))
+}
+
+fn quiet(diags: &[Diagnostic], code: &str) {
+    assert!(
+        diags.iter().all(|d| d.code != code),
+        "expected no {code}, got {:?}",
+        codes(diags)
+    );
+}
+
+fn e001_message(rel: &str) -> String {
+    find(&analyze(&parse(&fixture(rel))), "E001")
         .message
         .clone()
 }
 
-fn endogenous(model: &dygnosis::model::Model, name: &str) -> bool {
+fn endogenous(model: &Model, name: &str) -> bool {
     model.endogenous.iter().any(|d| model.name(d.name) == name)
 }
 
-fn exogenous(model: &dygnosis::model::Model, name: &str) -> bool {
+fn exogenous(model: &Model, name: &str) -> bool {
     model.exogenous.iter().any(|d| model.name(d.name) == name)
 }
 
@@ -74,6 +137,75 @@ fn legal_surgery_files_are_quiet() {
         "{rel} check_file: expected no diagnostics, got {:?}",
         codes(&diags)
     );
+}
+
+#[test]
+fn statement_refuses_fire_with_their_text() {
+    for fire in FIRES {
+        let diags = analyze(&parse(&fixture(fire.fixture)));
+        let hit = find(&diags, fire.code);
+        assert!(
+            hit.message.contains(fire.message),
+            "{}: {} message {:?} must carry {:?}",
+            fire.fixture,
+            fire.code,
+            hit.message,
+            fire.message
+        );
+        let file_diags = check_file(&fixture(fire.fixture), &fixture_path(fire.fixture));
+        assert!(
+            file_diags.iter().any(|d| d.code == fire.code),
+            "{}: check_file must emit {}, got {:?}",
+            fire.fixture,
+            fire.code,
+            codes(&file_diags)
+        );
+    }
+}
+
+#[test]
+fn repeated_tag_key_stops_the_statement() {
+    // 7.1 refuses the tag list itself, so the not-found check never runs.
+    let diags = analyze(&parse(&fixture("d_surgery/e256_tag_twice_surgery.mod")));
+    quiet(&diags, "E335");
+}
+
+#[test]
+fn double_quoted_string_is_lexer_junk() {
+    for rel in DOUBLE_QUOTED {
+        let diags = analyze(&parse(&fixture(rel)));
+        let hit = find(&diags, "E001");
+        assert!(
+            hit.message
+                .contains("Double-quoted string in the .mod file"),
+            "{rel}: {:?}",
+            hit.message
+        );
+    }
+}
+
+#[test]
+fn verbatim_body_keeps_its_double_quotes() {
+    let model = parse(&fixture("d_surgery/quiet_verbatim_quotes.mod"));
+    assert!(
+        analyze(&model).is_empty(),
+        "verbatim passes raw text through: {:?}",
+        codes(&analyze(&model))
+    );
+}
+
+#[test]
+fn dropped_symbol_entries_do_not_fire() {
+    // The removal drops `c`; 7.1 accepts the entries that named it before that point,
+    // and refuses `observation_trends` / `filter_initial_state` like we do.
+    let diags = analyze(&parse(&fixture("d_surgery/quiet_dropped_symbol.mod")));
+    quiet(&diags, "E058");
+    quiet(&diags, "E090");
+    let model = parse(&fixture("d_surgery/quiet_dropped_symbol.mod"));
+    assert!(model
+        .excluded_endogenous
+        .iter()
+        .any(|d| model.name(d.name) == "c"));
 }
 
 #[test]
@@ -177,11 +309,6 @@ fn malformed_surgery_shapes_are_e001() {
         empty.contains("Missing equation tag in the 'model_remove' statement"),
         "{empty}"
     );
-    let quoted = e001_message("d_surgery/e001_double_quoted_tag.mod");
-    assert!(
-        quoted.contains("Double-quoted tag in the 'model_remove' statement"),
-        "{quoted}"
-    );
     let unquoted = e001_message("d_surgery/e001_unquoted_tag_value.mod");
     assert!(
         unquoted.contains("Unquoted tag value in the 'model_remove' statement"),
@@ -196,17 +323,12 @@ fn malformed_surgery_shapes_are_e001() {
 
 #[test]
 fn refused_tag_list_does_not_remove_an_equation() {
-    for (rel, expected) in [
-        ("d_surgery/e001_double_quoted_tag.mod", 2),
-        ("d_surgery/e001_unquoted_tag_value.mod", 3),
-    ] {
-        let model = parse(&fixture(rel));
-        assert_eq!(model.equations.len(), expected, "{rel}");
-        assert!(model.equation_surgery[0].removed.is_empty(), "{rel}");
-    }
+    let model = parse(&fixture("d_surgery/e001_unquoted_tag_value.mod"));
+    assert_eq!(model.equations.len(), 3);
+    assert!(model.equation_surgery[0].removed.is_empty());
 }
 
 #[test]
-fn registry_is_unchanged() {
-    assert_eq!(dygnosis::explain::known_codes().len(), 245);
+fn registry_known_codes_grew_to_247() {
+    assert_eq!(dygnosis::explain::known_codes().len(), 247);
 }

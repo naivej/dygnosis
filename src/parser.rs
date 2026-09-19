@@ -42,10 +42,12 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, Vec<Range
         intern: Interner::default(),
         model: Model::default(),
         eq_token_ranges: Vec::new(),
+        verbatim_ranges: Vec::new(),
         symbol_list_id: 1,
         in_model: false,
     };
     p.parse_file();
+    p.record_double_quoted_strings();
     p.model
         .exogenous
         .extend(p.model.deterministic_exogenous.iter().cloned());
@@ -553,6 +555,8 @@ struct Parser<'a> {
     intern: Interner,
     model: Model,
     eq_token_ranges: Vec<Range<usize>>,
+    /// Token ranges of `verbatim; … end;` bodies, whose text 7.1 passes through raw.
+    verbatim_ranges: Vec<Range<usize>>,
     /// Bumped once per statement that lists names, so `CommandSymbol::list_id`
     /// groups one statement's list.
     symbol_list_id: u32,
@@ -960,9 +964,7 @@ impl Parser<'_> {
         loop {
             if self.at(TokenKind::String) {
                 *saw_tag = true;
-                if let Some(value) = self.surgery_tag_string(keyword) {
-                    sets.push(vec![("name".to_string(), value)]);
-                }
+                sets.push(vec![("name".to_string(), self.surgery_tag_string())]);
             } else if self.at(TokenKind::LBrack) {
                 *saw_tag = true;
                 let open = self.bump().span;
@@ -1027,10 +1029,7 @@ impl Parser<'_> {
         if self.at(TokenKind::Eq) {
             self.bump();
             if self.at(TokenKind::String) {
-                let Some(text) = self.surgery_tag_string(keyword) else {
-                    return false;
-                };
-                value = text;
+                value = self.surgery_tag_string();
             } else if self.at(TokenKind::Ident) || self.at(TokenKind::Number) {
                 let v = self.bump();
                 self.record_issue(ParseIssue {
@@ -1049,21 +1048,10 @@ impl Parser<'_> {
         true
     }
 
-    /// A quoted tag value. 7.1's lexer refuses the double quote outright, so such a
-    /// value is reported and dropped.
-    fn surgery_tag_string(&mut self, keyword: &str) -> Option<String> {
+    /// A quoted tag value.
+    fn surgery_tag_string(&mut self) -> String {
         let tok = self.bump();
-        let raw = self.lexeme(&tok).to_string();
-        if raw.starts_with('"') {
-            self.record_issue(ParseIssue {
-                kind: ParseIssueKind::SurgeryTagDoubleQuoted {
-                    keyword: keyword.to_string(),
-                },
-                span: tok.span,
-            });
-            return None;
-        }
-        Some(unquote_string(&raw))
+        unquote_string(self.lexeme(&tok))
     }
 
     /// Remove every equation the tag sets match. Returns what went (with the position
@@ -1182,8 +1170,24 @@ impl Parser<'_> {
             let decl = self.model.endogenous.remove(pos);
             if used.iter().any(|seen| seen == &name) {
                 self.model.exogenous.push(decl);
+            } else {
+                self.prune_dropped_symbol(&decl);
+                self.model.excluded_endogenous.push(decl);
             }
         }
+    }
+
+    /// 7.1 accepts what a block recorded **before** the removal for a symbol the removal
+    /// then drops, but still refuses `observation_trends` and `filter_initial_state`, so
+    /// only the entries it accepts are dropped here. The declaration moves to
+    /// `Model::excluded_endogenous` (7.1's `excludedVariable`).
+    fn prune_dropped_symbol(&mut self, decl: &Decl) {
+        self.model.initval.retain(|entry| entry.name != decl.name);
+        self.model.endval.retain(|entry| entry.name != decl.name);
+        self.model.histval.retain(|entry| entry.name != decl.name);
+        self.model
+            .varobs
+            .retain(|observed| observed.name != decl.name);
     }
 
     fn parse_ss_block(&mut self) {
@@ -3064,12 +3068,18 @@ impl Parser<'_> {
     }
 
     fn skip_block(&mut self) {
+        let opener = self.lexeme(&self.tokens[self.i]).to_ascii_lowercase();
+        let start = self.i;
         self.bump();
         if self.at(TokenKind::LParen) {
             self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
         }
         self.eat(TokenKind::Semi);
         self.consume_until_end();
+        if opener == "verbatim" {
+            // Raw text: 7.1 passes it through, so its quotes are none of the grammar's business.
+            self.verbatim_ranges.push(start..self.i);
+        }
     }
 
     fn parse_top_assignment(&mut self) {
@@ -3525,6 +3535,30 @@ impl Parser<'_> {
 
     fn record_issue(&mut self, issue: ParseIssue) {
         self.model.parse_issues.push(issue);
+    }
+
+    /// 7.1's lexer accepts only single-quoted strings, so a double-quoted one is lexer
+    /// junk wherever the grammar reads a string. `verbatim` bodies pass raw text through.
+    fn record_double_quoted_strings(&mut self) {
+        let mut issues = Vec::new();
+        for (i, tok) in self.tokens.iter().enumerate() {
+            if tok.kind != TokenKind::String || !self.lexeme(tok).starts_with('"') {
+                continue;
+            }
+            if self.verbatim_ranges.iter().any(|range| range.contains(&i)) {
+                continue;
+            }
+            issues.push(ParseIssue {
+                kind: ParseIssueKind::DoubleQuotedString,
+                span: tok.span,
+            });
+        }
+        if !issues.is_empty() {
+            self.model.parse_issues.extend(issues);
+            self.model
+                .parse_issues
+                .sort_by_key(|issue| issue.span.start);
+        }
     }
 
     fn record_missing_end(&mut self, keyword: &str, opener_span: Span, body_i: usize) {

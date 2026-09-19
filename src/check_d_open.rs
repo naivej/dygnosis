@@ -624,11 +624,14 @@ fn check_filter_initial_state(model: &Model) -> Vec<Diagnostic> {
     let params = name_set(model.parameters.iter());
     let trends: HashSet<Name> = model.trend_vars.iter().map(|t| t.name).collect();
     let declared = declared_set(model);
+    let excluded: HashSet<Name> = model.excluded_endogenous.iter().map(|d| d.name).collect();
     let mut seen: HashSet<(Name, i32)> = HashSet::new();
     let mut out = Vec::new();
     for entry in &model.filter_initial_state {
         let name = model.name(entry.name);
-        if !declared.contains(&entry.name) {
+        // A symbol `model_remove` dropped was declared when this entry was written, and
+        // 7.1 still refuses the entry — with the timing message, not the undeclared one.
+        if !declared.contains(&entry.name) && !excluded.contains(&entry.name) {
             out.push(err(
                 entry.span,
                 "E058",

@@ -2146,6 +2146,96 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         our_needle: "Symbol bar declared twice",
         stage: JsonStage::Check,
     },
+    HonestyRow {
+        code: "E335",
+        fixture: "d_surgery/e335_tag_not_found.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The equations specified by",
+        our_needle: "The equations specified by name=nosuchtag were not found.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E336",
+        fixture: "d_surgery/e336_no_lhs_variable.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "does not have a single variable on its left-hand side",
+        our_needle: "does not have a single variable on its left-hand side",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E337",
+        fixture: "d_surgery/e337_excluded_twice.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "was excluded twice via a model_remove or model_replace statement",
+        our_needle: "was excluded twice via a model_remove or model_replace statement",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E256",
+        fixture: "d_surgery/e256_tag_twice_surgery.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "cannot be used twice for the same equation",
+        our_needle: "cannot be used twice for the same equation",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E208",
+        fixture: "d_surgery/e208_static_after_remove.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the number of equations marked [static] must be equal to the number of",
+        our_needle: "the number of equations marked [static] must be equal to the number of",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E314",
+        fixture: "d_surgery/e314_filter_dropped.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "does not appear in the model with the lag -1",
+        our_needle: "does not appear in the model with the lag -1",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "d_surgery/e001_double_quoted_equation_tag.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "character unrecognized by lexer",
+        our_needle: "Double-quoted string in the .mod file",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "d_surgery/e001_double_quoted_bvar.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "character unrecognized by lexer",
+        our_needle: "Double-quoted string in the .mod file",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "d_surgery/e001_double_quoted_shock_group.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "character unrecognized by lexer",
+        our_needle: "Double-quoted string in the .mod file",
+        stage: JsonStage::Check,
+    },
 ];
 
 struct ClashQuiet {
@@ -2662,6 +2752,7 @@ fn surface_matrix_claims_every_official_message() {
             fixture.starts_with("d_open/")
                 || fixture.starts_with("d_gap/")
                 || fixture.starts_with("d_extfun/")
+                || fixture.starts_with("d_surgery/")
         })
         .collect();
     fixtures.sort_unstable();

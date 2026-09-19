@@ -2,7 +2,7 @@
 //!
 //! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 70
 //! codes shipped through 0.5.0, then kind `shared` / `skipped` / `added`.
-//! 245 keys = 190 shared + 27 added + 28 skipped. Catalog **0.5.1** D-clash and
+//! 247 keys = 193 shared + 27 added + 27 skipped (S016 shipped as E335-E337). Catalog **0.5.1** D-clash and
 //! D-check Errors are shared; the **0.5.2** D-walk, D-block, D-open, and D-extfun
 //! rows add shared keys and drop the `S###` keys they replace.
 //! `I050` and `W042` use the recorded surface rewrites in
@@ -40,11 +40,11 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 245 keys: 190 shared + 27 added + 28 skipped.
+// 247 keys: 193 shared + 27 added + 27 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
-        body: "The Dynare parser could not interpret the source. The diagnostic range points at the offending token or the nearest recoverable position. Dynare refuses with a generic bison `ERROR` at a location.\n\n**Warrant**\n\nThe editor names the missing construct and points at a usable range; Dynare's bison location is often the next token. When a reserved preprocessor symbol (`dsge_prior_weight`) is used outside a declaration, the message names the symbol and the positions that accept it, instead of Dynare's bare `unexpected DSGE_PRIOR_WEIGHT`.\n\n**Common causes**\n\n- Missing semicolon at the end of a declaration or equation\n- Unbalanced parentheses, braces, or block keywords\n- Malformed time subscript such as `y(1)` where `y(+1)` was meant\n- A reserved keyword used as an identifier\n- A reserved preprocessor symbol used where an expression is expected\n\n**Fix**\n\nInspect the line cited and the line immediately preceding it. Dynare's preprocessor frequently flags the *next* line after a missing semicolon.",
+        body: "The Dynare parser could not interpret the source. The diagnostic range points at the offending token or the nearest recoverable position. Dynare refuses with a generic bison `ERROR` at a location, or with `character unrecognized by lexer` when the source holds a double-quoted string.\n\n**Warrant**\n\nThe editor names the missing construct and points at a usable range; Dynare's bison location is often the next token, and its lexer note names no range at all. When a reserved preprocessor symbol (`dsge_prior_weight`) is used outside a declaration, the message names the symbol and the positions that accept it, instead of Dynare's bare `unexpected DSGE_PRIOR_WEIGHT`.\n\n**Common causes**\n\n- Missing semicolon at the end of a declaration or equation\n- Unbalanced parentheses, braces, or block keywords\n- Malformed time subscript such as `y(1)` where `y(+1)` was meant\n- A reserved keyword used as an identifier\n- A reserved preprocessor symbol used where an expression is expected\n\n**Fix**\n\nInspect the line cited and the line immediately preceding it. Dynare's preprocessor frequently flags the *next* line after a missing semicolon.",
         kind: ExplainKind::Shared,
     }),
     ("W013", ExplainEntry {
@@ -1127,6 +1127,21 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "The data file of ``load_params_and_steady_state`` holds a name that is not declared at that point in the ``.mod``. Dynare accepts and warns: `Unknown symbol zzz in w204_params.txt`.\n\n**Fix**\n\nRemove the entry from the data file, or declare the symbol above the ``load_params_and_steady_state`` statement.",
         kind: ExplainKind::Shared,
     }),
+    ("E335", ExplainEntry {
+        title: "Equation-surgery tag matched no equation",
+        body: "A ``model_remove`` / ``model_replace`` tag set names no equation of the model. Dynare refuses: `model_remove/model_replace/exclude_eqs/include_eqs: The equations specified by <tag list> were not found.`\n\n**Fix**\n\nCheck the tag value against the ``[name='...']`` tags of the model block, or drop the tag.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E336", ExplainEntry {
+        title: "Excluded equation has no single endogenous on its left side",
+        body: "``model_remove`` removed an equation that carries no ``endogenous`` tag and whose left side is not one endogenous variable. Dynare refuses: `Equation N has been excluded but it does not have a single variable on its left-hand side or an `endogenous` tag`. ``model_replace`` does not gate on this.\n\n**Fix**\n\nName the variable with an ``endogenous='name'`` tag, or put a single endogenous variable on the left side.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E337", ExplainEntry {
+        title: "Same endogenous excluded twice by one statement",
+        body: "One ``model_remove`` / ``model_replace`` statement excluded two equations that name the same endogenous. Dynare refuses: `Variable c was excluded twice via a model_remove or model_replace statement, or via the include_eqs or exclude_eqs option`.\n\n**Warrant**\n\nDynare looks the printed name up at the loop index, so it can name a symbol that was not excluded at all; the editor names the variable that was excluded twice.\n\n**Fix**\n\nRemove the equation once, or drop one of the tags.",
+        kind: ExplainKind::Shared,
+    }),
     ("E186", ExplainEntry {
         title: "Unused endogenous after substitution",
         body: "Dynare refuses: `Error: <name> not used in the model block`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
@@ -1210,11 +1225,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("S014", ExplainEntry {
         title: "Remaining pac_expectation after substitution",
         body: "Dynare refuses: `unknown pac_model / no matching pac_target_info`. Catching step: transform (rewrite). Owner: skip-rewrite 0.8 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S016", ExplainEntry {
-        title: "exclude_eqs, include_eqs, model_remove, or model_replace",
-        body: "Dynare refuses: `various exclude_eqs / model_remove…`. Catching step: transform (written clash). Owner: skip 0.5.3 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S020", ExplainEntry {

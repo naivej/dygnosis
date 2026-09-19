@@ -193,6 +193,6 @@ fn epilogue_duplicate_keeps_its_own_error() {
 }
 
 #[test]
-fn registry_known_codes_grew_to_245() {
-    assert_eq!(known_codes().len(), 245);
+fn registry_known_codes_grew_to_247() {
+    assert_eq!(known_codes().len(), 247);
 }

@@ -6983,6 +6983,140 @@
       "source": "d_surgery.rs",
       "cluster": "d_surgery/quiet_remove_many.mod",
       "notes": "one bracketed tag set removes two equations"
+    },
+    {
+      "id": "d_surgery_e335_tag_not_found",
+      "codes": [
+        "E335"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e335_tag_not_found.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e335_tag_not_found.mod",
+      "notes": "model_remove('nosuchtag') refuses at check"
+    },
+    {
+      "id": "d_surgery_e336_no_lhs_variable",
+      "codes": [
+        "E336"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e336_no_lhs_variable.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e336_no_lhs_variable.mod",
+      "notes": "excluded equation without one endogenous on its left side"
+    },
+    {
+      "id": "d_surgery_e337_excluded_twice",
+      "codes": [
+        "E337"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e337_excluded_twice.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e337_excluded_twice.mod",
+      "notes": "two removed equations name the same endogenous"
+    },
+    {
+      "id": "d_surgery_e256_tag_twice_surgery",
+      "codes": [
+        "E256"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e256_tag_twice_surgery.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e256_tag_twice_surgery.mod",
+      "notes": "repeated key inside one bracketed surgery tag set"
+    },
+    {
+      "id": "d_surgery_e208_static_after_remove",
+      "codes": [
+        "E208"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e208_static_after_remove.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e208_static_after_remove.mod",
+      "notes": "the removal unbalances the [static] / [dynamic] counts"
+    },
+    {
+      "id": "d_surgery_e314_filter_dropped",
+      "codes": [
+        "E314"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e314_filter_dropped.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e314_filter_dropped.mod",
+      "notes": "filter_initial_state names a symbol the removal dropped: the timing message, not E058"
+    },
+    {
+      "id": "d_surgery_e001_double_quoted_equation_tag",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e001_double_quoted_equation_tag.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e001_double_quoted_equation_tag.mod",
+      "notes": "[name=\"e1\"] is lexer junk in 7.1"
+    },
+    {
+      "id": "d_surgery_e001_double_quoted_bvar",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e001_double_quoted_bvar.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e001_double_quoted_bvar.mod",
+      "notes": "bvar_irf(12, \"irf1\") is lexer junk in 7.1"
+    },
+    {
+      "id": "d_surgery_e001_double_quoted_shock_group",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e001_double_quoted_shock_group.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e001_double_quoted_shock_group.mod",
+      "notes": "a double-quoted shock_groups name is lexer junk in 7.1"
+    },
+    {
+      "id": "d_surgery_quiet_dropped_symbol",
+      "codes": [
+        "E001",
+        "E058",
+        "E090"
+      ],
+      "kind": "quiet",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/quiet_dropped_symbol.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/quiet_dropped_symbol.mod",
+      "notes": "initval / endval / histval / varobs entries for a symbol the removal drops"
+    },
+    {
+      "id": "d_surgery_quiet_verbatim_quotes",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/quiet_verbatim_quotes.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/quiet_verbatim_quotes.mod",
+      "notes": "verbatim bodies pass double quotes through"
     }
   ]
 }

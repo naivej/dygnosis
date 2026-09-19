@@ -86,6 +86,7 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     out.extend(crate::check_symbol_list::check_symbol_list(model));
     out.extend(crate::check_d_block::check_d_block(model));
     out.extend(crate::check_d_open::check_d_open(model));
+    out.extend(crate::check_d_surgery::check_d_surgery(model));
     out
 }
 

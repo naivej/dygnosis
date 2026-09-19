@@ -339,6 +339,11 @@ pub struct Model {
     pub equations: Vec<Equation>,
     /// `model_remove` / `model_replace` statements, file order, with what each removed.
     pub equation_surgery: Vec<EquationSurgery>,
+    /// Endogenous a `model_remove` dropped from the model (7.1's `excludedVariable`
+    /// type). The symbol is no longer in `endogenous`, but it was declared before the
+    /// removal: `filter_initial_state` refuses it with the timing message, not with
+    /// the undeclared one.
+    pub excluded_endogenous: Vec<Decl>,
     pub steady_state_equations: Vec<Equation>,
     pub initval: Vec<Assignment>,
     pub endval: Vec<Assignment>,
@@ -705,10 +710,9 @@ pub enum ParseIssueKind {
     MissingSurgeryTag {
         keyword: String,
     },
-    /// `model_remove("tag");` — 7.1's lexer refuses the double quote.
-    SurgeryTagDoubleQuoted {
-        keyword: String,
-    },
+    /// A double-quoted string. 7.1's lexer accepts only single quotes in the grammar,
+    /// so this is lexer junk wherever it appears (verbatim blocks pass raw text through).
+    DoubleQuotedString,
     /// `model_remove([name=e1]);` — 7.1 wants the value in single quotes.
     SurgeryTagUnquoted {
         keyword: String,

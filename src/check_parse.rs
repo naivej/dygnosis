@@ -537,13 +537,14 @@ fn format_recorded_issues(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
                     None,
                 ));
             }
-            ParseIssueKind::SurgeryTagDoubleQuoted { keyword } => {
+            ParseIssueKind::DoubleQuotedString => {
                 let line = index.position(src, issue.span.start).line + 1;
                 out.push(e001(
                     issue.span,
                     format!(
-                        "Double-quoted tag in the '{keyword}' statement (line {line}). \
-                         Fix: use single quotes, e.g. 'eq1'."
+                        "Double-quoted string in the .mod file (line {line}). \
+                         Dynare accepts only single quotes. Fix: replace the double quotes \
+                         with single ones."
                     ),
                     None,
                 ));
