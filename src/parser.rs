@@ -9,13 +9,16 @@ use crate::lexer::{tokenize, Token, TokenKind};
 use crate::macro_expand::expand_macros_full;
 use crate::model::{
     Assignment, ChangeTypeKind, ChangeTypeStmt, CommandSymbol, Complementarity,
-    ComplementarityTriple, Decl, DeprecatedOption, DerivSpec, Equation, EquationSurgery,
-    EstimatedParam, EstimatedParamKind, EstimationDsgeVarStmt, ExternalFunctionStmt,
-    GenerateIrfsElement, HistvalEntry, HomotopyRow, IncludeDirective, IncludePathDirective,
-    Init2ShocksBlock, Init2ShocksRow, MacroDirective, MacroInterp, Model, NonstationaryVar,
-    ObservedVar, OccbinConstraint, OccbinExpr, OptimWeight, OsrBound, ParseIssue, ParseIssueKind,
-    PolicyCommand, PolicyCommandStatement, RamseyConstraint, RemovedEquation, ShockGroup,
-    ShockKind, ShockStmt, ShocksSemiFamily, SurgeryExit, SurgeryKind, TrendVar,
+    ComplementarityTriple, ConditionalForecastPath, ConditionalForecastPaths, DataStatement, Decl,
+    DeprecatedOption, DerivSpec, DottedHead, DottedKind, DottedStatement, Equation,
+    EquationSurgery, EstimatedParam, EstimatedParamKind, EstimationDsgeVarStmt,
+    ExternalFunctionStmt, FamilyOption, FamilyValueKind, GenerateIrfsElement, HistvalEntry,
+    HomotopyRow, IncludeDirective, IncludePathDirective, Init2ShocksBlock, Init2ShocksRow,
+    MacroDirective, MacroInterp, Model, MsStatement, NonstationaryVar, ObservedVar,
+    OccbinConstraint, OccbinExpr, OptimWeight, OsrBound, ParseIssue, ParseIssueKind, PolicyCommand,
+    PolicyCommandStatement, RamseyConstraint, RemovedEquation, ShockGroup, ShockKind, ShockStmt,
+    ShocksSemiFamily, SurgeryExit, SurgeryKind, SvarEquation, SvarIdentification,
+    SvarIdentificationElement, TrendVar,
 };
 use crate::span::Span;
 
@@ -75,6 +78,29 @@ struct TopOption {
     value_span: Span,
 }
 
+/// One option value read for a family statement record.
+struct FamilyValue {
+    kind: FamilyValueKind,
+    span: Span,
+    text: String,
+    names: Vec<(Name, Span)>,
+    /// Token offset after the value.
+    next: usize,
+}
+
+impl FamilyValue {
+    /// A bare flag: no value text. `span` is the option name's span, matching
+    /// `FamilyOption::value_span`'s documented meaning.
+    fn empty(span: Span, next: usize) -> Self {
+        Self {
+            kind: FamilyValueKind::Flag,
+            span,
+            text: String::new(),
+            names: Vec::new(),
+            next,
+        }
+    }
+}
 struct ParsedTag {
     static_tag: bool,
     dynamic_tag: bool,
@@ -112,6 +138,8 @@ fn is_trailing_symbol_command(cmd: &str) -> bool {
     cmd.eq_ignore_ascii_case("stoch_simul")
         || cmd.eq_ignore_ascii_case("estimation")
         || cmd.eq_ignore_ascii_case("calib_smoother")
+        || cmd.eq_ignore_ascii_case("ms_irf")
+        || cmd.eq_ignore_ascii_case("plot_conditional_forecast")
 }
 
 fn top_options(tokens: &[Token], src: &str, from: usize, to: usize) -> Vec<TopOption> {
@@ -651,6 +679,18 @@ impl Parser<'_> {
                 self.parse_equation_surgery(false);
             } else if self.at_ident_ci("model_replace") {
                 self.parse_equation_surgery(true);
+            } else if self.at_ms_family_command().is_some() {
+                self.parse_ms_statement();
+            } else if self.at_ident_ci("svar_identification") && self.at_command_shape(1) {
+                self.parse_svar_identification_block();
+            } else if self.at_ident_ci("conditional_forecast_paths") && self.at_command_shape(1) {
+                self.parse_conditional_forecast_paths_block();
+            } else if self.at_ident_ci("data") && self.at_command_shape(1) {
+                self.parse_data_statement();
+            } else if self.at_dotted_statement().is_some() {
+                self.parse_dotted_statement();
+            } else if let Some(end) = self.native_statement_end() {
+                self.skip_native_statement(end);
             } else if let Some(command) = self.at_policy_command() {
                 self.parse_policy_command(command);
             } else if self.at_skipped_block() {
@@ -1895,6 +1935,1044 @@ impl Parser<'_> {
     fn parse_bvar_statement(&mut self) {
         self.model.bvar_present = true;
         self.skip_until_semi();
+    }
+
+    /// Command name for the `;` statements of the MS-SBVAR family, or `None`.
+    ///
+    /// The dotted statements are not here: their head is a symbol, not a command.
+    /// A name followed by `=`, a bare name, or a name before another word is not a
+    /// statement here — 7.1 refuses those shapes, and they keep their existing paths.
+    fn at_ms_family_command(&self) -> Option<&'static str> {
+        const COMMANDS: &[&str] = &[
+            "ms_estimation",
+            "ms_simulation",
+            "ms_compute_mdd",
+            "ms_compute_probabilities",
+            "ms_irf",
+            "ms_forecast",
+            "ms_variance_decomposition",
+            "markov_switching",
+            "svar",
+            "sbvar",
+            "svar_global_identification_check",
+            "conditional_forecast",
+            "plot_conditional_forecast",
+        ];
+        let command = COMMANDS.iter().copied().find(|cmd| self.at_ident_ci(cmd))?;
+        match self.peek_kind(1) {
+            Some(TokenKind::LParen) | Some(TokenKind::Semi) => Some(command),
+            // `ms_irf y, c;` and `plot_conditional_forecast y;` take a symbol list.
+            Some(TokenKind::Ident) if is_trailing_symbol_command(command) => Some(command),
+            _ => None,
+        }
+    }
+
+    /// One family `;` statement: its span, its option rows, and — for `ms_irf` and
+    /// `plot_conditional_forecast` — the trailing symbol list.
+    fn parse_ms_statement(&mut self) {
+        let command = self
+            .at_ms_family_command()
+            .expect("caller checked the command")
+            .to_string();
+        let start = self.current_start();
+        self.bump();
+        let mut options = Vec::new();
+        if self.at(TokenKind::LParen) {
+            let from = self.i;
+            self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+            self.record_deprecated_options_in_range(from, self.i);
+            self.record_skip_command_options(&command, from, self.i);
+            options = self.read_family_options(from, self.i);
+            self.record_parsed_option_twice(&options);
+        }
+        self.model.ms_statements.push(MsStatement {
+            command: command.clone(),
+            span: Span {
+                start,
+                end: self.current_start(),
+            },
+            options,
+        });
+        if is_trailing_symbol_command(&command) {
+            self.collect_trailing_symbols(&command);
+        }
+        while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+            self.bump();
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        if let Some(stmt) = self.model.ms_statements.last_mut() {
+            stmt.span.end = end;
+        }
+    }
+
+    /// One `data(file=…);` statement. The 0.5.2 presence-only record becomes this
+    /// one: the estimation gate reads `has_file_or_series` off the parsed rows.
+    fn parse_data_statement(&mut self) {
+        let start = self.current_start();
+        self.bump();
+        let mut options = Vec::new();
+        if self.at(TokenKind::LParen) {
+            let from = self.i;
+            self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+            self.record_deprecated_options_in_range(from, self.i);
+            self.record_skip_command_options("data", from, self.i);
+            options = self.read_family_options(from, self.i);
+            self.record_parsed_option_twice(&options);
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        self.model.data_statements.push(DataStatement {
+            span: Span { start, end },
+            options,
+        });
+    }
+
+    /// The dotted statement at the cursor, when every name in its head is declared.
+    /// `zzz.prior(…)` on an undeclared head is a native MATLAB line at the pin
+    /// (7.1 accepts it), so its span must not be claimed here.
+    fn at_dotted_statement(&self) -> Option<(DottedKind, usize)> {
+        let (_, body_at) = self.dotted_head_at()?;
+        let kind = if self.at_ident_ci_at(body_at, "prior") {
+            DottedKind::Prior
+        } else if self.at_ident_ci_at(body_at, "options") {
+            DottedKind::Options
+        } else if self.at_ident_ci_at(body_at, "subsamples") {
+            DottedKind::Subsamples
+        } else {
+            return None;
+        };
+        Some((kind, body_at))
+    }
+
+    fn at_ident_ci_at(&self, ahead: usize, name: &str) -> bool {
+        self.tokens.get(self.i + ahead).is_some_and(|t| {
+            t.kind == TokenKind::Ident && t.text(self.src).eq_ignore_ascii_case(name)
+        })
+    }
+
+    fn kind_at(&self, ahead: usize) -> Option<TokenKind> {
+        self.tokens.get(self.i + ahead).map(|t| t.kind)
+    }
+
+    /// The token after a keyword is one a statement may begin with: `(` or `;`.
+    /// `data = 0.5;` is not a `data` statement — 7.1 refuses it as an assignment.
+    fn at_command_shape(&self, ahead: usize) -> bool {
+        matches!(
+            self.kind_at(ahead),
+            Some(TokenKind::LParen) | Some(TokenKind::Semi)
+        )
+    }
+
+    /// A dotted head at the cursor plus the offset of the identifier after it.
+    /// Every name the head carries must already be declared, matching the pin's
+    /// lexer rule that decides statement versus native line.
+    fn dotted_head_at(&self) -> Option<(DottedHead, usize)> {
+        if self.kind_at(0) == Some(TokenKind::LBrack) {
+            let (names, after) = self.vector_head_names()?;
+            return Some((DottedHead::Vec { names }, after));
+        }
+        if self.at_ident_ci_at(0, "std") && self.kind_at(1) == Some(TokenKind::LParen) {
+            let (first, first_span) = self.declared_ident_at(2)?;
+            if self.kind_at(3) != Some(TokenKind::RParen) || self.kind_at(4) != Some(TokenKind::Dot)
+            {
+                return None;
+            }
+            if let Some((second, _)) = self.declared_ident_at(5) {
+                if self.kind_at(6) == Some(TokenKind::Dot) {
+                    return Some((
+                        DottedHead::Std {
+                            first,
+                            first_span,
+                            second: Some(second),
+                        },
+                        7,
+                    ));
+                }
+            }
+            return Some((
+                DottedHead::Std {
+                    first,
+                    first_span,
+                    second: None,
+                },
+                5,
+            ));
+        }
+        if self.at_ident_ci_at(0, "corr") && self.kind_at(1) == Some(TokenKind::LParen) {
+            let (first, first_span) = self.declared_ident_at(2)?;
+            if self.kind_at(3) != Some(TokenKind::Comma) {
+                return None;
+            }
+            let (second, second_span) = self.declared_ident_at(4)?;
+            if self.kind_at(5) != Some(TokenKind::RParen) || self.kind_at(6) != Some(TokenKind::Dot)
+            {
+                return None;
+            }
+            if let Some((third, _)) = self.declared_ident_at(7) {
+                if self.kind_at(8) == Some(TokenKind::Dot) {
+                    return Some((
+                        DottedHead::Corr {
+                            first,
+                            first_span,
+                            second,
+                            second_span,
+                            third: Some(third),
+                        },
+                        9,
+                    ));
+                }
+            }
+            return Some((
+                DottedHead::Corr {
+                    first,
+                    first_span,
+                    second,
+                    second_span,
+                    third: None,
+                },
+                7,
+            ));
+        }
+        let (first, _) = self.declared_ident_at(0)?;
+        if self.kind_at(1) != Some(TokenKind::Dot) {
+            return None;
+        }
+        if let Some((second, _)) = self.declared_ident_at(2) {
+            if self.kind_at(3) == Some(TokenKind::Dot) {
+                return Some((
+                    DottedHead::Param {
+                        first,
+                        second: Some(second),
+                    },
+                    4,
+                ));
+            }
+        }
+        Some((
+            DottedHead::Param {
+                first,
+                second: None,
+            },
+            2,
+        ))
+    }
+
+    /// An `[a, b]` head whose names are all declared, plus the offset after it.
+    fn vector_head_names(&self) -> Option<(Vec<(Name, Span)>, usize)> {
+        let mut names = Vec::new();
+        let mut k = 1;
+        loop {
+            let (name, span) = self.declared_ident_at(k)?;
+            names.push((name, span));
+            k += 1;
+            match self.kind_at(k) {
+                Some(TokenKind::RBrack) if names.len() >= 2 => {
+                    if self.kind_at(k + 1) == Some(TokenKind::Dot) {
+                        return Some((names, k + 2));
+                    }
+                    return None;
+                }
+                Some(TokenKind::Comma) => k += 1,
+                _ => return None,
+            }
+        }
+    }
+
+    /// The symbol at a token offset when the pin's lexer would read it as a
+    /// statement head, or `None`.
+    ///
+    /// 7.1's rule is `symbol_exists_and_is_not_modfile_local_or_external_function`:
+    /// a name declared as `var` / `varexo` / `parameters` / `predetermined_variables`
+    /// enters a Dynare statement, while a mod-file local (`#x = 1;`) or an
+    /// `external_function` name sends the whole line to native MATLAB, where no
+    /// language claim is made. This mirrors that rule, so `#x = 1;` followed by
+    /// `x.prior(…)` is native text to both sides.
+    fn declared_ident_at(&self, offset: usize) -> Option<(Name, Span)> {
+        let tok = self.tokens.get(self.i + offset)?;
+        if tok.kind != TokenKind::Ident {
+            return None;
+        }
+        // During parsing the interner lives on the parser, not on the model.
+        let name = self.intern.lookup(tok.text(self.src))?;
+        if !self.is_statement_head_symbol(name) {
+            return None;
+        }
+        Some((name, tok.span))
+    }
+
+    /// The text between two token offsets, when it is exactly `s`.
+    fn gap_is(&self, left: usize, right: usize, s: &str) -> bool {
+        let (Some(a), Some(b)) = (self.tokens.get(left), self.tokens.get(right)) else {
+            return false;
+        };
+        self.src
+            .get(a.span.end as usize..b.span.start as usize)
+            .is_some_and(|gap| gap == s)
+    }
+
+    /// Whether a token offset is an identifier at all (declaration not checked).
+    fn ident_at(&self, offset: usize) -> bool {
+        self.kind_at(offset) == Some(TokenKind::Ident)
+    }
+
+    /// The head names of the dotted shape at the cursor plus the offset of the
+    /// identifier after the head, or `None` when the tokens are not that shape.
+    ///
+    /// Shape only: 7.1's lexer decides statement versus native line by looking at
+    /// the head, and the grammar then keys the body on `prior` / `options` /
+    /// `subsamples`, so this must not consult the symbol table.
+    fn syntactic_dotted_head(&self) -> Option<(Vec<usize>, usize)> {
+        // `[a, b].prior(…)` and longer vectors.
+        if self.kind_at(0) == Some(TokenKind::LBrack) {
+            let mut names = Vec::new();
+            let mut k = 1;
+            loop {
+                if !self.ident_at(k) {
+                    return None;
+                }
+                names.push(k);
+                k += 1;
+                match self.kind_at(k) {
+                    Some(TokenKind::RBrack) => {
+                        if names.len() >= 2
+                            && self.kind_at(k + 1) == Some(TokenKind::Dot)
+                            && self.ident_at(k + 2)
+                        {
+                            return Some((names, k + 2));
+                        }
+                        return None;
+                    }
+                    Some(TokenKind::Comma) => k += 1,
+                    _ => return None,
+                }
+            }
+        }
+        // `std(x).prior(…)` and `corr(x, y).prior(…)`. Their names are checked by the
+        // grammar's own `symbol` production, so the head is always a statement.
+        let mut head_names = Vec::new();
+        for (keyword, arity) in [("std", 1usize), ("corr", 2usize)] {
+            if !self.at_ident_ci_at(0, keyword) || self.kind_at(1) != Some(TokenKind::LParen) {
+                continue;
+            }
+            let mut k = 2;
+            for arg in 0..arity {
+                if arg > 0 && self.kind_at(k) == Some(TokenKind::Comma) {
+                    k += 1;
+                }
+                if !self.ident_at(k) {
+                    return None;
+                }
+                head_names.push(k);
+                k += 1;
+            }
+            if self.kind_at(k) != Some(TokenKind::RParen)
+                || self.kind_at(k + 1) != Some(TokenKind::Dot)
+            {
+                return None;
+            }
+            // These two are keywords, so they never go native.
+            if self.ident_at(k + 2) {
+                return Some((Vec::new(), k + 4));
+            }
+            return Some((Vec::new(), k + 2));
+        }
+        // `alpha.prior(…)` and `alpha.beta.prior(…)`.
+        if self.ident_at(0) && self.kind_at(1) == Some(TokenKind::Dot) {
+            if self.ident_at(2) && self.kind_at(3) == Some(TokenKind::Dot) {
+                return Some((vec![0], 4));
+            }
+            return Some((vec![0], 2));
+        }
+        None
+    }
+
+    /// Whether every head name at these token offsets is declared as a statement
+    /// head. An empty list means the head is a keyword (`std` / `corr`), which the
+    /// grammar always reads as a statement.
+    fn dotted_head_is_statement(&self, names: &[usize]) -> bool {
+        names.iter().all(|&k| {
+            self.ident_at(k)
+                && self
+                    .intern
+                    .lookup(self.tokens[self.i + k].text(self.src))
+                    .is_some_and(|name| self.is_statement_head_symbol(name))
+        })
+    }
+
+    /// The end offset of a top-level statement 7.1 reads as native MATLAB text: it
+    /// makes no language claim on the line, so neither may we beyond leaving it be.
+    ///
+    /// Two shapes reach here. A dotted head whose names fail the pin's declaration
+    /// rule (`zzz.prior(…)`, `[aaa, bbb].prior(…)`, a mod-file local or an
+    /// external-function name as the head), and an identifier that is not one of the
+    /// pin's statement keywords followed by `(`. Both are 7.1-accepted however their
+    /// contents read. A head that passes the rule stays a Dynare statement, so the
+    /// grammar's own refusals on it keep their existing paths.
+    fn native_statement_end(&self) -> Option<usize> {
+        let native_dotted = self.syntactic_dotted_head().is_some_and(|(names, body)| {
+            self.kind_at(body + 1) == Some(TokenKind::LParen)
+                && !self.dotted_head_is_statement(&names)
+        });
+        let head = &self.tokens[self.i];
+        let non_keyword_call = self.ident_at(0)
+            && self.kind_at(1) == Some(TokenKind::LParen)
+            && !crate::command_skip::is_pin_statement_keyword(head.text(self.src))
+            && self
+                .intern
+                .lookup(head.text(self.src))
+                .is_none_or(|name| !self.is_statement_head_symbol(name));
+        if !native_dotted && !non_keyword_call {
+            return None;
+        }
+        // The statement ends at its `;`, or at the end of the parenthesised group.
+        let mut k = 0;
+        while let Some(kind) = self.kind_at(k) {
+            match kind {
+                TokenKind::Semi => return Some(k),
+                TokenKind::LParen | TokenKind::LBrack => {
+                    let close = if kind == TokenKind::LParen {
+                        TokenKind::RParen
+                    } else {
+                        TokenKind::RBrack
+                    };
+                    k = skip_balanced_tokens(&self.tokens, self.i + k, kind, close) - self.i;
+                    continue;
+                }
+                TokenKind::Eof => return None,
+                _ => k += 1,
+            }
+        }
+        None
+    }
+
+    /// Claim a native statement's span and step over it, recording no row.
+    fn skip_native_statement(&mut self, end: usize) {
+        let start = self.tokens[self.i].span.start;
+        let end_span = if self.kind_at(end) == Some(TokenKind::Semi) {
+            self.tokens[self.i + end].span.end
+        } else {
+            self.tokens
+                .get(self.i + end.saturating_sub(1))
+                .map(|t| t.span.end)
+                .unwrap_or(start)
+        };
+        self.model.ms_unparsed_spans.push(Span {
+            start,
+            end: end_span,
+        });
+        self.i = (self.i + end + 1).min(self.tokens.len().saturating_sub(1));
+        if self.tokens[self.i].kind == TokenKind::Semi {
+            self.bump();
+        }
+    }
+
+    /// A declared name that enters a Dynare statement: declared, and neither a
+    /// mod-file local nor an external-function name.
+    fn is_statement_head_symbol(&self, name: Name) -> bool {
+        self.model
+            .endogenous
+            .iter()
+            .chain(&self.model.exogenous)
+            .chain(&self.model.deterministic_exogenous)
+            .chain(&self.model.parameters)
+            .chain(&self.model.predetermined)
+            .any(|d| d.name == name)
+            && !self.model.mod_file_locals.contains(&name)
+            && !self.model.external_function_names.contains(&name)
+    }
+
+    /// One dotted statement. A `prior` body is read; an `options` / `subsamples`
+    /// body is claimed but not read, so its contents never reach a check.
+    fn parse_dotted_statement(&mut self) {
+        let (kind, body_at) = self
+            .at_dotted_statement()
+            .expect("caller checked the dotted head");
+        let (head, _) = self
+            .dotted_head_at()
+            .expect("caller checked the dotted head");
+        let start = self.tokens[self.i].span.start;
+        let open = body_at + 1;
+        let mut k = body_at;
+        let mut options = Vec::new();
+        if self.kind_at(open) == Some(TokenKind::LParen) {
+            let close = skip_balanced_tokens(
+                &self.tokens,
+                self.i + open,
+                TokenKind::LParen,
+                TokenKind::RParen,
+            );
+            self.record_deprecated_options_in_range(self.i + open, close);
+            if kind == DottedKind::Prior {
+                options = self.read_family_options(self.i + open, close);
+                self.record_parsed_option_twice(&options);
+            } else {
+                // The `options` / `subsamples` bodies are not read into records, but
+                // a repeated option in them is still a repeat 7.1 refuses.
+                self.record_option_twice(self.i + open, close);
+            }
+            k = close - self.i;
+        }
+        while matches!(
+            self.kind_at(k),
+            Some(kind) if kind != TokenKind::Semi && kind != TokenKind::Eof
+        ) {
+            k += 1;
+            if self.i + k >= self.tokens.len() {
+                break;
+            }
+        }
+        let end = if self.kind_at(k) == Some(TokenKind::Semi) {
+            let end = self.tokens[self.i + k].span.end;
+            k += 1;
+            end
+        } else {
+            self.tokens
+                .get(self.i + k.saturating_sub(1))
+                .map(|t| t.span.end)
+                .unwrap_or_else(|| self.src.len() as u32)
+        };
+        self.i = (self.i + k).min(self.tokens.len().saturating_sub(1));
+        self.model.dotted_statements.push(DottedStatement {
+            kind,
+            head,
+            span: Span { start, end },
+            options,
+        });
+    }
+
+    /// Every option row of one `(…)` list, with each value's shape.
+    fn read_family_options(&self, open_i: usize, close_i: usize) -> Vec<FamilyOption> {
+        self.read_options_in_range(open_i + 1, close_i.saturating_sub(1))
+    }
+
+    fn read_options_in_range(&self, from: usize, to: usize) -> Vec<FamilyOption> {
+        let end = to.min(self.tokens.len());
+        let mut out = Vec::new();
+        let mut i = from;
+        let mut depth: i32 = 0;
+        while i < end {
+            match self.tokens[i].kind {
+                TokenKind::LParen | TokenKind::LBrack => {
+                    depth += 1;
+                    i += 1;
+                }
+                TokenKind::RParen | TokenKind::RBrack => {
+                    depth = depth.saturating_sub(1);
+                    i += 1;
+                }
+                TokenKind::Ident if depth == 0 => {
+                    let name = self.tokens[i].text(self.src).to_string();
+                    let span = self.tokens[i].span;
+                    i += 1;
+                    let mut opt = FamilyOption {
+                        name,
+                        span,
+                        has_value: false,
+                        value_kind: FamilyValueKind::Flag,
+                        value_span: span,
+                        value_text: String::new(),
+                        names: Vec::new(),
+                    };
+                    if i < end && self.tokens[i].kind == TokenKind::Eq {
+                        opt.has_value = true;
+                        i += 1;
+                        let value = self.read_family_value(i, end, span);
+                        opt.value_kind = value.kind;
+                        opt.value_span = value.span;
+                        opt.value_text = value.text;
+                        opt.names = value.names;
+                        i = value.next;
+                    }
+                    out.push(opt);
+                }
+                _ => i += 1,
+            }
+        }
+        out
+    }
+
+    /// One option value, from the token just after `=`. `name_span` is the option
+    /// name's span, used when the `=` has no value at all.
+    fn read_family_value(&self, from: usize, end: usize, name_span: Span) -> FamilyValue {
+        if from >= end {
+            return FamilyValue::empty(name_span, from);
+        }
+        let first = &self.tokens[from];
+        // `A1:B10`: 7.1's `range` production reads the two halves as one value, so
+        // the tail is part of this option, not a second option row. The lexer drops
+        // the `:`, leaving two adjacent identifiers.
+        if first.kind == TokenKind::Ident
+            && self.tokens.get(from + 1).map(|t| t.kind) == Some(TokenKind::Ident)
+            && self.gap_is(from, from + 1, ":")
+        {
+            let tail = &self.tokens[from + 1];
+            let span = Span {
+                start: first.span.start,
+                end: tail.span.end,
+            };
+            return FamilyValue {
+                kind: FamilyValueKind::Range,
+                span,
+                text: self.src[span.start as usize..span.end as usize].to_string(),
+                names: Vec::new(),
+                next: from + 2,
+            };
+        }
+        if first.kind == TokenKind::LBrack || first.kind == TokenKind::LParen {
+            let (open, close) = if first.kind == TokenKind::LBrack {
+                (TokenKind::LBrack, TokenKind::RBrack)
+            } else {
+                (TokenKind::LParen, TokenKind::RParen)
+            };
+            let stop = skip_balanced_tokens(&self.tokens, from, open, close).min(end);
+            let inner = (from + 1, stop.saturating_sub(1));
+            let kind = self.bracket_value_kind(inner.0, inner.1);
+            let (text, names) = if kind == FamilyValueKind::NameList {
+                self.name_list_value(inner.0, inner.1)
+            } else {
+                (join_lexemes(self.src, &self.tokens[from..stop]), Vec::new())
+            };
+            let span = Span {
+                start: first.span.start,
+                end: self.tokens[stop.saturating_sub(1)].span.end,
+            };
+            return FamilyValue {
+                kind,
+                span,
+                text,
+                names,
+                next: stop,
+            };
+        }
+        if first.kind == TokenKind::Number {
+            if let Some(suffix) = self
+                .tokens
+                .get(from + 1)
+                .filter(|t| t.kind == TokenKind::Ident && t.span.start == first.span.end)
+            {
+                // `1959Q1` and friends: the lexer splits the number from its suffix.
+                let span = Span {
+                    start: first.span.start,
+                    end: suffix.span.end,
+                };
+                let text = self.src[span.start as usize..span.end as usize].to_string();
+                return FamilyValue {
+                    kind: FamilyValueKind::Date,
+                    span,
+                    text,
+                    names: Vec::new(),
+                    next: from + 2,
+                };
+            }
+            return FamilyValue {
+                kind: FamilyValueKind::Scalar,
+                span: first.span,
+                text: first.text(self.src).to_string(),
+                names: Vec::new(),
+                next: from + 1,
+            };
+        }
+        if first.kind == TokenKind::Minus || first.kind == TokenKind::Plus {
+            let mut stop = from + 1;
+            while stop < end
+                && matches!(
+                    self.tokens[stop].kind,
+                    TokenKind::Number | TokenKind::Minus | TokenKind::Plus
+                )
+            {
+                stop += 1;
+            }
+            let span = Span {
+                start: first.span.start,
+                end: self.tokens[stop - 1].span.end,
+            };
+            return FamilyValue {
+                kind: FamilyValueKind::Scalar,
+                span,
+                text: join_lexemes(self.src, &self.tokens[from..stop]),
+                names: Vec::new(),
+                next: stop,
+            };
+        }
+        FamilyValue {
+            kind: FamilyValueKind::Scalar,
+            span: first.span,
+            text: first.text(self.src).to_string(),
+            names: Vec::new(),
+            next: from + 1,
+        }
+    }
+
+    /// `NameList` when every top-level element of a bracketed value is an
+    /// identifier, `Matrix` when a bracket sits inside it, `Vector` otherwise.
+    fn bracket_value_kind(&self, from: usize, to: usize) -> FamilyValueKind {
+        let mut depth: i32 = 0;
+        let mut saw_inner_bracket = false;
+        let mut saw_element = false;
+        let mut all_idents = true;
+        for k in from..to.min(self.tokens.len()) {
+            match self.tokens[k].kind {
+                TokenKind::LBrack => {
+                    saw_inner_bracket = true;
+                    depth += 1;
+                }
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen | TokenKind::RBrack => depth -= 1,
+                TokenKind::Comma => {}
+                TokenKind::Ident if depth == 0 => saw_element = true,
+                _ if depth == 0 => all_idents = false,
+                _ => {}
+            }
+        }
+        if saw_inner_bracket {
+            FamilyValueKind::Matrix
+        } else if saw_element && all_idents {
+            FamilyValueKind::NameList
+        } else {
+            FamilyValueKind::Vector
+        }
+    }
+
+    fn name_list_value(&self, from: usize, to: usize) -> (String, Vec<(Name, Span)>) {
+        let mut names = Vec::new();
+        let mut text = String::new();
+        for k in from..to.min(self.tokens.len()) {
+            let tok = &self.tokens[k];
+            if tok.kind != TokenKind::Ident {
+                continue;
+            }
+            let lex = tok.text(self.src);
+            if !text.is_empty() {
+                text.push(' ');
+            }
+            text.push_str(lex);
+            if let Some(name) = self.intern.lookup(lex) {
+                names.push((name, tok.span));
+            }
+        }
+        (text, names)
+    }
+
+    /// `svar_identification;` … `end;`. The body keeps structured rows, mirroring
+    /// the pin's `SvarIdentificationStatement`.
+    fn parse_svar_identification_block(&mut self) {
+        let opener_span = self.bump_plain_opener();
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed("svar_identification", opener_span, body_i, body_end_i);
+        let end = self.block_end_after_consume();
+        let saved = self.i;
+        self.i = body_i;
+        let mut elements = Vec::new();
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            let before = self.i;
+            self.read_svar_identification_element(&mut elements);
+            if self.i <= before {
+                self.bump();
+            }
+        }
+        self.i = saved;
+        self.model.svar_identifications.push(SvarIdentification {
+            span: Span {
+                start: opener_span.start,
+                end,
+            },
+            elements,
+        });
+    }
+
+    /// One element of an `svar_identification` body, appended to `out`.
+    fn read_svar_identification_element(&mut self, out: &mut Vec<SvarIdentificationElement>) {
+        let start = self.current_start();
+        if self.at_ident_ci("exclusion") {
+            self.bump();
+            if self.at_ident_ci("lag") {
+                self.bump();
+                let lag = self.take_int();
+                let span = self.finish_family_element(start);
+                out.push(SvarIdentificationElement::ExclusionLag {
+                    lag,
+                    span,
+                    equations: Vec::new(),
+                });
+            } else {
+                self.bump_until_semi();
+                let span = self.finish_family_element(start);
+                out.push(SvarIdentificationElement::ExclusionConstants { span });
+            }
+            return;
+        }
+        if self.at_ident_ci("upper_cholesky") || self.at_ident_ci("lower_cholesky") {
+            let upper = self.at_ident_ci("upper_cholesky");
+            self.bump();
+            let span = self.finish_family_element(start);
+            out.push(if upper {
+                SvarIdentificationElement::UpperCholesky { span }
+            } else {
+                SvarIdentificationElement::LowerCholesky { span }
+            });
+            return;
+        }
+        if self.at_ident_ci("equation") {
+            let row = self.read_svar_equation();
+            match out.last_mut() {
+                Some(SvarIdentificationElement::ExclusionLag { equations, .. }) => {
+                    equations.push(row)
+                }
+                _ => out.push(SvarIdentificationElement::ExclusionLag {
+                    lag: None,
+                    span: row.span,
+                    equations: vec![row],
+                }),
+            }
+            return;
+        }
+        if self.at_ident_ci("restriction") {
+            self.bump();
+            if self.at_ident_ci("equation") {
+                self.bump();
+            }
+            let number = self.take_int();
+            if self.at(TokenKind::Comma) {
+                self.bump();
+            }
+            let expr_start = self.current_start();
+            let mut expr_end = expr_start;
+            while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) && !self.at(TokenKind::Eq) {
+                if self.at(TokenKind::LParen) {
+                    expr_end = self.skip_balanced(TokenKind::LParen, TokenKind::RParen).end;
+                    continue;
+                }
+                expr_end = self.bump().span.end;
+            }
+            let expr_span = Span {
+                start: expr_start,
+                end: expr_end,
+            };
+            let span = self.finish_family_element(start);
+            out.push(SvarIdentificationElement::Restriction {
+                number,
+                span,
+                expr_span,
+            });
+            return;
+        }
+        self.bump();
+    }
+
+    /// One `equation N, name…;` row.
+    fn read_svar_equation(&mut self) -> SvarEquation {
+        let start = self.current_start();
+        self.bump();
+        let number = self.take_int();
+        if self.at(TokenKind::Comma) {
+            self.bump();
+        }
+        let mut names = Vec::new();
+        while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            if self.at(TokenKind::Ident) {
+                let tok = self.bump();
+                let lex = self.lexeme(&tok).to_string();
+                names.push((self.intern.intern(&lex), tok.span));
+                continue;
+            }
+            self.bump();
+        }
+        let end = self.current_start();
+        self.eat(TokenKind::Semi);
+        SvarEquation {
+            number,
+            names,
+            span: Span { start, end },
+        }
+    }
+
+    /// An optional non-negative integer at the cursor.
+    fn take_int(&mut self) -> Option<i32> {
+        if !self.at(TokenKind::Number) {
+            return None;
+        }
+        let tok = self.bump();
+        parse_int_lexeme(self.lexeme(&tok))
+    }
+
+    fn bump_until_semi(&mut self) {
+        while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::LParen) {
+                self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                continue;
+            }
+            self.bump();
+        }
+    }
+
+    /// One element's span: its start through its `;`.
+    fn finish_family_element(&mut self, start: u32) -> Span {
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        Span { start, end }
+    }
+
+    /// `conditional_forecast_paths;` … `end;`: repeated `var name; periods …; values …;`.
+    fn parse_conditional_forecast_paths_block(&mut self) {
+        let opener_span = self.bump_plain_opener();
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed(
+            "conditional_forecast_paths",
+            opener_span,
+            body_i,
+            body_end_i,
+        );
+        let end = self.block_end_after_consume();
+        let saved = self.i;
+        self.i = body_i;
+        let mut rows = Vec::new();
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            let before = self.i;
+            if let Some(row) = self.read_conditional_forecast_path() {
+                rows.push(row);
+            }
+            if self.i <= before {
+                self.bump();
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+        self.model
+            .conditional_forecast_paths
+            .push(ConditionalForecastPaths {
+                span: Span {
+                    start: opener_span.start,
+                    end,
+                },
+                rows,
+            });
+    }
+
+    /// One `var name; periods …; values …;` row.
+    fn read_conditional_forecast_path(&mut self) -> Option<ConditionalForecastPath> {
+        if !self.at_ident_ci("var") {
+            return None;
+        }
+        let start = self.current_start();
+        self.bump();
+        let Some(name_tok) = self
+            .tokens
+            .get(self.i)
+            .filter(|t| t.kind == TokenKind::Ident)
+            .cloned()
+        else {
+            self.bump_until_semi();
+            self.eat(TokenKind::Semi);
+            return None;
+        };
+        self.bump();
+        let name = self.intern.intern(name_tok.text(self.src));
+        self.eat(TokenKind::Semi);
+        let mut periods = Vec::new();
+        let mut periods_span = Span {
+            start: name_tok.span.end,
+            end: name_tok.span.end,
+        };
+        if self.at_ident_ci("periods") {
+            let from = self.i + 1;
+            self.bump_until_semi();
+            periods = self.list_entries(from, self.i);
+            periods_span = self.entry_list_span(from, self.i);
+            self.eat(TokenKind::Semi);
+        }
+        let mut values = Vec::new();
+        let mut values_span = Span {
+            start: periods_span.end,
+            end: periods_span.end,
+        };
+        if self.at_ident_ci("values") {
+            let from = self.i + 1;
+            self.bump_until_semi();
+            values = self.list_entries(from, self.i);
+            values_span = self.entry_list_span(from, self.i);
+            self.eat(TokenKind::Semi);
+        }
+        Some(ConditionalForecastPath {
+            name,
+            name_span: name_tok.span,
+            periods,
+            periods_span,
+            values,
+            values_span,
+            span: Span {
+                start,
+                end: self.current_start(),
+            },
+        })
+    }
+
+    /// List entries between two token offsets: a run of tokens with no whitespace
+    /// or comma between them is one entry, so `1:4` counts as one and `1 2 3` as three.
+    fn list_entries(&self, from: usize, to: usize) -> Vec<Span> {
+        let mut out: Vec<Span> = Vec::new();
+        let end = to.min(self.tokens.len());
+        let mut k = from;
+        while k < end {
+            if self.tokens[k].kind == TokenKind::Comma {
+                k += 1;
+                continue;
+            }
+            let start = self.tokens[k].span.start;
+            let mut stop = k;
+            while stop + 1 < end {
+                let prev = &self.tokens[stop];
+                let next = &self.tokens[stop + 1];
+                if next.kind == TokenKind::Comma {
+                    break;
+                }
+                let between = &self.src[prev.span.end as usize..next.span.start as usize];
+                if between.chars().any(char::is_whitespace) {
+                    break;
+                }
+                stop += 1;
+            }
+            out.push(Span {
+                start,
+                end: self.tokens[stop].span.end,
+            });
+            k = stop + 1;
+        }
+        out
+    }
+
+    fn entry_list_span(&self, from: usize, to: usize) -> Span {
+        let end = to.min(self.tokens.len());
+        if from >= end {
+            let at = self
+                .tokens
+                .get(from)
+                .map(|t| t.span.start)
+                .unwrap_or_else(|| self.current_start());
+            return Span { start: at, end: at };
+        }
+        Span {
+            start: self.tokens[from].span.start,
+            end: self.tokens[end - 1].span.end,
+        }
     }
 
     /// `change_type(type) name_list;`
@@ -3719,6 +4797,11 @@ impl Parser<'_> {
         let src = self.src;
         let blocks = complete_block_ranges(&self.tokens, src);
         let cmd_spans = crate::command_skip::command_stmt_spans(&self.tokens, src);
+        // Parsed family statements claim their own lines: a multi-line `sbvar` or
+        // `.prior(…)` option list is not a run of parameter assignments.
+        let mut family_spans: Vec<Span> = self.model.statement_spans();
+        family_spans.extend(cmd_spans);
+        family_spans.sort_by_key(|span| (span.start, span.end));
         let trailing = trailing_code_line(&self.tokens, src);
         let lines: Vec<&str> = src.split('\n').collect();
         for (i, line) in lines.iter().enumerate() {
@@ -3734,7 +4817,7 @@ impl Parser<'_> {
                     .map(|l| l.len() + 1)
                     .sum::<usize>() as u32
             };
-            if inside_span(line_start, &blocks) || inside_span(line_start, &cmd_spans) {
+            if inside_span(line_start, &blocks) || inside_span(line_start, &family_spans) {
                 continue;
             }
             let trimmed_start = line.len() - line.trim_start().len();
@@ -4619,6 +5702,20 @@ impl Parser<'_> {
         }
     }
 
+    /// The same check on already-parsed rows. 7.1 counts one `name=value` per
+    /// option, so a name inside a bracketed value (`parameters=[alpha, alpha]`) is
+    /// not a repeat, while two options with the same name are.
+    fn record_parsed_option_twice(&mut self, options: &[FamilyOption]) {
+        let mut seen: HashMap<String, ()> = HashMap::new();
+        for opt in options {
+            let key = opt.name.to_ascii_lowercase();
+            if seen.insert(key, ()).is_none() {
+                continue;
+            }
+            self.model.option_twice.push((opt.name.clone(), opt.span));
+        }
+    }
+
     fn skip_balanced(&mut self, open: TokenKind, close: TokenKind) -> Span {
         let start = self.bump().span.start;
         let mut depth = 1;
@@ -4678,8 +5775,6 @@ impl Parser<'_> {
             &mut self.model.pfee_setup_span
         } else if lex.eq_ignore_ascii_case("write_latex_steady_state_model") {
             &mut self.model.write_latex_steady_state_model_span
-        } else if lex.eq_ignore_ascii_case("data") {
-            &mut self.model.data_span
         } else if lex.eq_ignore_ascii_case("prior_function") {
             &mut self.model.prior_function_span
         } else if lex.eq_ignore_ascii_case("posterior_function") {
@@ -4736,7 +5831,6 @@ impl Parser<'_> {
             "heteroskedastic_shocks",
             "shock_paths",
             "perfect_foresight_controlled_paths",
-            "conditional_forecast_paths",
         ];
         BLOCKS.iter().any(|kw| self.at_ident_ci(kw))
     }
@@ -5566,9 +6660,8 @@ mod tests {
 
     #[test]
     fn model_options_use_dll_bytecode_no_static_linear() {
-        let model = parse(
-            "var y; varexo e; model(use_dll, bytecode, no_static, linear); y = e; end;",
-        );
+        let model =
+            parse("var y; varexo e; model(use_dll, bytecode, no_static, linear); y = e; end;");
         assert!(model.is_linear);
         assert!(model.use_dll_span.is_some());
         assert!(model.no_static_span.is_some());
@@ -5590,15 +6683,13 @@ mod tests {
 
     #[test]
     fn initval_all_values_required_and_after_endval() {
-        let req = parse(
-            "var y; varexo e; model; y = e; end; initval(all_values_required); y = 0; end;",
-        );
+        let req =
+            parse("var y; varexo e; model; y = e; end; initval(all_values_required); y = 0; end;");
         assert!(req.initval_all_values_required);
         assert!(!req.endval_all_values_required);
         assert!(req.initval_after_endval_span.is_none());
-        let order = parse(
-            "var y; varexo e; model; y = e; end; endval; y = 0; end; initval; y = 0; end;",
-        );
+        let order =
+            parse("var y; varexo e; model; y = e; end; endval; y = 0; end; initval; y = 0; end;");
         assert!(order.endval_block.is_some());
         assert!(order.initval_block.is_some());
         assert!(order.initval_after_endval_span.is_some());

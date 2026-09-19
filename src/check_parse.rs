@@ -801,7 +801,10 @@ fn looks_like_matlab(rhs: &str) -> bool {
 fn invalid_ident_diags(model: &Model, tokens: &[Token], index: &LineIndex) -> Vec<Diagnostic> {
     let _ = index;
     let src = &model.source;
-    let blocks = complete_block_ranges(tokens, src);
+    let mut blocks = complete_block_ranges(tokens, src);
+    // Statements the parser read claim their own spans: a `keyword=[…]` option
+    // value inside one is not a declaration.
+    blocks.extend(model.statement_spans());
     let mut out = Vec::new();
     let mut i = 0;
     while i < tokens.len() {

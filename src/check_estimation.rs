@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::diagnostic::{Diagnostic, Severity};
-use crate::model::{EstimatedParamKind, Model};
+use crate::model::{DataStatement, EstimatedParamKind, Model};
 use crate::span::Span;
 
 const FALLBACK: Span = Span { start: 0, end: 1 };
@@ -47,7 +47,10 @@ pub fn check_estimation(model: &Model) -> Vec<Diagnostic> {
     }
     if model.estimation_span.is_some()
         && model.estimation_datafile_span.is_none()
-        && model.data_span.is_none()
+        && !model
+            .data_statements
+            .iter()
+            .any(DataStatement::has_file_or_series)
     {
         let span = model.estimation_span.unwrap_or(FALLBACK);
         push(&mut out, span, "E227", E227_MSG);

@@ -66,11 +66,15 @@ fn dsge_var_bare_vs_calibrated() {
 #[test]
 fn data_opener_presence_not_database() {
     let data = parse("data(file='x.csv');");
-    assert!(data.data_span.is_some());
+    assert_eq!(data.data_statements.len(), 1);
+    assert!(data.data_statements[0].has_file_or_series());
     assert!(data.helper_assignments.is_empty());
     assert!(data.param_assignments.is_empty());
+    let nobs_only = parse("data(nobs=10);");
+    assert_eq!(nobs_only.data_statements.len(), 1);
+    assert!(!nobs_only.data_statements[0].has_file_or_series());
     let db = parse("database foo;");
-    assert!(db.data_span.is_none());
+    assert!(db.data_statements.is_empty());
 }
 
 #[test]

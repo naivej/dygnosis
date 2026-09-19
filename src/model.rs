@@ -484,8 +484,21 @@ pub struct Model {
     pub initval_after_endval_span: Option<Span>,
     /// `instruments=` was present on a `discretionary_policy` (list may be empty).
     pub discretionary_has_instruments_option: bool,
-    /// First `data` command identifier (not `database`).
-    pub data_span: Option<Span>,
+    /// Every parsed MS-SBVAR family statement, file order.
+    pub ms_statements: Vec<MsStatement>,
+    /// Statement spans the parser recognised as a family shape but deliberately did
+    /// not interpret: a dotted head the pin's lexer would send to native MATLAB, and
+    /// a family keyword in a shape 7.1's grammar has no production for. 7.1 makes no
+    /// language claim on those lines, so neither may we.
+    pub ms_unparsed_spans: Vec<Span>,
+    /// Every parsed dotted `prior` / `options` / `subsamples` statement, file order.
+    pub dotted_statements: Vec<DottedStatement>,
+    /// Every parsed `data` statement, file order (the estimation / MS-SBVAR one).
+    pub data_statements: Vec<DataStatement>,
+    /// `svar_identification;` … `end;` bodies, file order.
+    pub svar_identifications: Vec<SvarIdentification>,
+    /// `conditional_forecast_paths;` … `end;` bodies, file order.
+    pub conditional_forecast_paths: Vec<ConditionalForecastPaths>,
     /// First `prior_function` command identifier.
     pub prior_function_span: Option<Span>,
     /// First `posterior_function` command identifier.
@@ -662,6 +675,186 @@ pub struct CommandSymbol {
     pub list_id: u32,
 }
 
+/// One parsed MS-SBVAR family statement (`ms_*`, `sbvar`, `svar`, `markov_switching`,
+/// `conditional_forecast`, `svar_global_identification_check`).
+#[derive(Clone, Debug)]
+pub struct MsStatement {
+    /// Command name as written.
+    pub command: String,
+    /// Whole statement: opener through the terminating `;`.
+    pub span: Span,
+    /// Parsed option rows; a bare command with no `(…)` has none.
+    pub options: Vec<FamilyOption>,
+}
+
+/// One parsed `data(file=…)` statement (the estimation / MS-SBVAR data statement).
+#[derive(Clone, Debug)]
+pub struct DataStatement {
+    /// Opener through the terminating `;`.
+    pub span: Span,
+    pub options: Vec<FamilyOption>,
+}
+
+impl DataStatement {
+    /// The `file` or `series` option the estimation gate looks for.
+    pub fn has_file_or_series(&self) -> bool {
+        self.options.iter().any(|opt| {
+            opt.has_value
+                && (opt.name.eq_ignore_ascii_case("file")
+                    || opt.name.eq_ignore_ascii_case("series"))
+        })
+    }
+}
+
+/// The dotted `….prior(…)` / `….options(…)` / `….subsamples(…)` statement family.
+#[derive(Clone, Debug)]
+pub struct DottedStatement {
+    pub kind: DottedKind,
+    /// The head the statement is keyed on.
+    pub head: DottedHead,
+    /// Head through the terminating `;`.
+    pub span: Span,
+    /// Parsed option rows. Empty for `options` / `subsamples`, whose bodies are
+    /// recognised but not read.
+    pub options: Vec<FamilyOption>,
+}
+
+/// Which dotted statement this is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DottedKind {
+    Prior,
+    Options,
+    Subsamples,
+}
+
+/// The head of a dotted statement. 7.1 keys the statement on a declared symbol,
+/// so each name here was declared before the statement.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DottedHead {
+    /// `alpha.prior(…)`, or `alpha.beta.prior(…)`.
+    Param { first: Name, second: Option<Name> },
+    /// `std(e).prior(…)`, or `std(e).beta.prior(…)`.
+    Std {
+        first: Name,
+        first_span: Span,
+        second: Option<Name>,
+    },
+    /// `corr(y, c).prior(…)`, or `corr(y, c).beta.prior(…)`.
+    Corr {
+        first: Name,
+        first_span: Span,
+        second: Name,
+        second_span: Span,
+        third: Option<Name>,
+    },
+    /// `[alpha, beta].prior(…)`.
+    Vec { names: Vec<(Name, Span)> },
+}
+
+/// One option row of a parsed family statement.
+#[derive(Clone, Debug)]
+pub struct FamilyOption {
+    /// Option name as written.
+    pub name: String,
+    /// Option-name span.
+    pub span: Span,
+    /// `true` when the option was written `name=value`.
+    pub has_value: bool,
+    pub value_kind: FamilyValueKind,
+    /// Value span; the option-name span when there is no value.
+    pub value_span: Span,
+    /// Value text with whitespace collapsed.
+    pub value_text: String,
+    /// Names for a name list; the declaration order as written.
+    pub names: Vec<(Name, Span)>,
+}
+
+/// The shape of one option's value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FamilyValueKind {
+    /// A bare flag: `coefficients`, `filtered_probabilities`.
+    Flag,
+    /// One number, bare name, or quoted string.
+    Scalar,
+    /// `[a, b, c]` of names.
+    NameList,
+    /// `[1 2 3]`, `[1, 2]`.
+    Vector,
+    /// `[[1, 2, 0.5], [1, 2, 0.3]]`.
+    Matrix,
+    /// A date such as `1959Q1` or `1959M4`.
+    Date,
+    /// A cell range such as `A1:B10`; 7.1 reads its two halves as one value.
+    Range,
+}
+
+/// One parsed `svar_identification;` … `end;` block.
+#[derive(Clone, Debug)]
+pub struct SvarIdentification {
+    /// Opener through `end;`.
+    pub span: Span,
+    pub elements: Vec<SvarIdentificationElement>,
+}
+
+/// One element of an `svar_identification` body.
+#[derive(Clone, Debug)]
+pub enum SvarIdentificationElement {
+    /// `exclusion lag N;` and the `equation` rows that follow it.
+    ExclusionLag {
+        lag: Option<i32>,
+        span: Span,
+        equations: Vec<SvarEquation>,
+    },
+    /// `exclusion constants;`
+    ExclusionConstants {
+        span: Span,
+    },
+    UpperCholesky {
+        span: Span,
+    },
+    LowerCholesky {
+        span: Span,
+    },
+    /// `restriction equation N, EXPR = EXPR;`
+    Restriction {
+        number: Option<i32>,
+        span: Span,
+        /// The restriction expression's span.
+        expr_span: Span,
+    },
+}
+
+/// One `equation N, name…;` row under an `exclusion lag` row.
+#[derive(Clone, Debug)]
+pub struct SvarEquation {
+    pub number: Option<i32>,
+    pub names: Vec<(Name, Span)>,
+    pub span: Span,
+}
+
+/// One parsed `conditional_forecast_paths;` … `end;` block.
+#[derive(Clone, Debug)]
+pub struct ConditionalForecastPaths {
+    /// Opener through `end;`.
+    pub span: Span,
+    pub rows: Vec<ConditionalForecastPath>,
+}
+
+/// One `var name; periods …; values …;` row.
+#[derive(Clone, Debug)]
+pub struct ConditionalForecastPath {
+    pub name: Name,
+    pub name_span: Span,
+    /// One entry per `periods` element; `1:4` counts as one entry.
+    pub periods: Vec<Span>,
+    pub periods_span: Span,
+    /// One entry per `values` element.
+    pub values: Vec<Span>,
+    pub values_span: Span,
+    /// The `var` row span.
+    pub span: Span,
+}
+
 /// `dsge_var` forms on one `estimation` statement.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EstimationDsgeVarStmt {
@@ -766,6 +959,29 @@ pub enum ShocksSemiFamily {
 impl Model {
     pub fn name(&self, name: Name) -> &str {
         self.intern.get(name)
+    }
+
+    /// The spans of every statement this parser read on purpose, so the text-level
+    /// passes (invalid identifiers, missing semicolons) can leave their contents
+    /// alone. Every parsed surface must be listed here, or the passes will read its
+    /// option values as declarations or as parameter assignments.
+    pub fn statement_spans(&self) -> Vec<Span> {
+        let mut spans: Vec<Span> = self
+            .ms_statements
+            .iter()
+            .map(|stmt| stmt.span)
+            .chain(self.data_statements.iter().map(|stmt| stmt.span))
+            .chain(self.dotted_statements.iter().map(|stmt| stmt.span))
+            .chain(self.ms_unparsed_spans.iter().copied())
+            .chain(self.svar_identifications.iter().map(|block| block.span))
+            .chain(
+                self.conditional_forecast_paths
+                    .iter()
+                    .map(|block| block.span),
+            )
+            .collect();
+        spans.sort_by_key(|span| (span.start, span.end));
+        spans
     }
 
     /// True when a `model_remove` took `name` out of the model **after** byte `at`: the

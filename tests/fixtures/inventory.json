@@ -7178,6 +7178,153 @@
       "source": "d_surgery.rs",
       "cluster": "d_surgery/e317_after_removal.mod",
       "notes": "optim_weights written after the removal: 7.1 refuses too"
+    },
+    {
+      "id": "d_ms_quiet_statements",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_ms",
+      "fixture": "tests/fixtures/d_ms/quiet_statements.mod",
+      "source": "d_ms.rs",
+      "cluster": "d_ms/quiet_statements.mod",
+      "notes": "every `;` statement of the family, one line each: 7.1 accepts it and no parse Error fires"
+    },
+    {
+      "id": "d_ms_quiet_blocks",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_ms",
+      "fixture": "tests/fixtures/d_ms/quiet_blocks.mod",
+      "source": "d_ms.rs",
+      "cluster": "d_ms/quiet_blocks.mod",
+      "notes": "svar_identification body rows plus a conditional_forecast_paths block: parsed, no Error"
+    },
+    {
+      "id": "d_ms_quiet_blocks_lower",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_ms",
+      "fixture": "tests/fixtures/d_ms/quiet_blocks_lower.mod",
+      "source": "d_ms.rs",
+      "cluster": "d_ms/quiet_blocks_lower.mod",
+      "notes": "lower_cholesky and a second conditional_forecast_paths block"
+    },
+    {
+      "id": "d_ms_quiet_prior",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_ms",
+      "fixture": "tests/fixtures/d_ms/quiet_prior.mod",
+      "source": "d_ms.rs",
+      "cluster": "d_ms/quiet_prior.mod",
+      "notes": "the dotted prior heads plus the options and subsamples heads"
+    },
+    {
+      "id": "d_ms_multiline_switching",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_ms",
+      "fixture": "tests/fixtures/d_ms/multiline_switching.mod",
+      "source": "d_ms.rs",
+      "cluster": "d_ms/multiline_switching.mod",
+      "notes": "false E001 shape 1: parameters=[alpha, delta, theta] is an option value, not a declaration"
+    },
+    {
+      "id": "d_ms_multiline_sbvar_prior",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_ms",
+      "fixture": "tests/fixtures/d_ms/multiline_sbvar_prior.mod",
+      "source": "d_ms.rs",
+      "cluster": "d_ms/multiline_sbvar_prior.mod",
+      "notes": "false E001 shape 2: multi-line option lists on sbvar, a dotted prior, and a dotted options"
+    },
+    {
+      "id": "d_ms_e001_assign_no_semi",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "d_ms",
+      "fixture": "tests/fixtures/d_ms/e001_assign_no_semi.mod",
+      "source": "d_ms.rs",
+      "cluster": "d_ms/e001_assign_no_semi.mod",
+      "notes": "a genuine parameter assignment with no `;` still fires E001"
+    },
+    {
+      "id": "d_ms_kept_extras",
+      "codes": [
+        "E271",
+        "W201",
+        "W160"
+      ],
+      "kind": "fire",
+      "package": "d_ms",
+      "fixture": "tests/fixtures/d_ms/kept_extras.mod",
+      "source": "d_ms.rs",
+      "cluster": "d_ms/kept_extras.mod",
+      "notes": "options declared twice on family statements, restriction_fname, and an unresolved datafile: all three shipped extras survive the parse"
+    },
+    {
+      "id": "d_ms_e239_undeclared_irf",
+      "codes": [
+        "E239"
+      ],
+      "kind": "fire",
+      "package": "d_ms",
+      "fixture": "tests/fixtures/d_ms/e239_undeclared_irf.mod",
+      "source": "d_ms.rs",
+      "cluster": "d_ms/e239_undeclared_irf.mod",
+      "notes": "ms_irf takes a trailing symbol list, so the shipped E239 reaches it"
+    },
+    {
+      "id": "d_ms_native_heads",
+      "codes": [
+        "E001",
+        "E271"
+      ],
+      "kind": "quiet",
+      "package": "d_ms",
+      "fixture": "tests/fixtures/d_ms/native_heads.mod",
+      "source": "d_ms.rs",
+      "cluster": "d_ms/native_heads.mod",
+      "notes": "lines 7.1 reads as native MATLAB: undeclared and later-declared dotted heads, sbvar_global_identification_check(paren), and a non-keyword call"
+    },
+    {
+      "id": "d_ms_excluded_heads",
+      "codes": [
+        "E271"
+      ],
+      "kind": "quiet",
+      "package": "d_ms",
+      "fixture": "tests/fixtures/d_ms/excluded_heads.mod",
+      "source": "d_ms.rs",
+      "cluster": "d_ms/excluded_heads.mod",
+      "notes": "a mod-file local and an external_function name as dotted heads: the pin sends both to native MATLAB"
+    },
+    {
+      "id": "d_ms_spreadsheet_range",
+      "codes": [
+        "E271"
+      ],
+      "kind": "quiet",
+      "package": "d_ms",
+      "fixture": "tests/fixtures/d_ms/spreadsheet_range.mod",
+      "source": "d_ms.rs",
+      "cluster": "d_ms/spreadsheet_range.mod",
+      "notes": "xls_range=A1:B10 keeps one value span, so the tail is not an option row"
     }
   ]
 }

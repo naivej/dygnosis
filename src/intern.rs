@@ -25,4 +25,9 @@ impl Interner {
     pub fn get(&self, name: Name) -> &str {
         &self.names[name.0 as usize]
     }
+
+    /// The `Name` of an already-interned spelling, or `None`.
+    pub fn lookup(&self, name: &str) -> Option<Name> {
+        self.map.get(name).copied().map(Name)
+    }
 }
