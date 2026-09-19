@@ -9,13 +9,13 @@ use crate::lexer::{tokenize, Token, TokenKind};
 use crate::macro_expand::expand_macros_full;
 use crate::model::{
     Assignment, ChangeTypeKind, ChangeTypeStmt, CommandSymbol, Complementarity,
-    ComplementarityTriple, Decl, DeprecatedOption, DerivSpec, Equation, EstimatedParam,
-    EstimatedParamKind, EstimationDsgeVarStmt, ExternalFunctionStmt, GenerateIrfsElement,
-    HistvalEntry, HomotopyRow, IncludeDirective, IncludePathDirective, Init2ShocksBlock,
-    Init2ShocksRow, MacroDirective, MacroInterp, Model, NonstationaryVar, ObservedVar,
-    OccbinConstraint, OccbinExpr, OptimWeight, OsrBound, ParseIssue, ParseIssueKind, PolicyCommand,
-    PolicyCommandStatement, RamseyConstraint, ShockGroup, ShockKind, ShockStmt, ShocksSemiFamily,
-    TrendVar,
+    ComplementarityTriple, Decl, DeprecatedOption, DerivSpec, Equation, EquationSurgery,
+    EstimatedParam, EstimatedParamKind, EstimationDsgeVarStmt, ExternalFunctionStmt,
+    GenerateIrfsElement, HistvalEntry, HomotopyRow, IncludeDirective, IncludePathDirective,
+    Init2ShocksBlock, Init2ShocksRow, MacroDirective, MacroInterp, Model, NonstationaryVar,
+    ObservedVar, OccbinConstraint, OccbinExpr, OptimWeight, OsrBound, ParseIssue, ParseIssueKind,
+    PolicyCommand, PolicyCommandStatement, RamseyConstraint, RemovedEquation, ShockGroup,
+    ShockKind, ShockStmt, ShocksSemiFamily, TrendVar,
 };
 use crate::span::Span;
 
@@ -643,6 +643,10 @@ impl Parser<'_> {
                 self.parse_optim_weights_block();
             } else if self.at_ident_ci("ramsey_constraints") {
                 self.parse_ramsey_constraints_block();
+            } else if self.at_ident_ci("model_remove") {
+                self.parse_equation_surgery(false);
+            } else if self.at_ident_ci("model_replace") {
+                self.parse_equation_surgery(true);
             } else if let Some(command) = self.at_policy_command() {
                 self.parse_policy_command(command);
             } else if self.at_skipped_block() {
@@ -871,6 +875,315 @@ impl Parser<'_> {
         }
         let end = self.finish_block_named("model", opener_span, body_i);
         self.model.model_block = Some(Span { start, end });
+    }
+
+    /// `model_remove(TAGS);` and `model_replace(TAGS); BODY end;`. 7.1 removes the
+    /// matching equations during parse, so the model object is post-removal everywhere.
+    fn parse_equation_surgery(&mut self, replace: bool) {
+        let keyword = if replace {
+            "model_replace"
+        } else {
+            "model_remove"
+        };
+        let start = self.bump().span.start;
+        let mut tag_sets: Vec<Vec<(String, String)>> = Vec::new();
+        let mut tag_twice: Vec<(String, Span)> = Vec::new();
+        let mut saw_tag = false;
+        if self.at(TokenKind::LParen) {
+            self.bump();
+            self.parse_surgery_tag_selection(keyword, &mut tag_sets, &mut tag_twice, &mut saw_tag);
+            self.eat(TokenKind::RParen);
+        }
+        let opener_end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        let span = Span {
+            start,
+            end: opener_end,
+        };
+        if !saw_tag {
+            self.record_issue(ParseIssue {
+                kind: ParseIssueKind::MissingSurgeryTag {
+                    keyword: keyword.to_string(),
+                },
+                span,
+            });
+        }
+        let (removed, unmatched) = self.take_surgery_equations(&tag_sets);
+        if !replace {
+            self.apply_excluded_type_change(&removed);
+        }
+        self.model.equation_surgery.push(EquationSurgery {
+            span,
+            replace,
+            tag_sets,
+            unmatched,
+            tag_twice,
+            removed,
+        });
+        if !replace {
+            return;
+        }
+        let body_i = self.i;
+        let mut n_equations = 0usize;
+        while !self.at(TokenKind::Eof) && !self.at_block_stop() {
+            if let Some((eq, range)) = self.parse_equation_statement() {
+                self.eq_token_ranges.push(range);
+                self.model.equations.push(eq);
+                n_equations += 1;
+            }
+        }
+        if n_equations == 0 {
+            let issue_span = self.tokens.get(self.i).map(|tok| tok.span).unwrap_or(span);
+            self.record_issue(ParseIssue {
+                kind: ParseIssueKind::EmptyReplaceBody,
+                span: issue_span,
+            });
+        }
+        if self.at_block_end() {
+            self.record_missing_final("model_replace", body_i, self.i);
+        }
+        self.finish_block_named("model_replace", span, body_i);
+    }
+
+    /// A surgery tag list: `'value'`, `key='value'`, or a bracketed pair list. Each
+    /// comma-separated element is one conjunctive set.
+    fn parse_surgery_tag_selection(
+        &mut self,
+        keyword: &str,
+        sets: &mut Vec<Vec<(String, String)>>,
+        twice: &mut Vec<(String, Span)>,
+        saw_tag: &mut bool,
+    ) {
+        loop {
+            if self.at(TokenKind::String) {
+                *saw_tag = true;
+                if let Some(value) = self.surgery_tag_string(keyword) {
+                    sets.push(vec![("name".to_string(), value)]);
+                }
+            } else if self.at(TokenKind::LBrack) {
+                *saw_tag = true;
+                let open = self.bump().span;
+                let mut pairs: Vec<(String, String)> = Vec::new();
+                let mut refused = false;
+                while !self.at(TokenKind::RBrack) && !self.at(TokenKind::Eof) {
+                    if self.at(TokenKind::Ident) {
+                        refused |= !self.parse_surgery_tag_pair(keyword, &mut pairs, twice);
+                    } else {
+                        self.bump();
+                    }
+                    if self.at(TokenKind::Comma) {
+                        self.bump();
+                    }
+                }
+                self.eat(TokenKind::RBrack);
+                if refused {
+                    // The set names a tag 7.1 refuses; it must not select equations.
+                } else if pairs.is_empty() {
+                    self.record_issue(ParseIssue {
+                        kind: ParseIssueKind::MissingSurgeryTag {
+                            keyword: keyword.to_string(),
+                        },
+                        span: Span {
+                            start: open.start,
+                            end: self.current_start(),
+                        },
+                    });
+                } else {
+                    sets.push(pairs);
+                }
+            } else if self.at(TokenKind::Ident) {
+                *saw_tag = true;
+                let mut pairs: Vec<(String, String)> = Vec::new();
+                let mut no_twice = Vec::new();
+                if self.parse_surgery_tag_pair(keyword, &mut pairs, &mut no_twice) {
+                    sets.push(pairs);
+                }
+            } else {
+                break;
+            }
+            if self.at(TokenKind::Comma) {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// One `key` / `key='value'` pair of a surgery tag list. 7.1 lowercases the key and
+    /// wants the value in single quotes; an unquoted value is refused, so `false` means
+    /// the pair — and the tag set it belongs to — is dropped.
+    fn parse_surgery_tag_pair(
+        &mut self,
+        keyword: &str,
+        pairs: &mut Vec<(String, String)>,
+        twice: &mut Vec<(String, Span)>,
+    ) -> bool {
+        let tok = self.bump();
+        let key = self.lexeme(&tok).to_ascii_lowercase();
+        let mut value = String::new();
+        if self.at(TokenKind::Eq) {
+            self.bump();
+            if self.at(TokenKind::String) {
+                let Some(text) = self.surgery_tag_string(keyword) else {
+                    return false;
+                };
+                value = text;
+            } else if self.at(TokenKind::Ident) || self.at(TokenKind::Number) {
+                let v = self.bump();
+                self.record_issue(ParseIssue {
+                    kind: ParseIssueKind::SurgeryTagUnquoted {
+                        keyword: keyword.to_string(),
+                    },
+                    span: v.span,
+                });
+                return false;
+            }
+        }
+        if pairs.iter().any(|(seen, _)| seen == &key) {
+            twice.push((key.clone(), tok.span));
+        }
+        pairs.push((key, value));
+        true
+    }
+
+    /// A quoted tag value. 7.1's lexer refuses the double quote outright, so such a
+    /// value is reported and dropped.
+    fn surgery_tag_string(&mut self, keyword: &str) -> Option<String> {
+        let tok = self.bump();
+        let raw = self.lexeme(&tok).to_string();
+        if raw.starts_with('"') {
+            self.record_issue(ParseIssue {
+                kind: ParseIssueKind::SurgeryTagDoubleQuoted {
+                    keyword: keyword.to_string(),
+                },
+                span: tok.span,
+            });
+            return None;
+        }
+        Some(unquote_string(&raw))
+    }
+
+    /// Remove every equation the tag sets match. Returns what went (with the position
+    /// each held before this statement) and the sets that matched nothing.
+    fn take_surgery_equations(
+        &mut self,
+        tag_sets: &[Vec<(String, String)>],
+    ) -> (Vec<RemovedEquation>, Vec<Vec<(String, String)>>) {
+        let mut drop = vec![false; self.model.equations.len()];
+        let mut unmatched = Vec::new();
+        for set in tag_sets {
+            let mut hit = false;
+            for (i, eq) in self.model.equations.iter().enumerate() {
+                if set
+                    .iter()
+                    .all(|(key, value)| eq.tag_map.get(key).is_some_and(|got| got == value))
+                {
+                    drop[i] = true;
+                    hit = true;
+                }
+            }
+            if !hit {
+                unmatched.push(set.clone());
+            }
+        }
+        let mut removed = Vec::new();
+        for (i, eq) in self.model.equations.iter().enumerate() {
+            if drop[i] {
+                removed.push(RemovedEquation {
+                    number: i + 1,
+                    endogenous: self.equation_named_endogenous(eq),
+                    equation: eq.clone(),
+                });
+            }
+        }
+        if !removed.is_empty() {
+            let before = self.model.equations.len();
+            let mut i = 0usize;
+            self.model.equations.retain(|_| {
+                let keep = !drop[i];
+                i += 1;
+                keep
+            });
+            if self.eq_token_ranges.len() == before {
+                let mut i = 0usize;
+                self.eq_token_ranges.retain(|_| {
+                    let keep = !drop[i];
+                    i += 1;
+                    keep
+                });
+            }
+        }
+        (removed, unmatched)
+    }
+
+    /// The endogenous a removed equation names: its `endogenous` tag value, or the one
+    /// endogenous symbol on its left side. `None` when it names none (7.1 refuses that file).
+    fn equation_named_endogenous(&self, eq: &Equation) -> Option<String> {
+        if let Some(name) = eq.tag_map.get("endogenous") {
+            if !name.is_empty() {
+                return Some(name.clone());
+            }
+        }
+        let id = eq.lhs_expr?;
+        let mut names: Vec<String> = Vec::new();
+        self.collect_names(id, true, &mut names);
+        if names.len() == 1 {
+            names.pop()
+        } else {
+            None
+        }
+    }
+
+    /// Distinct names used by an expression tree (`endogenous_only` keeps just declared
+    /// endogenous symbols — 7.1's left-side variable count).
+    fn collect_names(&self, id: ExprId, endogenous_only: bool, out: &mut Vec<String>) {
+        for ident in self.model.exprs.walk_idents(id) {
+            let keep = !endogenous_only
+                || self
+                    .model
+                    .endogenous
+                    .iter()
+                    .any(|decl| decl.name == ident.name);
+            let text = self.intern.get(ident.name).to_string();
+            if keep && !out.iter().any(|seen| seen == &text) {
+                out.push(text);
+            }
+        }
+    }
+
+    /// 7.1 changes the type of each removed equation's endogenous: exogenous while it is
+    /// still used somewhere, gone otherwise.
+    fn apply_excluded_type_change(&mut self, removed: &[RemovedEquation]) {
+        let names: Vec<String> = removed
+            .iter()
+            .filter_map(|row| row.endogenous.clone())
+            .collect();
+        if names.is_empty() {
+            return;
+        }
+        let mut used: Vec<String> = Vec::new();
+        for eq in &self.model.equations {
+            for id in [eq.lhs_expr, eq.rhs_expr].into_iter().flatten() {
+                self.collect_names(id, false, &mut used);
+            }
+        }
+        for name in names {
+            let Some(pos) = self
+                .model
+                .endogenous
+                .iter()
+                .position(|decl| self.intern.get(decl.name) == name.as_str())
+            else {
+                continue;
+            };
+            let decl = self.model.endogenous.remove(pos);
+            if used.iter().any(|seen| seen == &name) {
+                self.model.exogenous.push(decl);
+            }
+        }
     }
 
     fn parse_ss_block(&mut self) {
@@ -4376,7 +4689,6 @@ impl Parser<'_> {
         const BLOCKS: &[&str] = &[
             "matched_irfs",
             "verbatim",
-            "model_replace",
             "heteroskedastic_shocks",
             "shock_paths",
             "perfect_foresight_controlled_paths",

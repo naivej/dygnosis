@@ -526,6 +526,50 @@ fn format_recorded_issues(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
                     }),
                 ));
             }
+            ParseIssueKind::MissingSurgeryTag { keyword } => {
+                let line = index.position(src, issue.span.start).line + 1;
+                out.push(e001(
+                    issue.span,
+                    format!(
+                        "Missing equation tag in the '{keyword}' statement (line {line}). \
+                         Fix: list a tag, e.g. {keyword}('eq1');."
+                    ),
+                    None,
+                ));
+            }
+            ParseIssueKind::SurgeryTagDoubleQuoted { keyword } => {
+                let line = index.position(src, issue.span.start).line + 1;
+                out.push(e001(
+                    issue.span,
+                    format!(
+                        "Double-quoted tag in the '{keyword}' statement (line {line}). \
+                         Fix: use single quotes, e.g. 'eq1'."
+                    ),
+                    None,
+                ));
+            }
+            ParseIssueKind::SurgeryTagUnquoted { keyword } => {
+                let line = index.position(src, issue.span.start).line + 1;
+                out.push(e001(
+                    issue.span,
+                    format!(
+                        "Unquoted tag value in the '{keyword}' statement (line {line}). \
+                         Fix: quote the value, e.g. name='eq1'."
+                    ),
+                    None,
+                ));
+            }
+            ParseIssueKind::EmptyReplaceBody => {
+                let line = index.position(src, issue.span.start).line + 1;
+                out.push(e001(
+                    issue.span,
+                    format!(
+                        "Missing equation in the 'model_replace' block (line {line}). \
+                         Fix: add an equation before 'end;'."
+                    ),
+                    None,
+                ));
+            }
             ParseIssueKind::KeywordTypo { found, correct } => {
                 let start = index.position(src, issue.span.start);
                 let end = index.position(src, issue.span.end);

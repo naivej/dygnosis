@@ -1,0 +1,23 @@
+// inventory: d_surgery_quiet_replace
+var c k;
+varexo x;
+parameters aa alph bet delt gam;
+aa = 1;
+alph = 0.33;
+bet = 0.99;
+delt = 0.025;
+gam = 1;
+model;
+[name='e1'] c + k = aa*x*k(-1)^alph;
+[name='e2'] c^(-gam) = (aa*alph*x(+1)*k^(alph-1) + 1 - delt)*c(+1)^(-gam)/(1+bet);
+end;
+shocks;
+var x = 0.01;
+end;
+initval;
+c = 1;
+k = 1;
+end;
+model_replace('e1');
+c = k;
+end;

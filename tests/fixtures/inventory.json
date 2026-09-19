@@ -6875,6 +6875,114 @@
       "source": "d_extfun.rs",
       "cluster": "d_extfun/quiet_e334_no_name_option.mod",
       "notes": "the no-name= shape is E322's, not this Error"
+    },
+    {
+      "id": "d_surgery_e001_empty_tag_list",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e001_empty_tag_list.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e001_empty_tag_list.mod",
+      "notes": "model_remove(); is bison junk in 7.1"
+    },
+    {
+      "id": "d_surgery_e001_double_quoted_tag",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e001_double_quoted_tag.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e001_double_quoted_tag.mod",
+      "notes": "double-quoted tag is lexer junk in 7.1"
+    },
+    {
+      "id": "d_surgery_e001_empty_replace_body",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e001_empty_replace_body.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e001_empty_replace_body.mod",
+      "notes": "model_replace wants an equation list before end;"
+    },
+    {
+      "id": "d_surgery_quiet_remove",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/quiet_remove.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/quiet_remove.mod",
+      "notes": "legal model_remove: the equation leaves the model, no E001"
+    },
+    {
+      "id": "d_surgery_quiet_remove_exo",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/quiet_remove_exo.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/quiet_remove_exo.mod",
+      "notes": "removed endogenous still used becomes exogenous"
+    },
+    {
+      "id": "d_surgery_quiet_tag_forms",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/quiet_tag_forms.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/quiet_tag_forms.mod",
+      "notes": "bare flag pair and a bracketed conjunction both match"
+    },
+    {
+      "id": "d_surgery_quiet_replace",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/quiet_replace.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/quiet_replace.mod",
+      "notes": "model_replace body equations join the model"
+    },
+    {
+      "id": "d_surgery_e001_unquoted_tag_value",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e001_unquoted_tag_value.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e001_unquoted_tag_value.mod",
+      "notes": "model_remove([name=e3]) wants the value quoted"
+    },
+    {
+      "id": "d_surgery_quiet_remove_many",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/quiet_remove_many.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/quiet_remove_many.mod",
+      "notes": "one bracketed tag set removes two equations"
     }
   ]
 }

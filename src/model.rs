@@ -42,6 +42,35 @@ pub struct Equation {
     pub complementarity: Option<Complementarity>,
 }
 
+/// One `model_remove` / `model_replace` statement and what it matched.
+#[derive(Clone, Debug)]
+pub struct EquationSurgery {
+    /// Keyword span of the statement.
+    pub span: Span,
+    /// `true` for a `model_replace` block.
+    pub replace: bool,
+    /// The tag sets the statement listed; a set matches when every pair matches.
+    pub tag_sets: Vec<Vec<(String, String)>>,
+    /// Tag sets that matched no equation.
+    pub unmatched: Vec<Vec<(String, String)>>,
+    /// Keys listed twice inside one bracketed set.
+    pub tag_twice: Vec<(String, Span)>,
+    /// The equations it removed, in file order.
+    pub removed: Vec<RemovedEquation>,
+}
+
+/// An equation a surgery statement removed.
+#[derive(Clone, Debug)]
+pub struct RemovedEquation {
+    /// The equation as parsed, with its tags and spans.
+    pub equation: Equation,
+    /// 1-based position in the equation list before the statement ran.
+    pub number: usize,
+    /// The endogenous the equation names: its `endogenous` tag value, or the
+    /// single endogenous symbol on its left side. `None` when it names none.
+    pub endogenous: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct OccbinExpr {
     pub text: String,
@@ -308,6 +337,8 @@ pub struct Model {
     pub param_assignments: Vec<Assignment>,
     pub helper_assignments: Vec<Assignment>,
     pub equations: Vec<Equation>,
+    /// `model_remove` / `model_replace` statements, file order, with what each removed.
+    pub equation_surgery: Vec<EquationSurgery>,
     pub steady_state_equations: Vec<Equation>,
     pub initval: Vec<Assignment>,
     pub endval: Vec<Assignment>,
@@ -670,6 +701,20 @@ pub enum ParseIssueKind {
         keyword: String,
         body_code_end: u32,
     },
+    /// `model_remove;` / `model_remove();` / `model_remove([]);`
+    MissingSurgeryTag {
+        keyword: String,
+    },
+    /// `model_remove("tag");` — 7.1's lexer refuses the double quote.
+    SurgeryTagDoubleQuoted {
+        keyword: String,
+    },
+    /// `model_remove([name=e1]);` — 7.1 wants the value in single quotes.
+    SurgeryTagUnquoted {
+        keyword: String,
+    },
+    /// `model_replace('tag'); end;` — the grammar wants an equation list.
+    EmptyReplaceBody,
     KeywordTypo {
         found: String,
         correct: String,

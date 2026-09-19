@@ -1,0 +1,21 @@
+// inventory: d_surgery_quiet_tag_forms
+var c k dummy1;
+varexo x;
+parameters aa alph bet delt gam;
+aa = 1;
+alph = 0.33;
+bet = 0.99;
+delt = 0.025;
+gam = 1;
+model;
+[name='e1', foo] c = -k + aa*x*k(-1)^alph + (1-delt)*k(-1);
+[name='e2'] c^(-gam) = (aa*alph*x(+1)*k^(alph-1) + 1 - delt)*c(+1)^(-gam)/(1+bet);
+[name='e3', endogenous='dummy1'] dummy1 = k;
+end;
+shocks;
+var x = 0.01;
+end;
+initval;
+k = 1;
+end;
+model_remove(foo, [name='e3', endogenous='dummy1']);
