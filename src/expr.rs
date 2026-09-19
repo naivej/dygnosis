@@ -94,6 +94,14 @@ impl ExprArena {
         &self.nodes[id.0 as usize]
     }
 
+    /// Every expression in the arena, in allocation order.
+    pub fn iter(&self) -> impl Iterator<Item = (ExprId, &Expr)> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .map(|(i, expr)| (ExprId(i as u32), expr))
+    }
+
     /// Visits `Ident` nodes only (not Call callees, not String/Number contents).
     pub fn walk_idents(&self, root: ExprId) -> impl Iterator<Item = IdentRef> {
         let mut out = Vec::new();

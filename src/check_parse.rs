@@ -1,6 +1,8 @@
 //! E001 parse diagnostics. Token/AST walks; Python supplies messages, not regex.
 
 use crate::diagnostic::{Diagnostic, Severity, TextEdit};
+use crate::expr::ExprKind;
+use crate::intern::Name;
 use crate::lexer::{tokenize, Token, TokenKind};
 use crate::model::{Decl, Model, ParseIssueKind, ShocksSemiFamily};
 use crate::span::{LineIndex, Span};
@@ -135,10 +137,88 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
     out.extend(format_recorded_issues(model, &index));
     out.extend(invalid_ident_diags(model, &tokens, &index));
     out.extend(reserved_ident_diags(model, &index));
+    out.extend(reserved_symbol_use_diags(model));
     out.extend(merged_equation_diags(model, &tokens, &index, &out));
     out.extend(merged_assignment_diags(model, &tokens, &index, &out));
     out.extend(unbalanced_paren_diags(model, &tokens));
     out
+}
+
+/// `dsge_prior_weight` is a reserved preprocessor symbol. 7.1's lexer turns it
+/// into a token wherever an expression is expected, and the grammar refuses the
+/// token there — while a declaration list and `estimated_params` may name it.
+/// The expression arena covers every expression; the name slots below are the
+/// blocks that name a symbol without building an expression for it.
+/// `shocks` / `mshocks` var lists are the exception: their names carry no span
+/// of their own, and the shock type checks (E266–E270, their texts) refuse
+/// them instead.
+const RESERVED_SYMBOL: &str = "dsge_prior_weight";
+
+fn reserved_symbol_use_diags(model: &Model) -> Vec<Diagnostic> {
+    let mut spans: Vec<Span> = Vec::new();
+    for (_, expr) in model.exprs.iter() {
+        if let ExprKind::Ident {
+            name, ident_span, ..
+        } = &expr.kind
+        {
+            if model.name(*name) == RESERVED_SYMBOL {
+                spans.push(*ident_span);
+            }
+        }
+    }
+
+    let mut slots: Vec<(Name, Span)> = Vec::new();
+    for entry in model.initval.iter().chain(&model.endval) {
+        slots.push((entry.name, entry.span));
+    }
+    for entry in model.histval.iter().chain(&model.filter_initial_state) {
+        slots.push((entry.name, entry.span));
+    }
+    for block in &model.init2shocks_blocks {
+        for row in &block.rows {
+            slots.push((row.endo, row.endo_span));
+            slots.push((row.exo, row.exo_span));
+        }
+    }
+    for row in &model.homotopy_rows {
+        slots.push((row.name, row.span));
+    }
+    for group in &model.shock_groups {
+        slots.extend(group.members.iter().copied());
+    }
+    for row in &model.optim_weights {
+        slots.push((row.first, row.first_span));
+        if let Some(second) = row.second {
+            if let Some(span) = row.second_span {
+                slots.push((second, span));
+            }
+        }
+    }
+    slots.extend(model.observation_trends.iter().copied());
+    for assignment in &model.epilogue {
+        slots.push((assignment.name, assignment.span));
+    }
+    for (name, span) in slots {
+        if model.name(name) == RESERVED_SYMBOL {
+            spans.push(span);
+        }
+    }
+
+    spans.sort_by_key(|span| (span.start, span.end));
+    spans.dedup();
+    spans
+        .into_iter()
+        .map(|span| {
+            e001(
+                span,
+                format!(
+                    "Invalid use of '{RESERVED_SYMBOL}': reserved preprocessor symbol, \
+                     allowed only in a declaration. Choose a different name."
+                ),
+                None,
+            )
+        })
+        .collect()
 }
 
 pub fn has_structural_error(model: &Model) -> bool {

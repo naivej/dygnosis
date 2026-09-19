@@ -1928,6 +1928,180 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         our_needle: "in shock_groups is not declared",
         stage: JsonStage::Check,
     },
+    HonestyRow {
+        code: "E030",
+        fixture: "d_gap/e030_trend_mixed.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "declared twice with different types",
+        our_needle: "declared twice with different types",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E030",
+        fixture: "d_gap/e030_trend_and_var.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "declared twice with different types",
+        our_needle: "declared twice with different types",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E030",
+        fixture: "d_gap/e030_epilogue_and_var.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "declared twice with different types",
+        our_needle: "declared twice with different types",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W031",
+        fixture: "d_gap/w031_trend_same_kind.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "Symbol A declared twice",
+        our_needle: "Symbol A declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W031",
+        fixture: "d_gap/w031_epilogue_dup.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "Symbol foo declared twice",
+        our_needle: "Symbol foo declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "d_gap/e001_dsge_prior_weight_use.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "unexpected DSGE_PRIOR_WEIGHT",
+        our_needle: "reserved preprocessor symbol",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "d_gap/e001_dsge_prior_weight_slot.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "unexpected DSGE_PRIOR_WEIGHT",
+        our_needle: "reserved preprocessor symbol",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E287",
+        fixture: "d_gap/w031_epilogue_dup.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "in the 'epilogue' block, variable",
+        our_needle: "in the 'epilogue' block, variable 'foo' is declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E307",
+        fixture: "d_gap/w031_trend_same_kind.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Trend variable A was declared twice",
+        our_needle: "Trend variable A was declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W031",
+        fixture: "d_open/e287_epilogue_dup.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "Symbol foo declared twice",
+        our_needle: "Symbol foo declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W031",
+        fixture: "d_open/e307_trend_twice.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "Symbol A declared twice",
+        our_needle: "Symbol A declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W031",
+        fixture: "d_open/e308_trend_listed_twice.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "Symbol y declared twice",
+        our_needle: "Symbol y declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W031",
+        fixture: "d_open/e309_deflator_nonstationary.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "Symbol z declared twice",
+        our_needle: "Symbol z declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W031",
+        fixture: "d_open/e309_deflator_nonstationary.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "Symbol w declared twice",
+        our_needle: "Symbol w declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W031",
+        fixture: "d_open/e326_extfun_nargs_mismatch.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "Symbol foo declared twice",
+        our_needle: "Symbol foo declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W031",
+        fixture: "d_open/e327_extfun_first_deriv_mismatch.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "Symbol foo declared twice",
+        our_needle: "Symbol foo declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W150",
+        fixture: "d_open/e298_ramsey_model_after_policy.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "statement is deprecated",
+        our_needle: "'ramsey_policy' is deprecated",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W150",
+        fixture: "d_open/e299_ramsey_policy_after_model.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "statement is deprecated",
+        our_needle: "'ramsey_policy' is deprecated",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W150",
+        fixture: "d_open/e300_ramsey_policy_twice.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "statement is deprecated",
+        our_needle: "'ramsey_policy' is deprecated",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W150",
+        fixture: "d_open/e302_planner_discount_policy.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "statement is deprecated",
+        our_needle: "'ramsey_policy' is deprecated",
+        stage: JsonStage::Check,
+    },
 ];
 
 struct ClashQuiet {
@@ -2208,17 +2382,21 @@ fn honesty_fire_table() {
                         "{} check_file must emit {}, got {own_codes:?}",
                         row.fixture, row.code
                     ));
-                } else {
-                    let ours = own_file
-                        .iter()
-                        .find(|d| d.code == row.code)
-                        .expect(row.code);
-                    if !ours.message.contains(row.our_needle) {
-                        failures.push(format!(
-                            "{} own {} missing {:?}: {}",
-                            row.fixture, row.code, row.our_needle, ours.message
-                        ));
-                    }
+                } else if !own_file
+                    .iter()
+                    .any(|d| d.code == row.code && d.message.contains(row.our_needle))
+                {
+                    failures.push(format!(
+                        "{} own {} missing {:?} on every row: {:?}",
+                        row.fixture,
+                        row.code,
+                        row.our_needle,
+                        own_file
+                            .iter()
+                            .filter(|d| d.code == row.code)
+                            .map(|d| d.message.as_str())
+                            .collect::<Vec<_>>()
+                    ));
                 }
                 if !workspace_only {
                     let own_analyze = analyze(&parse(&text));
@@ -2268,10 +2446,13 @@ fn honesty_fire_table() {
                                 row.fixture, row.code, ours.severity
                             ));
                         }
-                        if !ours.message.contains(row.our_needle) {
+                        if !own_file
+                            .iter()
+                            .any(|d| d.code == row.code && d.message.contains(row.our_needle))
+                        {
                             failures.push(format!(
-                                "{} own {} missing {:?}: {}",
-                                row.fixture, row.code, row.our_needle, ours.message
+                                "{} own {} missing {:?} on every row",
+                                row.fixture, row.code, row.our_needle
                             ));
                         }
                     }
@@ -2400,6 +2581,76 @@ fn clash_quiet_at_transform() {
     assert!(
         failures.is_empty(),
         "clash quiet transform failed:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// Official messages we knowingly do not mirror on a surface file, with the
+/// reason. Anything else must be claimed by a `HONESTY_FIRE` needle.
+const SURFACE_WAIVERS: &[(&str, &str)] = &[(
+    // 7.1 puts the top-level function name in its symbol table for the bare
+    // `first_deriv_provided` / `second_deriv_provided` forms, so a named
+    // statement beside them reads as a second declaration. We do not model the
+    // implicit name; the paired **E328** still refuses the file on both sides.
+    "d_open/e328_extfun_first_top_second_named.mod",
+    "Symbol foo declared twice",
+)];
+
+/// Every official ERROR/WARNING line on a D-open / D-gap surface file must be
+/// claimed by a needle in `HONESTY_FIRE` for that fixture (or waived above).
+/// This is the direction honesty rows cannot see: they check the codes we know
+/// about, this checks the messages they print. Official lines that carry no
+/// `ERROR: ` / `WARNING: ` prefix are out of scope here.
+fn official_message_lines(result: &dygnosis::preprocessor::PreprocessorResult) -> Vec<String> {
+    result
+        .raw_stdout
+        .lines()
+        .chain(result.raw_stderr.lines())
+        .filter(|line| line.starts_with("ERROR: ") || line.starts_with("WARNING: "))
+        .map(|line| line.trim().to_string())
+        .collect()
+}
+
+#[test]
+fn surface_matrix_claims_every_official_message() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    let mut fixtures: Vec<&str> = HONESTY_FIRE
+        .iter()
+        .map(|row| row.fixture)
+        .filter(|fixture| fixture.starts_with("d_open/") || fixture.starts_with("d_gap/"))
+        .collect();
+    fixtures.sort_unstable();
+    fixtures.dedup();
+
+    let mut failures = Vec::new();
+    for fixture in fixtures {
+        let path = honesty_mod_path(fixture);
+        let text = read_path(&path);
+        let result = spawn(&text, &path, &pp, JsonStage::Check);
+        let claims: Vec<&str> = HONESTY_FIRE
+            .iter()
+            .filter(|row| row.fixture == fixture)
+            .map(|row| row.their_needle)
+            .collect();
+        for line in official_message_lines(&result) {
+            if claims.iter().any(|needle| line.contains(needle)) {
+                continue;
+            }
+            if SURFACE_WAIVERS
+                .iter()
+                .any(|(waived, needle)| *waived == fixture && line.contains(needle))
+            {
+                continue;
+            }
+            failures.push(format!("{fixture}: unclaimed official message {line:?}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "surface matrix failed:\n{}",
         failures.join("\n")
     );
 }

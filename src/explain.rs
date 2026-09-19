@@ -44,7 +44,7 @@ pub struct ExplainEntry {
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
-        body: "The Dynare parser could not interpret the source. The diagnostic range points at the offending token or the nearest recoverable position. Dynare refuses with a generic bison `ERROR` at a location.\n\n**Warrant**\n\nThe editor names the missing construct and points at a usable range; Dynare's bison location is often the next token.\n\n**Common causes**\n\n- Missing semicolon at the end of a declaration or equation\n- Unbalanced parentheses, braces, or block keywords\n- Malformed time subscript such as `y(1)` where `y(+1)` was meant\n- A reserved keyword used as an identifier\n\n**Fix**\n\nInspect the line cited and the line immediately preceding it. Dynare's preprocessor frequently flags the *next* line after a missing semicolon.",
+        body: "The Dynare parser could not interpret the source. The diagnostic range points at the offending token or the nearest recoverable position. Dynare refuses with a generic bison `ERROR` at a location.\n\n**Warrant**\n\nThe editor names the missing construct and points at a usable range; Dynare's bison location is often the next token. When a reserved preprocessor symbol (`dsge_prior_weight`) is used outside a declaration, the message names the symbol and the positions that accept it, instead of Dynare's bare `unexpected DSGE_PRIOR_WEIGHT`.\n\n**Common causes**\n\n- Missing semicolon at the end of a declaration or equation\n- Unbalanced parentheses, braces, or block keywords\n- Malformed time subscript such as `y(1)` where `y(+1)` was meant\n- A reserved keyword used as an identifier\n- A reserved preprocessor symbol used where an expression is expected\n\n**Fix**\n\nInspect the line cited and the line immediately preceding it. Dynare's preprocessor frequently flags the *next* line after a missing semicolon.",
         kind: ExplainKind::Shared,
     }),
     ("W013", ExplainEntry {
@@ -89,12 +89,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E030", ExplainEntry {
         title: "Duplicate declaration across types or `#` twice",
-        body: "The same identifier is declared in two different blocks (for example both `var` and `varexo`), or a model-local `#` name is defined twice. Dynare refuses: `Symbol y declared twice with different types!` and `Local model variable foo declared twice.`\n\n**Fix**\n\nRemove the extra declaration. If you intended two related but distinct symbols, rename one.",
+        body: "The same identifier is declared in two different blocks (for example both `var` and `varexo`), in two different trend forms (`trend_var` and `log_trend_var`), or both in a declaration and in the `epilogue` block or an `external_function` name. A model-local `#` name defined twice is the same code. Dynare refuses: `Symbol y declared twice with different types!` and `Local model variable foo declared twice.`\n\n**Fix**\n\nRemove the extra declaration. If you intended two related but distinct symbols, rename one.",
         kind: ExplainKind::Shared,
     }),
     ("W031", ExplainEntry {
         title: "Symbol declared twice with the same type",
-        body: "The same identifier is declared more than once in `var`, `varexo`, `varexo_det`, or `parameters`. Dynare accepts and warns `Symbol y declared twice.`\n\n**Fix**\n\nRemove the redundant declaration.",
+        body: "The same identifier is declared more than once with the same type: in `var`, `varexo`, `varexo_det`, or `parameters`, as the same trend form twice, twice in the `epilogue` block, or as the name of two `external_function` statements. Dynare accepts and warns `Symbol y declared twice.`\n\n**Fix**\n\nRemove the redundant declaration.",
         kind: ExplainKind::Shared,
     }),
     ("W054", ExplainEntry {

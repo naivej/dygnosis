@@ -5,6 +5,5 @@ parameters rho;
 rho = 0.5;
 model;
 y = rho * y(-1) + e;
-dsge_prior_weight = 0;
 end;
 estimation(dsge_var=0.5, datafile='d.csv');

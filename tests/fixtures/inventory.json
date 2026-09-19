@@ -6641,6 +6641,117 @@
       "source": "d_open.rs",
       "cluster": "d_open/quiet_change_type.mod",
       "notes": "declared change_type is quiet"
+    },
+    {
+      "id": "e030_trend_mixed",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "d_gap",
+      "fixture": "tests/fixtures/d_gap/e030_trend_mixed.mod",
+      "source": "d_gap.rs",
+      "cluster": "d_gap/e030_trend_mixed.mod",
+      "notes": "the two trend forms on one name"
+    },
+    {
+      "id": "e030_trend_and_var",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "d_gap",
+      "fixture": "tests/fixtures/d_gap/e030_trend_and_var.mod",
+      "source": "d_gap.rs",
+      "cluster": "d_gap/e030_trend_and_var.mod",
+      "notes": "trend name also declared var"
+    },
+    {
+      "id": "e030_epilogue_and_var",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "d_gap",
+      "fixture": "tests/fixtures/d_gap/e030_epilogue_and_var.mod",
+      "source": "d_gap.rs",
+      "cluster": "d_gap/e030_epilogue_and_var.mod",
+      "notes": "epilogue helper also declared var"
+    },
+    {
+      "id": "w031_trend_same_kind",
+      "codes": [
+        "W031"
+      ],
+      "kind": "fire",
+      "package": "d_gap",
+      "fixture": "tests/fixtures/d_gap/w031_trend_same_kind.mod",
+      "source": "d_gap.rs",
+      "cluster": "d_gap/w031_trend_same_kind.mod",
+      "notes": "same trend form listed twice"
+    },
+    {
+      "id": "w031_epilogue_dup",
+      "codes": [
+        "W031"
+      ],
+      "kind": "fire",
+      "package": "d_gap",
+      "fixture": "tests/fixtures/d_gap/w031_epilogue_dup.mod",
+      "source": "d_gap.rs",
+      "cluster": "d_gap/w031_epilogue_dup.mod",
+      "notes": "epilogue helper assigned twice"
+    },
+    {
+      "id": "quiet_legal_trends",
+      "codes": [
+        "E030",
+        "W031",
+        "E307",
+        "E287"
+      ],
+      "kind": "quiet",
+      "package": "d_gap",
+      "fixture": "tests/fixtures/d_gap/quiet_legal_trends.mod",
+      "source": "d_gap.rs",
+      "cluster": "d_gap/quiet_legal_trends.mod",
+      "notes": "legal trend, deflator and epilogue names are quiet"
+    },
+    {
+      "id": "e001_dsge_prior_weight_use",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "d_gap",
+      "fixture": "tests/fixtures/d_gap/e001_dsge_prior_weight_use.mod",
+      "source": "d_gap.rs",
+      "cluster": "d_gap/e001_dsge_prior_weight_use.mod",
+      "notes": "reserved symbol used in the model block"
+    },
+    {
+      "id": "e001_dsge_prior_weight_slot",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "d_gap",
+      "fixture": "tests/fixtures/d_gap/e001_dsge_prior_weight_slot.mod",
+      "source": "d_gap.rs",
+      "cluster": "d_gap/e001_dsge_prior_weight_slot.mod",
+      "notes": "reserved symbol in an optim_weights name slot"
+    },
+    {
+      "id": "quiet_dsge_prior_weight_decl",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_gap",
+      "fixture": "tests/fixtures/d_gap/quiet_dsge_prior_weight_decl.mod",
+      "source": "d_gap.rs",
+      "cluster": "d_gap/quiet_dsge_prior_weight_decl.mod",
+      "notes": "declaration plus estimated_params listing stay accepted"
     }
   ]
 }
