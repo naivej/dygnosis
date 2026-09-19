@@ -579,6 +579,8 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("block_static", "Prints out the block decomposition of the static model."),
         ("incidence", "Displays the gross incidence matrix and the reordered incidence matrix of the block decomposed model for the block_dynamic or block_static options."),
     ]),
+    ("model_remove", &[]),
+    ("model_replace", &[]),
     ("ms_compute_mdd", &[
         ("file_tag", "The portion of the filename associated with this run."),
         ("output_file_tag", "The portion of the output filename that will be assigned to this run."),

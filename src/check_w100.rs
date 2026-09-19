@@ -123,12 +123,16 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
                 })
             })
             .collect();
+        let planner_span = model.planner_objective_span.unwrap_or(FALLBACK);
         let exo_in_planner = model.exprs.walk_idents(id).any(|r| {
-            !endo.contains(&r.name) && !params.contains(&r.name) && !locals.contains(&r.name)
+            !model.dropped_by_surgery_after(r.name, planner_span.start)
+                && !endo.contains(&r.name)
+                && !params.contains(&r.name)
+                && !locals.contains(&r.name)
         });
         if exo_in_planner {
             diagnostics.push(Diagnostic::new(
-                model.planner_objective_span.unwrap_or(FALLBACK),
+                planner_span,
                 Severity::Error,
                 "E251",
                 "You cannot include exogenous variables (or variables of undeclared type) in the planner objective. Please define an auxiliary endogenous variable like eps_aux=epsilon and use it instead of the varexo.",

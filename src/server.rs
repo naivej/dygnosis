@@ -31,6 +31,8 @@ const DYNARE_KEYWORDS: &[(&str, &str)] = &[
     ("varexo", "Declare exogenous variables"),
     ("parameters", "Declare parameters"),
     ("model", "Begin model equation block"),
+    ("model_remove", "Remove equations by tag"),
+    ("model_replace", "Replace equations by tag"),
     ("end", "End a block"),
     ("steady_state_model", "Define steady state computation"),
     ("initval", "Set initial values for steady state computation"),

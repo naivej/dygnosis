@@ -15,7 +15,7 @@ use crate::model::{
     Init2ShocksBlock, Init2ShocksRow, MacroDirective, MacroInterp, Model, NonstationaryVar,
     ObservedVar, OccbinConstraint, OccbinExpr, OptimWeight, OsrBound, ParseIssue, ParseIssueKind,
     PolicyCommand, PolicyCommandStatement, RamseyConstraint, RemovedEquation, ShockGroup,
-    ShockKind, ShockStmt, ShocksSemiFamily, TrendVar,
+    ShockKind, ShockStmt, ShocksSemiFamily, SurgeryExit, SurgeryKind, TrendVar,
 };
 use crate::span::Span;
 
@@ -917,7 +917,7 @@ impl Parser<'_> {
         }
         let (removed, unmatched) = self.take_surgery_equations(&tag_sets);
         if !replace {
-            self.apply_excluded_type_change(&removed);
+            self.apply_excluded_type_change(&removed, span);
         }
         self.model.equation_surgery.push(EquationSurgery {
             span,
@@ -1143,8 +1143,10 @@ impl Parser<'_> {
     }
 
     /// 7.1 changes the type of each removed equation's endogenous: exogenous while it is
-    /// still used somewhere, gone otherwise.
-    fn apply_excluded_type_change(&mut self, removed: &[RemovedEquation]) {
+    /// still used somewhere, gone otherwise. Each name leaves a record with the
+    /// statement's span, so a later check can tell whether a statement read it while it
+    /// was still endogenous.
+    fn apply_excluded_type_change(&mut self, removed: &[RemovedEquation], span: Span) {
         let names: Vec<String> = removed
             .iter()
             .filter_map(|row| row.endogenous.clone())
@@ -1168,12 +1170,20 @@ impl Parser<'_> {
                 continue;
             };
             let decl = self.model.endogenous.remove(pos);
-            if used.iter().any(|seen| seen == &name) {
+            let name_id = decl.name;
+            let exit = if used.iter().any(|seen| seen == &name) {
                 self.model.exogenous.push(decl);
+                SurgeryKind::Exogenous
             } else {
                 self.prune_dropped_symbol(&decl);
                 self.model.excluded_endogenous.push(decl);
-            }
+                SurgeryKind::Dropped
+            };
+            self.model.surgery_exits.push(SurgeryExit {
+                name: name_id,
+                statement: span,
+                kind: exit,
+            });
         }
     }
 

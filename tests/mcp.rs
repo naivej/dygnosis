@@ -749,6 +749,20 @@ fn list_options_handler_matches_expected() {
 }
 
 #[test]
+fn surgery_statements_are_known_commands_without_options() {
+    for command in ["model_remove", "model_replace"] {
+        assert!(dygnosis::catalog::is_known_command(command), "{command}");
+        assert!(
+            dygnosis::catalog::command_options(command).is_empty(),
+            "{command}"
+        );
+    }
+    let payload = dynare_list_options(Some("model_remove"));
+    assert_eq!(payload["known"], Value::Bool(true));
+    assert_eq!(payload["n_options"], Value::Number(0.into()));
+}
+
+#[test]
 fn find_references_betta_skips_comment() {
     let base = read_mod("trend_rbc_gov_inv");
     let text = format!("// betta\n{base}");

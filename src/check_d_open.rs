@@ -738,6 +738,10 @@ fn check_optim_weights(model: &Model) -> Vec<Diagnostic> {
             if endo.contains(&name) {
                 continue;
             }
+            // 7.1 read this row while the symbol was still endogenous (close call 1a).
+            if model.surgery_exit_after(name, span.start) {
+                continue;
+            }
             if params.contains(&name) || exo.contains(&name) || exo_det.contains(&name) {
                 out.push(err(
                     span,
@@ -758,7 +762,7 @@ enum RamseyMatch {
     Malformed,
 }
 
-fn match_ramsey_constraint(model: &Model, id: ExprId) -> RamseyMatch {
+fn match_ramsey_constraint(model: &Model, id: ExprId, at: u32) -> RamseyMatch {
     let ExprKind::Binary { op, lhs, rhs } = &model.exprs.get(id).kind else {
         return RamseyMatch::NotAnInequality;
     };
@@ -768,14 +772,14 @@ fn match_ramsey_constraint(model: &Model, id: ExprId) -> RamseyMatch {
         BinOp::Lt | BinOp::Le => false,
         _ => return RamseyMatch::NotAnInequality,
     };
-    if let Some(name) = contemporaneous_endo(model, lhs) {
-        if !is_constant_bound(model, rhs) {
+    if let Some(name) = contemporaneous_endo(model, lhs, at) {
+        if !is_constant_bound(model, rhs, at) {
             return RamseyMatch::BoundsNotConstant;
         }
         return RamseyMatch::Triple(name);
     }
-    if let Some(name) = contemporaneous_endo(model, rhs) {
-        if !is_constant_bound(model, lhs) {
+    if let Some(name) = contemporaneous_endo(model, rhs, at) {
+        if !is_constant_bound(model, lhs, at) {
             return RamseyMatch::BoundsNotConstant;
         }
         return RamseyMatch::Triple(name);
@@ -800,33 +804,34 @@ fn match_ramsey_constraint(model: &Model, id: ExprId) -> RamseyMatch {
     if !same_dir {
         return RamseyMatch::Malformed;
     }
-    let Some(name) = contemporaneous_endo(model, inner_rhs) else {
+    let Some(name) = contemporaneous_endo(model, inner_rhs, at) else {
         return RamseyMatch::Malformed;
     };
-    if !is_constant_bound(model, inner_lhs) || !is_constant_bound(model, rhs) {
+    if !is_constant_bound(model, inner_lhs, at) || !is_constant_bound(model, rhs, at) {
         return RamseyMatch::BoundsNotConstant;
     }
     RamseyMatch::Triple(name)
 }
 
-fn contemporaneous_endo(model: &Model, id: ExprId) -> Option<Name> {
+fn contemporaneous_endo(model: &Model, id: ExprId, at: u32) -> Option<Name> {
     let ExprKind::Ident { name, timing, .. } = &model.exprs.get(id).kind else {
         return None;
     };
     if *timing != 0 {
         return None;
     }
-    model
-        .endogenous
-        .iter()
-        .any(|d| d.name == *name)
-        .then_some(*name)
+    // A name a later `model_remove` took out of the model was still endogenous when
+    // this constraint was written, and 7.1 read it that way.
+    let was_endogenous =
+        model.endogenous.iter().any(|d| d.name == *name) || model.surgery_exit_after(*name, at);
+    was_endogenous.then_some(*name)
 }
 
 /// True when the expression holds no endogenous, exogenous, or `varexo_det` symbol.
-fn is_constant_bound(model: &Model, id: ExprId) -> bool {
+fn is_constant_bound(model: &Model, id: ExprId, at: u32) -> bool {
     !model.exprs.walk_idents(id).any(|r| {
-        model.endogenous.iter().any(|d| d.name == r.name)
+        model.surgery_exit_after(r.name, at)
+            || model.endogenous.iter().any(|d| d.name == r.name)
             || model.exogenous.iter().any(|d| d.name == r.name)
             || model
                 .deterministic_exogenous
@@ -842,7 +847,8 @@ fn check_ramsey_constraints(model: &Model) -> Vec<Diagnostic> {
         let Some(id) = row.expr else {
             continue;
         };
-        match match_ramsey_constraint(model, id) {
+        // The matcher reads each name as of this row's position (close call 1a).
+        match match_ramsey_constraint(model, id, row.span.start) {
             RamseyMatch::Triple(name) => {
                 if !seen.insert(name) {
                     out.push(err(

@@ -71,6 +71,25 @@ pub struct RemovedEquation {
     pub endogenous: Option<String>,
 }
 
+/// One name a `model_remove` took out of the model, with that statement's position and
+/// which way it left.
+#[derive(Clone, Copy, Debug)]
+pub struct SurgeryExit {
+    pub name: Name,
+    /// Span of the removal statement.
+    pub statement: Span,
+    pub kind: SurgeryKind,
+}
+
+/// Which way a `model_remove` moved an endogenous out of the model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurgeryKind {
+    /// Still used somewhere: 7.1's exogenous.
+    Exogenous,
+    /// Nowhere else: 7.1's `excludedVariable`.
+    Dropped,
+}
+
 #[derive(Clone, Debug)]
 pub struct OccbinExpr {
     pub text: String,
@@ -344,6 +363,10 @@ pub struct Model {
     /// removal: `filter_initial_state` refuses it with the timing message, not with
     /// the undeclared one.
     pub excluded_endogenous: Vec<Decl>,
+    /// Every name a `model_remove` took out of the model, file order. A check that reads
+    /// a name's type reads it as of the statement it is looking at: 7.1 validated that
+    /// statement while the name was still endogenous.
+    pub surgery_exits: Vec<SurgeryExit>,
     pub steady_state_equations: Vec<Equation>,
     pub initval: Vec<Assignment>,
     pub endval: Vec<Assignment>,
@@ -743,6 +766,21 @@ pub enum ShocksSemiFamily {
 impl Model {
     pub fn name(&self, name: Name) -> &str {
         self.intern.get(name)
+    }
+
+    /// True when a `model_remove` took `name` out of the model **after** byte `at`: the
+    /// statement at `at` was written while the name was still endogenous.
+    pub fn surgery_exit_after(&self, name: Name, at: u32) -> bool {
+        self.surgery_exits
+            .iter()
+            .any(|exit| exit.name == name && exit.statement.start > at)
+    }
+
+    /// True when a `model_remove` **dropped** `name` (excluded, not exogenous) after `at`.
+    pub fn dropped_by_surgery_after(&self, name: Name, at: u32) -> bool {
+        self.surgery_exits.iter().any(|exit| {
+            exit.name == name && exit.statement.start > at && exit.kind == SurgeryKind::Dropped
+        })
     }
 
     /// `ModFileStructure::isStochasticContext`, plus `ramsey_policy` (sets `stoch_simul_present`).

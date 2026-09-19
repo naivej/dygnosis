@@ -162,9 +162,18 @@ fn shadowing_diag(model: &Model, name: Name, span: Span) -> Diagnostic {
 
 fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
     let local_declared = all_declared_name_strings(model);
+    // Equations a surgery statement removed still refuse an undeclared name: 7.1 resolves
+    // symbols while it parses the model block, before the removal statement runs.
+    let removed_equations = || {
+        model
+            .equation_surgery
+            .iter()
+            .flat_map(|surgery| surgery.removed.iter().map(|row| &row.equation))
+    };
     let pound: HashSet<Name> = model
         .equations
         .iter()
+        .chain(removed_equations())
         .filter_map(|eq| model_local_name(model, eq).map(|(n, _)| n))
         .collect();
     let shocks: HashSet<Name> = model.shocks_vars.iter().copied().collect();
@@ -191,16 +200,25 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
         .collect();
     let exo_underscore = exo_names.iter().any(|e| e.ends_with('_'));
 
-    let mut eqs: Vec<&Equation> = model.equations.iter().collect();
-    eqs.sort_by_key(|eq| (eq.span.start, eq.span.end));
+    let mut eqs: Vec<(&Equation, bool)> = model
+        .equations
+        .iter()
+        .map(|eq| (eq, false))
+        .chain(removed_equations().map(|eq| (eq, true)))
+        .collect();
+    eqs.sort_by_key(|(eq, _)| (eq.span.start, eq.span.end));
 
     let mut seen = HashSet::new();
     let mut diagnostics = Vec::new();
-    for eq in eqs {
+    for (eq, removed) in eqs {
         let visible = visible_names(model, eq);
         for r in model.ident_refs(eq) {
             let ref_name = model.name(r.name);
             if is_skipped_ref(ref_name) {
+                continue;
+            }
+            // The declaration was live when this removed equation was written.
+            if removed && model.dropped_by_surgery_after(r.name, eq.span.start) {
                 continue;
             }
             if visible.contains(&r.name) || pound.contains(&r.name) {

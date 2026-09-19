@@ -141,7 +141,7 @@ fn occbin_constraints_is_catalogued_block() {
     assert_eq!(upper, payload);
 
     let omitted = to_value(list_options(None));
-    assert_eq!(omitted["n_commands"], 63);
+    assert_eq!(omitted["n_commands"], 65);
     let i = omitted["commands"]
         .as_array()
         .unwrap()

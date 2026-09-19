@@ -2207,6 +2207,36 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         stage: JsonStage::Check,
     },
     HonestyRow {
+        code: "E020",
+        fixture: "d_surgery/e020_dropped_equation_name.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Unknown symbol: zzz",
+        our_needle: "Undeclared identifier 'zzz'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E251",
+        fixture: "d_surgery/e251_planner_exogenous.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You cannot include exogenous variables (or variables of undeclared type) in the planner objective",
+        our_needle: "You cannot include exogenous variables (or variables of undeclared type) in the planner objective",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E317",
+        fixture: "d_surgery/e317_after_removal.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "c is not endogenous.",
+        our_needle: "c is not endogenous.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
         code: "E001",
         fixture: "d_surgery/e001_double_quoted_equation_tag.mod",
         kind: HonestyKind::Error {

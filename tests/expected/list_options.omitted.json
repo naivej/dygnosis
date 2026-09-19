@@ -1,5 +1,5 @@
 {
-  "n_commands": 63,
+  "n_commands": 65,
   "commands": [
     "bvar_density",
     "bvar_forecast",
@@ -29,6 +29,8 @@
     "method_of_moments",
     "model_comparison",
     "model_info",
+    "model_remove",
+    "model_replace",
     "ms_compute_mdd",
     "ms_compute_probabilities",
     "ms_estimation",

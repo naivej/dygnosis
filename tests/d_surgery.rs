@@ -19,6 +19,8 @@ const QUIET: &[&str] = &[
     "d_surgery/quiet_replace.mod",
     "d_surgery/quiet_tag_forms.mod",
     "d_surgery/quiet_dropped_symbol.mod",
+    "d_surgery/quiet_optw_retyped.mod",
+    "d_surgery/quiet_planner_dropped.mod",
 ];
 
 /// One locked fire: fixture, code, and the mapped part of their message.
@@ -53,6 +55,21 @@ const FIRES: &[Fire] = &[
         fixture: "d_surgery/e314_filter_dropped.mod",
         code: "E314",
         message: "filter_initial_state: variable c does not appear in the model with the lag -1",
+    },
+    Fire {
+        fixture: "d_surgery/e020_dropped_equation_name.mod",
+        code: "E020",
+        message: "Undeclared identifier 'zzz'",
+    },
+    Fire {
+        fixture: "d_surgery/e251_planner_exogenous.mod",
+        code: "E251",
+        message: "You cannot include exogenous variables (or variables of undeclared type) in the planner objective",
+    },
+    Fire {
+        fixture: "d_surgery/e317_after_removal.mod",
+        code: "E317",
+        message: "c is not endogenous.",
     },
     Fire {
         fixture: "d_surgery/e208_static_after_remove.mod",

@@ -7117,6 +7117,67 @@
       "source": "d_surgery.rs",
       "cluster": "d_surgery/quiet_verbatim_quotes.mod",
       "notes": "verbatim bodies pass double quotes through"
+    },
+    {
+      "id": "d_surgery_quiet_optw_retyped",
+      "codes": [
+        "E317"
+      ],
+      "kind": "quiet",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/quiet_optw_retyped.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/quiet_optw_retyped.mod",
+      "notes": "optim_weights written before a removal that turns the symbol exogenous"
+    },
+    {
+      "id": "d_surgery_quiet_planner_dropped",
+      "codes": [
+        "E251",
+        "E321"
+      ],
+      "kind": "quiet",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/quiet_planner_dropped.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/quiet_planner_dropped.mod",
+      "notes": "planner_objective and ramsey_constraints written before a removal that drops the symbol"
+    },
+    {
+      "id": "d_surgery_e020_dropped_equation_name",
+      "codes": [
+        "E020"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e020_dropped_equation_name.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e020_dropped_equation_name.mod",
+      "notes": "an undeclared name inside a removed equation"
+    },
+    {
+      "id": "d_surgery_e251_planner_exogenous",
+      "codes": [
+        "E251"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e251_planner_exogenous.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e251_planner_exogenous.mod",
+      "notes": "planner_objective names a symbol the removal turns exogenous: 7.1 refuses too"
+    },
+    {
+      "id": "d_surgery_e317_after_removal",
+      "codes": [
+        "E317"
+      ],
+      "kind": "fire",
+      "package": "d_surgery",
+      "fixture": "tests/fixtures/d_surgery/e317_after_removal.mod",
+      "source": "d_surgery.rs",
+      "cluster": "d_surgery/e317_after_removal.mod",
+      "notes": "optim_weights written after the removal: 7.1 refuses too"
     }
   ]
 }
