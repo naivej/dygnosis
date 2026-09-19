@@ -9,6 +9,7 @@ pub mod catalog;
 pub mod check_clash;
 pub mod check_context;
 pub mod check_d_block;
+pub mod check_d_open;
 pub mod check_estimation;
 pub mod check_symbol_list;
 pub mod check_e020;
@@ -57,6 +58,7 @@ pub use catalog::{
 pub use check_clash::check_clash;
 pub use check_context::check_context;
 pub use check_d_block::check_d_block;
+pub use check_d_open::{check_d_open, check_workspace_d_open};
 pub use check_estimation::check_estimation;
 pub use check_symbol_list::check_symbol_list;
 pub use check_e020::check_e020;

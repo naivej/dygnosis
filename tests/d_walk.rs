@@ -34,8 +34,8 @@ fn quiet(diags: &[Diagnostic], code: &str) {
 }
 
 #[test]
-fn registry_known_codes_is_201() {
-    assert_eq!(known_codes().len(), 201);
+fn registry_known_codes_grew_to_244() {
+    assert_eq!(known_codes().len(), 244);
 }
 
 #[test]

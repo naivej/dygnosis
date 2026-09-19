@@ -5838,5 +5838,809 @@
       "cluster": "d_block/e285_plus_type.mod",
       "notes": "macro + type mismatch"
     }
+,
+    {
+      "id": "e286_epilogue_without_block",
+      "codes": [
+        "E286"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e286_with_epilogue_without_block.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e286_with_epilogue_without_block.mod",
+      "notes": "with_epilogue without an epilogue block"
+    },
+    {
+      "id": "e287_epilogue_dup",
+      "codes": [
+        "E287"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e287_epilogue_dup.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e287_epilogue_dup.mod",
+      "notes": "epilogue name declared twice"
+    },
+    {
+      "id": "e288_epilogue_unknown",
+      "codes": [
+        "E288"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e288_epilogue_unknown.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e288_epilogue_unknown.mod",
+      "notes": "undeclared name in the epilogue block"
+    },
+    {
+      "id": "e289_epilogue_exo",
+      "codes": [
+        "E289"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e289_epilogue_exo.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e289_epilogue_exo.mod",
+      "notes": "exogenous variable in the epilogue block"
+    },
+    {
+      "id": "e290_epilogue_exo_det",
+      "codes": [
+        "E290"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e290_epilogue_exo_det.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e290_epilogue_exo_det.mod",
+      "notes": "deterministic exogenous variable in the epilogue block"
+    },
+    {
+      "id": "e291_epilogue_expectation",
+      "codes": [
+        "E291"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e291_epilogue_expectation.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e291_epilogue_expectation.mod",
+      "notes": "EXPECTATION in the epilogue block"
+    },
+    {
+      "id": "e292_epilogue_steady_state",
+      "codes": [
+        "E292"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e292_epilogue_steady_state.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e292_epilogue_steady_state.mod",
+      "notes": "STEADY_STATE in the epilogue block"
+    },
+    {
+      "id": "e293_epilogue_sum",
+      "codes": [
+        "E293"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e293_epilogue_sum.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e293_epilogue_sum.mod",
+      "notes": "SUM in the epilogue block"
+    },
+    {
+      "id": "e294_epilogue_outside",
+      "codes": [
+        "E294"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e294_epilogue_outside.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e294_epilogue_outside.mod",
+      "notes": "epilogue name used outside the block"
+    },
+    {
+      "id": "e295_change_type_unknown",
+      "codes": [
+        "E295"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e295_change_type_unknown.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e295_change_type_unknown.mod",
+      "notes": "change_type name not declared"
+    },
+    {
+      "id": "e296_change_type_used",
+      "codes": [
+        "E296"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e296_change_type_used.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e296_change_type_used.mod",
+      "notes": "change_type after the symbol was used"
+    },
+    {
+      "id": "e297_ramsey_model_twice",
+      "codes": [
+        "E297"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e297_ramsey_model_twice.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e297_ramsey_model_twice.mod",
+      "notes": "several ramsey_model statements"
+    },
+    {
+      "id": "e298_ramsey_model_after_policy",
+      "codes": [
+        "E298"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e298_ramsey_model_after_policy.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e298_ramsey_model_after_policy.mod",
+      "notes": "ramsey_model after ramsey_policy"
+    },
+    {
+      "id": "e299_ramsey_policy_after_model",
+      "codes": [
+        "E299"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e299_ramsey_policy_after_model.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e299_ramsey_policy_after_model.mod",
+      "notes": "ramsey_policy after ramsey_model"
+    },
+    {
+      "id": "e300_ramsey_policy_twice",
+      "codes": [
+        "E300"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e300_ramsey_policy_twice.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e300_ramsey_policy_twice.mod",
+      "notes": "several ramsey_policy statements"
+    },
+    {
+      "id": "e301_planner_discount_model",
+      "codes": [
+        "E301"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e301_planner_discount_model.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e301_planner_discount_model.mod",
+      "notes": "planner_discount with a declared discount factor"
+    },
+    {
+      "id": "e302_planner_discount_policy",
+      "codes": [
+        "E302"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e302_planner_discount_policy.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e302_planner_discount_policy.mod",
+      "notes": "planner_discount on ramsey_policy"
+    },
+    {
+      "id": "e303_dsge_prior_weight_parameter",
+      "codes": [
+        "E303"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e303_dsge_prior_weight_parameter.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e303_dsge_prior_weight_parameter.mod",
+      "notes": "dsge_prior_weight declared as a parameter"
+    },
+    {
+      "id": "e304_includepath_missing_dir",
+      "codes": [
+        "E304"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e304_includepath_missing_dir.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e304_includepath_missing_dir.mod",
+      "notes": "includepath is not a directory"
+    },
+    {
+      "id": "e305_includepath_not_string",
+      "codes": [
+        "E305"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e305_includepath_not_string.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e305_includepath_not_string.mod",
+      "notes": "includepath argument is not a string"
+    },
+    {
+      "id": "e306_load_params_missing",
+      "codes": [
+        "E306"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e306_load_params_missing.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e306_load_params_missing.mod",
+      "notes": "load_params file missing"
+    },
+    {
+      "id": "w204_load_params_unknown",
+      "codes": [
+        "W204"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/w204_load_params_unknown.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/w204_load_params_unknown.mod",
+      "notes": "unknown symbol in the load_params file"
+    },
+    {
+      "id": "e058_fis_undeclared",
+      "codes": [
+        "E058"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e058_fis_undeclared.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e058_fis_undeclared.mod",
+      "notes": "filter_initial_state names an undeclared symbol"
+    },
+    {
+      "id": "e058_init2shocks_undeclared",
+      "codes": [
+        "E058"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e058_init2shocks_undeclared.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e058_init2shocks_undeclared.mod",
+      "notes": "init2shocks pair names an undeclared symbol"
+    },
+    {
+      "id": "e058_homotopy_undeclared",
+      "codes": [
+        "E058"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e058_homotopy_undeclared.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e058_homotopy_undeclared.mod",
+      "notes": "homotopy_setup row names an undeclared symbol"
+    },
+    {
+      "id": "e058_shock_groups_undeclared",
+      "codes": [
+        "E058"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e058_shock_groups_undeclared.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e058_shock_groups_undeclared.mod",
+      "notes": "shock_groups member names an undeclared symbol"
+    },
+    {
+      "id": "e307_trend_twice",
+      "codes": [
+        "E307"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e307_trend_twice.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e307_trend_twice.mod",
+      "notes": "trend variable declared twice"
+    },
+    {
+      "id": "e308_trend_listed_twice",
+      "codes": [
+        "E308"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e308_trend_listed_twice.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e308_trend_listed_twice.mod",
+      "notes": "endo listed twice as following a trend"
+    },
+    {
+      "id": "e309_deflator_nonstationary",
+      "codes": [
+        "E309"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e309_deflator_nonstationary.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e309_deflator_nonstationary.mod",
+      "notes": "deflator contains a non-stationary endogenous"
+    },
+    {
+      "id": "e310_trend_outside_model",
+      "codes": [
+        "E310"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e310_trend_outside_model.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e310_trend_outside_model.mod",
+      "notes": "trend variable used outside the model"
+    },
+    {
+      "id": "e311_fis_not_endo",
+      "codes": [
+        "E311"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e311_fis_not_endo.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e311_fis_not_endo.mod",
+      "notes": "filter_initial_state name is not endogenous or exogenous"
+    },
+    {
+      "id": "e312_fis_exo_no_lag",
+      "codes": [
+        "E312"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e312_fis_exo_no_lag.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e312_fis_exo_no_lag.mod",
+      "notes": "filter_initial_state exogenous variable without a lag"
+    },
+    {
+      "id": "e313_fis_dup",
+      "codes": [
+        "E313"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e313_fis_dup.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e313_fis_dup.mod",
+      "notes": "filter_initial_state entry declared twice"
+    },
+    {
+      "id": "e314_fis_lag_mismatch",
+      "codes": [
+        "E314"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e314_fis_lag_mismatch.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e314_fis_lag_mismatch.mod",
+      "notes": "filter_initial_state lag not used by the model"
+    },
+    {
+      "id": "e315_optim_weights_dup",
+      "codes": [
+        "E315"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e315_optim_weights_dup.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e315_optim_weights_dup.mod",
+      "notes": "optim_weights variable declared twice"
+    },
+    {
+      "id": "e316_optim_weights_pair_dup",
+      "codes": [
+        "E316"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e316_optim_weights_pair_dup.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e316_optim_weights_pair_dup.mod",
+      "notes": "optim_weights pair declared twice"
+    },
+    {
+      "id": "e317_optim_weights_not_endo",
+      "codes": [
+        "E317"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e317_optim_weights_not_endo.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e317_optim_weights_not_endo.mod",
+      "notes": "optim_weights name is not endogenous"
+    },
+    {
+      "id": "e318_ramsey_constraints_two",
+      "codes": [
+        "E318"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e318_ramsey_constraints_two.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e318_ramsey_constraints_two.mod",
+      "notes": "two ramsey_constraints for one variable"
+    },
+    {
+      "id": "e319_ramsey_constraints_not_inequality",
+      "codes": [
+        "E319"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e319_ramsey_constraints_not_inequality.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e319_ramsey_constraints_not_inequality.mod",
+      "notes": "ramsey constraint is not an inequality"
+    },
+    {
+      "id": "e320_ramsey_constraints_bad_bound",
+      "codes": [
+        "E320"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e320_ramsey_constraints_bad_bound.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e320_ramsey_constraints_bad_bound.mod",
+      "notes": "ramsey constraint bound is not constant"
+    },
+    {
+      "id": "e321_ramsey_constraints_chain",
+      "codes": [
+        "E321"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e321_ramsey_constraints_chain.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e321_ramsey_constraints_chain.mod",
+      "notes": "ramsey constraint fails the complementarity form"
+    },
+    {
+      "id": "e322_extfun_no_name",
+      "codes": [
+        "E322"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e322_extfun_no_name.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e322_extfun_no_name.mod",
+      "notes": "external_function without a name option"
+    },
+    {
+      "id": "e323_extfun_empty_name",
+      "codes": [
+        "E323"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e323_extfun_empty_name.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e323_extfun_empty_name.mod",
+      "notes": "external_function name option without an argument"
+    },
+    {
+      "id": "e324_extfun_second_named",
+      "codes": [
+        "E324"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e324_extfun_second_named.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e324_extfun_second_named.mod",
+      "notes": "second derivative without the first"
+    },
+    {
+      "id": "e325_extfun_second_bare",
+      "codes": [
+        "E325"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e325_extfun_second_bare.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e325_extfun_second_bare.mod",
+      "notes": "bare second derivative without a bare first"
+    },
+    {
+      "id": "e326_extfun_nargs_mismatch",
+      "codes": [
+        "E326"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e326_extfun_nargs_mismatch.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e326_extfun_nargs_mismatch.mod",
+      "notes": "external_function nargs mismatch"
+    },
+    {
+      "id": "e327_extfun_first_deriv_mismatch",
+      "codes": [
+        "E327"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e327_extfun_first_deriv_mismatch.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e327_extfun_first_deriv_mismatch.mod",
+      "notes": "external_function first derivative mismatch"
+    },
+    {
+      "id": "e328_extfun_first_top_second_named",
+      "codes": [
+        "E328"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e328_extfun_first_top_second_named.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e328_extfun_first_top_second_named.mod",
+      "notes": "second derivative from another function"
+    },
+    {
+      "id": "e329_init2shocks_dup",
+      "codes": [
+        "E329"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e329_init2shocks_dup.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e329_init2shocks_dup.mod",
+      "notes": "init2shocks duplicate endogenous"
+    },
+    {
+      "id": "e330_init2shocks_first_not_endo",
+      "codes": [
+        "E330"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e330_init2shocks_first_not_endo.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e330_init2shocks_first_not_endo.mod",
+      "notes": "init2shocks first name is not endogenous"
+    },
+    {
+      "id": "e331_init2shocks_second_not_exo",
+      "codes": [
+        "E331"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e331_init2shocks_second_not_exo.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e331_init2shocks_second_not_exo.mod",
+      "notes": "init2shocks second name is not exogenous"
+    },
+    {
+      "id": "e332_homotopy_not_param",
+      "codes": [
+        "E332"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e332_homotopy_not_param.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e332_homotopy_not_param.mod",
+      "notes": "homotopy_setup name is not a parameter or exogenous"
+    },
+    {
+      "id": "e333_shock_groups_not_exo",
+      "codes": [
+        "E333"
+      ],
+      "kind": "fire",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/e333_shock_groups_not_exo.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/e333_shock_groups_not_exo.mod",
+      "notes": "shock_groups member is not exogenous"
+    },
+    {
+      "id": "quiet_epilogue",
+      "codes": [
+        "E286",
+        "E287",
+        "E294"
+      ],
+      "kind": "quiet",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/quiet_epilogue.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/quiet_epilogue.mod",
+      "notes": "epilogue with with_epilogue is quiet"
+    },
+    {
+      "id": "quiet_optim_weights",
+      "codes": [
+        "E315",
+        "E316",
+        "E317"
+      ],
+      "kind": "quiet",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/quiet_optim_weights.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/quiet_optim_weights.mod",
+      "notes": "single and pair weights are quiet"
+    },
+    {
+      "id": "quiet_ramsey_constraints",
+      "codes": [
+        "E318",
+        "E319",
+        "E320",
+        "E321"
+      ],
+      "kind": "quiet",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/quiet_ramsey_constraints.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/quiet_ramsey_constraints.mod",
+      "notes": "chained constraint is quiet"
+    },
+    {
+      "id": "quiet_extfun",
+      "codes": [
+        "E322",
+        "E323",
+        "E324",
+        "E325",
+        "E326",
+        "E327",
+        "E328"
+      ],
+      "kind": "quiet",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/quiet_extfun.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/quiet_extfun.mod",
+      "notes": "external function used in the model is quiet"
+    },
+    {
+      "id": "quiet_init2shocks",
+      "codes": [
+        "E329",
+        "E330",
+        "E331"
+      ],
+      "kind": "quiet",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/quiet_init2shocks.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/quiet_init2shocks.mod",
+      "notes": "one pair per endo is quiet"
+    },
+    {
+      "id": "quiet_homotopy",
+      "codes": [
+        "E332"
+      ],
+      "kind": "quiet",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/quiet_homotopy.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/quiet_homotopy.mod",
+      "notes": "parameter and varexo_det rows are quiet"
+    },
+    {
+      "id": "quiet_shock_groups",
+      "codes": [
+        "E333"
+      ],
+      "kind": "quiet",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/quiet_shock_groups.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/quiet_shock_groups.mod",
+      "notes": "quoted group with varexo members is quiet"
+    },
+    {
+      "id": "quiet_fis",
+      "codes": [
+        "E311",
+        "E312",
+        "E313",
+        "E314"
+      ],
+      "kind": "quiet",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/quiet_fis.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/quiet_fis.mod",
+      "notes": "endogenous and lagged exogenous entries are quiet"
+    },
+    {
+      "id": "quiet_trend",
+      "codes": [
+        "E307",
+        "E308",
+        "E309",
+        "E310"
+      ],
+      "kind": "quiet",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/quiet_trend.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/quiet_trend.mod",
+      "notes": "trend var with a deflator is quiet"
+    },
+    {
+      "id": "quiet_bvar",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/quiet_bvar.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/quiet_bvar.mod",
+      "notes": "Sims bvar statements are not E001"
+    },
+    {
+      "id": "quiet_heterogeneity",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/quiet_heterogeneity.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/quiet_heterogeneity.mod",
+      "notes": "var(heterogeneity) is not E001"
+    },
+    {
+      "id": "quiet_change_type",
+      "codes": [
+        "E295",
+        "E296",
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "d_open",
+      "fixture": "tests/fixtures/d_open/quiet_change_type.mod",
+      "source": "d_open.rs",
+      "cluster": "d_open/quiet_change_type.mod",
+      "notes": "declared change_type is quiet"
+    }
   ]
 }

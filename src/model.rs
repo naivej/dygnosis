@@ -99,6 +99,125 @@ pub enum PolicyCommand {
     Osr,
 }
 
+/// One `ramsey_model` / `ramsey_policy` / … statement, file order.
+#[derive(Clone, Copy, Debug)]
+pub struct PolicyCommandStatement {
+    pub command: PolicyCommand,
+    /// Command identifier through the statement `;`.
+    pub span: Span,
+    /// `planner_discount=` on this statement (`ramsey_model` / `ramsey_policy` only).
+    pub planner_discount: Option<Span>,
+}
+
+/// Target type of a `change_type(…)` statement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChangeTypeKind {
+    Parameters,
+    Var,
+    Varexo,
+    VarexoDet,
+}
+
+/// One `change_type(type) name_list;` statement.
+#[derive(Clone, Debug)]
+pub struct ChangeTypeStmt {
+    pub new_type: ChangeTypeKind,
+    /// Listed names with their identifier spans, source order.
+    pub names: Vec<(Name, Span)>,
+    /// Statement keyword through `;`.
+    pub span: Span,
+}
+
+/// One `trend_var` / `log_trend_var` name.
+#[derive(Clone, Debug)]
+pub struct TrendVar {
+    pub name: Name,
+    pub span: Span,
+    pub log_trend: bool,
+    pub growth: Option<ExprId>,
+}
+
+/// One `var(deflator=…)` / `var(log_deflator=…)` / `var(log, deflator=…)` statement.
+#[derive(Clone, Debug)]
+pub struct NonstationaryVar {
+    pub name: Name,
+    pub span: Span,
+    pub log_deflator: bool,
+    pub log_option: bool,
+    pub deflator: Option<ExprId>,
+}
+
+/// One `optim_weights` row: `symbol expr;` or `symbol, symbol expr;`.
+#[derive(Clone, Debug)]
+pub struct OptimWeight {
+    pub first: Name,
+    pub first_span: Span,
+    pub second: Option<Name>,
+    pub second_span: Option<Span>,
+    pub expr: Option<ExprId>,
+    /// Whole row through `;`.
+    pub span: Span,
+}
+
+/// One `ramsey_constraints` entry (one expression through `;`).
+#[derive(Clone, Debug)]
+pub struct RamseyConstraint {
+    pub expr: Option<ExprId>,
+    pub span: Span,
+}
+
+/// `first_deriv_provided` / `second_deriv_provided` value on `external_function`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DerivSpec {
+    /// Bare option: the derivative is provided by the top-level function.
+    Bare(Span),
+    /// `=<name>`: another external function provides it.
+    Named(Name, Span),
+}
+
+/// One `external_function(…)` statement.
+#[derive(Clone, Debug)]
+pub struct ExternalFunctionStmt {
+    /// `name=` value and its span.
+    pub name: Option<(Name, Span)>,
+    /// `nargs=` value.
+    pub nargs: Option<i32>,
+    pub first_deriv: Option<DerivSpec>,
+    pub second_deriv: Option<DerivSpec>,
+    /// Statement keyword through `;`.
+    pub span: Span,
+}
+
+/// One `symbol symbol;` row of an `init2shocks` block.
+#[derive(Clone, Debug)]
+pub struct Init2ShocksRow {
+    pub endo: Name,
+    pub endo_span: Span,
+    pub exo: Name,
+    pub exo_span: Span,
+    pub span: Span,
+}
+
+/// One `init2shocks(name=group);` … `end;` block.
+#[derive(Clone, Debug)]
+pub struct Init2ShocksBlock {
+    pub group: String,
+    pub rows: Vec<Init2ShocksRow>,
+}
+
+/// One `name, expr, expr;` row of a `homotopy_setup` block.
+#[derive(Clone, Debug)]
+pub struct HomotopyRow {
+    pub name: Name,
+    pub span: Span,
+}
+
+/// One `'group' = name_list;` row of a `shock_groups` block.
+#[derive(Clone, Debug)]
+pub struct ShockGroup {
+    pub members: Vec<(Name, Span)>,
+}
+
 /// Deprecated command / model option recorded from an option-list identifier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeprecatedOption {
@@ -406,6 +525,44 @@ pub struct Model {
     pub mod_file_locals: Vec<Name>,
     /// Macro type errors from expansion (`@#if` not bool, `@#for` tuple, `+` mismatch).
     pub macro_type_errors: Vec<(Span, &'static str, String)>,
+    /// `epilogue;` … `end;` (first block).
+    pub epilogue_block: Option<Span>,
+    /// `epilogue` assignments `name = expr;`, source order.
+    pub epilogue: Vec<Assignment>,
+    /// First `with_epilogue` option on `shock_decomposition` /
+    /// `realtime_shock_decomposition` / `initial_condition_decomposition`.
+    pub with_epilogue_span: Option<Span>,
+    /// Every `ramsey_model` / `ramsey_policy` / `discretionary_policy` / `osr`
+    /// statement with its span, file order.
+    pub policy_command_statements: Vec<PolicyCommandStatement>,
+    /// Every `change_type(…)` statement, file order.
+    pub change_type_statements: Vec<ChangeTypeStmt>,
+    /// `dsge_prior_weight` inside a `parameters` declaration.
+    pub dsge_prior_weight_param: Option<Span>,
+    /// `load_params_and_steady_state(…)` filename (quotes stripped) and statement span.
+    pub load_params_file: Option<(String, Span)>,
+    /// Every `trend_var` / `log_trend_var` entry, file order.
+    pub trend_vars: Vec<TrendVar>,
+    /// Every `var(deflator=…)` / `var(log_deflator=…)` name, file order.
+    pub nonstationary_vars: Vec<NonstationaryVar>,
+    /// `filter_initial_state;` … `end;` (first block).
+    pub filter_initial_state_block: Option<Span>,
+    /// Parsed `filter_initial_state` entries (own vec; not `histval`).
+    pub filter_initial_state: Vec<HistvalEntry>,
+    /// Parsed `optim_weights` rows (every block concatenated).
+    pub optim_weights: Vec<OptimWeight>,
+    /// Parsed `ramsey_constraints` expressions (every block concatenated).
+    pub ramsey_constraints: Vec<RamseyConstraint>,
+    /// Every `external_function(…)` statement, file order.
+    pub external_functions: Vec<ExternalFunctionStmt>,
+    /// Every `init2shocks` block, file order.
+    pub init2shocks_blocks: Vec<Init2ShocksBlock>,
+    /// Every `homotopy_setup` row, file order.
+    pub homotopy_rows: Vec<HomotopyRow>,
+    /// Members of every `shock_groups` block, file order.
+    pub shock_groups: Vec<ShockGroup>,
+    /// True iff a Sims `bvar_density` / `bvar_forecast` / `bvar_irf` statement is present.
+    pub bvar_present: bool,
 }
 
 /// `histval` assignment `name(lag) = expr`.

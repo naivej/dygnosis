@@ -1,0 +1,11 @@
+// inventory: e312_fis_exo_no_lag
+var y;
+varexo e;
+parameters rho;
+rho = 0.9;
+model;
+y = rho * y(-1) + e;
+end;
+filter_initial_state;
+e(0) = 0.1;
+end;

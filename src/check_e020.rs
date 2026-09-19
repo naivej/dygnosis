@@ -361,6 +361,18 @@ fn visible_names(model: &Model, eq: &Equation) -> HashSet<Name> {
             visible.insert(decl.name);
         }
     }
+    // Trend variables and epilogue names are not `Decl`s but the model block
+    // may still use each one from its declaration onward.
+    for (name, span) in model
+        .trend_vars
+        .iter()
+        .map(|t| (t.name, t.span))
+        .chain(model.epilogue.iter().map(|a| (a.name, a.span)))
+    {
+        if span.start <= eq.span.start {
+            visible.insert(name);
+        }
+    }
     visible
 }
 

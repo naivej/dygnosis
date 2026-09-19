@@ -669,6 +669,10 @@ fn includepath_dirs_for(key: &str, model: &Model) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for dir in &model.includepaths {
         for p in includepath_paths(key, dir) {
+            // A resolved path that is not a directory never helps an include.
+            if !p.is_dir() {
+                continue;
+            }
             if !paths.iter().any(|e| e == &p) {
                 paths.push(p);
             }
@@ -678,25 +682,29 @@ fn includepath_dirs_for(key: &str, model: &Model) -> Vec<PathBuf> {
 }
 
 fn includepath_paths(key: &str, directive: &IncludePathDirective) -> Vec<PathBuf> {
-    let including_dir = Path::new(key).parent().map(Path::to_path_buf);
     let mut paths = Vec::new();
     for raw in split_includepath_argument(&directive.argument) {
-        let path = PathBuf::from(normalize_separators(&raw));
-        let path = if path.is_absolute() {
-            path
-        } else if let Some(dir) = &including_dir {
-            dir.join(path)
-        } else {
-            path
-        };
-        let path = std::fs::canonicalize(&path)
-            .map(strip_verbatim)
-            .unwrap_or(path);
+        let path = resolve_includepath(key, &raw);
         if !paths.iter().any(|p| p == &path) {
             paths.push(path);
         }
     }
     paths
+}
+
+/// Resolve one `@#includepath` argument against the directive file's parent.
+pub fn resolve_includepath(key: &str, raw: &str) -> PathBuf {
+    let path = PathBuf::from(normalize_separators(raw));
+    let path = if path.is_absolute() {
+        path
+    } else if let Some(dir) = Path::new(key).parent() {
+        dir.join(path)
+    } else {
+        path
+    };
+    std::fs::canonicalize(&path)
+        .map(strip_verbatim)
+        .unwrap_or(path)
 }
 
 /// Colon-split that does not split Windows `C:/` drive prefixes.

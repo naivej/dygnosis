@@ -218,7 +218,7 @@ fn has_suffix(p: &Path) -> bool {
     p.extension().is_some()
 }
 
-fn make_absolute(path: &Path) -> PathBuf {
+pub(crate) fn make_absolute(path: &Path) -> PathBuf {
     if let Ok(canonical) = std::fs::canonicalize(path) {
         return strip_verbatim(canonical);
     }

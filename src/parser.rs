@@ -8,11 +8,14 @@ use crate::intern::{Interner, Name};
 use crate::lexer::{tokenize, Token, TokenKind};
 use crate::macro_expand::expand_macros_full;
 use crate::model::{
-    Assignment, CommandSymbol, Complementarity, ComplementarityTriple, Decl, DeprecatedOption,
-    Equation, EstimatedParam, EstimatedParamKind, EstimationDsgeVarStmt, GenerateIrfsElement,
-    HistvalEntry, IncludeDirective, IncludePathDirective, MacroDirective, MacroInterp, Model,
-    ObservedVar, OccbinConstraint, OccbinExpr, OsrBound, ParseIssue, ParseIssueKind, PolicyCommand,
-    ShockKind, ShockStmt, ShocksSemiFamily,
+    Assignment, ChangeTypeKind, ChangeTypeStmt, CommandSymbol, Complementarity,
+    ComplementarityTriple, Decl, DeprecatedOption, DerivSpec, Equation, EstimatedParam,
+    EstimatedParamKind, EstimationDsgeVarStmt, ExternalFunctionStmt, GenerateIrfsElement,
+    HistvalEntry, HomotopyRow, IncludeDirective, IncludePathDirective, Init2ShocksBlock,
+    Init2ShocksRow, MacroDirective, MacroInterp, Model, NonstationaryVar, ObservedVar,
+    OccbinConstraint, OccbinExpr, OptimWeight, OsrBound, ParseIssue, ParseIssueKind, PolicyCommand,
+    PolicyCommandStatement, RamseyConstraint, ShockGroup, ShockKind, ShockStmt, ShocksSemiFamily,
+    TrendVar,
 };
 use crate::span::Span;
 
@@ -80,6 +83,27 @@ struct ParsedTag {
 
 fn parse_int_lexeme(lex: &str) -> Option<i32> {
     lex.parse::<i32>().ok()
+}
+
+fn change_type_kind(lex: &str) -> Option<ChangeTypeKind> {
+    if lex.eq_ignore_ascii_case("parameters") {
+        Some(ChangeTypeKind::Parameters)
+    } else if lex.eq_ignore_ascii_case("var") {
+        Some(ChangeTypeKind::Var)
+    } else if lex.eq_ignore_ascii_case("varexo_det") {
+        Some(ChangeTypeKind::VarexoDet)
+    } else if lex.eq_ignore_ascii_case("varexo") {
+        Some(ChangeTypeKind::Varexo)
+    } else {
+        None
+    }
+}
+
+/// Commands whose `(…)` option list may carry `with_epilogue`.
+fn is_decomposition_command(cmd: &str) -> bool {
+    cmd.eq_ignore_ascii_case("shock_decomposition")
+        || cmd.eq_ignore_ascii_case("realtime_shock_decomposition")
+        || cmd.eq_ignore_ascii_case("initial_condition_decomposition")
 }
 
 fn is_trailing_symbol_command(cmd: &str) -> bool {
@@ -275,6 +299,13 @@ const BLOCK_OPENERS: &[&str] = &[
     "estimated_params_bounds",
     "osr_params_bounds",
     "generate_irfs",
+    "epilogue",
+    "filter_initial_state",
+    "optim_weights",
+    "ramsey_constraints",
+    "init2shocks",
+    "homotopy_setup",
+    "shock_groups",
 ];
 
 const PRIOR_SHAPES: &[&str] = &[
@@ -582,9 +613,36 @@ impl Parser<'_> {
                 self.parse_osr_params();
             } else if self.at_ident_ci("generate_irfs") {
                 self.parse_generate_irfs_block();
+            } else if self.at_ident_ci("log_trend_var") {
+                self.parse_trend_declaration(true);
+            } else if self.at_ident_ci("trend_var") {
+                self.parse_trend_declaration(false);
+            } else if self.at_ident_ci("load_params_and_steady_state") {
+                self.parse_load_params();
+            } else if self.at_ident_ci("filter_initial_state") {
+                self.parse_filter_initial_state_block();
+            } else if self.at_ident_ci("external_function") {
+                self.parse_external_function();
+            } else if self.at_ident_ci("init2shocks") {
+                self.parse_init2shocks_block();
+            } else if self.at_ident_ci("homotopy_setup") {
+                self.parse_homotopy_setup_block();
+            } else if self.at_ident_ci("shock_groups") {
+                self.parse_shock_groups_block();
+            } else if self.at_ident_ci("bvar_density")
+                || self.at_ident_ci("bvar_forecast")
+                || self.at_ident_ci("bvar_irf")
+            {
+                self.parse_bvar_statement();
+            } else if self.at_ident_ci("change_type") {
+                self.parse_change_type();
+            } else if self.at_ident_ci("epilogue") {
+                self.parse_epilogue_block();
             } else if self.at_ident_ci("optim_weights") {
                 self.model.has_optim_weights = true;
-                self.skip_block();
+                self.parse_optim_weights_block();
+            } else if self.at_ident_ci("ramsey_constraints") {
+                self.parse_ramsey_constraints_block();
             } else if let Some(command) = self.at_policy_command() {
                 self.parse_policy_command(command);
             } else if self.at_skipped_block() {
@@ -604,14 +662,16 @@ impl Parser<'_> {
     fn parse_declaration(&mut self, keyword: &str) -> Vec<Decl> {
         let start = self.current_start();
         let keyword_is_var = self.at_ident_ci("var");
+        let keyword_is_parameters = self.at_ident_ci("parameters");
         self.bump();
         let mut log_transform = false;
+        let mut log_deflator = false;
+        let mut deflator = None;
         if self.at(TokenKind::LParen) {
-            let opt = self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
-            log_transform = keyword_is_var
-                && self.src[opt.start as usize..opt.end as usize]
-                    .split(',')
-                    .any(|p| p.trim().eq_ignore_ascii_case("log"));
+            let (log, is_log_deflator, expr) = self.parse_declaration_options();
+            log_transform = keyword_is_var && log;
+            log_deflator = is_log_deflator;
+            deflator = expr;
         }
         let kw_range_end = self.current_start();
         let mut decls = Vec::new();
@@ -692,7 +752,86 @@ impl Parser<'_> {
             });
         }
         self.eat(TokenKind::Semi);
+        if keyword_is_parameters {
+            for decl in &decls {
+                if self.intern.get(decl.name) == "dsge_prior_weight"
+                    && self.model.dsge_prior_weight_param.is_none()
+                {
+                    self.model.dsge_prior_weight_param = Some(decl.span);
+                }
+            }
+        }
+        if keyword_is_var && (log_deflator || deflator.is_some()) {
+            for decl in &decls {
+                self.model.nonstationary_vars.push(NonstationaryVar {
+                    name: decl.name,
+                    span: decl.span,
+                    log_deflator,
+                    log_option: log_transform,
+                    deflator,
+                });
+            }
+        }
         decls
+    }
+
+    /// `var(…)` option list: `log`, `deflator=`, `log_deflator=`, other `=value`s skipped.
+    fn parse_declaration_options(&mut self) -> (bool, bool, Option<ExprId>) {
+        let mut log = false;
+        let mut log_deflator = false;
+        let mut deflator = None;
+        let mut saw_deflator = false;
+        self.bump();
+        while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) {
+            if self.at(TokenKind::Ident) {
+                let lex = self.lexeme(&self.tokens[self.i]).to_string();
+                if lex.eq_ignore_ascii_case("log") {
+                    log = true;
+                    self.bump();
+                    continue;
+                }
+                if lex.eq_ignore_ascii_case("deflator") || lex.eq_ignore_ascii_case("log_deflator")
+                {
+                    let is_log = lex.eq_ignore_ascii_case("log_deflator");
+                    self.bump();
+                    if self.at(TokenKind::Eq) {
+                        self.bump();
+                        let expr = self.parse_expr();
+                        if !saw_deflator {
+                            saw_deflator = true;
+                            deflator = expr;
+                            log_deflator = is_log;
+                        }
+                    }
+                    continue;
+                }
+                self.bump();
+                if self.at(TokenKind::Eq) {
+                    self.bump();
+                    self.skip_option_value();
+                }
+                continue;
+            }
+            if self.at(TokenKind::LParen) {
+                self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                continue;
+            }
+            self.bump();
+        }
+        self.eat(TokenKind::RParen);
+        (log, log_deflator, deflator)
+    }
+
+    fn skip_option_value(&mut self) {
+        if self.at(TokenKind::LParen) {
+            self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+        } else if !self.at(TokenKind::Comma)
+            && !self.at(TokenKind::RParen)
+            && !self.at(TokenKind::Semi)
+            && !self.at(TokenKind::Eof)
+        {
+            self.bump();
+        }
     }
 
     fn parse_model_block(&mut self) {
@@ -993,6 +1132,600 @@ impl Parser<'_> {
             },
             exos,
         })
+    }
+
+    /// `epilogue; ident = expr; … end;` Names are epilogue-typed, not endogenous.
+    fn parse_epilogue_block(&mut self) {
+        let opener_span = self.bump_plain_opener();
+        let start = opener_span.start;
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed("epilogue", opener_span, body_i, body_end_i);
+        let end = self.block_end_after_consume();
+        if self.model.epilogue_block.is_none() {
+            self.model.epilogue_block = Some(Span { start, end });
+        }
+        let saved = self.i;
+        self.i = body_i;
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                continue;
+            }
+            let before = self.i;
+            if let Some(assignment) = self.parse_named_assignment() {
+                self.model.epilogue.push(assignment);
+            }
+            if self.i <= before {
+                self.bump();
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+    }
+
+    /// `trend_var(options) A, B;` / `log_trend_var(options) A;`
+    fn parse_trend_declaration(&mut self, log_trend: bool) {
+        self.bump();
+        let mut growth = None;
+        if self.at(TokenKind::LParen) {
+            self.bump();
+            while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) {
+                if self.at_ident_ci("growth_factor") || self.at_ident_ci("log_growth_factor") {
+                    self.bump();
+                    if self.at(TokenKind::Eq) {
+                        self.bump();
+                        let expr = self.parse_expr();
+                        if growth.is_none() {
+                            growth = expr;
+                        }
+                    }
+                    continue;
+                }
+                if self.at(TokenKind::LParen) {
+                    self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                    continue;
+                }
+                self.bump();
+            }
+            self.eat(TokenKind::RParen);
+        }
+        while !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
+            if self.at(TokenKind::LParen) {
+                self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                continue;
+            }
+            if self.at(TokenKind::Ident) {
+                let tok = self.bump();
+                let lex = self.lexeme(&tok).to_string();
+                let name = self.intern.intern(&lex);
+                self.model.trend_vars.push(TrendVar {
+                    name,
+                    span: tok.span,
+                    log_trend,
+                    growth,
+                });
+                continue;
+            }
+            self.bump();
+        }
+        self.eat(TokenKind::Semi);
+    }
+
+    /// `load_params_and_steady_state('file');`
+    fn parse_load_params(&mut self) {
+        let start = self.current_start();
+        self.bump();
+        let mut filename = None;
+        if self.at(TokenKind::LParen) {
+            self.bump();
+            if self.at(TokenKind::String) || self.at(TokenKind::Ident) {
+                let tok = self.bump();
+                filename = Some(self.lexeme(&tok).to_string());
+            }
+            while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) {
+                self.bump();
+            }
+            self.eat(TokenKind::RParen);
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        if self.model.load_params_file.is_none() {
+            if let Some(raw) = filename {
+                let file = unquote_string(&raw).replace('\\', "/");
+                self.model.load_params_file = Some((file, Span { start, end }));
+            }
+        }
+    }
+
+    /// `filter_initial_state; name(lag) = expr; … end;`
+    fn parse_filter_initial_state_block(&mut self) {
+        let opener_span = self.bump_plain_opener();
+        let start = opener_span.start;
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed(
+            "filter_initial_state",
+            opener_span,
+            body_i,
+            body_end_i,
+        );
+        let end = self.block_end_after_consume();
+        if self.model.filter_initial_state_block.is_none() {
+            self.model.filter_initial_state_block = Some(Span { start, end });
+        }
+        let saved = self.i;
+        self.i = body_i;
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                continue;
+            }
+            let before = self.i;
+            if let Some(entry) = self.parse_histval_entry(body_end_i) {
+                self.model.filter_initial_state.push(entry);
+            }
+            if self.i <= before {
+                self.bump();
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+    }
+
+    /// `external_function(name=…, nargs=…, first_deriv_provided[, =…], …);`
+    fn parse_external_function(&mut self) {
+        let start = self.current_start();
+        self.bump();
+        let mut stmt = ExternalFunctionStmt {
+            name: None,
+            nargs: None,
+            first_deriv: None,
+            second_deriv: None,
+            span: Span { start, end: start },
+        };
+        if self.at(TokenKind::LParen) {
+            let from = self.i;
+            self.bump();
+            while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) {
+                let Some(opt) = self.parse_external_function_option() else {
+                    self.bump();
+                    continue;
+                };
+                let value = if opt.value_lex.is_empty() {
+                    None
+                } else {
+                    Some((opt.value_lex.clone(), opt.value_span))
+                };
+                match opt.ident.to_ascii_lowercase().as_str() {
+                    "name" if stmt.name.is_none() => {
+                        if let Some((raw, span)) = value {
+                            let id = self.intern.intern(&unquote_string(&raw));
+                            stmt.name = Some((id, span));
+                            self.push_external_function_name(id);
+                        }
+                    }
+                    "nargs" if stmt.nargs.is_none() => {
+                        stmt.nargs = value.as_ref().and_then(|(v, _)| parse_int_lexeme(v));
+                    }
+                    "first_deriv_provided" if stmt.first_deriv.is_none() => {
+                        stmt.first_deriv = Some(self.deriv_spec(opt.span, value));
+                    }
+                    "second_deriv_provided" if stmt.second_deriv.is_none() => {
+                        stmt.second_deriv = Some(self.deriv_spec(opt.span, value));
+                    }
+                    _ => {}
+                }
+            }
+            self.eat(TokenKind::RParen);
+            self.record_option_twice(from, self.i);
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        stmt.span = Span { start, end };
+        self.model.external_functions.push(stmt);
+    }
+
+    fn parse_external_function_option(&mut self) -> Option<TopOption> {
+        if !self.at(TokenKind::Ident) {
+            return None;
+        }
+        let ident = self.lexeme(&self.tokens[self.i]).to_string();
+        let span = self.tokens[self.i].span;
+        let mut eq = false;
+        if self.peek_kind(1) == Some(TokenKind::Eq) {
+            eq = true;
+        } else if self.peek_kind(1) != Some(TokenKind::Comma)
+            && self.peek_kind(1) != Some(TokenKind::RParen)
+        {
+            return None;
+        }
+        self.bump();
+        let mut value_lex = String::new();
+        let mut value_span = span;
+        if eq {
+            self.bump();
+            if self.at(TokenKind::String) || self.at(TokenKind::Ident) || self.at(TokenKind::Number)
+            {
+                let tok = self.bump();
+                value_lex = self.lexeme(&tok).to_string();
+                value_span = tok.span;
+            }
+        }
+        Some(TopOption {
+            ident,
+            span,
+            eq,
+            value_lex,
+            value_span,
+        })
+    }
+
+    fn deriv_spec(&mut self, opt_span: Span, value: Option<(String, Span)>) -> DerivSpec {
+        match value {
+            Some((lex, span)) => DerivSpec::Named(self.intern.intern(&unquote_string(&lex)), span),
+            None => DerivSpec::Bare(opt_span),
+        }
+    }
+
+    fn push_external_function_name(&mut self, id: Name) {
+        if !self.model.external_function_names.contains(&id) {
+            self.model.external_function_names.push(id);
+        }
+    }
+
+    /// `init2shocks(name=group); endo exo; … end;`
+    fn parse_init2shocks_block(&mut self) {
+        let opener_span = self.bump_plain_opener();
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed("init2shocks", opener_span, body_i, body_end_i);
+        let group = self.group_name_from_opener(opener_span);
+        let mut rows = Vec::new();
+        let saved = self.i;
+        self.i = body_i;
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Semi) || self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            let before = self.i;
+            if let Some(row) = self.parse_pair_symbols(body_end_i) {
+                rows.push(row);
+            }
+            if self.i <= before {
+                self.bump();
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+        self.model
+            .init2shocks_blocks
+            .push(Init2ShocksBlock { group, rows });
+    }
+
+    /// Two symbols through `;`: `a b;` or `a, b;`.
+    fn parse_pair_symbols(&mut self, end_i: usize) -> Option<Init2ShocksRow> {
+        if !self.at(TokenKind::Ident) {
+            return None;
+        }
+        let first = self.bump();
+        let first_lex = self.lexeme(&first).to_string();
+        self.eat(TokenKind::Comma);
+        if !self.at(TokenKind::Ident) {
+            self.skip_to_stmt_end();
+            self.eat(TokenKind::Semi);
+            return None;
+        }
+        let second = self.bump();
+        let second_lex = self.lexeme(&second).to_string();
+        let end = self.finish_shock_stmt(end_i);
+        Some(Init2ShocksRow {
+            endo: self.intern.intern(&first_lex),
+            endo_span: first.span,
+            exo: self.intern.intern(&second_lex),
+            exo_span: second.span,
+            span: Span {
+                start: first.span.start,
+                end,
+            },
+        })
+    }
+
+    /// `homotopy_setup[(from_initval_to_endval)]; name, expr[, expr]; … end;`
+    fn parse_homotopy_setup_block(&mut self) {
+        let opener_span = self.bump_plain_opener();
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed("homotopy_setup", opener_span, body_i, body_end_i);
+        let saved = self.i;
+        self.i = body_i;
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Semi) || self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            let before = self.i;
+            if let Some(row) = self.parse_homotopy_row(body_end_i) {
+                self.model.homotopy_rows.push(row);
+            }
+            if self.i <= before {
+                self.bump();
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+    }
+
+    fn parse_homotopy_row(&mut self, end_i: usize) -> Option<HomotopyRow> {
+        if !self.at(TokenKind::Ident) {
+            return None;
+        }
+        let name_tok = self.bump();
+        let lex = self.lexeme(&name_tok).to_string();
+        if !self.at(TokenKind::Comma) {
+            self.skip_to_stmt_end();
+            self.eat(TokenKind::Semi);
+            return None;
+        }
+        while self.i < end_i && !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            let before = self.i;
+            self.parse_expr();
+            if self.i <= before {
+                self.bump();
+            }
+        }
+        let end = self.finish_shock_stmt(end_i);
+        Some(HomotopyRow {
+            name: self.intern.intern(&lex),
+            span: Span {
+                start: name_tok.span.start,
+                end,
+            },
+        })
+    }
+
+    /// `shock_groups[(name=group)]; symbol = name_list; … end;`
+    fn parse_shock_groups_block(&mut self) {
+        let opener_span = self.bump_plain_opener();
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed("shock_groups", opener_span, body_i, body_end_i);
+        let saved = self.i;
+        self.i = body_i;
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Semi) || self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            let before = self.i;
+            if let Some(group) = self.parse_shock_group(body_end_i) {
+                self.model.shock_groups.push(group);
+            }
+            if self.i <= before {
+                self.bump();
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+    }
+
+    fn parse_shock_group(&mut self, end_i: usize) -> Option<ShockGroup> {
+        if !self.at(TokenKind::Ident) && !self.at(TokenKind::String) {
+            return None;
+        }
+        self.bump();
+        if !self.at(TokenKind::Eq) {
+            self.skip_to_stmt_end();
+            self.eat(TokenKind::Semi);
+            return None;
+        }
+        self.bump();
+        let mut members = Vec::new();
+        while self.i < end_i && !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            if self.at(TokenKind::Ident) {
+                let tok = self.bump();
+                let lex = self.lexeme(&tok).to_string();
+                members.push((self.intern.intern(&lex), tok.span));
+                continue;
+            }
+            self.bump();
+        }
+        self.eat(TokenKind::Semi);
+        Some(ShockGroup { members })
+    }
+
+    /// Sims `bvar_density N;` / `bvar_forecast N;` / `bvar_irf(N, 'name');`
+    fn parse_bvar_statement(&mut self) {
+        self.model.bvar_present = true;
+        self.skip_until_semi();
+    }
+
+    /// `change_type(type) name_list;`
+    fn parse_change_type(&mut self) {
+        let start = self.current_start();
+        self.bump();
+        let mut new_type = None;
+        if self.at(TokenKind::LParen) {
+            self.bump();
+            if self.at(TokenKind::Ident) {
+                let tok = self.bump();
+                let lex = self.lexeme(&tok).to_string();
+                new_type = change_type_kind(&lex);
+            }
+            while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) {
+                self.bump();
+            }
+            self.eat(TokenKind::RParen);
+        }
+        let mut names = Vec::new();
+        while !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
+            if self.at(TokenKind::Ident) {
+                let tok = self.bump();
+                let lex = self.lexeme(&tok).to_string();
+                names.push((self.intern.intern(&lex), tok.span));
+                continue;
+            }
+            self.bump();
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        if let Some(new_type) = new_type {
+            self.model.change_type_statements.push(ChangeTypeStmt {
+                new_type,
+                names,
+                span: Span { start, end },
+            });
+        }
+    }
+
+    /// `optim_weights;` rows `symbol expr;` / `symbol, symbol expr;` `end;`
+    fn parse_optim_weights_block(&mut self) {
+        let opener_span = self.bump_plain_opener();
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed("optim_weights", opener_span, body_i, body_end_i);
+        let saved = self.i;
+        self.i = body_i;
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Semi) || self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            let before = self.i;
+            if let Some(row) = self.parse_optim_weight_row(body_end_i) {
+                self.model.optim_weights.push(row);
+            }
+            if self.i <= before {
+                self.bump();
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+    }
+
+    fn parse_optim_weight_row(&mut self, end_i: usize) -> Option<OptimWeight> {
+        if !self.at(TokenKind::Ident) {
+            return None;
+        }
+        let first_tok = self.bump();
+        let first_lex = self.lexeme(&first_tok).to_string();
+        let mut second = None;
+        if self.at(TokenKind::Comma) {
+            self.bump();
+            if self.at(TokenKind::Ident) {
+                let second_tok = self.bump();
+                let lex = self.lexeme(&second_tok).to_string();
+                second = Some((self.intern.intern(&lex), second_tok.span));
+            }
+        }
+        let expr = self.parse_expr();
+        let end = self.finish_shock_stmt(end_i);
+        Some(OptimWeight {
+            first: self.intern.intern(&first_lex),
+            first_span: first_tok.span,
+            second: second.map(|(id, _)| id),
+            second_span: second.map(|(_, span)| span),
+            expr,
+            span: Span {
+                start: first_tok.span.start,
+                end,
+            },
+        })
+    }
+
+    /// `ramsey_constraints;` one expression per `;`, `end;`
+    fn parse_ramsey_constraints_block(&mut self) {
+        let opener_span = self.bump_plain_opener();
+        let start = opener_span.start;
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed("ramsey_constraints", opener_span, body_i, body_end_i);
+        let end = self.block_end_after_consume();
+        if self.model.ramsey_constraints_span.is_none() {
+            self.model.ramsey_constraints_span = Some(Span { start, end });
+        }
+        let saved = self.i;
+        self.i = body_i;
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                continue;
+            }
+            let before = self.i;
+            let stmt_start = self.current_start();
+            let expr = self.parse_expr();
+            let stmt_end = self.finish_shock_stmt(body_end_i);
+            if expr.is_none() && self.i <= before {
+                self.bump();
+                continue;
+            }
+            self.model.ramsey_constraints.push(RamseyConstraint {
+                expr,
+                span: Span {
+                    start: stmt_start,
+                    end: stmt_end,
+                },
+            });
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+    }
+
+    /// `name=value` option of a block opener, as the group name.
+    fn group_name_from_opener(&self, opener_span: Span) -> String {
+        let raw = self
+            .src
+            .get(opener_span.start as usize..opener_span.end as usize)
+            .unwrap_or("");
+        let Some(pos) = raw.find('=') else {
+            return "default".to_string();
+        };
+        let value = raw[pos + 1..]
+            .trim()
+            .trim_end_matches(';')
+            .trim()
+            .trim_end_matches(')')
+            .trim();
+        unquote_string(value)
     }
 
     fn parse_occbin_constraints_block(&mut self) {
@@ -1331,10 +2064,10 @@ impl Parser<'_> {
         {
             self.model.discretionary_policy_span = Some(tok.span);
         }
-        let saw_instruments = if self.at(TokenKind::LParen) {
+        let (saw_instruments, planner_discount) = if self.at(TokenKind::LParen) {
             self.parse_policy_options(command)
         } else {
-            false
+            (false, None)
         };
         if command == PolicyCommand::DiscretionaryPolicy {
             self.model.discretionary_has_instruments_option |= saw_instruments;
@@ -1345,13 +2078,35 @@ impl Parser<'_> {
         ) {
             self.collect_trailing_symbols(command.as_str());
         }
-        self.eat(TokenKind::Semi);
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        self.model
+            .policy_command_statements
+            .push(PolicyCommandStatement {
+                command,
+                span: Span {
+                    start: tok.span.start,
+                    end,
+                },
+                planner_discount: if matches!(
+                    command,
+                    PolicyCommand::RamseyModel | PolicyCommand::RamseyPolicy
+                ) {
+                    planner_discount
+                } else {
+                    None
+                },
+            });
     }
 
-    fn parse_policy_options(&mut self, command: PolicyCommand) -> bool {
+    fn parse_policy_options(&mut self, command: PolicyCommand) -> (bool, Option<Span>) {
         let from = self.i;
         self.bump();
         let mut saw_instruments = false;
+        let mut planner_discount = None;
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) && !self.at(TokenKind::Semi) {
             if self.at_ident_ci("instruments") && self.peek_kind(1) == Some(TokenKind::Eq) {
                 saw_instruments = true;
@@ -1361,8 +2116,12 @@ impl Parser<'_> {
             } else if self.at_ident_ci("planner_discount")
                 && self.peek_kind(1) == Some(TokenKind::Eq)
             {
+                let opt_span = self.tokens[self.i].span;
                 self.bump();
                 self.bump();
+                if planner_discount.is_none() {
+                    planner_discount = Some(opt_span);
+                }
                 let expr = self.parse_expr();
                 if let Some(id) = expr {
                     if self.model.planner_discount_expr.is_none() {
@@ -1391,7 +2150,7 @@ impl Parser<'_> {
         self.eat(TokenKind::RParen);
         self.record_policy_option_flags(command, from, self.i);
         self.record_option_twice(from, self.i);
-        saw_instruments
+        (saw_instruments, planner_discount)
     }
 
     fn collect_instruments(&mut self) {
@@ -1587,9 +2346,7 @@ impl Parser<'_> {
                 match target {
                     EstimatedParamsTarget::Params => self.model.estimated_params.push(entry),
                     EstimatedParamsTarget::Init => self.model.estimated_params_init.push(entry),
-                    EstimatedParamsTarget::Bounds => {
-                        self.model.estimated_params_bounds.push(entry)
-                    }
+                    EstimatedParamsTarget::Bounds => self.model.estimated_params_bounds.push(entry),
                 }
             }
             entry_start = entry_end;
@@ -3254,9 +4011,7 @@ impl Parser<'_> {
                 continue;
             }
             if self.at(TokenKind::Ident)
-                && opener
-                    .as_deref()
-                    .is_some_and(is_trailing_symbol_command)
+                && opener.as_deref().is_some_and(is_trailing_symbol_command)
             {
                 let cmd = opener.as_deref().unwrap().to_string();
                 self.push_command_symbol(&cmd);
@@ -3274,6 +4029,14 @@ impl Parser<'_> {
             self.model.prior_function_has_parens = true;
         }
         let opts = top_options(&self.tokens, self.src, from, to);
+        if is_decomposition_command(opener) && self.model.with_epilogue_span.is_none() {
+            if let Some(opt) = opts
+                .iter()
+                .find(|o| o.ident.eq_ignore_ascii_case("with_epilogue"))
+            {
+                self.model.with_epilogue_span = Some(opt.span);
+            }
+        }
         let mut stmt_estimated = None;
         let mut stmt_calibrated = None;
         for opt in &opts {
@@ -3350,7 +4113,10 @@ impl Parser<'_> {
                     self.model.proposal_approximation_montecarlo_span = Some(opt.span);
                 } else if opt.ident.eq_ignore_ascii_case("distribution_approximation")
                     && opt.value_lex.eq_ignore_ascii_case("montecarlo")
-                    && self.model.distribution_approximation_montecarlo_span.is_none()
+                    && self
+                        .model
+                        .distribution_approximation_montecarlo_span
+                        .is_none()
                 {
                     self.model.distribution_approximation_montecarlo_span = Some(opt.span);
                 }
@@ -3599,10 +4365,6 @@ impl Parser<'_> {
             && self.model.perfect_foresight_controlled_paths_span.is_none()
         {
             self.model.perfect_foresight_controlled_paths_span = Some(tok.span);
-        } else if lex.eq_ignore_ascii_case("ramsey_constraints")
-            && self.model.ramsey_constraints_span.is_none()
-        {
-            self.model.ramsey_constraints_span = Some(tok.span);
         }
     }
 
@@ -3618,7 +4380,6 @@ impl Parser<'_> {
             "heteroskedastic_shocks",
             "shock_paths",
             "perfect_foresight_controlled_paths",
-            "ramsey_constraints",
             "conditional_forecast_paths",
         ];
         BLOCKS.iter().any(|kw| self.at_ident_ci(kw))
@@ -4505,11 +5266,13 @@ mod tests {
     }
 
     #[test]
-    fn ramsey_constraints_skipped_as_block() {
+    fn ramsey_constraints_body_is_parsed() {
         let model = parse(
             "var y; varexo e; model; y = e; end; ramsey_constraints; y > 0; end; stoch_simul;",
         );
         assert!(model.ramsey_constraints_span.is_some());
+        assert_eq!(model.ramsey_constraints.len(), 1);
+        assert!(model.ramsey_constraints[0].expr.is_some());
         assert!(model.stoch_simul_span.is_some());
     }
 

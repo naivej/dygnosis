@@ -641,6 +641,11 @@ fn requires_source_dir_file(mod_text: &str) -> bool {
             return true;
         }
     }
+    // `load_params_and_steady_state` reads its file relative to the process CWD,
+    // which the editor stands for with the `.mod`'s directory.
+    if model.load_params_file.is_some() {
+        return true;
+    }
     false
 }
 
@@ -1282,22 +1287,27 @@ fn remove_with_retries(path: &Path) {
     }
 }
 
-fn make_tmp_dir(prefix: &str) -> std::io::Result<PathBuf> {
+/// `SystemTime::now()` is coarser than nanoseconds on Windows, so concurrent runs
+/// in one process can read the same value; the counter keeps the name unique.
+static RUN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn run_token() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let dir = std::env::temp_dir().join(format!("{prefix}{}_{nanos}", std::process::id()));
+    let seq = RUN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{}_{nanos}_{seq}", std::process::id())
+}
+
+fn make_tmp_dir(prefix: &str) -> std::io::Result<PathBuf> {
+    let dir = std::env::temp_dir().join(format!("{prefix}{}", run_token()));
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
 
 fn unique_mod_in(dir: &Path) -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    dir.join(format!(".dynare_lsp_{}_{nanos}.mod", std::process::id()))
+    dir.join(format!(".dynare_lsp_{}.mod", run_token()))
 }
 
 fn abs_path(path: &Path) -> PathBuf {

@@ -2,8 +2,8 @@
 //!
 //! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 70
 //! codes shipped through 0.5.0, then kind `shared` / `skipped` / `added`.
-//! 201 keys = 140 shared + 27 added + 34 skipped. Catalog **0.5.1** D-clash and
-//! D-check Errors are shared; **0.5.2** D-walk and D-block rows add shared keys and drop
+//! 244 keys = 189 shared + 27 added + 28 skipped. Catalog **0.5.1** D-clash and
+//! D-check Errors are shared; **0.5.2** D-walk, D-block, and D-open rows add shared keys and drop
 //! the `S###` keys they replace.
 //! `I050` and `W042` use the recorded surface rewrites in
 //! `dev_logs/0.1/0.1.0/22-c-explain.md` (do not advertise Compute Steady State).
@@ -40,7 +40,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 201 keys: 140 shared + 27 added + 34 skipped.
+// 244 keys: 189 shared + 27 added + 28 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -193,8 +193,8 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Shared,
     }),
     ("E058", ExplainEntry {
-        title: "Undeclared variable in initval",
-        body: "An entry in the `initval` block refers to a name that is not declared as a variable. Dynare refuses: `Unknown symbol: undeclared_zzz`.\n\n**Warrant**\n\nThe editor names the undeclared `initval` / `endval` entry; Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the variable, or remove the stray `initval` entry.",
+        title: "Undeclared variable in a block that names symbols",
+        body: "A block that names symbols refers to one that is not declared at all: an `initval` / `endval` entry, a `histval` lag, a `filter_initial_state` entry, an `init2shocks` pair, a `homotopy_setup` row, or a `shock_groups` member. Dynare refuses: `Unknown symbol: undeclared_zzz`.\n\n**Warrant**\n\nThe editor names the undeclared entry and its block; Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the variable, or remove the stray entry.",
         kind: ExplainKind::Shared,
     }),
     ("W051", ExplainEntry {
@@ -877,6 +877,251 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "A macro ``+`` combines operands of incompatible types. Dynare refuses: `Type mismatch for operands of + operator`.\n\n**Fix**\n\nAdd numbers to numbers, or change the operands.",
         kind: ExplainKind::Shared,
     }),
+    ("E286", ExplainEntry {
+        title: "with_epilogue without an epilogue block",
+        body: "A ``shock_decomposition``, ``realtime_shock_decomposition``, or ``initial_condition_decomposition`` statement has the ``with_epilogue`` option, but the file has no ``epilogue`` block. Dynare refuses: `the 'with_epilogue' option cannot be specified when there is no 'epilogue' block`.\n\n**Fix**\n\nAdd an ``epilogue;`` … ``end;`` block, or drop the ``with_epilogue`` option.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E287", ExplainEntry {
+        title: "Duplicate name in the epilogue block",
+        body: "The ``epilogue`` block assigns the same name twice. Dynare refuses: `in the 'epilogue' block, variable 'foo' is declared twice`.\n\n**Fix**\n\nKeep one assignment per name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E288", ExplainEntry {
+        title: "Undeclared name in the epilogue block",
+        body: "An expression in the ``epilogue`` block uses a name that is not declared before it. Dynare refuses: `Variable bar used in the epilogue block but was not declared.`\n\n**Fix**\n\nDeclare the symbol, or correct the name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E289", ExplainEntry {
+        title: "Exogenous variable in the epilogue block",
+        body: "The ``epilogue`` block uses an exogenous variable. Dynare refuses: `Symbol 'e' cannot be used inside the epilogue block, because it is an exogenous variable.`\n\n**Fix**\n\nUse endogenous variables and epilogue names there.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E290", ExplainEntry {
+        title: "Deterministic exogenous variable in the epilogue block",
+        body: "The ``epilogue`` block uses a ``varexo_det`` variable. Dynare refuses: `Symbol 'ed' cannot be used inside the epilogue block, because it is an exogenous deterministic variable.`\n\n**Fix**\n\nUse endogenous variables and epilogue names there.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E291", ExplainEntry {
+        title: "EXPECTATION in the epilogue block",
+        body: "The ``epilogue`` block uses the ``EXPECTATION`` operator. Dynare refuses: `The 'expectation' operator is forbidden in 'epilogue'.`\n\n**Fix**\n\nRemove the operator from the epilogue expression.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E292", ExplainEntry {
+        title: "STEADY_STATE in the epilogue block",
+        body: "The ``epilogue`` block uses the ``STEADY_STATE`` operator. Dynare refuses: `The STEADY_STATE() operator is forbidden in epilogue block`.\n\n**Fix**\n\nRemove the operator from the epilogue expression.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E293", ExplainEntry {
+        title: "SUM in the epilogue block",
+        body: "The ``epilogue`` block uses the ``SUM`` operator. Dynare refuses: `The SUM() operator is forbidden in epilogue block`.\n\n**Fix**\n\nRemove the operator from the epilogue expression.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E294", ExplainEntry {
+        title: "Epilogue name outside the epilogue block",
+        body: "A name declared in the ``epilogue`` block is used in the model or in another statement. Dynare refuses: `Symbol 'foo' cannot be used outside the epilogue block.`\n\n**Fix**\n\nUse the name only inside the ``epilogue`` block.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E295", ExplainEntry {
+        title: "Unknown name in change_type",
+        body: "A ``change_type`` statement lists a name that is not declared before it. Dynare refuses: `Unknown variable zzz`.\n\n**Fix**\n\nDeclare the symbol, or correct the name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E296", ExplainEntry {
+        title: "change_type after the symbol was used",
+        body: "A ``change_type`` statement changes a symbol that an earlier expression already used. Dynare refuses: `You cannot modify the type of symbol y after having used it in an expression`.\n\n**Fix**\n\nMove the ``change_type`` statement above the first use.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E297", ExplainEntry {
+        title: "Several ramsey_model statements",
+        body: "The file has more than one ``ramsey_model`` statement. Dynare refuses: `Several 'ramsey_model' statements cannot appear in a given .mod file.`\n\n**Fix**\n\nKeep a single ``ramsey_model`` statement.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E298", ExplainEntry {
+        title: "ramsey_model after ramsey_policy",
+        body: "A ``ramsey_model`` statement follows a ``ramsey_policy`` statement. Dynare refuses: `A 'ramsey_model' statement cannot follow a 'ramsey_policy' statement.`\n\n**Fix**\n\nKeep one of the two, in the intended order.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E299", ExplainEntry {
+        title: "ramsey_policy after ramsey_model",
+        body: "A ``ramsey_policy`` statement follows a ``ramsey_model`` statement. Dynare refuses: `A 'ramsey_policy' statement cannot follow a 'ramsey_model' statement.`\n\n**Fix**\n\nKeep one of the two, in the intended order.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E300", ExplainEntry {
+        title: "Several ramsey_policy statements",
+        body: "The file has more than one ``ramsey_policy`` statement. Dynare refuses: `Several 'ramsey_policy' statements cannot appear in a given .mod file.`\n\n**Fix**\n\nKeep a single ``ramsey_policy`` statement.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E301", ExplainEntry {
+        title: "planner_discount with a declared optimal_policy_discount_factor",
+        body: "``ramsey_model(planner_discount=…)`` is used while ``optimal_policy_discount_factor`` is already declared as a parameter. Dynare refuses: `ramsey_model: the 'planner_discount' option cannot be used when the 'optimal_policy_discount_factor' parameter is explicitly declared.`\n\n**Fix**\n\nDrop the ``planner_discount`` option, or remove the parameter declaration.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E302", ExplainEntry {
+        title: "planner_discount on ramsey_policy with a declared optimal_policy_discount_factor",
+        body: "``ramsey_policy(planner_discount=…)`` is used while ``optimal_policy_discount_factor`` is already declared as a parameter. Dynare refuses: `ramsey_policy: the 'planner_discount' option cannot be used when the 'optimal_policy_discount_factor' parameter is explicitly declared.`\n\n**Fix**\n\nDrop the ``planner_discount`` option, or remove the parameter declaration.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E303", ExplainEntry {
+        title: "dsge_prior_weight declared as a parameter",
+        body: "The ``parameters`` declaration lists ``dsge_prior_weight``. Dynare refuses: `dsge_prior_weight cannot be declared as a parameter. Use the dsge_var option in the estimation statement instead.`\n\n**Fix**\n\nRemove it from ``parameters`` and pass ``dsge_var`` to the ``estimation`` statement.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E304", ExplainEntry {
+        title: "@#includepath is not a directory",
+        body: "The ``@#includepath`` argument does not resolve to an existing directory (a relative path resolves against the file that contains the directive). Dynare refuses: `missing_dir does not evaluate to a valid directory`.\n\n**Warrant**\n\nDynare prints that line inside a `Macro-processing error: backtrace…` block that also repeats the directive and its location; the editor reports the single line.\n\n**Fix**\n\nPoint the directive at an existing directory, or create it.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E305", ExplainEntry {
+        title: "@#includepath argument is not a string",
+        body: "The ``@#includepath`` argument does not evaluate to a string. Dynare refuses: `File name does not evaluate to a string`.\n\n**Fix**\n\nQuote the directory: ``@#includepath \"mydir\"``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E306", ExplainEntry {
+        title: "load_params_and_steady_state cannot open its file",
+        body: "The ``load_params_and_steady_state`` file is not found next to the ``.mod``. Dynare refuses: `Can't open nope.txt`.\n\n**Fix**\n\nPut the file next to the ``.mod``, or correct its name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E307", ExplainEntry {
+        title: "Trend variable declared twice",
+        body: "A ``trend_var`` or ``log_trend_var`` name is declared twice. Dynare refuses: `Trend variable A was declared twice.`\n\n**Fix**\n\nDeclare each trend variable once.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E308", ExplainEntry {
+        title: "Endogenous variable listed twice as following a trend",
+        body: "A ``var(deflator=…)`` list holds the same endogenous variable twice (also across statements). Dynare refuses: `Variable y was listed more than once as following a trend.`\n\n**Fix**\n\nList the variable once.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E309", ExplainEntry {
+        title: "Deflator contains a non-stationary endogenous variable",
+        body: "The deflator expression of a ``var(deflator=…)`` statement uses a variable that is itself declared with a deflator. Dynare refuses: `The deflator contains a non-stationary endogenous variable. This is not allowed. Please use only stationary endogenous and/or {log_}trend_vars.`\n\n**Fix**\n\nUse a stationary variable or a trend variable as the deflator.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E310", ExplainEntry {
+        title: "Trend variable used outside the model",
+        body: "A ``trend_var`` / ``log_trend_var`` name appears outside the ``model`` block (for example in a parameter assignment). Dynare refuses: `Variable A not allowed outside model declaration, because it is a trend variable.`\n\n**Fix**\n\nUse the trend variable in the ``model`` block or as a deflator.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E311", ExplainEntry {
+        title: "filter_initial_state name is not endogenous or exogenous",
+        body: "A ``filter_initial_state`` entry names a symbol that is neither endogenous nor exogenous (for example a parameter). Dynare refuses: `filter_initial_state: rho should be an endogenous or exogenous variable`.\n\n**Fix**\n\nList an endogenous or exogenous variable.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E312", ExplainEntry {
+        title: "filter_initial_state exogenous variable without a lag",
+        body: "A ``filter_initial_state`` entry gives an exogenous variable the lag 0. Dynare refuses: `filter_initial_state: exogenous variable e must be provided with a lag`.\n\n**Fix**\n\nGive the exogenous variable a negative lag.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E313", ExplainEntry {
+        title: "filter_initial_state entry declared twice",
+        body: "The same ``(name, lag)`` pair appears twice in ``filter_initial_state``. Dynare refuses: `filter_initial_state: (y, 0) declared twice`.\n\n**Fix**\n\nKeep one assignment per ``(name, lag)`` pair.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E314", ExplainEntry {
+        title: "filter_initial_state lag not used by the model",
+        body: "A ``filter_initial_state`` entry uses a lag that the model does not carry: the entry's ``lag`` stands for the model lag ``lag - 1``. Dynare refuses: `filter_initial_state: variable y does not appear in the model with the lag -3 (see the reference manual for the timing convention in 'filter_initial_state')`.\n\n**Fix**\n\nMatch an entry's lag to the model: for ``y(-3)`` in the model, write ``y(-2)`` here.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E315", ExplainEntry {
+        title: "optim_weights variable declared twice",
+        body: "``optim_weights`` gives the same variable two weights. Dynare refuses: `optim_weights: y declared twice`.\n\n**Fix**\n\nKeep one weight per variable.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E316", ExplainEntry {
+        title: "optim_weights pair declared twice",
+        body: "``optim_weights`` gives the same pair of variables two weights. Dynare refuses: `optim_weights: pair of variables (y, z) declared twice`.\n\n**Fix**\n\nKeep one weight per pair (the order of the two names matters).",
+        kind: ExplainKind::Shared,
+    }),
+    ("E317", ExplainEntry {
+        title: "optim_weights name is not endogenous",
+        body: "``optim_weights`` weights a symbol that is not an endogenous variable. Dynare refuses: `e is not endogenous.`\n\n**Fix**\n\nWeight endogenous variables.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E318", ExplainEntry {
+        title: "Two ramsey_constraints for one variable",
+        body: "``ramsey_constraints`` constrains the same endogenous variable twice (also across blocks). Dynare refuses: `The ramsey_constraints block contains two constraints for variable y`.\n\n**Fix**\n\nMerge the bounds into one constraint, such as ``0 < y < 1``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E319", ExplainEntry {
+        title: "Ramsey constraint is not an inequality",
+        body: "A ``ramsey_constraints`` entry is not an inequality. Dynare refuses: `Ramsey constraint has an incorrect form: This expression is not an inequality`.\n\n**Fix**\n\nWrite ``y > bound``, ``y < bound``, or ``lower < y < upper``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E320", ExplainEntry {
+        title: "Ramsey constraint bound is not constant",
+        body: "A ``ramsey_constraints`` bound holds an endogenous or exogenous variable. Dynare refuses: `Ramsey constraint has an incorrect form: Bounds must not contain any endogenous or exogenous variable`.\n\n**Fix**\n\nUse constants (parameters are allowed) for the bounds.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E321", ExplainEntry {
+        title: "Ramsey constraint does not match the complementarity form",
+        body: "A ``ramsey_constraints`` entry is an inequality but not one of the accepted shapes, and Dynare reports it without a detail. Dynare refuses: `Ramsey constraint has an incorrect form:`.\n\n**Fix**\n\nWrite ``y > bound``, ``y < bound``, or ``lower < y < upper`` around a single contemporaneous endogenous variable.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E322", ExplainEntry {
+        title: "external_function without a name option",
+        body: "An ``external_function`` statement has no ``name`` option. Dynare refuses: `The 'name' option must be passed to external_function().`\n\n**Fix**\n\nAdd ``name='myfunc'``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E323", ExplainEntry {
+        title: "external_function name option without an argument",
+        body: "The ``name`` option of ``external_function`` is empty. Dynare refuses: `An argument must be passed to the 'name' option of the external_function() statement.`\n\n**Fix**\n\nPass the function name: ``name='myfunc'``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E324", ExplainEntry {
+        title: "external_function second derivative without the first",
+        body: "``second_deriv_provided=…`` names a derivative function while the statement does not provide a first derivative. Dynare refuses: `If the second derivative is provided to the external_function command, the first derivative must also be provided.`\n\n**Fix**\n\nAdd ``first_deriv_provided=…``, or drop the second derivative.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E325", ExplainEntry {
+        title: "external_function bare second derivative without a bare first",
+        body: "A bare ``second_deriv_provided`` asks the top-level function for the second derivative while the first derivative comes from somewhere else. Dynare refuses: `If the second derivative is provided in the top-level function, the first derivative must also be provided in that function.`\n\n**Fix**\n\nAdd a bare ``first_deriv_provided``, or name the second-derivative function.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E326", ExplainEntry {
+        title: "external_function nargs differs from an earlier statement",
+        body: "A second ``external_function`` statement for the same function passes a different number of arguments. Dynare refuses: `The number of arguments passed to the external_function() statement do not match the number of arguments passed to a previous call or declaration of the top-level function.`\n\n**Fix**\n\nGive the statements the same ``nargs``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E327", ExplainEntry {
+        title: "external_function first derivative differs from an earlier statement",
+        body: "A second ``external_function`` statement for the same function names a different first-derivative function. Dynare refuses: `The first derivative function passed to the external_function() statement does not match the first derivative function passed to a previous call or declaration of the top-level function.`\n\n**Fix**\n\nRepeat the earlier ``first_deriv_provided`` form.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E328", ExplainEntry {
+        title: "external_function second derivative from another function",
+        body: "The first derivative comes from the top-level function while ``second_deriv_provided`` names a different external function. Dynare refuses: `If the first derivative is provided by the top-level function, the second derivative cannot be provided by any other external function.`\n\n**Fix**\n\nProvide the second derivative in the same function (a bare ``second_deriv_provided``), or name a first-derivative function.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E329", ExplainEntry {
+        title: "init2shocks duplicate endogenous variable",
+        body: "An ``init2shocks`` block pairs the same endogenous variable twice. Dynare refuses: `Init2shocks(default): enogenous variable 'y' appears more than once in the init2shocks statement` (their spelling).\n\n**Fix**\n\nKeep one pair per endogenous variable.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E330", ExplainEntry {
+        title: "init2shocks first name is not endogenous",
+        body: "The first name of an ``init2shocks`` pair is not an endogenous variable. Dynare refuses: `init2shocks: rho should be an endogenous variable`.\n\n**Fix**\n\nPut an endogenous variable first.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E331", ExplainEntry {
+        title: "init2shocks second name is not exogenous",
+        body: "The second name of an ``init2shocks`` pair is not a ``varexo`` variable; ``varexo_det`` does not count here. Dynare refuses: `init2shocks: rho should be an exogenous variable`.\n\n**Fix**\n\nPut a ``varexo`` variable second.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E332", ExplainEntry {
+        title: "homotopy_setup name is not a parameter or exogenous variable",
+        body: "A ``homotopy_setup`` row names a symbol that is neither a parameter, a ``varexo``, nor a ``varexo_det`` variable. Dynare refuses: `homotopy_val: y should be a parameter or exogenous variable`.\n\n**Fix**\n\nUse a parameter or an exogenous variable.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E333", ExplainEntry {
+        title: "shock_groups member is not exogenous",
+        body: "A ``shock_groups`` member is not a ``varexo`` variable; ``varexo_det`` does not count here. Dynare refuses: `shock_groups: rho should be an exogenous variable`.\n\n**Fix**\n\nList ``varexo`` variables.",
+        kind: ExplainKind::Shared,
+    }),
+    ("W204", ExplainEntry {
+        title: "Unknown symbol in a load_params_and_steady_state file",
+        body: "The data file of ``load_params_and_steady_state`` holds a name that is not declared at that point in the ``.mod``. Dynare accepts and warns: `Unknown symbol zzz in w204_params.txt`.\n\n**Fix**\n\nRemove the entry from the data file, or declare the symbol above the ``load_params_and_steady_state`` statement.",
+        kind: ExplainKind::Shared,
+    }),
     ("E186", ExplainEntry {
         title: "Unused endogenous after substitution",
         body: "Dynare refuses: `Error: <name> not used in the model block`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
@@ -982,11 +1227,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "Dynare refuses: `not a heterogeneous exogenous variable`. Catching step: check. Owner: skip 0.9 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S036", ExplainEntry {
-        title: "init2shocks duplicate endogenous",
-        body: "Dynare refuses: `Init2shocks(name): enogenous variable '…' appears more than once`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
     ("S037", ExplainEntry {
         title: "shock_paths self reference without a lag",
         body: "Dynare refuses: `the use of 'self.…' without a lag is not allowed, since it is a circular reference`. Catching step: check. Owner: skip 0.11 E. This code is never emitted.",
@@ -995,11 +1235,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("S038", ExplainEntry {
         title: "PAC growth, auxname, or kind vs pac_target_info",
         body: "Dynare refuses: `PAC checkPass messages`. Catching step: check. Owner: skip 0.8 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S039", ExplainEntry {
-        title: "with_epilogue without epilogue",
-        body: "Dynare refuses: `epilogue messages`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S040", ExplainEntry {
@@ -1012,29 +1247,9 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "Dynare refuses: `various ms_* / data / prior ERROR`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S044", ExplainEntry {
-        title: "@#includepath is not a directory",
-        body: "Dynare refuses: `ERROR in macro-processor: … does not evaluate to a valid directory`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S046", ExplainEntry {
-        title: "load_params_and_steady_state unknown symbol",
-        body: "Dynare warns: `WARNING: Unknown symbol … in <file>`. Catching step: parse. Owner: skip 0.6 W. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S047", ExplainEntry {
-        title: "load_params_and_steady_state cannot open file",
-        body: "Dynare refuses: `ERROR: Can't open <file> / Unsupported variable type for …`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S051", ExplainEntry {
-        title: "change_type, statement-local clash, or several ramsey_*",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
     ("S052", ExplainEntry {
-        title: "Trend, histval, filter_initial_state, or related parse",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E / 0.11 E. This code is never emitted.",
+        title: "shock_paths body, DATE, and related parse",
+        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.11 E (DATE / `set_time` / `database` / `shock_paths` body / `mshocks` add-multiply / surprise `stderr` / `heteroskedastic_shocks`). This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S053", ExplainEntry {

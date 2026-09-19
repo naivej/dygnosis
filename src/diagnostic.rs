@@ -85,6 +85,7 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     out.extend(crate::check_w130::check_w130(model));
     out.extend(crate::check_symbol_list::check_symbol_list(model));
     out.extend(crate::check_d_block::check_d_block(model));
+    out.extend(crate::check_d_open::check_d_open(model));
     out
 }
 
@@ -110,6 +111,9 @@ pub(crate) fn check_in_workspace(ws: &mut Workspace, abs_path: &str) -> Vec<Diag
 fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<Vec<Diagnostic>> {
     let model = ws.get_effective_model(abs_path)?.clone();
     let mut diags = analyze(&model);
+    diags.extend(crate::check_d_open::check_workspace_d_open(
+        &model, abs_path,
+    ));
     let records = ws.include_records(abs_path).cloned().unwrap_or_default();
     diags.extend(crate::check_e060::check_e060(&records));
     diags.extend(crate::check_e060::check_e061(&records));
