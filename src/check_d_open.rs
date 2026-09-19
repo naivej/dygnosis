@@ -954,6 +954,17 @@ fn check_external_functions(model: &Model) -> Vec<Diagnostic> {
                 }
             }
         }
+        // `deriv_id` maps a derivative name equal to `own` to `Top`, so both
+        // options are `Named` only when neither is the top-level function.
+        if let (DerivId::Named(first), DerivId::Named(second)) = (options.first, options.second) {
+            if first == second {
+                out.push(err(
+                    stmt.span,
+                    "E334",
+                    "If the Jacobian and Hessian are provided by the same function, that function must be the top-level function.",
+                ));
+            }
+        }
         if let Some(previous) = table.get(&own) {
             if options.nargs != previous.nargs {
                 out.push(err(

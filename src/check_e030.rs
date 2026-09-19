@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::expr::ExprKind;
 use crate::intern::Name;
-use crate::model::{Equation, Model};
+use crate::model::{DerivSpec, Equation, Model};
 use crate::span::Span;
 
 pub fn check_e030(model: &Model) -> Vec<Diagnostic> {
@@ -54,6 +54,14 @@ fn check_duplicate_declarations(model: &Model) -> Vec<Diagnostic> {
     for stmt in &model.external_functions {
         if let Some((name, span)) = stmt.name {
             all_vars.push((name, span, "external_function"));
+        }
+        // 7.1 declares every function name the statement carries, so the
+        // derivative values collide with a declaration or a repeat just as the
+        // `name=` value does.
+        for deriv in [stmt.first_deriv, stmt.second_deriv].into_iter().flatten() {
+            if let DerivSpec::Named(name, span) = deriv {
+                all_vars.push((name, span, "external_function"));
+            }
         }
     }
     all_vars.sort_by_key(|(_, span, _)| (span.start, span.end));

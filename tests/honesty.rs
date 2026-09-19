@@ -2102,6 +2102,50 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         our_needle: "'ramsey_policy' is deprecated",
         stage: JsonStage::Check,
     },
+    HonestyRow {
+        code: "E030",
+        fixture: "d_scope/e030_extfun_deriv_and_var.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "declared twice with different types",
+        our_needle: "declared twice with different types",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W031",
+        fixture: "d_scope/w031_extfun_deriv_same_name.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "Symbol foo declared twice",
+        our_needle: "Symbol foo declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W031",
+        fixture: "d_open/e328_extfun_first_top_second_named.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "Symbol foo declared twice",
+        our_needle: "Symbol foo declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E334",
+        fixture: "d_extfun/e334_extfun_same_function.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "If the Jacobian and Hessian are provided by the same function",
+        our_needle: "If the Jacobian and Hessian are provided by the same function",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W031",
+        fixture: "d_extfun/e334_extfun_same_function.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "Symbol bar declared twice",
+        our_needle: "Symbol bar declared twice",
+        stage: JsonStage::Check,
+    },
 ];
 
 struct ClashQuiet {
@@ -2587,17 +2631,11 @@ fn clash_quiet_at_transform() {
 
 /// Official messages we knowingly do not mirror on a surface file, with the
 /// reason. Anything else must be claimed by a `HONESTY_FIRE` needle.
-const SURFACE_WAIVERS: &[(&str, &str)] = &[(
-    // 7.1 puts the top-level function name in its symbol table for the bare
-    // `first_deriv_provided` / `second_deriv_provided` forms, so a named
-    // statement beside them reads as a second declaration. We do not model the
-    // implicit name; the paired **E328** still refuses the file on both sides.
-    "d_open/e328_extfun_first_top_second_named.mod",
-    "Symbol foo declared twice",
-)];
+const SURFACE_WAIVERS: &[(&str, &str)] = &[];
 
-/// Every official ERROR/WARNING line on a D-open / D-gap surface file must be
-/// claimed by a needle in `HONESTY_FIRE` for that fixture (or waived above).
+/// Every official ERROR/WARNING line on a D-open / D-gap / D-extfun surface
+/// file must be claimed by a needle in `HONESTY_FIRE` for that fixture (or
+/// waived above).
 /// This is the direction honesty rows cannot see: they check the codes we know
 /// about, this checks the messages they print. Official lines that carry no
 /// `ERROR: ` / `WARNING: ` prefix are out of scope here.
@@ -2620,7 +2658,11 @@ fn surface_matrix_claims_every_official_message() {
     let mut fixtures: Vec<&str> = HONESTY_FIRE
         .iter()
         .map(|row| row.fixture)
-        .filter(|fixture| fixture.starts_with("d_open/") || fixture.starts_with("d_gap/"))
+        .filter(|fixture| {
+            fixture.starts_with("d_open/")
+                || fixture.starts_with("d_gap/")
+                || fixture.starts_with("d_extfun/")
+        })
         .collect();
     fixtures.sort_unstable();
     fixtures.dedup();

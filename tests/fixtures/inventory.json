@@ -6752,6 +6752,129 @@
       "source": "d_gap.rs",
       "cluster": "d_gap/quiet_dsge_prior_weight_decl.mod",
       "notes": "declaration plus estimated_params listing stay accepted"
+    },
+    {
+      "id": "e030_extfun_deriv_and_var",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "d_scope",
+      "fixture": "tests/fixtures/d_scope/e030_extfun_deriv_and_var.mod",
+      "source": "d_scope.rs",
+      "cluster": "d_scope/e030_extfun_deriv_and_var.mod",
+      "notes": "derivative function name also declared var"
+    },
+    {
+      "id": "w031_extfun_deriv_same_name",
+      "codes": [
+        "W031"
+      ],
+      "kind": "fire",
+      "package": "d_scope",
+      "fixture": "tests/fixtures/d_scope/w031_extfun_deriv_same_name.mod",
+      "source": "d_scope.rs",
+      "cluster": "d_scope/w031_extfun_deriv_same_name.mod",
+      "notes": "name= and first_deriv_provided name the same function"
+    },
+    {
+      "id": "quiet_unused_varexo_det",
+      "codes": [
+        "E021"
+      ],
+      "kind": "quiet",
+      "package": "d_scope",
+      "fixture": "tests/fixtures/d_scope/quiet_unused_varexo_det.mod",
+      "source": "d_scope.rs",
+      "cluster": "d_scope/quiet_unused_varexo_det.mod",
+      "notes": "7.1 accepts an unused varexo_det"
+    },
+    {
+      "id": "quiet_extfun_deriv_names",
+      "codes": [
+        "E030",
+        "W031"
+      ],
+      "kind": "quiet",
+      "package": "d_scope",
+      "fixture": "tests/fixtures/d_scope/quiet_extfun_deriv_names.mod",
+      "source": "d_scope.rs",
+      "cluster": "d_scope/quiet_extfun_deriv_names.mod",
+      "notes": "three different function names are quiet"
+    },
+    {
+      "id": "e334_extfun_same_function",
+      "codes": [
+        "E334",
+        "W031"
+      ],
+      "kind": "fire",
+      "package": "d_extfun",
+      "fixture": "tests/fixtures/d_extfun/e334_extfun_same_function.mod",
+      "source": "d_extfun.rs",
+      "cluster": "d_extfun/e334_extfun_same_function.mod",
+      "notes": "Jacobian and Hessian from the same non-top-level function"
+    },
+    {
+      "id": "e334_extfun_var_collision",
+      "codes": [
+        "E030",
+        "E334"
+      ],
+      "kind": "fire",
+      "package": "d_extfun",
+      "fixture": "tests/fixtures/d_extfun/e334_extfun_var_collision.mod",
+      "source": "d_extfun.rs",
+      "cluster": "d_extfun/e334_extfun_var_collision.mod",
+      "notes": "the pair's function is also declared var"
+    },
+    {
+      "id": "quiet_e334_own_name_function",
+      "codes": [
+        "E334"
+      ],
+      "kind": "quiet",
+      "package": "d_extfun",
+      "fixture": "tests/fixtures/d_extfun/quiet_e334_own_name_function.mod",
+      "source": "d_extfun.rs",
+      "cluster": "d_extfun/quiet_e334_own_name_function.mod",
+      "notes": "the pair names the statement's own function"
+    },
+    {
+      "id": "quiet_e334_single_deriv_function",
+      "codes": [
+        "E334"
+      ],
+      "kind": "quiet",
+      "package": "d_extfun",
+      "fixture": "tests/fixtures/d_extfun/quiet_e334_single_deriv_function.mod",
+      "source": "d_extfun.rs",
+      "cluster": "d_extfun/quiet_e334_single_deriv_function.mod",
+      "notes": "one derivative alone is legal"
+    },
+    {
+      "id": "quiet_e334_distinct_functions",
+      "codes": [
+        "E334"
+      ],
+      "kind": "quiet",
+      "package": "d_extfun",
+      "fixture": "tests/fixtures/d_extfun/quiet_e334_distinct_functions.mod",
+      "source": "d_extfun.rs",
+      "cluster": "d_extfun/quiet_e334_distinct_functions.mod",
+      "notes": "two different derivative functions are legal"
+    },
+    {
+      "id": "quiet_e334_no_name_option",
+      "codes": [
+        "E334"
+      ],
+      "kind": "quiet",
+      "package": "d_extfun",
+      "fixture": "tests/fixtures/d_extfun/quiet_e334_no_name_option.mod",
+      "source": "d_extfun.rs",
+      "cluster": "d_extfun/quiet_e334_no_name_option.mod",
+      "notes": "the no-name= shape is E322's, not this Error"
     }
   ]
 }

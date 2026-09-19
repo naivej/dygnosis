@@ -143,8 +143,20 @@ pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
         return Vec::new();
     }
     let referenced = model_eq_refs(model);
+    // `Model::exogenous` holds `varexo_det` names too; 7.1's unused check covers
+    // plain `varexo` only, so filter them out as the other plain-`varexo`
+    // readers do — an unused `varexo_det` is accepted there.
+    let exo_det: HashSet<Name> = model
+        .deterministic_exogenous
+        .iter()
+        .map(|d| d.name)
+        .collect();
     let mut diagnostics = Vec::new();
-    for d in &model.exogenous {
+    for d in model
+        .exogenous
+        .iter()
+        .filter(|d| !exo_det.contains(&d.name))
+    {
         if referenced.contains(&d.name) {
             continue;
         }

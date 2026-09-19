@@ -2,9 +2,9 @@
 //!
 //! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 70
 //! codes shipped through 0.5.0, then kind `shared` / `skipped` / `added`.
-//! 244 keys = 189 shared + 27 added + 28 skipped. Catalog **0.5.1** D-clash and
-//! D-check Errors are shared; **0.5.2** D-walk, D-block, and D-open rows add shared keys and drop
-//! the `S###` keys they replace.
+//! 245 keys = 190 shared + 27 added + 28 skipped. Catalog **0.5.1** D-clash and
+//! D-check Errors are shared; the **0.5.2** D-walk, D-block, D-open, and D-extfun
+//! rows add shared keys and drop the `S###` keys they replace.
 //! `I050` and `W042` use the recorded surface rewrites in
 //! `dev_logs/0.1/0.1.0/22-c-explain.md` (do not advertise Compute Steady State).
 
@@ -40,7 +40,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 244 keys: 189 shared + 27 added + 28 skipped.
+// 245 keys: 190 shared + 27 added + 28 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -89,12 +89,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E030", ExplainEntry {
         title: "Duplicate declaration across types or `#` twice",
-        body: "The same identifier is declared in two different blocks (for example both `var` and `varexo`), in two different trend forms (`trend_var` and `log_trend_var`), or both in a declaration and in the `epilogue` block or an `external_function` name. A model-local `#` name defined twice is the same code. Dynare refuses: `Symbol y declared twice with different types!` and `Local model variable foo declared twice.`\n\n**Fix**\n\nRemove the extra declaration. If you intended two related but distinct symbols, rename one.",
+        body: "The same identifier is declared in two different blocks (for example both `var` and `varexo`), in two different trend forms (`trend_var` and `log_trend_var`), or both in a declaration and in the `epilogue` block or on an `external_function` statement (`name=`, `first_deriv_provided`, `second_deriv_provided`). A model-local `#` name defined twice is the same code. Dynare refuses: `Symbol y declared twice with different types!` and `Local model variable foo declared twice.`\n\n**Fix**\n\nRemove the extra declaration. If you intended two related but distinct symbols, rename one.",
         kind: ExplainKind::Shared,
     }),
     ("W031", ExplainEntry {
         title: "Symbol declared twice with the same type",
-        body: "The same identifier is declared more than once with the same type: in `var`, `varexo`, `varexo_det`, or `parameters`, as the same trend form twice, twice in the `epilogue` block, or as the name of two `external_function` statements. Dynare accepts and warns `Symbol y declared twice.`\n\n**Fix**\n\nRemove the redundant declaration.",
+        body: "The same identifier is declared more than once with the same type: in `var`, `varexo`, `varexo_det`, or `parameters`, as the same trend form twice, twice in the `epilogue` block, or as a function name repeated on `external_function` statements (`name=`, `first_deriv_provided`, `second_deriv_provided`). Dynare accepts and warns `Symbol y declared twice.`\n\n**Fix**\n\nRemove the redundant declaration.",
         kind: ExplainKind::Shared,
     }),
     ("W054", ExplainEntry {
@@ -179,7 +179,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E021", ExplainEntry {
         title: "Exogenous variable never referenced in model",
-        body: "A shock declared in `varexo` does not appear in any equation. Dynare refuses: `unused_exo not used in model block. To bypass this error, use the nostrict option. This may lead to crashes or unexpected behavior.`",
+        body: "A shock declared in `varexo` does not appear in any equation. Dynare refuses: `unused_exo not used in model block. To bypass this error, use the nostrict option. This may lead to crashes or unexpected behavior.` A `varexo_det` declaration does not count — 7.1 accepts one that is never used.",
         kind: ExplainKind::Shared,
     }),
     ("W022", ExplainEntry {
@@ -1117,6 +1117,11 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "A ``shock_groups`` member is not a ``varexo`` variable; ``varexo_det`` does not count here. Dynare refuses: `shock_groups: rho should be an exogenous variable`.\n\n**Fix**\n\nList ``varexo`` variables.",
         kind: ExplainKind::Shared,
     }),
+    ("E334", ExplainEntry {
+        title: "external_function Jacobian and Hessian from the same non-top-level function",
+        body: "The Jacobian and the Hessian are provided by the same external function, but that function is not the statement's top-level function. Dynare refuses: `If the Jacobian and Hessian are provided by the same function, that function must be the top-level function.`\n\n**Fix**\n\nProvide both derivatives in the top-level function (bare ``first_deriv_provided`` / ``second_deriv_provided``), or name two different external functions.",
+        kind: ExplainKind::Shared,
+    }),
     ("W204", ExplainEntry {
         title: "Unknown symbol in a load_params_and_steady_state file",
         body: "The data file of ``load_params_and_steady_state`` holds a name that is not declared at that point in the ``.mod``. Dynare accepts and warns: `Unknown symbol zzz in w204_params.txt`.\n\n**Fix**\n\nRemove the entry from the data file, or declare the symbol above the ``load_params_and_steady_state`` statement.",
@@ -1209,7 +1214,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("S016", ExplainEntry {
         title: "exclude_eqs, include_eqs, model_remove, or model_replace",
-        body: "Dynare refuses: `various exclude_eqs / model_remove…`. Catching step: transform (written clash). Owner: skip 0.6 E. This code is never emitted.",
+        body: "Dynare refuses: `various exclude_eqs / model_remove…`. Catching step: transform (written clash). Owner: skip 0.5.3 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S020", ExplainEntry {
@@ -1244,7 +1249,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("S041", ExplainEntry {
         title: "MS-SBVAR, markov_switching, or related command",
-        body: "Dynare refuses: `various ms_* / data / prior ERROR`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
+        body: "Dynare refuses: `various ms_* / data / prior ERROR`. Catching step: check. Owner: skip 0.5.4 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S052", ExplainEntry {

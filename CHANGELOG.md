@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.5.2
+
+Covers more of the checks the Dynare preprocessor performs. Codes `E219`–`E334` and `W201`–`W204`. No new command family.
+
+Diagnostics implemented in this release:
+- **Commands**: option walks on `estimation` (DSGE-VAR, the `datafile` gate, deprecated options), `sensitivity`, `identification`, `discretionary_policy`, `stoch_simul`, `prior_function` / `posterior_function`, and symbol lists on commands we already record.
+- **Blocks we now parse**: `histval`, `estimated_params_init` / `estimated_params_bounds`, `osr_params_bounds`, `epilogue`, `change_type`, `trend_var` / `log_trend_var` / `var(deflator=…)`, `filter_initial_state`, `optim_weights` contents, `ramsey_constraints` body, `external_function`, `init2shocks`, `homotopy_setup`, `shock_groups`.
+- **Names, types, macro**: MATLAB/Octave function name as a variable, external function as a bare `var`, macro type mismatches, `log(0)` and division by zero while building an expression, shock type checks (`var` / `stderr` / `cov` / `corr` / `skew`).
+- **Duplicates and reuse**: an equation tag twice, an option declared twice, an empty option vector, several `varobs` statements, namespace-qualified misuse, and Warnings for `restriction_fname` and a symbol listed twice.
+- **Reserved token**: `dsge_prior_weight` is refused wherever an expression is expected, while a declaration, `estimated_params`, or a model-local `#` may still name it.
+
+Other changes:
+- Trend declarations, epilogue helpers, and `external_function(name=…)` names join the duplicate-declaration pass (`E030` / `W031`).
+- An unused `varexo_det` no longer reports `E021` (Dynare accepts it), and the `first_deriv_provided` / `second_deriv_provided` function names join the duplicate-declaration pass (`E030` / `W031`).
+- `external_function` with the Jacobian and Hessian from the same non-top-level function is refused with Dynare's message (`E334`).
+
 ## v0.5.1
 
 Until this release, some diagnostics arrived only by running a local Dynare preprocessor and overlaying its messages (`P###`), which is too late for typing. Some refuses appear only after Dynare rewrites the equations — those points do not land on the `.mod` you edit. 
