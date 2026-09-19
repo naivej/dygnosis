@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.5.3
+
+Adds the equation surgery family: the `model_remove(TAGS);` statement and the `model_replace(TAGS); … end;` block now change the model before the checks run, and the refuses they can cause are reported. Codes `E335`–`E337`.
+
+Diagnostics implemented in this release:
+- **Equation surgery**: a tag set that matches no equation of the model (`E335`), an excluded equation whose left side is not one endogenous variable and which carries no `endogenous` tag (`E336`, `model_remove` only), and the same endogenous excluded twice by one statement (`E337`). Each refusal points at the equation or the statement in the file you edit.
+- **`E256`** (a tag key used twice) also fires on the tag list of a surgery statement, where the preprocessor refuses the list while parsing it.
+- **Double-quoted strings**: a tag, a `shock_groups` name, a `bvar_*` string, or an option value written with double quotes is now `E001` — the preprocessor refuses `"…"` with `character unrecognized by lexer` in every one of those positions. Macro directives keep their double quotes, and single quotes are unaffected.
+- **Names read as of the statement that names them**: a symbol a later `model_remove` takes out of the model was still endogenous when an earlier statement used it, so `optim_weights` (`E317`) and `ramsey_constraints` (`E321`) written before the removal no longer report a false Error whichever way the symbol left, and `planner_objective` (`E251`) no longer does when the symbol is dropped. A statement written after the removal refuses the name, as before. A constraint's bound is read as of its own row, so a bound a removal re-typed still refuses (`E320`), with the preprocessor's own sentence. The same rule keeps `initval` / `endval` / `histval` / `varobs` entries for a symbol a removal drops from reading as undeclared, `filter_initial_state` reports the timing refusal (`E314`) instead of the undeclared one, and a removed equation's body joins the undeclared-name walk (`E020`).
+
+Other changes:
+- The equation list, the counts, and the `[static]` / `[dynamic]` check (`E208`) are the post-removal model, the way 7.1 sees it.
+- `model_remove` and `model_replace` are in `dynare_list_options` and in command-name completion.
+
+`exclude_eqs` / `include_eqs` are not covered: they are preprocessor invocation options rather than `.mod` syntax, and the editor never sees them.
+
 ## v0.5.2
 
 Covers more of the checks the Dynare preprocessor performs. Codes `E219`–`E334` and `W201`–`W204`. No new command family.
