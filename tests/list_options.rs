@@ -141,7 +141,7 @@ fn occbin_constraints_is_catalogued_block() {
     assert_eq!(upper, payload);
 
     let omitted = to_value(list_options(None));
-    assert_eq!(omitted["n_commands"], 65);
+    assert_eq!(omitted["n_commands"], 71);
     let i = omitted["commands"]
         .as_array()
         .unwrap()
@@ -276,4 +276,100 @@ fn occbin_constraints_is_catalogued_block() {
             "lmmcp unexpectedly on {command}"
         );
     }
+}
+
+/// The five MS-SBVAR members whose option list is the statement's own options.
+#[test]
+fn ms_sbvar_family_options_are_catalogued() {
+    assert_eq!(
+        option_names("sbvar"),
+        [
+            "aband",
+            "alpha",
+            "apband",
+            "beta",
+            "cms",
+            "cnum",
+            "coefficients_prior_hyperparameters",
+            "contemp_reduced_form",
+            "cross_restrictions",
+            "datafile",
+            "dummy_obs",
+            "eq_cms",
+            "eq_ms",
+            "final_subperiod",
+            "final_year",
+            "flat_prior",
+            "foreband",
+            "forecast",
+            "freq",
+            "gsig2_lmdm",
+            "indxap",
+            "indxestima",
+            "indxfore",
+            "indxgdls",
+            "indxgforehat",
+            "indxgimfhat",
+            "indximf",
+            "indxovr",
+            "indxparr",
+            "indxscalesstates",
+            "initial_subperiod",
+            "initial_year",
+            "ncms",
+            "ncsk",
+            "ninv",
+            "nlags",
+            "no_bayesian_prior",
+            "nstates",
+            "nstd",
+            "q_diag",
+            "real_pseudo_forecast",
+            "restriction_fname",
+            "tlindx",
+            "tlnumber",
+            "vlist",
+            "vlistlog",
+            "vlistper",
+        ]
+    );
+    assert_eq!(option_names("plot_conditional_forecast"), ["periods"]);
+    assert!(option_names("svar_global_identification_check").is_empty());
+
+    // The three members whose body is rows, not options.
+    for command in [
+        "svar_identification",
+        "svar_global_identification_check",
+        "conditional_forecast_paths",
+    ] {
+        assert!(is_known_command(command), "{command}");
+        assert!(
+            command_options(command).is_empty(),
+            "{command} takes no options"
+        );
+    }
+
+    // The dotted `prior` statement: its head is a symbol, so the entry is keyed
+    // on the tail word the user writes after the dot.
+    assert!(is_known_command("prior"));
+    assert_eq!(
+        option_names("prior"),
+        [
+            "domain", "interval", "mean", "median", "mode", "shape", "shift", "stdev", "truncate",
+            "variance",
+        ]
+    );
+    assert_eq!(
+        option_doc("median"),
+        "A shortcut to setting error_band_percentiles=[0.5]."
+    );
+}
+
+/// A `sbvar` option 7.1 cannot reach is not catalogued: `DATA` is produced only
+/// by a line that starts with `data`, so `data=` is a syntax error inside the
+/// option list. The grammar accepts `datafile` there.
+#[test]
+fn sbvar_has_no_unreachable_data_option() {
+    assert!(option_names("sbvar").contains(&"datafile"));
+    assert!(!option_names("sbvar").contains(&"data"));
 }

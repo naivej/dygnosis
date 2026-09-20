@@ -1,5 +1,5 @@
 {
-  "n_commands": 65,
+  "n_commands": 71,
   "commands": [
     "bvar_density",
     "bvar_forecast",
@@ -7,6 +7,7 @@
     "calib_smoother",
     "check",
     "conditional_forecast",
+    "conditional_forecast_paths",
     "corr",
     "data",
     "discretionary_policy",
@@ -49,13 +50,16 @@
     "perfect_foresight_solver",
     "perfect_foresight_with_expectation_errors_setup",
     "perfect_foresight_with_expectation_errors_solver",
+    "plot_conditional_forecast",
     "plot_shock_decomposition",
     "posterior_function",
+    "prior",
     "prior_function",
     "ramsey_model",
     "ramsey_policy",
     "realtime_shock_decomposition",
     "resid",
+    "sbvar",
     "sensitivity",
     "shock_decomposition",
     "simul",
@@ -64,6 +68,8 @@
     "steady",
     "stoch_simul",
     "svar",
+    "svar_global_identification_check",
+    "svar_identification",
     "trend_component_model",
     "var_model"
   ]

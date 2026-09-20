@@ -1179,6 +1179,55 @@ async fn completion_nsam_spelling() {
     );
 }
 
+/// The dotted `prior` statement: its head is a symbol, so the option list is
+/// reached through the word after the dot, not through a command name.
+#[tokio::test]
+async fn dotted_prior_reaches_hover_and_completion() {
+    let text = "var y; parameters alpha;\nalpha.prior(shape=beta, mean=0.5, stdev=0.1);\n";
+    let uri = Url::parse("file:///tmp/dotted_prior_test.mod").unwrap();
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.to_string(), 1))
+        .await;
+
+    let byte = text.find("stdev=").expect("stdev option");
+    let md = hover_markdown(
+        service
+            .inner()
+            .hover(HoverParams {
+                text_document_position_params: tdp(uri.clone(), text, byte),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("hover rpc")
+            .expect("hover"),
+    );
+    assert!(md.contains("prior"), "hover: {md}");
+    assert!(md.contains("`stdev`"), "hover: {md}");
+
+    let byte = text.find("mean=0.5").expect("mean option");
+    let labels = completion_labels(
+        service
+            .inner()
+            .completion(CompletionParams {
+                text_document_position: tdp(uri, text, byte),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .expect("completion rpc")
+            .expect("completion"),
+    );
+    for name in ["shape", "domain", "variance"] {
+        assert!(
+            labels.iter().any(|l| l == name),
+            "prior option {name} missing: {labels:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn prepare_rename_rejects_comment() {
     let mut text = read_mod("trend_rbc_gov_inv");

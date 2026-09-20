@@ -762,6 +762,37 @@ fn surgery_statements_are_known_commands_without_options() {
     assert_eq!(payload["n_options"], Value::Number(0.into()));
 }
 
+/// The six MS-SBVAR members 0.5.4 01 parsed and 02 gave their refuses. Five of
+/// them carry an option list; the two blocks and the bare check take none.
+#[test]
+fn ms_sbvar_family_is_a_known_command() {
+    for (command, n_options) in [
+        ("sbvar", 47),
+        ("svar_identification", 0),
+        ("svar_global_identification_check", 0),
+        ("conditional_forecast_paths", 0),
+        ("plot_conditional_forecast", 1),
+        ("prior", 10),
+    ] {
+        assert!(dygnosis::catalog::is_known_command(command), "{command}");
+        assert_eq!(
+            dygnosis::catalog::command_options(command).len(),
+            n_options,
+            "{command}"
+        );
+        let payload = dynare_list_options(Some(command));
+        assert_eq!(payload["known"], Value::Bool(true), "{command}");
+        assert_eq!(
+            payload["n_options"],
+            Value::Number((n_options as u64).into()),
+            "{command}"
+        );
+    }
+    let payload = dynare_list_options(Some("SBVAR"));
+    assert_eq!(payload["command"], Value::String("sbvar".into()));
+    assert_eq!(payload["n_options"], Value::Number(47.into()));
+}
+
 #[test]
 fn find_references_betta_skips_comment() {
     let base = read_mod("trend_rbc_gov_inv");

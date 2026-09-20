@@ -71,8 +71,9 @@
   "bvar": {
     "command": "bvar",
     "known": false,
-    "message": "'bvar' is not a Dynare command in the bundled 7.1 grammar. Did you mean: svar, bvar_irf?",
+    "message": "'bvar' is not a Dynare command in the bundled 7.1 grammar. Did you mean: sbvar, svar, bvar_irf?",
     "suggestions": [
+      "sbvar",
       "svar",
       "bvar_irf"
     ]

@@ -53,6 +53,24 @@ const DYNARE_KEYWORDS: &[(&str, &str)] = &[
     ("planner_objective", "Define planner's objective for Ramsey"),
     ("identification", "Run identification analysis"),
     ("sensitivity", "Run sensitivity analysis"),
+    ("sbvar", "Estimate a Markov-switching SBVAR model"),
+    (
+        "svar_identification",
+        "Describe the SVAR identification restrictions",
+    ),
+    (
+        "svar_global_identification_check",
+        "Check the SVAR identification globally",
+    ),
+    (
+        "conditional_forecast_paths",
+        "Constrain an endogenous path before conditional_forecast",
+    ),
+    (
+        "plot_conditional_forecast",
+        "Plot the conditional and unconditional forecasts",
+    ),
+    ("prior", "Prior distribution for a parameter"),
 ];
 
 const BUILTIN_FNS: &[(&str, &str)] = &[
