@@ -12,9 +12,9 @@ use crate::model::{
     ComplementarityTriple, ConditionalForecastPath, ConditionalForecastPaths, DataStatement, Decl,
     DeprecatedOption, DerivSpec, DottedHead, DottedKind, DottedStatement, Equation,
     EquationSurgery, EstimatedParam, EstimatedParamKind, EstimationDsgeVarStmt,
-    ExternalFunctionStmt, FamilyOption, FamilyValueKind, GenerateIrfsElement, HistvalEntry,
-    HomotopyRow, IncludeDirective, IncludePathDirective, Init2ShocksBlock, Init2ShocksRow,
-    MacroDirective, MacroInterp, Model, MsStatement, NonstationaryVar, ObservedVar,
+    EstimationStatement, ExternalFunctionStmt, FamilyOption, FamilyValueKind, GenerateIrfsElement,
+    HistvalEntry, HomotopyRow, IncludeDirective, IncludePathDirective, Init2ShocksBlock,
+    Init2ShocksRow, MacroDirective, MacroInterp, Model, MsStatement, NonstationaryVar, ObservedVar,
     OccbinConstraint, OccbinExpr, OptimWeight, OsrBound, ParseIssue, ParseIssueKind, PolicyCommand,
     PolicyCommandStatement, RamseyConstraint, RemovedEquation, ShockGroup, ShockKind, ShockStmt,
     ShocksSemiFamily, SurgeryExit, SurgeryKind, SvarEquation, SvarIdentification,
@@ -127,7 +127,7 @@ fn change_type_kind(lex: &str) -> Option<ChangeTypeKind> {
     }
 }
 
-/// Commands whose `(…)` option list may carry `with_epilogue`.
+/// Commands whose `(?)` option list may carry `with_epilogue`.
 fn is_decomposition_command(cmd: &str) -> bool {
     cmd.eq_ignore_ascii_case("shock_decomposition")
         || cmd.eq_ignore_ascii_case("realtime_shock_decomposition")
@@ -583,7 +583,7 @@ struct Parser<'a> {
     intern: Interner,
     model: Model,
     eq_token_ranges: Vec<Range<usize>>,
-    /// Token ranges of `verbatim; … end;` bodies, whose text 7.1 passes through raw.
+    /// Token ranges of `verbatim; ? end;` bodies, whose text 7.1 passes through raw.
     verbatim_ranges: Vec<Range<usize>>,
     /// Bumped once per statement that lists names, so `CommandSymbol::list_id`
     /// groups one statement's list.
@@ -823,7 +823,7 @@ impl Parser<'_> {
         decls
     }
 
-    /// `var(…)` option list: `log`, `deflator=`, `log_deflator=`, other `=value`s skipped.
+    /// `var(?)` option list: `log`, `deflator=`, `log_deflator=`, other `=value`s skipped.
     fn parse_declaration_options(&mut self) -> (bool, bool, Option<ExprId>) {
         let mut log = false;
         let mut log_deflator = false;
@@ -1056,7 +1056,7 @@ impl Parser<'_> {
 
     /// One `key` / `key='value'` pair of a surgery tag list. 7.1 lowercases the key and
     /// wants the value in single quotes; an unquoted value is refused, so `false` means
-    /// the pair — and the tag set it belongs to — is dropped.
+    /// the pair ? and the tag set it belongs to ? is dropped.
     fn parse_surgery_tag_pair(
         &mut self,
         keyword: &str,
@@ -1166,7 +1166,7 @@ impl Parser<'_> {
     }
 
     /// Distinct names used by an expression tree (`endogenous_only` keeps just declared
-    /// endogenous symbols — 7.1's left-side variable count).
+    /// endogenous symbols ? 7.1's left-side variable count).
     fn collect_names(&self, id: ExprId, endogenous_only: bool, out: &mut Vec<String>) {
         for ident in self.model.exprs.walk_idents(id) {
             let keep = !endogenous_only
@@ -1501,7 +1501,7 @@ impl Parser<'_> {
         })
     }
 
-    /// `epilogue; ident = expr; … end;` Names are epilogue-typed, not endogenous.
+    /// `epilogue; ident = expr; ? end;` Names are epilogue-typed, not endogenous.
     fn parse_epilogue_block(&mut self) {
         let opener_span = self.bump_plain_opener();
         let start = opener_span.start;
@@ -1611,7 +1611,7 @@ impl Parser<'_> {
         }
     }
 
-    /// `filter_initial_state; name(lag) = expr; … end;`
+    /// `filter_initial_state; name(lag) = expr; ? end;`
     fn parse_filter_initial_state_block(&mut self) {
         let opener_span = self.bump_plain_opener();
         let start = opener_span.start;
@@ -1649,7 +1649,7 @@ impl Parser<'_> {
         self.i = saved;
     }
 
-    /// `external_function(name=…, nargs=…, first_deriv_provided[, =…], …);`
+    /// `external_function(name=?, nargs=?, first_deriv_provided[, =?], ?);`
     fn parse_external_function(&mut self) {
         let start = self.current_start();
         self.bump();
@@ -1753,7 +1753,7 @@ impl Parser<'_> {
         }
     }
 
-    /// `init2shocks(name=group); endo exo; … end;`
+    /// `init2shocks(name=group); endo exo; ? end;`
     fn parse_init2shocks_block(&mut self) {
         let opener_span = self.bump_plain_opener();
         let body_i = self.i;
@@ -1814,7 +1814,7 @@ impl Parser<'_> {
         })
     }
 
-    /// `homotopy_setup[(from_initval_to_endval)]; name, expr[, expr]; … end;`
+    /// `homotopy_setup[(from_initval_to_endval)]; name, expr[, expr]; ? end;`
     fn parse_homotopy_setup_block(&mut self) {
         let opener_span = self.bump_plain_opener();
         let body_i = self.i;
@@ -1874,7 +1874,7 @@ impl Parser<'_> {
         })
     }
 
-    /// `shock_groups[(name=group)]; symbol = name_list; … end;`
+    /// `shock_groups[(name=group)]; symbol = name_list; ? end;`
     fn parse_shock_groups_block(&mut self) {
         let opener_span = self.bump_plain_opener();
         let body_i = self.i;
@@ -1941,7 +1941,7 @@ impl Parser<'_> {
     ///
     /// The dotted statements are not here: their head is a symbol, not a command.
     /// A name followed by `=`, a bare name, or a name before another word is not a
-    /// statement here — 7.1 refuses those shapes, and they keep their existing paths.
+    /// statement here ? 7.1 refuses those shapes, and they keep their existing paths.
     fn at_ms_family_command(&self) -> Option<&'static str> {
         const COMMANDS: &[&str] = &[
             "ms_estimation",
@@ -1967,8 +1967,8 @@ impl Parser<'_> {
         }
     }
 
-    /// One family `;` statement: its span, its option rows, and — for `ms_irf` and
-    /// `plot_conditional_forecast` — the trailing symbol list.
+    /// One family `;` statement: its span, its option rows, and ? for `ms_irf` and
+    /// `plot_conditional_forecast` ? the trailing symbol list.
     fn parse_ms_statement(&mut self) {
         let command = self
             .at_ms_family_command()
@@ -2009,7 +2009,7 @@ impl Parser<'_> {
         }
     }
 
-    /// One `data(file=…);` statement. The 0.5.2 presence-only record becomes this
+    /// One `data(file=?);` statement. The 0.5.2 presence-only record becomes this
     /// one: the estimation gate reads `has_file_or_series` off the parsed rows.
     fn parse_data_statement(&mut self) {
         let start = self.current_start();
@@ -2035,9 +2035,9 @@ impl Parser<'_> {
     }
 
     /// The dotted statement at the cursor, when every name in its head is declared.
-    /// `zzz.prior(…)` on an undeclared head is a native MATLAB line at the pin
+    /// `zzz.prior(?)` on an undeclared head is a native MATLAB line at the pin
     /// (7.1 accepts it), so its span must not be claimed here.
-    fn at_dotted_statement(&self) -> Option<(DottedKind, usize)> {
+    fn at_dotted_statement(&mut self) -> Option<(DottedKind, usize)> {
         let (_, body_at) = self.dotted_head_at()?;
         let kind = if self.at_ident_ci_at(body_at, "prior") {
             DottedKind::Prior
@@ -2062,7 +2062,7 @@ impl Parser<'_> {
     }
 
     /// The token after a keyword is one a statement may begin with: `(` or `;`.
-    /// `data = 0.5;` is not a `data` statement — 7.1 refuses it as an assignment.
+    /// `data = 0.5;` is not a `data` statement ? 7.1 refuses it as an assignment.
     fn at_command_shape(&self, ahead: usize) -> bool {
         matches!(
             self.kind_at(ahead),
@@ -2073,28 +2073,31 @@ impl Parser<'_> {
     /// A dotted head at the cursor plus the offset of the identifier after it.
     /// Every name the head carries must already be declared, matching the pin's
     /// lexer rule that decides statement versus native line.
-    fn dotted_head_at(&self) -> Option<(DottedHead, usize)> {
+    fn dotted_head_at(&mut self) -> Option<(DottedHead, usize)> {
         if self.kind_at(0) == Some(TokenKind::LBrack) {
             let (names, after) = self.vector_head_names()?;
             return Some((DottedHead::Vec { names }, after));
         }
         if self.at_ident_ci_at(0, "std") && self.kind_at(1) == Some(TokenKind::LParen) {
-            let (first, first_span) = self.declared_ident_at(2)?;
+            // `std` is a lexer keyword, so the statement is entered whatever the
+            // name inside the parentheses is: an undeclared one is checked by the
+            // grammar's own `symbol` production, not by the head rule.
+            let (first, first_span) = self.ident_at_name(2)?;
             if self.kind_at(3) != Some(TokenKind::RParen) || self.kind_at(4) != Some(TokenKind::Dot)
             {
                 return None;
             }
-            if let Some((second, _)) = self.declared_ident_at(5) {
-                if self.kind_at(6) == Some(TokenKind::Dot) {
-                    return Some((
-                        DottedHead::Std {
-                            first,
-                            first_span,
-                            second: Some(second),
-                        },
-                        7,
-                    ));
-                }
+            if self.kind_at(5) == Some(TokenKind::Ident) && self.kind_at(6) == Some(TokenKind::Dot)
+            {
+                let (second, _) = self.ident_at_name(5)?;
+                return Some((
+                    DottedHead::Std {
+                        first,
+                        first_span,
+                        second: Some(second),
+                    },
+                    7,
+                ));
             }
             return Some((
                 DottedHead::Std {
@@ -2106,28 +2109,28 @@ impl Parser<'_> {
             ));
         }
         if self.at_ident_ci_at(0, "corr") && self.kind_at(1) == Some(TokenKind::LParen) {
-            let (first, first_span) = self.declared_ident_at(2)?;
+            let (first, first_span) = self.ident_at_name(2)?;
             if self.kind_at(3) != Some(TokenKind::Comma) {
                 return None;
             }
-            let (second, second_span) = self.declared_ident_at(4)?;
+            let (second, second_span) = self.ident_at_name(4)?;
             if self.kind_at(5) != Some(TokenKind::RParen) || self.kind_at(6) != Some(TokenKind::Dot)
             {
                 return None;
             }
-            if let Some((third, _)) = self.declared_ident_at(7) {
-                if self.kind_at(8) == Some(TokenKind::Dot) {
-                    return Some((
-                        DottedHead::Corr {
-                            first,
-                            first_span,
-                            second,
-                            second_span,
-                            third: Some(third),
-                        },
-                        9,
-                    ));
-                }
+            if self.kind_at(7) == Some(TokenKind::Ident) && self.kind_at(8) == Some(TokenKind::Dot)
+            {
+                let (third, _) = self.ident_at_name(7)?;
+                return Some((
+                    DottedHead::Corr {
+                        first,
+                        first_span,
+                        second,
+                        second_span,
+                        third: Some(third),
+                    },
+                    9,
+                ));
             }
             return Some((
                 DottedHead::Corr {
@@ -2173,7 +2176,10 @@ impl Parser<'_> {
             names.push((name, span));
             k += 1;
             match self.kind_at(k) {
-                Some(TokenKind::RBrack) if names.len() >= 2 => {
+                // The pin's lexer spells `[a]` and `[a, b]` with the same rule, so a
+                // one-name bracket is a `SYMBOL_VEC` too; the joint prior's own check
+                // pass then refuses the count (`you must pass at least two ?`).
+                Some(TokenKind::RBrack) if !names.is_empty() => {
                     if self.kind_at(k + 1) == Some(TokenKind::Dot) {
                         return Some((names, k + 2));
                     }
@@ -2193,7 +2199,7 @@ impl Parser<'_> {
     /// enters a Dynare statement, while a mod-file local (`#x = 1;`) or an
     /// `external_function` name sends the whole line to native MATLAB, where no
     /// language claim is made. This mirrors that rule, so `#x = 1;` followed by
-    /// `x.prior(…)` is native text to both sides.
+    /// `x.prior(?)` is native text to both sides.
     fn declared_ident_at(&self, offset: usize) -> Option<(Name, Span)> {
         let tok = self.tokens.get(self.i + offset)?;
         if tok.kind != TokenKind::Ident {
@@ -2204,6 +2210,18 @@ impl Parser<'_> {
         if !self.is_statement_head_symbol(name) {
             return None;
         }
+        Some((name, tok.span))
+    }
+
+    /// An identifier at a token offset with its span, whether or not it is
+    /// declared. The `std` / `corr` heads carry their names through the grammar's
+    /// own `symbol` production, so those names are read here and checked later.
+    fn ident_at_name(&mut self, offset: usize) -> Option<(Name, Span)> {
+        let tok = self.tokens.get(self.i + offset)?;
+        if tok.kind != TokenKind::Ident {
+            return None;
+        }
+        let name = self.intern.intern(tok.text(self.src));
         Some((name, tok.span))
     }
 
@@ -2229,7 +2247,7 @@ impl Parser<'_> {
     /// the head, and the grammar then keys the body on `prior` / `options` /
     /// `subsamples`, so this must not consult the symbol table.
     fn syntactic_dotted_head(&self) -> Option<(Vec<usize>, usize)> {
-        // `[a, b].prior(…)` and longer vectors.
+        // `[a, b].prior(?)` and longer vectors.
         if self.kind_at(0) == Some(TokenKind::LBrack) {
             let mut names = Vec::new();
             let mut k = 1;
@@ -2240,8 +2258,11 @@ impl Parser<'_> {
                 names.push(k);
                 k += 1;
                 match self.kind_at(k) {
+                    // One name is enough for the shape: `[a].prior(?)` is the same
+                    // `SYMBOL_VEC` production, and the joint prior's check pass
+                    // refuses it for its count.
                     Some(TokenKind::RBrack) => {
-                        if names.len() >= 2
+                        if !names.is_empty()
                             && self.kind_at(k + 1) == Some(TokenKind::Dot)
                             && self.ident_at(k + 2)
                         {
@@ -2254,7 +2275,7 @@ impl Parser<'_> {
                 }
             }
         }
-        // `std(x).prior(…)` and `corr(x, y).prior(…)`. Their names are checked by the
+        // `std(x).prior(?)` and `corr(x, y).prior(?)`. Their names are checked by the
         // grammar's own `symbol` production, so the head is always a statement.
         let mut head_names = Vec::new();
         for (keyword, arity) in [("std", 1usize), ("corr", 2usize)] {
@@ -2283,7 +2304,7 @@ impl Parser<'_> {
             }
             return Some((Vec::new(), k + 2));
         }
-        // `alpha.prior(…)` and `alpha.beta.prior(…)`.
+        // `alpha.prior(?)` and `alpha.beta.prior(?)`.
         if self.ident_at(0) && self.kind_at(1) == Some(TokenKind::Dot) {
             if self.ident_at(2) && self.kind_at(3) == Some(TokenKind::Dot) {
                 return Some((vec![0], 4));
@@ -2310,7 +2331,7 @@ impl Parser<'_> {
     /// makes no language claim on the line, so neither may we beyond leaving it be.
     ///
     /// Two shapes reach here. A dotted head whose names fail the pin's declaration
-    /// rule (`zzz.prior(…)`, `[aaa, bbb].prior(…)`, a mod-file local or an
+    /// rule (`zzz.prior(?)`, `[aaa, bbb].prior(?)`, a mod-file local or an
     /// external-function name as the head), and an identifier that is not one of the
     /// pin's statement keywords followed by `(`. Both are 7.1-accepted however their
     /// contents read. A head that passes the rule stays a Dynare statement, so the
@@ -2447,7 +2468,7 @@ impl Parser<'_> {
         });
     }
 
-    /// Every option row of one `(…)` list, with each value's shape.
+    /// Every option row of one `(?)` list, with each value's shape.
     fn read_family_options(&self, open_i: usize, close_i: usize) -> Vec<FamilyOption> {
         self.read_options_in_range(open_i + 1, close_i.saturating_sub(1))
     }
@@ -2660,7 +2681,7 @@ impl Parser<'_> {
         (text, names)
     }
 
-    /// `svar_identification;` … `end;`. The body keeps structured rows, mirroring
+    /// `svar_identification;` ? `end;`. The body keeps structured rows, mirroring
     /// the pin's `SvarIdentificationStatement`.
     fn parse_svar_identification_block(&mut self) {
         let opener_span = self.bump_plain_opener();
@@ -2767,7 +2788,7 @@ impl Parser<'_> {
         self.bump();
     }
 
-    /// One `equation N, name…;` row.
+    /// One `equation N, name?;` row.
     fn read_svar_equation(&mut self) -> SvarEquation {
         let start = self.current_start();
         self.bump();
@@ -2827,7 +2848,7 @@ impl Parser<'_> {
         Span { start, end }
     }
 
-    /// `conditional_forecast_paths;` … `end;`: repeated `var name; periods …; values …;`.
+    /// `conditional_forecast_paths;` ? `end;`: repeated `var name; periods ?; values ?;`.
     fn parse_conditional_forecast_paths_block(&mut self) {
         let opener_span = self.bump_plain_opener();
         let body_i = self.i;
@@ -2867,7 +2888,7 @@ impl Parser<'_> {
             });
     }
 
-    /// One `var name; periods …; values …;` row.
+    /// One `var name; periods ?; values ?;` row.
     fn read_conditional_forecast_path(&mut self) -> Option<ConditionalForecastPath> {
         if !self.at_ident_ci("var") {
             return None;
@@ -4798,7 +4819,7 @@ impl Parser<'_> {
         let blocks = complete_block_ranges(&self.tokens, src);
         let cmd_spans = crate::command_skip::command_stmt_spans(&self.tokens, src);
         // Parsed family statements claim their own lines: a multi-line `sbvar` or
-        // `.prior(…)` option list is not a run of parameter assignments.
+        // `.prior(?)` option list is not a run of parameter assignments.
         let mut family_spans: Vec<Span> = self.model.statement_spans();
         family_spans.extend(cmd_spans);
         family_spans.sort_by_key(|span| (span.start, span.end));
@@ -5425,12 +5446,15 @@ impl Parser<'_> {
         self.symbol_list_id += 1;
         let mut saw_ident = false;
         let mut opener: Option<String> = None;
+        let mut opener_span = Span::default();
+        let mut saw_datafile = false;
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             if !saw_ident && self.at(TokenKind::Ident) {
                 saw_ident = true;
                 let tok = self.tokens[self.i].clone();
                 let lex = self.lexeme(&tok).to_string();
                 self.record_top_command(&lex, tok.span);
+                opener_span = tok.span;
                 opener = Some(lex);
                 self.bump();
                 continue;
@@ -5440,7 +5464,8 @@ impl Parser<'_> {
                 self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
                 self.record_deprecated_options_in_range(from, self.i);
                 if let Some(cmd) = opener.as_deref() {
-                    self.record_skip_command_options(cmd, from, self.i);
+                    saw_datafile =
+                        self.record_skip_command_options(cmd, from, self.i) || saw_datafile;
                     self.record_option_twice(from, self.i);
                     if cmd.eq_ignore_ascii_case("extended_path")
                         && self.option_ident_in_range(from, self.i, "periods")
@@ -5459,10 +5484,21 @@ impl Parser<'_> {
             }
             self.bump();
         }
+        // One row per `estimation` statement: 7.1's data gate is per statement and
+        // reads the `data` flag in file order, so the gate needs both.
+        if opener.as_deref() == Some("estimation") {
+            self.model.estimation_statements.push(EstimationStatement {
+                span: opener_span,
+                has_datafile: saw_datafile,
+            });
+        }
         self.eat(TokenKind::Semi);
     }
 
-    fn record_skip_command_options(&mut self, opener: &str, from: usize, to: usize) {
+    /// Record the extras one catalogued command's `(?)` list carries. Returns
+    /// whether this statement listed `datafile=` (only `estimation` asks).
+    fn record_skip_command_options(&mut self, opener: &str, from: usize, to: usize) -> bool {
+        let mut saw_datafile = false;
         if opener.eq_ignore_ascii_case("prior_function")
             || opener.eq_ignore_ascii_case("posterior_function")
         {
@@ -5512,11 +5548,11 @@ impl Parser<'_> {
                     && self.model.bayesian_irf_span.is_none()
                 {
                     self.model.bayesian_irf_span = Some(opt.span);
-                } else if opt.ident.eq_ignore_ascii_case("datafile")
-                    && opt.eq
-                    && self.model.estimation_datafile_span.is_none()
-                {
-                    self.model.estimation_datafile_span = Some(opt.span);
+                } else if opt.ident.eq_ignore_ascii_case("datafile") && opt.eq {
+                    saw_datafile = true;
+                    if self.model.estimation_datafile_span.is_none() {
+                        self.model.estimation_datafile_span = Some(opt.span);
+                    }
                 } else if opt.ident.eq_ignore_ascii_case("dataseries")
                     && opt.eq
                     && self.model.estimation_dataseries_span.is_none()
@@ -5625,6 +5661,7 @@ impl Parser<'_> {
                     calibrated: stmt_calibrated,
                 });
         }
+        saw_datafile
     }
 
     fn record_policy_option_flags(&mut self, command: PolicyCommand, from: usize, to: usize) {

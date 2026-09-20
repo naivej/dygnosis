@@ -673,6 +673,37 @@ fn model_local_name(model: &Model, eq: &Equation) -> Option<Name> {
     model.exprs.walk_idents(id).next().map(|r| r.name)
 }
 
+/// The `std(…)` / `corr(…)` prior heads' names that are neither endogenous nor
+/// exogenous — their `N is neither endogenous or exogenous.` sentence, which
+/// **E059** already prints for `initval` / `endval`.
+///
+/// A `varexo_det` name prints their `N is an exogenous deterministic.` instead,
+/// and that one is **E317** (in `check_d_open`). Their walk stops at the first
+/// name it refuses, so this does too.
+fn check_prior_head_not_endo_or_exo(model: &Model) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for stmt in &model.dotted_statements {
+        for head in crate::check_d_ms::prior_std_corr_head_names(model, stmt) {
+            if head.verdict != crate::check_d_ms::PriorHeadVerdict::NotEndogenousOrExogenous {
+                continue;
+            }
+            diagnostics.push(Diagnostic {
+                span: stmt.span,
+                severity: Severity::Error,
+                code: "E059".to_string(),
+                message: format!(
+                    "{} is neither endogenous or exogenous.",
+                    model.name(head.name)
+                ),
+                fix: None,
+                tags: Vec::new(),
+            });
+            break;
+        }
+    }
+    diagnostics
+}
+
 fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
     let params: HashSet<Name> = model.parameters.iter().map(|d| d.name).collect();
     let declared: HashSet<Name> = model
@@ -683,6 +714,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
         .map(|d| d.name)
         .collect();
     let mut diagnostics = Vec::new();
+    diagnostics.extend(check_prior_head_not_endo_or_exo(model));
     for (block_name, entries) in [
         ("initval", model.initval.as_slice()),
         ("endval", model.endval.as_slice()),

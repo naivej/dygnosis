@@ -1,0 +1,27 @@
+// inventory: e356_identification_lag_no_equation
+// 7.1 refuses this file: syntax error, unexpected EXCLUSION, expecting EQUATION
+// (their grammar needs an quation row before a lag is closed)
+// 7.1 refuses this file: `Unknown symbol: nosuchvar.`
+var R Pie Y;
+varexo eps;
+parameters alpha beta;
+alpha = 0.36;
+beta = 0.99;
+model;
+R = beta*R(-1) + eps;
+Pie = alpha*R(-1) + eps;
+Y = beta*Pie(-1) + eps;
+end;
+initval;
+R = 0;
+Pie = 0;
+Y = 0;
+end;
+shocks;
+var eps; stderr 0.1;
+end;
+varobs Y Pie R;
+svar_identification;
+exclusion lag 0;
+exclusion lag 0;
+end;

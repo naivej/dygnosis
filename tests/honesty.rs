@@ -2266,6 +2266,596 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         our_needle: "Double-quoted string in the .mod file",
         stage: JsonStage::Check,
     },
+    HonestyRow {
+        code: "E338",
+        fixture: "d_ms/e338_data_no_file.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The file or series option must be passed to the data statement.",
+        our_needle: "The file or series option must be passed to the data statement.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E339",
+        fixture: "d_ms/e339_data_file_and_series.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The file and series options cannot be used simultaneously",
+        our_needle: "The file and series options cannot be used simultaneously",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E340",
+        fixture: "d_ms/e340_data_nobs_zero.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The nobs option of the data statement only accepts positive integers.",
+        our_needle: "The nobs option of the data statement only accepts positive integers.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E341",
+        fixture: "d_ms/e341_ms_estimation_missing.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "you must pass the datafile and initial_year options.",
+        our_needle: "you must pass the datafile and initial_year options.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E342",
+        fixture: "d_ms/e342_conditional_forecast_no_parameter_set.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You must pass the `parameter_set` option to conditional_forecast",
+        our_needle: "You must pass the `parameter_set` option to conditional_forecast",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E343",
+        fixture: "d_ms/e343_cfp_count_mismatch.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "number of periods is different from number of shock values",
+        our_needle: "number of periods is different from number of shock values",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E344",
+        fixture: "d_ms/e344_cfp_var_twice.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "shocks/conditional_forecast_paths: variable Pie declared twice",
+        our_needle: "variable Pie declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E345",
+        fixture: "d_ms/e345_markov_switching_option_missing.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "A 'chain' option must be passed to the 'markov_switching' statement.",
+        our_needle: "A 'chain' option must be passed to the 'markov_switching' statement.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E346",
+        fixture: "d_ms/e346_markov_switching_chain_zero.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The value passed to the chain option must be greater than zero.",
+        our_needle: "The value passed to the chain option must be greater than zero.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E347",
+        fixture: "d_ms/e347_markov_switching_regimes_zero.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The value passed to the number_of_regimes option must be greater than zero.",
+        our_needle: "The value passed to the number_of_regimes option must be greater than zero.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E348",
+        fixture: "d_ms/e348_markov_switching_chain_order.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "takes consecutive integers beginning at 1.",
+        our_needle: "takes consecutive integers beginning at 1.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E349",
+        fixture: "d_ms/e349_markov_switching_parameters_type.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "must be parameters. Caused by: Pie",
+        our_needle: "must be parameters. Caused by: Pie",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E350",
+        fixture: "d_ms/e350_markov_switching_restrictions_form.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "restrictions in the subsample statement must be specified in the form",
+        our_needle: "restrictions in the subsample statement must be specified in the form",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E351",
+        fixture: "d_ms/e351_markov_switching_regime_beyond.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the regimes specified in the restrictions option must be",
+        our_needle: "the regimes specified in the restrictions option must be",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E352",
+        fixture: "d_ms/e352_markov_switching_restriction_twice.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "two restrictions were given for: 1, 2",
+        our_needle: "two restrictions were given for: 1, 2",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E353",
+        fixture: "d_ms/e353_markov_switching_probability_gt_one.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "the transition probability, 1.5 must be less than 1",
+        our_needle: "the transition probability, 1.5 must be less than 1",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E354",
+        fixture: "d_ms/e354_markov_switching_sums.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "When all transitions probabilities are specified for a certain regime, they must sum to 1",
+        our_needle: "they must sum to 1",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E355",
+        fixture: "d_ms/e355_markov_switching_partial_sum.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "When transition probabilites are not specified for every regime",
+        our_needle: "their sum must be < 1",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E356",
+        fixture: "d_ms/e356_svar_identification_twice.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You may only have one svar_identification block in your .mod file.",
+        our_needle: "You may only have one svar_identification block in your .mod file.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E357",
+        fixture: "d_ms/e357_svar_identification_two_cholesky.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "you may only have one of upper_cholesky and lower_cholesky.",
+        our_needle: "you may only have one of upper_cholesky and lower_cholesky.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E358",
+        fixture: "d_ms/e358_svar_identification_lag_twice.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "lag 0 used more than once.",
+        our_needle: "lag 0 used more than once.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E359",
+        fixture: "d_ms/e359_svar_identification_equation_twice.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "equation number 1 referenced more than once under a single lag.",
+        our_needle: "equation number 1 referenced more than once under a single lag.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E360",
+        fixture: "d_ms/e360_svar_identification_equation_zero.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "equation numbers must be greater than or equal to 1.",
+        our_needle: "equation numbers must be greater than or equal to 1.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E361",
+        fixture: "d_ms/e361_svar_identification_name_twice.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Pie restriction added twice.",
+        our_needle: "Pie restriction added twice.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E362",
+        fixture: "d_ms/e362_svar_identification_qi_ri.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "a single restrictions must affect either Qi or Ri, but not both",
+        our_needle: "must affect either Qi or Ri, but not both",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E363",
+        fixture: "d_ms/e363_svar_none_of_three.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You must pass one of 'coefficients', 'variances', or 'constants'.",
+        our_needle: "You must pass one of 'coefficients', 'variances', or 'constants'.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E364",
+        fixture: "d_ms/e364_svar_two_of_three.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You may only pass one of 'coefficients', 'variances', or 'constants'.",
+        our_needle: "You may only pass one of 'coefficients', 'variances', or 'constants'.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E365",
+        fixture: "d_ms/e365_svar_chain_missing.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "A 'chain' option must be passed to the 'svar' statement.",
+        our_needle: "A 'chain' option must be passed to the 'svar' statement.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E366",
+        fixture: "d_ms/e366_svar_chain_zero.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The value passed to the 'chain' option must be greater than zero.",
+        our_needle: "The value passed to the 'chain' option must be greater than zero.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E367",
+        fixture: "d_ms/e367_svar_equations_zero.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The value(s) passed to the 'equations' option must be greater than zero.",
+        our_needle: "The value(s) passed to the 'equations' option must be greater than zero.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E368",
+        fixture: "d_ms/e368_ms_compute_probabilities_two.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You may only pass one of real_time_smoothed and filtered_probabilities to ms_compute_probabilities.",
+        our_needle: "You may only pass one of real_time_smoothed and filtered_probabilities to ms_compute_probabilities.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E369",
+        fixture: "d_ms/e369_ms_irf_two.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You may only pass one of regime, regimes and filtered_probabilities to ms_irf",
+        our_needle: "You may only pass one of regime, regimes and filtered_probabilities to ms_irf",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E370",
+        fixture: "d_ms/e370_ms_forecast_two.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You may only pass one of regime and regimes to ms_forecast",
+        our_needle: "You may only pass one of regime and regimes to ms_forecast",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E371",
+        fixture: "d_ms/e371_ms_variance_decomposition_two.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You may only pass one of regime, regimes and filtered_probabilities to ms_variance_decomposition",
+        our_needle: "You may only pass one of regime, regimes and filtered_probabilities to ms_variance_decomposition",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E372",
+        fixture: "d_ms/e372_prior_no_shape.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You must pass the shape option to the prior statement.",
+        our_needle: "You must pass the shape option to the prior statement.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E373",
+        fixture: "d_ms/e373_prior_no_mean_or_mode.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You must pass at least one of mean and mode to the prior statement.",
+        our_needle: "You must pass at least one of mean and mode to the prior statement.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E374",
+        fixture: "d_ms/e374_prior_stdev_and_variance.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You must pass exactly one of stdev and variance to the prior statement.",
+        our_needle: "You must pass exactly one of stdev and variance to the prior statement.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E375",
+        fixture: "d_ms/e375_prior_domain_two_values.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You must pass exactly two values to the domain option.",
+        our_needle: "You must pass exactly two values to the domain option.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E376",
+        fixture: "d_ms/e376_joint_prior_domain_four_values.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "You must pass exactly four values to the domain option.",
+        our_needle: "You must pass exactly four values to the domain option.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E377",
+        fixture: "d_ms/e377_joint_prior_one_name.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "you must pass at least two parameters to the joint prior statement",
+        our_needle: "you must pass at least two parameters to the joint prior statement",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E378",
+        fixture: "d_ms/e378_prior_head_not_parameter.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Pie is not a parameter",
+        our_needle: "Pie is not a parameter",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E379",
+        fixture: "d_ms/e379_prior_corr_mixed_types.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "A and B must be of the same type. In your case, Pie and eps",
+        our_needle: "A and B must be of the same type. In your case, Pie and eps",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E058",
+        fixture: "d_ms/e058_identification_unknown.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Unknown symbol: nosuchvar.",
+        our_needle: "in svar_identification is not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E058",
+        fixture: "d_ms/e058_cfp_var_undeclared.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Unknown symbol: nosuch.",
+        our_needle: "in conditional_forecast_paths is not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E058",
+        fixture: "d_ms/e058_prior_std_undeclared.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Unknown symbol: nosuchvar.",
+        our_needle: "in prior is not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E317",
+        fixture: "d_ms/e317_cfp_var_not_endogenous.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "eps is not endogenous.",
+        our_needle: "eps is not endogenous.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E059",
+        fixture: "d_ms/e059_prior_std_not_parameter.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "alpha is neither endogenous or exogenous.",
+        our_needle: "alpha is neither endogenous or exogenous.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E239",
+        fixture: "d_ms/e239_undeclared_irf.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "ms_irf: Variable zzz was not declared.",
+        our_needle: "ms_irf: Variable zzz was not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "d_ms/e240_irf_not_endogenous.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "ms_irf: Variable eps is not one of {endogenous}",
+        our_needle: "ms_irf: Variable eps is not one of {endogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E239",
+        fixture: "d_ms/e239_pcf_undeclared.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "plot_conditional_forecast: Variable zzz was not declared.",
+        our_needle: "plot_conditional_forecast: Variable zzz was not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "d_ms/e240_pcf_not_endogenous.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "plot_conditional_forecast: Variable eps is not one of {endogenous}",
+        our_needle: "plot_conditional_forecast: Variable eps is not one of {endogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E227",
+        fixture: "d_ms/e227_data_after.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The estimation statement requires a data file to be supplied via the datafile option.",
+        our_needle: "The estimation statement requires a data file to be supplied via the datafile option.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E227",
+        fixture: "d_ms/e227_two_estimations.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The estimation statement requires a data file to be supplied via the datafile option.",
+        our_needle: "The estimation statement requires a data file to be supplied via the datafile option.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E271",
+        fixture: "d_ms/kept_extras.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "option ms.freq declared twice",
+        our_needle: "option freq declared twice",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E317",
+        fixture: "d_ms/e317_prior_std_exo_det.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "dve is an exogenous deterministic.",
+        our_needle: "dve is an exogenous deterministic.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E317",
+        fixture: "d_ms/e317_prior_corr_exo_det.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "dve is an exogenous deterministic.",
+        our_needle: "dve is an exogenous deterministic.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E317",
+        fixture: "d_ms/e317_prior_std_exo_det_subsample.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "dve is an exogenous deterministic.",
+        our_needle: "dve is an exogenous deterministic.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E058",
+        fixture: "d_ms/e058_prior_corr_two_undeclared.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Unknown symbol: nosuch1.",
+        our_needle: "in prior is not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E059",
+        fixture: "d_ms/e059_prior_corr_two_params.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "alpha is neither endogenous or exogenous.",
+        our_needle: "alpha is neither endogenous or exogenous.",
+        stage: JsonStage::Check,
+    },
 ];
 
 struct ClashQuiet {
@@ -2783,6 +3373,7 @@ fn surface_matrix_claims_every_official_message() {
                 || fixture.starts_with("d_gap/")
                 || fixture.starts_with("d_extfun/")
                 || fixture.starts_with("d_surgery/")
+                || fixture.starts_with("d_ms/")
         })
         .collect();
     fixtures.sort_unstable();

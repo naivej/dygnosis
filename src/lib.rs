@@ -9,6 +9,7 @@ pub mod catalog;
 pub mod check_clash;
 pub mod check_context;
 pub mod check_d_block;
+pub mod check_d_ms;
 pub mod check_d_open;
 pub mod check_d_surgery;
 pub mod check_estimation;
@@ -59,6 +60,7 @@ pub use catalog::{
 pub use check_clash::check_clash;
 pub use check_context::check_context;
 pub use check_d_block::check_d_block;
+pub use check_d_ms::check_d_ms;
 pub use check_d_open::{check_d_open, check_workspace_d_open};
 pub use check_d_surgery::check_d_surgery;
 pub use check_estimation::check_estimation;

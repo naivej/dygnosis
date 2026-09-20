@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::diagnostic::{Diagnostic, Severity};
-use crate::model::{DataStatement, EstimatedParamKind, Model};
+use crate::model::{EstimatedParamKind, Model};
 use crate::span::Span;
 
 const FALLBACK: Span = Span { start: 0, end: 1 };
@@ -20,6 +20,16 @@ const E230_MSG: &str = "The option mh_tune_guess in estimation statement cannot 
 const E231_MSG: &str = "The filter_algorithm=gmf option is incompatible with proposal_approximation=montecarlo in the estimation statement.";
 const E232_MSG: &str = "The filter_algorithm=gmf option is incompatible with distribution_approximation=montecarlo in the estimation statement.";
 const E234_MSG: &str = "both the 'prior_function' and 'posterior_function' commands require the 'function' option";
+
+/// True when a `data` statement carrying `file` or `series` is written **before**
+/// `at`. 7.1 sets that flag when the statement's own check pass runs, and the
+/// `estimation` pass reads it in file order.
+fn data_statement_before(model: &Model, at: u32) -> bool {
+    model
+        .data_statements
+        .iter()
+        .any(|stmt| stmt.span.start < at && stmt.has_file_or_series())
+}
 
 pub fn check_estimation(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
@@ -45,15 +55,14 @@ pub fn check_estimation(model: &Model) -> Vec<Diagnostic> {
     if let Some(span) = e226_span(model) {
         push(&mut out, span, "E226", E226_MSG);
     }
-    if model.estimation_span.is_some()
-        && model.estimation_datafile_span.is_none()
-        && !model
-            .data_statements
-            .iter()
-            .any(DataStatement::has_file_or_series)
-    {
-        let span = model.estimation_span.unwrap_or(FALLBACK);
-        push(&mut out, span, "E227", E227_MSG);
+    for stmt in &model.estimation_statements {
+        if stmt.has_datafile {
+            continue;
+        }
+        if data_statement_before(model, stmt.span.start) {
+            continue;
+        }
+        push(&mut out, stmt.span, "E227", E227_MSG);
     }
     if model.estimation_mode_file_span.is_some()
         && model.estimated_params_init_use_calibration.is_some()

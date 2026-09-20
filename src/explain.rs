@@ -2,7 +2,7 @@
 //!
 //! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 70
 //! codes shipped through 0.5.0, then kind `shared` / `skipped` / `added`.
-//! 247 keys = 193 shared + 27 added + 27 skipped (S016 shipped as E335-E337). Catalog **0.5.1** D-clash and
+//! 289 keys = 235 shared + 27 added + 27 skipped (S016 shipped as E335-E337). Catalog **0.5.1** D-clash and
 //! D-check Errors are shared; the **0.5.2** D-walk, D-block, D-open, and D-extfun
 //! rows add shared keys and drop the `S###` keys they replace.
 //! `I050` and `W042` use the recorded surface rewrites in
@@ -40,7 +40,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 247 keys: 193 shared + 27 added + 27 skipped.
+// 289 keys: 235 shared + 27 added + 27 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -194,7 +194,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E058", ExplainEntry {
         title: "Undeclared variable in a block that names symbols",
-        body: "A block that names symbols refers to one that is not declared at all: an `initval` / `endval` entry, a `histval` lag, a `filter_initial_state` entry, an `init2shocks` pair, a `homotopy_setup` row, or a `shock_groups` member. Dynare refuses: `Unknown symbol: undeclared_zzz`.\n\n**Warrant**\n\nThe editor names the undeclared entry and its block; Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the variable, or remove the stray entry.",
+        body: "A block that names symbols refers to one that is not declared at all: an `initval` / `endval` entry, a `histval` lag, a `filter_initial_state` entry, an `init2shocks` pair, a `homotopy_setup` row, a `shock_groups` member, an `svar_identification` body row, a `conditional_forecast_paths` `var` row, or a `std(…)` / `corr(…)` prior head name. Dynare refuses: `Unknown symbol: undeclared_zzz`.\n\n**Warrant**\n\nThe editor names the undeclared entry and its block; Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the variable, or remove the stray entry.",
         kind: ExplainKind::Shared,
     }),
     ("W051", ExplainEntry {
@@ -208,8 +208,8 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Added,
     }),
     ("E059", ExplainEntry {
-        title: "Name in initval/endval is neither endogenous or exogenous",
-        body: "An `initval` or `endval` entry names a symbol that is not endogenous or exogenous (for example a parameter). Dynare refuses: `… is neither endogenous or exogenous.`\n\n**Fix**\n\nAssign parameters before the model block, or inside `steady_state_model`. Use `initval` / `endval` only for endogenous or exogenous variables.",
+        title: "Name in initval/endval or a std/corr prior head is neither endogenous or exogenous",
+        body: "An `initval` or `endval` entry, a `histval` entry, or a `std(…)` / `corr(…)` prior head names a symbol that is not endogenous or exogenous (for example a parameter). Dynare refuses: `… is neither endogenous or exogenous.`\n\n**Fix**\n\nAssign parameters before the model block, or inside `steady_state_model`. Use `initval` / `endval` only for endogenous or exogenous variables, and a plain `name.prior(…)` head for a parameter.",
         kind: ExplainKind::Shared,
     }),
     ("W060", ExplainEntry {
@@ -1033,8 +1033,8 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Shared,
     }),
     ("E317", ExplainEntry {
-        title: "optim_weights name is not endogenous",
-        body: "``optim_weights`` weights a symbol that is not an endogenous variable. Dynare refuses: `e is not endogenous.`\n\n**Fix**\n\nWeight endogenous variables.",
+        title: "Name is not endogenous, or is an exogenous deterministic",
+        body: "A name that must be endogenous is not. Dynare refuses `N is not endogenous.`, and a ``varexo_det`` name on a ``std(…)`` / ``corr(…)`` prior head gets their other sentence, `N is an exogenous deterministic.` The surfaces are the ``optim_weights`` weights, a ``conditional_forecast_paths`` `var` row, and a prior head.\n\n**Fix**\n\nName an endogenous variable.",
         kind: ExplainKind::Shared,
     }),
     ("E318", ExplainEntry {
@@ -1140,6 +1140,384 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E337", ExplainEntry {
         title: "Same endogenous excluded twice by one statement",
         body: "One ``model_remove`` / ``model_replace`` statement excluded two equations that name the same endogenous. Dynare refuses: `Variable c was excluded twice via a model_remove or model_replace statement, or via the include_eqs or exclude_eqs option`.\n\n**Warrant**\n\nDynare looks the printed name up at the loop index, so it can name a symbol that was not excluded at all; the editor names the variable that was excluded twice.\n\n**Fix**\n\nRemove the equation once, or drop one of the tags.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E338", ExplainEntry {
+        title: "data statement without file or series",
+        body: "The ``data`` statement carries neither ``file`` nor ``series``. Dynare refuses: `The file or series option must be passed to the data statement.`
+
+**Fix**
+
+Pass exactly one of the two: ``data(file='x.csv');`` or ``data(series=y);``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E339", ExplainEntry {
+        title: "data statement with both file and series",
+        body: "The ``data`` statement carries both ``file`` and ``series``. Dynare refuses: `The file and series options cannot be used simultaneously in the data statement.`
+
+**Fix**
+
+Keep one of the two.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E340", ExplainEntry {
+        title: "data statement nobs is not positive",
+        body: "The ``nobs`` option of the ``data`` statement is ``0``. Dynare refuses: `The nobs option of the data statement only accepts positive integers.` A negative value is a syntax error before this check runs.
+
+**Fix**
+
+Pass a positive number of observations, or drop ``nobs``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E341", ExplainEntry {
+        title: "ms_estimation without no_create_init, datafile and initial_year",
+        body: "``ms_estimation`` was written without ``no_create_init`` and without one of ``datafile`` / ``initial_year``. Dynare refuses: `If you do not pass no_create_init to ms_estimation, you must pass the datafile and initial_year options.` One sentence covers every missing combination.
+
+**Fix**
+
+Add ``no_create_init``, or pass both ``datafile`` and ``initial_year``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E342", ExplainEntry {
+        title: "conditional_forecast without parameter_set",
+        body: "``conditional_forecast`` was written without the ``parameter_set`` option. Dynare refuses: ``You must pass the `parameter_set` option to conditional_forecast``. The option takes one of ``prior_mode``, ``prior_mean``, ``posterior_mean``, ``posterior_mode``, ``posterior_median``, ``mle_mode`` or ``calibration``.
+
+**Fix**
+
+Pass ``parameter_set=calibration`` (or the prior or posterior set you intend).",
+        kind: ExplainKind::Shared,
+    }),
+    ("E343", ExplainEntry {
+        title: "conditional_forecast_paths periods and values counts differ",
+        body: "A ``var`` row of ``conditional_forecast_paths`` lists a different number of ``periods`` and ``values`` entries. Dynare refuses: `shocks/conditional_forecast_paths: variable Pie: number of periods is different from number of shock values`. A range such as ``1:4`` counts as one entry.
+
+**Fix**
+
+Give one value per period entry.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E344", ExplainEntry {
+        title: "conditional_forecast_paths variable declared twice",
+        body: "One ``var`` name appears twice in a single ``conditional_forecast_paths`` block. Dynare refuses: `shocks/conditional_forecast_paths: variable Pie declared twice`.
+
+**Fix**
+
+Merge the two rows into one, or remove the duplicate.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E345", ExplainEntry {
+        title: "markov_switching statement missing a required option",
+        body: "``markov_switching`` was written without one of ``chain``, ``number_of_regimes`` or ``duration``. Dynare refuses: `A 'chain' option must be passed to the 'markov_switching' statement.` with the missing option named.
+
+**Fix**
+
+Pass the named option.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E346", ExplainEntry {
+        title: "markov_switching chain is zero",
+        body: "The ``chain`` option of ``markov_switching`` is ``0``. Dynare refuses: `The value passed to the chain option must be greater than zero.` A negative value is a syntax error before this check runs.
+
+**Fix**
+
+Chains are numbered from 1, in file order.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E347", ExplainEntry {
+        title: "markov_switching number_of_regimes is zero",
+        body: "The ``number_of_regimes`` option of ``markov_switching`` is ``0``. Dynare refuses: `The value passed to the number_of_regimes option must be greater than zero.` A negative value is a syntax error before this check runs.
+
+**Fix**
+
+Pass a positive number of regimes.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E348", ExplainEntry {
+        title: "markov_switching chain is not the next consecutive integer",
+        body: "The ``chain`` options of the file's ``markov_switching`` statements must be ``1``, ``2``, ``3``, … in file order. Dynare refuses: `The markov_switching chain option takes consecutive integers beginning at 1.`
+
+**Fix**
+
+Number the statements from 1 with no gaps, in the order they appear.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E349", ExplainEntry {
+        title: "markov_switching parameters names are not parameters",
+        body: "A name in the ``parameters=[…]`` option of ``markov_switching`` is not a declared parameter. Dynare refuses: `Variables passed to the parameters option of the markov_switching statement must be parameters. Caused by: Y`.
+
+**Fix**
+
+List only ``parameters`` names, or declare the name as a parameter.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E350", ExplainEntry {
+        title: "markov_switching restrictions row is not three entries",
+        body: "A row of the ``restrictions`` option of ``markov_switching`` does not hold exactly three entries. Dynare refuses: `restrictions in the subsample statement must be specified in the form [current_period_regime, next_period_regime, transition_probability]`.
+
+**Fix**
+
+Write each row as ``[from_regime, to_regime, probability]``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E351", ExplainEntry {
+        title: "markov_switching restriction regime above number_of_regimes",
+        body: "A regime number in the ``restrictions`` option is larger than ``number_of_regimes``. Dynare refuses: `the regimes specified in the restrictions option must be <= the number of regimes specified in the number_of_regimes option`.
+
+**Fix**
+
+Correct the regime numbers, or raise ``number_of_regimes``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E352", ExplainEntry {
+        title: "markov_switching restriction given twice for one regime pair",
+        body: "Two rows of the ``restrictions`` option name the same ``[from, to]`` regime pair. Dynare refuses: `two restrictions were given for: 1, 2`.
+
+**Fix**
+
+Keep one row per regime pair.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E353", ExplainEntry {
+        title: "markov_switching transition probability above 1",
+        body: "A transition probability in the ``restrictions`` option is greater than 1. Dynare refuses: `the transition probability, 1.5 must be less than 1`.
+
+**Fix**
+
+Pass a probability of at most 1.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E354", ExplainEntry {
+        title: "markov_switching row or column of transition probabilities does not sum to 1",
+        body: "Every transition out of one regime (or into it) was given, and the probabilities do not sum to 1. Dynare refuses: `When all transitions probabilities are specified for a certain regime, they must sum to 1`. One sentence covers both the row sum and the column sum.
+
+**Fix**
+
+Adjust the probabilities so the complete row and the complete column each sum to 1.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E355", ExplainEntry {
+        title: "markov_switching partial transition probabilities sum to 1 or more",
+        body: "Only some transitions out of one regime (or into it) were given, and their sum is 1 or more. Dynare refuses: `When transition probabilites are not specified for every regime, their sum must be < 1`.
+
+**Fix**
+
+Lower the probabilities, or give the whole row and column.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E356", ExplainEntry {
+        title: "more than one svar_identification block",
+        body: "The file holds a second ``svar_identification;`` … ``end;`` block. Dynare refuses: `You may only have one svar_identification block in your .mod file.`
+
+**Fix**
+
+Merge the two blocks into one.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E357", ExplainEntry {
+        title: "svar_identification with both choleskys",
+        body: "One ``svar_identification`` block holds both ``upper_cholesky;`` and ``lower_cholesky;``. Dynare refuses: `Within the svar_identification statement, you may only have one of upper_cholesky and lower_cholesky.`
+
+**Fix**
+
+Keep one of the two.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E358", ExplainEntry {
+        title: "svar_identification exclusion lag used more than once",
+        body: "The same ``exclusion lag N;`` opens two elements of one ``svar_identification`` block. Dynare refuses: `lag 0 used more than once.`
+
+**Fix**
+
+Put every equation of that lag under one element.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E359", ExplainEntry {
+        title: "svar_identification equation number repeated under one lag",
+        body: "Two ``equation N, …;`` rows under one ``exclusion lag`` carry the same equation number. Dynare refuses: `equation number 1 referenced more than once under a single lag.`
+
+**Fix**
+
+Name each equation once per lag.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E360", ExplainEntry {
+        title: "svar_identification equation number below 1",
+        body: "An ``equation`` row of ``svar_identification`` carries the number ``0``. Dynare refuses: `equation numbers must be greater than or equal to 1.` A negative number is a syntax error before this check runs, and the ``restriction equation N, …`` spelling is not range-checked.
+
+**Fix**
+
+Number equations from 1.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E361", ExplainEntry {
+        title: "svar_identification name added twice in one equation row",
+        body: "One ``equation N, name…;`` row lists the same name twice. Dynare refuses: `Py restriction added twice.`
+
+**Fix**
+
+List the name once.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E362", ExplainEntry {
+        title: "svar_identification restriction mixes Qi and Ri",
+        body: "One ``restriction equation N, …;`` uses both a ``coeff(name,0)`` term (the contemporaneous Qi matrix) and a ``coeff(name,k)`` term with ``k > 0`` (the lagged Ri matrix). Dynare refuses: `SVAR_IDENTIFICATION: a single restrictions must affect either Qi or Ri, but not both`.
+
+**Fix**
+
+Split the restriction into one statement per matrix.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E363", ExplainEntry {
+        title: "svar without coefficients, variances or constants",
+        body: "``svar`` was written without any of ``coefficients``, ``variances`` or ``constants``. Dynare refuses: `You must pass one of 'coefficients', 'variances', or 'constants'.` The third name is unreachable at this pin: ``constants`` is a token the grammar does not take, so spelling it is a syntax error.
+
+**Fix**
+
+Pass ``coefficients`` or ``variances``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E364", ExplainEntry {
+        title: "svar with two of coefficients, variances and constants",
+        body: "``svar`` was written with two of ``coefficients``, ``variances`` and ``constants``. Dynare refuses: `You may only pass one of 'coefficients', 'variances', or 'constants'.` The third name is unreachable at this pin: ``constants`` is a token the grammar does not take, so spelling it is a syntax error.
+
+**Fix**
+
+Keep one of the two.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E365", ExplainEntry {
+        title: "svar without the chain option",
+        body: "``svar`` was written without the ``chain`` option. Dynare refuses: `A 'chain' option must be passed to the 'svar' statement.`
+
+**Fix**
+
+Pass ``chain=N``; the number must name the matching ``markov_switching`` chain.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E366", ExplainEntry {
+        title: "svar chain is zero",
+        body: "The ``chain`` option of ``svar`` is ``0``. Dynare refuses: `The value passed to the 'chain' option must be greater than zero.` This is a different sentence from the one ``markov_switching`` prints for its own ``chain``. A negative or fractional value is a syntax error before this check runs.
+
+**Fix**
+
+Number the chain from 1.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E367", ExplainEntry {
+        title: "svar equations option holds a non-positive number",
+        body: "The ``equations=[…]`` option of ``svar`` holds a number that is ``0`` or less. Dynare refuses: `The value(s) passed to the 'equations' option must be greater than zero.` An empty list and a negative value are syntax errors before this check runs.
+
+**Fix**
+
+Number the equations from 1.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E368", ExplainEntry {
+        title: "ms_compute_probabilities with both probability options",
+        body: "``ms_compute_probabilities`` was written with both ``real_time_smoothed`` and ``filtered_probabilities``. Dynare refuses: `You may only pass one of real_time_smoothed and filtered_probabilities to ms_compute_probabilities.`
+
+**Fix**
+
+Keep one of the two.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E369", ExplainEntry {
+        title: "ms_irf with more than one regime or probability option",
+        body: "``ms_irf`` was written with more than one of ``regime``, ``regimes`` and ``filtered_probabilities``. Dynare refuses: `You may only pass one of regime, regimes and filtered_probabilities to ms_irf`. No full stop.
+
+**Fix**
+
+Keep one of the three.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E370", ExplainEntry {
+        title: "ms_forecast with both regime and regimes",
+        body: "``ms_forecast`` was written with both ``regime`` and ``regimes``. Dynare refuses: `You may only pass one of regime and regimes to ms_forecast`. No full stop. ``ms_forecast`` has no ``filtered_probabilities`` option.
+
+**Fix**
+
+Keep one of the two.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E371", ExplainEntry {
+        title: "ms_variance_decomposition with more than one regime or probability option",
+        body: "``ms_variance_decomposition`` was written with more than one of ``regime``, ``regimes`` and ``filtered_probabilities``. Dynare refuses: `You may only pass one of regime, regimes and filtered_probabilities to ms_variance_decomposition`. No full stop.
+
+**Fix**
+
+Keep one of the three.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E372", ExplainEntry {
+        title: "prior statement without the shape option",
+        body: "A dotted ``prior`` statement carries no ``shape``. Dynare refuses: `You must pass the shape option to the prior statement.` The sentence is the same for the plain, ``std(…)``, ``corr(…)`` and joint forms.
+
+**Fix**
+
+Pass ``shape=beta`` (or the distribution you intend).",
+        kind: ExplainKind::Shared,
+    }),
+    ("E373", ExplainEntry {
+        title: "prior statement without mean or mode",
+        body: "A dotted ``prior`` statement carries neither ``mean`` nor ``mode``. Dynare refuses: `You must pass at least one of mean and mode to the prior statement.` Passing both is accepted.
+
+**Fix**
+
+Pass ``mean=`` or ``mode=``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E374", ExplainEntry {
+        title: "prior statement without exactly one of stdev and variance",
+        body: "A dotted ``prior`` statement carries neither ``stdev`` nor ``variance``, or both. Dynare refuses: `You must pass exactly one of stdev and variance to the prior statement.` One sentence covers both cases; the joint ``[a, b]`` form is not checked.
+
+**Fix**
+
+Pass exactly one of the two.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E375", ExplainEntry {
+        title: "prior statement domain does not hold two values",
+        body: "The ``domain`` option of a single ``prior`` statement does not hold exactly two values. Dynare refuses: `You must pass exactly two values to the domain option.` An empty list is a syntax error before this check runs.
+
+**Fix**
+
+Pass two values, such as ``domain=[0, 1]``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E376", ExplainEntry {
+        title: "joint prior statement domain does not hold four values",
+        body: "The ``domain`` option of a joint ``[a, b].prior(…)`` statement does not hold exactly four values. Dynare refuses: `You must pass exactly four values to the domain option.`
+
+**Fix**
+
+Pass four values, such as ``domain=[0.1 0.2 0.3 0.4]``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E377", ExplainEntry {
+        title: "joint prior statement with fewer than two names",
+        body: "A joint prior statement names fewer than two parameters. Dynare refuses: `you must pass at least two parameters to the joint prior statement`. The lowercase ``you`` is theirs.
+
+**Fix**
+
+Name two or more parameters, or use the single ``name.prior(…)`` form.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E378", ExplainEntry {
+        title: "prior head is not a parameter",
+        body: "The head of a plain or bracketed ``prior`` statement names a symbol that is not a parameter. Dynare refuses: `Pie is not a parameter`. The ``std(…)`` and ``corr(…)`` heads print their own sentence instead.
+
+**Fix**
+
+Use a ``parameters`` name as the head, or move the statement to the right surface.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E379", ExplainEntry {
+        title: "corr prior mixes an endogenous and an exogenous name",
+        body: "The two names of a ``corr(A,B).prior(…)`` statement are of different types. Dynare refuses: `In the corr(A,B).prior statement, A and B must be of the same type. In your case, Pie and eps are of different types.`
+
+**Fix**
+
+Name two endogenous variables or two exogenous ones.",
         kind: ExplainKind::Shared,
     }),
     ("E186", ExplainEntry {

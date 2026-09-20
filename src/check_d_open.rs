@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use crate::check_d_ms::PriorHeadVerdict;
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::expr::{BinOp, ExprId, ExprKind};
 use crate::intern::Name;
@@ -25,7 +26,88 @@ pub fn check_d_open(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_ramsey_constraints(model));
     out.extend(check_external_functions(model));
     out.extend(check_pair_lists(model));
+    out.extend(check_ms_symbols(model));
     out
+}
+
+/// The 0.5.4 family surfaces whose undeclared names are the shipped **E058**
+/// sentence, plus the one wrong-type row the shipped **E317** carries there.
+///
+/// Their parsing checks these names in this order: a `conditional_forecast_paths`
+/// `var` row wants an endogenous (**E317** for anything else), while the
+/// `svar_identification` body and the `std(…)` / `corr(…)` prior heads only ask
+/// that the name exist (**E058**). The prior heads' other checks —
+/// `neither endogenous or exogenous` and `is an exogenous deterministic` — are
+/// **E059**, in `diag_shape`. Every shape here stops their run at one name, so
+/// each loop breaks at its first hit: one Error, exactly as 7.1 prints one.
+fn check_ms_symbols(model: &Model) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    for block in &model.conditional_forecast_paths {
+        let Some((span, name, undeclared)) =
+            crate::check_d_ms::cfp_first_bad_row(model, &block.rows)
+        else {
+            continue;
+        };
+        let message = if undeclared {
+            format!(
+                "Variable '{}' in conditional_forecast_paths is not declared.",
+                model.name(name)
+            )
+        } else {
+            format!("{} is not endogenous.", model.name(name))
+        };
+        let code = if undeclared { "E058" } else { "E317" };
+        out.push(err(span, code, message));
+        break;
+    }
+    for block in &model.svar_identifications {
+        if let Some((span, name)) = crate::check_d_ms::identification_undeclared_name(model, block)
+        {
+            out.push(err(
+                span,
+                "E058",
+                format!("Variable '{name}' in svar_identification is not declared."),
+            ));
+            break;
+        }
+    }
+    for row in prior_std_corr_rows(model) {
+        match row.verdict {
+            PriorHeadVerdict::Undeclared => {
+                out.push(err(
+                    row.span,
+                    "E058",
+                    format!(
+                        "Variable '{}' in prior is not declared.",
+                        model.name(row.name)
+                    ),
+                ));
+                break;
+            }
+            // Their `check_symbol_is_endogenous_or_exogenous` reaches the
+            // `exogenousDet` arm and prints its own sentence, which **E317**
+            // already carries the `is not …` shape of.
+            PriorHeadVerdict::ExogenousDeterministic => {
+                out.push(err(
+                    row.span,
+                    "E317",
+                    format!("{} is an exogenous deterministic.", model.name(row.name)),
+                ));
+                break;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Every `std(…)` / `corr(…)` prior head name, in source order.
+fn prior_std_corr_rows(model: &Model) -> Vec<crate::check_d_ms::PriorHeadName> {
+    model
+        .dotted_statements
+        .iter()
+        .flat_map(|stmt| crate::check_d_ms::prior_std_corr_head_names(model, stmt))
+        .collect()
 }
 
 /// File-relative D-open checks: `@#includepath` directories, `load_params` files.

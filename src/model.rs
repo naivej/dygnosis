@@ -521,6 +521,11 @@ pub struct Model {
     pub bayesian_irf_span: Option<Span>,
     /// First `datafile=` on `estimation`.
     pub estimation_datafile_span: Option<Span>,
+    /// Every `estimation` statement, file order: its identifier span and whether
+    /// that statement carried `datafile=`. The **E227** gate reads the order
+    /// against `data_statements`, because 7.1's flag is per statement and set in
+    /// file order.
+    pub estimation_statements: Vec<EstimationStatement>,
     /// First `dataseries=` on `estimation` (recorded; not an E227 gate).
     pub estimation_dataseries_span: Option<Span>,
     /// First `mode_file=` on `estimation`.
@@ -860,6 +865,15 @@ pub struct ConditionalForecastPath {
 pub struct EstimationDsgeVarStmt {
     pub estimated: Option<Span>,
     pub calibrated: Option<Span>,
+}
+
+/// One `estimation` statement, in file order.
+#[derive(Clone, Copy, Debug)]
+pub struct EstimationStatement {
+    /// The command identifier's span. The **E227** row points here.
+    pub span: Span,
+    /// This statement carried `datafile=`.
+    pub has_datafile: bool,
 }
 
 /// A literal `@#include` filename plus the directive's byte span.
