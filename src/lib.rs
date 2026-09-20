@@ -1,7 +1,8 @@
 //! Thin Dynare analysis library.
 //!
-//! Scope follows the 0.5.3 cut line in `dev_logs/0.5/0.5.3/masterplan.md`
-//! (equation surgery on the file you edit: `model_remove` / `model_replace`).
+//! Scope follows the 0.5.4 cut line in `dev_logs/0.5/0.5.4/masterplan.md`
+//! (the MS-SBVAR family: `ms_*`, `sbvar`, `svar`, `markov_switching`,
+//! `svar_identification`, `conditional_forecast`, `data`, `prior`).
 //! Dynare compute (steady state, BK, identification, MATLAB) stays out.
 
 pub mod auto_fix;

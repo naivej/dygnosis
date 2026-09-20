@@ -1636,8 +1636,8 @@ Name two endogenous variables or two exogenous ones.",
         kind: ExplainKind::Skipped,
     }),
     ("S041", ExplainEntry {
-        title: "MS-SBVAR, markov_switching, or related command",
-        body: "Dynare refuses: `various ms_* / data / prior ERROR`. Catching step: check. Owner: skip 0.5.4 E. This code is never emitted.",
+        title: "Subsample lookup and the options / subsamples bodies",
+        body: "Dynare refuses: `A subsample statement has not been issued for alpha`, and the `options` / `subsamples` statement bodies are not read. Catching step: parse. Owner: skip 0.11 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S052", ExplainEntry {

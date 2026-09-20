@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.5.4
+
+Adds the MS-SBVAR family: the `ms_*` commands, `sbvar`, `svar`, `markov_switching`, the `svar_identification` and `conditional_forecast_paths` blocks, `conditional_forecast`, `plot_conditional_forecast`, the `data` statement and the dotted `prior` statement are read instead of skipped, and the refuses Dynare makes on them are reported. Codes `E338`–`E379`.
+
+Diagnostics implemented in this release:
+- **The family's own refusals** (one code per distinct Dynare message): the `data` statement's file-or-series rule, its both-at-once rule and its `nobs` bound (`E338`–`E340`); `ms_estimation`'s `datafile` / `initial_year` gate (`E341`); `conditional_forecast`'s `parameter_set` (`E342`), and `conditional_forecast_paths`' mismatched period and value counts and its repeated `var` name (`E343`, `E344`); `markov_switching`'s required options, its chain and regime-count values, its chain order, its `parameters` types, its `restrictions` row shape, its regime bound, its repeated regime pair, its transition probabilities and their sums (`E345`–`E355`); `svar_identification`'s one-block and one-cholesky rules, its repeated lag, its repeated equation, its equation-number bound, its repeated name and its Qi-or-Ri restriction (`E356`–`E362`); `svar`'s choice of one of `coefficients` / `variances` / `constants` with its chain and equation values (`E363`–`E367`); the `ms_*` commands' mutually exclusive regime and filtered-probability options (`E368`–`E371`); and the `prior` statement's `shape`, `mean` / `mode`, `stdev` / `variance` and `domain` rules, the joint head's name count, a head that is not a parameter, and a `corr` head whose two names differ in type (`E372`–`E379`).
+- **`E227` reads the `data` statement in file order**: `estimation; data(file='x.csv');` is refused, as Dynare refuses it, while a `data` statement written before the `estimation` silences the refusal on both sides.
+- **The parsed family reaches the shared name checks**: an undeclared name in the `svar_identification` body, in a `conditional_forecast_paths` `var` row or in a `prior` head reports `E058`; a `var` row naming an exogenous reports `E317`; a `prior` head naming a parameter reports `E059`; and the trailing name lists of `ms_irf` and `plot_conditional_forecast` report `E239` / `E240` with Dynare's own text.
+- **Malformed family shapes** are `E001`, pointed at the token Dynare's parser stops on: a missing or empty option list, an option name the command does not take, a value written in a shape the grammar has no production for, an empty or malformed block body, and the statements `dsample(10, 10);`, `rplot(periods=10);`, `smoother2histval(periods=10);`, `var_remove(alpha);`, `y(1) = 2;` and the dotted heads whose body is not `prior`, `options` or `subsamples`.
+- **`E378` also fires on a top-level assignment** (`y = 3;`), where Dynare's `y is not a parameter` is the same sentence its `prior` head prints.
+
+Other changes:
+- The `data` statement is parsed: it replaces the presence-only record 0.5.2 kept for the `datafile` gate.
+- A line the Dynare lexer reads as native MATLAB text is no longer reported as a parameter assignment with a missing semicolon; `aaaa = 1` followed by `bbbb = 2;` is accepted here, as Dynare accepts it.
+- `sbvar`, `svar_identification`, `svar_global_identification_check`, `conditional_forecast_paths`, `plot_conditional_forecast` and the dotted `prior` are in `dynare_list_options`, in option hover and completion, and in command-name completion.
+
+Three shapes stay silent on purpose, because Dynare 7.1 prints no message for them: it aborts on `markov_switching(…, parameters=[<undeclared>])`, on a `restriction` whose expression is not a `coeff(…)` term, and on a `duration` written as a vector.
+
 ## v0.5.3
 
 Adds the equation surgery family: the `model_remove(TAGS);` statement and the `model_replace(TAGS); … end;` block now change the model before the checks run, and the refuses they can cause are reported. Codes `E335`–`E337`.
