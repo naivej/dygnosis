@@ -1,0 +1,35 @@
+// inventory: quiet_option_shapes
+// One legal option list per command, so the tables accept what 7.1 accepts: the `ms_*` group, `sbvar`, `markov_switching`, `svar`, `conditional_forecast`, `data`, and the dotted `prior`.
+var y c k;
+varexo e;
+parameters alpha beta gamma;
+alpha = 0.36;
+beta = 0.99;
+gamma = 0.5;
+model;
+c = alpha*y + beta*c(-1) + e;
+y = beta*y(-1) + c;
+k = y;
+end;
+initval;
+y = 0;
+c = 0;
+k = 0;
+end;
+shocks;
+var e; stderr 0.1;
+end;
+ms_estimation(freq=quarterly, no_create_init, nlags=2, specification=sims_zha, alpha=0.5);
+ms_simulation(mh_replic=1000, drop=100, thinning_factor=2, adaptive_mh_draws=100, save_draws);
+ms_compute_mdd(proposal_type=1, proposal_draws=1000, proposal_lower_bound=-1, use_mean_center);
+ms_compute_probabilities(real_time_smoothed, file_tag=t);
+ms_irf(horizon=10, median, regimes, free_parameters=[0.5, 0.9], error_band_percentiles=[10 50 90]) y;
+ms_forecast(data_obs_nbr=20, regime=1, parameter_uncertainty);
+ms_variance_decomposition(filtered_probabilities, no_error_bands, horizon=4);
+sbvar(datafile='a.csv', freq=4, nlags=2, vlist=1, vlistlog=(y, c), no_bayesian_prior, restriction_fname=upper_cholesky);
+markov_switching(chain=1, number_of_regimes=2, duration=2.5, number_of_lags=1, parameters=[alpha, beta], restrictions=[[1, 2, 0.5]]);
+svar(coefficients, chain=1, equations=[1 2]);
+conditional_forecast(periods=8, replic=100, conf_sig=0.9, controlled_varexo=(e), parameter_set=prior_mean);
+data(file='x.csv', nobs=10, first_obs=1959Q1, last_obs=2005Q4);
+alpha.prior(shape=gamma, mean=3.22, variance=0.01, domain=[0, 5], shift=1, truncate=[0, 2]);
+[alpha, beta].prior(shape=beta, mean=[0.5 0.5], variance=[[1 0],[0 1]], domain=[0, 1, 0, 1]);

@@ -1,8 +1,10 @@
 // inventory: e001_assign_before_cmd
-// Original AR(1) plus Euler. Missing ';' before a catalog command must still be E001.
+// Original AR(1) plus Euler. A declared head with a missing ';' before a catalog
+// command must still be E001: 7.1's lexer sends the line to the grammar's
+// `symbol EQUAL expression`, and the grammar then wants a `;`.
 var y c;
 varexo e;
-parameters rho betta alpha sigmae;
+parameters rho betta alpha sigmae scale;
 rho = 0.90;
 betta = 0.99;
 alpha = 0.33;

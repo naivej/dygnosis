@@ -1,0 +1,40 @@
+// inventory: quiet_native_statement_boundaries
+// A family keyword reached mid-expression is not a statement start to 7.1's lexer: `xx.data(2,3)` inside an assignment is native MATLAB text, and so is every other family keyword used the same way. 7.1 accepts every line, so no Error may fire. `zz = 1; data(nobs=1);` is one native line too: the lexer left `INITIAL` at `zz`, and only a `;` closing a Dynare statement returns it.
+var y c k R Pie Y;
+varexo e eps;
+parameters alpha beta gamma;
+alpha = 0.36;
+beta = 0.99;
+gamma = 0.5;
+model;
+c = alpha*y + beta*c(-1) + e;
+y = beta*y(-1) + c;
+k = y;
+R = beta*R(-1) + eps;
+Pie = alpha*R(-1) + eps;
+Y = beta*Pie(-1) + eps;
+end;
+initval;
+y = 0;
+c = 0;
+k = 0;
+R = 0;
+Pie = 0;
+Y = 0;
+end;
+shocks;
+var e; stderr 0.1;
+var eps; stderr 0.1;
+end;
+zz = 1./xx.data(2,3);
+zz = 1./xx.ms_irf(2,3);
+zz = 1./xx.sbvar(2,3);
+zz = 1./xx.markov_switching(2,3);
+zz = 1./xx.dsample(2);
+zz = 1./xx.rplot(2);
+zz = 1./xx.var_remove(2);
+zz = 1./xx.conditional_forecast_paths(2);
+zz = 1./xx.svar_identification(2);
+zz = 1; data(nobs=1);
+zz2 = 2
+xx.data(2,3);

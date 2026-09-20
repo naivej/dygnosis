@@ -8,17 +8,19 @@ use crate::intern::{Interner, Name};
 use crate::lexer::{tokenize, Token, TokenKind};
 use crate::macro_expand::expand_macros_full;
 use crate::model::{
-    Assignment, ChangeTypeKind, ChangeTypeStmt, CommandSymbol, Complementarity,
-    ComplementarityTriple, ConditionalForecastPath, ConditionalForecastPaths, DataStatement, Decl,
-    DeprecatedOption, DerivSpec, DottedHead, DottedKind, DottedStatement, Equation,
-    EquationSurgery, EstimatedParam, EstimatedParamKind, EstimationDsgeVarStmt,
-    EstimationStatement, ExternalFunctionStmt, FamilyOption, FamilyValueKind, GenerateIrfsElement,
-    HistvalEntry, HomotopyRow, IncludeDirective, IncludePathDirective, Init2ShocksBlock,
-    Init2ShocksRow, MacroDirective, MacroInterp, Model, MsStatement, NonstationaryVar, ObservedVar,
-    OccbinConstraint, OccbinExpr, OptimWeight, OsrBound, ParseIssue, ParseIssueKind, PolicyCommand,
-    PolicyCommandStatement, RamseyConstraint, RemovedEquation, ShockGroup, ShockKind, ShockStmt,
-    ShocksSemiFamily, SurgeryExit, SurgeryKind, SvarEquation, SvarIdentification,
-    SvarIdentificationElement, TrendVar,
+    Assignment, ConditionalForecastPath, ConditionalForecastPaths, DataStatement, Decl, DottedHead,
+    DottedKind, DottedStatement, Equation, EstimationStatement, FamilyOption, FamilyValueKind,
+    Init2ShocksBlock, Init2ShocksRow, Model, MsStatement, OptimWeight, ParseIssue, ParseIssueKind,
+    ShapeRefuse, ShockGroup, SvarEquation, SvarIdentification, SvarIdentificationElement,
+};
+use crate::model::{
+    ChangeTypeKind, ChangeTypeStmt, CommandSymbol, Complementarity, ComplementarityTriple,
+    DeprecatedOption, DerivSpec, EquationSurgery, EstimatedParam, EstimatedParamKind,
+    EstimationDsgeVarStmt, ExternalFunctionStmt, GenerateIrfsElement, HistvalEntry, HomotopyRow,
+    IncludeDirective, IncludePathDirective, MacroDirective, MacroInterp, NonstationaryVar,
+    ObservedVar, OccbinConstraint, OccbinExpr, OsrBound, PolicyCommand, PolicyCommandStatement,
+    RamseyConstraint, RemovedEquation, ShockKind, ShockStmt, ShocksSemiFamily, SurgeryExit,
+    SurgeryKind, TrendVar,
 };
 use crate::span::Span;
 
@@ -140,6 +142,26 @@ fn is_trailing_symbol_command(cmd: &str) -> bool {
         || cmd.eq_ignore_ascii_case("calib_smoother")
         || cmd.eq_ignore_ascii_case("ms_irf")
         || cmd.eq_ignore_ascii_case("plot_conditional_forecast")
+}
+
+/// The three words the pin's grammar keys a dotted statement's body on.
+fn is_dotted_body_word(word: &str) -> bool {
+    word.eq_ignore_ascii_case("prior")
+        || word.eq_ignore_ascii_case("options")
+        || word.eq_ignore_ascii_case("subsamples")
+}
+
+/// One family `;` statement whose grammar production requires its `(…)` list.
+/// `plot_conditional_forecast` requires the trailing symbol list instead.
+fn requires_option_list(cmd: &str) -> bool {
+    cmd.eq_ignore_ascii_case("data")
+        || cmd.eq_ignore_ascii_case("markov_switching")
+        || cmd.eq_ignore_ascii_case("svar")
+        || cmd.eq_ignore_ascii_case("conditional_forecast")
+}
+
+fn requires_symbol_list(cmd: &str) -> bool {
+    cmd.eq_ignore_ascii_case("plot_conditional_forecast")
 }
 
 fn top_options(tokens: &[Token], src: &str, from: usize, to: usize) -> Vec<TopOption> {
@@ -336,6 +358,20 @@ const BLOCK_OPENERS: &[&str] = &[
     "init2shocks",
     "homotopy_setup",
     "shock_groups",
+    // The pin's remaining `DYNARE_BLOCK` openers, whose bodies this parser skips.
+    "matched_irfs",
+    "matched_irfs_weights",
+    "matched_moments",
+    "moment_calibration",
+    "irf_calibration",
+    "pac_target_info",
+    "priors",
+    "deterministic_trends",
+    "estimated_params_remove",
+    "observation_trends",
+    "heteroskedastic_shocks",
+    "shock_paths",
+    "perfect_foresight_controlled_paths",
 ];
 
 const PRIOR_SHAPES: &[&str] = &[
@@ -679,16 +715,27 @@ impl Parser<'_> {
                 self.parse_equation_surgery(false);
             } else if self.at_ident_ci("model_replace") {
                 self.parse_equation_surgery(true);
-            } else if self.at_ms_family_command().is_some() {
+            } else if self.at_ms_family_command().is_some() && self.at_statement_boundary() {
                 self.parse_ms_statement();
-            } else if self.at_ident_ci("svar_identification") && self.at_command_shape(1) {
+            } else if self.at_ident_ci("svar_identification")
+                && self.at_command_shape(1)
+                && self.at_statement_boundary()
+            {
                 self.parse_svar_identification_block();
-            } else if self.at_ident_ci("conditional_forecast_paths") && self.at_command_shape(1) {
+            } else if self.at_ident_ci("conditional_forecast_paths")
+                && self.at_command_shape(1)
+                && self.at_statement_boundary()
+            {
                 self.parse_conditional_forecast_paths_block();
-            } else if self.at_ident_ci("data") && self.at_command_shape(1) {
+            } else if self.at_ident_ci("data")
+                && self.at_command_shape(1)
+                && self.at_statement_boundary()
+            {
                 self.parse_data_statement();
-            } else if self.at_dotted_statement().is_some() {
+            } else if self.at_dotted_statement().is_some() && self.at_statement_boundary() {
                 self.parse_dotted_statement();
+            } else if self.at_handed_over_statement() && self.at_statement_boundary() {
+                self.parse_handed_over_statement();
             } else if let Some(end) = self.native_statement_end() {
                 self.skip_native_statement(end);
             } else if let Some(command) = self.at_policy_command() {
@@ -1977,13 +2024,33 @@ impl Parser<'_> {
         let start = self.current_start();
         self.bump();
         let mut options = Vec::new();
+        let mut option_span = None;
         if self.at(TokenKind::LParen) {
             let from = self.i;
             self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
-            self.record_deprecated_options_in_range(from, self.i);
-            self.record_skip_command_options(&command, from, self.i);
-            options = self.read_family_options(from, self.i);
+            let close_i = self.i;
+            self.record_deprecated_options_in_range(from, close_i);
+            self.record_skip_command_options(&command, from, close_i);
+            options = self.read_family_options(from, close_i);
             self.record_parsed_option_twice(&options);
+            self.record_option_shape_refuse(&command, &options, from);
+            option_span = Some(from);
+        }
+        // The grammar's own shape for this command: the list it requires, the one
+        // it forbids, and the trailing symbol list `plot_conditional_forecast`
+        // needs. Each refusal points at the token 7.1's parser stops on.
+        if option_span.is_some() && command.eq_ignore_ascii_case("svar_global_identification_check")
+        {
+            let tok = self.tokens[self.i - 1].span;
+            self.model
+                .shape_refuses
+                .push(ShapeRefuse::new(tok, &command, "no option list"));
+        }
+        if option_span.is_none() && requires_option_list(&command) {
+            let tok = self.tokens[self.i].span;
+            self.model
+                .shape_refuses
+                .push(ShapeRefuse::new(tok, &command, "an option list"));
         }
         self.model.ms_statements.push(MsStatement {
             command: command.clone(),
@@ -1995,6 +2062,23 @@ impl Parser<'_> {
         });
         if is_trailing_symbol_command(&command) {
             self.collect_trailing_symbols(&command);
+        }
+        // `plot_conditional_forecast` needs a trailing symbol list: `(periods=N)`
+        // alone is a syntax error, and so is a bare `;`. `ms_irf` parses in all
+        // four forms, so it has no such rule.
+        if requires_symbol_list(&command)
+            && !self
+                .model
+                .command_symbols
+                .iter()
+                .any(|sym| sym.list_id == self.symbol_list_id)
+        {
+            let tok = self.tokens[self.i].span;
+            self.model.shape_refuses.push(ShapeRefuse::new(
+                tok,
+                &command,
+                "a list of endogenous names",
+            ));
         }
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             self.bump();
@@ -2015,13 +2099,25 @@ impl Parser<'_> {
         let start = self.current_start();
         self.bump();
         let mut options = Vec::new();
+        let mut has_list = false;
         if self.at(TokenKind::LParen) {
+            has_list = true;
             let from = self.i;
             self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
-            self.record_deprecated_options_in_range(from, self.i);
-            self.record_skip_command_options("data", from, self.i);
-            options = self.read_family_options(from, self.i);
+            let close_i = self.i;
+            self.record_deprecated_options_in_range(from, close_i);
+            self.record_skip_command_options("data", from, close_i);
+            options = self.read_family_options(from, close_i);
             self.record_parsed_option_twice(&options);
+            self.record_option_shape_refuse("data", &options, from);
+        }
+        // `data;` — the grammar's `DATA '(' data_options_list ')' ';'` requires the
+        // list, and `data()` needs at least one option in it.
+        if !has_list {
+            let tok = self.tokens[self.i].span;
+            self.model
+                .shape_refuses
+                .push(ShapeRefuse::new(tok, "data", "an option list"));
         }
         let end = if self.at(TokenKind::Semi) {
             self.bump().span.end
@@ -2394,9 +2490,274 @@ impl Parser<'_> {
         }
     }
 
-    /// A declared name that enters a Dynare statement: declared, and neither a
-    /// mod-file local nor an external-function name.
-    fn is_statement_head_symbol(&self, name: Name) -> bool {
+    /// Whether the cursor is where 7.1's lexer would be in `INITIAL`, i.e. at the
+    /// start of a statement rather than inside one.
+    ///
+    /// The pin's lexer enters a statement only from `INITIAL`, and it returns to
+    /// `INITIAL` in exactly two ways: `<DYNARE_STATEMENT>;` after a statement's own
+    /// `;`, and the `\n` that ends a `NATIVE` block. Everything else on a line that
+    /// began as native MATLAB text is still native — so `zz = 1; data(nobs=1);` is
+    /// one native line to 7.1 and never starts a `data` statement, while
+    /// `data(file='x.csv'); data(nobs=1);` does.
+    ///
+    /// Reading a mid-line keyword as a statement is what put an Error on files 7.1
+    /// accepts (`w = 1./xx.data(2,3);`, whose `data` fires only in `INITIAL`).
+    fn at_statement_boundary(&self) -> bool {
+        let line_start = self.line_first_token(self.i);
+        if line_start == self.i {
+            return true;
+        }
+        // Mid-line: only a `;` that closed a Dynare *statement* returns to `INITIAL`.
+        self.tokens[self.i - 1].kind == TokenKind::Semi && self.line_began_a_statement(line_start)
+    }
+
+    /// The index of the first token on the line that contains token `at`.
+    fn line_first_token(&self, at: usize) -> usize {
+        let mut k = at;
+        while k > 0 {
+            let prev = &self.tokens[k - 1];
+            let gap = self
+                .src
+                .get(prev.span.end as usize..self.tokens[k].span.start as usize)
+                .unwrap_or("");
+            if gap.contains('\n') {
+                break;
+            }
+            k -= 1;
+        }
+        k
+    }
+
+    /// Whether the line that starts at token `head` began a Dynare statement or
+    /// block, so every `;` after it returns the lexer to `INITIAL`. A line that
+    /// began as native MATLAB text never does: the whole line stays native.
+    fn line_began_a_statement(&self, head: usize) -> bool {
+        let Some(tok) = self.tokens.get(head) else {
+            return false;
+        };
+        if tok.kind != TokenKind::Ident {
+            return false;
+        }
+        let lex = tok.text(self.src);
+        if lex.eq_ignore_ascii_case("end")
+            || crate::command_skip::is_pin_statement_keyword(lex)
+            || self.at_policy_command_name(lex)
+        {
+            return true;
+        }
+        // A declared head: the dotted statements and a top-level assignment.
+        self.intern
+            .lookup(lex)
+            .is_some_and(|name| self.is_statement_head_symbol(name))
+    }
+
+    fn at_policy_command_name(&self, lex: &str) -> bool {
+        [
+            "ramsey_model",
+            "ramsey_policy",
+            "discretionary_policy",
+            "osr",
+        ]
+        .iter()
+        .any(|c| lex.eq_ignore_ascii_case(c))
+    }
+
+    /// Claim the span of a handed-over shape and record its refuse. The statement
+    /// is 7.1-refused, so nothing reads it further; the span is claimed all the
+    /// same so the text-level passes leave its contents alone.
+    fn parse_handed_over_statement(&mut self) {
+        let start = self.tokens[self.i].span.start;
+        if let Some(refuse) = self.handed_over_refusal() {
+            self.model.shape_refuses.push(refuse);
+        }
+        while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::LParen) {
+                self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                continue;
+            }
+            self.bump();
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        self.model.ms_unparsed_spans.push(Span { start, end });
+    }
+
+    /// A statement whose head is one of the pin's own keywords but whose shape the
+    /// grammar has no production for, or a declared head with a body the grammar
+    /// cannot put on it.
+    ///
+    /// These are parse syntax errors in 7.1, not native lines: the pin's lexer
+    /// enters the statement on the keyword (`dsample`, `rplot`,
+    /// `smoother2histval`, `var_remove`, `database`) or on the declared head (a
+    /// name before `(` or `;`, a dotted head whose tail word is not `prior` /
+    /// `options` / `subsamples`), and the grammar then refuses what it reads.
+    ///
+    /// A statement whose *legal* shape is untouched matches nothing here: `rplot y;`,
+    /// `var_remove alpha;`, `dsample 10 20;`, `smoother2histval;` and
+    /// `database myfile;` are all legal, and a command whose option list repeats a
+    /// name keeps its own **E271** rather than gaining this refuse.
+    fn at_handed_over_statement(&self) -> bool {
+        self.handed_over_refusal().is_some()
+    }
+
+    /// The refuse one of those heads earns, or `None` when the shape is one the
+    /// grammar does accept.
+    fn handed_over_refusal(&self) -> Option<ShapeRefuse> {
+        let head = &self.tokens[self.i];
+        let lex = head.text(self.src);
+        if lex.eq_ignore_ascii_case("dsample") {
+            let legal = self.kind_at(1) == Some(TokenKind::Number)
+                && (self.kind_at(2) == Some(TokenKind::Semi)
+                    || (self.kind_at(2) == Some(TokenKind::Number)
+                        && self.kind_at(3) == Some(TokenKind::Semi)));
+            return (!legal).then(|| ShapeRefuse::new(head.span, lex, "one or two integers"));
+        }
+        if lex.eq_ignore_ascii_case("rplot") || lex.eq_ignore_ascii_case("var_remove") {
+            if self.kind_at(1) == Some(TokenKind::Ident) && !self.at_repeated_option_list() {
+                return None;
+            }
+            // `rplot(periods=10, periods=20);` keeps its **E271**; every other
+            // non-list shape is the grammar refusing a missing symbol list.
+            if self.at_repeated_option_list() {
+                return None;
+            }
+            return Some(ShapeRefuse::new(head.span, lex, "a list of symbols"));
+        }
+        if lex.eq_ignore_ascii_case("smoother2histval") {
+            if self.kind_at(1) == Some(TokenKind::Semi) || self.at_repeated_option_list() {
+                return None;
+            }
+            if self.kind_at(1) != Some(TokenKind::LParen) {
+                return Some(ShapeRefuse::new(
+                    head.span,
+                    lex,
+                    "invars, outvars, outfile or period options",
+                ));
+            }
+            return self.option_list_refusal_at(1, lex);
+        }
+        if lex.eq_ignore_ascii_case("database") {
+            if self.kind_at(1) == Some(TokenKind::Ident) {
+                return None;
+            }
+            return Some(ShapeRefuse::new(head.span, lex, "a list of symbols"));
+        }
+        if !self.declared_spelling(lex) {
+            return None;
+        }
+        self.declared_head_refusal(head.span, lex)
+    }
+
+    /// The option-list refuse for the list that opens `open` tokens ahead of the
+    /// cursor, or `None` when every option is one the named command's production
+    /// carries. An empty list has no production either.
+    fn option_list_refusal_at(&self, open: usize, subject: &str) -> Option<ShapeRefuse> {
+        let close = skip_balanced_tokens(
+            &self.tokens,
+            self.i + open,
+            TokenKind::LParen,
+            TokenKind::RParen,
+        );
+        let options = self.read_family_options(self.i + open, close);
+        if options.is_empty() {
+            return Some(ShapeRefuse::new(
+                self.tokens[self.i + open].span,
+                subject,
+                "at least one option",
+            ));
+        }
+        let table = crate::shape_gate::command_options(subject)?;
+        crate::shape_gate::option_refusal(self.src, subject, &options, table)
+    }
+
+    /// Whether the `(…)` at the cursor holds an option name twice. Such a list is
+    /// **E271**'s, not this sweep's, so it must be left alone here.
+    fn at_repeated_option_list(&self) -> bool {
+        if self.kind_at(1) != Some(TokenKind::LParen) {
+            return false;
+        }
+        let close = skip_balanced_tokens(
+            &self.tokens,
+            self.i + 1,
+            TokenKind::LParen,
+            TokenKind::RParen,
+        );
+        let options = self.read_family_options(self.i + 1, close);
+        let mut seen: HashMap<String, ()> = HashMap::new();
+        options
+            .iter()
+            .any(|opt| seen.insert(opt.name.to_ascii_lowercase(), ()).is_some())
+    }
+
+    /// A declared name the pin's lexer sends to a Dynare statement. The lexer
+    /// decides as it reads, so the declaration must start before this line.
+    fn declared_spelling(&self, spelling: &str) -> bool {
+        self.declared_before(self.tokens[self.i].span.start, spelling)
+    }
+
+    /// `alpha;`, `y(1) = 2;`, `alpha.foo(…)`, `alpha.foo.bar(…)`, `alpha.foo = 1;`:
+    /// a declared head followed by a token whose production the grammar has no
+    /// rule for.
+    fn declared_head_refusal(&self, head_span: Span, first: &str) -> Option<ShapeRefuse> {
+        match self.kind_at(1) {
+            // `alpha;` — the grammar wants `EQUAL` or a `.`-tail.
+            Some(TokenKind::Semi) => {
+                Some(ShapeRefuse::new(head_span, first, "EQUAL or a dotted tail"))
+            }
+            // `y(1) = 2;` — the grammar's top-level `symbol` takes no arguments.
+            Some(TokenKind::LParen) => Some(ShapeRefuse::new(head_span, first, "EQUAL or '.'")),
+            Some(TokenKind::Dot) => self.dotted_tail_refusal(head_span, first),
+            _ => None,
+        }
+    }
+
+    /// `alpha.foo(…)`, `alpha.foo.bar(…)`, `alpha.foo = 1;`, `alpha.foo;`. The
+    /// grammar's dotted productions are keyed on `prior` / `options` /
+    /// `subsamples` only, and a two-level head takes `prior` / `options` after the
+    /// middle word.
+    fn dotted_tail_refusal(&self, head_span: Span, first: &str) -> Option<ShapeRefuse> {
+        if self.kind_at(2) != Some(TokenKind::Ident) {
+            return None;
+        }
+        let tail = self.tokens[self.i + 2].text(self.src);
+        if !is_dotted_body_word(tail) {
+            // `alpha.foo = 1;` names the second word; `alpha.foo(…)` and
+            // `alpha.foo;` are the dot's own token.
+            return Some(if self.kind_at(3) == Some(TokenKind::Eq) {
+                ShapeRefuse::new(self.tokens[self.i + 2].span, first, "'.'")
+            } else {
+                ShapeRefuse::new(self.tokens[self.i + 1].span, first, "'.'")
+            });
+        }
+        if self.kind_at(3) != Some(TokenKind::Dot) {
+            // `alpha.prior;`, `alpha.prior = beta.prior;` — the copy form needs a
+            // right-hand head, and a bare `;` has none. `at_dotted_statement` has
+            // already claimed the legal body forms.
+            return Some(ShapeRefuse::new(head_span, first, "EQUAL or '.'"));
+        }
+        if self.kind_at(4) != Some(TokenKind::Ident) {
+            return None;
+        }
+        let inner = self.tokens[self.i + 4].text(self.src);
+        if !is_dotted_body_word(inner) {
+            return Some(ShapeRefuse::new(
+                self.tokens[self.i + 4].span,
+                first,
+                "OPTIONS or PRIOR",
+            ));
+        }
+        None
+    }
+
+    /// The declaration of `name`, when the parser has one: `var` / `varexo` /
+    /// `varexo_det` / `parameters` / `predetermined_variables`.
+    ///
+    /// Shared by the two questions below, so a declaration class added here
+    /// reaches both.
+    fn declaration_of(&self, name: Name) -> Option<&Decl> {
         self.model
             .endogenous
             .iter()
@@ -2404,9 +2765,47 @@ impl Parser<'_> {
             .chain(&self.model.deterministic_exogenous)
             .chain(&self.model.parameters)
             .chain(&self.model.predetermined)
-            .any(|d| d.name == name)
-            && !self.model.mod_file_locals.contains(&name)
-            && !self.model.external_function_names.contains(&name)
+            .find(|d| d.name == name)
+    }
+
+    /// A declared name that enters a Dynare statement: declared, and neither a
+    /// mod-file local nor an external-function name. This reads the **finished**
+    /// table, which is what every site that decides `local` vs `extern` needs.
+    fn is_statement_head_symbol(&self, name: Name) -> bool {
+        self.is_statement_head_at(name, None)
+    }
+
+    /// The same question read **as of** a byte position: the head is declared by a
+    /// declaration that starts before `at`.
+    ///
+    /// The pin's lexer decides as it reads, not off the finished symbol table, so
+    /// `gg = 1` followed by `parameters gg hh;` is native text to 7.1 even though
+    /// `gg` ends up declared.
+    ///
+    /// **Only `record_missing_assign_semis` uses this form.** It is the one pass
+    /// that asks per line after the file is parsed, so it has to reconstruct the
+    /// position the lexer was at. Every other site — the dotted-statement head
+    /// rule, `native_statement_end`, `at_statement_boundary`,
+    /// `sweep_undeclared_dotted_heads` — reads the finished table through
+    /// `is_statement_head_symbol`, because it runs while the cursor is already at
+    /// the site and the lexer's own position is the cursor.
+    fn declared_before(&self, at: u32, spelling: &str) -> bool {
+        let Some(name) = self.intern.lookup(spelling) else {
+            return false;
+        };
+        self.is_statement_head_at(name, Some(at))
+    }
+
+    /// `declaration_of` plus the local / external exclusions and the optional
+    /// as-of position.
+    fn is_statement_head_at(&self, name: Name, before: Option<u32>) -> bool {
+        if self.model.mod_file_locals.contains(&name)
+            || self.model.external_function_names.contains(&name)
+        {
+            return false;
+        }
+        self.declaration_of(name)
+            .is_some_and(|d| before.is_none_or(|at| d.span.start < at))
     }
 
     /// One dotted statement. A `prior` body is read; an `options` / `subsamples`
@@ -2433,6 +2832,14 @@ impl Parser<'_> {
             if kind == DottedKind::Prior {
                 options = self.read_family_options(self.i + open, close);
                 self.record_parsed_option_twice(&options);
+                let joint = matches!(head, DottedHead::Vec { .. });
+                let table = crate::shape_gate::prior_options(joint);
+                let subject = if joint { "[…].prior" } else { "prior" };
+                if let Some(refuse) =
+                    crate::shape_gate::option_refusal(self.src, subject, &options, table)
+                {
+                    self.model.shape_refuses.push(refuse);
+                }
             } else {
                 // The `options` / `subsamples` bodies are not read into records, but
                 // a repeated option in them is still a repeat 7.1 refuses.
@@ -2692,31 +3099,74 @@ impl Parser<'_> {
         let saved = self.i;
         self.i = body_i;
         let mut elements = Vec::new();
+        let mut refused_while_reading: Vec<ShapeRefuse> = Vec::new();
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
             let before = self.i;
-            self.read_svar_identification_element(&mut elements);
+            self.read_svar_identification_element(&mut elements, &mut refused_while_reading);
             if self.i <= before {
                 self.bump();
             }
         }
         self.i = saved;
+        // The grammar's own shape: the body is a list of elements, each
+        // `exclusion lag N;` must be followed by at least one `equation` row, and an
+        // `equation` row belongs to the lag above it. A body with no elements at all
+        // is refused at the `end;` that closes it. A lag this body closed without an
+        // `equation` row is a syntax error too.
+        let mut shape_refuses = refused_while_reading;
+        if elements.is_empty() {
+            let end_tok = self.tokens[body_end_i.min(self.tokens.len() - 1)].span;
+            shape_refuses.push(ShapeRefuse::new(
+                end_tok,
+                "svar_identification",
+                "an exclusion, cholesky or restriction row",
+            ));
+        }
+        for element in &elements {
+            if let SvarIdentificationElement::ExclusionLag {
+                lag: Some(_),
+                span,
+                equations,
+            } = element
+            {
+                if equations.is_empty() {
+                    shape_refuses.push(ShapeRefuse::new(*span, "exclusion lag", "an equation row"));
+                }
+            }
+        }
         self.model.svar_identifications.push(SvarIdentification {
             span: Span {
                 start: opener_span.start,
                 end,
             },
             elements,
+            shape_refuses,
         });
     }
 
     /// One element of an `svar_identification` body, appended to `out`.
-    fn read_svar_identification_element(&mut self, out: &mut Vec<SvarIdentificationElement>) {
+    fn read_svar_identification_element(
+        &mut self,
+        out: &mut Vec<SvarIdentificationElement>,
+        refuses: &mut Vec<ShapeRefuse>,
+    ) {
         let start = self.current_start();
         if self.at_ident_ci("exclusion") {
             self.bump();
             if self.at_ident_ci("lag") {
                 self.bump();
+                // `exclusion lag N;` — the lag is an unsigned integer, and the
+                // grammar needs at least one `equation` row before the element is
+                // combined.
+                let lag_span = self.tokens[self.i].span;
                 let lag = self.take_int();
+                if lag.is_none() && !self.at_ident_ci("lag") {
+                    refuses.push(ShapeRefuse::new(
+                        lag_span,
+                        "exclusion lag",
+                        "a non-negative integer",
+                    ));
+                }
                 let span = self.finish_family_element(start);
                 out.push(SvarIdentificationElement::ExclusionLag {
                     lag,
@@ -2747,11 +3197,20 @@ impl Parser<'_> {
                 Some(SvarIdentificationElement::ExclusionLag { equations, .. }) => {
                     equations.push(row)
                 }
-                _ => out.push(SvarIdentificationElement::ExclusionLag {
-                    lag: None,
-                    span: row.span,
-                    equations: vec![row],
-                }),
+                _ => {
+                    // `equation N, …;` with no `exclusion lag` above it: the
+                    // grammar's list has no production for a leading row.
+                    refuses.push(ShapeRefuse::new(
+                        row.span,
+                        "svar_identification",
+                        "a row of the block's own list",
+                    ));
+                    out.push(SvarIdentificationElement::ExclusionLag {
+                        lag: None,
+                        span: row.span,
+                        equations: vec![row],
+                    });
+                }
             }
             return;
         }
@@ -2863,10 +3322,25 @@ impl Parser<'_> {
         let saved = self.i;
         self.i = body_i;
         let mut rows = Vec::new();
+        // A row that opens with a key the production does not take: the pin's
+        // lexer knows `exogenize` / `endogenize`, and the grammar has no rule for
+        // them inside this block.
+        let mut stray_keywords: Vec<ShapeRefuse> = Vec::new();
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
             let before = self.i;
             if let Some(row) = self.read_conditional_forecast_path() {
                 rows.push(row);
+            } else if self.at(TokenKind::Ident) {
+                let tok = self.tokens[self.i].clone();
+                let lex = self.lexeme(&tok).to_string();
+                stray_keywords.push(ShapeRefuse::new(
+                    tok.span,
+                    "conditional_forecast_paths",
+                    "a var row",
+                ));
+                let _ = lex;
+                self.bump_until_semi();
+                self.eat(TokenKind::Semi);
             }
             if self.i <= before {
                 self.bump();
@@ -2877,6 +3351,43 @@ impl Parser<'_> {
             }
         }
         self.i = saved;
+        // The grammar's own shape: the body is a non-empty list of
+        // `VAR symbol ';' PERIODS period_list ';' VALUES value_list ';'` rows. A row
+        // that opens with a keyword the production does not take, one that stops
+        // before its `values`, and an empty `periods` / `values` list are each a
+        // syntax error; an empty body is refused at the `end;` that closes it.
+        let mut shape_refuses = stray_keywords;
+        if rows.is_empty() && shape_refuses.is_empty() {
+            let end_tok = self.tokens[body_end_i.min(self.tokens.len() - 1)].span;
+            shape_refuses.push(ShapeRefuse::new(
+                end_tok,
+                "conditional_forecast_paths",
+                "a var row",
+            ));
+        }
+        for row in &rows {
+            if !row.has_periods {
+                shape_refuses.push(ShapeRefuse::new(
+                    row.span,
+                    "conditional_forecast_paths",
+                    "a periods row",
+                ));
+            } else if row.periods.is_empty() {
+                shape_refuses.push(ShapeRefuse::new(
+                    row.periods_span,
+                    "periods",
+                    "a date or an integer",
+                ));
+            } else if !row.has_values {
+                shape_refuses.push(ShapeRefuse::new(
+                    row.span,
+                    "conditional_forecast_paths",
+                    "a values row",
+                ));
+            } else if row.values.is_empty() {
+                shape_refuses.push(ShapeRefuse::new(row.values_span, "values", "a value"));
+            }
+        }
         self.model
             .conditional_forecast_paths
             .push(ConditionalForecastPaths {
@@ -2885,6 +3396,7 @@ impl Parser<'_> {
                     end,
                 },
                 rows,
+                shape_refuses,
             });
     }
 
@@ -2913,11 +3425,27 @@ impl Parser<'_> {
             start: name_tok.span.end,
             end: name_tok.span.end,
         };
+        let mut has_periods = false;
         if self.at_ident_ci("periods") {
+            has_periods = true;
             let from = self.i + 1;
+            // `periods;` with nothing between the keyword and its `;`: the
+            // grammar's `period_list` needs at least one `period_range`.
+            if self
+                .tokens
+                .get(from)
+                .is_some_and(|t| t.kind == TokenKind::Semi)
+            {
+                periods_span = Span {
+                    start: self.tokens[self.i].span.start,
+                    end: self.tokens[from].span.end,
+                };
+            }
             self.bump_until_semi();
             periods = self.list_entries(from, self.i);
-            periods_span = self.entry_list_span(from, self.i);
+            if !periods.is_empty() {
+                periods_span = self.entry_list_span(from, self.i);
+            }
             self.eat(TokenKind::Semi);
         }
         let mut values = Vec::new();
@@ -2925,11 +3453,25 @@ impl Parser<'_> {
             start: periods_span.end,
             end: periods_span.end,
         };
+        let mut has_values = false;
         if self.at_ident_ci("values") {
+            has_values = true;
             let from = self.i + 1;
+            if self
+                .tokens
+                .get(from)
+                .is_some_and(|t| t.kind == TokenKind::Semi)
+            {
+                values_span = Span {
+                    start: self.tokens[self.i].span.start,
+                    end: self.tokens[from].span.end,
+                };
+            }
             self.bump_until_semi();
             values = self.list_entries(from, self.i);
-            values_span = self.entry_list_span(from, self.i);
+            if !values.is_empty() {
+                values_span = self.entry_list_span(from, self.i);
+            }
             self.eat(TokenKind::Semi);
         }
         Some(ConditionalForecastPath {
@@ -2943,6 +3485,8 @@ impl Parser<'_> {
                 start,
                 end: self.current_start(),
             },
+            has_periods,
+            has_values,
         })
     }
 
@@ -4846,6 +5390,14 @@ impl Parser<'_> {
             let Some(name) = leading_ident(rest) else {
                 continue;
             };
+            // The pin's lexer decides, as it reads, whether this line enters a
+            // Dynare statement: only a head declared **before** the line — and
+            // neither a mod-file local nor an external-function name — reaches the
+            // grammar's `symbol EQUAL expression`. Everything else is native MATLAB
+            // text, which 7.1 accepts however it reads, so the pass must not claim it.
+            if !self.declared_before(line_start, name) {
+                continue;
+            }
             let after_name = &rest[name.len()..];
             let after_ws = after_name.trim_start();
             if !after_ws.starts_with('=') || after_ws.starts_with("==") {
@@ -5753,6 +6305,32 @@ impl Parser<'_> {
         }
     }
 
+    /// Record the statement when its option list is outside every production the
+    /// grammar gives that command. 7.1's parser stops on the offending token, so
+    /// the refuse points at the option's own name (or at the list's own token when
+    /// the list is empty or missing).
+    fn record_option_shape_refuse(
+        &mut self,
+        command: &str,
+        options: &[FamilyOption],
+        open_i: usize,
+    ) {
+        let Some(table) = crate::shape_gate::command_options(command) else {
+            return;
+        };
+        if options.is_empty() {
+            // `name()` — the grammar's list needs at least one option.
+            let at = self.tokens[open_i].span;
+            self.model
+                .shape_refuses
+                .push(ShapeRefuse::new(at, command, "at least one option"));
+            return;
+        }
+        if let Some(refuse) = crate::shape_gate::option_refusal(self.src, command, options, table) {
+            self.model.shape_refuses.push(refuse);
+        }
+    }
+
     fn skip_balanced(&mut self, open: TokenKind, close: TokenKind) -> Span {
         let start = self.bump().span.start;
         let mut depth = 1;
@@ -5861,9 +6439,22 @@ impl Parser<'_> {
         self.tokens.get(self.i).is_some_and(|t| t.kind == kind)
     }
 
+    /// Blocks the grammar hands to `… END ';'` and this parser does not read. Every
+    /// pin `DYNARE_BLOCK` opener that no other branch parses belongs here, or its
+    /// body rows fall through to the top-level statement walk: `matched_moments;`
+    /// rows are bare expressions (`ln_c;`), and a declared head before `;` reads as
+    /// a statement a top-level recogniser would then refuse on a file 7.1 accepts.
     fn at_skipped_block(&self) -> bool {
         const BLOCKS: &[&str] = &[
             "matched_irfs",
+            "matched_irfs_weights",
+            "matched_moments",
+            "moment_calibration",
+            "irf_calibration",
+            "pac_target_info",
+            "priors",
+            "deterministic_trends",
+            "estimated_params_remove",
             "verbatim",
             "heteroskedastic_shocks",
             "shock_paths",

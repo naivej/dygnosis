@@ -1503,12 +1503,12 @@ Name two or more parameters, or use the single ``name.prior(…)`` form.",
         kind: ExplainKind::Shared,
     }),
     ("E378", ExplainEntry {
-        title: "prior head is not a parameter",
-        body: "The head of a plain or bracketed ``prior`` statement names a symbol that is not a parameter. Dynare refuses: `Pie is not a parameter`. The ``std(…)`` and ``corr(…)`` heads print their own sentence instead.
+        title: "assignment or prior head is not a parameter",
+        body: "A top-level `symbol = …;` assignment, or the head of a plain or bracketed ``prior`` statement, names a symbol that is not a parameter. Dynare refuses both while parsing, with the same sentence: `y is not a parameter`. The ``std(…)`` and ``corr(…)`` heads print their own sentence instead, and a line whose head the file never declares is native MATLAB text that 7.1 accepts.
 
 **Fix**
 
-Use a ``parameters`` name as the head, or move the statement to the right surface.",
+Name a ``parameters`` symbol, or move the statement to the surface that takes this kind.",
         kind: ExplainKind::Shared,
     }),
     ("E379", ExplainEntry {

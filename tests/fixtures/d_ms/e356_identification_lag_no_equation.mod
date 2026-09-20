@@ -1,7 +1,9 @@
 // inventory: e356_identification_lag_no_equation
-// 7.1 refuses this file: syntax error, unexpected EXCLUSION, expecting EQUATION
-// (their grammar needs an quation row before a lag is closed)
-// 7.1 refuses this file: `Unknown symbol: nosuchvar.`
+// A second `exclusion lag 0;` where the first one still needs its `equation`
+// row: 7.1 refuses `syntax error, unexpected EXCLUSION, expecting EQUATION`.
+// The sibling `d_ms/e001_identification_lag_no_equation.mod` closes the body with
+// `end;` instead, which 7.1 refuses with `unexpected END, expecting EQUATION`;
+// both spellings are swept and locked.
 var R Pie Y;
 varexo eps;
 parameters alpha beta;

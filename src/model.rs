@@ -493,6 +493,13 @@ pub struct Model {
     pub ms_unparsed_spans: Vec<Span>,
     /// Every parsed dotted `prior` / `options` / `subsamples` statement, file order.
     pub dotted_statements: Vec<DottedStatement>,
+    /// One row per statement whose shape 7.1's grammar has no production for, in
+    /// file order: a family command with a malformed option list or block body, a
+    /// pin keyword used in a shape the grammar does not take, or a dotted head the
+    /// grammar cannot put a body on. 7.1 refuses each with a parse-stage
+    /// `syntax error, unexpected …`, so the row carries the token to report and the
+    /// command or head to name.
+    pub shape_refuses: Vec<ShapeRefuse>,
     /// Every parsed `data` statement, file order (the estimation / MS-SBVAR one).
     pub data_statements: Vec<DataStatement>,
     /// `svar_identification;` … `end;` bodies, file order.
@@ -711,6 +718,31 @@ impl DataStatement {
     }
 }
 
+/// One statement the pin's grammar has no production for, recorded where the
+/// parser meets it. 7.1 refuses these with a parse-stage `syntax error,
+/// unexpected …` that names no construct, so the report carries our own wording
+/// (**E001**) on `span`, naming `subject`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShapeRefuse {
+    /// The token 7.1's parser stops on.
+    pub span: Span,
+    /// The command, keyword or head the message names, as written.
+    pub subject: String,
+    /// What the grammar does take there, for the hint. Empty when the shape is a
+    /// whole statement the grammar has no form of at all.
+    pub expected: &'static str,
+}
+
+impl ShapeRefuse {
+    pub fn new(span: Span, subject: impl Into<String>, expected: &'static str) -> Self {
+        Self {
+            span,
+            subject: subject.into(),
+            expected,
+        }
+    }
+}
+
 /// The dotted `….prior(…)` / `….options(…)` / `….subsamples(…)` statement family.
 #[derive(Clone, Debug)]
 pub struct DottedStatement {
@@ -799,6 +831,10 @@ pub struct SvarIdentification {
     /// Opener through `end;`.
     pub span: Span,
     pub elements: Vec<SvarIdentificationElement>,
+    /// Rows the grammar has no production for, in file order: an `equation` row
+    /// written before any `exclusion lag`, and a lag whose `equation` list never
+    /// came. A body with none of these is one 7.1 parses.
+    pub shape_refuses: Vec<ShapeRefuse>,
 }
 
 /// One element of an `svar_identification` body.
@@ -843,6 +879,10 @@ pub struct ConditionalForecastPaths {
     /// Opener through `end;`.
     pub span: Span,
     pub rows: Vec<ConditionalForecastPath>,
+    /// Rows the grammar has no production for, in file order: `exogenize` /
+    /// `endogenize` instead of `var`, a row that stops before its `values`, and an
+    /// empty `periods` / `values` row.
+    pub shape_refuses: Vec<ShapeRefuse>,
 }
 
 /// One `var name; periods …; values …;` row.
@@ -858,6 +898,10 @@ pub struct ConditionalForecastPath {
     pub values_span: Span,
     /// The `var` row span.
     pub span: Span,
+    /// The row carried a `periods` keyword at all.
+    pub has_periods: bool,
+    /// The row carried a `values` keyword at all.
+    pub has_values: bool,
 }
 
 /// `dsge_var` forms on one `estimation` statement.

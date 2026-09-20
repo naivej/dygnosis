@@ -33,13 +33,18 @@ use crate::diagnostic::{Diagnostic, Severity};
 use crate::intern::Name;
 use crate::model::{
     ConditionalForecastPath, DataStatement, DottedHead, DottedKind, DottedStatement, FamilyOption,
-    FamilyValueKind, Model, MsStatement, SvarEquation, SvarIdentification,
+    FamilyValueKind, Model, MsStatement, ShapeRefuse, SvarEquation, SvarIdentification,
     SvarIdentificationElement,
 };
 use crate::span::Span;
 
 /// 7.1 reads the whole file, then runs each statement's check pass in file
 /// order. Both phases stop at their first refusal, so the walk does too.
+///
+/// A shape the grammar cannot spell is a **parse**-stage refuse: 7.1's parser
+/// stops on it before the run reaches any check pass, whatever line the check
+/// pass would have been on. So the shape sweep joins the parse phase and is
+/// ordered against its units by file position.
 pub fn check_d_ms(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     if check_parse_phase(model, &mut out) {
@@ -49,18 +54,114 @@ pub fn check_d_ms(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
+/// The shape refusals the family's own records carry, in file order.
+/// Statement-level rows live on `Model::shape_refuses`; each block keeps its own.
+fn shape_refuses(model: &Model) -> Vec<&ShapeRefuse> {
+    let mut rows: Vec<&ShapeRefuse> = model.shape_refuses.iter().collect();
+    for block in &model.svar_identifications {
+        rows.extend(block.shape_refuses.iter());
+    }
+    for block in &model.conditional_forecast_paths {
+        rows.extend(block.shape_refuses.iter());
+    }
+    rows.sort_by_key(|refuse| (refuse.span.start, refuse.span.end));
+    rows
+}
+
+/// Every parsed family statement's span, whatever record holds it.
+fn statement_spans(model: &Model) -> Vec<Span> {
+    model
+        .ms_statements
+        .iter()
+        .map(|s| s.span)
+        .chain(model.data_statements.iter().map(|s| s.span))
+        .chain(model.dotted_statements.iter().map(|s| s.span))
+        .chain(model.svar_identifications.iter().map(|b| b.span))
+        .chain(model.conditional_forecast_paths.iter().map(|b| b.span))
+        .collect()
+}
+
+/// The start of the innermost parsed statement that contains `refuse`, or the
+/// refuse's own start when it sits outside every one.
+fn containing_statement_start(spans: &[Span], refuse: &ShapeRefuse) -> u32 {
+    spans
+        .iter()
+        .filter(|span| refuse.span.start >= span.start && refuse.span.start < span.end)
+        .map(|span| span.start)
+        .min()
+        .unwrap_or(refuse.span.start)
+}
+
+/// The first shape refuse that belongs to the statement starting at `at`, in file
+/// order.
+///
+/// 7.1's parser reads a statement's tokens left to right and stops at the first
+/// one its grammar cannot spell, so a shape refuse anywhere inside a statement
+/// pre-empts every sentence that statement's own actions or check pass would
+/// print — including the ones the grammar's actions print while parsing
+/// (`The value passed to the chain option …`). Within the parse stage the refuse
+/// keeps its own position, because there it competes with other parse actions in
+/// file order.
+fn shape_refuse_in_statement(model: &Model, at: u32, end: u32) -> Option<&ShapeRefuse> {
+    shape_refuses(model)
+        .into_iter()
+        .find(|refuse| refuse.span.start >= at && refuse.span.start < end)
+}
+
+/// The check-phase unit's own end, for scoping a shape refuse to its statement.
+fn unit_end(model: &Model, unit: &CheckUnit) -> u32 {
+    match unit {
+        CheckUnit::Data(stmt) => stmt.span.end,
+        CheckUnit::MsEstimation(stmt)
+        | CheckUnit::ConditionalForecast(stmt)
+        | CheckUnit::Markov(stmt)
+        | CheckUnit::MutuallyExclusive(stmt) => stmt.span.end,
+        CheckUnit::Identification(block) => block.span.end,
+        CheckUnit::Prior(stmt) => stmt.span.end,
+    }
+    .max(1)
+    .min(model.source.len() as u32)
+}
+
+/// Our wording for a shape 7.1 refuses with generic bison text: short, one
+/// problem, naming the command or the option. The hint names what the grammar
+/// takes there.
+fn shape_refuse_message(refuse: &ShapeRefuse) -> String {
+    format!(
+        "Unexpected token in '{}'. The grammar takes {} here.",
+        refuse.subject, refuse.expected
+    )
+}
+
 /// The refusals 7.1 prints while reading the file, in file order. Returns `true`
 /// when one fired.
 fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
-    // Every parse-time unit of the family, ordered by where it starts.
+    // Every parse-time unit of the family, ordered by where it starts. The shape
+    // refusals are units of their own, so a refuse written before a sentence's
+    // statement wins and one written after it loses — 7.1's parser stops at the
+    // first of the two in file order.
     enum Unit<'a> {
+        Shape(&'a ShapeRefuse),
         Markov(&'a MsStatement),
         Svar(&'a MsStatement),
         Identification(&'a SvarIdentification),
         Paths(&'a crate::model::ConditionalForecastPaths),
         Prior(&'a DottedStatement),
+        TopAssignment(&'a crate::model::Assignment),
     }
     let mut units: Vec<(u32, Unit)> = Vec::new();
+    let spans = statement_spans(model);
+    for refuse in shape_refuses(model) {
+        let at = containing_statement_start(&spans, refuse);
+        units.push((at, Unit::Shape(refuse)));
+    }
+    // A top-level `symbol = …;` reaches the grammar only when the head is declared,
+    // and 7.1 refuses it while parsing when the symbol is not a parameter.
+    for assignment in &model.helper_assignments {
+        if declared_names(model).contains(&assignment.name) {
+            units.push((assignment.span.start, Unit::TopAssignment(assignment)));
+        }
+    }
     for stmt in &model.ms_statements {
         if stmt.command.eq_ignore_ascii_case("markov_switching") {
             units.push((stmt.span.start, Unit::Markov(stmt)));
@@ -80,8 +181,12 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
     units.sort_by_key(|(at, _)| *at);
     for (_, unit) in units {
         let fired = match unit {
+            Unit::Shape(refuse) => {
+                push(out, refuse.span, "E001", shape_refuse_message(refuse));
+                true
+            }
             Unit::Markov(stmt) => check_markov_switching_parse(model, stmt, out),
-            Unit::Svar(stmt) => check_svar(stmt, out),
+            Unit::Svar(stmt) => check_svar(&model.source, stmt, out),
             Unit::Identification(block) => {
                 if let Some((span, code, message)) = identification_body_refusal(model, block) {
                     push(out, span, code, message);
@@ -92,6 +197,7 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
             }
             Unit::Paths(block) => check_conditional_forecast_paths(model, block, out),
             Unit::Prior(stmt) => check_prior_head(model, stmt, out),
+            Unit::TopAssignment(assignment) => check_top_assignment(model, assignment, out),
         };
         if fired {
             return true;
@@ -100,78 +206,89 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
     false
 }
 
+/// The check-pass units, so a shape refuse can be scoped to the statement it
+/// belongs to.
+enum CheckUnit<'a> {
+    Data(&'a DataStatement),
+    MsEstimation(&'a MsStatement),
+    ConditionalForecast(&'a MsStatement),
+    Markov(&'a MsStatement),
+    Identification(&'a SvarIdentification),
+    MutuallyExclusive(&'a MsStatement),
+    Prior(&'a DottedStatement),
+}
+
 /// The refusals 7.1 prints in the check pass, in file order.
 fn check_check_phase(model: &Model, out: &mut Vec<Diagnostic>) {
-    enum Unit<'a> {
-        Data(&'a DataStatement),
-        MsEstimation(&'a MsStatement),
-        ConditionalForecast(&'a MsStatement),
-        Markov(&'a MsStatement),
-        Identification(&'a SvarIdentification),
-        MutuallyExclusive(&'a MsStatement),
-        Prior(&'a DottedStatement),
-    }
-    let mut units: Vec<(u32, Unit)> = Vec::new();
+    let mut units: Vec<(u32, CheckUnit)> = Vec::new();
     for stmt in &model.data_statements {
-        units.push((stmt.span.start, Unit::Data(stmt)));
+        units.push((stmt.span.start, CheckUnit::Data(stmt)));
     }
     for stmt in &model.ms_statements {
         let unit = if stmt.command.eq_ignore_ascii_case("ms_estimation") {
-            Unit::MsEstimation(stmt)
+            CheckUnit::MsEstimation(stmt)
         } else if stmt.command.eq_ignore_ascii_case("conditional_forecast") {
-            Unit::ConditionalForecast(stmt)
+            CheckUnit::ConditionalForecast(stmt)
         } else if stmt.command.eq_ignore_ascii_case("markov_switching") {
-            Unit::Markov(stmt)
+            CheckUnit::Markov(stmt)
         } else {
-            Unit::MutuallyExclusive(stmt)
+            CheckUnit::MutuallyExclusive(stmt)
         };
         units.push((stmt.span.start, unit));
     }
     for block in &model.svar_identifications {
-        units.push((block.span.start, Unit::Identification(block)));
+        units.push((block.span.start, CheckUnit::Identification(block)));
     }
     for stmt in &model.dotted_statements {
-        units.push((stmt.span.start, Unit::Prior(stmt)));
+        units.push((stmt.span.start, CheckUnit::Prior(stmt)));
     }
     units.sort_by_key(|(at, _)| *at);
     let mut chains: i32 = 0;
     let mut second_identification = false;
-    for (_, unit) in units {
+    for (at, unit) in units {
+        // 7.1's parser stops inside the statement before its check pass runs, so a
+        // shape refuse written anywhere in this statement beats every sentence the
+        // statement would print here.
+        let end = unit_end(model, &unit);
+        if let Some(refuse) = shape_refuse_in_statement(model, at, end) {
+            push(out, refuse.span, "E001", shape_refuse_message(refuse));
+            return;
+        }
         match unit {
-            Unit::Data(stmt) => {
-                if check_data(stmt, out) {
+            CheckUnit::Data(stmt) => {
+                if check_data(&model.source, stmt, out) {
                     return;
                 }
             }
-            Unit::MsEstimation(stmt) => {
+            CheckUnit::MsEstimation(stmt) => {
                 if check_ms_estimation(stmt, out) {
                     return;
                 }
             }
-            Unit::ConditionalForecast(stmt) => {
+            CheckUnit::ConditionalForecast(stmt) => {
                 if check_conditional_forecast(stmt, out) {
                     return;
                 }
             }
             // Their chain counter lives on `ModFileStructure`, so it runs across
             // the whole file, not per statement.
-            Unit::Markov(stmt) => {
+            CheckUnit::Markov(stmt) => {
                 if check_markov_switching_chain_and_sums(stmt, &mut chains, out) {
                     return;
                 }
             }
-            Unit::Identification(block) => {
+            CheckUnit::Identification(block) => {
                 if check_svar_identification_block(block, second_identification, out) {
                     return;
                 }
                 second_identification = true;
             }
-            Unit::MutuallyExclusive(stmt) => {
+            CheckUnit::MutuallyExclusive(stmt) => {
                 if check_ms_mutual_exclusion(stmt, out) {
                     return;
                 }
             }
-            Unit::Prior(stmt) => {
+            CheckUnit::Prior(stmt) => {
                 if check_prior_body(model, stmt, out) {
                     return;
                 }
@@ -257,8 +374,8 @@ fn any_float(text: &str) -> Option<f64> {
 
 /// The estimation / MS-SBVAR `data` statement. Their `checkPass` tests `nobs`
 /// before the file / series pair. Returns `true` when it refused.
-fn check_data(stmt: &DataStatement, out: &mut Vec<Diagnostic>) -> bool {
-    if !data_options_spellable(stmt) {
+fn check_data(src: &str, stmt: &DataStatement, out: &mut Vec<Diagnostic>) -> bool {
+    if !data_options_spellable(src, stmt) {
         return false;
     }
     let nobs = option_of(&stmt.options, "nobs");
@@ -299,30 +416,10 @@ fn check_data(stmt: &DataStatement, out: &mut Vec<Diagnostic>) -> bool {
 }
 
 /// Whether every option of this `data` statement is written in a shape the
-/// grammar produces. `data();` is a syntax error, a date option whose value is
-/// not a date is one, and an option name the grammar does not know is one.
-fn data_options_spellable(stmt: &DataStatement) -> bool {
-    !stmt.options.is_empty()
-        && stmt.options.iter().all(|opt| {
-            if opt.name.eq_ignore_ascii_case("nobs") {
-                return opt.has_value && unsigned_int(&opt.value_text).is_some();
-            }
-            if opt.name.eq_ignore_ascii_case("first_obs")
-                || opt.name.eq_ignore_ascii_case("last_obs")
-            {
-                return opt.has_value && opt.value_kind == FamilyValueKind::Date;
-            }
-            if opt.name.eq_ignore_ascii_case("file")
-                || opt.name.eq_ignore_ascii_case("series")
-                || opt.name.eq_ignore_ascii_case("xls_sheet")
-            {
-                return opt.has_value;
-            }
-            if opt.name.eq_ignore_ascii_case("xls_range") {
-                return opt.has_value && opt.value_kind == FamilyValueKind::Range;
-            }
-            false
-        })
+/// grammar produces. The tables live in [`crate::shape_gate`], so this asks the
+/// sweep's own question rather than keeping a second copy of them.
+fn data_options_spellable(src: &str, stmt: &DataStatement) -> bool {
+    crate::shape_gate::command_options_spellable(src, "data", &stmt.options)
 }
 
 // ---------------------------------------------------------------------------
@@ -366,19 +463,33 @@ fn check_conditional_forecast(stmt: &MsStatement, out: &mut Vec<Diagnostic>) -> 
 
 /// Their row order is the name's type first (their `check_symbol_is_endogenous`,
 /// which **E058** / **E317** own), then declared-twice, then the periods /
-/// values counts. Returns `true` when it refused.
+/// values counts. A row whose `periods` / `values` list is empty is a parse-stage
+/// syntax error, and 7.1's parser stops at it before any count is read — so the
+/// block's own shape refuses are ordered against the rows here. Returns `true`
+/// when it refused.
 fn check_conditional_forecast_paths(
     model: &Model,
     block: &crate::model::ConditionalForecastPaths,
     out: &mut Vec<Diagnostic>,
 ) -> bool {
-    // A row whose name they refuse stops the block before any count is read.
+    // A row whose name their type check refuses stops the block before any count
+    // is read, and so does a row the grammar cannot spell.
     if cfp_first_bad_row(model, &block.rows).is_some() {
         return false;
     }
     let endogenous = endogenous_names(model);
     let mut seen: HashSet<Name> = HashSet::new();
     for row in &block.rows {
+        // A malformed row is the parser's own refuse; it comes first, because a
+        // syntax error stops the run before the sentence on a later row.
+        if let Some(refuse) = block
+            .shape_refuses
+            .iter()
+            .find(|refuse| refuse.span.start >= row.span.start && refuse.span.start < row.span.end)
+        {
+            push(out, refuse.span, "E001", shape_refuse_message(refuse));
+            return true;
+        }
         if !endogenous.contains(&row.name) {
             continue;
         }
@@ -406,6 +517,12 @@ fn check_conditional_forecast_paths(
             );
             return true;
         }
+    }
+    // A refuse that sits outside every row's span — the empty body, or an
+    // `exogenize` / `endogenize` row the walker skipped — is reported after them.
+    if let Some(refuse) = block.shape_refuses.first() {
+        push(out, refuse.span, "E001", shape_refuse_message(refuse));
+        return true;
     }
     false
 }
@@ -491,7 +608,7 @@ fn check_markov_switching_parse(
     let Some(restrictions) = option(stmt, "restrictions") else {
         return false;
     };
-    if !restrictions_spellable(restrictions) {
+    if !restrictions_spellable(&model.source, restrictions) {
         return false;
     }
     let rows = matrix_rows(&restrictions.value_text).unwrap_or_default();
@@ -600,22 +717,13 @@ fn check_markov_switching_chain_and_sums(
 /// it: a bracketed list of bracketed number rows. Anything else is a syntax
 /// error or a row their `stoi` / `stod` catch, which prints a sentence of its
 /// own that no 0.5.4 row claims.
-fn restrictions_spellable(restrictions: &FamilyOption) -> bool {
-    if restrictions.value_kind != FamilyValueKind::Matrix {
-        return false;
-    }
-    let Some(rows) = matrix_rows(&restrictions.value_text) else {
-        return false;
-    };
-    rows.iter().all(|row| {
-        row.iter().enumerate().all(|(index, value)| {
-            if index < 2 {
-                plain_int(value).is_some()
-            } else {
-                any_float(value).is_some()
-            }
-        })
-    })
+fn restrictions_spellable(src: &str, restrictions: &FamilyOption) -> bool {
+    crate::shape_gate::options_spellable(
+        src,
+        "markov_switching",
+        std::slice::from_ref(restrictions),
+        crate::shape_gate::command_options("markov_switching").unwrap_or(&[]),
+    )
 }
 
 /// The `parameters=[…]` option list. Returns `true` when it fired.
@@ -802,6 +910,10 @@ fn identification_names(model: &Model, block: &SvarIdentification) -> Vec<(Span,
 /// lag is only combined — and its repeat test run — after that element's rows.
 /// A name they do not declare has the shipped **E058**, so their run stops there
 /// and this walk stops too.
+///
+/// A row the grammar has no production for is a syntax error, so it stops the
+/// run before any sentence on that element: a leading `equation` row never
+/// reaches `equation numbers must be greater than or equal to 1.`.
 fn identification_body_refusal(
     model: &Model,
     block: &SvarIdentification,
@@ -809,15 +921,25 @@ fn identification_body_refusal(
     let declared = declared_names(model);
     let mut lags: Vec<i32> = Vec::new();
     for element in &block.elements {
+        let element_span = match element {
+            SvarIdentificationElement::ExclusionLag { span, .. } => *span,
+            SvarIdentificationElement::Restriction { span, .. } => *span,
+            SvarIdentificationElement::ExclusionConstants { span }
+            | SvarIdentificationElement::UpperCholesky { span }
+            | SvarIdentificationElement::LowerCholesky { span } => *span,
+        };
+        if let Some(refuse) = block.shape_refuses.iter().find(|refuse| {
+            refuse.span.start >= element_span.start && refuse.span.start < element_span.end
+        }) {
+            return Some((refuse.span, "E001", shape_refuse_message(refuse)));
+        }
         match element {
             SvarIdentificationElement::ExclusionLag { lag, equations, .. } => {
                 if let Some(refusal) = equation_rows_refusal(model, equations, &declared) {
                     return Some(refusal);
                 }
                 // The grammar needs at least one `equation` row before the lag is
-                // combined, so `exclusion lag 0;` with no row under it is a syntax
-                // error and never reaches their repeat test. Such an element also
-                // carries no row to point a range at.
+                // combined.
                 if equations.is_empty() {
                     continue;
                 }
@@ -838,6 +960,10 @@ fn identification_body_refusal(
             }
             _ => {}
         }
+    }
+    // A refuse that belongs to no element — an empty body — is reported after them.
+    if let Some(refuse) = block.shape_refuses.first() {
+        return Some((refuse.span, "E001", shape_refuse_message(refuse)));
     }
     None
 }
@@ -1071,13 +1197,13 @@ fn at_ident(text: &str, name: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 /// One refusal per statement, in their order. Returns `true` when it refused.
-fn check_svar(stmt: &MsStatement, out: &mut Vec<Diagnostic>) -> bool {
+fn check_svar(src: &str, stmt: &MsStatement, out: &mut Vec<Diagnostic>) -> bool {
     if stmt.options.is_empty() {
         return false;
     }
     // `constants` is a token but not one of `svar`'s options, so every spelling
     // of it is a syntax error that never reaches their own `constants` sentence.
-    if !svar_options_spellable(stmt) {
+    if !svar_options_spellable(src, stmt) {
         return false;
     }
     let coefficients = has(stmt, "coefficients");
@@ -1126,7 +1252,16 @@ fn check_svar(stmt: &MsStatement, out: &mut Vec<Diagnostic>) -> bool {
     let Some(equations) = option(stmt, "equations") else {
         return false;
     };
-    let values = bracketed_entries(&equations.value_text).unwrap_or_default();
+    // `equations=0` (the bare `vec_int_number` form) and `equations=[0, 1]` (the
+    // bracketed `vec_int` form) reach the same sentence: their `checkPass` loops
+    // over whichever the grammar produced.
+    let values = match bracketed_entries(&equations.value_text) {
+        Some(entries) => entries,
+        None if !equations.value_text.trim().is_empty() => {
+            vec![equations.value_text.trim().to_string()]
+        }
+        None => return false,
+    };
     // `equations=[]` is a syntax error in 7.1, and an empty list holds no value
     // their `<= 0` test could name.
     if values.is_empty() {
@@ -1152,21 +1287,8 @@ fn check_svar(stmt: &MsStatement, out: &mut Vec<Diagnostic>) -> bool {
 /// The four option names and the shapes `svar` accepts. `constants` is a token
 /// the production does not take, a signed or fractional `chain` and a non-vector
 /// `equations` are syntax errors, so no sentence here may fire on them.
-fn svar_options_spellable(stmt: &MsStatement) -> bool {
-    stmt.options.iter().all(|opt| {
-        if opt.name.eq_ignore_ascii_case("coefficients")
-            || opt.name.eq_ignore_ascii_case("variances")
-        {
-            return !opt.has_value;
-        }
-        if opt.name.eq_ignore_ascii_case("chain") {
-            return opt.has_value && unsigned_int(&opt.value_text).is_some();
-        }
-        if opt.name.eq_ignore_ascii_case("equations") {
-            return opt.has_value && opt.value_kind == FamilyValueKind::Vector;
-        }
-        false
-    })
+fn svar_options_spellable(src: &str, stmt: &MsStatement) -> bool {
+    crate::shape_gate::command_options_spellable(src, "svar", &stmt.options)
 }
 
 // ---------------------------------------------------------------------------
@@ -1220,12 +1342,6 @@ fn check_ms_mutual_exclusion(stmt: &MsStatement, out: &mut Vec<Diagnostic>) -> b
 // ---------------------------------------------------------------------------
 // the dotted `prior` statement
 // ---------------------------------------------------------------------------
-
-/// The prior option names the grammar carries.
-const PRIOR_OPTIONS: &[&str] = &[
-    "shift", "mean", "median", "stdev", "truncate", "variance", "mode", "interval", "shape",
-    "domain",
-];
 
 /// One `std(…)` / `corr(…)` prior head name, with what their parse makes of it.
 ///
@@ -1311,7 +1427,9 @@ pub(crate) fn prior_std_corr_head_names(
 }
 
 /// The prior refusals 7.1 prints while parsing: the plain and bracketed heads'
-/// parameter test (**E378**). Returns `true` when it refused.
+/// parameter test (**E378**) and the top-level `y = 3;` assignment, which their
+/// `ParsingDriver::init_param` sends through the same `check_symbol_is_parameter`
+/// the head does. Returns `true` when it refused.
 ///
 /// The `std` / `corr` heads and the subsample forms are read and refused while
 /// parsing too; their sentences belong to **E058** / **E059** (or to no 0.5.4 row
@@ -1338,6 +1456,28 @@ fn check_prior_head(model: &Model, stmt: &DottedStatement, out: &mut Vec<Diagnos
     false
 }
 
+/// The same sentence on the top-level assignment. 7.1's `init_param` runs
+/// `check_symbol_is_parameter` while parsing the statement, so `y = 3;` with a
+/// declared `y` is refused exactly as `y.prior(…)` is. An undeclared head never
+/// reaches it — the pin's lexer sends that line to native MATLAB. Returns `true`
+/// when it refused.
+fn check_top_assignment(
+    model: &Model,
+    assignment: &crate::model::Assignment,
+    out: &mut Vec<Diagnostic>,
+) -> bool {
+    if parameter_names(model).contains(&assignment.name) {
+        return false;
+    }
+    push(
+        out,
+        assignment.span,
+        "E378",
+        format!("{} is not a parameter", model.name(assignment.name)),
+    );
+    true
+}
+
 /// The prior body sentences of one statement, in 7.1's order: the joint head's
 /// name count (**E377**) opens their check pass, the body's shape sentences
 /// follow, and the `corr(A,B)` mixed-type rule (**E379**) is last — their
@@ -1353,7 +1493,7 @@ fn check_prior_body(model: &Model, stmt: &DottedStatement, out: &mut Vec<Diagnos
         return false;
     }
     let joint = matches!(stmt.head, DottedHead::Vec { .. });
-    if !prior_body_spellable(&stmt.options, joint) {
+    if !prior_body_spellable(&model.source, &stmt.options, joint) {
         return false;
     }
     if let DottedHead::Vec { names } = &stmt.head {
@@ -1491,33 +1631,8 @@ fn prior_shape_refusal(stmt: &DottedStatement, joint: bool, out: &mut Vec<Diagno
 /// the grammar gives it. An unknown option name, a flag with no value, a
 /// bracketed value outside the vector options and `mean=[…]` on the single form
 /// are all syntax errors.
-fn prior_body_spellable(options: &[FamilyOption], joint: bool) -> bool {
-    options.iter().all(|opt| {
-        if !PRIOR_OPTIONS
-            .iter()
-            .any(|name| opt.name.eq_ignore_ascii_case(name))
-        {
-            return false;
-        }
-        if !opt.has_value {
-            return false;
-        }
-        let vector = opt.name.eq_ignore_ascii_case("domain")
-            || opt.name.eq_ignore_ascii_case("interval")
-            || opt.name.eq_ignore_ascii_case("truncate");
-        if vector {
-            return opt.value_kind == FamilyValueKind::Vector;
-        }
-        if joint {
-            if opt.name.eq_ignore_ascii_case("mean") {
-                return opt.value_kind == FamilyValueKind::Vector;
-            }
-            if opt.name.eq_ignore_ascii_case("variance") {
-                return opt.value_kind == FamilyValueKind::Matrix;
-            }
-        }
-        opt.value_kind == FamilyValueKind::Scalar
-    })
+fn prior_body_spellable(src: &str, options: &[FamilyOption], joint: bool) -> bool {
+    crate::shape_gate::prior_options_spellable(src, options, joint)
 }
 
 /// Whether the statement's own text carries a `prior(…)` body rather than the
