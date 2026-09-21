@@ -6104,6 +6104,16 @@
       "notes": "unknown symbol in the load_params file"
     },
     {
+      "id": "e380_load_params_epilogue",
+      "codes": [],
+      "kind": "harness",
+      "package": "d_writer",
+      "fixture": "tests/fixtures/d_writer/e380_load_params_epilogue.mod",
+      "source": "honesty.rs::write_stage_refuses_load_params_epilogue_name",
+      "cluster": "d_writer/e380_load_params_epilogue.mod",
+      "notes": "writer-stage refuse: quiet at check and transform, refused on the plain write run; slice 02 flips this row to fire with E380"
+    },
+    {
       "id": "e058_fis_undeclared",
       "codes": [
         "E058"

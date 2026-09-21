@@ -19,7 +19,8 @@ use crate::workspace::{split_includepath_argument, Workspace};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Catching step passed to the official preprocessor (`json=`).
+/// Catching step passed to the official preprocessor: a `json=` stage, or the
+/// plain write run that reaches the MATLAB writer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[doc(hidden)]
 pub enum JsonStage {
@@ -27,13 +28,17 @@ pub enum JsonStage {
     Check,
     /// `json=transform`. Written-clash honesty (05 D-clash).
     Transform,
+    /// Plain write run: no `json=`, no `onlyjson` (probe §The stage rule,
+    /// step 3). Writer-stage honesty (0.5.5).
+    Write,
 }
 
 impl JsonStage {
-    fn as_arg(self) -> &'static str {
+    fn as_arg(self) -> Option<&'static str> {
         match self {
-            Self::Check => "json=check",
-            Self::Transform => "json=transform",
+            Self::Check => Some("json=check"),
+            Self::Transform => Some("json=transform"),
+            Self::Write => None,
         }
     }
 }
@@ -130,17 +135,27 @@ pub fn run_preprocessor(
         .as_ref()
         .is_some_and(|dir| requires_source_dir_file(&text) && dir.is_dir());
 
-    let (tmp_file, run_cwd, generated_root) = if use_source_dir {
+    let (tmp_file, run_cwd, generated_root, package_root) = if use_source_dir {
         let dir = source_dir_abs.as_ref().expect("checked");
         let tmp_file = unique_mod_in(dir);
         let stem = tmp_file
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "model".into());
-        let generated_root = dir.join(stem);
-        (tmp_file, dir.clone(), Some(generated_root))
+        let generated_root = dir.join(&stem);
+        // Their `packageDir` (Utils.cc:38-46) splits the basename on `.` and
+        // skips empty segments, so the package dir is `+dynare_lsp_<token>/`
+        // with no dot after the `+`. Stems hold no other dot today
+        // (`unique_mod_in`); an internal dot would nest, not flatten.
+        let package_root = dir.join(format!("+{}", stem.trim_start_matches('.')));
+        (
+            tmp_file,
+            dir.clone(),
+            Some(generated_root),
+            Some(package_root),
+        )
     } else {
-        (tmp_dir.join("model.mod"), tmp_dir.clone(), None)
+        (tmp_dir.join("model.mod"), tmp_dir.clone(), None, None)
     };
 
     let write_err = std::fs::File::create(&tmp_file).and_then(|mut f| f.write_all(text.as_bytes()));
@@ -149,6 +164,7 @@ pub fn run_preprocessor(
             &tmp_dir,
             Some(&tmp_file),
             generated_root.as_deref(),
+            package_root.as_deref(),
             source_dir_abs.as_deref(),
         );
         return spawn_fail_result(preprocessor_path, &text, &err.to_string());
@@ -156,10 +172,11 @@ pub fn run_preprocessor(
 
     let include_dirs = include_search_directories(&text, source_dir_abs.as_deref());
     let mut cmd = Command::new(preprocessor_path);
-    cmd.arg(&tmp_file)
-        .arg(stage.as_arg())
-        .arg("onlyjson")
-        .arg("nopreprocessoroutput");
+    cmd.arg(&tmp_file);
+    if let Some(json) = stage.as_arg() {
+        cmd.arg(json).arg("onlyjson");
+    }
+    cmd.arg("nopreprocessoroutput");
     for dir in &include_dirs {
         cmd.arg(format!("-I{}", dir.display()));
     }
@@ -185,6 +202,7 @@ pub fn run_preprocessor(
                 &tmp_dir,
                 Some(&tmp_file),
                 generated_root.as_deref(),
+                package_root.as_deref(),
                 source_dir_abs.as_deref(),
             );
             return spawn_fail_result(preprocessor_path, &text, &err.to_string());
@@ -242,6 +260,7 @@ pub fn run_preprocessor(
         &tmp_dir,
         Some(&tmp_file),
         generated_root.as_deref(),
+        package_root.as_deref(),
         source_dir_abs.as_deref(),
     );
     outcome
@@ -1251,10 +1270,14 @@ fn cleanup_run(
     tmp_dir: &Path,
     tmp_file: Option<&Path>,
     generated_root: Option<&Path>,
+    package_root: Option<&Path>,
     source_dir_abs: Option<&Path>,
 ) {
     if let Some(root) = generated_root {
         remove_with_retries(root);
+    }
+    if let Some(pkg) = package_root {
+        remove_with_retries(pkg);
     }
     if let (Some(tmp_file), Some(source_dir)) = (tmp_file, source_dir_abs) {
         if let Some(parent) = tmp_file.parent() {

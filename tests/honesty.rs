@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -4066,6 +4067,73 @@ fn occbin_square_is_quiet() {
             "square.mod must not emit OccBin Error, got {errors:?}"
         );
     }
+}
+
+/// The writer catching step (probe §The stage rule): a file quiet at check
+/// and transform that the plain write run refuses. The writer ERROR line has
+/// no `file: line N:` prefix, so the spawn parser cannot map it; assert on
+/// the raw output. The run must leave no `<stem>/` or `+<stem>/` beside the
+/// fixture.
+#[test]
+fn write_stage_refuses_load_params_epilogue_name() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    let path = fixture("d_writer/e380_load_params_epilogue.mod");
+    let text = read_path(&path);
+    let dir = path.parent().expect("fixture parent").to_path_buf();
+    let before: HashSet<PathBuf> = fixture_dir_snapshot(&dir);
+
+    let checked = spawn(&text, &path, &pp, JsonStage::Check);
+    assert!(
+        checked.success,
+        "d_writer/e380_load_params_epilogue.mod should be accepted at check: stdout {:?} stderr {:?}",
+        checked.raw_stdout, checked.raw_stderr
+    );
+    let transformed = spawn(&text, &path, &pp, JsonStage::Transform);
+    assert!(
+        transformed.success,
+        "d_writer/e380_load_params_epilogue.mod should be accepted at transform: stdout {:?} stderr {:?}",
+        transformed.raw_stdout, transformed.raw_stderr
+    );
+
+    let written = spawn(&text, &path, &pp, JsonStage::Write);
+    assert!(
+        !written.success,
+        "d_writer/e380_load_params_epilogue.mod should be refused on the plain write run: stdout {:?} stderr {:?} diags {:?}",
+        written.raw_stdout,
+        written.raw_stderr,
+        written.diagnostics
+    );
+    assert!(
+        they_mention(
+            &written,
+            "Unsupported variable type for A in load_params_and_steady_state"
+        ),
+        "write run should print their sentence: stdout {:?} stderr {:?} diags {:?}",
+        written.raw_stdout,
+        written.raw_stderr,
+        written.diagnostics
+    );
+
+    let after: HashSet<PathBuf> = fixture_dir_snapshot(&dir);
+    let leftovers: Vec<String> = after
+        .difference(&before)
+        .map(|p| p.display().to_string())
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "write run left entries beside the fixture: {leftovers:?}"
+    );
+}
+
+/// Entries of a fixture directory, panicking like `read_path` when unreadable.
+fn fixture_dir_snapshot(dir: &Path) -> HashSet<PathBuf> {
+    std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("fixture dir unreadable: {e}"))
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect()
 }
 
 #[test]
