@@ -224,6 +224,6 @@ fn e381_is_quiet_for_a_plain_operand() {
 }
 
 #[test]
-fn registry_known_codes_grew_to_294() {
-    assert_eq!(known_codes().len(), 294);
+fn registry_known_codes_grew_to_297() {
+    assert_eq!(known_codes().len(), 297);
 }

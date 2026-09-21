@@ -2,9 +2,12 @@
 //!
 //! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 70
 //! codes shipped through 0.5.0, then kind `shared` / `skipped` / `added`.
-//! 294 keys = 238 shared + 27 added + 29 skipped (S016 shipped as E335-E337). Catalog **0.5.1** D-clash and
+//! 297 keys = 238 shared + 27 added + 32 skipped (S016 shipped as E335-E337). Catalog **0.5.1** D-clash and
 //! D-check Errors are shared; the **0.5.2** D-walk, D-block, D-open, and D-extfun
-//! rows add shared keys and drop the `S###` keys they replace.
+//! rows add shared keys and drop the `S###` keys they replace. An
+//! `S###` key is a placeholder for a row a named version will later drop and
+//! replace with an emitted `E` / `W` code; a row no version owns keeps its real
+//! letter from the start (`E186`-`E191` / `W186`-`W187`).
 //! `I050` and `W042` use the recorded surface rewrites in
 //! `dev_logs/0.1/0.1.0/22-c-explain.md` (do not advertise Compute Steady State).
 
@@ -40,7 +43,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 294 keys: 238 shared + 27 added + 29 skipped.
+// 297 keys: 238 shared + 27 added + 32 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -1568,9 +1571,19 @@ Move the call out of the ``steady_state(…)`` operator.",
         body: "Dynare refuses: `EXPECTATION(0)(X) can only be used when X is a single variable`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
+    ("E191", ExplainEntry {
+        title: "Excluded name still assigned in initval or endval",
+        body: "Dynare refuses: `Variable … was excluded but found in an initval or endval statement`. Catching step: writer. Owner: skip-writer E. Their probe crashes with no message at this pin. This code is never emitted.",
+        kind: ExplainKind::Skipped,
+    }),
     ("W186", ExplainEntry {
         title: "Possible auxiliary name in a symbol list",
         body: "Dynare warns: `WARNING: symbol_list variable … possible auxiliary variable name`. Catching step: check. Owner: skip-rewrite W. This code is never emitted.",
+        kind: ExplainKind::Skipped,
+    }),
+    ("W187", ExplainEntry {
+        title: "Generated .m nests more than 32 parentheses",
+        body: "Dynare warns: `A .m file created by Dynare will have more than 32 nested parenthesis…`. Catching step: writer. Owner: skip-writer W. The trigger is the nesting depth of their generated text, not of the file. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S002", ExplainEntry {
@@ -1678,14 +1691,19 @@ Move the call out of the ``steady_state(…)`` operator.",
         body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.9 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S055", ExplainEntry {
-        title: "Generated .m nests more than 32 parentheses",
-        body: "Dynare warns: `A .m file created by Dynare will have more than 32 nested parenthesis…`. Catching step: writer. Owner: skip-writer W. The trigger is the nesting depth of their generated text, not of the file. This code is never emitted.",
+    ("S061", ExplainEntry {
+        title: "matched_irfs / matched_moments parse",
+        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.7 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S056", ExplainEntry {
-        title: "Excluded name still assigned in initval or endval",
-        body: "Dynare refuses: `Variable … was excluded but found in an initval or endval statement`. Catching step: writer. Owner: skip-writer E. Their probe crashes with no message at this pin. This code is never emitted.",
+    ("S062", ExplainEntry {
+        title: "deterministic_trends body names a non-variable symbol",
+        body: "Dynare warns: `WARNING: Non-variable symbol used in deterministic_trends: …`. Catching step: check. Owner: skip 0.8 W. This code is never emitted.",
+        kind: ExplainKind::Skipped,
+    }),
+    ("S063", ExplainEntry {
+        title: "PAC / heterogeneous operator inside epilogue",
+        body: "Dynare refuses: `… forbidden in epilogue` / `… because it is heterogeneous`. Catching step: check. Owner: skip 0.8 E (var_expectation / pac_expectation / pac_target_nonstationary) and skip 0.9 E (heterogeneous). This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
 ];

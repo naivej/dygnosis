@@ -346,6 +346,6 @@ fn refused_tag_list_does_not_remove_an_equation() {
 }
 
 #[test]
-fn registry_known_codes_grew_to_294() {
-    assert_eq!(dygnosis::explain::known_codes().len(), 294);
+fn registry_known_codes_grew_to_297() {
+    assert_eq!(dygnosis::explain::known_codes().len(), 297);
 }
