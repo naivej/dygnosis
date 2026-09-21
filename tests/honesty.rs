@@ -4109,7 +4109,7 @@ fn occbin_square_is_quiet() {
 }
 
 /// The writer catching step (probe §The stage rule): a file quiet at check
-/// and transform that the plain write run refuses. The writer ERROR line has
+/// and transform that the write run refuses. The writer ERROR line has
 /// no `file: line N:` prefix, so the spawn parser cannot map it; assert on
 /// the raw output. The run must leave no `<stem>/` or `+<stem>/` beside the
 /// fixture.
@@ -4141,7 +4141,7 @@ fn write_stage_refuses_load_params_epilogue_name() {
     let written = spawn(&text, &path, &pp, JsonStage::Write);
     assert!(
         !written.success,
-        "d_writer/e380_load_params_epilogue.mod should be refused on the plain write run: stdout {:?} stderr {:?} diags {:?}",
+        "d_writer/e380_load_params_epilogue.mod should be refused on the write run: stdout {:?} stderr {:?} diags {:?}",
         written.raw_stdout,
         written.raw_stderr,
         written.diagnostics

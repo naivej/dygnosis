@@ -11,7 +11,7 @@ Diagnostics implemented in this release:
 
 Other changes:
 - **`W204` narrows**: the unsupported kinds above now error `E380` instead, and `W204` keeps the genuinely unknown name. All three kinds are positional, as Dynare's own reading is — a name declared only *after* the `load_params_and_steady_state` statement is still unknown to the loader, warns `Unknown symbol`, and stays `W204`.
-- **Writer-stage honesty**: the test harness can now spawn the plain write run Dynare offers (`nopreprocessoroutput`, no `json=` and no `onlyjson`), the last stage before MATLAB, and cleans the `+<name>/` package directory such a run leaves beside the `.mod`.
+- **Writer-stage honesty**: the test harness can now spawn a run that reaches the MATLAB writer (bare `nopreprocessoroutput`, without `onlyjson`, which is what skips the writer), and cleans the `+<name>/` package directory such a run leaves beside the `.mod`.
 - The two writer-stage messages that no `.mod` shape can be matched against — the more-than-32-nested-parentheses warning (whose trigger is Dynare's generated text) and the excluded-name-still-in-`initval` refusal (which aborts Dynare with no message) — are documented as deliberately silent (`S055`, `S056`).
 
 ## v0.5.4

@@ -8,12 +8,10 @@
 
 Limitations by design
 
-- **Checks on the rewritten model are omitted.** Some refusals fire only after Dynare has rewritten the equations — inlined `#` locals, added auxiliary variables, clipped leads and lags, substituted constants. The model it tests no longer matches the file you edit, so those checks have no honest place to point.
-- **Refusals decided by how you run Dynare are omitted.** `nostrict`, `warn_uninit`, `exclude_eqs=` / `include_eqs=` and the like belong to a command-line option; `mexext` and a missing compiler belong to the machine. Neither is a property of the `.mod` file.
-- **Numerical results are left to MATLAB.** Steady state, Blanchard–Kahn conditions, residuals, derivatives, identification, and “will this solve” are computed there, not here. Use the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit) for seamless integration with MATLAB.
-- **Some command families are still read as opaque text,** so their refusals are not reported yet: method of moments, VAR / TCM / PAC, heterogeneity, and the shock-path surfaces.
-
-`dygnosis explain --list` marks every code as shared with Dynare, added by dygnosis, or skipped, so what is out stays inspectable.
+- **Checks on a rewritten model are not reported.** Dynare rearranges your equations before some of its checks, adding extra variables and turning leads and lags around. When a check complains about that version, there is no matching place in the file you edit, so dygnosis stays quiet.
+- **A few Dynare messages have no match here.** One is about the MATLAB code Dynare writes out, not about your model. In others Dynare crashes instead of printing anything. Either way there is nothing to show you.
+- **Checks that depend on how you run Dynare are skipped.** Some come from command-line options, others need a compiler on your machine. They say nothing about the `.mod` file.
+- **Numbers are left to MATLAB.** Steady state, stability, and whether the model solves are computed there, not here. Use the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit) for seamless integration with MATLAB.
 
 ## How to use
 

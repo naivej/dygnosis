@@ -19,8 +19,8 @@ use crate::workspace::{split_includepath_argument, Workspace};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Catching step passed to the official preprocessor: a `json=` stage, or the
-/// plain write run that reaches the MATLAB writer.
+/// Catching step passed to the official preprocessor: a `json=` stage, or a run
+/// without `onlyjson` that reaches the MATLAB writer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[doc(hidden)]
 pub enum JsonStage {
@@ -28,8 +28,9 @@ pub enum JsonStage {
     Check,
     /// `json=transform`. Written-clash honesty (05 D-clash).
     Transform,
-    /// Plain write run: no `json=`, no `onlyjson` (probe §The stage rule,
-    /// step 3). Writer-stage honesty (0.5.5).
+    /// Writer-stage run: no `json=`, no `onlyjson` — the invocation that
+    /// reaches `writeMOutput` (probe §The stage rule, step 3). Writer-stage
+    /// honesty (0.5.5).
     Write,
 }
 
