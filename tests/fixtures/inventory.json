@@ -6105,13 +6105,88 @@
     },
     {
       "id": "e380_load_params_epilogue",
-      "codes": [],
-      "kind": "harness",
+      "codes": [
+        "E380"
+      ],
+      "kind": "fire",
       "package": "d_writer",
       "fixture": "tests/fixtures/d_writer/e380_load_params_epilogue.mod",
-      "source": "honesty.rs::write_stage_refuses_load_params_epilogue_name",
+      "source": "d_writer.rs",
       "cluster": "d_writer/e380_load_params_epilogue.mod",
-      "notes": "writer-stage refuse: quiet at check and transform, refused on the plain write run; slice 02 flips this row to fire with E380"
+      "notes": "writer-stage refuse: an epilogue helper named in the load_params file; quiet at check and transform"
+    },
+    {
+      "id": "e381_steady_state_extfun",
+      "codes": [
+        "E381"
+      ],
+      "kind": "fire",
+      "package": "d_writer",
+      "fixture": "tests/fixtures/d_writer/e381_steady_state_extfun.mod",
+      "source": "d_writer.rs",
+      "cluster": "d_writer/e381_steady_state_extfun.mod",
+      "notes": "writer-stage refuse: steady_state(ef(c)) over an external_function; quiet at check and transform"
+    },
+    {
+      "id": "w205_shock_groups_label_reused",
+      "codes": [
+        "W205"
+      ],
+      "kind": "fire",
+      "package": "d_writer",
+      "fixture": "tests/fixtures/d_writer/w205_shock_groups_label_reused.mod",
+      "source": "d_writer.rs",
+      "cluster": "d_writer/w205_shock_groups_label_reused.mod",
+      "notes": "writer-stage warning: one shock_groups block reuses the label g1"
+    },
+    {
+      "id": "e380_load_params_used_trend",
+      "codes": [
+        "E380"
+      ],
+      "kind": "fire",
+      "package": "d_writer",
+      "fixture": "tests/fixtures/d_writer/e380_load_params_used_trend.mod",
+      "source": "d_writer.rs",
+      "cluster": "d_writer/e380_load_params_used_trend.mod",
+      "notes": "writer-stage refuse: a trend variable the model uses (balanced-growth-compatible, so nothing shadows the gate)"
+    },
+    {
+      "id": "quiet_load_params_after_statement",
+      "codes": [
+        "E380"
+      ],
+      "kind": "quiet",
+      "package": "d_writer",
+      "fixture": "tests/fixtures/d_writer/e380_load_params_after_unknown.mod",
+      "source": "d_writer.rs",
+      "cluster": "d_writer/e380_load_params_after_unknown.mod",
+      "notes": "an epilogue helper and an external_function name declared AFTER the load statement are unknown to the loader: 7.1 warns Unknown symbol (W204), never E380"
+    },
+    {
+      "id": "quiet_shock_groups_d_writer",
+      "codes": [
+        "W205"
+      ],
+      "kind": "quiet",
+      "package": "d_writer",
+      "fixture": "tests/fixtures/d_writer/quiet_shock_groups.mod",
+      "source": "d_writer.rs",
+      "cluster": "d_writer/quiet_shock_groups.mod",
+      "notes": "two blocks with distinct labels are quiet (the reuse comparison is within one block)"
+    },
+    {
+      "id": "quiet_load_params",
+      "codes": [
+        "E380",
+        "W204"
+      ],
+      "kind": "quiet",
+      "package": "d_writer",
+      "fixture": "tests/fixtures/d_writer/quiet_load_params.mod",
+      "source": "d_writer.rs",
+      "cluster": "d_writer/quiet_load_params.mod",
+      "notes": "the load file names one allowed slot of each kind (parameter, endogenous, varexo)"
     },
     {
       "id": "e058_fis_undeclared",

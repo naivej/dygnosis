@@ -356,10 +356,77 @@ pub fn check_e060_family_on_model(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_e063(model));
     out.extend(check_e064(model));
     out.extend(check_e065(model));
+    out.extend(check_e381(model));
     for (span, code, message) in &model.macro_type_errors {
         out.push(Diagnostic::new(*span, Severity::Error, *code, message.clone()));
     }
     out
+}
+
+/// E381: an `external_function` call inside a `steady_state(…)` operator.
+///
+/// The external-function analog of **E065**: the same operand set, the same
+/// per-equation span. Their needle prints only in the MATLAB-output path
+/// (`ExprNode.cc:8095`, `ExternalFunctionNode::writeOutput`); a `json=compute`
+/// run aborts with no message, so the honesty row uses the write stage.
+pub fn check_e381(model: &Model) -> Vec<Diagnostic> {
+    if model.external_function_names.is_empty() {
+        return Vec::new();
+    }
+    let external: HashSet<Name> = model.external_function_names.iter().copied().collect();
+    let mut diagnostics = Vec::new();
+    for eq in &model.equations {
+        let mut operands = Vec::new();
+        if let Some(id) = eq.lhs_expr {
+            collect_steady_state_operands(&model.exprs, id, &mut operands);
+        }
+        if let Some(id) = eq.rhs_expr {
+            collect_steady_state_operands(&model.exprs, id, &mut operands);
+        }
+        let mut hit = false;
+        for arg in operands {
+            walk_call_callees(model, arg, &mut |callee| {
+                if external.contains(&callee) {
+                    hit = true;
+                }
+            });
+            if hit {
+                break;
+            }
+        }
+        if hit {
+            diagnostics.push(Diagnostic::new(
+                eq.span,
+                Severity::Error,
+                "E381",
+                "The expression inside a steady_state operator cannot contain external functions",
+            ));
+        }
+    }
+    diagnostics
+}
+
+/// Visits every `Call` node's callee identifier in one expression tree.
+/// `walk_idents` skips callees, so the external-function needle needs this walk.
+fn walk_call_callees(model: &Model, id: ExprId, f: &mut impl FnMut(Name)) {
+    let expr = model.exprs.get(id);
+    match &expr.kind {
+        ExprKind::Call { callee, args } => {
+            f(*callee);
+            for arg in args {
+                walk_call_callees(model, *arg, f);
+            }
+        }
+        ExprKind::Unary { arg, .. } => walk_call_callees(model, *arg, f),
+        ExprKind::Binary { lhs, rhs, .. } => {
+            walk_call_callees(model, *lhs, f);
+            walk_call_callees(model, *rhs, f);
+        }
+        ExprKind::SteadyState { arg } | ExprKind::Expectation { arg, .. } => {
+            walk_call_callees(model, *arg, f);
+        }
+        ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String | ExprKind::Error => {}
+    }
 }
 
 fn label(kind: &str) -> String {
@@ -736,7 +803,7 @@ fn known_names_before(model: &Model, before_line: usize) -> HashSet<String> {
     known
 }
 
-fn collect_steady_state_operands(
+pub(crate) fn collect_steady_state_operands(
     arena: &crate::expr::ExprArena,
     id: ExprId,
     out: &mut Vec<ExprId>,

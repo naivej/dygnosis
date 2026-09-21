@@ -263,6 +263,10 @@ pub struct HomotopyRow {
 /// One `'group' = name_list;` row of a `shock_groups` block.
 #[derive(Clone, Debug)]
 pub struct ShockGroup {
+    /// The row's label, quotes stripped (`'g1'` and `g1` are the same label).
+    pub label: String,
+    /// The label token's span (inside the quotes for a quoted label).
+    pub label_span: Span,
     pub members: Vec<(Name, Span)>,
 }
 
@@ -645,6 +649,10 @@ pub struct Model {
     pub homotopy_rows: Vec<HomotopyRow>,
     /// Members of every `shock_groups` block, file order.
     pub shock_groups: Vec<ShockGroup>,
+    /// Flat-vec index where each `shock_groups` block's rows begin. Their reuse
+    /// warning compares labels within one block only (each block is its own
+    /// statement; probed on 7.1), so the check needs the boundaries.
+    pub shock_group_block_starts: Vec<usize>,
     /// True iff a Sims `bvar_density` / `bvar_forecast` / `bvar_irf` statement is present.
     pub bvar_present: bool,
 }

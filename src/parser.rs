@@ -1789,7 +1789,14 @@ impl Parser<'_> {
 
     fn deriv_spec(&mut self, opt_span: Span, value: Option<(String, Span)>) -> DerivSpec {
         match value {
-            Some((lex, span)) => DerivSpec::Named(self.intern.intern(&unquote_string(&lex)), span),
+            // Their driver declares a named derivative as an externalFunction
+            // symbol too (`ParsingDriver::external_function`), so the name lands
+            // in the same unsupported-slot set as `name=`.
+            Some((lex, span)) => {
+                let id = self.intern.intern(&unquote_string(&lex));
+                self.push_external_function_name(id);
+                DerivSpec::Named(id, span)
+            }
             None => DerivSpec::Bare(opt_span),
         }
     }
@@ -1929,6 +1936,9 @@ impl Parser<'_> {
         self.record_missing_end_if_unclosed("shock_groups", opener_span, body_i, body_end_i);
         let saved = self.i;
         self.i = body_i;
+        self.model
+            .shock_group_block_starts
+            .push(self.model.shock_groups.len());
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::Semi) || self.at(TokenKind::Comma) {
                 self.bump();
@@ -1953,7 +1963,12 @@ impl Parser<'_> {
         if !self.at(TokenKind::Ident) && !self.at(TokenKind::String) {
             return None;
         }
-        self.bump();
+        // The label token: `g1 = …` or `'g1' = …`. Their grammar takes both
+        // (`symbol` / `QUOTED_STRING`), and the reuse warning compares the
+        // unquoted text, so quotes are stripped here.
+        let label_tok = self.bump();
+        let label = unquote_string(self.lexeme(&label_tok));
+        let label_span = label_tok.span;
         if !self.at(TokenKind::Eq) {
             self.skip_to_stmt_end();
             self.eat(TokenKind::Semi);
@@ -1975,7 +1990,11 @@ impl Parser<'_> {
             self.bump();
         }
         self.eat(TokenKind::Semi);
-        Some(ShockGroup { members })
+        Some(ShockGroup {
+            label,
+            label_span,
+            members,
+        })
     }
 
     /// Sims `bvar_density N;` / `bvar_forecast N;` / `bvar_irf(N, 'name');`

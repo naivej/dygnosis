@@ -2,7 +2,7 @@
 //!
 //! Mechanical port of `python_dynare_lsp/explain.py` `_ENTRIES` for the 70
 //! codes shipped through 0.5.0, then kind `shared` / `skipped` / `added`.
-//! 289 keys = 235 shared + 27 added + 27 skipped (S016 shipped as E335-E337). Catalog **0.5.1** D-clash and
+//! 294 keys = 238 shared + 27 added + 29 skipped (S016 shipped as E335-E337). Catalog **0.5.1** D-clash and
 //! D-check Errors are shared; the **0.5.2** D-walk, D-block, D-open, and D-extfun
 //! rows add shared keys and drop the `S###` keys they replace.
 //! `I050` and `W042` use the recorded surface rewrites in
@@ -40,7 +40,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 289 keys: 235 shared + 27 added + 27 skipped.
+// 294 keys: 238 shared + 27 added + 29 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -1124,7 +1124,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W204", ExplainEntry {
         title: "Unknown symbol in a load_params_and_steady_state file",
-        body: "The data file of ``load_params_and_steady_state`` holds a name that is not declared at that point in the ``.mod``. Dynare accepts and warns: `Unknown symbol zzz in w204_params.txt`.\n\n**Fix**\n\nRemove the entry from the data file, or declare the symbol above the ``load_params_and_steady_state`` statement.",
+        body: "The data file of ``load_params_and_steady_state`` holds a name that is not declared at that point in the ``.mod``. Dynare accepts and warns: `Unknown symbol zzz in w204_params.txt`. A name that *is* declared but sits in an unsupported slot — an ``epilogue`` helper, an ``external_function`` name, a trend variable — errors **E380** instead; this warning keeps only the genuinely unknown name.\n\n**Fix**\n\nRemove the entry from the data file, or declare the symbol above the ``load_params_and_steady_state`` statement.",
+        kind: ExplainKind::Shared,
+    }),
+    ("W205", ExplainEntry {
+        title: "shock_groups label reused",
+        body: "Two rows of the same ``shock_groups`` block reuse a label. The comparison is within one block only: each block is its own statement, so two separate ``shock_groups`` blocks may share a label silently. Dynare accepts the file and warns only when writing the MATLAB files, once per row that has a later twin: `shock group label 'g1' has been reused. Only using the last definition.`\n\n**Fix**\n\nGive each row of the block its own label.",
         kind: ExplainKind::Shared,
     }),
     ("E335", ExplainEntry {
@@ -1520,6 +1525,24 @@ Name a ``parameters`` symbol, or move the statement to the surface that takes th
 Name two endogenous variables or two exogenous ones.",
         kind: ExplainKind::Shared,
     }),
+    ("E380", ExplainEntry {
+        title: "load_params_and_steady_state names an unsupported variable type",
+        body: "The data file of ``load_params_and_steady_state`` holds a name that is declared, but not as a parameter, an endogenous variable, a ``varexo``, or a ``varexo_det``: an ``epilogue`` helper, an ``external_function`` name, or a trend variable. Dynare accepts the file through its checks and refuses only when writing the MATLAB files: `Unsupported variable type for A in load_params_and_steady_state`.
+
+**Fix**
+
+Remove the entry from the data file, or name one of the four allowed kinds.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E381", ExplainEntry {
+        title: "steady_state operator contains an external function",
+        body: "The expression inside a ``steady_state(…)`` operator calls an ``external_function``. Dynare accepts the file through its checks and refuses only when writing the MATLAB files: `The expression inside a steady_state operator cannot contain external functions`.
+
+**Fix**
+
+Move the call out of the ``steady_state(…)`` operator.",
+        kind: ExplainKind::Shared,
+    }),
     ("E186", ExplainEntry {
         title: "Unused endogenous after substitution",
         body: "Dynare refuses: `Error: <name> not used in the model block`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
@@ -1653,6 +1676,16 @@ Name two endogenous variables or two exogenous ones.",
     ("S054", ExplainEntry {
         title: "Heterogeneity dimension unknown or twice",
         body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.9 E. This code is never emitted.",
+        kind: ExplainKind::Skipped,
+    }),
+    ("S055", ExplainEntry {
+        title: "Generated .m nests more than 32 parentheses",
+        body: "Dynare warns: `A .m file created by Dynare will have more than 32 nested parenthesis…`. Catching step: writer. Owner: skip-writer W. The trigger is the nesting depth of their generated text, not of the file. This code is never emitted.",
+        kind: ExplainKind::Skipped,
+    }),
+    ("S056", ExplainEntry {
+        title: "Excluded name still assigned in initval or endval",
+        body: "Dynare refuses: `Variable … was excluded but found in an initval or endval statement`. Catching step: writer. Owner: skip-writer E. Their probe crashes with no message at this pin. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
 ];

@@ -27,6 +27,7 @@ pub fn check_d_open(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_external_functions(model));
     out.extend(check_pair_lists(model));
     out.extend(check_ms_symbols(model));
+    out.extend(check_shock_group_labels(model));
     out
 }
 
@@ -564,7 +565,21 @@ fn quoted_literal(raw: &str) -> Option<&str> {
     Some(inner)
 }
 
-/// E306 / W204: the `load_params_and_steady_state` file next to the `.mod`.
+/// E306 / W204 / E380: the `load_params_and_steady_state` file next to the `.mod`.
+///
+/// Their gate reads the symbol table the constructor built while parsing: a name
+/// not in the table warns **W204** (their `Unknown symbol`), a name in the table
+/// but not one of the four allowed slots errors **E380** at the writer
+/// (`NumericalInitialization.cc:697`, the `default:` arm of the type switch).
+/// The table is finished at parse, so the positional rule is ours: a name
+/// declared only *after* the statement is unknown to the constructor, and 7.1
+/// warns `Unknown symbol` on it (probed: epilogue after the load statement).
+///
+/// A trend name is in the slot set like the other two kinds: a *used* trend is
+/// refused by the compute-stage balanced-growth test only when the use is itself
+/// balanced-growth-incompatible (probed). A compatible use is quiet at check,
+/// transform **and** compute, and the write run still prints the sentence, so
+/// there is no shadow to defer to.
 fn check_load_params(model: &Model, abs_path: &str) -> Vec<Diagnostic> {
     let Some((file, span)) = &model.load_params_file else {
         return Vec::new();
@@ -585,6 +600,14 @@ fn check_load_params(model: &Model, abs_path: &str) -> Vec<Diagnostic> {
         if declared {
             continue;
         }
+        if is_unsupported_slot(model, &name, span.start) {
+            out.push(err(
+                *span,
+                "E380",
+                format!("Unsupported variable type for {name} in load_params_and_steady_state"),
+            ));
+            continue;
+        }
         out.push(warn(
             *span,
             "W204",
@@ -592,6 +615,40 @@ fn check_load_params(model: &Model, abs_path: &str) -> Vec<Diagnostic> {
         ));
     }
     out
+}
+
+/// True when a declared name sits in a slot the loader's four-way type switch
+/// does not accept: an `epilogue` helper, an `external_function` name (the
+/// `name=` value or a value named by `first_deriv_provided` /
+/// `second_deriv_provided`), or a trend variable.
+///
+/// All three are positional, like `declared_names`: the loader's constructor
+/// reads the symbol table as parsing reaches the statement, so a name declared
+/// only *after* it is still unknown and 7.1 warns `Unknown symbol` (probed on
+/// the epilogue and the `external_function` shapes).
+fn is_unsupported_slot(model: &Model, name: &str, pos: u32) -> bool {
+    if model
+        .epilogue
+        .iter()
+        .any(|a| model.name(a.name) == name && a.span.start < pos)
+    {
+        return true;
+    }
+    if model.external_functions.iter().any(|stmt| {
+        let own = stmt
+            .name
+            .is_some_and(|(id, span)| model.name(id) == name && span.start < pos);
+        let derived = [stmt.first_deriv, stmt.second_deriv].iter().any(|spec| {
+            matches!(spec, Some(DerivSpec::Named(id, span)) if model.name(*id) == name && span.start < pos)
+        });
+        own || derived
+    }) {
+        return true;
+    }
+    model
+        .trend_vars
+        .iter()
+        .any(|t| model.name(t.name) == name && t.span.start < pos)
 }
 
 /// `name value` pairs, whitespace separated: `f >> symb_name >> value` reads both.
@@ -1206,6 +1263,43 @@ fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
                     ),
                 ));
             }
+        }
+    }
+    out
+}
+
+/// W205: two rows of one `shock_groups` block reuse a label.
+///
+/// Their comparison is within one block only — each block is its own
+/// `ShockGroupsStatement` and the vector clears at `end_shock_groups`, so two
+/// blocks may share a label silently (probed on 7.1). The `name=group` opener
+/// option is skipped by `bump_plain_opener` and never recorded, so it cannot
+/// fire this either. Their text, trailing period included.
+///
+/// Theirs warns on every row that has a later twin
+/// (`ranges::find_if(it + 1, …)`, `Shocks.cc:1209`; message at `:1213`), so the
+/// span points at the definition that "only using the last definition"
+/// discards. A three-row block with one label reports twice.
+fn check_shock_group_labels(model: &Model) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    let rows = &model.shock_groups;
+    let mut bounds = model.shock_group_block_starts.clone();
+    bounds.push(rows.len());
+    for window in bounds.windows(2) {
+        let (start, end) = (window[0], window[1]);
+        for (i, group) in rows[start..end].iter().enumerate() {
+            let rest = &rows[start + i + 1..end];
+            if !rest.iter().any(|later| later.label == group.label) {
+                continue;
+            }
+            out.push(warn(
+                group.label_span,
+                "W205",
+                format!(
+                    "shock group label '{}' has been reused. Only using the last definition.",
+                    group.label
+                ),
+            ));
         }
     }
     out

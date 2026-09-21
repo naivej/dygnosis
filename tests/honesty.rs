@@ -1620,6 +1620,44 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         stage: JsonStage::Check,
     },
     HonestyRow {
+        code: "E380",
+        fixture: "d_writer/e380_load_params_epilogue.mod",
+        kind: HonestyKind::Error {
+            workspace_only: true,
+        },
+        their_needle: "Unsupported variable type for A in load_params_and_steady_state",
+        our_needle: "Unsupported variable type for A in load_params_and_steady_state",
+        stage: JsonStage::Write,
+    },
+    HonestyRow {
+        code: "E380",
+        fixture: "d_writer/e380_load_params_used_trend.mod",
+        kind: HonestyKind::Error {
+            workspace_only: true,
+        },
+        their_needle: "Unsupported variable type for A in load_params_and_steady_state",
+        our_needle: "Unsupported variable type for A in load_params_and_steady_state",
+        stage: JsonStage::Write,
+    },
+    HonestyRow {
+        code: "E381",
+        fixture: "d_writer/e381_steady_state_extfun.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The expression inside a steady_state operator cannot contain external functions",
+        our_needle: "The expression inside a steady_state operator cannot contain external functions",
+        stage: JsonStage::Write,
+    },
+    HonestyRow {
+        code: "W205",
+        fixture: "d_writer/w205_shock_groups_label_reused.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "shock group label 'g1' has been reused",
+        our_needle: "shock group label 'g1' has been reused",
+        stage: JsonStage::Write,
+    },
+    HonestyRow {
         code: "E307",
         fixture: "d_open/e307_trend_twice.mod",
         kind: HonestyKind::Error {
@@ -3866,6 +3904,7 @@ fn honesty_fire_table() {
         eprintln!("skipping honesty: dynare-preprocessor not found");
         return;
     };
+    let _run = writer_run_lock();
     let mut failures: Vec<String> = Vec::new();
     for row in HONESTY_FIRE {
         let path = honesty_mod_path(row.fixture);
@@ -4080,6 +4119,7 @@ fn write_stage_refuses_load_params_epilogue_name() {
         eprintln!("skipping honesty: dynare-preprocessor not found");
         return;
     };
+    let _run = writer_run_lock();
     let path = fixture("d_writer/e380_load_params_epilogue.mod");
     let text = read_path(&path);
     let dir = path.parent().expect("fixture parent").to_path_buf();
@@ -4134,6 +4174,55 @@ fn fixture_dir_snapshot(dir: &Path) -> HashSet<PathBuf> {
         .unwrap_or_else(|e| panic!("fixture dir unreadable: {e}"))
         .filter_map(|e| e.ok().map(|e| e.path()))
         .collect()
+}
+
+/// Serializes the tests that spawn the preprocessor on `d_writer/` fixtures.
+///
+/// A `requires_source_dir_file` run writes its transient `.dynare_lsp_*` and
+/// `+dynare_lsp_*` entries into the fixture directory itself. Rust runs the
+/// tests of one binary in parallel, so a sibling run would surface as a
+/// leftover in the whole-directory snapshots below.
+static WRITER_RUN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn writer_run_lock() -> std::sync::MutexGuard<'static, ()> {
+    WRITER_RUN
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// `JC5`: the writer fire files stay quiet at check and transform — the
+/// stage rule's first two runs. The write run is the fire table's.
+#[test]
+fn writer_rows_quiet_at_check_and_transform() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    let _run = writer_run_lock();
+    let mut failures: Vec<String> = Vec::new();
+    for fixture in [
+        "d_writer/e380_load_params_epilogue.mod",
+        "d_writer/e380_load_params_used_trend.mod",
+        "d_writer/e381_steady_state_extfun.mod",
+        "d_writer/w205_shock_groups_label_reused.mod",
+    ] {
+        let path = honesty_mod_path(fixture);
+        let text = read_path(&path);
+        for stage in [JsonStage::Check, JsonStage::Transform] {
+            let result = spawn(&text, &path, &pp, stage);
+            if !result.success {
+                failures.push(format!(
+                    "{fixture} should be quiet at {stage:?}: stdout {:?} stderr {:?} diags {:?}",
+                    result.raw_stdout, result.raw_stderr, result.diagnostics
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "writer rows must be quiet at check and transform:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]
@@ -4197,6 +4286,7 @@ fn surface_matrix_claims_every_official_message() {
         eprintln!("skipping honesty: dynare-preprocessor not found");
         return;
     };
+    let _run = writer_run_lock();
     let mut fixtures: Vec<&str> = HONESTY_FIRE
         .iter()
         .map(|row| row.fixture)
@@ -4206,6 +4296,7 @@ fn surface_matrix_claims_every_official_message() {
                 || fixture.starts_with("d_extfun/")
                 || fixture.starts_with("d_surgery/")
                 || fixture.starts_with("d_ms/")
+                || fixture.starts_with("d_writer/")
         })
         .collect();
     fixtures.sort_unstable();
@@ -4215,7 +4306,12 @@ fn surface_matrix_claims_every_official_message() {
     for fixture in fixtures {
         let path = honesty_mod_path(fixture);
         let text = read_path(&path);
-        let result = spawn(&text, &path, &pp, JsonStage::Check);
+        let stage = HONESTY_FIRE
+            .iter()
+            .find(|row| row.fixture == fixture)
+            .map(|row| row.stage)
+            .unwrap_or(JsonStage::Check);
+        let result = spawn(&text, &path, &pp, stage);
         let claims: Vec<&str> = HONESTY_FIRE
             .iter()
             .filter(|row| row.fixture == fixture)

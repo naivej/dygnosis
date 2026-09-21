@@ -24,12 +24,13 @@ const RUST_CODES: &[&str] = &[
     "E344", "E345", "E346", "E347", "E348", "E349", "E350", "E351", "E352", "E353", "E354", "E355",
     "E356", "E357", "E358", "E359", "E360", "E361", "E362", "E363", "E364", "E365", "E366", "E367",
     "E368", "E369", "E370", "E371", "E372", "E373", "E374", "E375", "E376", "E377", "E378", "E379",
-    "E999", "I050", "S002", "S003", "S004", "S005", "S008", "S009", "S010", "S011", "S012", "S013",
-    "S014", "S020", "S032", "S035", "S037", "S038", "S040", "S041", "S052", "S053", "S054", "W010",
+    "E380", "E381", "E999", "I050", "S002", "S003", "S004", "S005", "S008", "S009", "S010", "S011",
+    "S012", "S013", "S014", "S020", "S032", "S035", "S037", "S038", "S040", "S041", "S052", "S053",
+    "S054", "S055", "S056", "W010",
     "W011", "W012", "W013", "W020", "W022", "W031", "W042", "W051", "W052", "W054", "W055", "W056",
     "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094", "W102", "W110", "W112", "W120",
     "W121", "W122", "W131", "W140", "W150", "W160", "W170", "W186", "W200", "W201", "W202", "W203",
-    "W204",
+    "W204", "W205",
 ];
 
 const THIN_CODES: &[&str] = &[
@@ -51,10 +52,11 @@ const THIN_CODES: &[&str] = &[
     "E337", "E338", "E339", "E340", "E341", "E342", "E343", "E344", "E345", "E346", "E347", "E348",
     "E349", "E350", "E351", "E352", "E353", "E354", "E355", "E356", "E357", "E358", "E359", "E360",
     "E361", "E362", "E363", "E364", "E365", "E366", "E367", "E368", "E369", "E370", "E371", "E372",
-    "E373", "E374", "E375", "E376", "E377", "E378", "E379", "E999", "I050", "W010", "W011", "W012",
-    "W013", "W020", "W022", "W031", "W042", "W051", "W052", "W054", "W055", "W056", "W057", "W060",
-    "W061", "W062", "W070", "W091", "W092", "W094", "W102", "W110", "W112", "W120", "W121", "W122",
-    "W131", "W140", "W150", "W160", "W170", "W200", "W201", "W202", "W203", "W204",
+    "E373", "E374", "E375", "E376", "E377", "E378", "E379", "E380", "E381", "E999", "I050", "W010",
+    "W011", "W012", "W013", "W020", "W022", "W031", "W042", "W051", "W052", "W054", "W055", "W056",
+    "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094", "W102", "W110", "W112", "W120",
+    "W121", "W122", "W131", "W140", "W150", "W160", "W170", "W200", "W201", "W202", "W203", "W204",
+    "W205",
 ];
 
 const SHARED: &[&str] = &[
@@ -76,8 +78,8 @@ const SHARED: &[&str] = &[
     "E337", "E338", "E339", "E340", "E341", "E342", "E343", "E344", "E345", "E346", "E347", "E348",
     "E349", "E350", "E351", "E352", "E353", "E354", "E355", "E356", "E357", "E358", "E359", "E360",
     "E361", "E362", "E363", "E364", "E365", "E366", "E367", "E368", "E369", "E370", "E371", "E372",
-    "E373", "E374", "E375", "E376", "E377", "E378", "E379", "W022", "W031", "W042", "W121", "W131",
-    "W150", "W170", "W200", "W201", "W202", "W203", "W204",
+    "E373", "E374", "E375", "E376", "E377", "E378", "E379", "E380", "E381", "W022", "W031", "W042",
+    "W121", "W131", "W150", "W170", "W200", "W201", "W202", "W203", "W204", "W205",
 ];
 
 const ADDED: &[&str] = &[
@@ -89,7 +91,7 @@ const ADDED: &[&str] = &[
 const SKIP_KEYS: &[&str] = &[
     "E186", "E187", "E188", "E189", "E190", "S002", "S003", "S004", "S005", "S008", "S009", "S010",
     "S011", "S012", "S013", "S014", "S020", "S032", "S035", "S037", "S038", "S040", "S041", "S052",
-    "S053", "S054", "W186",
+    "S053", "S054", "S055", "S056", "W186",
 ];
 
 const OUT: &[&str] = &[
@@ -156,14 +158,14 @@ fn read_mod(archive_dir: &str) -> String {
 }
 
 #[test]
-fn known_codes_is_exactly_the_289_rust_keys() {
-    assert_eq!(SHARED.len(), 235);
+fn known_codes_is_exactly_the_294_rust_keys() {
+    assert_eq!(SHARED.len(), 238);
     assert_eq!(ADDED.len(), 27);
-    assert_eq!(SKIP_KEYS.len(), 27);
-    assert_eq!(THIN_CODES.len(), 262);
-    assert_eq!(RUST_CODES.len(), 289);
+    assert_eq!(SKIP_KEYS.len(), 29);
+    assert_eq!(THIN_CODES.len(), 265);
+    assert_eq!(RUST_CODES.len(), 294);
     assert_eq!(known_codes(), RUST_CODES);
-    assert_eq!(known_codes().len(), 289);
+    assert_eq!(known_codes().len(), 294);
     assert!(!RUST_CODES.contains(&"P000"));
     assert!(RUST_CODES.contains(&"E178"));
     assert!(RUST_CODES.contains(&"E179"));
@@ -383,7 +385,7 @@ fn cli_explain_list() {
         entries.push((code, kind, title));
         i += 1;
     }
-    assert_eq!(entries.len(), 289);
+    assert_eq!(entries.len(), 294);
     assert_eq!(
         entries.iter().map(|(c, _, _)| *c).collect::<Vec<_>>(),
         RUST_CODES
@@ -417,7 +419,7 @@ fn cli_explain_list() {
     );
     assert_eq!(
         lines.get(i + 1).copied(),
-        Some("289 codes. Run `dygnosis explain <CODE>` for details.")
+        Some("294 codes. Run `dygnosis explain <CODE>` for details.")
     );
     assert!(!stdout.contains("python_dynare_lsp"));
     assert!(!stdout.contains("DYNR"));

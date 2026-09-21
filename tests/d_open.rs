@@ -512,8 +512,8 @@ fn some_shipped_codes_still_fire() {
 }
 
 #[test]
-fn registry_known_codes_grew_to_289() {
-    assert_eq!(known_codes().len(), 289);
+fn registry_known_codes_grew_to_294() {
+    assert_eq!(known_codes().len(), 294);
 }
 
 #[test]
