@@ -1277,9 +1277,9 @@ fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
 /// fire this either. Their text, trailing period included.
 ///
 /// Theirs warns on every row that has a later twin
-/// (`ranges::find_if(it + 1, …)`, `Shocks.cc:1209`; message at `:1213`), so the
-/// span points at the definition that "only using the last definition"
-/// discards. A three-row block with one label reports twice.
+/// (`for (auto it1 = it + 1; …)`, `Shocks.cc:1192`; message at `:1196`, pin
+/// `9c61fb6e`), so the span points at the definition that "only using the last
+/// definition" discards. A three-row block with one label reports twice.
 fn check_shock_group_labels(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let rows = &model.shock_groups;

@@ -4,7 +4,7 @@
 
 - powers MCP for agents and LSP for humans, with code intelligence while typing;
 - internally rewrites the model and maps checks on the transformed model back to the original `.mod`;
-- checks almost all issues covered by the Dynare (7.1) preprocessor, and more.
+- checks almost all issues covered by the Dynare (7.1) preprocessor, and more, including the refusals it makes only when it generates the MATLAB files — each decided by the file you edit.
 
 Limitations by design
 

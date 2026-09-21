@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.5.5
+
+Adds the refusals the Dynare preprocessor prints only at its last stage, when it writes the MATLAB files — after its check and transform stages have already accepted the file. The file you edit is enough to decide each of them. Codes `E380`, `E381` and `W205`.
+
+Diagnostics implemented in this release:
+- **E380** — a `load_params_and_steady_state` file names something the loader cannot take: an `epilogue` helper, an `external_function` name (the `name=` value or a value named by `first_deriv_provided` / `second_deriv_provided`), or a trend variable. The four slots it accepts are parameter, endogenous, `varexo` and `varexo_det`. Dynare refuses only when writing: `Unsupported variable type for A in load_params_and_steady_state`.
+- **E381** — a `steady_state(…)` expression calls an `external_function`: `The expression inside a steady_state operator cannot contain external functions`. The operand walk descends, so a call nested under an operator is caught too.
+- **W205** — two rows of the same `shock_groups` block reuse a label: `shock group label 'g1' has been reused. Only using the last definition.` The comparison is within one block, as Dynare's is: two separate `shock_groups` blocks may share a label silently.
+
+Other changes:
+- **`W204` narrows**: the unsupported kinds above now error `E380` instead, and `W204` keeps the genuinely unknown name. All three kinds are positional, as Dynare's own reading is — a name declared only *after* the `load_params_and_steady_state` statement is still unknown to the loader, warns `Unknown symbol`, and stays `W204`.
+- **Writer-stage honesty**: the test harness can now spawn the plain write run Dynare offers (`nopreprocessoroutput`, no `json=` and no `onlyjson`), the last stage before MATLAB, and cleans the `+<name>/` package directory such a run leaves beside the `.mod`.
+- The two writer-stage messages that no `.mod` shape can be matched against — the more-than-32-nested-parentheses warning (whose trigger is Dynare's generated text) and the excluded-name-still-in-`initval` refusal (which aborts Dynare with no message) — are documented as deliberately silent (`S055`, `S056`).
+
 ## v0.5.4
 
 Adds the MS-SBVAR family: the `ms_*` commands, `sbvar`, `svar`, `markov_switching`, the `svar_identification` and `conditional_forecast_paths` blocks, `conditional_forecast`, `plot_conditional_forecast`, the `data` statement and the dotted `prior` statement are read instead of skipped, and the refuses Dynare makes on them are reported. Codes `E338`–`E379`.

@@ -186,6 +186,7 @@ fn e380_is_positional_and_leaves_w204_after_the_statement() {
 fn quiet_files_stay_quiet() {
     let quiets: &[(&str, &[&str])] = &[
         ("d_writer/quiet_shock_groups.mod", &["W205"]),
+        ("d_writer/quiet_shock_groups_two_blocks.mod", &["W205"]),
         ("d_writer/quiet_load_params.mod", &["E380", "W204"]),
     ];
     for (rel, expected_quiet) in quiets {

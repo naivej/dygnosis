@@ -1,8 +1,8 @@
 //! Thin Dynare analysis library.
 //!
-//! Scope follows the 0.5.4 cut line in `dev_logs/0.5/0.5.4/masterplan.md`
-//! (the MS-SBVAR family: `ms_*`, `sbvar`, `svar`, `markov_switching`,
-//! `svar_identification`, `conditional_forecast`, `data`, `prior`).
+//! Scope follows the 0.5.5 cut line in `dev_logs/0.5/0.5.5/masterplan.md`
+//! (the static refusals the preprocessor prints only when it writes MATLAB,
+//! on the file you edit).
 //! Dynare compute (steady state, BK, identification, MATLAB) stays out.
 
 pub mod auto_fix;

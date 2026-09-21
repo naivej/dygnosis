@@ -6176,6 +6176,18 @@
       "notes": "two blocks with distinct labels are quiet (the reuse comparison is within one block)"
     },
     {
+      "id": "quiet_shock_groups_two_blocks",
+      "codes": [
+        "W205"
+      ],
+      "kind": "quiet",
+      "package": "d_writer",
+      "fixture": "tests/fixtures/d_writer/quiet_shock_groups_two_blocks.mod",
+      "source": "d_writer.rs",
+      "cluster": "d_writer/quiet_shock_groups_two_blocks.mod",
+      "notes": "two separate blocks sharing the label g1 are quiet: their comparison never crosses blocks (probed)"
+    },
+    {
       "id": "quiet_load_params",
       "codes": [
         "E380",
