@@ -8,8 +8,12 @@
 
 Limitations by design
 
-- A few checks on the transformed model that cannot be mapped back to the original `.mod` are omitted.
-- Numerical calculations such as the steady state and BK conditions are left to MATLAB. Use the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit) for seamless integration with MATLAB.
+- **Checks on the rewritten model are omitted.** Some refusals fire only after Dynare has rewritten the equations — inlined `#` locals, added auxiliary variables, clipped leads and lags, substituted constants. The model it tests no longer matches the file you edit, so those checks have no honest place to point.
+- **Refusals decided by how you run Dynare are omitted.** `nostrict`, `warn_uninit`, `exclude_eqs=` / `include_eqs=` and the like belong to a command-line option; `mexext` and a missing compiler belong to the machine. Neither is a property of the `.mod` file.
+- **Numerical results are left to MATLAB.** Steady state, Blanchard–Kahn conditions, residuals, derivatives, identification, and “will this solve” are computed there, not here. Use the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit) for seamless integration with MATLAB.
+- **Some command families are still read as opaque text,** so their refusals are not reported yet: method of moments, VAR / TCM / PAC, heterogeneity, and the shock-path surfaces.
+
+`dygnosis explain --list` marks every code as shared with Dynare, added by dygnosis, or skipped, so what is out stays inspectable.
 
 ## How to use
 
