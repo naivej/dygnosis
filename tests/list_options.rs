@@ -1,4 +1,4 @@
-use dygnosis::{command_options, is_known_command, list_options, option_doc};
+use dygnosis::{check_parse, command_options, is_known_command, list_options, option_doc, parse};
 
 fn to_value(payload: impl serde::Serialize) -> serde_json::Value {
     serde_json::to_value(payload).unwrap()
@@ -141,7 +141,7 @@ fn occbin_constraints_is_catalogued_block() {
     assert_eq!(upper, payload);
 
     let omitted = to_value(list_options(None));
-    assert_eq!(omitted["n_commands"], 71);
+    assert_eq!(omitted["n_commands"], 75);
     let i = omitted["commands"]
         .as_array()
         .unwrap()
@@ -372,4 +372,129 @@ fn ms_sbvar_family_options_are_catalogued() {
 fn sbvar_has_no_unreachable_data_option() {
     assert!(option_names("sbvar").contains(&"datafile"));
     assert!(!option_names("sbvar").contains(&"data"));
+}
+
+/// The two IRF rows carry the manual's sentence for their own block; the two
+/// row-body blocks take no parenthesised production at the pin, so their lists
+/// are empty.
+const MATCHED_IRFS_OVERWRITE_HELP: &str =
+    "The overwrite option replaces the current matched_irfs block with the new one.";
+const MATCHED_IRFS_WEIGHTS_OVERWRITE_HELP: &str =
+    "The overwrite option replaces the current matched_irfs_weights block with the new one.";
+
+#[test]
+fn the_four_family_blocks_are_catalogued() {
+    assert_eq!(option_names("matched_irfs"), ["overwrite"]);
+    assert_eq!(option_names("matched_irfs_weights"), ["overwrite"]);
+    assert!(option_names("matched_moments").is_empty());
+    assert!(option_names("moment_calibration").is_empty());
+
+    for command in [
+        "matched_irfs",
+        "matched_irfs_weights",
+        "matched_moments",
+        "moment_calibration",
+    ] {
+        assert!(is_known_command(command), "{command}");
+        assert!(is_known_command(&command.to_uppercase()), "{command}");
+    }
+
+    let payload = to_value(list_options(Some("matched_irfs")));
+    assert_eq!(payload["command"], "matched_irfs");
+    assert_eq!(payload["known"], true);
+    assert_eq!(payload["n_options"], 1);
+    assert_eq!(payload["options"][0]["name"], "overwrite");
+    assert_eq!(
+        payload["options"][0]["description"],
+        MATCHED_IRFS_OVERWRITE_HELP
+    );
+
+    let payload = to_value(list_options(Some("matched_irfs_weights")));
+    assert_eq!(payload["n_options"], 1);
+    assert_eq!(payload["options"][0]["name"], "overwrite");
+    assert_eq!(
+        payload["options"][0]["description"],
+        MATCHED_IRFS_WEIGHTS_OVERWRITE_HELP
+    );
+
+    for command in ["matched_moments", "moment_calibration"] {
+        let payload = to_value(list_options(Some(command)));
+        assert_eq!(payload["command"], command);
+        assert_eq!(payload["known"], true);
+        assert_eq!(payload["n_options"], 0, "{command}");
+        assert_eq!(payload["options"].as_array().unwrap().len(), 0, "{command}");
+    }
+}
+
+/// The `overwrite` key this slice introduces: its own `OPTION_DOCS` row from the
+/// manual's `shocks` statement, plus the two IRF rows' own block sentences.
+#[test]
+fn overwrite_docs_come_from_the_manual() {
+    const HELP: &str =
+        "If a shocks or mshocks block is declared with the overwrite option, then it replaces all the previous shocks and mshocks blocks.";
+    assert_eq!(option_doc("overwrite"), HELP);
+    assert_eq!(
+        command_options("matched_irfs")[0].1,
+        MATCHED_IRFS_OVERWRITE_HELP
+    );
+    assert_eq!(
+        command_options("matched_irfs_weights")[0].1,
+        MATCHED_IRFS_WEIGHTS_OVERWRITE_HELP
+    );
+}
+
+/// A declared head left without its `;` before a family command is **E001**, the
+/// way the `stoch_simul` follower already is. 7.1 refuses every shape in this
+/// table with `syntax error, unexpected IDENTIFIER`, so the two agree.
+#[test]
+fn a_declared_head_without_semi_before_a_family_command_is_e001() {
+    const HEAD: &str = "var y c;\nvarexo e;\nparameters a;\na = 0.5;\n\nmodel;\ny = a*y(-1) + e;\nc = y;\nend;\n\na = 0.6\n";
+
+    for follower in [
+        "matched_irfs;",
+        "matched_irfs_weights;",
+        "matched_moments;",
+        "moment_calibration;",
+        "method_of_moments(mom_method=GMM, datafile=msdata);",
+        "stoch_simul(order=1);",
+    ] {
+        let text = format!("{HEAD}{follower}\n");
+        let got: Vec<String> = check_parse(&parse(&text))
+            .into_iter()
+            .map(|d| d.message.clone())
+            .collect();
+        assert!(
+            got.iter().any(
+                |m| m.contains("Parameter assignment 'a' is missing its terminating semicolon")
+            ),
+            "{follower}: expected the follower E001, got {got:?}"
+        );
+    }
+}
+
+/// The other direction: a completed assignment before the same commands keeps
+/// them quiet. 7.1 accepts every one of these files.
+#[test]
+fn a_completed_assignment_before_a_family_command_leaves_e001_quiet() {
+    const HEAD: &str = "var y c;\nvarexo e;\nparameters a;\na = 0.5;\n\nmodel;\ny = a*y(-1) + e;\nc = y;\nend;\n\na = 0.6;\n";
+
+    for follower in [
+        "matched_irfs;\nvar y; varexo e; periods 1; values 1; end;",
+        "matched_irfs_weights;\ny(1), e, c(1), e, 20;\nend;",
+        "matched_moments;\ny;\nend;",
+        "moment_calibration;\ny, c(0), [0.1, 0.5];\nend;",
+        "method_of_moments(mom_method=GMM, datafile=msdata);",
+        "stoch_simul(order=1);",
+    ] {
+        let text = format!("{HEAD}{follower}\n");
+        let got: Vec<String> = check_parse(&parse(&text))
+            .into_iter()
+            .map(|d| d.message.clone())
+            .collect();
+        assert!(
+            !got.iter()
+                .any(|m| m.contains("is missing its terminating semicolon")),
+            "{follower}: expected no follower E001, got {got:?}"
+        );
+    }
 }

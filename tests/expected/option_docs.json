@@ -287,6 +287,7 @@
   "outfile": "Write the initial conditions to a file.",
   "output_file_tag": "The portion of the output filename that will be assigned to this run.",
   "outvars": "A list of variables which will be given the initial conditions.",
+  "overwrite": "If a shocks or mshocks block is declared with the overwrite option, then it replaces all the previous shocks and mshocks blocks.",
   "parameter_convergence_criterion": "The convergence criterion for parameter values when max_repeated_optimizations_runs is positive.",
   "parameter_set": "Specify the parameter set to use for running the smoother.",
   "parameter_uncertainty": "Calculate IRFs under parameter uncertainty.",

@@ -1,5 +1,5 @@
 {
-  "n_commands": 71,
+  "n_commands": 75,
   "commands": [
     "bvar_density",
     "bvar_forecast",
@@ -27,11 +27,15 @@
     "initval_file",
     "irf_calibration",
     "markov_switching",
+    "matched_irfs",
+    "matched_irfs_weights",
+    "matched_moments",
     "method_of_moments",
     "model_comparison",
     "model_info",
     "model_remove",
     "model_replace",
+    "moment_calibration",
     "ms_compute_mdd",
     "ms_compute_probabilities",
     "ms_estimation",

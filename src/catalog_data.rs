@@ -477,6 +477,13 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("parameters", "This option specifies which parameters are controlled by this Markov Chain."),
         ("restrictions", "Provides restrictions on this chain’s regime transition matrix."),
     ]),
+    ("matched_irfs", &[
+        ("overwrite", "The overwrite option replaces the current matched_irfs block with the new one."),
+    ]),
+    ("matched_irfs_weights", &[
+        ("overwrite", "The overwrite option replaces the current matched_irfs_weights block with the new one."),
+    ]),
+    ("matched_moments", &[]),
     ("method_of_moments", &[
         ("add_tiny_number_to_cholesky", "In case of a non-positive definite covariance matrix, a tiny number is added to the Cholesky factor to avoid numerical problems when computing IRFs."),
         ("additional_optimizer_steps", "additional_optimizer_steps = [INTEGER1:INTEGER2] additional_optimizer_steps = [INTEGER1 INTEGER2 ...]"),
@@ -582,6 +589,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
     ]),
     ("model_remove", &[]),
     ("model_replace", &[]),
+    ("moment_calibration", &[]),
     ("ms_compute_mdd", &[
         ("file_tag", "The portion of the filename associated with this run."),
         ("output_file_tag", "The portion of the output filename that will be assigned to this run."),
@@ -1642,6 +1650,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("outfile", "Write the initial conditions to a file."),
     ("output_file_tag", "The portion of the output filename that will be assigned to this run."),
     ("outvars", "A list of variables which will be given the initial conditions."),
+    ("overwrite", "If a shocks or mshocks block is declared with the overwrite option, then it replaces all the previous shocks and mshocks blocks."),
     ("parameter_convergence_criterion", "The convergence criterion for parameter values when max_repeated_optimizations_runs is positive."),
     ("parameter_set", "Specify the parameter set to use for running the smoother."),
     ("parameter_uncertainty", "Calculate IRFs under parameter uncertainty."),

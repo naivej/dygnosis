@@ -71,6 +71,21 @@ const DYNARE_KEYWORDS: &[(&str, &str)] = &[
         "Plot the conditional and unconditional forecasts",
     ),
     ("prior", "Prior distribution for a parameter"),
+    ("method_of_moments", "Run method of moments estimation"),
+    (
+        "matched_moments",
+        "Specify the product moments used in estimation",
+    ),
+    (
+        "matched_irfs",
+        "Specify the empirical IRFs matched in estimation",
+    ),
+    (
+        "matched_irfs_weights",
+        "Specify the weighting matrix used for IRF matching",
+    ),
+    ("irf_calibration", "Define IRF calibration criteria"),
+    ("moment_calibration", "Define moment calibration criteria"),
 ];
 
 const BUILTIN_FNS: &[(&str, &str)] = &[

@@ -793,6 +793,44 @@ fn ms_sbvar_family_is_a_known_command() {
     assert_eq!(payload["n_options"], Value::Number(47.into()));
 }
 
+/// The two row-body blocks and the two IRF blocks P-mom parses; the IRF rows
+/// take the one word their parenthesis holds, and the two row-body blocks take
+/// none.
+#[test]
+fn the_mom_family_blocks_are_known_commands() {
+    for (command, n_options) in [
+        ("matched_irfs", 1),
+        ("matched_irfs_weights", 1),
+        ("matched_moments", 0),
+        ("moment_calibration", 0),
+    ] {
+        assert!(dygnosis::catalog::is_known_command(command), "{command}");
+        assert_eq!(
+            dygnosis::catalog::command_options(command).len(),
+            n_options,
+            "{command}"
+        );
+        let payload = dynare_list_options(Some(command));
+        assert_eq!(payload["known"], Value::Bool(true), "{command}");
+        assert_eq!(
+            payload["n_options"],
+            Value::Number((n_options as u64).into()),
+            "{command}"
+        );
+    }
+
+    let payload = dynare_list_options(Some("MATCHED_IRFS"));
+    assert_eq!(payload["command"], Value::String("matched_irfs".into()));
+    assert_eq!(payload["n_options"], Value::Number(1.into()));
+    assert_eq!(
+        payload["options"][0]["name"],
+        Value::String("overwrite".into())
+    );
+
+    let payload = dynare_list_options(Some("matched_moments"));
+    assert_eq!(payload["options"].as_array().map(Vec::len), Some(0));
+}
+
 #[test]
 fn find_references_betta_skips_comment() {
     let base = read_mod("trend_rbc_gov_inv");

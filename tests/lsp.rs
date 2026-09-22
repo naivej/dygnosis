@@ -1121,6 +1121,93 @@ async fn completion_stoch_simul_options() {
     );
 }
 
+/// The six family names this slice added to `DYNARE_KEYWORDS`, so command-name
+/// completion offers them: the list is hand-kept and does not read the catalog.
+#[tokio::test]
+async fn completion_offers_the_moment_family_keywords() {
+    let text = "var y;\n\n".to_string();
+    let uri = Url::parse("file:///tmp/moment_keywords_test.mod").unwrap();
+    let byte = text.len() - 1;
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let labels = completion_labels(
+        service
+            .inner()
+            .completion(CompletionParams {
+                text_document_position: tdp(uri, &text, byte),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .expect("completion rpc")
+            .expect("completion"),
+    );
+    for name in [
+        "method_of_moments",
+        "matched_moments",
+        "matched_irfs",
+        "matched_irfs_weights",
+        "irf_calibration",
+        "moment_calibration",
+    ] {
+        assert!(
+            labels.iter().any(|l| l == name),
+            "keyword {name} missing: {labels:?}"
+        );
+    }
+}
+
+/// The two IRF blocks the catalog gained: `overwrite` reaches hover and
+/// completion through the command name before the parenthesis.
+#[tokio::test]
+async fn matched_irfs_overwrite_reaches_hover_and_completion() {
+    let text = "var y c;\nvarexo e;\nparameters a;\na = 0.5;\nmodel;\ny = a*y(-1) + e;\nc = y;\nend;\n\nmatched_irfs(overwrite);\nvar y; varexo e; periods 1; values 1; end;\n";
+    let uri = Url::parse("file:///tmp/matched_irfs_overwrite_test.mod").unwrap();
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.to_string(), 1))
+        .await;
+
+    let byte = text.find("overwrite").expect("overwrite word");
+    let md = hover_markdown(
+        service
+            .inner()
+            .hover(HoverParams {
+                text_document_position_params: tdp(uri.clone(), text, byte),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("hover rpc")
+            .expect("hover"),
+    );
+    assert!(md.contains("matched_irfs"), "hover: {md}");
+    assert!(md.contains("`overwrite`"), "hover: {md}");
+
+    let byte = text.find("matched_irfs(").expect("matched_irfs opener") + "matched_irfs(".len();
+    let labels = completion_labels(
+        service
+            .inner()
+            .completion(CompletionParams {
+                text_document_position: tdp(uri, text, byte),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .expect("completion rpc")
+            .expect("completion"),
+    );
+    assert!(
+        labels.iter().any(|l| l == "overwrite"),
+        "matched_irfs option overwrite missing: {labels:?}"
+    );
+}
+
 #[tokio::test]
 async fn completion_includes_exogenous() {
     let text = read_mod("trend_rbc_gov_inv");
