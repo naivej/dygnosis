@@ -1588,22 +1588,22 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("S002", ExplainEntry {
         title: "shocks(learnt_in) without PFEE setup and solver",
-        body: "Dynare refuses: `'shocks(learnt_in=…)' block can only be used in conjunction with…`. Catching step: transform (written clash). Owner: skip 0.11 E. This code is never emitted.",
+        body: "Dynare refuses: `'shocks(learnt_in=…)' block can only be used in conjunction with…`. Catching step: transform (written clash). Owner: skip 0.7 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S003", ExplainEntry {
         title: "endval(learnt_in) without PFEE setup and solver",
-        body: "Dynare refuses: `'endval(learnt_in=…)' block can only be used…`. Catching step: transform (written clash). Owner: skip 0.11 E. This code is never emitted.",
+        body: "Dynare refuses: `'endval(learnt_in=…)' block can only be used…`. Catching step: transform (written clash). Owner: skip 0.7 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S004", ExplainEntry {
         title: "perfect_foresight_controlled_paths(learnt_in) without PFEE",
-        body: "Dynare refuses: `'perfect_foresight_controlled_paths(learnt_in=…)'…`. Catching step: transform (written clash). Owner: skip 0.11 E. This code is never emitted.",
+        body: "Dynare refuses: `'perfect_foresight_controlled_paths(learnt_in=…)'…`. Catching step: transform (written clash). Owner: skip 0.7 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S005", ExplainEntry {
         title: "shock_paths(learnt_in) without PFEE setup and solver",
-        body: "Dynare refuses: `'shock_paths(learnt_in=…)'…`. Catching step: transform (written clash). Owner: skip 0.11 E. This code is never emitted.",
+        body: "Dynare refuses: `'shock_paths(learnt_in=…)'…`. Catching step: transform (written clash). Owner: skip 0.7 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S008", ExplainEntry {
@@ -1648,7 +1648,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("S032", ExplainEntry {
         title: "method_of_moments option error",
-        body: "Dynare refuses: `MoM messages`. Catching step: check. Owner: skip 0.7 E. This code is never emitted.",
+        body: "Dynare refuses: `MoM messages`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S035", ExplainEntry {
@@ -1658,7 +1658,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("S037", ExplainEntry {
         title: "shock_paths self reference without a lag",
-        body: "Dynare refuses: `the use of 'self.…' without a lag is not allowed, since it is a circular reference`. Catching step: check. Owner: skip 0.11 E. This code is never emitted.",
+        body: "Dynare refuses: `the use of 'self.…' without a lag is not allowed, since it is a circular reference`. Catching step: check. Owner: skip 0.7 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S038", ExplainEntry {
@@ -1673,12 +1673,12 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("S041", ExplainEntry {
         title: "Subsample lookup and the options / subsamples bodies",
-        body: "Dynare refuses: `A subsample statement has not been issued for alpha`, and the `options` / `subsamples` statement bodies are not read. Catching step: parse. Owner: skip 0.11 E. This code is never emitted.",
+        body: "Dynare refuses: `A subsample statement has not been issued for alpha`, and the `options` / `subsamples` statement bodies are not read. Catching step: parse. Owner: skip 0.7 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S052", ExplainEntry {
         title: "shock_paths body, DATE, and related parse",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.11 E (DATE / `set_time` / `database` / `shock_paths` body / `mshocks` add-multiply / surprise `stderr` / `heteroskedastic_shocks`). This code is never emitted.",
+        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.7 E (DATE / `set_time` / `database` / `shock_paths` body / `mshocks` add-multiply / surprise `stderr` / `heteroskedastic_shocks`). This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S053", ExplainEntry {
@@ -1692,8 +1692,8 @@ Move the call out of the ``steady_state(…)`` operator.",
         kind: ExplainKind::Skipped,
     }),
     ("S061", ExplainEntry {
-        title: "matched_irfs / matched_moments parse",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.7 E. This code is never emitted.",
+        title: "matched_irfs / matched_moments / calibration parse",
+        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E (matched_irfs / matched_moments / matched_irfs_weights; irf_calibration / moment_calibration). This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S062", ExplainEntry {

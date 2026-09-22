@@ -1378,7 +1378,7 @@ pub(crate) enum PriorHeadVerdict {
 /// refuse, in source order. The head's name checks run before the subsample
 /// name is looked up, so a subsample form (`std(e).beta.prior(…)`) carries the
 /// same verdicts; what it refuses *after* them — `A subsample statement has not
-/// been issued for e` — belongs to **0.11**.
+/// been issued for e` — belongs to **0.7**.
 pub(crate) fn prior_std_corr_head_names(
     model: &Model,
     stmt: &DottedStatement,
@@ -1532,7 +1532,7 @@ fn check_prior_body(model: &Model, stmt: &DottedStatement, out: &mut Vec<Diagnos
 /// Whether their parse stops inside the head, before any sentence this module
 /// owns: a `std(…)` / `corr(…)` head carrying a name it refuses, or any subsample
 /// form (`std(e).beta.prior(…)`, `alpha.b.prior(…)`), whose next sentence —
-/// `A subsample statement has not been issued for e` — belongs to **0.11**.
+/// `A subsample statement has not been issued for e` — belongs to **0.7**.
 ///
 /// Every one of those head refuses is a sentence another code carries, so this
 /// only decides whether the body sentences may run.
