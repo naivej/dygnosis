@@ -201,11 +201,17 @@ fn bare_mom_statement_has_no_option_rows() {
     let model = parse("var y; varexo e; model; y = e; end; method_of_moments;");
     assert_eq!(model.mom_statements.len(), 1);
     assert!(model.mom_statements[0].options.is_empty());
+    assert!(
+        !model.mom_statements[0].has_option_list,
+        "a bare statement wrote no list"
+    );
     assert!(model.method_of_moments_span.is_some());
+    // 02 owns the check sentence: this slice records the statement, and the
+    // missing method reaches E382 there.
     let diags = analyze(&model);
     assert!(
-        diags.iter().all(|d| !d.message.contains("mom_method")),
-        "this slice emits no check sentence: {:?}",
+        codes(&diags).contains(&"E382"),
+        "the missing method reaches E382: {:?}",
         codes(&diags)
     );
 }

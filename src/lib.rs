@@ -18,6 +18,7 @@ pub mod check_e030;
 pub mod check_e060;
 pub mod check_estimated_params;
 pub mod check_estimation;
+pub mod check_mom;
 pub mod check_occbin;
 pub mod check_parse;
 pub mod check_symbol_list;
@@ -73,6 +74,7 @@ pub use check_e060::{
 };
 pub use check_estimated_params::check_estimated_params;
 pub use check_estimation::check_estimation;
+pub use check_mom::check_mom;
 pub use check_occbin::check_occbin;
 pub use check_parse::{check_parse, has_structural_error};
 pub use check_symbol_list::check_symbol_list;

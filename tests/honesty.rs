@@ -1658,6 +1658,166 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         stage: JsonStage::Write,
     },
     HonestyRow {
+        code: "E382",
+        fixture: "mom/mom_no_method.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The 'method_of_moments' statement requires a method to be supplied",
+        our_needle: "The 'method_of_moments' statement requires a method to be supplied",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E383",
+        fixture: "mom/mom_gmm_no_datafile.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The 'method_of_moments' statement requires a data file to be supplied",
+        our_needle: "The 'method_of_moments' statement requires a data file to be supplied",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E384",
+        fixture: "mom/mom_analytic.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "The analytic_standard_errors statement requires the GMM option.",
+        our_needle: "The analytic_standard_errors statement requires the GMM option.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E385",
+        fixture: "mom/mom_two_filters.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "method_of_moments: can only use one of HP, one-sided HP, and bandpass filters",
+        our_needle: "method_of_moments: can only use one of HP, one-sided HP, and bandpass filters",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E386",
+        fixture: "mom/mm_not_endo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Matched moment expression has incorrect format: Variable e is not an endogenous",
+        our_needle: "Matched moment expression has incorrect format: Variable e is not an endogenous",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E387",
+        fixture: "mom/mirf_not_exo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "y is not exogenous.",
+        our_needle: "y is not exogenous.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E388",
+        fixture: "mom/mirf_dup.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "matched_irfs: the pair endogenous y with exogenous e appears two times",
+        our_needle: "matched_irfs: the pair endogenous y with exogenous e appears two times",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E389",
+        fixture: "mom/mirfw_dup.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "matched_irfs: the tuple (y(1),e,c(2),e) appears two times",
+        our_needle: "matched_irfs: the tuple (y(1),e,c(2),e) appears two times",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E390",
+        fixture: "mom/mirf_count.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "matched_irfs: the 'periods' and 'values' keywords are not followed by the same number of elements",
+        our_needle: "matched_irfs: the 'periods' and 'values' keywords are not followed by the same number of elements",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E391",
+        fixture: "mom/mirf_weights_count.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "matched_irfs: the 'periods' and 'weights' keywords are not followed by the same number of elements",
+        our_needle: "matched_irfs: the 'periods' and 'weights' keywords are not followed by the same number of elements",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E392",
+        fixture: "mom/mirf_date.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "matched_irfs: dates are not allowed in the 'periods' keyword",
+        our_needle: "matched_irfs: dates are not allowed in the 'periods' keyword",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E058",
+        fixture: "mom/mc_undeclared.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Unknown symbol: zzz.",
+        our_needle: "in moment_calibration is not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E317",
+        fixture: "mom/mc_not_endo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "e is not endogenous.",
+        our_needle: "e is not endogenous.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E317",
+        fixture: "mom/mirf_det.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "ed is an exogenous deterministic.",
+        our_needle: "ed is an exogenous deterministic.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E387",
+        fixture: "mom/ic_bad_shock.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Variable y is not an exogenous.",
+        our_needle: "Variable y is not an exogenous.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/mom_empty_list.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "syntax error, unexpected ')'",
+        our_needle: "at least one option",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
         code: "E307",
         fixture: "d_open/e307_trend_twice.mod",
         kind: HonestyKind::Error {

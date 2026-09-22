@@ -767,6 +767,30 @@ impl ShapeRefuse {
     }
 }
 
+/// Our wording for a shape 7.1 refuses with generic bison text: short, one
+/// problem, naming the command or the option. The hint names what the grammar
+/// takes there. Shared by the MS-SBVAR family (**E001** from a recorded
+/// `ShapeRefuse`) and the moment family (whose handed-over shapes are not).
+pub fn shape_refuse_wording(subject: &str, expected: &str) -> String {
+    format!("Unexpected token in '{subject}'. The grammar takes {expected} here.")
+}
+
+/// **E280**: an `external_function` name used as a bare variable inside a model
+/// expression. One wording, so the several surfaces that can meet it agree.
+pub fn external_function_in_model_message(name: &str) -> String {
+    format!(
+        "Symbol {name} is a function name external to Dynare. It cannot be used like a variable without input argument inside model."
+    )
+}
+
+/// **E281**: a name first written outside `model` (or in another statement's
+/// expression) used inside a model expression.
+pub fn mod_file_local_in_model_message(name: &str) -> String {
+    format!(
+        "Variable {name} not allowed inside model declaration. Its scope is only outside model."
+    )
+}
+
 /// The dotted `….prior(…)` / `….options(…)` / `….subsamples(…)` statement family.
 #[derive(Clone, Debug)]
 pub struct DottedStatement {
@@ -933,6 +957,10 @@ pub struct ConditionalForecastPath {
 pub struct MomStatement {
     /// Keyword through `;`.
     pub span: Span,
+    /// The statement wrote `(…)` at all. `method_of_moments()` is a syntax refuse
+    /// while a bare `method_of_moments;` reaches the missing-method sentence, and
+    /// both store an empty option list.
+    pub has_option_list: bool,
     /// Empty when the statement has no `(…)`.
     pub options: Vec<FamilyOption>,
 }

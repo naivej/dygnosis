@@ -127,10 +127,7 @@ fn unit_end(model: &Model, unit: &CheckUnit) -> u32 {
 /// problem, naming the command or the option. The hint names what the grammar
 /// takes there.
 fn shape_refuse_message(refuse: &ShapeRefuse) -> String {
-    format!(
-        "Unexpected token in '{}'. The grammar takes {} here.",
-        refuse.subject, refuse.expected
-    )
+    crate::model::shape_refuse_wording(&refuse.subject, refuse.expected)
 }
 
 /// The refusals 7.1 prints while reading the file, in file order. Returns `true`

@@ -50,7 +50,9 @@ fn check_planner_lead_local(model: &Model) -> Vec<Diagnostic> {
     let Some(id) = model.planner_objective_expr else {
         return Vec::new();
     };
-    let span = model.planner_objective_span.unwrap_or(Span { start: 0, end: 1 });
+    let span = model
+        .planner_objective_span
+        .unwrap_or(Span { start: 0, end: 1 });
     let locals: HashSet<Name> = model
         .equations
         .iter()
@@ -225,9 +227,7 @@ fn check_matlab_locals(model: &Model) -> Vec<Diagnostic> {
                 out.push(err(
                     r.span,
                     "E280",
-                    format!(
-                        "Symbol {name} is a function name external to Dynare. It cannot be used like a variable without input argument inside model."
-                    ),
+                    crate::model::external_function_in_model_message(name),
                 ));
             }
             if mod_locals.contains(&r.name) && seen_in.insert((r.name, "E281")) {
@@ -235,9 +235,7 @@ fn check_matlab_locals(model: &Model) -> Vec<Diagnostic> {
                 out.push(err(
                     r.span,
                     "E281",
-                    format!(
-                        "Variable {name} not allowed inside model declaration. Its scope is only outside model."
-                    ),
+                    crate::model::mod_file_local_in_model_message(name),
                 ));
             }
         }

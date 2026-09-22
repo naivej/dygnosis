@@ -2026,7 +2026,9 @@ impl Parser<'_> {
     fn parse_mom_statement(&mut self) {
         let keyword = self.bump().span;
         let mut options = Vec::new();
+        let mut has_option_list = false;
         if self.at(TokenKind::LParen) {
+            has_option_list = true;
             let from = self.i;
             self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
             let close_i = self.i;
@@ -2052,6 +2054,7 @@ impl Parser<'_> {
                 start: keyword.start,
                 end,
             },
+            has_option_list,
             options,
         });
     }

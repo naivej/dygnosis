@@ -43,7 +43,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 297 keys: 238 shared + 27 added + 32 skipped.
+// 307 keys: 249 shared + 27 added + 31 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -197,7 +197,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E058", ExplainEntry {
         title: "Undeclared variable in a block that names symbols",
-        body: "A block that names symbols refers to one that is not declared at all: an `initval` / `endval` entry, a `histval` lag, a `filter_initial_state` entry, an `init2shocks` pair, a `homotopy_setup` row, a `shock_groups` member, an `svar_identification` body row, a `conditional_forecast_paths` `var` row, or a `std(…)` / `corr(…)` prior head name. Dynare refuses: `Unknown symbol: undeclared_zzz`.\n\n**Warrant**\n\nThe editor names the undeclared entry and its block; Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the variable, or remove the stray entry.",
+        body: "A block that names symbols refers to one that is not declared at all: an `initval` / `endval` entry, a `histval` lag, a `filter_initial_state` entry, an `init2shocks` pair, a `homotopy_setup` row, a `shock_groups` member, an `svar_identification` body row, a `conditional_forecast_paths` `var` row, a `std(…)` / `corr(…)` prior head name, or a name slot of a `moment_calibration` / `irf_calibration` row or of a `matched_irfs` / `matched_irfs_weights` row. Dynare refuses: `Unknown symbol: undeclared_zzz`.\n\n**Warrant**\n\nThe editor names the undeclared entry and its block; Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the variable, or remove the stray entry.",
         kind: ExplainKind::Shared,
     }),
     ("W051", ExplainEntry {
@@ -1037,7 +1037,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E317", ExplainEntry {
         title: "Name is not endogenous, or is an exogenous deterministic",
-        body: "A name that must be endogenous is not. Dynare refuses `N is not endogenous.`, and a ``varexo_det`` name on a ``std(…)`` / ``corr(…)`` prior head gets their other sentence, `N is an exogenous deterministic.` The surfaces are the ``optim_weights`` weights, a ``conditional_forecast_paths`` `var` row, and a prior head.\n\n**Fix**\n\nName an endogenous variable.",
+        body: "A name that must be endogenous is not. Dynare refuses `N is not endogenous.`, and a ``varexo_det`` name on a ``std(…)`` / ``corr(…)`` prior head or in the shock slot of a ``matched_irfs`` / ``matched_irfs_weights`` row gets their other sentence, `N is an exogenous deterministic.` The surfaces are the ``optim_weights`` weights, a ``conditional_forecast_paths`` `var` row, a prior head, both names of a ``moment_calibration`` row, the endogenous of an ``irf_calibration`` row, and the endogenous slot of a ``matched_irfs`` / ``matched_irfs_weights`` row.\n\n**Fix**\n\nName an endogenous variable.",
         kind: ExplainKind::Shared,
     }),
     ("E318", ExplainEntry {
@@ -1546,6 +1546,61 @@ Remove the entry from the data file, or name one of the four allowed kinds.",
 Move the call out of the ``steady_state(…)`` operator.",
         kind: ExplainKind::Shared,
     }),
+    ("E382", ExplainEntry {
+        title: "method_of_moments without a method",
+        body: "A ``method_of_moments`` statement carries no ``mom_method`` option, so Dynare cannot tell GMM, SMM, and IRF matching apart. Dynare refuses: `The 'method_of_moments' statement requires a method to be supplied via the 'mom_method' option. Possible values are 'GMM', 'SMM', or 'IRF_MATCHING'.`\n\nThe option value must be one of those three bare words; a quoted or other word is a syntax error, reported as **E001**.\n\n**Fix**\n\nAdd ``mom_method=GMM``, ``mom_method=SMM``, or ``mom_method=IRF_MATCHING``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E383", ExplainEntry {
+        title: "method_of_moments without a data file",
+        body: "A ``method_of_moments`` statement asks for ``GMM`` or ``SMM`` but names no ``datafile``. Both methods match moments against data, so the file is required. Dynare refuses: `The 'method_of_moments' statement requires a data file to be supplied via the 'datafile' option.`\n\n``IRF_MATCHING`` does not need one. The file itself need not exist yet at this step; a named one that is missing is **W160**.\n\n**Fix**\n\nAdd ``datafile='your_data.csv'``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E384", ExplainEntry {
+        title: "analytic option without GMM",
+        body: "``analytic_standard_errors`` or ``analytic_jacobian`` is a bare flag on a ``method_of_moments`` statement whose ``mom_method`` is ``SMM`` or ``IRF_MATCHING``. Only GMM has the analytic derivatives these options ask for. Dynare refuses: `The analytic_standard_errors statement requires the GMM option.` (or ``analytic_jacobian`` in place of the first name).\n\n**Fix**\n\nDrop the option, or switch ``mom_method`` to ``GMM``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E385", ExplainEntry {
+        title: "method_of_moments with more than one filter",
+        body: "A ``method_of_moments`` statement asks for more than one of ``hp_filter``, ``one_sided_hp_filter``, and ``bandpass_filter``. Dynare refuses: `method_of_moments: can only use one of HP, one-sided HP, and bandpass filters`\n\nThis is the ``method_of_moments`` sentence; ``stoch_simul`` has its own (**E238**).\n\n**Fix**\n\nKeep one filter.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E386", ExplainEntry {
+        title: "Matched moment is not a supported shape",
+        body: "A ``matched_moments`` row is not a shape the moment matcher accepts. Dynare refuses: `Matched moment expression has incorrect format: {reason}`, where the reason is one of:\n\n- `Variable {name} is not an endogenous`\n- `Unsupported binary operator`\n- `First argument of power expression must be a variable`\n- `Second argument of power expression must be a positive integer`\n- `Unsupported expression`\n\nA moment is a product of endogenous variables, each optionally raised to a positive whole-number power, each optionally with a lead or a lag. So ``y``, ``c*y``, ``y^2``, ``y*y(-1)`` and ``y(1)`` are accepted, while ``y+c``, ``log(y)``, ``1``, and ``y^c`` are not. The reason names the first problem found.\n\n**Fix**\n\nRewrite the row as a product of endogenous variables with positive integer powers.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E387", ExplainEntry {
+        title: "Name is not exogenous",
+        body: "A name in a shock slot is declared, but is neither a ``varexo`` nor a ``varexo_det``: an endogenous variable or a parameter. Dynare refuses: `{name} is not exogenous.` The slots are the ``varexo`` row of ``matched_irfs`` and of ``matched_irfs_weights``.\n\nFor the ``irf_calibration`` shock, Dynare's own sentence names the row's endogenous instead: `Variable {endo} is not an exogenous.` That sentence is this code as well.\n\n**Fix**\n\nName a ``varexo`` variable.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E388", ExplainEntry {
+        title: "matched_irfs pair repeated",
+        body: "One ``matched_irfs`` block lists the same endogenous/shock pair twice. Dynare refuses: `matched_irfs: the pair endogenous {y} with exogenous {e} appears two times`. The periods may differ; the pair is the key. Two separate blocks may repeat a pair silently.\n\n**Fix**\n\nMerge the two rows into one, or drop the second.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E389", ExplainEntry {
+        title: "matched_irfs_weights tuple repeated",
+        body: "One ``matched_irfs_weights`` block lists the same six-part tuple twice: both endogenous names with their periods, and both shock names. The weight is not part of the key, so two rows differing only in the weight are refused. Dynare refuses: `matched_irfs: the tuple ({y}({1}),{e},{c}({2}),{e}) appears two times`, with no spaces around the parts.\n\n**Fix**\n\nMerge the two rows, or drop the second.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E390", ExplainEntry {
+        title: "matched_irfs periods and values counts differ",
+        body: "In one ``matched_irfs`` row the ``periods`` and ``values`` lists hold different numbers of elements. Dynare refuses: `matched_irfs: the 'periods' and 'values' keywords are not followed by the same number of elements`. A range such as ``1:2`` counts as one period, and a parenthesised value such as ``(xx)`` as one value.\n\n**Fix**\n\nGive one value per period.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E391", ExplainEntry {
+        title: "matched_irfs periods and weights counts differ",
+        body: "In one ``matched_irfs`` row the ``weights`` list holds more than one element and does not match the number of periods. Dynare refuses: `matched_irfs: the 'periods' and 'weights' keywords are not followed by the same number of elements`. A single weight is accepted and copied across the periods.\n\n**Fix**\n\nGive one weight per period, or a single weight for the whole row.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E392", ExplainEntry {
+        title: "matched_irfs periods holds a date",
+        body: "A ``periods`` entry of a ``matched_irfs`` row is written as a date such as ``2000Q1``. The row counts periods after the start of the simulation, so it takes integers and integer ranges only. Dynare refuses: `matched_irfs: dates are not allowed in the 'periods' keyword`\n\n**Fix**\n\nWrite the horizon as an integer, or as an ``a:b`` range of integers.",
+        kind: ExplainKind::Shared,
+    }),
     ("E186", ExplainEntry {
         title: "Unused endogenous after substitution",
         body: "Dynare refuses: `Error: <name> not used in the model block`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
@@ -1646,11 +1701,6 @@ Move the call out of the ``steady_state(…)`` operator.",
         body: "Dynare refuses: `'<cmd>' … is not supported for heterogeneous models`. Catching step: check. Owner: skip 0.9 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S032", ExplainEntry {
-        title: "method_of_moments option error",
-        body: "Dynare refuses: `MoM messages`. Catching step: check. Owner: skip 0.6 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
     ("S035", ExplainEntry {
         title: "Heterogeneous shocks with a bad type",
         body: "Dynare refuses: `not a heterogeneous exogenous variable`. Catching step: check. Owner: skip 0.9 E. This code is never emitted.",
@@ -1692,8 +1742,8 @@ Move the call out of the ``steady_state(…)`` operator.",
         kind: ExplainKind::Skipped,
     }),
     ("S061", ExplainEntry {
-        title: "matched_irfs / matched_moments / calibration parse",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E (matched_irfs / matched_moments / matched_irfs_weights; irf_calibration / moment_calibration). This code is never emitted.",
+        title: "moment / calibration syntax the parser hands over",
+        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E. The rows and shapes this key keeps are the ones a record cannot show: a row P-mom skipped inside a block that stored a good row, a bad option word on a block opener (`irf_calibration(hp_filter=1600)`, `matched_irfs(zoom)`), a `periods` / `lags` entry the grammar cannot spell (`-1`, `foo`, `1.5`, a three-part range), the `periods` / `values` / `weights` keyword shapes of a `matched_irfs` row, and a weight that is not a parenthesised expression. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S062", ExplainEntry {
