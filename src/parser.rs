@@ -145,6 +145,15 @@ fn is_trailing_symbol_command(cmd: &str) -> bool {
         || cmd.eq_ignore_ascii_case("calib_smoother")
         || cmd.eq_ignore_ascii_case("ms_irf")
         || cmd.eq_ignore_ascii_case("plot_conditional_forecast")
+        || cmd.eq_ignore_ascii_case("forecast")
+        || cmd.eq_ignore_ascii_case("rplot")
+        || cmd.eq_ignore_ascii_case("dynasave")
+        || cmd.eq_ignore_ascii_case("dynatype")
+        || cmd.eq_ignore_ascii_case("shock_decomposition")
+        || cmd.eq_ignore_ascii_case("realtime_shock_decomposition")
+        || cmd.eq_ignore_ascii_case("initial_condition_decomposition")
+        || cmd.eq_ignore_ascii_case("plot_shock_decomposition")
+        || cmd.eq_ignore_ascii_case("squeeze_shock_decomposition")
 }
 
 /// The three words the pin's grammar keys a dotted statement's body on.
@@ -4846,7 +4855,7 @@ impl Parser<'_> {
                 let id = self.intern.intern(&lex);
                 self.model.osr_params.push(id);
                 self.model.command_symbols.push(CommandSymbol {
-                    command: "osr".to_string(),
+                    command: "osr_params".to_string(),
                     name: id,
                     span,
                     list_id,
@@ -6895,7 +6904,9 @@ impl Parser<'_> {
         self.bump();
         let name = self.intern.intern(&lex);
         self.model.command_symbols.push(CommandSymbol {
-            command: command.to_string(),
+            // 7.1 names the command in its sentence with its own lowercase word:
+            // `STOCH_SIMUL z;` prints `stoch_simul: Variable z was not declared.`
+            command: command.to_ascii_lowercase(),
             name,
             span,
             list_id: self.symbol_list_id,

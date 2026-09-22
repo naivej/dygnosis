@@ -632,12 +632,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E239", ExplainEntry {
         title: "Undeclared name in a command symbol list",
-        body: "A trailing symbol list on ``stoch_simul``, ``estimation``, ``calib_smoother``, ``ramsey_policy``, ``discretionary_policy``, ``osr``, or the ``osr_params`` statement names a symbol that is not declared. Dynare refuses: `{cmd}: Variable {name} was not declared.`\n\n**Fix**\n\nDeclare the symbol, or remove it from the list.",
+        body: "A trailing symbol list names a symbol that is not declared. Every command that takes such a list is covered: ``stoch_simul``, ``estimation``, ``calib_smoother``, ``ramsey_policy``, ``discretionary_policy``, ``osr``, ``ms_irf``, ``plot_conditional_forecast``, ``forecast``, ``rplot``, ``dynasave``, ``dynatype``, ``shock_decomposition``, ``realtime_shock_decomposition``, ``initial_condition_decomposition``, ``plot_shock_decomposition``, ``squeeze_shock_decomposition``, and the ``osr_params`` statement. Dynare refuses: `{cmd}: Variable {name} was not declared.`\n\n**Fix**\n\nDeclare the symbol, or remove it from the list.",
         kind: ExplainKind::Shared,
     }),
     ("E240", ExplainEntry {
         title: "Wrong type in a command symbol list",
-        body: "A trailing symbol list names a declared symbol of the wrong type: those lists hold endogenous variables, and ``osr_params`` holds parameters. Dynare refuses: `{cmd}: Variable {name} is not one of {endogenous}` (``{parameter}`` for ``osr_params``).\n\n**Fix**\n\nUse a symbol of the type the command accepts, or remove it from the list.",
+        body: "A trailing symbol list names a declared symbol of the wrong type. Dynare refuses with one of four lists, each naming the types that command accepts: `{cmd}: Variable {name} is not one of {endogenous}`, `{endogenous, exogenous}` (``rplot``, ``dynasave``, ``dynatype``), `{endogenous, epilogue}` (``plot_shock_decomposition``), or `{parameter}` (``osr_params``, whose sentence prints `osr: `).\n\n**Fix**\n\nUse a symbol of the type the command accepts, or remove it from the list.",
         kind: ExplainKind::Shared,
     }),
     ("W201", ExplainEntry {

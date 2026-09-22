@@ -2976,6 +2976,266 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         stage: JsonStage::Check,
     },
     HonestyRow {
+        code: "E239",
+        fixture: "lists/e239_forecast_z.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "forecast: Variable z was not declared.",
+        our_needle: "forecast: Variable z was not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E239",
+        fixture: "lists/e239_rplot_z.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "rplot: Variable z was not declared.",
+        our_needle: "rplot: Variable z was not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E239",
+        fixture: "lists/e239_dynasave_z.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "dynasave: Variable z was not declared.",
+        our_needle: "dynasave: Variable z was not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E239",
+        fixture: "lists/e239_dynatype_z.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "dynatype: Variable z was not declared.",
+        our_needle: "dynatype: Variable z was not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E239",
+        fixture: "lists/e239_shockdec_z.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "shock_decomposition: Variable z was not declared.",
+        our_needle: "shock_decomposition: Variable z was not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E239",
+        fixture: "lists/e239_squeeze_z.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "squeeze_shock_decomposition: Variable z was not declared.",
+        our_needle: "squeeze_shock_decomposition: Variable z was not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E239",
+        fixture: "lists/e239_osr_aux_endo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "osr: Variable AUX_ENDO_1 was not declared.",
+        our_needle: "osr: Variable AUX_ENDO_1 was not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E239",
+        fixture: "lists/e239_toplevel_forecast.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "forecast: Variable xx was not declared.",
+        our_needle: "forecast: Variable xx was not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E239",
+        fixture: "lists/e239_mloc_forecast.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "forecast: Variable mloc was not declared.",
+        our_needle: "forecast: Variable mloc was not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E239",
+        fixture: "lists/e239_forecast_upper.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "forecast: Variable z was not declared.",
+        our_needle: "forecast: Variable z was not declared.",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_forecast_a.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "forecast: Variable a is not one of {endogenous}",
+        our_needle: "forecast: Variable a is not one of {endogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_rplot_a.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "rplot: Variable a is not one of {endogenous, exogenous}",
+        our_needle: "rplot: Variable a is not one of {endogenous, exogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_rplot_ed.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "rplot: Variable ed is not one of {endogenous, exogenous}",
+        our_needle: "rplot: Variable ed is not one of {endogenous, exogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_dynatype_a.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "dynatype: Variable a is not one of {endogenous, exogenous}",
+        our_needle: "dynatype: Variable a is not one of {endogenous, exogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_shockdec_e.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "shock_decomposition: Variable e is not one of {endogenous}",
+        our_needle: "shock_decomposition: Variable e is not one of {endogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_realtime_a.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "realtime_shock_decomposition: Variable a is not one of {endogenous}",
+        our_needle: "realtime_shock_decomposition: Variable a is not one of {endogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_icdec_a.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "initial_condition_decomposition: Variable a is not one of {endogenous}",
+        our_needle: "initial_condition_decomposition: Variable a is not one of {endogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_plotsd_a.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "plot_shock_decomposition: Variable a is not one of {endogenous, epilogue}",
+        our_needle: "plot_shock_decomposition: Variable a is not one of {endogenous, epilogue}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_plotsd_exo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "plot_shock_decomposition: Variable e is not one of {endogenous, epilogue}",
+        our_needle: "plot_shock_decomposition: Variable e is not one of {endogenous, epilogue}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_osr_trailing.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "osr: Variable a is not one of {endogenous}",
+        our_needle: "osr: Variable a is not one of {endogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_epilogue_forecast.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "forecast: Variable gg is not one of {endogenous}",
+        our_needle: "forecast: Variable gg is not one of {endogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_gg_stoch.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "stoch_simul: Variable gg is not one of {endogenous}",
+        our_needle: "stoch_simul: Variable gg is not one of {endogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_trend_rplot.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "rplot: Variable tt is not one of {endogenous, exogenous}",
+        our_needle: "rplot: Variable tt is not one of {endogenous, exogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_extfun_dynatype.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "dynatype: Variable foo is not one of {endogenous, exogenous}",
+        our_needle: "dynatype: Variable foo is not one of {endogenous, exogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_removed_stoch.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "stoch_simul: Variable c is not one of {endogenous}",
+        our_needle: "stoch_simul: Variable c is not one of {endogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E240",
+        fixture: "lists/e240_modellocal_lists.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "forecast: Variable foo is not one of {endogenous}",
+        our_needle: "forecast: Variable foo is not one of {endogenous}",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
         code: "E227",
         fixture: "d_ms/e227_data_after.mod",
         kind: HonestyKind::Error {
@@ -4457,6 +4717,7 @@ fn surface_matrix_claims_every_official_message() {
                 || fixture.starts_with("d_surgery/")
                 || fixture.starts_with("d_ms/")
                 || fixture.starts_with("d_writer/")
+                || fixture.starts_with("lists/")
         })
         .collect();
     fixtures.sort_unstable();

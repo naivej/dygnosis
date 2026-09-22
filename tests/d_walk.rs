@@ -170,7 +170,7 @@ fn restriction_fname_and_osr_params_symbols() {
     let osr = parse("osr_params rho, z;");
     assert_eq!(osr.osr_params.len(), 2);
     assert_eq!(osr.command_symbols.len(), 2);
-    assert_eq!(osr.command_symbols[0].command, "osr");
+    assert_eq!(osr.command_symbols[0].command, "osr_params");
     assert_eq!(osr.name(osr.command_symbols[0].name), "rho");
     assert_eq!(osr.name(osr.command_symbols[1].name), "z");
 }
