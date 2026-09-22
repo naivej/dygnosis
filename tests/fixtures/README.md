@@ -32,6 +32,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 | `clash/` | written-clash fires (`E026`–`E028`, `E104`, `E113`, `E179`) and their quiets |
 | `d_check/` | check-class fires (`E200`–`E218`, `W200`) and their quiets |
 | `occbin/` | library OccBin structure (`occbin_constraints`, tag map, `⟂` / `_|_`, `shocks(surprise)`) and D-occbin fire files (`E170`–`E177`, `E180`–`E185`, `W170`). `e178_surprise.mod` is the E178 honesty fire (`periods`/`values`). |
+| `mom/` | the five moment / IRF-calibration blocks and the `method_of_moments` statement parse as structure (0.6.0 01). Not a diagnostic: each file is a legal shape 7.1 accepts and this product must not refuse. |
 
 `e001/` files stop later checks (`analyze()` stops at a parse error). Do not use them to prove a W* warning.
 

@@ -8,10 +8,13 @@ use crate::intern::{Interner, Name};
 use crate::lexer::{tokenize, Token, TokenKind};
 use crate::macro_expand::expand_macros_full;
 use crate::model::{
-    Assignment, ConditionalForecastPath, ConditionalForecastPaths, DataStatement, Decl, DottedHead,
-    DottedKind, DottedStatement, Equation, EstimationStatement, FamilyOption, FamilyValueKind,
-    Init2ShocksBlock, Init2ShocksRow, Model, MsStatement, OptimWeight, ParseIssue, ParseIssueKind,
-    ShapeRefuse, ShockGroup, SvarEquation, SvarIdentification, SvarIdentificationElement,
+    Assignment, CalibrationRange, ConditionalForecastPath, ConditionalForecastPaths, DataStatement,
+    Decl, DottedHead, DottedKind, DottedStatement, Equation, EstimationStatement, FamilyOption,
+    FamilyValueKind, Init2ShocksBlock, Init2ShocksRow, IrfCalibrationBlock, IrfCalibrationRow,
+    MatchedIrfsBlock, MatchedIrfsRow, MatchedIrfsWeight, MatchedIrfsWeightsBlock, MatchedMoment,
+    Model, MomStatement, MomentCalibrationBlock, MomentCalibrationRow, MsStatement, OptimWeight,
+    ParseIssue, ParseIssueKind, ShapeRefuse, ShockGroup, SvarEquation, SvarIdentification,
+    SvarIdentificationElement,
 };
 use crate::model::{
     ChangeTypeKind, ChangeTypeStmt, CommandSymbol, Complementarity, ComplementarityTriple,
@@ -358,7 +361,9 @@ const BLOCK_OPENERS: &[&str] = &[
     "init2shocks",
     "homotopy_setup",
     "shock_groups",
-    // The pin's remaining `DYNARE_BLOCK` openers, whose bodies this parser skips.
+    // Every Dynare block keyword. `consume_until_end` / `at_block_opener` stop a
+    // body at the next one. The five moment/calibration names are parsed below;
+    // the rest still go through `at_skipped_block`.
     "matched_irfs",
     "matched_irfs_weights",
     "matched_moments",
@@ -601,6 +606,12 @@ fn bare_include_literal(argument: &str) -> Option<String> {
     Some(raw.to_string())
 }
 
+/// Whether a block opener's `(…)` held this one bare word.
+fn is_flag_word(word: &Option<String>, flag: &str) -> bool {
+    word.as_deref()
+        .is_some_and(|lex| lex.eq_ignore_ascii_case(flag))
+}
+
 fn is_ident_only(s: &str) -> bool {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
@@ -697,6 +708,18 @@ impl Parser<'_> {
                 self.parse_homotopy_setup_block();
             } else if self.at_ident_ci("shock_groups") {
                 self.parse_shock_groups_block();
+            } else if self.at_ident_ci("moment_calibration") && self.at_command_shape(1) {
+                self.parse_moment_calibration_block();
+            } else if self.at_ident_ci("irf_calibration") && self.at_command_shape(1) {
+                self.parse_irf_calibration_block();
+            } else if self.at_ident_ci("matched_moments") && self.at_command_shape(1) {
+                self.parse_matched_moments_block();
+            } else if self.at_ident_ci("matched_irfs_weights") && self.at_command_shape(1) {
+                self.parse_matched_irfs_weights_block();
+            } else if self.at_ident_ci("matched_irfs") && self.at_command_shape(1) {
+                self.parse_matched_irfs_block();
+            } else if self.at_ident_ci("method_of_moments") && self.at_statement_boundary() {
+                self.parse_mom_statement();
             } else if self.at_ident_ci("bvar_density")
                 || self.at_ident_ci("bvar_forecast")
                 || self.at_ident_ci("bvar_irf")
@@ -1995,6 +2018,607 @@ impl Parser<'_> {
             label_span,
             members,
         })
+    }
+
+    /// `method_of_moments[(?)];` — a `;` statement, not a block. Its `(…)` list is
+    /// recorded as `FamilyOption` rows and keeps the option side-effects the skip
+    /// path used to run, so **W160** / **E271** do not move.
+    fn parse_mom_statement(&mut self) {
+        let keyword = self.bump().span;
+        let mut options = Vec::new();
+        if self.at(TokenKind::LParen) {
+            let from = self.i;
+            self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+            let close_i = self.i;
+            self.record_deprecated_options_in_range(from, close_i);
+            self.record_skip_command_options("method_of_moments", from, close_i);
+            self.record_option_twice(from, close_i);
+            options = self.read_family_options(from, close_i);
+        }
+        while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+            self.bump();
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        // The clash check reads the keyword's own span, not the statement's.
+        if self.model.method_of_moments_span.is_none() {
+            self.model.method_of_moments_span = Some(keyword);
+        }
+        self.model.mom_statements.push(MomStatement {
+            span: Span {
+                start: keyword.start,
+                end,
+            },
+            options,
+        });
+    }
+
+    /// `matched_moments;` one model expression per `;`, `end;`.
+    fn parse_matched_moments_block(&mut self) {
+        let (opener_span, _, body_i, body_end_i) = self.bump_block_opener("matched_moments");
+        let end = self.block_end_after_consume();
+        self.model.matched_moments_blocks.push(Span {
+            start: opener_span.start,
+            end,
+        });
+        let saved = self.i;
+        self.i = body_i;
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            let before = self.i;
+            if let Some(row) = self.read_matched_moment(body_end_i) {
+                self.model.matched_moments.push(row);
+            }
+            if self.i <= before {
+                self.bump();
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+    }
+
+    /// One `model_expression ';'` row. An empty row is skipped, not stored.
+    /// Leftover tokens after the expression (`y = 3;`) mean the row does not
+    /// match: skip to its `;` and store nothing (close call 1).
+    fn read_matched_moment(&mut self, end_i: usize) -> Option<MatchedMoment> {
+        if self.at(TokenKind::Semi) {
+            self.bump();
+            return None;
+        }
+        let start = self.current_start();
+        let expr_from = self.i;
+        let expr = self.parse_expr();
+        if !self.at(TokenKind::Semi) {
+            self.skip_until_semi();
+            self.eat(TokenKind::Semi);
+            return None;
+        }
+        let text = join_lexemes(self.src, &self.tokens[expr_from..self.i]);
+        let end = self.finish_row(end_i);
+        Some(MatchedMoment {
+            text,
+            span: Span { start, end },
+            expr,
+        })
+    }
+
+    /// `matched_irfs[(overwrite)];` one `var`/`varexo` pair per `;`, `end;`.
+    fn parse_matched_irfs_block(&mut self) {
+        let (opener_span, word, body_i, body_end_i) = self.bump_block_opener("matched_irfs");
+        let end = self.block_end_after_consume();
+        let rows = self.read_matched_irfs_rows(body_i, body_end_i);
+        self.model.matched_irfs.push(MatchedIrfsBlock {
+            span: Span {
+                start: opener_span.start,
+                end,
+            },
+            overwrite: is_flag_word(&word, "overwrite"),
+            rows,
+        });
+    }
+
+    fn read_matched_irfs_rows(&mut self, body_i: usize, body_end_i: usize) -> Vec<MatchedIrfsRow> {
+        let saved = self.i;
+        self.i = body_i;
+        let mut rows = Vec::new();
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            let before = self.i;
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                continue;
+            }
+            if let Some(row) = self.read_matched_irfs_row(body_end_i) {
+                rows.push(row);
+            }
+            if self.i <= before {
+                self.skip_until_semi();
+                self.eat(TokenKind::Semi);
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+        rows
+    }
+
+    /// One `var ENDO; varexo EXO; periods ?; values ?; [weights ?;]` row, in either
+    /// `var`/`varexo` order and either `values`/`weights` order.
+    fn read_matched_irfs_row(&mut self, end_i: usize) -> Option<MatchedIrfsRow> {
+        let start = self.current_start();
+        let mut endogenous = None;
+        let mut exogenous = None;
+        while self.at_ident_ci("var") || self.at_ident_ci("varexo") {
+            let is_var = self.at_ident_ci("var");
+            self.bump();
+            let (name, span) = self.read_symbol()?;
+            if is_var {
+                endogenous.get_or_insert((name, span));
+            } else {
+                exogenous.get_or_insert((name, span));
+            }
+            self.eat(TokenKind::Semi);
+        }
+        let (endogenous, endogenous_span) = endogenous?;
+        let (exogenous, exogenous_span) = exogenous?;
+        let mut periods = Vec::new();
+        if self.at_ident_ci("periods") {
+            periods = self.read_keyword_entries(end_i);
+        }
+        let mut values = Vec::new();
+        let mut weights = Vec::new();
+        // Either keyword may come first, and each appears at most once.
+        for _ in 0..2 {
+            if self.at_ident_ci("values") {
+                values = self.read_keyword_entries(end_i);
+            } else if self.at_ident_ci("weights") {
+                weights = self.read_keyword_entries(end_i);
+            }
+        }
+        let end = self.finish_row(end_i);
+        Some(MatchedIrfsRow {
+            endogenous,
+            endogenous_span,
+            exogenous,
+            exogenous_span,
+            periods,
+            values,
+            weights,
+            span: Span { start, end },
+        })
+    }
+
+    /// `matched_irfs_weights[(overwrite)];` one four-name tuple per `;`, `end;`.
+    fn parse_matched_irfs_weights_block(&mut self) {
+        let (opener_span, word, body_i, body_end_i) =
+            self.bump_block_opener("matched_irfs_weights");
+        let end = self.block_end_after_consume();
+        let saved = self.i;
+        self.i = body_i;
+        let mut rows = Vec::new();
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            let before = self.i;
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                continue;
+            }
+            if let Some(row) = self.read_matched_irfs_weight_row(body_end_i) {
+                rows.push(row);
+            }
+            if self.i <= before {
+                self.skip_until_semi();
+                self.eat(TokenKind::Semi);
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+        self.model
+            .matched_irfs_weight_rows
+            .extend(rows.iter().cloned());
+        self.model
+            .matched_irfs_weights
+            .push(MatchedIrfsWeightsBlock {
+                span: Span {
+                    start: opener_span.start,
+                    end,
+                },
+                overwrite: is_flag_word(&word, "overwrite"),
+                rows,
+            });
+    }
+
+    /// One `name(periods), exo, name(periods), exo, expression;` row.
+    fn read_matched_irfs_weight_row(&mut self, end_i: usize) -> Option<MatchedIrfsWeight> {
+        let start = self.current_start();
+        let (left_endo, left_endo_span, left_periods, left_periods_span) =
+            self.read_weighted_symbol()?;
+        self.eat(TokenKind::Comma);
+        let (left_exo, left_exo_span) = self.read_symbol()?;
+        self.eat(TokenKind::Comma);
+        let (right_endo, right_endo_span, right_periods, right_periods_span) =
+            self.read_weighted_symbol()?;
+        self.eat(TokenKind::Comma);
+        let (right_exo, right_exo_span) = self.read_symbol()?;
+        self.eat(TokenKind::Comma);
+        let (weight_text, weight_span) = self.read_expression_text();
+        let end = self.finish_row(end_i);
+        Some(MatchedIrfsWeight {
+            left_endo,
+            left_endo_span,
+            left_periods,
+            left_periods_span,
+            left_exo,
+            left_exo_span,
+            right_endo,
+            right_endo_span,
+            right_periods,
+            right_periods_span,
+            right_exo,
+            right_exo_span,
+            weight_text,
+            weight_span,
+            span: Span { start, end },
+        })
+    }
+
+    /// `name` then the optional `(integer_or_range)` that follows it. `1` and `1:2`
+    /// are each one period entry.
+    fn read_weighted_symbol(&mut self) -> Option<(Name, Span, String, Span)> {
+        let (name, span) = self.read_symbol()?;
+        let (text, group_span) = match self.read_paren_group() {
+            Some((text, group_span)) => (text, group_span),
+            None => (String::new(), span),
+        };
+        Some((name, span, text, group_span))
+    }
+
+    /// `moment_calibration;` one `name, name[(lags)], range;` row, `end;`.
+    fn parse_moment_calibration_block(&mut self) {
+        let (opener_span, _, body_i, body_end_i) = self.bump_block_opener("moment_calibration");
+        let end = self.block_end_after_consume();
+        let saved = self.i;
+        self.i = body_i;
+        let mut rows = Vec::new();
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            let before = self.i;
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                continue;
+            }
+            if let Some(row) = self.read_moment_calibration_row(body_end_i) {
+                rows.push(row);
+            }
+            if self.i <= before {
+                self.skip_until_semi();
+                self.eat(TokenKind::Semi);
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+        self.model.moment_calibration.push(MomentCalibrationBlock {
+            span: Span {
+                start: opener_span.start,
+                end,
+            },
+            rows,
+        });
+    }
+
+    fn read_moment_calibration_row(&mut self, end_i: usize) -> Option<MomentCalibrationRow> {
+        let start = self.current_start();
+        let (first, first_span) = self.read_symbol()?;
+        self.eat(TokenKind::Comma);
+        let (second, second_span) = self.read_symbol()?;
+        let (lags, lags_span) = match self.read_paren_group() {
+            Some((text, span)) => (Some(text), Some(span)),
+            None => (None, None),
+        };
+        self.eat(TokenKind::Comma);
+        let range = self.read_calibration_range()?;
+        let end = self.finish_row(end_i);
+        Some(MomentCalibrationRow {
+            first,
+            first_span,
+            second,
+            second_span,
+            lags,
+            lags_span,
+            range,
+            span: Span { start, end },
+        })
+    }
+
+    /// `irf_calibration[(relative_irf)];` one `name[(periods)], exo, range;` row.
+    fn parse_irf_calibration_block(&mut self) {
+        let (opener_span, word, body_i, body_end_i) = self.bump_block_opener("irf_calibration");
+        let end = self.block_end_after_consume();
+        let saved = self.i;
+        self.i = body_i;
+        let mut rows = Vec::new();
+        while self.i < body_end_i && !self.at(TokenKind::Eof) {
+            let before = self.i;
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                continue;
+            }
+            if let Some(row) = self.read_irf_calibration_row(body_end_i) {
+                rows.push(row);
+            }
+            if self.i <= before {
+                self.skip_until_semi();
+                self.eat(TokenKind::Semi);
+            }
+            if self.i > body_end_i {
+                self.i = body_end_i;
+                break;
+            }
+        }
+        self.i = saved;
+        self.model.irf_calibration.push(IrfCalibrationBlock {
+            span: Span {
+                start: opener_span.start,
+                end,
+            },
+            relative_irf: is_flag_word(&word, "relative_irf"),
+            rows,
+        });
+    }
+
+    fn read_irf_calibration_row(&mut self, end_i: usize) -> Option<IrfCalibrationRow> {
+        let start = self.current_start();
+        let (endogenous, endogenous_span) = self.read_symbol()?;
+        let (periods, periods_span) = match self.read_paren_group() {
+            Some((text, span)) => (Some(text), Some(span)),
+            None => (None, None),
+        };
+        self.eat(TokenKind::Comma);
+        let (exogenous, exogenous_span) = self.read_symbol()?;
+        self.eat(TokenKind::Comma);
+        let range = self.read_calibration_range()?;
+        let end = self.finish_row(end_i);
+        Some(IrfCalibrationRow {
+            endogenous,
+            endogenous_span,
+            periods,
+            periods_span,
+            exogenous,
+            exogenous_span,
+            range,
+            span: Span { start, end },
+        })
+    }
+
+    /// The `(…)` group at the cursor: its inner text and the group's whole span.
+    /// `None` when the cursor is not on a `(`.
+    ///
+    /// The inner text is read from the source, so a range keeps its `:` (the lexer
+    /// drops the colon, leaving two adjacent numbers).
+    fn read_paren_group(&mut self) -> Option<(String, Span)> {
+        if !self.at(TokenKind::LParen) {
+            return None;
+        }
+        let open = self.bump().span;
+        let inner_from = open.end;
+        let mut inner_end = inner_from;
+        let mut depth = 0i32;
+        while !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::LParen) {
+                depth += 1;
+                self.bump();
+                continue;
+            }
+            if self.at(TokenKind::RParen) {
+                if depth == 0 {
+                    let end = self.bump().span.end;
+                    let text = self
+                        .src
+                        .get(inner_from as usize..inner_end as usize)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    return Some((
+                        text,
+                        Span {
+                            start: open.start,
+                            end,
+                        },
+                    ));
+                }
+                depth -= 1;
+                self.bump();
+                continue;
+            }
+            inner_end = self.tokens[self.i].span.end;
+            self.bump();
+        }
+        // Unclosed: the row ends where the tokens did.
+        let text = self
+            .src
+            .get(inner_from as usize..inner_end as usize)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        Some((
+            text,
+            Span {
+                start: open.start,
+                end: inner_end,
+            },
+        ))
+    }
+
+    /// `[expr, expr]` / `+` / `-`: a calibration row's third column.
+    fn read_calibration_range(&mut self) -> Option<CalibrationRange> {
+        if self.at(TokenKind::LBrack) {
+            let start = self.bump().span.start;
+            let lower = self.read_range_side();
+            self.eat(TokenKind::Comma);
+            let upper = self.read_range_side();
+            let end = if self.at(TokenKind::RBrack) {
+                self.bump().span.end
+            } else {
+                self.current_start()
+            };
+            return Some(CalibrationRange::Bracket {
+                lower,
+                upper,
+                span: Span { start, end },
+            });
+        }
+        if self.at(TokenKind::Plus) {
+            return Some(CalibrationRange::Plus {
+                span: self.bump().span,
+            });
+        }
+        if self.at(TokenKind::Minus) {
+            return Some(CalibrationRange::Minus {
+                span: self.bump().span,
+            });
+        }
+        None
+    }
+
+    /// One side of a `[…]` range, as written.
+    fn read_range_side(&mut self) -> String {
+        let from = self.i;
+        while !self.at(TokenKind::Eof) && !self.at(TokenKind::Comma) && !self.at(TokenKind::RBrack)
+        {
+            let before = self.i;
+            self.parse_expr();
+            if self.i <= before {
+                self.bump();
+            }
+        }
+        join_lexemes(self.src, &self.tokens[from..self.i.min(self.tokens.len())])
+    }
+
+    /// One expression's text and span, read at the cursor.
+    fn read_expression_text(&mut self) -> (String, Span) {
+        let start = self.current_start();
+        let from = self.i;
+        let before = self.i;
+        self.parse_expr();
+        if self.i <= before {
+            self.bump();
+        }
+        let end = (from..self.i.min(self.tokens.len()))
+            .rev()
+            .find(|&k| self.tokens[k].kind != TokenKind::Eof)
+            .map(|k| self.tokens[k].span.end)
+            .unwrap_or(start);
+        let text = self
+            .src
+            .get(start as usize..end as usize)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        (text, Span { start, end })
+    }
+
+    /// A symbol token, or `None` when the cursor is not on one.
+    fn read_symbol(&mut self) -> Option<(Name, Span)> {
+        if !self.at(TokenKind::Ident) {
+            return None;
+        }
+        let tok = self.bump();
+        let lex = self.lexeme(&tok).to_string();
+        Some((self.intern.intern(&lex), tok.span))
+    }
+
+    /// `keyword entry_list ';'` inside a `matched_irfs` row, as one span per entry.
+    /// `1:2` is one entry; so is `(xx)`.
+    ///
+    /// An entry's `(…)` holds an expression, and a name first seen there is a
+    /// mod-file local at 7.1, so the expression is built rather than stepped over.
+    fn read_keyword_entries(&mut self, end_i: usize) -> Vec<Span> {
+        self.bump();
+        let from = self.i;
+        while self.i < end_i && !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
+            if self.at(TokenKind::LParen) {
+                self.read_parenthesised_expression();
+                continue;
+            }
+            self.bump();
+        }
+        let entries = self.list_entries(from, self.i);
+        self.eat(TokenKind::Semi);
+        entries
+    }
+
+    /// The `(expression)` of one `values` / `weights` entry, read for its names.
+    fn read_parenthesised_expression(&mut self) {
+        self.bump();
+        while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) {
+            let before = self.i;
+            self.parse_expr();
+            if self.i <= before {
+                self.bump();
+            }
+        }
+        self.eat(TokenKind::RParen);
+    }
+
+    /// The block opener's keyword through its `(…)` and `;`, the single bare word
+    /// its list holds (`None` when the list is absent or holds something else), and
+    /// the body's token bounds.
+    ///
+    /// The `(…)` is one fixed token in the grammar (`OVERWRITE` or `RELATIVE_IRF`),
+    /// not an option list, so it carries no option side-effects. On `matched_moments`
+    /// and `moment_calibration` it is outside the grammar altogether: it is consumed
+    /// and sets no flag, and earns no Error here (close call 1).
+    fn bump_block_opener(&mut self, keyword: &str) -> (Span, Option<String>, usize, usize) {
+        let start = self.bump().span.start;
+        let mut word = None;
+        if self.at(TokenKind::LParen) {
+            let from = self.i;
+            self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+            let close_i = self.i;
+            let inner = (from + 1)..close_i.saturating_sub(1);
+            if inner.len() == 1 && self.tokens[inner.start].kind == TokenKind::Ident {
+                word = Some(self.lexeme(&self.tokens[inner.start]).to_string());
+            }
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        let opener_span = Span { start, end };
+        let body_i = self.i;
+        let body_end_i = self.consume_until_end();
+        self.record_missing_end_if_unclosed(keyword, opener_span, body_i, body_end_i);
+        (opener_span, word, body_i, body_end_i)
+    }
+
+    /// A row's own `;`. If that `;` was already eaten (a `matched_irfs` keyword
+    /// list), stay put so the next pair is still a row. Leftover tokens on this
+    /// row still skip to that `;`.
+    fn finish_row(&mut self, end_i: usize) -> u32 {
+        if self.at(TokenKind::Semi) {
+            return self.bump().span.end;
+        }
+        if let Some(prev) = self.i.checked_sub(1) {
+            if self
+                .tokens
+                .get(prev)
+                .is_some_and(|t| t.kind == TokenKind::Semi)
+            {
+                return self.tokens[prev].span.end;
+            }
+        }
+        self.finish_shock_stmt(end_i)
     }
 
     /// Sims `bvar_density N;` / `bvar_forecast N;` / `bvar_irf(N, 'name');`
@@ -6460,16 +7084,11 @@ impl Parser<'_> {
 
     /// Blocks the grammar hands to `… END ';'` and this parser does not read. Every
     /// pin `DYNARE_BLOCK` opener that no other branch parses belongs here, or its
-    /// body rows fall through to the top-level statement walk: `matched_moments;`
-    /// rows are bare expressions (`ln_c;`), and a declared head before `;` reads as
-    /// a statement a top-level recogniser would then refuse on a file 7.1 accepts.
+    /// body rows fall through to the top-level statement walk: a `priors;` row is a
+    /// bare name, and a declared head before `;` reads as a statement a top-level
+    /// recogniser would then refuse on a file 7.1 accepts.
     fn at_skipped_block(&self) -> bool {
         const BLOCKS: &[&str] = &[
-            "matched_irfs",
-            "matched_irfs_weights",
-            "matched_moments",
-            "moment_calibration",
-            "irf_calibration",
             "pac_target_info",
             "priors",
             "deterministic_trends",

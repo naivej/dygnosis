@@ -189,6 +189,15 @@ fn e001_delete_occbin_end() {
 }
 
 #[test]
+fn e001_delete_matched_moments_end() {
+    assert_fire(
+        "e001/delete_matched_moments_end.mod",
+        "Missing 'end;' for 'matched_moments'",
+        "matched_moments;",
+    );
+}
+
+#[test]
 fn e001_strip_var_semicolon() {
     assert_fire(
         "e001/strip_var_semi.mod",

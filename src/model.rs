@@ -655,6 +655,22 @@ pub struct Model {
     pub shock_group_block_starts: Vec<usize>,
     /// True iff a Sims `bvar_density` / `bvar_forecast` / `bvar_irf` statement is present.
     pub bvar_present: bool,
+    /// Every `method_of_moments` statement, file order.
+    pub mom_statements: Vec<MomStatement>,
+    /// Every `matched_moments` row, every block concatenated in source order.
+    pub matched_moments: Vec<MatchedMoment>,
+    /// One span per `matched_moments;` … `end;`.
+    pub matched_moments_blocks: Vec<Span>,
+    /// Every `matched_irfs` block, file order.
+    pub matched_irfs: Vec<MatchedIrfsBlock>,
+    /// Every `matched_irfs_weights` block, file order.
+    pub matched_irfs_weights: Vec<MatchedIrfsWeightsBlock>,
+    /// Every `matched_irfs_weights` row, every block concatenated in source order.
+    pub matched_irfs_weight_rows: Vec<MatchedIrfsWeight>,
+    /// Every `moment_calibration` block, file order.
+    pub moment_calibration: Vec<MomentCalibrationBlock>,
+    /// Every `irf_calibration` block, file order.
+    pub irf_calibration: Vec<IrfCalibrationBlock>,
 }
 
 /// `histval` assignment `name(lag) = expr`.
@@ -912,6 +928,141 @@ pub struct ConditionalForecastPath {
     pub has_values: bool,
 }
 
+/// One `method_of_moments` statement: its keyword through `;`, and its option rows.
+#[derive(Clone, Debug)]
+pub struct MomStatement {
+    /// Keyword through `;`.
+    pub span: Span,
+    /// Empty when the statement has no `(…)`.
+    pub options: Vec<FamilyOption>,
+}
+
+/// One `matched_moments` row: a model expression through `;`.
+#[derive(Clone, Debug)]
+pub struct MatchedMoment {
+    /// `join_lexemes` of the expression.
+    pub text: String,
+    pub span: Span,
+    /// `parse_expr`; `None` when the row was empty.
+    pub expr: Option<ExprId>,
+}
+
+/// One `matched_irfs` block.
+#[derive(Clone, Debug)]
+pub struct MatchedIrfsBlock {
+    /// Opener through `end;`.
+    pub span: Span,
+    /// The block wrote `(overwrite)`.
+    pub overwrite: bool,
+    pub rows: Vec<MatchedIrfsRow>,
+}
+
+/// One `matched_irfs_weights` block.
+#[derive(Clone, Debug)]
+pub struct MatchedIrfsWeightsBlock {
+    /// Opener through `end;`.
+    pub span: Span,
+    /// The block wrote `(overwrite)`.
+    pub overwrite: bool,
+    pub rows: Vec<MatchedIrfsWeight>,
+}
+
+/// One `var ENDO; varexo EXO; periods …; values …; weights …;` row.
+#[derive(Clone, Debug)]
+pub struct MatchedIrfsRow {
+    pub endogenous: Name,
+    pub endogenous_span: Span,
+    pub exogenous: Name,
+    pub exogenous_span: Span,
+    /// One entry per `period_list` item; `1:4` is one.
+    pub periods: Vec<Span>,
+    /// One entry per value; `(xx)` is one.
+    pub values: Vec<Span>,
+    /// Empty when the row has no `weights` keyword.
+    pub weights: Vec<Span>,
+    pub span: Span,
+}
+
+/// One `name(periods), exo, name(periods), exo, expression;` row.
+#[derive(Clone, Debug)]
+pub struct MatchedIrfsWeight {
+    pub left_endo: Name,
+    pub left_endo_span: Span,
+    /// `1` or `1:2`, as written.
+    pub left_periods: String,
+    pub left_periods_span: Span,
+    pub left_exo: Name,
+    pub left_exo_span: Span,
+    pub right_endo: Name,
+    pub right_endo_span: Span,
+    pub right_periods: String,
+    pub right_periods_span: Span,
+    pub right_exo: Name,
+    pub right_exo_span: Span,
+    pub weight_text: String,
+    pub weight_span: Span,
+    pub span: Span,
+}
+
+/// One `moment_calibration;` … `end;` block.
+#[derive(Clone, Debug)]
+pub struct MomentCalibrationBlock {
+    pub span: Span,
+    pub rows: Vec<MomentCalibrationRow>,
+}
+
+/// One `name, name(lags), range;` row.
+#[derive(Clone, Debug)]
+pub struct MomentCalibrationRow {
+    pub first: Name,
+    pub first_span: Span,
+    pub second: Name,
+    pub second_span: Span,
+    /// `None` when there is no `(…)`; 7.1 defaults this to `0`.
+    pub lags: Option<String>,
+    pub lags_span: Option<Span>,
+    pub range: CalibrationRange,
+    pub span: Span,
+}
+
+/// One `irf_calibration;` … `end;` block.
+#[derive(Clone, Debug)]
+pub struct IrfCalibrationBlock {
+    pub span: Span,
+    /// The block wrote `(relative_irf)`.
+    pub relative_irf: bool,
+    pub rows: Vec<IrfCalibrationRow>,
+}
+
+/// One `name(periods), exo, range;` row.
+#[derive(Clone, Debug)]
+pub struct IrfCalibrationRow {
+    pub endogenous: Name,
+    pub endogenous_span: Span,
+    /// `None` when there is no `(…)`; 7.1 defaults this to `1`.
+    pub periods: Option<String>,
+    pub periods_span: Option<Span>,
+    pub exogenous: Name,
+    pub exogenous_span: Span,
+    pub range: CalibrationRange,
+    pub span: Span,
+}
+
+/// The third column of a `moment_calibration` / `irf_calibration` row.
+#[derive(Clone, Debug)]
+pub enum CalibrationRange {
+    /// `[0.5, 1.2]`, `[0, Inf]`.
+    Bracket {
+        lower: String,
+        upper: String,
+        span: Span,
+    },
+    /// `+`
+    Plus { span: Span },
+    /// `-`
+    Minus { span: Span },
+}
+
 /// `dsge_var` forms on one `estimation` statement.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EstimationDsgeVarStmt {
@@ -1045,6 +1196,12 @@ impl Model {
                     .iter()
                     .map(|block| block.span),
             )
+            .chain(self.mom_statements.iter().map(|stmt| stmt.span))
+            .chain(self.matched_moments_blocks.iter().copied())
+            .chain(self.matched_irfs.iter().map(|block| block.span))
+            .chain(self.matched_irfs_weights.iter().map(|block| block.span))
+            .chain(self.moment_calibration.iter().map(|block| block.span))
+            .chain(self.irf_calibration.iter().map(|block| block.span))
             .collect();
         spans.sort_by_key(|span| (span.start, span.end));
         spans

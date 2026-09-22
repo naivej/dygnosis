@@ -103,10 +103,13 @@ pub use mcp::{
     DiagnosticCodeItem, McpDiagnostic, McpReference, McpWorkspaceReference,
 };
 pub use model::{
-    Complementarity, ComplementarityTriple, DeprecatedOption, EstimatedParam, EstimatedParamKind,
-    IncludeDirective, IncludePathDirective, MacroDirective, MacroInterp, Model, ObservedVar,
-    OccbinConstraint, OccbinExpr, ParseIssue, ParseIssueKind, ParseSummary, PolicyCommand,
-    ShockKind, ShockStmt, ShocksSemiFamily,
+    CalibrationRange, Complementarity, ComplementarityTriple, DeprecatedOption, EstimatedParam,
+    EstimatedParamKind, IncludeDirective, IncludePathDirective, IrfCalibrationBlock,
+    IrfCalibrationRow, MacroDirective, MacroInterp, MatchedIrfsBlock, MatchedIrfsRow,
+    MatchedIrfsWeight, MatchedIrfsWeightsBlock, MatchedMoment, Model, MomStatement,
+    MomentCalibrationBlock, MomentCalibrationRow, ObservedVar, OccbinConstraint, OccbinExpr,
+    ParseIssue, ParseIssueKind, ParseSummary, PolicyCommand, ShockKind, ShockStmt,
+    ShocksSemiFamily,
 };
 pub use model_diff::{compare_models, EquationChange, IndexedEquation, ModelDiff, ParameterChange};
 pub use model_info::{
