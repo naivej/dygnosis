@@ -136,14 +136,14 @@ fn has_dsge_prior_weight(model: &Model) -> bool {
     model
         .estimated_params
         .iter()
-        .any(|p| model.name(p.name) == "dsge_prior_weight")
+        .any(|p| model.name(p.name).eq_ignore_ascii_case("dsge_prior_weight"))
 }
 
 fn dsge_prior_weight_span(model: &Model) -> Option<Span> {
     model
         .estimated_params
         .iter()
-        .find(|p| model.name(p.name) == "dsge_prior_weight")
+        .find(|p| model.name(p.name).eq_ignore_ascii_case("dsge_prior_weight"))
         .map(|p| p.span)
 }
 

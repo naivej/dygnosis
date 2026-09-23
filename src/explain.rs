@@ -217,7 +217,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W060", ExplainEntry {
         title: "Requested IRF has no written stochastic shock size",
-        body: "A `stoch_simul` command explicitly requests IRFs with `irf>0` or `irf_shocks`, but no variance or standard error is written for a requested `varexo` shock. A bare `stoch_simul`, a `varexo` declaration alone, and an explicit zero variance do not trigger this Warning. This is an editor Warning; Dynare does not report it before MATLAB.\n\n**Fix**\n\nIf the IRF request is intended, specify a variance or standard error for the shock in a `shocks` block, or provide its shock size through the intended alternative source.",
+        body: "With `irf_shocks`, W060 names each selected plain exogenous shock without a written variance or standard error. With `irf>0` and no selected list, it warns only when no plain exogenous shock has a written size at all. An estimated standard error for the relevant plain `varexo`, a possible external size source, or uncertain macro/include input keeps this Warning quiet; an observed-variable measurement-error estimate alone does not. A bare `stoch_simul`, a `varexo` declaration alone, and an explicit zero variance do not trigger it. This is an editor Warning; Dynare does not report it before MATLAB.\n\n**Fix**\n\nIf the IRF request is intended, specify a variance or standard error for the shock in a `shocks` block, or provide its shock size through the intended alternative source.",
         kind: ExplainKind::Added,
     }),
     ("W061", ExplainEntry {
@@ -247,7 +247,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E093", ExplainEntry {
         title: "estimated_params references an undeclared symbol",
-        body: "An ``estimated_params`` entry names a symbol that is not declared with the expected role: a plain entry must name a parameter, an ``stderr`` or ``skew`` entry must name a shock or observed variable, and a ``corr`` entry must name two declared shocks or variables. Dynare refuses: `Unknown symbol: not_a_param` (unknown ``skew`` is `in `estimated_params' block, unknown symbol: {name}`).\n\n**Warrant**\n\nThe editor names the ``estimated_params`` role (parameter, stderr, corr, or skew); Dynare's string is the generic `Unknown symbol` or the estimated-params unknown-symbol line.\n\n**Fix**\n\nDeclare the symbol, or correct the name / entry type.",
+        body: "An ``estimated_params`` entry names a symbol that is not declared with the expected role: a plain entry must name a parameter (apart from reserved `dsge_prior_weight`, which needs no declaration), an ``stderr`` or ``skew`` entry must name a shock or observed variable, and a ``corr`` entry must name two declared shocks or variables. Dynare refuses: `Unknown symbol: not_a_param` (unknown ``skew`` is `in `estimated_params' block, unknown symbol: {name}`).\n\n**Warrant**\n\nThe editor names the ``estimated_params`` role (parameter, stderr, corr, or skew); Dynare's string is the generic `Unknown symbol` or the estimated-params unknown-symbol line.\n\n**Fix**\n\nDeclare the symbol, or correct the name / entry type.",
         kind: ExplainKind::Shared,
     }),
     ("W094", ExplainEntry {

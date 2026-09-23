@@ -32,7 +32,9 @@ fn check_w060(model: &Model) -> Vec<Diagnostic> {
             .estimated_params
             .iter()
             .filter(|row| {
-                row.kind == EstimatedParamKind::Stderr && row.span.start < request.span.start
+                row.kind == EstimatedParamKind::Stderr
+                    && row.span.start < request.span.start
+                    && exo.contains(&row.name)
             })
             .map(|row| row.name)
             .collect();

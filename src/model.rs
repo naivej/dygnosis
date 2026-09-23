@@ -1,5 +1,6 @@
 //! Parsed `.mod` model. This is the seam diagnostic families and transports share.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -1057,7 +1058,7 @@ pub struct ShapeRefuse {
     /// statement has no form or `official_message` supplies the exact text.
     pub expected: &'static str,
     /// Exact official syntax text for a known token-level refusal, when available.
-    pub official_message: Option<&'static str>,
+    pub official_message: Option<Cow<'static, str>>,
 }
 
 impl ShapeRefuse {
@@ -1070,12 +1071,16 @@ impl ShapeRefuse {
         }
     }
 
-    pub fn official(span: Span, subject: impl Into<String>, message: &'static str) -> Self {
+    pub fn official(
+        span: Span,
+        subject: impl Into<String>,
+        message: impl Into<Cow<'static, str>>,
+    ) -> Self {
         Self {
             span,
             subject: subject.into(),
             expected: "",
-            official_message: Some(message),
+            official_message: Some(message.into()),
         }
     }
 }

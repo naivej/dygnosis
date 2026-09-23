@@ -143,6 +143,23 @@ fn w060_explicit_sizes_and_partial_unselected_stay_quiet() {
 }
 
 #[test]
+fn observed_error_estimate_does_not_size_an_exogenous_irf() {
+    let prefix = "var y; varexo e; varobs y; model; y=e; end;";
+    let observed = format!("{prefix} estimated_params; stderr y, 0.1; end; stoch_simul(irf=20);");
+    let structural = format!("{prefix} estimated_params; stderr e, 0.1; end; stoch_simul(irf=20);");
+    let warning = diagnostics(&observed);
+    assert!(has(&warning, "W060"), "{warning:?}");
+    assert!(!has(&diagnostics(&structural), "W060"));
+    if let Some(pp) = find_preprocessor(None) {
+        for source in [&observed, &structural] {
+            let result =
+                run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+            assert!(result.success, "{}", result.raw_stdout);
+        }
+    }
+}
+
+#[test]
 fn w060_resolved_include_maps_selected_span_to_active_file() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/d_shocks/include_w060/main.mod");
@@ -466,6 +483,274 @@ fn parse_refusals_preempt_path_self_cycle() {
             !has(&result, "E420"),
             "E420 leaked past {first_code}: {result:?}"
         );
+    }
+}
+
+#[test]
+fn parse_and_check_refusals_preempt_later_shock_stages() {
+    let parse_first = base(
+        "shock_paths; var e; periods 1; values self.e; end; perfect_foresight_setup(periods=1,periods=2);",
+    );
+    let check_first = base("shock_paths(learnt_in=2); var e; periods 2; values self.e; end;");
+    let check_neighbour = base("shock_paths; var e; periods 1; values self.e; end;");
+    let transform_neighbour =
+        base("shock_paths(learnt_in=2); var e; periods 2; values self.e(-1); end;");
+    let other_check_first =
+        "var y; varexo e; model; y=0; end; shocks(learnt_in=2); var e; periods 2; values 1; end;"
+            .to_string();
+    let other_transform_neighbour =
+        "var y; varexo e; model; y=e; end; shocks(learnt_in=2); var e; periods 2; values 1; end;"
+            .to_string();
+    let later_parse_unknown =
+        "var y; varexo e; shock_paths; var e; periods 1; values self.e; end; model; y=z+e; end;"
+            .to_string();
+    let later_parse_known = "var y; varexo e; parameters z; shock_paths; var e; periods 1; values self.e; end; model; y=z+e; end;".to_string();
+    let later_duplicate = "var y; varexo e; shock_paths; var e; periods 1; values self.e; end; parameters a; var a; model; y=e; end;".to_string();
+    let later_duplicate_neighbour = "var y; varexo e; shock_paths; var e; periods 1; values self.e; end; parameters a; model; y=e; end;".to_string();
+    let later_estimated_unknown = "var y; varexo e; shock_paths; var e; periods 1; values self.e; end; model; y=e; end; estimated_params; bad, 0.5; end;".to_string();
+    let later_estimated_known = "var y; varexo e; parameters p; shock_paths; var e; periods 1; values self.e; end; model; y=e; end; estimated_params; p, 0.5; end;".to_string();
+    let parse_diags = diagnostics(&parse_first);
+    assert!(
+        has(&parse_diags, "E271") && !has(&parse_diags, "E420"),
+        "{parse_diags:?}"
+    );
+    let check_diags = diagnostics(&check_first);
+    assert!(
+        has(&check_diags, "E420") && !has(&check_diags, "E425"),
+        "{check_diags:?}"
+    );
+    assert!(has(&diagnostics(&check_neighbour), "E420"));
+    assert!(has(&diagnostics(&transform_neighbour), "E425"));
+    let other_check_diags = diagnostics(&other_check_first);
+    assert!(
+        has(&other_check_diags, "E021") && !has(&other_check_diags, "E422"),
+        "{other_check_diags:?}"
+    );
+    assert!(has(&diagnostics(&other_transform_neighbour), "E422"));
+    let unknown_diags = diagnostics(&later_parse_unknown);
+    assert!(
+        has(&unknown_diags, "E020") && !has(&unknown_diags, "E420"),
+        "{unknown_diags:?}"
+    );
+    let known_diags = diagnostics(&later_parse_known);
+    assert!(
+        has(&known_diags, "E420") && !has(&known_diags, "E020"),
+        "{known_diags:?}"
+    );
+    for (source, parse_code) in [
+        (&later_duplicate, "E030"),
+        (&later_estimated_unknown, "E093"),
+    ] {
+        let diags = diagnostics(source);
+        assert!(has(&diags, parse_code) && !has(&diags, "E420"), "{diags:?}");
+    }
+    for source in [&later_duplicate_neighbour, &later_estimated_known] {
+        let diags = diagnostics(source);
+        assert!(
+            has(&diags, "E420") && !has(&diags, "E030") && !has(&diags, "E093"),
+            "{diags:?}"
+        );
+    }
+    if let Some(pp) = find_preprocessor(None) {
+        for (source, stage, needle, absent) in [
+            (
+                &parse_first,
+                JsonStage::Check,
+                "option periods declared twice",
+                "circular reference",
+            ),
+            (
+                &check_first,
+                JsonStage::Transform,
+                "circular reference",
+                "can only be used in conjunction",
+            ),
+            (
+                &check_neighbour,
+                JsonStage::Check,
+                "circular reference",
+                "can only be used in conjunction",
+            ),
+            (
+                &transform_neighbour,
+                JsonStage::Transform,
+                "can only be used in conjunction",
+                "circular reference",
+            ),
+            (
+                &other_check_first,
+                JsonStage::Transform,
+                "not used in model block",
+                "can only be used in conjunction",
+            ),
+            (
+                &other_transform_neighbour,
+                JsonStage::Transform,
+                "can only be used in conjunction",
+                "not used in model block",
+            ),
+            (
+                &later_parse_unknown,
+                JsonStage::Check,
+                "Unknown symbol: z",
+                "circular reference",
+            ),
+            (
+                &later_parse_known,
+                JsonStage::Check,
+                "circular reference",
+                "Unknown symbol: z",
+            ),
+            (
+                &later_duplicate,
+                JsonStage::Check,
+                "Symbol a declared twice with different types!",
+                "circular reference",
+            ),
+            (
+                &later_duplicate_neighbour,
+                JsonStage::Check,
+                "circular reference",
+                "declared twice with different types",
+            ),
+            (
+                &later_estimated_unknown,
+                JsonStage::Check,
+                "Unknown symbol: bad.",
+                "circular reference",
+            ),
+            (
+                &later_estimated_known,
+                JsonStage::Check,
+                "circular reference",
+                "Unknown symbol: bad.",
+            ),
+        ] {
+            let result = run_preprocessor(source, &pp, None, Duration::from_secs(30), stage);
+            assert!(
+                !result.success && result.raw_stdout.contains(needle),
+                "{source}: {}",
+                result.raw_stdout
+            );
+            assert!(
+                !result.raw_stdout.contains(absent),
+                "{source}: {}",
+                result.raw_stdout
+            );
+        }
+    }
+}
+
+#[test]
+fn reviewed_shock_dialects_refuse_at_the_official_token() {
+    let fire = [
+        ("shocks; var e; periods 1; scales 0.1; end;", "scales", "syntax error, unexpected SCALES, expecting VALUES or ADD or MULTIPLY"),
+        ("shocks(surprise); corr e,u = 0.1; end;", "corr", "syntax error, unexpected CORR, expecting VAR"),
+        ("shocks(learnt_in=2); corr e,u = 0.1; end;", "corr", "syntax error, unexpected CORR, expecting VAR"),
+        ("mshocks; corr e,u = 0.1; end;", "corr", "syntax error, unexpected CORR, expecting VAR"),
+        ("heteroskedastic_shocks; var e; periods 1; add 0.1; end;", "add", "syntax error, unexpected ADD, expecting VALUES or SCALES"),
+        ("shocks(surprise); skew e = 0.1; end;", "skew", "syntax error, unexpected SKEW, expecting VAR"),
+        ("shocks(surprise); var e,u = 0.1; end;", ",", "syntax error, unexpected COMMA, expecting ';'"),
+        ("shocks(learnt_in=2); var e,u = 0.1; end;", ",", "syntax error, unexpected COMMA, expecting ';'"),
+        ("mshocks; var e,u = 0.1; end;", ",", "syntax error, unexpected COMMA, expecting ';'"),
+        ("heteroskedastic_shocks; var e,u = 0.1; end;", ",", "syntax error, unexpected COMMA, expecting ';'"),
+        ("heteroskedastic_shocks; var e; stderr 0.1; end;", "stderr", "syntax error, unexpected STDERR, expecting PERIODS"),
+        ("heteroskedastic_shocks; var e = 0.1; end;", "=", "syntax error, unexpected EQUAL, expecting ';'"),
+        ("shocks(foo); var e = 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or SURPRISE or LEARNT_IN or HETEROGENEITY"),
+        ("mshocks(foo); var e; periods 1; values 1.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL"),
+        ("heteroskedastic_shocks(foo); var e; periods 1; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE"),
+        ("shock_paths(foo); var e; periods 1; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN"),
+        ("endval(foo); e = 1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting ALL_VALUES_REQUIRED or LEARNT_IN"),
+        ("perfect_foresight_controlled_paths(foo); exogenize y; periods 1; values 1; endogenize e; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting LEARNT_IN"),
+        ("shocks(surprise overwrite); var e; periods 1; values 0.1; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting COMMA or ')'"),
+        ("shocks(overwrite,overwrite); var e = 0.1; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting SURPRISE or LEARNT_IN or HETEROGENEITY"),
+        ("shocks(overwrite,foo); var e = 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting SURPRISE or LEARNT_IN or HETEROGENEITY"),
+        ("shocks(surprise,foo); var e; periods 1; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE"),
+        ("mshocks(overwrite foo); var e; periods 1; values 1.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'"),
+        ("mshocks(learnt_in=2 foo); var e; periods 2; values 1.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'"),
+        ("heteroskedastic_shocks(overwrite foo); var e; periods 1; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting ')'"),
+        ("heteroskedastic_shocks(overwrite overwrite); var e; periods 1; values 0.1; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting ')'"),
+        ("shock_paths(learnt_in=2 foo); var e; periods 2; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting OVERWRITE or LEARNT_IN or ')'"),
+        ("endval(learnt_in=1 foo); e = 1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting ')'"),
+        ("endval(all_values_required foo); e = 1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting ')'"),
+        ("perfect_foresight_controlled_paths(learnt_in=1 foo); exogenize y; periods 1; values 1; endogenize e; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting ')'"),
+        ("mshocks(surprise); var e; periods 1; values 1.1; end;", "surprise", "syntax error, unexpected SURPRISE, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL"),
+        ("mshocks(overwrite surprise); var e; periods 1; values 1.1; end;", "surprise", "syntax error, unexpected SURPRISE, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'"),
+        ("shock_paths(surprise); var e; periods 1; values 0.1; end;", "surprise", "syntax error, unexpected SURPRISE, expecting OVERWRITE or LEARNT_IN"),
+        ("shock_paths(overwrite surprise); var e; periods 1; values 0.1; end;", "surprise", "syntax error, unexpected SURPRISE, expecting OVERWRITE or LEARNT_IN or ')'"),
+        ("heteroskedastic_shocks(learnt_in=2); var e; periods 1; values 0.1; end;", "learnt_in", "syntax error, unexpected LEARNT_IN, expecting OVERWRITE"),
+        ("heteroskedastic_shocks(overwrite learnt_in=2); var e; periods 1; values 0.1; end;", "learnt_in", "syntax error, unexpected LEARNT_IN, expecting ')'"),
+        ("endval(overwrite); e = 1; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting ALL_VALUES_REQUIRED or LEARNT_IN"),
+        ("endval(learnt_in=1 overwrite); e = 1; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting ')'"),
+        ("perfect_foresight_controlled_paths(overwrite); exogenize y; periods 1; values 1; endogenize e; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting LEARNT_IN"),
+        ("perfect_foresight_controlled_paths(learnt_in=1 overwrite); exogenize y; periods 1; values 1; endogenize e; end;", "overwrite", "syntax error, unexpected OVERWRITE, expecting ')'"),
+        ("shocks(relative_to_initval); var e = 0.1; end;", "relative_to_initval", "syntax error, unexpected RELATIVE_TO_INITVAL, expecting OVERWRITE or SURPRISE or LEARNT_IN or HETEROGENEITY"),
+        ("shocks(overwrite,relative_to_initval); var e = 0.1; end;", "relative_to_initval", "syntax error, unexpected RELATIVE_TO_INITVAL, expecting SURPRISE or LEARNT_IN or HETEROGENEITY"),
+        ("shocks(surprise,learnt_in=2); var e; periods 1; values 0.1; end;", "learnt_in", "syntax error, unexpected LEARNT_IN, expecting OVERWRITE"),
+        ("shocks(); var e = 0.1; end;", ")", "syntax error, unexpected ')', expecting OVERWRITE or SURPRISE or LEARNT_IN or HETEROGENEITY"),
+        ("mshocks(); var e; periods 1; values 1.1; end;", ")", "syntax error, unexpected ')', expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL"),
+        ("heteroskedastic_shocks(); var e; periods 1; values 0.1; end;", ")", "syntax error, unexpected ')', expecting OVERWRITE"),
+        ("shock_paths(); var e; periods 1; values 0.1; end;", ")", "syntax error, unexpected ')', expecting OVERWRITE or LEARNT_IN"),
+        ("endval(); e = 1; end;", ")", "syntax error, unexpected ')', expecting ALL_VALUES_REQUIRED or LEARNT_IN"),
+        ("perfect_foresight_controlled_paths(); exogenize y; periods 1; values 1; endogenize e; end;", ")", "syntax error, unexpected ')', expecting LEARNT_IN"),
+        ("shocks(learnt_in); var e; periods 1; values 0.1; end;", ")", "syntax error, unexpected ')', expecting EQUAL"),
+        ("mshocks(learnt_in foo); var e; periods 1; values 1.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting EQUAL"),
+        ("shocks(learnt_in=foo); var e; periods 1; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER"),
+        ("shock_paths(learnt_in=foo); var e; periods 1; values 0.1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER"),
+        ("endval(learnt_in=foo); e=1; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER"),
+        ("perfect_foresight_controlled_paths(learnt_in=foo); exogenize y; periods 1; values 1; endogenize e; end;", "foo", "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER"),
+        ("shocks(overwrite,); var e=0.1; end;", ")", "syntax error, unexpected ')', expecting SURPRISE or LEARNT_IN or HETEROGENEITY"),
+        ("mshocks(overwrite 4); var e; periods 1; values 1.1; end;", "4", "syntax error, unexpected INT_NUMBER, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'"),
+    ];
+    let pp = find_preprocessor(None);
+    for (body, token, message) in fire {
+        let source = base(body);
+        let ours = diagnostics(&source);
+        let syntax = ours
+            .iter()
+            .find(|d| d.code == "E001")
+            .unwrap_or_else(|| panic!("{body}: {ours:?}"));
+        assert_eq!(syntax.message, message, "{body}");
+        assert_eq!(
+            &source[syntax.span.start as usize..syntax.span.end as usize],
+            token,
+            "{body}"
+        );
+        assert!(
+            ours.iter().all(|d| d.code == "E001"),
+            "parse refusal must precede later checks: {body}: {ours:?}"
+        );
+        if let Some(pp) = &pp {
+            let result =
+                run_preprocessor(&source, pp, None, Duration::from_secs(30), JsonStage::Check);
+            assert!(
+                !result.success && result.raw_stdout.contains(message),
+                "{body}: {}",
+                result.raw_stdout
+            );
+        }
+    }
+
+    let quiet = [
+        "shocks; var e; periods 1; values 0.1; end;",
+        "shocks(surprise,overwrite); var e; periods 1; values 0.1; end;",
+        "shocks(learnt_in=2,overwrite); var e; periods 2; values 0.1; end;",
+        "mshocks(relative_to_initval); var e; periods 1; values 1.1; end;",
+        "mshocks(overwrite relative_to_initval); var e; periods 1; values 1.1; end;",
+        "heteroskedastic_shocks(overwrite); var e; periods 1; values 0.1; end;",
+        "shock_paths(overwrite); var e; periods 1; values 0.1; end;",
+        "shock_paths(overwrite learnt_in=2); var e; periods 2; values 0.1; end;",
+        "endval(learnt_in=1); e = 1; end;",
+        "perfect_foresight_controlled_paths(learnt_in=1); exogenize y; periods 1; values 1; endogenize e; end;",
+    ];
+    for body in quiet {
+        let source = base(body);
+        assert!(!has(&diagnostics(&source), "E001"), "{body}");
+        if let Some(pp) = &pp {
+            let result =
+                run_preprocessor(&source, pp, None, Duration::from_secs(30), JsonStage::Check);
+            assert!(result.success, "{body}: {}", result.raw_stdout);
+        }
     }
 }
 

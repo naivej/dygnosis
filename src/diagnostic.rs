@@ -137,9 +137,17 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     {
         out.retain(|d| d.code != "E431");
     }
-    // A parse refusal in an earlier statement stops Dynare before a later
-    // shock_paths checkPass can report the circular self reference. Written
-    // transform clashes are excluded: they run after that checkPass.
+    // These generic parse refusals can enter through later diagnostic passes.
+    // Dynare finishes parsing the whole file before checkPass, so any of them
+    // stops E420 regardless of its written position.
+    let parse_refused = out
+        .iter()
+        .any(|d| matches!(d.code.as_str(), "E020" | "E030" | "E093" | "E271"));
+    if parse_refused {
+        out.retain(|d| d.code != "E420");
+    }
+    // A refusal in an earlier statement also stops a later shock_paths
+    // checkPass from reporting the circular self reference.
     let earlier_nonclash_errors: Vec<Span> = out
         .iter()
         .filter(|d| {
@@ -157,6 +165,20 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
                 .iter()
                 .any(|span| span.start < d.span.start)
     });
+    // A parse or check Error stops the file before transformPass. Warnings
+    // and other transform clashes do not prevent a written clash from firing.
+    if out.iter().any(|d| {
+        d.severity == Severity::Error
+            && !clashes
+                .iter()
+                .any(|clash| clash.code == d.code && clash.span == d.span)
+    }) {
+        out.retain(|d| {
+            !clashes
+                .iter()
+                .any(|clash| clash.code == d.code && clash.span == d.span)
+        });
+    }
     out
 }
 

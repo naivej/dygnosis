@@ -131,6 +131,7 @@ fn unit_end(model: &Model, unit: &CheckUnit) -> u32 {
 fn shape_refuse_message(refuse: &ShapeRefuse) -> String {
     refuse
         .official_message
+        .as_deref()
         .map(str::to_string)
         .unwrap_or_else(|| crate::model::shape_refuse_wording(&refuse.subject, refuse.expected))
 }

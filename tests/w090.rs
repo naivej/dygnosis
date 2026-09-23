@@ -1,7 +1,10 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use dygnosis::span::LineIndex;
-use dygnosis::{check_w090, parse, EstimatedParamKind};
+use dygnosis::{
+    analyze, check_w090, find_preprocessor, parse, run_preprocessor, EstimatedParamKind, JsonStage,
+};
 
 const CLEAN: &[&str] = &["trend_rbc_gov_inv", "sims_wu_2019", "lk2024"];
 
@@ -353,4 +356,39 @@ fn w090_w095_ot() {
         (start.line, start.character, end.line, end.character),
         "W095 should underline the y name"
     );
+}
+
+#[test]
+fn reserved_dsge_weight_is_not_an_unknown_estimated_parameter() {
+    let unknown = check_mod("w090/w093_param.mod");
+    assert!(rust_family(&unknown).iter().any(|d| d.code == "E093"));
+    let pp = find_preprocessor(None);
+    for (fixture, expected_clash) in [
+        ("d_walk/e220_bayesian_irf_counts.mod", "E220"),
+        ("d_walk/e221_shocks_lt_varobs.mod", "E221"),
+    ] {
+        let source = check_mod(fixture);
+        assert!(!rust_family(&source).iter().any(|d| d.code == "E093"));
+        let diags = analyze(&parse(&source));
+        assert!(
+            diags.iter().any(|d| d.code == expected_clash),
+            "{fixture}: {diags:?}"
+        );
+        assert!(!diags.iter().any(|d| d.code == "E093"));
+        if let Some(pp) = &pp {
+            let check =
+                run_preprocessor(&source, pp, None, Duration::from_secs(30), JsonStage::Check);
+            assert!(check.success, "{fixture}: {}", check.raw_stdout);
+        }
+    }
+    if let Some(pp) = &pp {
+        let check = run_preprocessor(
+            &unknown,
+            pp,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Check,
+        );
+        assert!(!check.success && check.raw_stdout.contains("Unknown symbol"));
+    }
 }

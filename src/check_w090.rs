@@ -127,7 +127,9 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
         let name = model.name(entry.name);
         match entry.kind {
             EstimatedParamKind::Param => {
-                if !parameters.contains(&entry.name) {
+                if !parameters.contains(&entry.name)
+                    && !name.eq_ignore_ascii_case("dsge_prior_weight")
+                {
                     let where_ = if endogenous.contains(&entry.name) {
                         " (it is an endogenous variable)"
                     } else if exogenous.contains(&entry.name) {

@@ -601,6 +601,7 @@ impl Parser<'_> {
             self.current_start()
         };
         let body_i = self.i;
+        self.record_shock_opener_refuse(opener_i, body_i, None);
         if !companion {
             for i in opener_i + 1..body_i {
                 if self.tokens[i].kind == TokenKind::Comma {
@@ -784,6 +785,7 @@ impl Parser<'_> {
         body_end_i: usize,
         end: u32,
     ) {
+        self.record_shock_opener_refuse(opener_i, body_i, None);
         let options = self.shock_options_at(opener_i, body_i);
         let saved = self.i;
         self.i = body_i;
@@ -1271,6 +1273,172 @@ impl Parser<'_> {
             .push(SubsampleInstruction::Declare { head, ranges, span });
     }
 
+    fn shock_opener_refuse(&mut self, at: usize, command: &str, expected: &str) -> bool {
+        let token = self.tokens[at].clone();
+        let word = token.text(self.src).to_ascii_lowercase();
+        let unexpected = match (token.kind, word.as_str()) {
+            (TokenKind::Comma, _) => "COMMA",
+            (TokenKind::RParen, _) => "')'",
+            (TokenKind::Number, _) if is_integer_lexeme(token.text(self.src)) => "INT_NUMBER",
+            (TokenKind::Number, _) => "FLOAT_NUMBER",
+            (TokenKind::Eq, _) => "EQUAL",
+            (_, "overwrite") => "OVERWRITE",
+            (_, "surprise") => "SURPRISE",
+            (_, "learnt_in") => "LEARNT_IN",
+            (_, "heterogeneity") => "HETEROGENEITY",
+            (_, "relative_to_initval") => "RELATIVE_TO_INITVAL",
+            (_, "all_values_required") => "ALL_VALUES_REQUIRED",
+            _ => "IDENTIFIER",
+        };
+        self.model.shape_refuses.push(ShapeRefuse::official(
+            token.span,
+            command,
+            format!("syntax error, unexpected {unexpected}, expecting {expected}"),
+        ));
+        true
+    }
+
+    /// The six 0.7 openers have different option grammars. Keep the
+    /// heterogeneous `shocks` variant with its later owner.
+    fn record_shock_opener_refuse(
+        &mut self,
+        opener_i: usize,
+        body_i: usize,
+        kind: Option<ShockBlockKind>,
+    ) -> bool {
+        let command = self.tokens[opener_i].text(self.src).to_ascii_lowercase();
+        if kind == Some(ShockBlockKind::Heterogeneous)
+            || self.tokens.get(opener_i + 1).map(|t| t.kind) != Some(TokenKind::LParen)
+        {
+            return false;
+        }
+        let Some(close_i) =
+            (opener_i + 2..body_i).find(|&i| self.tokens[i].kind == TokenKind::RParen)
+        else {
+            return false;
+        };
+        let first_i = opener_i + 2;
+        if first_i == close_i {
+            let expected = match command.as_str() {
+                "shocks" => "OVERWRITE or SURPRISE or LEARNT_IN or HETEROGENEITY",
+                "mshocks" => "OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL",
+                "heteroskedastic_shocks" => "OVERWRITE",
+                "shock_paths" => "OVERWRITE or LEARNT_IN",
+                "endval" => "ALL_VALUES_REQUIRED or LEARNT_IN",
+                "perfect_foresight_controlled_paths" => "LEARNT_IN",
+                _ => return false,
+            };
+            return self.shock_opener_refuse(close_i, &command, expected);
+        }
+        if first_i > close_i {
+            return false;
+        }
+        let (allowed, expected): (&[&str], &str) = match command.as_str() {
+            "shocks" => (
+                &["overwrite", "surprise", "learnt_in"],
+                "OVERWRITE or SURPRISE or LEARNT_IN or HETEROGENEITY",
+            ),
+            "mshocks" => (
+                &["overwrite", "learnt_in", "relative_to_initval"],
+                "OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL",
+            ),
+            "heteroskedastic_shocks" => (&["overwrite"], "OVERWRITE"),
+            "shock_paths" => (&["overwrite", "learnt_in"], "OVERWRITE or LEARNT_IN"),
+            "endval" => (
+                &["all_values_required", "learnt_in"],
+                "ALL_VALUES_REQUIRED or LEARNT_IN",
+            ),
+            "perfect_foresight_controlled_paths" => (&["learnt_in"], "LEARNT_IN"),
+            _ => return false,
+        };
+        if self.tokens[first_i].kind != TokenKind::Ident {
+            return self.shock_opener_refuse(first_i, &command, expected);
+        }
+        let first = self.tokens[first_i].text(self.src).to_ascii_lowercase();
+        if !allowed.contains(&first.as_str()) {
+            return self.shock_opener_refuse(first_i, &command, expected);
+        }
+        let mut next_i = first_i + 1;
+        if first == "learnt_in" {
+            if self.tokens.get(next_i).map(|t| t.kind) != Some(TokenKind::Eq) {
+                return self.shock_opener_refuse(next_i, &command, "EQUAL");
+            }
+            let value_i = next_i + 1;
+            let Some((_, after_value)) = self.period_point_at(value_i, false) else {
+                return self.shock_opener_refuse(value_i, &command, "DATE or INT_NUMBER");
+            };
+            next_i = after_value;
+        }
+        if matches!(command.as_str(), "mshocks" | "shock_paths") {
+            let later_expected = if command == "mshocks" {
+                "OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'"
+            } else {
+                "OVERWRITE or LEARNT_IN or ')'"
+            };
+            while next_i < close_i {
+                if self.tokens[next_i].kind == TokenKind::Comma {
+                    return false; // Existing comma gate owns this syntax.
+                }
+                if self.tokens[next_i].kind != TokenKind::Ident {
+                    return self.shock_opener_refuse(next_i, &command, later_expected);
+                }
+                let word = self.tokens[next_i].text(self.src).to_ascii_lowercase();
+                if !allowed.contains(&word.as_str()) {
+                    return self.shock_opener_refuse(next_i, &command, later_expected);
+                }
+                next_i += 1;
+                if word == "learnt_in" {
+                    if self.tokens.get(next_i).map(|t| t.kind) != Some(TokenKind::Eq) {
+                        return self.shock_opener_refuse(next_i, &command, "EQUAL");
+                    }
+                    let value_i = next_i + 1;
+                    let Some((_, after_value)) = self.period_point_at(value_i, false) else {
+                        return self.shock_opener_refuse(value_i, &command, "DATE or INT_NUMBER");
+                    };
+                    next_i = after_value;
+                }
+            }
+            return false;
+        }
+        if command != "shocks" {
+            return next_i < close_i && self.shock_opener_refuse(next_i, &command, "')'");
+        }
+        if next_i >= close_i {
+            return false;
+        }
+        if self.tokens[next_i].kind != TokenKind::Comma {
+            return self.shock_opener_refuse(next_i, &command, "COMMA or ')'");
+        }
+        let second_i = next_i + 1;
+        let (allowed_second, expected_second): (&[&str], &str) = if first == "overwrite" {
+            (
+                &["surprise", "learnt_in"],
+                "SURPRISE or LEARNT_IN or HETEROGENEITY",
+            )
+        } else {
+            (&["overwrite"], "OVERWRITE")
+        };
+        if second_i >= close_i || self.tokens[second_i].kind != TokenKind::Ident {
+            return self.shock_opener_refuse(second_i, &command, expected_second);
+        }
+        let second = self.tokens[second_i].text(self.src).to_ascii_lowercase();
+        if !allowed_second.contains(&second.as_str()) {
+            return self.shock_opener_refuse(second_i, &command, expected_second);
+        }
+        let mut end_i = second_i + 1;
+        if second == "learnt_in" {
+            if self.tokens.get(end_i).map(|t| t.kind) != Some(TokenKind::Eq) {
+                return self.shock_opener_refuse(end_i, &command, "EQUAL");
+            }
+            let value_i = end_i + 1;
+            let Some((_, after_value)) = self.period_point_at(value_i, false) else {
+                return self.shock_opener_refuse(value_i, &command, "DATE or INT_NUMBER");
+            };
+            end_i = after_value;
+        }
+        end_i < close_i && self.shock_opener_refuse(end_i, &command, "')'")
+    }
+
     pub(super) fn record_shock_shape_refuses(
         &mut self,
         opener_i: usize,
@@ -1279,6 +1447,9 @@ impl Parser<'_> {
         kind: ShockBlockKind,
     ) {
         let command = self.tokens[opener_i].text(self.src).to_string();
+        if self.record_shock_opener_refuse(opener_i, body_i, Some(kind)) {
+            return;
+        }
         let opts = self.shock_options_at(opener_i, body_i);
         if body_i == body_end_i {
             let message = match kind {
@@ -1302,9 +1473,25 @@ impl Parser<'_> {
         }
         if matches!(
             kind,
-            ShockBlockKind::Surprise | ShockBlockKind::LearntIn | ShockBlockKind::Multiplicative
+            ShockBlockKind::Surprise
+                | ShockBlockKind::LearntIn
+                | ShockBlockKind::Multiplicative
+                | ShockBlockKind::Heteroskedastic
         ) {
             for i in body_i..body_end_i.saturating_sub(2) {
+                let row_start = i == body_i || self.tokens[i - 1].kind == TokenKind::Semi;
+                if row_start
+                    && self.word_at(i, "var")
+                    && self.tokens[i + 1].kind == TokenKind::Ident
+                    && self.tokens[i + 2].kind == TokenKind::Comma
+                {
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        self.tokens[i + 2].span,
+                        &command,
+                        "syntax error, unexpected COMMA, expecting ';'",
+                    ));
+                    break;
+                }
                 if self.word_at(i, "var")
                     && self.tokens[i + 1].kind == TokenKind::Ident
                     && self.tokens[i + 2].kind == TokenKind::Eq
@@ -1325,6 +1512,72 @@ impl Parser<'_> {
                         &command,
                         "syntax error, unexpected STDERR, expecting PERIODS",
                     ));
+                }
+            }
+        }
+        if kind != ShockBlockKind::Heterogeneous {
+            for i in body_i..body_end_i {
+                let row_start = i == body_i || self.tokens[i - 1].kind == TokenKind::Semi;
+                if row_start
+                    && matches!(
+                        kind,
+                        ShockBlockKind::Surprise
+                            | ShockBlockKind::LearntIn
+                            | ShockBlockKind::Multiplicative
+                            | ShockBlockKind::Heteroskedastic
+                    )
+                    && (self.word_at(i, "corr") || self.word_at(i, "skew"))
+                {
+                    let message = if self.word_at(i, "corr") {
+                        "syntax error, unexpected CORR, expecting VAR"
+                    } else {
+                        "syntax error, unexpected SKEW, expecting VAR"
+                    };
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        self.tokens[i].span,
+                        &command,
+                        message,
+                    ));
+                    break;
+                }
+                if !self.word_at(i, "periods") {
+                    continue;
+                }
+                let Some(end_i) =
+                    (i + 1..body_end_i).find(|&j| self.tokens[j].kind == TokenKind::Semi)
+                else {
+                    continue;
+                };
+                let op_i = end_i + 1;
+                if op_i >= body_end_i {
+                    continue;
+                }
+                let operation = self.tokens[op_i].text(self.src).to_ascii_lowercase();
+                let message = match (kind, operation.as_str()) {
+                    (ShockBlockKind::Heteroskedastic, "add") => {
+                        Some("syntax error, unexpected ADD, expecting VALUES or SCALES")
+                    }
+                    (ShockBlockKind::Heteroskedastic, "multiply") => {
+                        Some("syntax error, unexpected MULTIPLY, expecting VALUES or SCALES")
+                    }
+                    (
+                        ShockBlockKind::Regular
+                        | ShockBlockKind::Surprise
+                        | ShockBlockKind::LearntIn
+                        | ShockBlockKind::Multiplicative,
+                        "scales",
+                    ) => {
+                        Some("syntax error, unexpected SCALES, expecting VALUES or ADD or MULTIPLY")
+                    }
+                    _ => None,
+                };
+                if let Some(message) = message {
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        self.tokens[op_i].span,
+                        &command,
+                        message,
+                    ));
+                    break;
                 }
             }
         }

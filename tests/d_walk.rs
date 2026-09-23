@@ -1,9 +1,10 @@
 //! D-walk family locks: options / flags / symbol lists on recorded commands.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use dygnosis::explain::known_codes;
-use dygnosis::{analyze, parse, Diagnostic};
+use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, Diagnostic, JsonStage};
 
 fn fixture(rel: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -222,6 +223,7 @@ fn e221_shocks_lt_varobs() {
 const E222_MSG: &str = "When estimating a DSGE-VAR model and estimating the weight of the prior, dsge_prior_weight must be referenced in the estimated_params block.";
 const E223_MSG: &str = "If dsge_prior_weight is in the estimated_params block, the prior weight cannot be calibrated via the dsge_var option in the estimation statement.";
 const E224_MSG: &str = "If dsge_prior_weight is in the estimated_params block, the dsge_var option must be passed to the estimation statement.";
+
 const E225_MSG: &str = "The estimation statement requires a dsge_var option to be passed if the dsge_varlag option is passed.";
 const E226_MSG: &str = "An estimation statement cannot take more than one dsge_var option.";
 const E227_MSG: &str = "The estimation statement requires a data file to be supplied via the datafile option.";
@@ -231,6 +233,56 @@ const E230_MSG: &str = "The option mh_tune_guess in estimation statement cannot 
 const E231_MSG: &str = "The filter_algorithm=gmf option is incompatible with proposal_approximation=montecarlo in the estimation statement.";
 const E232_MSG: &str = "The filter_algorithm=gmf option is incompatible with distribution_approximation=montecarlo in the estimation statement.";
 const E234_MSG: &str = "both the 'prior_function' and 'posterior_function' commands require the 'function' option";
+
+#[test]
+fn uppercase_dsge_prior_weight_reaches_the_same_checks() {
+    let pp = find_preprocessor(None);
+    for (file, code, message, stage) in [
+        (
+            "d_walk/e220_bayesian_irf_counts.mod",
+            "E220",
+            E220_MSG,
+            JsonStage::Transform,
+        ),
+        (
+            "d_walk/e221_shocks_lt_varobs.mod",
+            "E221",
+            E221_MSG,
+            JsonStage::Transform,
+        ),
+        (
+            "d_walk/e223_weight_and_calibrated.mod",
+            "E223",
+            E223_MSG,
+            JsonStage::Check,
+        ),
+        (
+            "d_walk/e224_weight_without_dsge_var.mod",
+            "E224",
+            E224_MSG,
+            JsonStage::Check,
+        ),
+    ] {
+        let source = fixture(file).replace("dsge_prior_weight", "DSGE_PRIOR_WEIGHT");
+        let diags = analyze(&parse(&source));
+        assert_eq!(find(&diags, code).message, message, "{file}");
+        quiet(&diags, "E093");
+        quiet(&diags, "E222");
+        if let Some(pp) = &pp {
+            if stage == JsonStage::Transform {
+                let check =
+                    run_preprocessor(&source, pp, None, Duration::from_secs(30), JsonStage::Check);
+                assert!(check.success, "{file}: {}", check.raw_stdout);
+            }
+            let official = run_preprocessor(&source, pp, None, Duration::from_secs(30), stage);
+            assert!(
+                !official.success && official.raw_stdout.contains(message),
+                "{file}: {}",
+                official.raw_stdout
+            );
+        }
+    }
+}
 
 fn fire(rel: &str, code: &str, msg: &str) {
     let diags = analyze(&parse(&fixture(rel)));
