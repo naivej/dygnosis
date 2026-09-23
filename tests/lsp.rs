@@ -2454,6 +2454,51 @@ async fn compare_models_trend_vs_sims_no_ss_fields() {
 }
 
 #[tokio::test]
+async fn compare_shock_locations_follow_open_document_edits() {
+    let uri_a = archive_url("trend_rbc_gov_inv");
+    let uri_b = archive_url("sims_wu_2019");
+    let before = "varexo e;\nshocks;\nvar e; periods 2; values 1; end;\n";
+    let after = "varexo e;\nshocks;\nvar e; periods 3; values 2; end;\n";
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri_a.clone(), before.into(), 1))
+        .await;
+    service
+        .inner()
+        .did_open(open_params(uri_b.clone(), after.into(), 1))
+        .await;
+    let edited = after.replacen("shocks;\n", "shocks;\n\n", 1);
+    service
+        .inner()
+        .did_change(change_params(uri_b.clone(), edited, 2))
+        .await;
+    let diff = service
+        .inner()
+        .execute_command(ExecuteCommandParams {
+            command: "dynare/compareModels".into(),
+            arguments: vec![serde_json::json!({
+                "uri_a": uri_a.as_str(),
+                "uri_b": uri_b.as_str(),
+            })],
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("compare rpc")
+        .expect("diff");
+    let changes = diff["shock_setup_changes"]
+        .as_array()
+        .expect("shock changes");
+    assert_eq!(changes.len(), 1, "{diff}");
+    let row = &changes[0];
+    assert_eq!(row["before"]["location"]["line"], 3);
+    assert_eq!(row["after"]["location"]["line"], 4);
+    assert_eq!(row["before"]["origin_uri"], uri_a.as_str());
+    assert_eq!(row["after"]["origin_uri"], uri_b.as_str());
+    assert!(diff["markdown"].as_str().unwrap().contains("after line 4"));
+}
+
+#[tokio::test]
 async fn format_indent_config_uses_four_spaces() {
     let text = "var y;\nmodel;\ny=c;\nend;\n";
     let uri = archive_url("trend_rbc_gov_inv");

@@ -39,5 +39,6 @@
   "removed_parameters": [
     "alpha",
     "delta"
-  ]
+  ],
+  "shock_setup_changes": []
 }

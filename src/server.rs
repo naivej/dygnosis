@@ -16,7 +16,7 @@ use crate::explain;
 use crate::format::{format_range, format_text};
 use crate::lexer::{tokenize, TokenKind};
 use crate::model::{Decl, Equation, Model};
-use crate::model_diff::compare_models;
+use crate::model_diff::{compare_models_with_sources, CompareSource};
 use crate::model_info::{
     assigned_number, classify_variable_timing, format_structure_lens, format_timing_line,
     structure_summary, TimingClass,
@@ -943,7 +943,25 @@ impl Backend {
         let Some(model_b) = inner.workspace.get_model(uri_b.as_str()) else {
             return json!({"error": format!("No parsed model for uri_b: {uri_b}"), "code": "URI_B_NOT_FOUND"});
         };
-        compare_models(model_a, model_b).to_json()
+        compare_models_with_sources(
+            model_a,
+            model_b,
+            inner
+                .workspace
+                .get_source(uri_a.as_str())
+                .map(|text| CompareSource {
+                    text,
+                    origin_uri: Some(uri_a.as_str()),
+                }),
+            inner
+                .workspace
+                .get_source(uri_b.as_str())
+                .map(|text| CompareSource {
+                    text,
+                    origin_uri: Some(uri_b.as_str()),
+                }),
+        )
+        .to_json()
     }
 
     fn show_effective_model_command(&self, arguments: &[Value]) -> Value {

@@ -114,7 +114,10 @@ pub use model::{
     ParseIssue, ParseIssueKind, ParseSummary, PolicyCommand, ShockKind, ShockStmt,
     ShocksSemiFamily,
 };
-pub use model_diff::{compare_models, EquationChange, IndexedEquation, ModelDiff, ParameterChange};
+pub use model_diff::{
+    compare_models, compare_models_with_sources, CompareSource, EquationChange, IndexedEquation,
+    ModelDiff, ParameterChange, ShockSetting, ShockSetupChange, SourceLocation, WrittenPeriod,
+};
 pub use model_info::{
     assigned_number, classify_variable_timing, format_structure_lens, format_timing_line,
     structure_summary, StructureSummary, TimingClass, TimingInfo,

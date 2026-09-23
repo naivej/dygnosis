@@ -21,7 +21,7 @@ use crate::expand::{expand_report, EquationOrigin, ExpandReport, OriginFrame};
 use crate::explain;
 use crate::include_resolver::{normalize_uri, path_key};
 use crate::model::Model;
-use crate::model_diff::compare_models;
+use crate::model_diff::{compare_models_with_sources, CompareSource};
 use crate::model_info::{classify_variable_timing, TimingClass};
 use crate::parser::{normalize_newlines, parse};
 use crate::refs::{is_legal_ident, occurrences, rename_in_text};
@@ -509,7 +509,19 @@ pub fn dynare_compare_models(
         first_nonempty_files(files_b, files),
         true,
     );
-    compare_models(&model_a, &model_b).to_json()
+    compare_models_with_sources(
+        &model_a,
+        &model_b,
+        Some(CompareSource {
+            text: file_content_a,
+            origin_uri: active_file_a,
+        }),
+        Some(CompareSource {
+            text: file_content_b,
+            origin_uri: active_file_b,
+        }),
+    )
+    .to_json()
 }
 
 /// Python `files_a or files`: an empty map is missing and the fallback is used.

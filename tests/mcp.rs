@@ -1383,6 +1383,68 @@ fn dynare_compare_models_indexed_equations_and_markdown() {
     assert_eq!(diff, expected);
 }
 
+#[test]
+fn compare_shock_locations_use_the_supplied_files() {
+    let before = "varexo e;\nshocks;\nvar e; periods 2; values 1; end;\n";
+    let after = "varexo e;\nshocks;\nvar e; periods 3; values 2; end;\n";
+    let diff = dynare_compare_models(
+        before,
+        after,
+        Some("before.mod"),
+        Some("after.mod"),
+        None,
+        None,
+        None,
+    );
+    let changes = diff["shock_setup_changes"]
+        .as_array()
+        .expect("shock changes");
+    assert_eq!(changes.len(), 1, "{diff}");
+    let row = &changes[0];
+    assert_eq!(row["before"]["location"]["line"], 3);
+    assert_eq!(row["after"]["location"]["line"], 3);
+    assert_eq!(row["before"]["origin_uri"], "before.mod");
+    assert_eq!(row["after"]["origin_uri"], "after.mod");
+
+    let without_names = dynare_compare_models(before, after, None, None, None, None, None);
+    let row = &without_names["shock_setup_changes"][0];
+    assert_eq!(row["before"]["location"]["line"], 3);
+    assert!(row["before"].get("origin_uri").is_none());
+}
+
+#[test]
+fn compare_omits_root_locations_for_spliced_shock_rows() {
+    let root = "@#include \"shock.inc\"\n";
+    let mut files_a = HashMap::new();
+    files_a.insert("root.mod".to_string(), root.to_string());
+    files_a.insert(
+        "shock.inc".to_string(),
+        "varexo e; shocks; var e; periods 2; values 1; end;".to_string(),
+    );
+    let mut files_b = files_a.clone();
+    files_b.insert(
+        "shock.inc".to_string(),
+        "varexo e; shocks; var e; periods 3; values 2; end;".to_string(),
+    );
+    let diff = dynare_compare_models(
+        root,
+        root,
+        Some("root.mod"),
+        Some("root.mod"),
+        Some(&files_a),
+        Some(&files_b),
+        None,
+    );
+    let changes = diff["shock_setup_changes"]
+        .as_array()
+        .expect("shock changes");
+    assert_eq!(changes.len(), 1, "{diff}");
+    let row = &changes[0];
+    assert!(row["before"].get("location").is_none(), "{diff}");
+    assert!(row["after"].get("location").is_none(), "{diff}");
+    assert!(row["before"].get("origin_uri").is_none(), "{diff}");
+}
+
 fn assert_count_gap_shape(payload: &Value) {
     let gap = payload["count_gap"].as_object().expect("count_gap object");
     assert!(gap.contains_key("n_endogenous"));
