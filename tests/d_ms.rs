@@ -470,7 +470,7 @@ fn data_statement_carries_file_or_series_for_the_e227_gate() {
 
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(dygnosis::explain::known_codes().len(), 333);
+    assert_eq!(dygnosis::explain::known_codes().len(), 338);
 }
 
 /// Every one of the family's 42 official sentences, on its fire fixture, with
@@ -978,7 +978,10 @@ fn the_shape_sweep_fires_e001() {
             "conditional_forecast",
         ),
         ("d_ms/e001_data_series_vector.mod", "data"),
-        ("d_ms/e001_data_first_obs_integer.mod", "data"),
+        (
+            "d_ms/e001_data_first_obs_integer.mod",
+            "syntax error, unexpected INT_NUMBER, expecting DATE",
+        ),
         ("d_ms/e001_data_nobs_negative.mod", "data"),
         ("d_ms/e001_svar_constants_flag.mod", "svar"),
         ("d_ms/e001_svar_equations_empty.mod", "svar"),

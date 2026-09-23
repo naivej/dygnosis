@@ -3562,7 +3562,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
             workspace_only: false,
         },
         their_needle: "unexpected INT_NUMBER, expecting DATE",
-        our_needle: "data",
+        our_needle: "syntax error, unexpected INT_NUMBER, expecting DATE",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -5109,6 +5109,48 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         our_needle: "option irf declared twice",
         stage: JsonStage::Check,
     },
+    HonestyRow { code: "E426", fixture: "d_carry/e426_removed_model.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "Variable 'c' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement", our_needle: "Variable 'c' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement", stage: JsonStage::Check },
+    HonestyRow { code: "E427", fixture: "d_carry/e427_range_twice.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "Symbol s may only be assigned once in a SUBSAMPLE statement", our_needle: "Symbol s may only be assigned once in a SUBSAMPLE statement", stage: JsonStage::Check },
+    HonestyRow { code: "E428", fixture: "d_carry/e428_copy_source_missing.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "a does not have an associated subsample statement.", our_needle: "a does not have an associated subsample statement.", stage: JsonStage::Check },
+    HonestyRow { code: "E429", fixture: "d_carry/e429_named_missing.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "A subsample statement has not been issued for a", our_needle: "A subsample statement has not been issued for a", stage: JsonStage::Check },
+    HonestyRow { code: "E430", fixture: "d_carry/e430_range_missing.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "The subsample name t was not previously declared in a subsample statement.", our_needle: "The subsample name t was not previously declared in a subsample statement.", stage: JsonStage::Check },
+    HonestyRow { code: "E431", fixture: "d_carry/e431_writer_declare.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "subsamples: invalid symbol type for d", our_needle: "subsamples: invalid symbol type for d", stage: JsonStage::Write },
+    HonestyRow { code: "E431", fixture: "d_carry/e431_writer_copy.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "subsamples: invalid symbol type for d", our_needle: "subsamples: invalid symbol type for d", stage: JsonStage::Write },
+    HonestyRow { code: "E278", fixture: "d_carry/e278_folded_denominator.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "Division by zero when forming (1)/(0); denominator simplified to 0", our_needle: "Division by zero when forming (1)/(0); denominator simplified to 0", stage: JsonStage::Check },
+    HonestyRow { code: "E240", fixture: "d_carry/e240_model_local_variable.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "forecast: Variable mv is not one of {endogenous}", our_needle: "forecast: Variable mv is not one of {endogenous}", stage: JsonStage::Check },
+    HonestyRow { code: "E240", fixture: "d_carry/e240_steady_state_local.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "forecast: Variable zz2 is not one of {endogenous}", our_needle: "forecast: Variable zz2 is not one of {endogenous}", stage: JsonStage::Check },
+    HonestyRow { code: "E240", fixture: "d_carry/e240_var_remove_list.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "stoch_simul: Variable c is not one of {endogenous}", our_needle: "stoch_simul: Variable c is not one of {endogenous}", stage: JsonStage::Check },
+    HonestyRow { code: "E379", fixture: "d_carry/e379_corr_options.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "In the corr(A,B).options statement, A and B must be of the same type.", our_needle: "In the corr(A,B).options statement, A and B must be of the same type.", stage: JsonStage::Check },
+    HonestyRow { code: "E058", fixture: "d_carry/e058_subsample_std_unknown.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "Unknown symbol: z.", our_needle: "Unknown symbol: z.", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_forecast_word.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected NOGRAPH", our_needle: "syntax error, unexpected NOGRAPH", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_squeeze_paren.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected '('", our_needle: "syntax error, unexpected '('", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_dynasave_bare.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected IDENTIFIER, expecting '('", our_needle: "syntax error, unexpected IDENTIFIER, expecting '('", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_options_body.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected IDENTIFIER, expecting BOUNDS or JSCALE or INIT", our_needle: "syntax error, unexpected IDENTIFIER, expecting BOUNDS or JSCALE or INIT", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_subsample_date.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected INT_NUMBER, expecting DATE", our_needle: "syntax error, unexpected INT_NUMBER, expecting DATE", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_set_time_integer.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected INT_NUMBER, expecting DATE", our_needle: "syntax error, unexpected INT_NUMBER, expecting DATE", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_pf_date_integer.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected INT_NUMBER, expecting DATE", our_needle: "syntax error, unexpected INT_NUMBER, expecting DATE", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_pfee_date_integer.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected INT_NUMBER, expecting DATE", our_needle: "syntax error, unexpected INT_NUMBER, expecting DATE", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_plot_date_integer.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected INT_NUMBER, expecting DATE", our_needle: "syntax error, unexpected INT_NUMBER, expecting DATE", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_data_date_integer.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected INT_NUMBER, expecting DATE", our_needle: "syntax error, unexpected INT_NUMBER, expecting DATE", stage: JsonStage::Check },
+    HonestyRow { code: "E030", fixture: "d_carry/e030_model_local_cross.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "Symbol mv declared twice with different types!", our_needle: "Symbol mv declared twice with different types!", stage: JsonStage::Check },
+    HonestyRow { code: "W031", fixture: "d_carry/w031_model_local_same.mod", kind: HonestyKind::Warning, their_needle: "Symbol mv declared twice.", our_needle: "Symbol mv declared twice.", stage: JsonStage::Check },
+    HonestyRow { code: "E271", fixture: "d_carry/e271_forecast_repeat.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "option periods declared twice", our_needle: "option periods declared twice", stage: JsonStage::Check },
+    HonestyRow { code: "E058", fixture: "d_carry/e058_options_copy_source.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "Unknown symbol: z.", our_needle: "Unknown symbol: z.", stage: JsonStage::Check },
+    HonestyRow { code: "E059", fixture: "d_carry/e059_options_copy_source.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "a is neither endogenous or exogenous.", our_needle: "a is neither endogenous or exogenous.", stage: JsonStage::Check },
+    HonestyRow { code: "E317", fixture: "d_carry/e317_options_copy_source.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "d is an exogenous deterministic.", our_needle: "d is an exogenous deterministic.", stage: JsonStage::Check },
+    HonestyRow { code: "E378", fixture: "d_carry/e378_prior_copy_source.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "y is not a parameter", our_needle: "y is not a parameter", stage: JsonStage::Check },
+    HonestyRow { code: "E058", fixture: "d_carry/e058_named_options_late.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "Unknown symbol: u.", our_needle: "Unknown symbol: u.", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_data_date_minus.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected MINUS, expecting COMMA or ')'", our_needle: "syntax error, unexpected MINUS, expecting COMMA or ')'", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_data_date_float.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER", our_needle: "syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_histval_date_minus.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected MINUS, expecting COMMA or ')'", our_needle: "syntax error, unexpected MINUS, expecting COMMA or ')'", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_initval_date_minus.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected MINUS, expecting COMMA or ')'", our_needle: "syntax error, unexpected MINUS, expecting COMMA or ')'", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_pf_date_minus.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected MINUS, expecting COMMA or ')'", our_needle: "syntax error, unexpected MINUS, expecting COMMA or ')'", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_pfee_date_minus.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected MINUS, expecting COMMA or ')'", our_needle: "syntax error, unexpected MINUS, expecting COMMA or ')'", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_plot_date_minus.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected MINUS, expecting ')'", our_needle: "syntax error, unexpected MINUS, expecting ')'", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_icd_date_minus.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected MINUS, expecting ')'", our_needle: "syntax error, unexpected MINUS, expecting ')'", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_set_time_float.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER", our_needle: "syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_subsample_last_minus.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected MINUS, expecting COMMA or ')'", our_needle: "syntax error, unexpected MINUS, expecting COMMA or ')'", stage: JsonStage::Check },
+    HonestyRow { code: "E001", fixture: "d_carry/e001_subsample_last_float.mod", kind: HonestyKind::Error { workspace_only: false }, their_needle: "syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER", our_needle: "syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER", stage: JsonStage::Check },
 ];
 
 struct ClashQuiet {
@@ -5975,6 +6017,7 @@ fn surface_matrix_claims_every_official_message() {
                 || fixture.starts_with("d_surgery/")
                 || fixture.starts_with("d_ms/")
                 || fixture.starts_with("d_writer/")
+                || fixture.starts_with("d_carry/")
                 || fixture.starts_with("lists/")
         })
         .collect();

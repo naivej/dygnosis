@@ -197,7 +197,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E058", ExplainEntry {
         title: "Undeclared variable in a block that names symbols",
-        body: "A block or option names a symbol that is not declared at that point in the file. This includes `initval` / `endval`, shock and path stanza targets, scoped path references, `irf_shocks`, and the older name slots listed in the catalog. Dynare refuses with `Unknown symbol: undeclared_zzz` (some sites add a full stop and a `nostrict` hint). A bare undeclared name in a `shock_paths` value is a separate no-message Dynare crash and stays quiet.\n\n**Warrant**\n\nThe editor names the undeclared entry and its block; Dynare's string is generic.\n\n**Fix**\n\nDeclare the variable before its use, or correct the name.",
+        body: "A block or option names a symbol that is not declared at that point in the file. This includes `initval` / `endval`, shock and path stanza targets, `subsamples` heads and copy sources, scoped path references, `irf_shocks`, and the older name slots listed in the catalog. Dynare refuses with `Unknown symbol: undeclared_zzz` (some sites add a full stop and a `nostrict` hint). A bare undeclared name in a `shock_paths` value is a separate no-message Dynare crash and stays quiet.\n\n**Warrant**\n\nThe editor names the undeclared entry and its block; Dynare's string is generic.\n\n**Fix**\n\nDeclare the variable before its use, or correct the name.",
         kind: ExplainKind::Shared,
     }),
     ("W051", ExplainEntry {
@@ -211,8 +211,8 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Added,
     }),
     ("E059", ExplainEntry {
-        title: "Name in initval/endval or a std/corr prior head is neither endogenous or exogenous",
-        body: "An `initval` or `endval` entry, a `histval` entry, a `std(…)` / `corr(…)` prior head, or an `initval.x` reference in `shock_paths` names something other than endogenous or exogenous (for example a parameter). Dynare refuses: `… is neither endogenous or exogenous.`\n\n**Fix**\n\nUse an endogenous or exogenous name in those slots; assign a parameter before the model block or inside `steady_state_model`.",
+        title: "Name in initval/endval or a std/corr prior/options head is neither endogenous or exogenous",
+        body: "An `initval` or `endval` entry, a `histval` entry, a `std(…)` / `corr(…)` prior or options head, or an `initval.x` reference in `shock_paths` names something other than endogenous or exogenous (for example a parameter). Dynare refuses: `… is neither endogenous or exogenous.`\n\n**Fix**\n\nUse an endogenous or exogenous name in those slots; assign a parameter before the model block or inside `steady_state_model`.",
         kind: ExplainKind::Shared,
     }),
     ("W060", ExplainEntry {
@@ -637,7 +637,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E240", ExplainEntry {
         title: "Wrong type in a command symbol list",
-        body: "A command symbol list names a declared symbol of the wrong type. Trailing lists use the command's accepted-kind sentence (`{endogenous}`, `{endogenous, exogenous}`, `{endogenous, epilogue}`, or `{parameter}`). The `irf_shocks` option of `stoch_simul` or `estimation` uses its own sentence: `Variables passed to irf_shocks must be exogenous. Caused by: y`.\n\n**Fix**\n\nUse a symbol of the type the command or option accepts.",
+        body: "A command symbol list names a declared symbol of the wrong type. This includes names declared by `model_local_variable`, first assigned in `steady_state_model`, or removed by `var_remove`. Trailing lists use the command's accepted-kind sentence (`{endogenous}`, `{endogenous, exogenous}`, `{endogenous, epilogue}`, or `{parameter}`). The `irf_shocks` option of `stoch_simul` or `estimation` uses its own sentence: `Variables passed to irf_shocks must be exogenous. Caused by: y`.\n\n**Fix**\n\nUse a symbol of the type the command or option accepts.",
         kind: ExplainKind::Shared,
     }),
     ("W201", ExplainEntry {
@@ -841,8 +841,8 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Shared,
     }),
     ("E278", ExplainEntry {
-        title: "Division by interned numeric zero",
-        body: "A division denominator folds to interned numeric 0 while the expression is built. Dynare refuses: `Division by zero when forming ({num})/({den}); denominator simplified to 0 (possibly after substituting a variable set to 0).`\n\n**Fix**\n\nChange the denominator so it is not zero.",
+        title: "Division by a denominator that folds to zero",
+        body: "A written division denominator folds to zero while the expression is built. This includes literal zero and local cancellation such as `c-c` or `y-y`. Dynare refuses: `Division by zero when forming ({num})/(0); denominator simplified to 0 (possibly after substituting a variable set to 0).` Assigned parameter values are not substituted at this parse step.\n\n**Fix**\n\nChange the denominator so it is not zero.",
         kind: ExplainKind::Shared,
     }),
     ("E279", ExplainEntry {
@@ -1037,7 +1037,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E317", ExplainEntry {
         title: "Name is not endogenous, or is an exogenous deterministic",
-        body: "A name has the wrong declared role in a slot that requires an endogenous variable, or a `varexo_det` name is used where only plain exogenous variables are allowed. Dynare refuses `N is not endogenous.` or `N is an exogenous deterministic.` This includes controlled-path `exogenize`, scheduled shock/path rows, `self`/`prev`/`learnt_in` references, and the older prior, calibration, and moment slots.\n\n**Fix**\n\nUse `var` for an endogenous slot and `varexo` for a plain exogenous slot.",
+        body: "A name has the wrong declared role in a slot that requires an endogenous variable, or a `varexo_det` name is used where only plain exogenous variables are allowed. Dynare refuses `N is not endogenous.` or `N is an exogenous deterministic.` This includes `std` / `corr` prior and options heads, controlled-path `exogenize`, scheduled shock/path rows, `self`/`prev`/`learnt_in` references, and the older calibration and moment slots.\n\n**Fix**\n\nUse `var` for an endogenous slot and `varexo` for a plain exogenous slot.",
         kind: ExplainKind::Shared,
     }),
     ("E318", ExplainEntry {
@@ -1511,8 +1511,8 @@ Name two or more parameters, or use the single ``name.prior(…)`` form.",
         kind: ExplainKind::Shared,
     }),
     ("E378", ExplainEntry {
-        title: "assignment or prior head is not a parameter",
-        body: "A top-level `symbol = …;` assignment, or the head of a plain or bracketed ``prior`` statement, names a symbol that is not a parameter. Dynare refuses both while parsing, with the same sentence: `y is not a parameter`. The ``std(…)`` and ``corr(…)`` heads print their own sentence instead, and a line whose head the file never declares is native MATLAB text that 7.1 accepts.
+        title: "assignment or prior/options head is not a parameter",
+        body: "A top-level `symbol = …;` assignment, or the head of a plain or bracketed ``prior`` or plain ``options`` statement, names a symbol that is not a parameter. Dynare refuses while parsing with `y is not a parameter`. Named subsample heads use the same test. The ``std(…)`` and ``corr(…)`` heads print their own sentence instead, and a line whose head the file never declares is native MATLAB text that 7.2 accepts.
 
 **Fix**
 
@@ -1520,8 +1520,8 @@ Name a ``parameters`` symbol, or move the statement to the surface that takes th
         kind: ExplainKind::Shared,
     }),
     ("E379", ExplainEntry {
-        title: "corr prior mixes an endogenous and an exogenous name",
-        body: "The two names of a ``corr(A,B).prior(…)`` statement are of different types. Dynare refuses: `In the corr(A,B).prior statement, A and B must be of the same type. In your case, Pie and eps are of different types.`
+        title: "corr prior or options mixes an endogenous and an exogenous name",
+        body: "The two names of a ``corr(A,B).prior(…)`` or ``corr(A,B).options(…)`` statement are of different types. Dynare refuses: `In the corr(A,B).prior statement, A and B must be of the same type. In your case, Pie and eps are of different types.` The options form uses `corr(A,B).options` in that sentence.
 
 **Fix**
 
@@ -1766,6 +1766,36 @@ Move the call out of the ``steady_state(…)`` operator.",
         body: "A nondefault `shock_paths(learnt_in=…)` block needs both expectation-errors setup and solver, without regular perfect-foresight setup or solver. Dynare refuses: `the 'shock_paths(learnt_in=…)' block can only be used in conjunction with the 'perfect_foresight_with_expectation_errors_setup' and 'perfect_foresight_with_expectation_errors_solver' commands.`\n\n**Fix**\n\nUse the expectation-errors setup and solver, or a default shock-path block.",
         kind: ExplainKind::Shared,
     }),
+    ("E426", ExplainEntry {
+        title: "Removed variable used in a model expression",
+        body: "A model expression uses a variable after `var_remove` changed its type to excluded. Dynare refuses: `Variable 'c' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement`. A use written before the removal is allowed.\n\n**Fix**\n\nRemove the `var_remove` statement or stop using that variable after it.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E427", ExplainEntry {
+        title: "Subsample range name assigned twice",
+        body: "One `subsamples` declaration assigns the same range name twice. Dynare refuses: `Symbol s may only be assigned once in a SUBSAMPLE statement`. A second whole declaration is allowed.\n\n**Fix**\n\nGive each range in the declaration a distinct name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E428", ExplainEntry {
+        title: "Subsample copy source is missing",
+        body: "A `subsamples` copy names a source head with no earlier subsample declaration. Dynare refuses: `a does not have an associated subsample statement.`\n\n**Fix**\n\nDeclare the source ranges before copying them.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E429", ExplainEntry {
+        title: "Named prior or options has no subsample declaration",
+        body: "A named `prior` or `options` body refers to a head with no subsample declaration. Dynare refuses: `A subsample statement has not been issued for a`. The named copy forms do not run this lookup.\n\n**Fix**\n\nDeclare the head's subsample ranges before the named prior or options body.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E430", ExplainEntry {
+        title: "Subsample range name was not declared",
+        body: "A named `prior` or `options` body uses a range name absent from that head's subsample declaration. Dynare refuses: `The subsample name t was not previously declared in a subsample statement.`\n\n**Fix**\n\nUse one of the declared range names, or add the range to the subsample declaration.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E431", ExplainEntry {
+        title: "Subsample target has an invalid final symbol type",
+        body: "A `subsamples` declaration or copy has a target whose final type is neither parameter, plain exogenous, nor endogenous. Dynare accepts through its JSON checks but refuses when writing MATLAB files: `subsamples: invalid symbol type for d`. The first target name determines the type, including after `change_type` or `var_remove`.\n\n**Fix**\n\nUse a parameter, `varexo`, or `var` target, or change the target's final type.",
+        kind: ExplainKind::Shared,
+    }),
     ("E186", ExplainEntry {
         title: "Unused endogenous after substitution",
         body: "Dynare refuses: `Error: <name> not used in the model block`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
@@ -1859,11 +1889,6 @@ Move the call out of the ``steady_state(…)`` operator.",
     ("S040", ExplainEntry {
         title: "Heterogeneous lead or lag bound",
         body: "Dynare refuses: `In model(heterogeneity=…), equation N: …`. Catching step: check. Owner: skip 0.9 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S041", ExplainEntry {
-        title: "Subsample lookup and the options / subsamples bodies",
-        body: "Dynare refuses: `A subsample statement has not been issued for alpha`, and the `options` / `subsamples` statement bodies are not read. Catching step: parse. Owner: skip 0.7 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S053", ExplainEntry {

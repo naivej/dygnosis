@@ -36,7 +36,13 @@ impl Allowed {
 pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let declared = declared_names(model);
-    let endogenous: HashSet<Name> = model.endogenous.iter().map(|d| d.name).collect();
+    let removed: HashSet<Name> = model.var_removed.iter().map(|row| row.name).collect();
+    let endogenous: HashSet<Name> = model
+        .endogenous
+        .iter()
+        .filter(|d| !removed.contains(&d.name))
+        .map(|d| d.name)
+        .collect();
     let exo_det: HashSet<Name> = model
         .deterministic_exogenous
         .iter()
@@ -50,12 +56,17 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
         model
             .exogenous
             .iter()
-            .filter(|d| !exo_det.contains(&d.name))
+            .filter(|d| !exo_det.contains(&d.name) && !removed.contains(&d.name))
             .map(|d| d.name),
     );
     let mut endogenous_epilogue = endogenous.clone();
     endogenous_epilogue.extend(model.epilogue.iter().map(|a| a.name));
-    let parameters: HashSet<Name> = model.parameters.iter().map(|d| d.name).collect();
+    let parameters: HashSet<Name> = model
+        .parameters
+        .iter()
+        .filter(|d| !removed.contains(&d.name))
+        .map(|d| d.name)
+        .collect();
     let mut seen_stoch = HashSet::new();
     // 7.1's aux hit returns from `checkPass` outright, so the rest of that
     // statement's list is never read. Remembering only that one statement keeps
@@ -154,7 +165,9 @@ fn declared_names(model: &Model) -> HashSet<Name> {
         .chain(&model.parameters)
         .chain(&model.predetermined)
         .chain(&model.excluded_endogenous)
+        .chain(&model.model_local_variables)
         .map(|d| d.name)
+        .chain(model.var_removed.iter().map(|row| row.name))
         .chain(model.epilogue.iter().map(|a| a.name))
         .chain(model.trend_vars.iter().map(|t| t.name))
         .chain(model.external_function_names.iter().copied())
@@ -164,6 +177,12 @@ fn declared_names(model: &Model) -> HashSet<Name> {
                 .iter()
                 .filter_map(|eq| model_local_name(model, eq)),
         )
+        .chain(model.steady_state_equations.iter().filter_map(|eq| {
+            match &model.exprs.get(eq.lhs_expr?).kind {
+                ExprKind::Ident { name, .. } => Some(*name),
+                _ => None,
+            }
+        }))
         .collect()
 }
 

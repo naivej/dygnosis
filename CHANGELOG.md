@@ -3,6 +3,7 @@
 ## v0.7.0
 
 - Reads the written shock, path, learning-date, and database forms accepted by Dynare 7.2 and reports their parse, check, and written transform refusals (`E393`–`E425`). Existing `E343`/`E344` now reach deterministic shocks; `E111` catches covariance followed by correlation and skew/co-skew duplicates have their own codes.
+- Subsample declarations, copies, and named `prior` / `options` uses now report missing or repeated ranges (`E427`–`E430`) and invalid final target types at Write (`E431`). A model use after `var_remove` reports `E426`; command lists recognize removed and model-local names through `E240`. Written denominator cancellation reaches `E278`, and malformed DATE and handed-over command forms reach `E001`. Mixed-type `corr(A,B).options` uses `E379`.
 - W060 now warns only for an explicit `stoch_simul` IRF request with no written stochastic shock size. It stays quiet for bare declarations, bare `stoch_simul`, explicit zero size, possible estimated or external sizes, and uncertain macro or include input. Warnings in a file with resolved includes point to the active file.
 - Compare adds `shock_setup_changes` and a **Shock setup changes** markdown section for stochastic, scheduled, surprise, multiplicative, heteroskedastic, controlled, and terminal instructions. It shows written values, timing, learning dates, controls, and overwrite status, with source locations when the input text can be verified against the parsed file. It does not infer realized paths or solver results.
 

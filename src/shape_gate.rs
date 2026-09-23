@@ -327,6 +327,46 @@ const JOINT_PRIOR_OPTIONS: &[(&str, &[Shape])] = &[
     ("domain", &[Shape::Vector]),
 ];
 
+const DOTTED_OPTIONS: &[(&str, &[Shape])] = &[
+    ("jscale", &[Shape::Positive]),
+    ("init", &[Shape::Number]),
+    ("bounds", &[Shape::Vector]),
+];
+
+const FORECAST_OPTIONS: &[(&str, &[Shape])] = &[
+    ("periods", &[Shape::Uint]),
+    ("conf_sig", &[Shape::Positive]),
+    ("nograph", &[Shape::Flag]),
+    ("graph", &[Shape::Flag]),
+    ("nodisplay", &[Shape::Flag]),
+    ("graph_format", &[Shape::ParenNames]),
+];
+
+/// Value shapes shared by the handed-over decomposition commands. Command
+/// membership still comes from the catalog, since their option sets differ.
+const DECOMPOSITION_VALUE_SHAPES: &[(&str, &[Shape])] = &[
+    ("colormap", &[Shape::Symbol]),
+    ("parameter_set", &[Shape::Word(words::PARAMETER_SETS)]),
+    ("periods", &[Shape::Uint]),
+    ("first_obs", &[Shape::Uint]),
+    ("nobs", &[Shape::Uint]),
+    ("init_state", &[Shape::Uint]),
+    ("fig_name", &[Shape::Filename]),
+    ("plot_init_date", &[Shape::Date]),
+    ("plot_end_date", &[Shape::Date]),
+    ("type", &[Shape::Word(&["qoq", "yoy", "aoa"])]),
+    ("nograph", &[Shape::Flag]),
+    ("nodisplay", &[Shape::Flag]),
+    ("detail_plot", &[Shape::Flag]),
+    ("with_epilogue", &[Shape::Flag]),
+    ("steadystate", &[Shape::Flag]),
+    ("write_xls", &[Shape::Flag]),
+    ("interactive", &[Shape::Flag]),
+    ("screen_shocks", &[Shape::Flag]),
+    ("diff", &[Shape::Flag]),
+    ("flip", &[Shape::Flag]),
+];
+
 /// What the grammar takes for a named command's option list, or `None` when the
 /// command is not one whose list this gate knows.
 pub fn command_options(command: &str) -> Option<&'static [(&'static str, &'static [Shape])]> {
@@ -370,6 +410,60 @@ pub fn prior_options(joint: bool) -> &'static [(&'static str, &'static [Shape])]
     } else {
         PRIOR_OPTIONS
     }
+}
+
+pub fn dotted_options() -> &'static [(&'static str, &'static [Shape])] {
+    DOTTED_OPTIONS
+}
+
+/// The syntax checks handed over with the nine trailing-list commands. The
+/// catalog decides membership for decomposition option sets; known values not
+/// covered by a shape row remain with their established parser/check owner.
+pub fn handed_option_refusal(
+    src: &str,
+    command: &str,
+    options: &[FamilyOption],
+) -> Option<ShapeRefuse> {
+    if command.eq_ignore_ascii_case("forecast") {
+        return option_refusal(src, command, options, FORECAST_OPTIONS);
+    }
+    let known = crate::catalog::command_options(command);
+    for opt in options {
+        if !known
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(&opt.name))
+        {
+            let message = if opt.name.eq_ignore_ascii_case("with_epilogue") {
+                "syntax error, unexpected WITH_EPILOGUE"
+            } else {
+                "syntax error, unexpected IDENTIFIER"
+            };
+            return Some(ShapeRefuse::official(opt.span, command, message));
+        }
+        if let Some((_, shapes)) = DECOMPOSITION_VALUE_SHAPES
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(&opt.name))
+        {
+            if !row_fits(src, shapes, opt) {
+                if shapes.contains(&Shape::Date)
+                    && opt.value_text.bytes().all(|b| b.is_ascii_digit())
+                    && !opt.value_text.is_empty()
+                {
+                    return Some(ShapeRefuse::official(
+                        opt.value_span,
+                        command,
+                        "syntax error, unexpected INT_NUMBER, expecting DATE",
+                    ));
+                }
+                return Some(ShapeRefuse::new(
+                    opt.span,
+                    command,
+                    "a value written in the shape that option has",
+                ));
+            }
+        }
+    }
+    None
 }
 
 /// Whether one option row matches one production of its table entry.
@@ -593,6 +687,16 @@ pub fn option_refusal(
             ));
         };
         if !row_fits(src, shapes, opt) {
+            if shapes.contains(&Shape::Date)
+                && opt.value_text.bytes().all(|b| b.is_ascii_digit())
+                && !opt.value_text.is_empty()
+            {
+                return Some(ShapeRefuse::official(
+                    opt.value_span,
+                    command,
+                    "syntax error, unexpected INT_NUMBER, expecting DATE",
+                ));
+            }
             return Some(ShapeRefuse::new(
                 opt.span,
                 command.to_string(),

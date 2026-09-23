@@ -27,14 +27,14 @@
 //! This module publishes the head and row tests they read, and stands down
 //! wherever their sentences fire, so no shape is reported twice.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::intern::Name;
 use crate::model::{
     ConditionalForecastPath, DataStatement, DottedHead, DottedKind, DottedStatement, FamilyOption,
-    FamilyValueKind, Model, MsStatement, ShapeRefuse, SvarEquation, SvarIdentification,
-    SvarIdentificationElement,
+    FamilyValueKind, Model, MsStatement, ShapeRefuse, SubsampleHead, SubsampleInstruction,
+    SvarEquation, SvarIdentification, SvarIdentificationElement, VarRemovedName,
 };
 use crate::span::Span;
 
@@ -51,6 +51,9 @@ pub fn check_d_ms(model: &Model) -> Vec<Diagnostic> {
         return out;
     }
     check_check_phase(model, &mut out);
+    if out.is_empty() {
+        check_subsample_writer(model, &mut out);
+    }
     out
 }
 
@@ -146,6 +149,9 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
         Identification(&'a SvarIdentification),
         Paths(&'a crate::model::ConditionalForecastPaths),
         Prior(&'a DottedStatement),
+        Subsample(&'a SubsampleInstruction),
+        VarRemove(&'a VarRemovedName),
+        RemovedUse(Name, Span),
         TopAssignment(&'a crate::model::Assignment),
     }
     let mut units: Vec<(u32, Unit)> = Vec::new();
@@ -177,7 +183,21 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
     for stmt in &model.dotted_statements {
         units.push((stmt.span.start, Unit::Prior(stmt)));
     }
+    for stmt in &model.subsamples {
+        let at = match stmt {
+            SubsampleInstruction::Declare { span, .. }
+            | SubsampleInstruction::Copy { span, .. } => span.start,
+        };
+        units.push((at, Unit::Subsample(stmt)));
+    }
+    for row in &model.var_removed {
+        units.push((row.statement.start, Unit::VarRemove(row)));
+    }
+    for (name, span) in &model.var_removed_model_uses {
+        units.push((span.start, Unit::RemovedUse(*name, *span)));
+    }
     units.sort_by_key(|(at, _)| *at);
+    let mut subsample_ranges: HashMap<(Name, Option<Name>), HashSet<Name>> = HashMap::new();
     for (_, unit) in units {
         let fired = match unit {
             Unit::Shape(refuse) => {
@@ -195,7 +215,27 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
                 }
             }
             Unit::Paths(block) => check_conditional_forecast_paths(model, block, out),
-            Unit::Prior(stmt) => check_prior_head(model, stmt, out),
+            Unit::Prior(stmt) => {
+                check_dotted_head_and_subsample(model, stmt, &subsample_ranges, out)
+            }
+            Unit::Subsample(stmt) => check_subsample_parse(model, stmt, &mut subsample_ranges, out),
+            Unit::VarRemove(row) => {
+                if declared_at(model, row.name, row.statement.start) {
+                    false
+                } else {
+                    push(
+                        out,
+                        row.name_span,
+                        "E058",
+                        format!("Unknown symbol: {}.", model.name(row.name)),
+                    );
+                    true
+                }
+            }
+            Unit::RemovedUse(name, span) => {
+                push(out, span, "E426", format!("Variable '{}' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement", model.name(name)));
+                true
+            }
             Unit::TopAssignment(assignment) => check_top_assignment(model, assignment, out),
         };
         if fired {
@@ -203,6 +243,457 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
         }
     }
     false
+}
+
+fn subsample_key(head: &SubsampleHead) -> (Name, Option<Name>) {
+    match head {
+        SubsampleHead::Symbol(name, _) | SubsampleHead::Std(name, _) => (*name, None),
+        SubsampleHead::Corr(first, _, second, _) => (*first, Some(*second)),
+    }
+}
+
+fn subsample_names(head: &SubsampleHead) -> Vec<(Name, Span)> {
+    match head {
+        SubsampleHead::Symbol(name, span) | SubsampleHead::Std(name, span) => {
+            vec![(*name, *span)]
+        }
+        SubsampleHead::Corr(first, first_span, second, second_span) => {
+            vec![(*first, *first_span), (*second, *second_span)]
+        }
+    }
+}
+
+fn declared_at(model: &Model, name: Name, before: u32) -> bool {
+    model
+        .endogenous
+        .iter()
+        .chain(&model.exogenous)
+        .chain(&model.deterministic_exogenous)
+        .chain(&model.parameters)
+        .chain(&model.model_local_variables)
+        .chain(&model.excluded_endogenous)
+        .any(|decl| decl.name == name && decl.span.start < before)
+        || model.steady_state_equations.iter().any(|eq| {
+            eq.span.start < before
+                && matches!(eq.lhs_expr.map(|id| &model.exprs.get(id).kind), Some(crate::expr::ExprKind::Ident { name: lhs, .. }) if *lhs == name)
+        })
+}
+
+fn check_subsample_parse(
+    model: &Model,
+    stmt: &SubsampleInstruction,
+    ranges: &mut HashMap<(Name, Option<Name>), HashSet<Name>>,
+    out: &mut Vec<Diagnostic>,
+) -> bool {
+    match stmt {
+        SubsampleInstruction::Declare {
+            head,
+            ranges: rows,
+            span,
+        } => {
+            let mut names = HashSet::new();
+            for row in rows {
+                if !names.insert(row.name) {
+                    push(
+                        out,
+                        row.span,
+                        "E427",
+                        format!(
+                            "Symbol {} may only be assigned once in a SUBSAMPLE statement",
+                            model.name(row.name)
+                        ),
+                    );
+                    return true;
+                }
+            }
+            for (name, name_span) in subsample_names(head) {
+                if !declared_at(model, name, span.start) {
+                    push(
+                        out,
+                        name_span,
+                        "E058",
+                        format!("Unknown symbol: {}.", model.name(name)),
+                    );
+                    return true;
+                }
+            }
+            ranges.insert(subsample_key(head), names);
+            false
+        }
+        SubsampleInstruction::Copy {
+            target,
+            source,
+            span,
+        } => {
+            for (name, name_span) in subsample_names(target)
+                .into_iter()
+                .chain(subsample_names(source))
+            {
+                if !declared_at(model, name, span.start) {
+                    push(
+                        out,
+                        name_span,
+                        "E058",
+                        format!("Unknown symbol: {}.", model.name(name)),
+                    );
+                    return true;
+                }
+            }
+            let source_key = subsample_key(source);
+            let Some(copied) = ranges.get(&source_key).cloned() else {
+                let (first, second) = source_key;
+                let names = if let Some(second) = second {
+                    format!("{},{}", model.name(first), model.name(second))
+                } else {
+                    model.name(first).to_string()
+                };
+                let range = subsample_names(source)
+                    .first()
+                    .map(|(_, span)| *span)
+                    .unwrap_or(*span);
+                push(
+                    out,
+                    range,
+                    "E428",
+                    format!("{names} does not have an associated subsample statement."),
+                );
+                return true;
+            };
+            ranges.insert(subsample_key(target), copied);
+            false
+        }
+    }
+}
+
+fn dotted_named_key(head: &DottedHead) -> Option<((Name, Option<Name>), Name)> {
+    match head {
+        DottedHead::Param {
+            first,
+            second: Some(range),
+        }
+        | DottedHead::Std {
+            first,
+            second: Some(range),
+            ..
+        } => Some(((*first, None), *range)),
+        DottedHead::Corr {
+            first,
+            second,
+            third: Some(range),
+            ..
+        } => Some(((*first, Some(*second)), *range)),
+        _ => None,
+    }
+}
+
+fn classify_std_corr_head_names(
+    model: &Model,
+    head: &DottedHead,
+    before: u32,
+) -> Vec<PriorHeadName> {
+    let pairs = match head {
+        DottedHead::Std {
+            first, first_span, ..
+        } => vec![(*first, *first_span)],
+        DottedHead::Corr {
+            first,
+            first_span,
+            second,
+            second_span,
+            ..
+        } => {
+            vec![(*first, *first_span), (*second, *second_span)]
+        }
+        _ => Vec::new(),
+    };
+    pairs
+        .into_iter()
+        .map(|(name, span)| PriorHeadName {
+            name,
+            span,
+            verdict: std_corr_verdict_at(model, name, before),
+        })
+        .collect()
+}
+
+fn std_corr_verdict_at(model: &Model, name: Name, before: u32) -> PriorHeadVerdict {
+    if !declared_at(model, name, before) {
+        return PriorHeadVerdict::Undeclared;
+    }
+    let changed = model
+        .change_type_statements
+        .iter()
+        .filter(|stmt| stmt.span.start < before && stmt.names.iter().any(|(n, _)| *n == name))
+        .max_by_key(|stmt| stmt.span.start);
+    let removed = model
+        .var_removed
+        .iter()
+        .filter(|row| row.name == name && row.statement.start < before)
+        .max_by_key(|row| row.statement.start);
+    if removed.is_some_and(|row| changed.is_none_or(|stmt| row.statement.start > stmt.span.start)) {
+        return PriorHeadVerdict::NotEndogenousOrExogenous;
+    }
+    if let Some(stmt) = changed {
+        return match stmt.new_type {
+            crate::model::ChangeTypeKind::Var => PriorHeadVerdict::Endogenous,
+            crate::model::ChangeTypeKind::Varexo => PriorHeadVerdict::Exogenous,
+            crate::model::ChangeTypeKind::VarexoDet => PriorHeadVerdict::ExogenousDeterministic,
+            crate::model::ChangeTypeKind::Parameters => PriorHeadVerdict::NotEndogenousOrExogenous,
+        };
+    }
+    if model
+        .deterministic_exogenous
+        .iter()
+        .any(|decl| decl.name == name)
+    {
+        PriorHeadVerdict::ExogenousDeterministic
+    } else if model.endogenous.iter().any(|decl| decl.name == name) {
+        PriorHeadVerdict::Endogenous
+    } else if model.exogenous.iter().any(|decl| decl.name == name) {
+        PriorHeadVerdict::Exogenous
+    } else {
+        PriorHeadVerdict::NotEndogenousOrExogenous
+    }
+}
+
+fn check_dotted_copy_source(
+    model: &Model,
+    stmt: &DottedStatement,
+    out: &mut Vec<Diagnostic>,
+) -> bool {
+    let Some(source) = &stmt.copy_source else {
+        return false;
+    };
+    if let DottedHead::Param { first, .. } = source {
+        if !declared_at(model, *first, stmt.span.start) {
+            push(
+                out,
+                stmt.span,
+                "E058",
+                format!("Unknown symbol: {}.", model.name(*first)),
+            );
+            return true;
+        }
+        if !model.parameters.iter().any(|decl| decl.name == *first) {
+            push(
+                out,
+                stmt.span,
+                "E378",
+                format!("{} is not a parameter", model.name(*first)),
+            );
+            return true;
+        }
+        return false;
+    }
+    let names = match source {
+        DottedHead::Std {
+            first, first_span, ..
+        } => vec![(*first, *first_span)],
+        DottedHead::Corr {
+            first,
+            first_span,
+            second,
+            second_span,
+            ..
+        } => {
+            vec![(*first, *first_span), (*second, *second_span)]
+        }
+        _ => Vec::new(),
+    };
+    for (name, span) in names {
+        let refusal = if !declared_at(model, name, stmt.span.start) {
+            Some(("E058", format!("Unknown symbol: {}.", model.name(name))))
+        } else if model
+            .deterministic_exogenous
+            .iter()
+            .any(|decl| decl.name == name)
+        {
+            Some((
+                "E317",
+                format!("{} is an exogenous deterministic.", model.name(name)),
+            ))
+        } else if !model.endogenous.iter().any(|decl| decl.name == name)
+            && !model.exogenous.iter().any(|decl| decl.name == name)
+        {
+            Some((
+                "E059",
+                format!("{} is neither endogenous or exogenous.", model.name(name)),
+            ))
+        } else {
+            None
+        };
+        if let Some((code, message)) = refusal {
+            push(out, span, code, message);
+            return true;
+        }
+    }
+    false
+}
+
+fn check_dotted_head_and_subsample(
+    model: &Model,
+    stmt: &DottedStatement,
+    ranges: &HashMap<(Name, Option<Name>), HashSet<Name>>,
+    out: &mut Vec<Diagnostic>,
+) -> bool {
+    if stmt.kind == DottedKind::Subsamples {
+        return false;
+    }
+    if let Some((name, span)) = model
+        .option_twice
+        .iter()
+        .find(|(_, span)| span.start >= stmt.span.start && span.end <= stmt.span.end)
+    {
+        push(out, *span, "E271", format!("option {name} declared twice"));
+        return true;
+    }
+    if let DottedHead::Param { first, .. } = stmt.head {
+        if !model.parameters.iter().any(|decl| decl.name == first) {
+            push(
+                out,
+                stmt.span,
+                "E378",
+                format!("{} is not a parameter", model.name(first)),
+            );
+            return true;
+        }
+    }
+    if let DottedHead::Vec { names } = &stmt.head {
+        for (name, span) in names {
+            if !model.parameters.iter().any(|decl| decl.name == *name) {
+                push(
+                    out,
+                    *span,
+                    "E378",
+                    format!("{} is not a parameter", model.name(*name)),
+                );
+                return true;
+            }
+        }
+    }
+    if matches!(stmt.head, DottedHead::Std { .. } | DottedHead::Corr { .. }) {
+        let rows = classify_std_corr_head_names(model, &stmt.head, stmt.span.start);
+        if let Some(row) = rows.iter().find(|row| {
+            !matches!(
+                row.verdict,
+                PriorHeadVerdict::Endogenous | PriorHeadVerdict::Exogenous
+            )
+        }) {
+            if stmt.kind == DottedKind::Prior {
+                // Existing E058/E059/E317 passes own this prior-head sentence.
+                return false;
+            }
+            let (code, message) = match row.verdict {
+                PriorHeadVerdict::Undeclared => {
+                    ("E058", format!("Unknown symbol: {}.", model.name(row.name)))
+                }
+                PriorHeadVerdict::ExogenousDeterministic => (
+                    "E317",
+                    format!("{} is an exogenous deterministic.", model.name(row.name)),
+                ),
+                PriorHeadVerdict::NotEndogenousOrExogenous => (
+                    "E059",
+                    format!(
+                        "{} is neither endogenous or exogenous.",
+                        model.name(row.name)
+                    ),
+                ),
+                _ => unreachable!(),
+            };
+            push(out, row.span, code, message);
+            return true;
+        }
+    }
+    if check_dotted_copy_source(model, stmt, out) {
+        return true;
+    }
+    if !stmt.has_body {
+        return false;
+    }
+    let Some((key, range)) = dotted_named_key(&stmt.head) else {
+        return false;
+    };
+    let found = ranges
+        .get(&key)
+        .or_else(|| key.1.and_then(|second| ranges.get(&(second, Some(key.0)))));
+    let Some(names) = found else {
+        let (first, second) = key;
+        let head = if let Some(second) = second {
+            format!("{},{}", model.name(first), model.name(second))
+        } else {
+            model.name(first).to_string()
+        };
+        push(
+            out,
+            stmt.span,
+            "E429",
+            format!("A subsample statement has not been issued for {head}"),
+        );
+        return true;
+    };
+    if !names.contains(&range) {
+        push(
+            out,
+            stmt.span,
+            "E430",
+            format!(
+                "The subsample name {} was not previously declared in a subsample statement.",
+                model.name(range)
+            ),
+        );
+        return true;
+    }
+    false
+}
+
+fn check_subsample_writer(model: &Model, out: &mut Vec<Diagnostic>) {
+    for stmt in &model.subsamples {
+        let head = match stmt {
+            SubsampleInstruction::Declare { head, .. } => head,
+            SubsampleInstruction::Copy { target, .. } => target,
+        };
+        let Some((name, span)) = subsample_names(head).first().copied() else {
+            continue;
+        };
+        let mut valid = model.parameters.iter().any(|decl| decl.name == name)
+            || model.endogenous.iter().any(|decl| decl.name == name)
+            || model.exogenous.iter().any(|decl| {
+                decl.name == name
+                    && !model
+                        .deterministic_exogenous
+                        .iter()
+                        .any(|det| det.name == name)
+            });
+        let last_change = model
+            .change_type_statements
+            .iter()
+            .filter(|change| change.names.iter().any(|(changed, _)| *changed == name))
+            .max_by_key(|change| change.span.start);
+        let last_remove = model
+            .var_removed
+            .iter()
+            .filter(|row| row.name == name)
+            .max_by_key(|row| row.statement.start);
+        if let Some(change) = last_change {
+            if last_remove.is_none_or(|remove| change.span.start > remove.statement.start) {
+                valid = change.new_type != crate::model::ChangeTypeKind::VarexoDet;
+            }
+        }
+        if last_remove.is_some_and(|remove| {
+            last_change.is_none_or(|change| remove.statement.start > change.span.start)
+        }) {
+            valid = false;
+        }
+        if !valid {
+            push(
+                out,
+                span,
+                "E431",
+                format!("subsamples: invalid symbol type for {}", model.name(name)),
+            );
+            break;
+        }
+    }
 }
 
 /// The check-pass units, so a shape refuse can be scoped to the statement it
@@ -288,7 +779,7 @@ fn check_check_phase(model: &Model, out: &mut Vec<Diagnostic>) {
                 }
             }
             CheckUnit::Prior(stmt) => {
-                if check_prior_body(model, stmt, out) {
+                if check_prior_body(model, stmt, out) || check_options_body(model, stmt, out) {
                     return;
                 }
             }
@@ -1385,74 +1876,7 @@ pub(crate) fn prior_std_corr_head_names(
     if stmt.kind != DottedKind::Prior {
         return Vec::new();
     }
-    let declared = declared_names(model);
-    let endogenous = endogenous_names(model);
-    let exogenous = name_set(model.exogenous.iter());
-    let deterministic = name_set(model.deterministic_exogenous.iter());
-    let pairs: Vec<(Span, Name)> = match &stmt.head {
-        DottedHead::Std {
-            first, first_span, ..
-        } => vec![(*first_span, *first)],
-        DottedHead::Corr {
-            first,
-            first_span,
-            second,
-            second_span,
-            ..
-        } => vec![(*first_span, *first), (*second_span, *second)],
-        _ => return Vec::new(),
-    };
-    pairs
-        .into_iter()
-        .map(|(span, name)| {
-            let verdict = if !declared.contains(&name) {
-                PriorHeadVerdict::Undeclared
-            } else if endogenous.contains(&name) {
-                PriorHeadVerdict::Endogenous
-            } else if deterministic.contains(&name) {
-                PriorHeadVerdict::ExogenousDeterministic
-            } else if exogenous.contains(&name) {
-                PriorHeadVerdict::Exogenous
-            } else {
-                PriorHeadVerdict::NotEndogenousOrExogenous
-            };
-            PriorHeadName {
-                span,
-                name,
-                verdict,
-            }
-        })
-        .collect()
-}
-
-/// The prior refusals 7.1 prints while parsing: the plain and bracketed heads'
-/// parameter test (**E378**) and the top-level `y = 3;` assignment, which their
-/// `ParsingDriver::init_param` sends through the same `check_symbol_is_parameter`
-/// the head does. Returns `true` when it refused.
-///
-/// The `std` / `corr` heads and the subsample forms are read and refused while
-/// parsing too; their sentences belong to **E058** / **E059** (or to no 0.5.4 row
-/// at all), so nothing here fires on them.
-fn check_prior_head(model: &Model, stmt: &DottedStatement, out: &mut Vec<Diagnostic>) -> bool {
-    if stmt.kind != DottedKind::Prior || !has_prior_body(model, stmt) {
-        return false;
-    }
-    if head_refused_while_parsing(model, stmt) {
-        return false;
-    }
-    let parameters = parameter_names(model);
-    for name in prior_parameter_names(&stmt.head) {
-        if !parameters.contains(&name) {
-            push(
-                out,
-                stmt.span,
-                "E378",
-                format!("{} is not a parameter", model.name(name)),
-            );
-            return true;
-        }
-    }
-    false
+    classify_std_corr_head_names(model, &stmt.head, stmt.span.start)
 }
 
 /// The same sentence on the top-level assignment. 7.1's `init_param` runs
@@ -1540,27 +1964,12 @@ fn head_refused_while_parsing(model: &Model, stmt: &DottedStatement) -> bool {
     let exogenous = name_set(model.exogenous.iter());
     let refused = |name: &Name| !endogenous.contains(name) && !exogenous.contains(name);
     match &stmt.head {
-        DottedHead::Std { first, second, .. } => second.is_some() || refused(first),
-        DottedHead::Corr {
-            first,
-            second,
-            third,
-            ..
-        } => third.is_some() || refused(first) || refused(second),
-        DottedHead::Param { second, .. } => second.is_some(),
+        DottedHead::Std { first, .. } => refused(first),
+        DottedHead::Corr { first, second, .. } => refused(first) || refused(second),
+        DottedHead::Param { .. } => false,
         // Every name of a bracketed head is declared: the pin's lexer sends the
         // line to native MATLAB otherwise, so no statement is recorded at all.
         DottedHead::Vec { .. } => false,
-    }
-}
-
-/// The names a plain or bracketed head carries, which 7.1 checks with
-/// `check_symbol_is_parameter`.
-fn prior_parameter_names(head: &DottedHead) -> Vec<Name> {
-    match head {
-        DottedHead::Param { first, .. } => vec![*first],
-        DottedHead::Vec { names } => names.iter().map(|(name, _)| *name).collect(),
-        _ => Vec::new(),
     }
 }
 
@@ -1636,11 +2045,31 @@ fn prior_body_spellable(src: &str, options: &[FamilyOption], joint: bool) -> boo
 
 /// Whether the statement's own text carries a `prior(…)` body rather than the
 /// `prior = prior` copy form or a bare `alpha.prior;`.
-fn has_prior_body(model: &Model, stmt: &DottedStatement) -> bool {
-    model
-        .source
-        .get(stmt.span.start as usize..stmt.span.end as usize)
-        .is_some_and(|text| text.contains('('))
+fn has_prior_body(_model: &Model, stmt: &DottedStatement) -> bool {
+    stmt.has_body
+}
+
+fn check_options_body(model: &Model, stmt: &DottedStatement, out: &mut Vec<Diagnostic>) -> bool {
+    if stmt.kind != DottedKind::Options || !stmt.has_body {
+        return false;
+    }
+    if let DottedHead::Corr { first, second, .. } = &stmt.head {
+        let endogenous = endogenous_names(model);
+        if endogenous.contains(first) != endogenous.contains(second) {
+            push(
+                out,
+                stmt.span,
+                "E379",
+                format!(
+                    "In the corr(A,B).options statement, A and B must be of the same type. In your case, {} and {} are of different types.",
+                    model.name(*first),
+                    model.name(*second)
+                ),
+            );
+            return true;
+        }
+    }
+    false
 }
 
 /// One bracketed list's entries as written.

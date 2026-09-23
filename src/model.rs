@@ -509,6 +509,14 @@ pub struct SubsampleRange {
     pub span: Span,
 }
 
+/// One name whose type `var_remove` changed while the file was parsed.
+#[derive(Clone, Debug)]
+pub struct VarRemovedName {
+    pub name: Name,
+    pub name_span: Span,
+    pub statement: Span,
+}
+
 #[derive(Clone, Debug)]
 pub enum SubsampleInstruction {
     Declare {
@@ -578,6 +586,13 @@ pub struct Model {
     /// removal: `filter_initial_state` refuses it with the timing message, not with
     /// the undeclared one.
     pub excluded_endogenous: Vec<Decl>,
+    /// `var_remove` changes these names to the excluded type. Command lists
+    /// read the final type, whereas expressions are checked in source order.
+    pub var_removed: Vec<VarRemovedName>,
+    /// Names declared with `model_local_variable`, separate from `#` rows.
+    pub model_local_variables: Vec<Decl>,
+    /// Uses of a name after `var_remove` in a model expression.
+    pub var_removed_model_uses: Vec<(Name, Span)>,
     /// Every name a `model_remove` took out of the model, file order. A check that reads
     /// a name's type reads it as of the statement it is looking at: 7.1 validated that
     /// statement while the name was still endogenous.
@@ -1081,8 +1096,13 @@ pub struct DottedStatement {
     pub head: DottedHead,
     /// Head through the terminating `;`.
     pub span: Span,
-    /// Parsed option rows. Empty for `options` / `subsamples`, whose bodies are
-    /// recognised but not read.
+    /// A parenthesized body, as opposed to a `prior` / `options` copy.
+    pub has_body: bool,
+    /// Source head of a `prior` / `options` copy. Copy forms check name types
+    /// but do not look up named subsample declarations.
+    pub copy_source: Option<DottedHead>,
+    /// Parsed option rows for `prior` and `options` bodies. Empty for
+    /// `subsamples` declarations and dotted copy forms.
     pub options: Vec<FamilyOption>,
 }
 

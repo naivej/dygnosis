@@ -24,10 +24,129 @@ use crate::model::{
     ObservedVar, OccbinConstraint, OccbinExpr, OsrBound, PolicyCommand, PolicyCommandStatement,
     RamseyConstraint, RemovedEquation, ShockKind, ShockStmt, ShocksSemiFamily, SurgeryExit,
     SurgeryKind, TrendVar,
+    VarRemovedName,
 };
 use crate::span::Span;
 
 mod shock_parser;
+
+#[derive(Clone, Debug)]
+enum FoldKey {
+    Number(u64),
+    Ident(Name, i32),
+    Neg(Box<FoldKey>),
+    Binary(BinOp, Box<FoldKey>, Box<FoldKey>),
+    Call(Name, Vec<FoldKey>),
+    SteadyState(Box<FoldKey>),
+    Expectation(i32, Box<FoldKey>),
+    Other(ExprId),
+}
+
+impl PartialEq for FoldKey {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Number(a), Self::Number(b)) => a == b,
+            (Self::Ident(a, at), Self::Ident(b, bt)) => a == b && at == bt,
+            (Self::Neg(a), Self::Neg(b)) | (Self::SteadyState(a), Self::SteadyState(b)) => a == b,
+            (Self::Binary(aop, al, ar), Self::Binary(bop, bl, br)) => {
+                aop == bop
+                    && ((al == bl && ar == br)
+                        || (matches!(aop, BinOp::Add | BinOp::Mul) && al == br && ar == bl))
+            }
+            (Self::Call(an, aa), Self::Call(bn, ba)) => an == bn && aa == ba,
+            (Self::Expectation(as_, a), Self::Expectation(bs, b)) => as_ == bs && a == b,
+            (Self::Other(a), Self::Other(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for FoldKey {}
+
+impl FoldKey {
+    fn number(value: f64) -> Self {
+        Self::Number(if value == 0.0 { 0 } else { value.to_bits() })
+    }
+
+    fn is_zero(&self) -> bool {
+        matches!(self, Self::Number(0))
+    }
+
+    fn is_one(&self) -> bool {
+        *self == Self::number(1.0)
+    }
+
+    fn neg(value: Self) -> Self {
+        match value {
+            Self::Number(bits) => Self::number(-f64::from_bits(bits)),
+            Self::Neg(inner) => *inner,
+            other => Self::Neg(Box::new(other)),
+        }
+    }
+
+    fn add(left: Self, right: Self) -> Self {
+        if left.is_zero() {
+            return right;
+        }
+        if right.is_zero() {
+            return left;
+        }
+        if let Self::Neg(inner) = &right {
+            return Self::sub(left, (**inner).clone());
+        }
+        if let Self::Neg(inner) = &left {
+            return Self::sub(right, (**inner).clone());
+        }
+        if let Self::Binary(BinOp::Sub, x, y) = &left {
+            if **y == right {
+                return (**x).clone();
+            }
+        }
+        if let Self::Binary(BinOp::Sub, x, y) = &right {
+            if **y == left {
+                return (**x).clone();
+            }
+        }
+        Self::Binary(BinOp::Add, Box::new(left), Box::new(right))
+    }
+
+    fn sub(left: Self, right: Self) -> Self {
+        if right.is_zero() {
+            return left;
+        }
+        if left.is_zero() {
+            return Self::neg(right);
+        }
+        if left == right {
+            return Self::number(0.0);
+        }
+        if let Self::Neg(inner) = &right {
+            return Self::add(left, (**inner).clone());
+        }
+        if let Self::Binary(BinOp::Add, x, y) = &left {
+            if **x == right {
+                return (**y).clone();
+            }
+            if **y == right {
+                return (**x).clone();
+            }
+        }
+        Self::Binary(BinOp::Sub, Box::new(left), Box::new(right))
+    }
+
+    fn mul(left: Self, right: Self) -> Self {
+        if left.is_zero() || right.is_zero() {
+            return Self::number(0.0);
+        }
+        if left.is_one() {
+            return right;
+        }
+        if right.is_one() {
+            return left;
+        }
+        Self::Binary(BinOp::Mul, Box::new(left), Box::new(right))
+    }
+}
 
 pub fn parse(text: &str) -> Model {
     let source = normalize_newlines(text);
@@ -157,6 +276,65 @@ fn is_trailing_symbol_command(cmd: &str) -> bool {
         || cmd.eq_ignore_ascii_case("initial_condition_decomposition")
         || cmd.eq_ignore_ascii_case("plot_shock_decomposition")
         || cmd.eq_ignore_ascii_case("squeeze_shock_decomposition")
+}
+
+fn handed_option_command(cmd: &str) -> bool {
+    cmd.eq_ignore_ascii_case("forecast")
+        || cmd.eq_ignore_ascii_case("shock_decomposition")
+        || cmd.eq_ignore_ascii_case("realtime_shock_decomposition")
+        || cmd.eq_ignore_ascii_case("initial_condition_decomposition")
+        || cmd.eq_ignore_ascii_case("plot_shock_decomposition")
+}
+
+fn date_option_consumer(command: &str, option: &str) -> bool {
+    let name = option.to_ascii_lowercase();
+    let first_last_obs = matches!(name.as_str(), "first_obs" | "last_obs");
+    let simulation_bound = matches!(
+        name.as_str(),
+        "first_simulation_period" | "last_simulation_period"
+    );
+    let plot_date = matches!(name.as_str(), "plot_init_date" | "plot_end_date");
+    if command.eq_ignore_ascii_case("data") {
+        first_last_obs
+    } else if command.eq_ignore_ascii_case("histval_file") {
+        first_last_obs || name == "first_simulation_period"
+    } else if command.eq_ignore_ascii_case("initval_file") {
+        first_last_obs || simulation_bound
+    } else if command.eq_ignore_ascii_case("perfect_foresight_setup")
+        || command.eq_ignore_ascii_case("perfect_foresight_with_expectation_errors_setup")
+    {
+        simulation_bound
+    } else if command.eq_ignore_ascii_case("plot_shock_decomposition")
+        || command.eq_ignore_ascii_case("initial_condition_decomposition")
+    {
+        plot_date
+    } else {
+        false
+    }
+}
+
+/// Flex returns these 7.2 option words as tokens in a trailing symbol list.
+/// The 03b handoff found them being misreported as undeclared names.
+fn reserved_trailing_option_error(word: &str) -> Option<&'static str> {
+    Some(match word.to_ascii_lowercase().as_str() {
+        "nograph" => "syntax error, unexpected NOGRAPH",
+        "conf_sig" => "syntax error, unexpected CONF_SIG",
+        "periods" => "syntax error, unexpected PERIODS",
+        "datafile" => "syntax error, unexpected DATAFILE",
+        "type" => "syntax error, unexpected TYPE",
+        "detail_plot" => "syntax error, unexpected DETAIL_PLOT",
+        "colormap" => "syntax error, unexpected COLORMAP",
+        "with_epilogue" => "syntax error, unexpected WITH_EPILOGUE",
+        "parameter_set" => "syntax error, unexpected PARAMETER_SET",
+        "graph_format" => "syntax error, unexpected GRAPH_FORMAT",
+        "nodisplay" => "syntax error, unexpected NODISPLAY",
+        "fig_name" => "syntax error, unexpected FIG_NAME",
+        "first_obs" => "syntax error, unexpected FIRST_OBS",
+        "last_obs" => "syntax error, unexpected LAST_OBS",
+        "init_state" => "syntax error, unexpected INIT_STATE",
+        "nobs" => "syntax error, unexpected NOBS",
+        _ => return None,
+    })
 }
 
 /// The three words the pin's grammar keys a dotted statement's body on.
@@ -707,6 +885,9 @@ impl Parser<'_> {
             } else if self.at_ident_ci("parameters") {
                 let decls = self.parse_declaration("parameters");
                 self.model.parameters.extend(decls);
+            } else if self.at_ident_ci("model_local_variable") {
+                let decls = self.parse_declaration("model_local_variable");
+                self.model.model_local_variables.extend(decls);
             } else if self.at_ident_ci("predetermined_variables") {
                 let decls = self.parse_declaration("predetermined_variables");
                 self.model.predetermined.extend(decls);
@@ -802,6 +983,10 @@ impl Parser<'_> {
                 self.parse_equation_surgery(false);
             } else if self.at_ident_ci("model_replace") {
                 self.parse_equation_surgery(true);
+            } else if self.at_ident_ci("var_remove")
+                && self.peek_kind(1) == Some(TokenKind::Ident)
+            {
+                self.parse_var_remove_statement();
             } else if self.at_ms_family_command().is_some() && self.at_statement_boundary() {
                 self.parse_ms_statement();
             } else if self.at_ident_ci("svar_identification")
@@ -1128,6 +1313,42 @@ impl Parser<'_> {
             self.record_missing_final("model_replace", body_i, self.i);
         }
         self.finish_block_named("model_replace", span, body_i);
+    }
+
+    fn parse_var_remove_statement(&mut self) {
+        let start = self.bump().span.start;
+        let mut names = Vec::new();
+        while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            if self.at(TokenKind::Ident) {
+                let tok = self.bump();
+                let spelling = self.lexeme(&tok).to_string();
+                names.push((self.intern.intern(&spelling), tok.span));
+                continue;
+            }
+            let tok = self.bump();
+            self.model.shape_refuses.push(ShapeRefuse::new(
+                tok.span,
+                "var_remove",
+                "a list of symbols",
+            ));
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        let statement = Span { start, end };
+        self.model
+            .var_removed
+            .extend(names.into_iter().map(|(name, name_span)| VarRemovedName {
+                name,
+                name_span,
+                statement,
+            }));
     }
 
     /// A surgery tag list: `'value'`, `key='value'`, or a bracketed pair list. Each
@@ -3493,6 +3714,20 @@ impl Parser<'_> {
     /// The leading plain name must be declared to enter the statement grammar.
     /// A later name can be a subsample label rather than a declared symbol.
     fn dotted_head_at(&mut self) -> Option<(DottedHead, usize)> {
+        self.dotted_head_at_with_gate(true)
+    }
+
+    /// A copy's right-hand head is already inside the grammar. Its plain first
+    /// name may be unknown, in which case the driver's type check refuses it.
+    fn dotted_copy_head_at(&mut self, index: usize) -> Option<DottedHead> {
+        let saved = self.i;
+        self.i = index;
+        let head = self.dotted_head_at_with_gate(false).map(|(head, _)| head);
+        self.i = saved;
+        head
+    }
+
+    fn dotted_head_at_with_gate(&mut self, require_declared_plain: bool) -> Option<(DottedHead, usize)> {
         if self.kind_at(0) == Some(TokenKind::LBrack) {
             let (names, after) = self.vector_head_names()?;
             return Some((DottedHead::Vec { names }, after));
@@ -3562,7 +3797,11 @@ impl Parser<'_> {
                 7,
             ));
         }
-        let (first, _) = self.declared_ident_at(0)?;
+        let (first, _) = if require_declared_plain {
+            self.declared_ident_at(0)?
+        } else {
+            self.ident_at_name(0)?
+        };
         if self.kind_at(1) != Some(TokenKind::Dot) {
             return None;
         }
@@ -3949,6 +4188,42 @@ impl Parser<'_> {
             }
             return Some(ShapeRefuse::new(head.span, lex, "a list of symbols"));
         }
+        if lex.eq_ignore_ascii_case("squeeze_shock_decomposition") {
+            return (self.kind_at(1) == Some(TokenKind::LParen)).then(|| {
+                ShapeRefuse::official(
+                    self.tokens[self.i + 1].span,
+                    lex,
+                    "syntax error, unexpected '('",
+                )
+            });
+        }
+        if lex.eq_ignore_ascii_case("dynasave") || lex.eq_ignore_ascii_case("dynatype") {
+            if self.kind_at(1) != Some(TokenKind::LParen) {
+                let next = self.tokens.get(self.i + 1).map(|tok| tok.span).unwrap_or(head.span);
+                return Some(ShapeRefuse::official(
+                    next,
+                    lex,
+                    "syntax error, unexpected IDENTIFIER, expecting '('",
+                ));
+            }
+            let value = self.kind_at(2);
+            if !matches!(value, Some(TokenKind::String | TokenKind::Ident)) {
+                return Some(ShapeRefuse::new(
+                    self.tokens[self.i + 2].span,
+                    lex,
+                    "a filename",
+                ));
+            }
+            if self.kind_at(3) != Some(TokenKind::RParen) {
+                let token = &self.tokens[self.i + 3];
+                return Some(if token.kind == TokenKind::Comma {
+                    ShapeRefuse::official(token.span, lex, "syntax error, unexpected COMMA, expecting ')'")
+                } else {
+                    ShapeRefuse::new(token.span, lex, "one filename")
+                });
+            }
+            return None;
+        }
         if lex.eq_ignore_ascii_case("smoother2histval") {
             if self.kind_at(1) == Some(TokenKind::Semi) || self.at_repeated_option_list() {
                 return None;
@@ -4150,6 +4425,12 @@ impl Parser<'_> {
             .expect("caller checked the dotted head");
         let start = self.tokens[self.i].span.start;
         let open = body_at + 1;
+        let has_body = self.kind_at(open) == Some(TokenKind::LParen);
+        let copy_source = if self.kind_at(open) == Some(TokenKind::Eq) {
+            self.dotted_copy_head_at(self.i + open + 1)
+        } else {
+            None
+        };
         let mut k = body_at;
         let mut options = Vec::new();
         if self.kind_at(open) == Some(TokenKind::LParen) {
@@ -4163,6 +4444,13 @@ impl Parser<'_> {
             if kind == DottedKind::Prior {
                 options = self.read_family_options(self.i + open, close);
                 self.record_parsed_option_twice(&options);
+                if options.is_empty() {
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        self.tokens[close.saturating_sub(1)].span,
+                        "prior",
+                        "syntax error, unexpected ')'",
+                    ));
+                }
                 let joint = matches!(head, DottedHead::Vec { .. });
                 let table = crate::shape_gate::prior_options(joint);
                 let subject = if joint { "[…].prior" } else { "prior" };
@@ -4172,8 +4460,34 @@ impl Parser<'_> {
                     self.model.shape_refuses.push(refuse);
                 }
             } else if kind == DottedKind::Options {
-                // The `options` body is claimed but not read into records.
-                self.record_option_twice(self.i + open, close);
+                options = self.read_family_options(self.i + open, close);
+                self.record_parsed_option_twice(&options);
+                if options.is_empty() {
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        self.tokens[close.saturating_sub(1)].span,
+                        "options",
+                        "syntax error, unexpected ')'",
+                    ));
+                }
+                if let Some(refuse) = crate::shape_gate::option_refusal(
+                    self.src,
+                    "options",
+                    &options,
+                    crate::shape_gate::dotted_options(),
+                ) {
+                    if let Some(opt) = options
+                        .iter()
+                        .find(|opt| opt.name.eq_ignore_ascii_case("overwrite"))
+                    {
+                        self.model.shape_refuses.push(ShapeRefuse::official(
+                            opt.span,
+                            "options",
+                            "syntax error, unexpected IDENTIFIER, expecting BOUNDS or JSCALE or INIT",
+                        ));
+                    } else {
+                        self.model.shape_refuses.push(refuse);
+                    }
+                }
             }
             k = close - self.i;
         }
@@ -4204,6 +4518,8 @@ impl Parser<'_> {
             kind,
             head,
             span: Span { start, end },
+            has_body,
+            copy_source,
             options,
         });
     }
@@ -7395,6 +7711,18 @@ impl Parser<'_> {
     }
 
     fn alloc(&mut self, kind: ExprKind, span: Span) -> ExprId {
+        if self.in_equation_body {
+            if let ExprKind::Ident {
+                name, ident_span, ..
+            } = &kind
+            {
+                if self.model.var_removed.iter().any(|removed| {
+                    removed.name == *name && removed.statement.end <= ident_span.start
+                }) {
+                    self.model.var_removed_model_uses.push((*name, *ident_span));
+                }
+            }
+        }
         let interned = match &kind {
             ExprKind::Number => self
                 .src
@@ -7445,6 +7773,44 @@ impl Parser<'_> {
         }
     }
 
+    /// The small simplifications `DataTree::AddPlus/AddMinus/AddTimes` make while
+    /// building an expression. This is deliberately local: assigned parameter
+    /// values and broader algebraic identities are not available at parse.
+    fn folded_key(&self, id: ExprId) -> FoldKey {
+        if let Some(value) = self.interned_value(id) {
+            return FoldKey::number(value);
+        }
+        match &self.model.exprs.get(id).kind {
+            ExprKind::Ident { name, timing, .. } => FoldKey::Ident(*name, *timing),
+            ExprKind::Unary { op, arg } => {
+                let inner = self.folded_key(*arg);
+                match op {
+                    UnOp::Pos => inner,
+                    UnOp::Neg => FoldKey::neg(inner),
+                }
+            }
+            ExprKind::Binary { op, lhs, rhs } => {
+                let left = self.folded_key(*lhs);
+                let right = self.folded_key(*rhs);
+                match op {
+                    BinOp::Add => FoldKey::add(left, right),
+                    BinOp::Sub => FoldKey::sub(left, right),
+                    BinOp::Mul => FoldKey::mul(left, right),
+                    _ => FoldKey::Binary(*op, Box::new(left), Box::new(right)),
+                }
+            }
+            ExprKind::Call { callee, args } => FoldKey::Call(
+                *callee,
+                args.iter().map(|arg| self.folded_key(*arg)).collect(),
+            ),
+            ExprKind::SteadyState { arg } => FoldKey::SteadyState(Box::new(self.folded_key(*arg))),
+            ExprKind::Expectation { shift, arg } => {
+                FoldKey::Expectation(*shift, Box::new(self.folded_key(*arg)))
+            }
+            _ => FoldKey::Other(id),
+        }
+    }
+
     fn note_const_fold_errors(&mut self, id: ExprId) {
         let span = self.expr_span(id);
         let log_zero = match &self.model.exprs.get(id).kind {
@@ -7482,14 +7848,17 @@ impl Parser<'_> {
             _ => None,
         };
         if let Some((lhs, rhs)) = div_zero {
-            if self.interned_value(rhs) == Some(0.0) {
-                let num = self.interned_display(lhs);
-                let den = self.interned_display(rhs);
+            if self.folded_key(rhs).is_zero() {
+                let num = if self.folded_key(lhs).is_zero() {
+                    "0".to_string()
+                } else {
+                    self.interned_display(lhs)
+                };
                 self.model.const_fold_errors.push((
                     span,
                     "E278",
                     format!(
-                        "Division by zero when forming ({num})/({den}); denominator simplified to 0 (possibly after substituting a variable set to 0)."
+                        "Division by zero when forming ({num})/(0); denominator simplified to 0 (possibly after substituting a variable set to 0)."
                     ),
                 ));
             }
@@ -7515,6 +7884,7 @@ impl Parser<'_> {
         let mut opener_span = Span::default();
         let mut saw_datafile = false;
         let mut stoch_options = None;
+        let mut saw_trailing_symbol = false;
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             if !saw_ident && self.at(TokenKind::Ident) {
                 saw_ident = true;
@@ -7529,8 +7899,31 @@ impl Parser<'_> {
             if self.at(TokenKind::LParen) {
                 let from = self.i;
                 self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                if saw_trailing_symbol {
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        self.tokens[from].span,
+                        opener.as_deref().unwrap_or("symbol list"),
+                        "syntax error, unexpected '('",
+                    ));
+                    continue;
+                }
                 self.record_deprecated_options_in_range(from, self.i);
                 if let Some(cmd) = opener.as_deref() {
+                    if handed_option_command(cmd) {
+                        let options = self.read_family_options(from, self.i);
+                        if options.is_empty() {
+                            self.model.shape_refuses.push(ShapeRefuse::official(
+                                self.tokens[self.i.saturating_sub(1)].span,
+                                cmd,
+                                "syntax error, unexpected ')'",
+                            ));
+                        }
+                        if let Some(refuse) = crate::shape_gate::handed_option_refusal(
+                            self.src, cmd, &options,
+                        ) {
+                            self.model.shape_refuses.push(refuse);
+                        }
+                    }
                     if cmd.eq_ignore_ascii_case("stoch_simul") {
                         stoch_options = Some((from, self.i));
                     }
@@ -7554,8 +7947,27 @@ impl Parser<'_> {
                 && opener.as_deref().is_some_and(is_trailing_symbol_command)
             {
                 let cmd = opener.as_deref().unwrap().to_string();
+                let word = self.lexeme(&self.tokens[self.i]).to_string();
+                if let Some(message) = reserved_trailing_option_error(&word) {
+                    let span = self.tokens[self.i].span;
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        span,
+                        &cmd,
+                        message,
+                    ));
+                    self.bump();
+                    continue;
+                }
                 self.push_command_symbol(&cmd);
+                saw_trailing_symbol = true;
                 continue;
+            }
+            if self.at(TokenKind::Eq) && saw_trailing_symbol {
+                self.model.shape_refuses.push(ShapeRefuse::official(
+                    self.tokens[self.i].span,
+                    opener.as_deref().unwrap_or("symbol list"),
+                    "syntax error, unexpected EQUAL",
+                ));
             }
             self.bump();
         }
@@ -7595,6 +8007,50 @@ impl Parser<'_> {
             self.model.prior_function_has_parens = true;
         }
         let opts = top_options(&self.tokens, self.src, from, to);
+        for opt in &opts {
+            if !opt.eq || !date_option_consumer(opener, &opt.ident) {
+                continue;
+            }
+            let Some(value_at) = (from..to.min(self.tokens.len()))
+                .find(|&i| self.tokens[i].span.start == opt.value_span.start)
+            else {
+                continue;
+            };
+            let Some((_, next)) = self.date_at(value_at) else {
+                continue;
+            };
+            let minus_message = if opener.eq_ignore_ascii_case("plot_shock_decomposition")
+                || opener.eq_ignore_ascii_case("initial_condition_decomposition")
+            {
+                "syntax error, unexpected MINUS, expecting ')'"
+            } else {
+                "syntax error, unexpected MINUS, expecting COMMA or ')'"
+            };
+            if let Some(refuse) = self.date_suffix_refusal_at(next, opener, minus_message) {
+                self.model.shape_refuses.push(refuse);
+            }
+        }
+        if opener.eq_ignore_ascii_case("perfect_foresight_setup")
+            || opener.eq_ignore_ascii_case("perfect_foresight_with_expectation_errors_setup")
+        {
+            for opt in &opts {
+                if !matches!(opt.ident.to_ascii_lowercase().as_str(), "first_simulation_period" | "last_simulation_period") {
+                    continue;
+                }
+                let parsed_date = self.model.date_options.iter().any(|row| {
+                    row.command.eq_ignore_ascii_case(opener)
+                        && row.name.eq_ignore_ascii_case(&opt.ident)
+                        && row.span.start == opt.span.start
+                });
+                if !parsed_date && opt.eq && opt.value_lex.parse::<i64>().is_ok() {
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        opt.value_span,
+                        opener,
+                        "syntax error, unexpected INT_NUMBER, expecting DATE",
+                    ));
+                }
+            }
+        }
         if opener.eq_ignore_ascii_case("histval_file") {
             for opt in &opts {
                 let message = if opt.ident.eq_ignore_ascii_case("nobs") {

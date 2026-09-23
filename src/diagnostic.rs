@@ -83,6 +83,14 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     if !recorded_syntax.is_empty() {
         return recorded_syntax;
     }
+    if ms_diags.first().is_some_and(|d| {
+        matches!(
+            d.code.as_str(),
+            "E058" | "E059" | "E317" | "E378" | "E426" | "E427" | "E428" | "E429" | "E430"
+        )
+    }) {
+        return ms_diags;
+    }
     let shock_diags = crate::check_d_shocks::check_d_shocks(model);
     let shock_parse_diags: Vec<Diagnostic> = shock_diags
         .iter()
@@ -115,9 +123,20 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     out.extend(crate::check_d_block::check_d_block(model));
     out.extend(shock_diags);
     out.extend(crate::check_d_open::check_d_open(model));
-    out.extend(ms_diags);
+    // E271 is already emitted for each repeated option by check_shape. The
+    // dotted parse walk uses the first duplicate only to stop a later head
+    // type refusal from pre-empting that statement.
+    out.extend(ms_diags.into_iter().filter(|d| d.code != "E271"));
     out.extend(crate::check_d_surgery::check_d_surgery(model));
     out.extend(crate::check_mom::check_mom(model));
+    // The subsample type gate is in writeOutput, after every parse, check and
+    // transform refusal. A prior Error keeps the writer from running.
+    if out
+        .iter()
+        .any(|d| d.severity == Severity::Error && d.code != "E431")
+    {
+        out.retain(|d| d.code != "E431");
+    }
     // A parse refusal in an earlier statement stops Dynare before a later
     // shock_paths checkPass can report the circular self reference. Written
     // transform clashes are excluded: they run after that checkPass.

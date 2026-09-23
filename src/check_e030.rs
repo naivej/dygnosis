@@ -40,6 +40,9 @@ fn check_duplicate_declarations(model: &Model) -> Vec<Diagnostic> {
     for d in &model.parameters {
         all_vars.push((d.name, d.span, "parameters"));
     }
+    for d in &model.model_local_variables {
+        all_vars.push((d.name, d.span, "model_local_variable"));
+    }
     for trend in &model.trend_vars {
         let kind = if trend.log_trend {
             "log_trend_var"

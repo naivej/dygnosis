@@ -35,7 +35,7 @@ fn quiet(diags: &[Diagnostic], code: &str) {
 
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 333);
+    assert_eq!(known_codes().len(), 338);
 }
 
 #[test]

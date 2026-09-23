@@ -257,7 +257,7 @@ fn the_nine_command_lists_are_collected() {
 /// A list collects its names in order, and the option list contributes none.
 #[test]
 fn a_list_collects_names_in_order() {
-    let model = parse(&format!("{}dynasave('f.csv', nobs=4) y, z;\n", head()));
+    let model = parse(&format!("{}dynasave('f.csv') y, z;\n", head()));
     let names: Vec<&str> = model
         .command_symbols
         .iter()
@@ -614,5 +614,5 @@ fn a_declared_name_of_the_right_type_is_quiet() {
 /// No new code ships, so the registry does not move.
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 333);
+    assert_eq!(known_codes().len(), 338);
 }

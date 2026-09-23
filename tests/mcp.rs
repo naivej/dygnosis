@@ -698,7 +698,7 @@ fn explain_e040_is_unknown() {
 #[test]
 fn list_diagnostic_codes_matches_known_codes() {
     let list = dynare_list_diagnostic_codes();
-    assert_eq!(list.len(), 333);
+    assert_eq!(list.len(), 338);
     assert_eq!(list.len(), known_codes().len());
     let codes: Vec<&str> = list.iter().map(|item| item.code.as_str()).collect();
     assert_eq!(codes, known_codes());

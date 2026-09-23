@@ -279,6 +279,31 @@ impl Parser<'_> {
         ))
     }
 
+    /// `date_at` intentionally returns the longest legal DATE prefix. A token
+    /// immediately after that prefix can still make the full value illegal.
+    pub(super) fn date_suffix_refusal_at(
+        &self,
+        next: usize,
+        subject: &str,
+        minus_message: &'static str,
+    ) -> Option<ShapeRefuse> {
+        let token = self.tokens.get(next)?;
+        if token.kind == TokenKind::Minus {
+            return Some(ShapeRefuse::official(token.span, subject, minus_message));
+        }
+        if token.kind == TokenKind::Plus {
+            let value = self.tokens.get(next + 1)?;
+            if value.kind == TokenKind::Number && !is_integer_lexeme(value.text(self.src)) {
+                return Some(ShapeRefuse::official(
+                    value.span,
+                    subject,
+                    "syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER",
+                ));
+            }
+        }
+        None
+    }
+
     fn period_point_at(&self, at: usize, allow_end: bool) -> Option<(PeriodPoint, usize)> {
         if let Some((date, next)) = self.date_at(at) {
             return Some((PeriodPoint::Date(date), next));
@@ -857,6 +882,13 @@ impl Parser<'_> {
                 Some(TokenKind::Minus) if self.date_at(first).is_none() => {
                     Some("syntax error, unexpected MINUS, expecting DATE")
                 }
+                Some(TokenKind::Number) if self.date_at(first).is_none() => {
+                    Some("syntax error, unexpected INT_NUMBER, expecting DATE")
+                }
+                Some(TokenKind::RParen) => Some("syntax error, unexpected ')', expecting DATE"),
+                Some(TokenKind::Ident) if self.date_at(first).is_none() => {
+                    Some("syntax error, unexpected IDENTIFIER, expecting DATE")
+                }
                 _ => None,
             };
             if let Some(message) = message {
@@ -868,7 +900,16 @@ impl Parser<'_> {
             }
         }
         let value = if self.at(TokenKind::LParen) {
-            self.date_at(self.i + 1).map(|(date, _)| date)
+            self.date_at(self.i + 1).map(|(date, next)| {
+                if let Some(refuse) = self.date_suffix_refusal_at(
+                    next,
+                    "set_time",
+                    "syntax error, unexpected MINUS, expecting PLUS or ')'",
+                ) {
+                    self.model.shape_refuses.push(refuse);
+                }
+                date
+            })
         } else {
             None
         };
@@ -1162,9 +1203,25 @@ impl Parser<'_> {
                 continue;
             }
             let Some((first, after_first)) = self.date_at(i + 2) else {
+                if let Some(tok) = self.tokens.get(i + 2) {
+                    if tok.kind == TokenKind::Number {
+                        self.model.shape_refuses.push(ShapeRefuse::official(
+                            tok.span,
+                            "subsamples",
+                            "syntax error, unexpected INT_NUMBER, expecting DATE",
+                        ));
+                    }
+                }
                 i += 1;
                 continue;
             };
+            if let Some(refuse) = self.date_suffix_refusal_at(
+                after_first,
+                "subsamples",
+                "syntax error, unexpected MINUS, expecting PLUS or ':'",
+            ) {
+                self.model.shape_refuses.push(refuse);
+            }
             if !self.gap_is(after_first - 1, after_first, ":") {
                 if self.tokens.get(after_first).map(|t| t.kind) == Some(TokenKind::Comma) {
                     self.model.shape_refuses.push(ShapeRefuse::official(
@@ -1177,9 +1234,25 @@ impl Parser<'_> {
                 continue;
             }
             let Some((last, after_last)) = self.date_at(after_first) else {
+                if let Some(tok) = self.tokens.get(after_first) {
+                    if tok.kind == TokenKind::Number {
+                        self.model.shape_refuses.push(ShapeRefuse::official(
+                            tok.span,
+                            "subsamples",
+                            "syntax error, unexpected INT_NUMBER, expecting DATE",
+                        ));
+                    }
+                }
                 i += 1;
                 continue;
             };
+            if let Some(refuse) = self.date_suffix_refusal_at(
+                after_last,
+                "subsamples",
+                "syntax error, unexpected MINUS, expecting COMMA or ')'",
+            ) {
+                self.model.shape_refuses.push(refuse);
+            }
             let name = self.intern.intern(name_tok.text(self.src));
             ranges.push(SubsampleRange {
                 name,
