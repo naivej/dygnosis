@@ -469,8 +469,8 @@ fn data_statement_carries_file_or_series_for_the_e227_gate() {
 }
 
 #[test]
-fn registry_known_codes_stays_307() {
-    assert_eq!(dygnosis::explain::known_codes().len(), 307);
+fn registry_known_codes_stays_306() {
+    assert_eq!(dygnosis::explain::known_codes().len(), 306);
 }
 
 /// Every one of the family's 42 official sentences, on its fire fixture, with

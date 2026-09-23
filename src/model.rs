@@ -671,6 +671,42 @@ pub struct Model {
     pub moment_calibration: Vec<MomentCalibrationBlock>,
     /// Every `irf_calibration` block, file order.
     pub irf_calibration: Vec<IrfCalibrationBlock>,
+    /// A token on one of the five moment blocks that 7.1 refuses while reading
+    /// the file, with the sentence it prints. Syntax errors, and the two
+    /// sentences no code owns.
+    pub mom_syntax: Vec<MomSyntax>,
+}
+
+/// One parse-stage sentence on a moment or calibration block.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MomSyntax {
+    pub span: Span,
+    /// The sentence 7.1 prints for this token.
+    pub message: String,
+}
+
+/// `DATE` as 7.1's lexer reads it: an optional sign, digits, and one unit suffix
+/// (`y`, `a`, `m1`–`m12`, `q1`–`q4`, `s1`/`s2`, `h1`/`h2`), case-insensitive.
+pub(crate) fn dynare_date(text: &str) -> bool {
+    let body = text.strip_prefix('-').unwrap_or(text);
+    let digits = body.chars().take_while(char::is_ascii_digit).count();
+    if digits == 0 || digits == body.len() {
+        return false;
+    }
+    let suffix = body.split_at(digits).1.to_ascii_lowercase();
+    if suffix == "y" || suffix == "a" {
+        return true;
+    }
+    let (unit, number) = suffix.split_at(1);
+    let Ok(number) = number.parse::<u32>() else {
+        return false;
+    };
+    match unit {
+        "m" => (1..=12).contains(&number),
+        "q" => (1..=4).contains(&number),
+        "s" | "h" => (1..=2).contains(&number),
+        _ => false,
+    }
 }
 
 /// `histval` assignment `name(lag) = expr`.
@@ -1006,8 +1042,12 @@ pub struct MatchedIrfsRow {
     pub periods: Vec<Span>,
     /// One entry per value; `(xx)` is one.
     pub values: Vec<Span>,
+    /// Expressions inside `values` parentheses. A bare number has no expression.
+    pub value_exprs: Vec<ExprId>,
     /// Empty when the row has no `weights` keyword.
     pub weights: Vec<Span>,
+    /// Expressions inside `weights` parentheses.
+    pub weight_exprs: Vec<ExprId>,
     pub span: Span,
 }
 
@@ -1029,6 +1069,8 @@ pub struct MatchedIrfsWeight {
     pub right_exo_span: Span,
     pub weight_text: String,
     pub weight_span: Span,
+    /// The weight expression, when one was read.
+    pub weight_expr: Option<ExprId>,
     pub span: Span,
 }
 

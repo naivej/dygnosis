@@ -657,23 +657,23 @@ fn an_external_function_row_takes_e280() {
     quiet(&got, "E386");
 }
 
-/// A block the reader could not store a row for is refused, whether its body is
-/// empty or holds only rows the grammar has no production for.
+/// An empty block is still the "at least one row" sentence. `y = 3` is their
+/// syntax error on `=`, which stops the parse before that sentence.
 #[test]
 fn a_moment_block_with_no_stored_row_fires_e001() {
-    for body in [
-        "matched_moments;\nend;\n",
-        "matched_moments;\ny = 3;\nend;\n",
-    ] {
-        let source = format!("{}{body}", head());
-        let got = analyze(&parse(&source));
-        let hit = find(&got, "E001");
-        assert!(
-            hit.message.contains("'matched_moments'"),
-            "{body}: message names the block, got {:?}",
-            hit.message
-        );
-    }
+    let empty = format!("{}matched_moments;\nend;\n", head());
+    let got = analyze(&parse(&empty));
+    let hit = find(&got, "E001");
+    assert!(
+        hit.message.contains("'matched_moments'"),
+        "empty block names the block, got {:?}",
+        hit.message
+    );
+    let bad = format!("{}matched_moments;\ny = 3;\nend;\n", head());
+    assert_eq!(
+        find(&analyze(&parse(&bad)), "E001").message,
+        "syntax error, unexpected EQUAL"
+    );
 }
 
 /// The `(…)` shapes P-mom handed over, and the `mom_method` values the grammar
@@ -830,14 +830,305 @@ fn the_legal_fixtures_stay_quiet() {
     }
 }
 
-/// The registry grew by the eleven new codes.
+/// The syntax S061 held. One file per shape. The sentence is the one 7.1 prints,
+/// on the token it stops on. A lead in a value is not E024: that sentence is the
+/// moment-row `varexo_det` lead. The value lead has no code of its own, so it is
+/// E001 with their text.
 #[test]
-fn registry_known_codes_grew_to_307() {
-    assert_eq!(known_codes().len(), 307);
+fn the_syntax_s061_held_is_their_sentence() {
+    const TABLE: &[(&str, &str, &str, &str)] = &[
+        (
+            "fmom_mirf_zoom",
+            "E001",
+            "syntax error, unexpected IDENTIFIER, expecting OVERWRITE",
+            "zoom",
+        ),
+        (
+            "fmom_mm_extra",
+            "E001",
+            "syntax error, unexpected '(', expecting ';'",
+            "(",
+        ),
+        (
+            "fmom_irf_hp",
+            "E001",
+            "syntax error, unexpected IDENTIFIER, expecting RELATIVE_IRF",
+            "hp_filter",
+        ),
+        (
+            "fmom_mirfw_zoom",
+            "E001",
+            "syntax error, unexpected IDENTIFIER, expecting OVERWRITE",
+            "zoom",
+        ),
+        (
+            "fmom_mcal_extra",
+            "E001",
+            "syntax error, unexpected '(', expecting ';'",
+            "(",
+        ),
+        (
+            "fmom_per_minus",
+            "E001",
+            "syntax error, unexpected MINUS, expecting DATE or INT_NUMBER",
+            "-",
+        ),
+        (
+            "fmom_per_foo",
+            "E001",
+            "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER",
+            "foo",
+        ),
+        (
+            "fmom_per_float",
+            "E001",
+            "syntax error, unexpected FLOAT_NUMBER, expecting DATE or INT_NUMBER",
+            "1.5",
+        ),
+        (
+            "fmom_per_exp",
+            "E001",
+            "syntax error, unexpected FLOAT_NUMBER, expecting DATE or INT_NUMBER",
+            "1e3",
+        ),
+        (
+            "fmom_per_call",
+            "E001",
+            "syntax error, unexpected IDENTIFIER, expecting DATE or INT_NUMBER",
+            "y",
+        ),
+        (
+            "fmom_per_three",
+            "E001",
+            "syntax error, unexpected ':', expecting COMMA or DATE or INT_NUMBER or ';'",
+            ":",
+        ),
+        (
+            "fmom_per_empty",
+            "E001",
+            "syntax error, unexpected ';', expecting DATE or INT_NUMBER",
+            ";",
+        ),
+        (
+            "fmom_per_beside",
+            "E392",
+            "matched_irfs: dates are not allowed in the 'periods' keyword",
+            "2000Q1",
+        ),
+        (
+            "fmom_lag_foo",
+            "E001",
+            "syntax error, unexpected IDENTIFIER, expecting INT_NUMBER or PLUS or MINUS",
+            "foo",
+        ),
+        (
+            "fmom_lag_float",
+            "E001",
+            "syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER or PLUS or MINUS",
+            "1.5",
+        ),
+        (
+            "fmom_lag_empty",
+            "E001",
+            "syntax error, unexpected ')', expecting INT_NUMBER or PLUS or MINUS",
+            ")",
+        ),
+        (
+            "fmom_lag_three",
+            "E001",
+            "syntax error, unexpected ':', expecting ')'",
+            ":",
+        ),
+        (
+            "fmom_lag_mix",
+            "E001",
+            "syntax error, unexpected DATE, expecting INT_NUMBER or PLUS or MINUS",
+            "2000Q1",
+        ),
+        (
+            "fmom_irf_minus",
+            "E001",
+            "syntax error, unexpected MINUS, expecting INT_NUMBER",
+            "-",
+        ),
+        (
+            "fmom_irf_date",
+            "E001",
+            "syntax error, unexpected DATE, expecting INT_NUMBER",
+            "2000Q1",
+        ),
+        (
+            "fmom_wper_minus",
+            "E001",
+            "syntax error, unexpected MINUS, expecting INT_NUMBER",
+            "-",
+        ),
+        (
+            "fmom_kw_values_first",
+            "E001",
+            "syntax error, unexpected VALUES, expecting PERIODS",
+            "values",
+        ),
+        (
+            "fmom_kw_miss_values",
+            "E001",
+            "syntax error, unexpected END, expecting VALUES or WEIGHTS",
+            "end",
+        ),
+        (
+            "fmom_kw_miss_periods",
+            "E001",
+            "syntax error, unexpected VALUES, expecting PERIODS",
+            "values",
+        ),
+        (
+            "fmom_kw_repeat",
+            "E001",
+            "syntax error, unexpected VALUES, expecting END or VAR or VAREXO",
+            "values",
+        ),
+        (
+            "fmom_kw_weight_name",
+            "E001",
+            "syntax error, unexpected IDENTIFIER",
+            "y",
+        ),
+        (
+            "fmom_bad_mm",
+            "E001",
+            "syntax error, unexpected EQUAL",
+            "=",
+        ),
+        (
+            "fmom_bad_mirf",
+            "E001",
+            "syntax error, unexpected IDENTIFIER, expecting END or VAR or VAREXO",
+            "y",
+        ),
+        (
+            "fmom_bad_mirfw",
+            "E001",
+            "syntax error, unexpected ';', expecting '('",
+            ";",
+        ),
+        (
+            "fmom_bad_mcal",
+            "E001",
+            "syntax error, unexpected ';', expecting COMMA",
+            ";",
+        ),
+        (
+            "fmom_bad_irf",
+            "E001",
+            "syntax error, unexpected ';', expecting COMMA or '('",
+            ";",
+        ),
+        (
+            "fmom_ex_helper",
+            "E279",
+            "Symbol 'helper' is the name of a MATLAB/Octave function, and cannot be used as a variable.",
+            "helper",
+        ),
+        (
+            "fmom_ex_loc",
+            "E282",
+            "Variable loc not allowed outside model declaration. Its scope is only inside model.",
+            "loc",
+        ),
+        (
+            "fmom_ex_trend",
+            "E310",
+            "Variable A not allowed outside model declaration, because it is a trend variable.",
+            "A",
+        ),
+        (
+            "fmom_ex_lead",
+            "E001",
+            "Using variable y with a lead or a lag is not allowed in this context",
+            "y(1)",
+        ),
+        (
+            "fmom_wt_helper",
+            "E279",
+            "Symbol 'helper' is the name of a MATLAB/Octave function, and cannot be used as a variable.",
+            "helper",
+        ),
+        (
+            "fmom_name_lead",
+            "E001",
+            "syntax error, unexpected '(', expecting ';'",
+            "(",
+        ),
+        (
+            "fmom_ns_dot",
+            "E001",
+            "syntax error, unexpected ';', expecting '(' or '.'",
+            ";",
+        ),
+        (
+            "fmom_ns_call",
+            "E001",
+            "To use an external function (foo.bar) within the model block, you must first declare it via the external_function() statement.",
+            "foo.bar(y)",
+        ),
+        (
+            "fmom_mm_det",
+            "E024",
+            "Exogenous deterministic variable tau cannot be given a lead or a lag",
+            "tau(1)",
+        ),
+    ];
+    for (name, code, message, token) in TABLE {
+        let source = fixture(&format!("mom/{name}.mod"));
+        let got = analyze(&parse(&source));
+        let hit = find(&got, code);
+        assert_eq!(hit.message, *message, "{name}");
+        let text = &source[hit.span.start as usize..hit.span.end as usize];
+        assert_eq!(text, *token, "{name} span");
+        // A `#` local or a trend name in the slot is already a symbol. Registering
+        // it again as a mod-file local makes E281 fire on the model, which 7.1
+        // does not print for these files.
+        if matches!(*name, "fmom_ex_loc" | "fmom_ex_trend" | "fmom_ex_helper" | "fmom_wt_helper") {
+            assert!(
+                got.iter().all(|d| d.code != "E281"),
+                "{name} must not emit E281: {:?}",
+                codes(&got)
+            );
+        }
+    }
+}
+
+/// A legal neighbour of each group stays quiet: the one flag, a signed lag, a
+/// parameter in a value, one bare weight, a well-formed period range.
+#[test]
+fn legal_syntax_neighbours_stay_quiet() {
+    for body in [
+        "matched_irfs(overwrite);\nvar y; varexo e; periods 1:2; values 1;\nend;\n",
+        "irf_calibration(relative_irf);\ny(1:2), e, [0, 1];\nend;\n",
+        "moment_calibration;\ny, c(-1), [0, 1];\ny, c(-(1:2)), +;\nend;\n",
+        "matched_irfs;\nvar y; varexo e; periods 1 2; values 1 2; weights 3;\nend;\n",
+        "matched_irfs;\nvar y; varexo e; periods 1; values (a);\nend;\n",
+        "matched_irfs;\nvar y; varexo e; periods 1; values 1; weights (y);\nend;\n",
+    ] {
+        let got = analyze(&parse(&format!("{}{body}", head())));
+        let errors: Vec<&str> = got
+            .iter()
+            .filter(|d| d.severity == dygnosis::Severity::Error)
+            .map(|d| d.code.as_str())
+            .collect();
+        assert!(errors.is_empty(), "{body}: {errors:?}");
+    }
+}
+
+/// The registry grew by the eleven new codes. S061 is dropped.
+#[test]
+fn registry_known_codes_grew_to_306() {
+    assert_eq!(known_codes().len(), 306);
     for code in [
         "E382", "E383", "E384", "E385", "E386", "E387", "E388", "E389", "E390", "E391", "E392",
     ] {
         assert!(known_codes().contains(&code), "{code} missing");
     }
     assert!(!known_codes().contains(&"S032"), "S032 was dropped");
+    assert!(!known_codes().contains(&"S061"), "S061 was dropped");
 }

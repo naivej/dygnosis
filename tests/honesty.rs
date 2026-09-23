@@ -4169,6 +4169,406 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         our_needle: "not used in the model",
         stage: JsonStage::Check,
     },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_mirf_zoom.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting OVERWRITE",
+        our_needle: "expecting OVERWRITE",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_mm_extra.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting ';'",
+        our_needle: "expecting ';'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_irf_hp.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting RELATIVE_IRF",
+        our_needle: "expecting RELATIVE_IRF",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_mirfw_zoom.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting OVERWRITE",
+        our_needle: "expecting OVERWRITE",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_mcal_extra.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting ';'",
+        our_needle: "expecting ';'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_per_minus.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting DATE or INT_NUMBER",
+        our_needle: "expecting DATE or INT_NUMBER",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_per_foo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting DATE or INT_NUMBER",
+        our_needle: "expecting DATE or INT_NUMBER",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_per_float.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "FLOAT_NUMBER",
+        our_needle: "FLOAT_NUMBER",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_per_exp.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "FLOAT_NUMBER",
+        our_needle: "FLOAT_NUMBER",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_per_call.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting DATE or INT_NUMBER",
+        our_needle: "expecting DATE or INT_NUMBER",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_per_three.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "unexpected ':'",
+        our_needle: "unexpected ':'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_per_empty.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting DATE or INT_NUMBER",
+        our_needle: "expecting DATE or INT_NUMBER",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E392",
+        fixture: "mom/fmom_per_beside.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "dates are not allowed",
+        our_needle: "dates are not allowed",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_lag_foo.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "INT_NUMBER or PLUS or MINUS",
+        our_needle: "INT_NUMBER or PLUS or MINUS",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_lag_float.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "FLOAT_NUMBER",
+        our_needle: "FLOAT_NUMBER",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_lag_empty.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "unexpected ')'",
+        our_needle: "unexpected ')'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_lag_three.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting ')'",
+        our_needle: "expecting ')'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_lag_mix.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "unexpected DATE",
+        our_needle: "unexpected DATE",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_irf_minus.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting INT_NUMBER",
+        our_needle: "expecting INT_NUMBER",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_irf_date.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "unexpected DATE",
+        our_needle: "unexpected DATE",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_wper_minus.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting INT_NUMBER",
+        our_needle: "expecting INT_NUMBER",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_kw_values_first.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting PERIODS",
+        our_needle: "expecting PERIODS",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_kw_miss_values.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting VALUES or WEIGHTS",
+        our_needle: "expecting VALUES or WEIGHTS",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_kw_miss_periods.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting PERIODS",
+        our_needle: "expecting PERIODS",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_kw_repeat.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "END or VAR or VAREXO",
+        our_needle: "END or VAR or VAREXO",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_kw_weight_name.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "unexpected IDENTIFIER",
+        our_needle: "unexpected IDENTIFIER",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_bad_mm.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "unexpected EQUAL",
+        our_needle: "unexpected EQUAL",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_bad_mirf.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "END or VAR or VAREXO",
+        our_needle: "END or VAR or VAREXO",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_bad_mirfw.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting '('",
+        our_needle: "expecting '('",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_bad_mcal.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting COMMA",
+        our_needle: "expecting COMMA",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_bad_irf.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "COMMA or '('",
+        our_needle: "COMMA or '('",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E279",
+        fixture: "mom/fmom_ex_helper.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "MATLAB/Octave function",
+        our_needle: "MATLAB/Octave function",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E282",
+        fixture: "mom/fmom_ex_loc.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "only inside model",
+        our_needle: "only inside model",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E310",
+        fixture: "mom/fmom_ex_trend.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "trend variable",
+        our_needle: "trend variable",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_ex_lead.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "not allowed in this context",
+        our_needle: "not allowed in this context",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E279",
+        fixture: "mom/fmom_wt_helper.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "MATLAB/Octave function",
+        our_needle: "MATLAB/Octave function",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_name_lead.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting ';'",
+        our_needle: "expecting ';'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_ns_dot.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting '(' or '.'",
+        our_needle: "expecting '(' or '.'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "mom/fmom_ns_call.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "external_function()",
+        our_needle: "external_function()",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E024",
+        fixture: "mom/fmom_mm_det.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "cannot be given a lead or a lag",
+        our_needle: "cannot be given a lead or a lag",
+        stage: JsonStage::Check,
+    },
 ];
 
 struct ClashQuiet {

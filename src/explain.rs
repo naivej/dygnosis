@@ -43,7 +43,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 307 keys: 249 shared + 27 added + 31 skipped.
+// 306 keys: 249 shared + 27 added + 30 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -1739,11 +1739,6 @@ Move the call out of the ``steady_state(…)`` operator.",
     ("S054", ExplainEntry {
         title: "Heterogeneity dimension unknown or twice",
         body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.9 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S061", ExplainEntry {
-        title: "moment / calibration syntax the parser hands over",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.6 E. The rows and shapes this key keeps are the ones a record cannot show: a row P-mom skipped inside a block that stored a good row, a bad option word on a block opener (`irf_calibration(hp_filter=1600)`, `matched_irfs(zoom)`), a `periods` / `lags` entry the grammar cannot spell (`-1`, `foo`, `1.5`, a three-part range), the `periods` / `values` / `weights` keyword shapes of a `matched_irfs` row, and a weight that is not a parenthesised expression. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S062", ExplainEntry {

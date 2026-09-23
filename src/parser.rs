@@ -12,7 +12,8 @@ use crate::model::{
     Decl, DottedHead, DottedKind, DottedStatement, Equation, EstimationStatement, FamilyOption,
     FamilyValueKind, Init2ShocksBlock, Init2ShocksRow, IrfCalibrationBlock, IrfCalibrationRow,
     MatchedIrfsBlock, MatchedIrfsRow, MatchedIrfsWeight, MatchedIrfsWeightsBlock, MatchedMoment,
-    Model, MomStatement, MomentCalibrationBlock, MomentCalibrationRow, MsStatement, OptimWeight,
+    Model, MomStatement, MomSyntax, MomentCalibrationBlock, MomentCalibrationRow, MsStatement,
+    OptimWeight,
     ParseIssue, ParseIssueKind, ShapeRefuse, ShockGroup, SvarEquation, SvarIdentification,
     SvarIdentificationElement,
 };
@@ -2165,17 +2166,27 @@ impl Parser<'_> {
     }
 
     /// One `model_expression ';'` row. An empty row is skipped, not stored.
-    /// Leftover tokens after the expression (`y = 3;`) mean the row does not
-    /// match: skip to its `;` and store nothing (close call 1).
+    /// A token the grammar cannot reduce (`y = 3`, `foo.bar`) records the
+    /// sentence 7.1 prints and stores nothing.
     fn read_matched_moment(&mut self, end_i: usize) -> Option<MatchedMoment> {
         if self.at(TokenKind::Semi) {
             self.bump();
             return None;
         }
+        if self.looks_like_dotted_name() {
+            return self.read_dotted_moment(end_i);
+        }
         let start = self.current_start();
         let expr_from = self.i;
         let expr = self.parse_expr();
         if !self.at(TokenKind::Semi) {
+            // `y = 3` stops on EQUAL and names nothing it expected.
+            let expecting = if self.at(TokenKind::Eq) {
+                None
+            } else {
+                Some("';'")
+            };
+            self.record_syntax_at(self.i, expecting);
             self.skip_until_semi();
             self.eat(TokenKind::Semi);
             return None;
@@ -2214,7 +2225,7 @@ impl Parser<'_> {
                 self.bump();
                 continue;
             }
-            if let Some(row) = self.read_matched_irfs_row(body_end_i) {
+            if let Some(row) = self.read_matched_irfs_row(body_end_i, rows.is_empty()) {
                 rows.push(row);
             }
             if self.i <= before {
@@ -2230,39 +2241,63 @@ impl Parser<'_> {
         rows
     }
 
-    /// One `var ENDO; varexo EXO; periods ?; values ?; [weights ?;]` row, in either
+    /// One `var ENDO; varexo EXO; periods …; values …; [weights …;]` row, in either
     /// `var`/`varexo` order and either `values`/`weights` order.
-    fn read_matched_irfs_row(&mut self, end_i: usize) -> Option<MatchedIrfsRow> {
+    ///
+    /// A token the grammar cannot reduce records 7.1's sentence and abandons the
+    /// rest of the block: their parser stops at the first of these.
+    fn read_matched_irfs_row(&mut self, end_i: usize, block_empty: bool) -> Option<MatchedIrfsRow> {
         let start = self.current_start();
+        if !self.at_ident_ci("var") && !self.at_ident_ci("varexo") {
+            let expecting = if block_empty {
+                "VAR or VAREXO"
+            } else {
+                "END or VAR or VAREXO"
+            };
+            self.record_syntax_at(self.i, Some(expecting));
+            return None;
+        }
         let mut endogenous = None;
         let mut exogenous = None;
         while self.at_ident_ci("var") || self.at_ident_ci("varexo") {
             let is_var = self.at_ident_ci("var");
             self.bump();
             let (name, span) = self.read_symbol()?;
+            if !self.at(TokenKind::Semi) {
+                // `var y(1)` — the name slot is a symbol, then `;`.
+                self.record_syntax_at(self.i, Some("';'"));
+                self.i = end_i;
+                return None;
+            }
+            self.eat(TokenKind::Semi);
             if is_var {
                 endogenous.get_or_insert((name, span));
             } else {
                 exogenous.get_or_insert((name, span));
             }
-            self.eat(TokenKind::Semi);
         }
         let (endogenous, endogenous_span) = endogenous?;
         let (exogenous, exogenous_span) = exogenous?;
-        let mut periods = Vec::new();
-        if self.at_ident_ci("periods") {
-            periods = self.read_keyword_entries(end_i);
+        if !self.at_ident_ci("periods") {
+            self.record_syntax_at(self.i, Some("PERIODS"));
+            self.i = end_i;
+            return None;
         }
-        let mut values = Vec::new();
-        let mut weights = Vec::new();
-        // Either keyword may come first, and each appears at most once.
-        for _ in 0..2 {
-            if self.at_ident_ci("values") {
-                values = self.read_keyword_entries(end_i);
-            } else if self.at_ident_ci("weights") {
-                weights = self.read_keyword_entries(end_i);
+        let periods = match self.read_irf_period_list(end_i) {
+            Some(periods) => periods,
+            None => {
+                self.i = end_i;
+                return None;
             }
-        }
+        };
+        let (values, value_exprs, weights, weight_exprs) = match self.read_irf_value_weights(end_i)
+        {
+            Some(lists) => lists,
+            None => {
+                self.i = end_i;
+                return None;
+            }
+        };
         let end = self.finish_row(end_i);
         Some(MatchedIrfsRow {
             endogenous,
@@ -2271,7 +2306,9 @@ impl Parser<'_> {
             exogenous_span,
             periods,
             values,
+            value_exprs,
             weights,
+            weight_exprs,
             span: Span { start, end },
         })
     }
@@ -2331,7 +2368,7 @@ impl Parser<'_> {
         self.eat(TokenKind::Comma);
         let (right_exo, right_exo_span) = self.read_symbol()?;
         self.eat(TokenKind::Comma);
-        let (weight_text, weight_span) = self.read_expression_text();
+        let (weight_text, weight_span, weight_expr) = self.read_expression_text();
         let end = self.finish_row(end_i);
         Some(MatchedIrfsWeight {
             left_endo,
@@ -2348,19 +2385,21 @@ impl Parser<'_> {
             right_exo_span,
             weight_text,
             weight_span,
+            weight_expr,
             span: Span { start, end },
         })
     }
 
-    /// `name` then the optional `(integer_or_range)` that follows it. `1` and `1:2`
-    /// are each one period entry.
+    /// `name` then the required `(integer_or_range)`. `1` and `1:2` are each one
+    /// period entry. A missing `(` is their syntax error on the next token.
     fn read_weighted_symbol(&mut self) -> Option<(Name, Span, String, Span)> {
         let (name, span) = self.read_symbol()?;
-        let (text, group_span) = match self.read_paren_group() {
-            Some((text, group_span)) => (text, group_span),
-            None => (String::new(), span),
-        };
-        Some((name, span, text, group_span))
+        if !self.at(TokenKind::LParen) {
+            self.record_syntax_at(self.i, Some("'('"));
+            return None;
+        }
+        self.read_checked_paren(false)
+            .map(|(text, group_span)| (name, span, text, group_span))
     }
 
     /// `moment_calibration;` one `name, name[(lags)], range;` row, `end;`.
@@ -2401,11 +2440,17 @@ impl Parser<'_> {
     fn read_moment_calibration_row(&mut self, end_i: usize) -> Option<MomentCalibrationRow> {
         let start = self.current_start();
         let (first, first_span) = self.read_symbol()?;
+        if !self.at(TokenKind::Comma) {
+            self.record_syntax_at(self.i, Some("COMMA"));
+            return None;
+        }
         self.eat(TokenKind::Comma);
         let (second, second_span) = self.read_symbol()?;
-        let (lags, lags_span) = match self.read_paren_group() {
-            Some((text, span)) => (Some(text), Some(span)),
-            None => (None, None),
+        let (lags, lags_span) = if self.at(TokenKind::LParen) {
+            let (text, span) = self.read_checked_paren(true)?;
+            (Some(text), Some(span))
+        } else {
+            (None, None)
         };
         self.eat(TokenKind::Comma);
         let range = self.read_calibration_range()?;
@@ -2461,10 +2506,16 @@ impl Parser<'_> {
     fn read_irf_calibration_row(&mut self, end_i: usize) -> Option<IrfCalibrationRow> {
         let start = self.current_start();
         let (endogenous, endogenous_span) = self.read_symbol()?;
-        let (periods, periods_span) = match self.read_paren_group() {
-            Some((text, span)) => (Some(text), Some(span)),
-            None => (None, None),
+        let (periods, periods_span) = if self.at(TokenKind::LParen) {
+            let (text, span) = self.read_checked_paren(false)?;
+            (Some(text), Some(span))
+        } else {
+            (None, None)
         };
+        if !self.at(TokenKind::Comma) {
+            self.record_syntax_at(self.i, Some("COMMA or '('"));
+            return None;
+        }
         self.eat(TokenKind::Comma);
         let (exogenous, exogenous_span) = self.read_symbol()?;
         self.eat(TokenKind::Comma);
@@ -2480,65 +2531,6 @@ impl Parser<'_> {
             range,
             span: Span { start, end },
         })
-    }
-
-    /// The `(…)` group at the cursor: its inner text and the group's whole span.
-    /// `None` when the cursor is not on a `(`.
-    ///
-    /// The inner text is read from the source, so a range keeps its `:` (the lexer
-    /// drops the colon, leaving two adjacent numbers).
-    fn read_paren_group(&mut self) -> Option<(String, Span)> {
-        if !self.at(TokenKind::LParen) {
-            return None;
-        }
-        let open = self.bump().span;
-        let inner_from = open.end;
-        let mut inner_end = inner_from;
-        let mut depth = 0i32;
-        while !self.at(TokenKind::Eof) {
-            if self.at(TokenKind::LParen) {
-                depth += 1;
-                self.bump();
-                continue;
-            }
-            if self.at(TokenKind::RParen) {
-                if depth == 0 {
-                    let end = self.bump().span.end;
-                    let text = self
-                        .src
-                        .get(inner_from as usize..inner_end as usize)
-                        .unwrap_or("")
-                        .trim()
-                        .to_string();
-                    return Some((
-                        text,
-                        Span {
-                            start: open.start,
-                            end,
-                        },
-                    ));
-                }
-                depth -= 1;
-                self.bump();
-                continue;
-            }
-            inner_end = self.tokens[self.i].span.end;
-            self.bump();
-        }
-        // Unclosed: the row ends where the tokens did.
-        let text = self
-            .src
-            .get(inner_from as usize..inner_end as usize)
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        Some((
-            text,
-            Span {
-                start: open.start,
-                end: inner_end,
-            },
-        ))
     }
 
     /// `[expr, expr]` / `+` / `-`: a calibration row's third column.
@@ -2586,12 +2578,12 @@ impl Parser<'_> {
         join_lexemes(self.src, &self.tokens[from..self.i.min(self.tokens.len())])
     }
 
-    /// One expression's text and span, read at the cursor.
-    fn read_expression_text(&mut self) -> (String, Span) {
+    /// One expression's text, span, and tree, read at the cursor.
+    fn read_expression_text(&mut self) -> (String, Span, Option<ExprId>) {
         let start = self.current_start();
         let from = self.i;
         let before = self.i;
-        self.parse_expr();
+        let expr = self.parse_expr();
         if self.i <= before {
             self.bump();
         }
@@ -2606,7 +2598,7 @@ impl Parser<'_> {
             .unwrap_or("")
             .trim()
             .to_string();
-        (text, Span { start, end })
+        (text, Span { start, end }, expr)
     }
 
     /// A symbol token, or `None` when the cursor is not on one.
@@ -2619,37 +2611,607 @@ impl Parser<'_> {
         Some((self.intern.intern(&lex), tok.span))
     }
 
-    /// `keyword entry_list ';'` inside a `matched_irfs` row, as one span per entry.
-    /// `1:2` is one entry; so is `(xx)`.
-    ///
-    /// An entry's `(…)` holds an expression, and a name first seen there is a
-    /// mod-file local at 7.1, so the expression is built rather than stepped over.
-    fn read_keyword_entries(&mut self, end_i: usize) -> Vec<Span> {
-        self.bump();
-        let from = self.i;
-        while self.i < end_i && !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
-            if self.at(TokenKind::LParen) {
-                self.read_parenthesised_expression();
-                continue;
-            }
-            self.bump();
-        }
-        let entries = self.list_entries(from, self.i);
-        self.eat(TokenKind::Semi);
-        entries
+    fn record_mom_syntax(&mut self, span: Span, message: impl Into<String>) {
+        self.model.mom_syntax.push(MomSyntax {
+            span,
+            message: message.into(),
+        });
     }
 
-    /// The `(expression)` of one `values` / `weights` entry, read for its names.
-    fn read_parenthesised_expression(&mut self) {
+    /// 7.1's `syntax error, unexpected …` on the token at `index`.
+    fn record_syntax_at(&mut self, index: usize, expecting: Option<&str>) {
+        let span = self
+            .tokens
+            .get(index)
+            .map(|tok| tok.span)
+            .unwrap_or(Span {
+                start: self.current_start(),
+                end: self.current_start(),
+            });
+        let unexpected = self.bison_token_name(index);
+        let message = match expecting {
+            Some(expected) => {
+                format!("syntax error, unexpected {unexpected}, expecting {expected}")
+            }
+            None => format!("syntax error, unexpected {unexpected}"),
+        };
+        self.record_mom_syntax(span, message);
+    }
+
+    fn bison_token_name(&self, index: usize) -> String {
+        let Some(tok) = self.tokens.get(index) else {
+            return "end of file".to_string();
+        };
+        match tok.kind {
+            TokenKind::Semi => "';'".to_string(),
+            TokenKind::LParen => "'('".to_string(),
+            TokenKind::RParen => "')'".to_string(),
+            TokenKind::Comma => "COMMA".to_string(),
+            TokenKind::Plus => "PLUS".to_string(),
+            TokenKind::Minus => "MINUS".to_string(),
+            TokenKind::Eq => "EQUAL".to_string(),
+            TokenKind::Number => {
+                if is_integer_lexeme(self.lexeme(tok)) {
+                    "INT_NUMBER".to_string()
+                } else {
+                    "FLOAT_NUMBER".to_string()
+                }
+            }
+            TokenKind::Ident => {
+                let lex = self.lexeme(tok);
+                if crate::model::dynare_date(lex) {
+                    "DATE".to_string()
+                } else if let Some(keyword) = block_keyword_token(lex) {
+                    keyword.to_string()
+                } else {
+                    "IDENTIFIER".to_string()
+                }
+            }
+            _ => "IDENTIFIER".to_string(),
+        }
+    }
+
+    /// The `(` on a moment-block opener. One flag is legal; anything else is the
+    /// syntax error on the token 7.1 stops on.
+    fn note_mom_opener(&mut self, keyword: &str, open_i: usize, close_i: usize) {
+        let rparen_i = close_i.saturating_sub(1);
+        let flag = match keyword {
+            "matched_irfs" | "matched_irfs_weights" => "OVERWRITE",
+            "irf_calibration" => "RELATIVE_IRF",
+            "matched_moments" | "moment_calibration" => {
+                self.record_syntax_at(open_i, Some("';'"));
+                return;
+            }
+            _ => return,
+        };
+        if open_i + 1 >= rparen_i {
+            self.record_syntax_at(rparen_i, Some(flag));
+            return;
+        }
+        let word = match flag {
+            "OVERWRITE" => "overwrite",
+            _ => "relative_irf",
+        };
+        let first = &self.tokens[open_i + 1];
+        let ok = first.kind == TokenKind::Ident && self.lexeme(first).eq_ignore_ascii_case(word);
+        if !ok {
+            self.record_syntax_at(open_i + 1, Some(flag));
+            return;
+        }
+        if open_i + 2 < rparen_i {
+            self.record_syntax_at(open_i + 2, Some("')'"));
+        }
+    }
+
+    fn looks_like_dotted_name(&self) -> bool {
+        self.at(TokenKind::Ident)
+            && self.peek_kind(1) == Some(TokenKind::Dot)
+            && self.peek_kind(2) == Some(TokenKind::Ident)
+    }
+
+    /// `foo.bar` and `foo.bar(y)` in a matched-moment row. A bare dotted name
+    /// stops on `;`. A call is an external function: undeclared, their declare
+    /// sentence; declared, the walk's unsupported expression.
+    fn read_dotted_moment(&mut self, end_i: usize) -> Option<MatchedMoment> {
+        let start = self.current_start();
+        let mut parts = Vec::new();
+        parts.push(self.lexeme(&self.tokens[self.i]).to_string());
         self.bump();
-        while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) {
-            let before = self.i;
-            self.parse_expr();
-            if self.i <= before {
+        while self.at(TokenKind::Dot) && self.peek_kind(1) == Some(TokenKind::Ident) {
+            self.bump();
+            parts.push(self.lexeme(&self.tokens[self.i]).to_string());
+            self.bump();
+        }
+        let name = parts.join(".");
+        if self.at(TokenKind::LParen) {
+            let call = self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+            let known = self
+                .model
+                .external_function_names
+                .iter()
+                .any(|id| self.model.name(*id) == name);
+            if known {
+                let span = Span {
+                    start,
+                    end: call.end,
+                };
+                let expr = self.alloc(ExprKind::Error, span);
+                let end = self.finish_row(end_i);
+                return Some(MatchedMoment {
+                    text: self
+                        .src
+                        .get(start as usize..end as usize)
+                        .unwrap_or("")
+                        .trim()
+                        .trim_end_matches(';')
+                        .trim()
+                        .to_string(),
+                    span: Span { start, end },
+                    expr: Some(expr),
+                });
+            }
+            self.record_mom_syntax(
+                Span {
+                    start,
+                    end: call.end,
+                },
+                format!(
+                    "To use an external function ({name}) within the model block, you must first declare it via the external_function() statement."
+                ),
+            );
+            self.skip_until_semi();
+            self.eat(TokenKind::Semi);
+            return None;
+        }
+        if self.at(TokenKind::Semi) {
+            self.record_syntax_at(self.i, Some("'(' or '.'"));
+            self.bump();
+            return None;
+        }
+        self.record_syntax_at(self.i, Some("'(' or '.'"));
+        self.skip_until_semi();
+        self.eat(TokenKind::Semi);
+        None
+    }
+
+    /// `periods` then a `period_list`. `None` after recording the syntax error.
+    fn read_irf_period_list(&mut self, end_i: usize) -> Option<Vec<Span>> {
+        self.bump();
+        if self.i >= end_i || self.at(TokenKind::Semi) {
+            self.record_syntax_at(self.i, Some("DATE or INT_NUMBER"));
+            self.eat(TokenKind::Semi);
+            return None;
+        }
+        let mut entries = Vec::new();
+        while self.i < end_i && !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
+            if self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            entries.push(self.take_irf_period()?);
+        }
+        self.eat(TokenKind::Semi);
+        Some(entries)
+    }
+
+    /// One `period_range`. A date is `2000Q1`: our lexer splits the suffix off the
+    /// number, and 7.1 keeps them as one `DATE`. A second `:` in `1:2:3` is the
+    /// syntax error.
+    fn take_irf_period(&mut self) -> Option<Span> {
+        let Some(first) = self.peek_period_atom() else {
+            self.record_syntax_at(self.i, Some("DATE or INT_NUMBER"));
+            return None;
+        };
+        self.i += first.tokens;
+        let left_last = self.i - 1;
+        if self.colon_between_tokens(left_last, self.i).is_none() {
+            return Some(first.span);
+        }
+        let Some(second) = self.peek_period_atom() else {
+            let expecting = if first.is_date { "DATE" } else { "INT_NUMBER" };
+            self.record_syntax_at(self.i, Some(expecting));
+            return None;
+        };
+        if first.is_date != second.is_date {
+            let unexpected = if second.is_date { "DATE" } else { "INT_NUMBER" };
+            let expecting = if first.is_date { "DATE" } else { "INT_NUMBER" };
+            self.record_mom_syntax(
+                second.span,
+                format!("syntax error, unexpected {unexpected}, expecting {expecting}"),
+            );
+            return None;
+        }
+        self.i += second.tokens;
+        if let Some(extra) = self.colon_between_tokens(self.i - 1, self.i) {
+            self.record_mom_syntax(
+                extra,
+                "syntax error, unexpected ':', expecting COMMA or DATE or INT_NUMBER or ';'",
+            );
+            return None;
+        }
+        Some(Span {
+            start: first.span.start,
+            end: second.span.end,
+        })
+    }
+
+    /// An integer, or a `DATE` written as a number plus its unit (`2000` `Q1`).
+    fn peek_period_atom(&self) -> Option<PeriodAtom> {
+        if let Some(span) = self.glued_date_span(self.i) {
+            return Some(PeriodAtom {
+                is_date: true,
+                span,
+                tokens: 2,
+            });
+        }
+        match self.period_kind(self.i) {
+            PeriodKind::Int => Some(PeriodAtom {
+                is_date: false,
+                span: self.tokens[self.i].span,
+                tokens: 1,
+            }),
+            PeriodKind::Date => Some(PeriodAtom {
+                is_date: true,
+                span: self.tokens[self.i].span,
+                tokens: 1,
+            }),
+            _ => None,
+        }
+    }
+
+    /// `2000Q1` when the lexer stored `2000` and `Q1` as two adjacent tokens.
+    fn glued_date_span(&self, index: usize) -> Option<Span> {
+        let number = self.tokens.get(index)?;
+        let suffix = self.tokens.get(index + 1)?;
+        if number.kind != TokenKind::Number || suffix.kind != TokenKind::Ident {
+            return None;
+        }
+        if !is_integer_lexeme(self.lexeme(number)) || number.span.end != suffix.span.start {
+            return None;
+        }
+        let text = &self.src[number.span.start as usize..suffix.span.end as usize];
+        if !crate::model::dynare_date(text) {
+            return None;
+        }
+        Some(Span {
+            start: number.span.start,
+            end: suffix.span.end,
+        })
+    }
+
+    fn period_kind(&self, index: usize) -> PeriodKind {
+        let Some(tok) = self.tokens.get(index) else {
+            return PeriodKind::Other;
+        };
+        match tok.kind {
+            TokenKind::Minus => PeriodKind::Minus,
+            TokenKind::Number => {
+                if is_integer_lexeme(self.lexeme(tok)) {
+                    PeriodKind::Int
+                } else {
+                    PeriodKind::Float
+                }
+            }
+            TokenKind::Ident if crate::model::dynare_date(self.lexeme(tok)) => PeriodKind::Date,
+            _ => PeriodKind::Other,
+        }
+    }
+
+    fn colon_between_tokens(&self, left: usize, right: usize) -> Option<Span> {
+        let left = self.tokens.get(left)?;
+        let right = self.tokens.get(right)?;
+        if left.span.end > right.span.start {
+            return None;
+        }
+        let between = &self.src[left.span.end as usize..right.span.start as usize];
+        if between.trim() != ":" {
+            return None;
+        }
+        let rel = between.find(':')? as u32;
+        let start = left.span.end + rel;
+        Some(Span {
+            start,
+            end: start + 1,
+        })
+    }
+
+    /// `values` / `weights` after `periods`. Missing both, or a repeated `values`,
+    /// is the syntax error. `None` once that error is recorded.
+    fn read_irf_value_weights(
+        &mut self,
+        end_i: usize,
+    ) -> Option<(Vec<Span>, Vec<ExprId>, Vec<Span>, Vec<ExprId>)> {
+        let mut saw_values = false;
+        let mut saw_weights = false;
+        let mut values = Vec::new();
+        let mut value_exprs = Vec::new();
+        let mut weights = Vec::new();
+        let mut weight_exprs = Vec::new();
+        loop {
+            if self.i >= end_i {
+                break;
+            }
+            if self.at_ident_ci("values") {
+                if saw_values {
+                    self.record_syntax_at(self.i, Some("END or VAR or VAREXO"));
+                    return None;
+                }
+                saw_values = true;
+                let (spans, exprs, ok) = self.read_value_list(end_i);
+                values = spans;
+                value_exprs = exprs;
+                if !ok {
+                    return None;
+                }
+                continue;
+            }
+            if self.at_ident_ci("weights") {
+                if saw_weights {
+                    self.record_syntax_at(self.i, Some("END or VAR or VAREXO"));
+                    return None;
+                }
+                saw_weights = true;
+                let (spans, exprs, ok) = self.read_value_list(end_i);
+                weights = spans;
+                weight_exprs = exprs;
+                if !ok {
+                    return None;
+                }
+                continue;
+            }
+            break;
+        }
+        if !saw_values {
+            let expecting = if saw_weights { "VALUES" } else { "VALUES or WEIGHTS" };
+            self.record_syntax_at(self.i, Some(expecting));
+            return None;
+        }
+        Some((values, value_exprs, weights, weight_exprs))
+    }
+
+    /// One `value_list`. A bare signed number is an entry. A `(expression)` is an
+    /// entry and an expression. Anything else is `unexpected IDENTIFIER` with no
+    /// expecting list — their set there is too large to print.
+    fn read_value_list(&mut self, end_i: usize) -> (Vec<Span>, Vec<ExprId>, bool) {
+        self.bump();
+        let mut spans = Vec::new();
+        let mut exprs = Vec::new();
+        while self.i < end_i && !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
+            if self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            if self.at(TokenKind::LParen) {
+                let start = self.current_start();
+                self.bump();
+                let before = self.i;
+                if let Some(id) = self.parse_expr() {
+                    exprs.push(id);
+                }
+                if self.i <= before {
+                    self.bump();
+                }
+                let end = if self.at(TokenKind::RParen) {
+                    self.bump().span.end
+                } else {
+                    self.current_start()
+                };
+                spans.push(Span { start, end });
+                continue;
+            }
+            if self.at_signed_number() {
+                let start = self.current_start();
+                if self.at(TokenKind::Plus) || self.at(TokenKind::Minus) {
+                    self.bump();
+                }
+                let end = self.bump().span.end;
+                spans.push(Span { start, end });
+                continue;
+            }
+            self.record_syntax_at(self.i, None);
+            self.skip_until_semi();
+            self.eat(TokenKind::Semi);
+            return (spans, exprs, false);
+        }
+        self.eat(TokenKind::Semi);
+        (spans, exprs, true)
+    }
+
+    fn at_signed_number(&self) -> bool {
+        if self.at(TokenKind::Number) {
+            return true;
+        }
+        (self.at(TokenKind::Plus) || self.at(TokenKind::Minus))
+            && self.peek_kind(1) == Some(TokenKind::Number)
+    }
+
+    /// The `(…)` of a lag or an IRF period. `signed` allows `+`/`-` and `-(a:b)`.
+    /// A bad token is recorded; the group is still consumed.
+    fn read_checked_paren(&mut self, signed: bool) -> Option<(String, Span)> {
+        if !self.at(TokenKind::LParen) {
+            return None;
+        }
+        let open = self.bump().span;
+        let inner_from = open.end;
+        if self.at(TokenKind::RParen) {
+            let expecting = if signed {
+                "INT_NUMBER or PLUS or MINUS"
+            } else {
+                "INT_NUMBER"
+            };
+            self.record_syntax_at(self.i, Some(expecting));
+            let end = self.bump().span.end;
+            return Some((
+                String::new(),
+                Span {
+                    start: open.start,
+                    end,
+                },
+            ));
+        }
+        if signed && self.at(TokenKind::Minus) && self.peek_kind(1) == Some(TokenKind::LParen) {
+            self.bump();
+            self.bump();
+            if !self.take_int_atom(true) {
+                return Some(self.finish_open_paren(open.start, inner_from));
+            }
+            if self.colon_between_tokens(self.i.wrapping_sub(1), self.i).is_none() {
+                self.record_syntax_at(self.i, Some("':'"));
+                return Some(self.finish_open_paren(open.start, inner_from));
+            }
+            if !self.take_int_atom(true) {
+                return Some(self.finish_open_paren(open.start, inner_from));
+            }
+            if !self.at(TokenKind::RParen) {
+                self.record_syntax_at(self.i, Some("')'"));
+                return Some(self.finish_open_paren(open.start, inner_from));
+            }
+            self.bump();
+        } else if !self.take_paren_range(signed) {
+            return Some(self.finish_open_paren(open.start, inner_from));
+        }
+        if !self.at(TokenKind::RParen) {
+            if let Some(extra) = self.colon_between_tokens(self.i.wrapping_sub(1), self.i) {
+                self.record_mom_syntax(extra, "syntax error, unexpected ':', expecting ')'");
+            } else {
+                self.record_syntax_at(self.i, Some("')'"));
+            }
+            return Some(self.finish_open_paren(open.start, inner_from));
+        }
+        let close = self.bump().span;
+        let text = self
+            .src
+            .get(inner_from as usize..close.start as usize)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        Some((
+            text,
+            Span {
+                start: open.start,
+                end: close.end,
+            },
+        ))
+    }
+
+    /// One integer, or `int:int`, inside a paren. `false` records the error.
+    fn take_paren_range(&mut self, signed: bool) -> bool {
+        if !self.take_int_atom(signed) {
+            return false;
+        }
+        let first_end = self.i.wrapping_sub(1);
+        if self.colon_between_tokens(first_end, self.i).is_none() {
+            return true;
+        }
+        if !self.take_int_atom(signed) {
+            return false;
+        }
+        let second_end = self.i.wrapping_sub(1);
+        if let Some(extra) = self.colon_between_tokens(second_end, self.i) {
+            self.record_mom_syntax(extra, "syntax error, unexpected ':', expecting ')'");
+            return false;
+        }
+        true
+    }
+
+    /// One `signed_integer` or bare `INT_NUMBER`. The bad token is consumed only
+    /// when it is not the `)` that closes the group.
+    fn take_int_atom(&mut self, signed: bool) -> bool {
+        let expecting = if signed {
+            "INT_NUMBER or PLUS or MINUS"
+        } else {
+            "INT_NUMBER"
+        };
+        if signed && (self.at(TokenKind::Plus) || self.at(TokenKind::Minus)) {
+            self.bump();
+            if self.at(TokenKind::Number) && is_integer_lexeme(self.lexeme(&self.tokens[self.i])) {
+                self.bump();
+                return true;
+            }
+            self.record_syntax_at(self.i, Some(expecting));
+            if !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
                 self.bump();
             }
+            return false;
         }
-        self.eat(TokenKind::RParen);
+        if self.at(TokenKind::Number) && is_integer_lexeme(self.lexeme(&self.tokens[self.i])) {
+            if let Some(date) = self.glued_date_span(self.i) {
+                self.record_mom_syntax(
+                    date,
+                    format!("syntax error, unexpected DATE, expecting {expecting}"),
+                );
+                self.i += 2;
+                return false;
+            }
+            self.bump();
+            return true;
+        }
+        self.record_syntax_at(self.i, Some(expecting));
+        if !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
+            self.bump();
+        }
+        false
+    }
+
+    /// Consume the rest of a `(` group already opened, through its `)`.
+    fn finish_open_paren(&mut self, open_start: u32, inner_from: u32) -> (String, Span) {
+        let mut inner_end = self
+            .tokens
+            .get(self.i.wrapping_sub(1))
+            .map(|tok| tok.span.end)
+            .unwrap_or(inner_from);
+        // Parens already consumed, including a nested `-(…)` , still have to close.
+        let mut depth = 0i32;
+        for tok in self.tokens.iter().take(self.i) {
+            if tok.span.start < open_start {
+                continue;
+            }
+            match tok.kind {
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen => depth -= 1,
+                _ => {}
+            }
+        }
+        if depth < 1 {
+            depth = 1;
+        }
+        while !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::LParen) {
+                depth += 1;
+                inner_end = self.bump().span.end;
+                continue;
+            }
+            if self.at(TokenKind::RParen) {
+                depth -= 1;
+                let end = self.bump().span.end;
+                if depth == 0 {
+                    let text = self
+                        .src
+                        .get(inner_from as usize..inner_end as usize)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    return (
+                        text,
+                        Span {
+                            start: open_start,
+                            end,
+                        },
+                    );
+                }
+                inner_end = end;
+                continue;
+            }
+            inner_end = self.tokens[self.i].span.end;
+            self.bump();
+        }
+        (
+            String::new(),
+            Span {
+                start: open_start,
+                end: inner_end,
+            },
+        )
     }
 
     /// The block opener's keyword through its `(…)` and `;`, the single bare word
@@ -2657,9 +3219,8 @@ impl Parser<'_> {
     /// the body's token bounds.
     ///
     /// The `(…)` is one fixed token in the grammar (`OVERWRITE` or `RELATIVE_IRF`),
-    /// not an option list, so it carries no option side-effects. On `matched_moments`
-    /// and `moment_calibration` it is outside the grammar altogether: it is consumed
-    /// and sets no flag, and earns no Error here (close call 1).
+    /// not an option list. Any other word, and any `(…)` on `matched_moments` or
+    /// `moment_calibration`, is the syntax error 7.1 prints on that token.
     fn bump_block_opener(&mut self, keyword: &str) -> (Span, Option<String>, usize, usize) {
         let start = self.bump().span.start;
         let mut word = None;
@@ -2667,6 +3228,7 @@ impl Parser<'_> {
             let from = self.i;
             self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
             let close_i = self.i;
+            self.note_mom_opener(keyword, from, close_i);
             let inner = (from + 1)..close_i.saturating_sub(1);
             if inner.len() == 1 && self.tokens[inner.start].kind == TokenKind::Ident {
                 word = Some(self.lexeme(&self.tokens[inner.start]).to_string());
@@ -6677,6 +7239,15 @@ impl Parser<'_> {
             .chain(&self.model.predetermined)
             .any(|d| d.name == name)
             || self.model.mod_file_locals.contains(&name)
+            || self.model.trend_vars.iter().any(|trend| trend.name == name)
+            || self.model.external_function_names.contains(&name)
+            || self.model.equations.iter().any(|eq| {
+                eq.is_local
+                    && matches!(
+                        eq.lhs_expr.map(|id| &self.model.exprs.get(id).kind),
+                        Some(ExprKind::Ident { name: local, .. }) if *local == name
+                    )
+            })
     }
 
     fn looks_like_timing(&self) -> bool {
@@ -7854,6 +8425,42 @@ fn looks_like_numeric_equation(text: &str) -> bool {
 
 fn is_integer_lexeme(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// What a `period_list` token is, in 7.1's token names.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PeriodKind {
+    Int,
+    Float,
+    Date,
+    Minus,
+    Other,
+}
+
+/// One integer or one date in a period list, before a `:`.
+struct PeriodAtom {
+    is_date: bool,
+    span: Span,
+    /// `2000Q1` is two of our tokens and one of theirs.
+    tokens: usize,
+}
+
+/// A `<DYNARE_BLOCK>` keyword, so bison names the token rather than IDENTIFIER.
+fn block_keyword_token(lex: &str) -> Option<&'static str> {
+    const WORDS: &[(&str, &str)] = &[
+        ("var", "VAR"),
+        ("varexo", "VAREXO"),
+        ("values", "VALUES"),
+        ("weights", "WEIGHTS"),
+        ("periods", "PERIODS"),
+        ("end", "END"),
+        ("overwrite", "OVERWRITE"),
+        ("relative_irf", "RELATIVE_IRF"),
+    ];
+    WORDS
+        .iter()
+        .find(|(name, _)| lex.eq_ignore_ascii_case(name))
+        .map(|(_, token)| *token)
 }
 
 fn is_builtin_function(name: &str) -> bool {

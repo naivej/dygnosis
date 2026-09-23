@@ -216,8 +216,8 @@ fn bare_mom_statement_has_no_option_rows() {
     );
 }
 
-/// The `(…)` on `matched_moments` / `moment_calibration` is outside the grammar.
-/// This slice consumes it and stays quiet (close call 1): 02 owns the sentence.
+/// `check_parse` stays empty on these bodies. The syntax sentence is recorded on
+/// the model and emitted by `check_mom` (0.6.0 07), not as a parse issue.
 #[test]
 fn out_of_grammar_rows_are_skipped_without_an_error() {
     let head = "var y c; varexo e; parameters a; a = 0.5;\n\

@@ -47,6 +47,15 @@ pub fn check_mom(model: &Model) -> Vec<Diagnostic> {
     let ctx = Ctx::new(model);
     let mut units: Vec<Unit> = Vec::new();
     let mut seq = 0u32;
+    for syn in &model.mom_syntax {
+        push(
+            &mut units,
+            &mut seq,
+            syn.span.start,
+            0,
+            err(syn.span, "E001", syn.message.clone()),
+        );
+    }
     collect_mom_statements(&ctx, &mut units, &mut seq);
     collect_matched_moments(&ctx, &mut units, &mut seq);
     collect_matched_irfs(&ctx, &mut units, &mut seq);
@@ -155,7 +164,7 @@ fn collect_matched_moments(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) 
             .collect();
         // No stored row covers both the empty body and a body whose only row the
         // grammar has no production for: 7.1 refuses both while reading.
-        if rows.is_empty() {
+        if rows.is_empty() && !ctx.syntax_in(*block) {
             push(
                 units,
                 seq,
@@ -187,7 +196,7 @@ fn collect_matched_moments(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) 
 
 fn collect_matched_irfs(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
     for block in &ctx.model.matched_irfs {
-        if block.rows.is_empty() {
+        if block.rows.is_empty() && !ctx.syntax_in(block.span) {
             push(
                 units,
                 seq,
@@ -205,6 +214,8 @@ fn collect_matched_irfs(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
             let at = row.span.start;
             if let Some(diag) = irfs_row_names(ctx, row) {
                 push(units, seq, at, 0, diag);
+            } else if let Some(diag) = irfs_row_exprs(ctx, row) {
+                push(units, seq, diag.span.start, 0, diag);
             } else if let Some(diag) = irfs_row_counts(row) {
                 push(units, seq, at, 1, diag);
             } else if let Some(diag) = irfs_row_date(ctx, row) {
@@ -219,7 +230,7 @@ fn collect_matched_irfs(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
 /// `matched_irfs_weights`: each row's names, then its tuple.
 fn collect_matched_irfs_weights(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
     for block in &ctx.model.matched_irfs_weights {
-        if block.rows.is_empty() {
+        if block.rows.is_empty() && !ctx.syntax_in(block.span) {
             push(
                 units,
                 seq,
@@ -237,6 +248,8 @@ fn collect_matched_irfs_weights(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut 
             let at = row.span.start;
             if let Some(diag) = weights_row_names(ctx, row) {
                 push(units, seq, at, 0, diag);
+            } else if let Some(diag) = row.weight_expr.and_then(|id| ctx.outside_expr(id)) {
+                push(units, seq, diag.span.start, 0, diag);
             } else if let Some(diag) = weights_tuple_seen(ctx, block, index) {
                 push(units, seq, at, 3, diag);
             }
@@ -247,7 +260,7 @@ fn collect_matched_irfs_weights(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut 
 /// `moment_calibration` and `irf_calibration`: each row's name slots.
 fn collect_calibration(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
     for block in &ctx.model.moment_calibration {
-        if block.rows.is_empty() {
+        if block.rows.is_empty() && !ctx.syntax_in(block.span) {
             push(
                 units,
                 seq,
@@ -270,7 +283,7 @@ fn collect_calibration(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
         }
     }
     for block in &ctx.model.irf_calibration {
-        if block.rows.is_empty() {
+        if block.rows.is_empty() && !ctx.syntax_in(block.span) {
             push(
                 units,
                 seq,
@@ -299,6 +312,15 @@ fn collect_calibration(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) {
 fn irfs_row_names(ctx: &Ctx<'_>, row: &MatchedIrfsRow) -> Option<Diagnostic> {
     endo_slot(ctx, row.endogenous, row.endogenous_span, "matched_irfs")
         .or_else(|| exo_slot(ctx, row.exogenous, row.exogenous_span, "matched_irfs"))
+}
+
+/// A `values` or `weights` expression. Their type and lead checks run while the
+/// expression is read, before the count sentences.
+fn irfs_row_exprs(ctx: &Ctx<'_>, row: &MatchedIrfsRow) -> Option<Diagnostic> {
+    row.value_exprs
+        .iter()
+        .chain(&row.weight_exprs)
+        .find_map(|id| ctx.outside_expr(*id))
 }
 
 /// A `matched_irfs_weights` row's four names: each pair checks its endogenous
@@ -347,38 +369,16 @@ fn irfs_row_date(ctx: &Ctx<'_>, row: &MatchedIrfsRow) -> Option<Diagnostic> {
     for entry in &row.periods {
         let text = ctx.source(*entry);
         let dated = match text.split_once(':') {
-            Some((first, second)) => is_date(first) && is_date(second),
-            None => is_date(text),
+            Some((first, second)) => {
+                crate::model::dynare_date(first) && crate::model::dynare_date(second)
+            }
+            None => crate::model::dynare_date(text),
         };
         if dated {
             return Some(err(*entry, "E392", E392_MSG));
         }
     }
     None
-}
-
-/// `DATE` as 7.1's lexer reads it: an optional sign, digits, and one unit suffix
-/// (`y`, `a`, `m1`–`m12`, `q1`–`q4`, `s1`/`s2`, `h1`/`h2`), case-insensitive.
-fn is_date(text: &str) -> bool {
-    let body = text.strip_prefix('-').unwrap_or(text);
-    let digits = body.chars().take_while(char::is_ascii_digit).count();
-    if digits == 0 || digits == body.len() {
-        return false;
-    }
-    let suffix = body.split_at(digits).1.to_ascii_lowercase();
-    if suffix == "y" || suffix == "a" {
-        return true;
-    }
-    let (unit, number) = suffix.split_at(1);
-    let Ok(number) = number.parse::<u32>() else {
-        return false;
-    };
-    match unit {
-        "m" => (1..=12).contains(&number),
-        "q" => (1..=4).contains(&number),
-        "s" | "h" => (1..=2).contains(&number),
-        _ => false,
-    }
 }
 
 /// The pair this block already holds, for their duplicate sentence. Each block
@@ -758,6 +758,66 @@ impl<'a> Ctx<'a> {
         self.deterministic_exogenous.contains(&name)
     }
 
+    fn syntax_in(&self, block: Span) -> bool {
+        self.model.mom_syntax.iter().any(|syn| {
+            syn.span.start >= block.start && syn.span.start < block.end
+        })
+    }
+
+    /// An expression outside `model`: a `#` local, a trend, an external function
+    /// used as a name, or any lead or lag. A parameter is legal.
+    fn outside_expr(&self, id: ExprId) -> Option<Diagnostic> {
+        for ident in self.model.exprs.walk_idents(id) {
+            let name = self.model.name(ident.name);
+            let external = self.model.external_function_names.contains(&ident.name);
+            if ident.timing != 0 {
+                if external {
+                    // `helper(1)` is a call, not a lead.
+                    continue;
+                }
+                let end = ident.timing_span.map(|t| t.end).unwrap_or(ident.span.end);
+                return Some(err(
+                    Span {
+                        start: ident.span.start,
+                        end,
+                    },
+                    "E001",
+                    format!(
+                        "Using variable {name} with a lead or a lag is not allowed in this context"
+                    ),
+                ));
+            }
+            if external {
+                return Some(err(
+                    ident.span,
+                    "E279",
+                    format!(
+                        "Symbol '{name}' is the name of a MATLAB/Octave function, and cannot be used as a variable."
+                    ),
+                ));
+            }
+            if self.model_locals.contains(&ident.name) {
+                return Some(err(
+                    ident.span,
+                    "E282",
+                    format!(
+                        "Variable {name} not allowed outside model declaration. Its scope is only inside model."
+                    ),
+                ));
+            }
+            if self.model.trend_vars.iter().any(|trend| trend.name == ident.name) {
+                return Some(err(
+                    ident.span,
+                    "E310",
+                    format!(
+                        "Variable {name} not allowed outside model declaration, because it is a trend variable."
+                    ),
+                ));
+            }
+        }
+        None
+    }
+
     fn source(&self, span: Span) -> &str {
         self.model
             .source
@@ -788,6 +848,24 @@ impl<'a> Ctx<'a> {
                         ident.span,
                         "E280",
                         crate::model::external_function_in_model_message(name),
+                    ),
+                ));
+            }
+            // A lead on a `varexo_det` is refused while the expression is read,
+            // before the walk at `end;`.
+            if ident.timing != 0 && self.deterministic_exogenous.contains(&ident.name) {
+                let end = ident.timing_span.map(|t| t.end).unwrap_or(ident.span.end);
+                return Some((
+                    ident.span.start,
+                    err(
+                        Span {
+                            start: ident.span.start,
+                            end,
+                        },
+                        "E024",
+                        format!(
+                            "Exogenous deterministic variable {name} cannot be given a lead or a lag"
+                        ),
                     ),
                 ));
             }

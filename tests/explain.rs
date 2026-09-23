@@ -27,7 +27,7 @@ const RUST_CODES: &[&str] = &[
     "E379", "E380", "E381", "E382", "E383", "E384", "E385", "E386", "E387", "E388", "E389", "E390",
     "E391", "E392", "E999", "I050", "S002", "S003", "S004", "S005", "S008", "S009", "S010", "S011",
     "S012", "S013", "S014", "S020", "S035", "S037", "S038", "S040", "S041", "S052", "S053", "S054",
-    "S061", "S062", "S063", "W010", "W011", "W012", "W013", "W020", "W022", "W031", "W042", "W051",
+    "S062", "S063", "W010", "W011", "W012", "W013", "W020", "W022", "W031", "W042", "W051",
     "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094",
     "W102", "W110", "W112", "W120", "W121", "W122", "W131", "W140", "W150", "W160", "W170", "W186",
     "W187", "W200", "W201", "W202", "W203", "W204", "W205",
@@ -92,7 +92,7 @@ const ADDED: &[&str] = &[
 const SKIP_KEYS: &[&str] = &[
     "E186", "E187", "E188", "E189", "E190", "E191", "S002", "S003", "S004", "S005", "S008", "S009",
     "S010", "S011", "S012", "S013", "S014", "S020", "S035", "S037", "S038", "S040", "S041", "S052",
-    "S053", "S054", "S061", "S062", "S063", "W186", "W187",
+    "S053", "S054", "S062", "S063", "W186", "W187",
 ];
 
 const OUT: &[&str] = &[
@@ -159,14 +159,14 @@ fn read_mod(archive_dir: &str) -> String {
 }
 
 #[test]
-fn known_codes_is_exactly_the_307_rust_keys() {
+fn known_codes_is_exactly_the_306_rust_keys() {
     assert_eq!(SHARED.len(), 249);
     assert_eq!(ADDED.len(), 27);
-    assert_eq!(SKIP_KEYS.len(), 31);
+    assert_eq!(SKIP_KEYS.len(), 30);
     assert_eq!(THIN_CODES.len(), 276);
-    assert_eq!(RUST_CODES.len(), 307);
+    assert_eq!(RUST_CODES.len(), 306);
     assert_eq!(known_codes(), RUST_CODES);
-    assert_eq!(known_codes().len(), 307);
+    assert_eq!(known_codes().len(), 306);
     assert!(!RUST_CODES.contains(&"P000"));
     assert!(RUST_CODES.contains(&"E178"));
     assert!(RUST_CODES.contains(&"E179"));
@@ -386,7 +386,7 @@ fn cli_explain_list() {
         entries.push((code, kind, title));
         i += 1;
     }
-    assert_eq!(entries.len(), 307);
+    assert_eq!(entries.len(), 306);
     assert_eq!(
         entries.iter().map(|(c, _, _)| *c).collect::<Vec<_>>(),
         RUST_CODES
@@ -420,7 +420,7 @@ fn cli_explain_list() {
     );
     assert_eq!(
         lines.get(i + 1).copied(),
-        Some("307 codes. Run `dygnosis explain <CODE>` for details.")
+        Some("306 codes. Run `dygnosis explain <CODE>` for details.")
     );
     assert!(!stdout.contains("python_dynare_lsp"));
     assert!(!stdout.contains("DYNR"));
