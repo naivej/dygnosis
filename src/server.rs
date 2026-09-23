@@ -185,9 +185,16 @@ impl Backend {
         let (word, span) = ident_at(&doc.text, byte)?;
         let range = Some(span_range(&index, &doc.text, span));
         if let Some(cmd) = option_command_at(&doc.text, byte) {
-            if command_options(&cmd).iter().any(|(n, _)| *n == word) {
+            if let Some((name, command_doc)) = command_options(&cmd)
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(&word))
+            {
                 let mut md = format!("**`{cmd}` option**: `{word}`");
-                let description = option_doc(&word);
+                let description = if command_doc.is_empty() {
+                    option_doc(name)
+                } else {
+                    *command_doc
+                };
                 if !description.is_empty() {
                     md.push_str("\n\n");
                     md.push_str(description);

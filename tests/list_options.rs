@@ -141,14 +141,14 @@ fn occbin_constraints_is_catalogued_block() {
     assert_eq!(upper, payload);
 
     let omitted = to_value(list_options(None));
-    assert_eq!(omitted["n_commands"], 75);
+    assert_eq!(omitted["n_commands"], 85);
     let i = omitted["commands"]
         .as_array()
         .unwrap()
         .iter()
         .position(|c| c == "occbin_constraints")
         .expect("occbin_constraints missing from omitted commands");
-    assert_eq!(omitted["commands"][i - 1], "ms_variance_decomposition");
+    assert_eq!(omitted["commands"][i - 1], "mshocks");
     assert_eq!(omitted["commands"][i], "occbin_constraints");
     assert_eq!(omitted["commands"][i + 1], "occbin_graph");
 
@@ -426,13 +426,34 @@ fn the_four_family_blocks_are_catalogued() {
     }
 }
 
-/// The `overwrite` key this slice introduces: its own `OPTION_DOCS` row from the
-/// manual's `shocks` statement, plus the two IRF rows' own block sentences.
+/// The common fallback stays true for every block; each block gives the exact
+/// scope of its own overwrite operation.
 #[test]
-fn overwrite_docs_come_from_the_manual() {
-    const HELP: &str =
-        "If a shocks or mshocks block is declared with the overwrite option, then it replaces all the previous shocks and mshocks blocks.";
+fn overwrite_docs_match_each_block() {
+    const HELP: &str = "Replaces earlier settings according to the current block's overwrite rule.";
     assert_eq!(option_doc("overwrite"), HELP);
+    let shocks = command_options("shocks")
+        .iter()
+        .find(|(name, _)| *name == "overwrite")
+        .unwrap()
+        .1;
+    let mshocks = command_options("mshocks")
+        .iter()
+        .find(|(name, _)| *name == "overwrite")
+        .unwrap()
+        .1;
+    let paths = command_options("shock_paths")
+        .iter()
+        .find(|(name, _)| *name == "overwrite")
+        .unwrap()
+        .1;
+    assert!(shocks.contains("deterministic schedules"));
+    assert!(shocks.contains("variance, standard-error, covariance, correlation"));
+    assert!(shocks.contains("other skew rows remain"));
+    assert!(mshocks.contains("earlier deterministic shocks"));
+    assert!(!mshocks.contains("variance, standard-error"));
+    assert!(paths.contains("perfect_foresight_controlled_paths entries"));
+    assert!(paths.contains("same learnt_in value"));
     assert_eq!(
         command_options("matched_irfs")[0].1,
         MATCHED_IRFS_OVERWRITE_HELP
@@ -441,6 +462,67 @@ fn overwrite_docs_come_from_the_manual() {
         command_options("matched_irfs_weights")[0].1,
         MATCHED_IRFS_WEIGHTS_OVERWRITE_HELP
     );
+}
+
+#[test]
+fn pinned_72_shock_and_date_catalog_has_only_opener_options() {
+    for (command, expected) in [
+        ("shocks", vec!["learnt_in", "overwrite", "surprise"]),
+        (
+            "mshocks",
+            vec!["learnt_in", "overwrite", "relative_to_initval"],
+        ),
+        ("heteroskedastic_shocks", vec!["overwrite"]),
+        ("shock_paths", vec!["learnt_in", "overwrite"]),
+        ("endval", vec!["learnt_in"]),
+        ("perfect_foresight_controlled_paths", vec!["learnt_in"]),
+        ("options", vec!["bounds", "init", "jscale"]),
+    ] {
+        assert!(is_known_command(command), "{command}");
+        assert_eq!(option_names(command), expected, "{command}");
+        let payload = to_value(list_options(Some(&command.to_uppercase())));
+        assert_eq!(payload["known"], true, "{command}");
+        assert_eq!(payload["n_options"], expected.len(), "{command}");
+    }
+
+    for command in ["database", "set_time", "subsamples"] {
+        assert!(is_known_command(command), "{command}");
+        assert!(command_options(command).is_empty(), "{command}");
+        let payload = to_value(list_options(Some(command)));
+        assert_eq!(payload["known"], true, "{command}");
+        assert_eq!(payload["n_options"], 0, "{command}");
+    }
+    assert!(!is_known_command("date"));
+    for (command, option) in [
+        ("data", "first_obs"),
+        ("data", "last_obs"),
+        ("perfect_foresight_setup", "first_simulation_period"),
+        ("perfect_foresight_setup", "last_simulation_period"),
+        ("plot_shock_decomposition", "plot_init_date"),
+        ("plot_shock_decomposition", "plot_end_date"),
+    ] {
+        assert!(
+            option_names(command).contains(&option),
+            "{command}.{option}"
+        );
+    }
+    for option in [
+        "bounds",
+        "init",
+        "jscale",
+        "learnt_in",
+        "relative_to_initval",
+        "surprise",
+    ] {
+        assert!(!option_doc(option).is_empty(), "{option}");
+    }
+    assert!(!option_names("shocks").contains(&"heterogeneity"));
+    assert!(!option_names("mshocks").contains(&"surprise"));
+    assert!(!option_names("shock_paths").contains(&"relative_to_initval"));
+    for body_word in ["periods", "values", "scales", "exogenize", "endogenize"] {
+        assert!(!option_names("shock_paths").contains(&body_word));
+        assert!(!option_names("mshocks").contains(&body_word));
+    }
 }
 
 /// A declared head left without its `;` before a family command is **E001**, the

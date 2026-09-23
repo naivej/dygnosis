@@ -1,6 +1,10 @@
 //! Static command/option tables ported from
 //! `python_dynare_lsp/dynare_catalog.py`.
 
+const SHOCKS_OVERWRITE: &str = "Regular shocks clear earlier deterministic schedules and variance, standard-error, covariance, correlation, and measurement-error settings; other skew rows remain. Surprise shocks replace earlier surprise shocks; learnt_in replaces shocks and mshocks for the same learning period.";
+const MSHOCKS_OVERWRITE: &str = "Clears earlier deterministic shocks; with learnt_in, replaces shocks and mshocks for the same learning period.";
+const LEARNT_IN: &str = "Integer period or date when agents learn this block's settings.";
+
 pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
     ("bvar_density", &[
         ("bvar_prior_decay", ""),
@@ -119,6 +123,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("xls_range", "The range with the data in an Excel file."),
         ("xls_sheet", "The name of the sheet with the data in an Excel file."),
     ]),
+    ("database", &[]),
     ("discretionary_policy", &[
         ("aim_solver", "Deprecated option equivalent to setting dr=aim."),
         ("analytical_girf", ""),
@@ -310,6 +315,9 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("xls_range", "The range with the data in an Excel file."),
         ("xls_sheet", "The name of the sheet with the data in an Excel file."),
     ]),
+    ("endval", &[
+        ("learnt_in", LEARNT_IN),
+    ]),
     ("evaluate_planner_objective", &[
         ("drop", "Number of points (burn-in) dropped at the beginning of simulation before computing the summary statistics."),
         ("periods", "Number of periods of the simulation."),
@@ -385,6 +393,9 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
     ]),
     ("heterogeneity_solve", &[
         ("truncation_horizon", "Time horizon for Jacobian computations."),
+    ]),
+    ("heteroskedastic_shocks", &[
+        ("overwrite", "Replaces previous heteroskedastic_shocks blocks."),
     ]),
     ("histval_file", &[
         ("datafile", "filename = FILENAME (deprecated)"),
@@ -698,6 +709,11 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("simulation_file_tag", "The portion of the filename associated with the simulation run."),
         ("thinning_factor", "The total number of draws is equal to thinning_factor*mh_replic+drop."),
     ]),
+    ("mshocks", &[
+        ("learnt_in", LEARNT_IN),
+        ("overwrite", MSHOCKS_OVERWRITE),
+        ("relative_to_initval", "Uses the initial steady state in initval as the basis for multiplication, even when endval is present."),
+    ]),
     ("occbin_constraints", &[
         ("bind", "Mandatory condition evaluated in the baseline/steady-state regime to check whether the constraint becomes binding."),
         ("error_bind", "Optional numerical criterion for the size of the bind-constraint violation. Default: absolute value of the bind inequality."),
@@ -787,6 +803,11 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("simul", "Selects the regime history from the last run of simulations."),
         ("smoother", "Selects the regime history from the last run of the smoother."),
     ]),
+    ("options", &[
+        ("bounds", "Bounds for the named parameter or shock setting."),
+        ("init", "Initial value for the named parameter or shock setting."),
+        ("jscale", "Proposal scale for the named parameter or shock setting."),
+    ]),
     ("osr", &[
         ("aim_solver", "Deprecated option equivalent to setting dr=aim."),
         ("analytic_derivation", "Triggers estimation with analytic gradient at order=1."),
@@ -851,6 +872,9 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("growth", ""),
         ("kind", ""),
         ("model_name", ""),
+    ]),
+    ("perfect_foresight_controlled_paths", &[
+        ("learnt_in", LEARNT_IN),
     ]),
     ("perfect_foresight_setup", &[
         ("datafile", "filename = FILENAME (deprecated)"),
@@ -1176,6 +1200,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("useautocorr", "Use autocorrelation matrices in place of autocovariance matrices in moments for identification analysis."),
         ("var_rmse", "List of observed series to be considered."),
     ]),
+    ("set_time", &[]),
     ("shock_decomposition", &[
         ("colormap", "Controls the colormap used for the shocks decomposition graphs."),
         ("datafile", "filename = FILENAME (deprecated)"),
@@ -1207,6 +1232,15 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("with_epilogue", "If set, then also compute the decomposition for variables declared in the epilogue block (see epilogue)."),
         ("xls_range", "The range with the data in an Excel file."),
         ("xls_sheet", "The name of the sheet with the data in an Excel file."),
+    ]),
+    ("shock_paths", &[
+        ("learnt_in", LEARNT_IN),
+        ("overwrite", "Replaces earlier shock_paths blocks and perfect_foresight_controlled_paths entries for the same learnt_in value."),
+    ]),
+    ("shocks", &[
+        ("learnt_in", LEARNT_IN),
+        ("overwrite", SHOCKS_OVERWRITE),
+        ("surprise", "Makes each specified temporary shock unanticipated by agents."),
     ]),
     ("simul", &[
         ("allow_nonfinite_values", "By default, Dynare sets all NaN and Inf encountered during iterations to 0 and tries to continue solving the model."),
@@ -1339,6 +1373,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("stderr_multiples", ""),
         ("tex", "Requests the printing of results and graphs in TeX tables and graphics that can be later directly included in LaTeX files."),
     ]),
+    ("subsamples", &[]),
     ("svar", &[
         ("chain", "The Markov chain considered."),
         ("coefficients", "Specifies that only the slope and intercept in the given equations are controlled by the given chain."),
@@ -1389,6 +1424,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("block_dynamic", "Prints out the block decomposition of the dynamic model."),
     ("block_static", "Prints out the block decomposition of the static model."),
     ("bounded_shock_support", "Trim shocks in simulations to \\pm 2 standard deviations."),
+    ("bounds", "Bounds for the named parameter or shock setting."),
     ("brooks_gelman_plotrows", "Number of parameters to depict along the rows of the figures depicting the :citeBrooks:1998 convergence diagnostics."),
     ("burnin", "Number of periods dropped at the beginning of simulation."),
     ("calibration_max_iter", "Maximum number of Broyden iterations."),
@@ -1515,6 +1551,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("identification", "If equal to 1, performs identification analysis (forcing redform=0 and morris=1) If equal to 0, no identification analysis."),
     ("ilptau", "If equal to 1, use LP_\\tau quasi-Monte Carlo."),
     ("incidence", "Displays the gross incidence matrix and the reordered incidence matrix of the block decomposed model for the block_dynamic or block_static options."),
+    ("init", "Initial value for the named parameter or shock setting."),
     ("init2shocks", "init2shocks = NAME"),
     ("init_state", "If equal to 0, the shock decomposition is computed conditional on the smoothed state variables in period 0, i.e."),
     ("initial_subperiod", "The first period of data (i.e."),
@@ -1530,12 +1567,14 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("istart_rmse", "Value at which to start computing RMSE’s (use 2 to avoid big intitial error)."),
     ("iter_maxit", "When stack_solve_algo <stack_solve_algo = INTEGER> is equal to 2 or 3, this option controls the maximum number of iterations of the iterative linear solver (either GMRES or BiCGStab)."),
     ("iter_tol", "When stack_solve_algo <stack_solve_algo = INTEGER> is equal to 2, 3 or 10, this option controls the relative tolerance of the iterative linear solver (either GMRES, BiCGStab or CGS)."),
+    ("jscale", "Proposal scale for the named parameter or shock setting."),
     ("k_order_solver", "Use a k-order solver (implemented in C++) instead of the default Dynare solver."),
     ("kalman_algo", "0"),
     ("kalman_tol", "Numerical tolerance for determining the singularity of the covariance matrix of the prediction errors during the Kalman filter (minimum allowed reciprocal of the matrix condition number)."),
     ("ksstat_redform", "Critical value for Smirnov statistics d when reduced-form entries are filtered."),
     ("last_obs", "The observation number or the date (see"),
     ("last_simulation_period", "Assign a date to the last simulation period, i.e."),
+    ("learnt_in", LEARNT_IN),
     ("lik_init", "Type of initialization of Kalman filter:"),
     ("lik_only", "If equal to 1, compute only likelihood and posterior."),
     ("likelihood_check_ahead_periods", "Number of periods for which to check ahead for return to the baseline regime during the simulation when computing the likelihood (equivalent of simul_check_ahead_periods)."),
@@ -1648,7 +1687,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("outfile", "Write the initial conditions to a file."),
     ("output_file_tag", "The portion of the output filename that will be assigned to this run."),
     ("outvars", "A list of variables which will be given the initial conditions."),
-    ("overwrite", "If a shocks or mshocks block is declared with the overwrite option, then it replaces all the previous shocks and mshocks blocks."),
+    ("overwrite", "Replaces earlier settings according to the current block's overwrite rule."),
     ("parameter_convergence_criterion", "The convergence criterion for parameter values when max_repeated_optimizations_runs is positive."),
     ("parameter_set", "Specify the parameter set to use for running the smoother."),
     ("parameter_uncertainty", "Calculate IRFs under parameter uncertainty."),
@@ -1703,6 +1742,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("regime", "Given the data and model parameters, what is the ergodic probability of being in the specified regime."),
     ("regimes", "Describes the evolution of regimes."),
     ("relative_irf", "Requests the computation of normalized IRFs."),
+    ("relative_to_initval", "Uses the initial steady state in initval as the basis for multiplication, even when endval is present."),
     ("relax", "Optional condition evaluated in the binding regime to check whether the constraint is relaxed. If omitted, Dynare checks whether the bind expression is false."),
     ("replic", "Number of simulated series used to compute the IRFs."),
     ("resampling", "Determines if resampling of the particles is done."),
@@ -1771,6 +1811,7 @@ pub(crate) static OPTION_DOCS: &[(&str, &str)] = &[
     ("steady_tolx", "See tolx <steady_tolx>."),
     ("steadystate", "If passed, the the y-axis value of the zero line in the shock decomposition plot is translated to the steady-state level."),
     ("sub_draws", "Number of draws from the MCMC that are used to compute posterior distribution of various objects (smoothed variable, smoothed shocks, forecast, moments, IRF)."),
+    ("surprise", "Makes each specified temporary shock unanticipated by agents."),
     ("taper_steps", "Percent tapering used for the spectral window in the :citeGeweke:1992,Geweke:1999 convergence diagnostics (requires mh_nblocks=1 <mh_nblocks = INTEGER>)."),
     ("tex", "Requests the printing of results and graphs in TeX tables and graphics that can be later directly included in LaTeX files."),
     ("thinning_factor", "The total number of draws is equal to thinning_factor*mh_replic+drop."),

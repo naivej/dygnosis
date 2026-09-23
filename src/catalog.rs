@@ -117,7 +117,7 @@ pub fn list_options(command: Option<&str>) -> ListOptions {
                     0.6,
                 );
                 let mut message =
-                    format!("'{key}' is not a Dynare command in the bundled 7.1 grammar.");
+                    format!("'{key}' is not in the bundled Dynare 7.2 command catalog.");
                 if !suggestions.is_empty() {
                     message.push_str(" Did you mean: ");
                     message.push_str(&suggestions.join(", "));

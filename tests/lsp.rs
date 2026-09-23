@@ -1209,6 +1209,87 @@ async fn matched_irfs_overwrite_reaches_hover_and_completion() {
 }
 
 #[tokio::test]
+async fn shock_overwrite_hover_uses_its_block_description() {
+    const BASE: &str = "var y; varexo e; parameters p; p=.5; model; y=p*y(-1)+e; end;\n";
+    for (command, option, body, expected, unrelated) in [
+        (
+            "shocks",
+            "overwrite",
+            "end;",
+            "other skew rows remain",
+            "earlier shock_paths blocks",
+        ),
+        (
+            "shocks",
+            "OVERWRITE",
+            "end;",
+            "other skew rows remain",
+            "earlier shock_paths blocks",
+        ),
+        (
+            "mshocks",
+            "overwrite",
+            "var e; periods 2; values 1.1; end;",
+            "earlier deterministic shocks",
+            "measurement-error settings",
+        ),
+        (
+            "shock_paths",
+            "overwrite",
+            "var e; periods 2; values 1; end;",
+            "perfect_foresight_controlled_paths entries",
+            "measurement-error settings",
+        ),
+    ] {
+        let text = format!("{BASE}{command}({option}); {body}\n");
+        let uri = Url::parse(&format!("file:///tmp/{command}_{option}_catalog.mod")).unwrap();
+        let (service, _socket) = new_service();
+        service
+            .inner()
+            .did_open(open_params(uri.clone(), text.clone(), 1))
+            .await;
+
+        let option_byte = text.find(option).unwrap();
+        let md = hover_markdown(
+            service
+                .inner()
+                .hover(HoverParams {
+                    text_document_position_params: tdp(uri.clone(), &text, option_byte),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .expect("hover rpc")
+                .expect("hover"),
+        );
+        assert!(md.contains(expected), "{command} hover: {md}");
+        assert!(!md.contains(unrelated), "{command} hover: {md}");
+        assert!(md.contains(&format!("`{option}`")), "{command} hover: {md}");
+
+        let labels = completion_labels(
+            service
+                .inner()
+                .completion(CompletionParams {
+                    text_document_position: tdp(uri, &text, option_byte),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                    context: None,
+                })
+                .await
+                .expect("completion rpc")
+                .expect("completion"),
+        );
+        assert!(
+            labels.contains(&"overwrite".to_string()),
+            "{command}: {labels:?}"
+        );
+        assert!(
+            labels.contains(&"learnt_in".to_string()),
+            "{command}: {labels:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn completion_includes_exogenous() {
     let text = read_mod("trend_rbc_gov_inv");
     let uri = archive_url("trend_rbc_gov_inv");
