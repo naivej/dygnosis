@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.6.1
+
+Pins language checks and honesty tests to Dynare 7.2. When several Dynare installations are present, discovery prefers the 7.2 preprocessor unless `DYNARE_PREPROCESSOR` is set.
+
+- **E243** uses 7.2's `histval: y(0) declared twice` sentence.
+- `histval_file` no longer offers `nobs` or `last_simulation_period`; either option reports Dynare's syntax error on its name. `initval_file` still accepts both.
+- Duplicate checks for shocks, histval, generated IRFs, filter initial state, observation trends, optimization weights, and estimated parameters compare entries within one block. Repeating an entry in a later block stays quiet. **E248** now checks a value reference only against parameters declared in the same block. Existing same-block refusals remain.
+
 ## v0.6.0
 
 Reads method of moments, matched moments and IRFs, and the IRF and moment calibration blocks, and reports the refusals Dynare makes on them. Codes `E382`–`E392`.
