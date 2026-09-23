@@ -95,20 +95,33 @@ fn discovery_empty_common_is_none() {
 }
 
 #[test]
-fn windows_candidate_shape_includes_dynare_version() {
+fn windows_candidate_shape_prefers_pin_over_newer_version() {
     let cands = windows_common_candidates(&[(
         PathBuf::from(r"C:\dynare"),
-        vec!["7.0".into(), "7.1".into()],
+        vec!["7.0".into(), "7.1".into(), "7.2".into(), "7.3".into()],
     )]);
-    let want = PathBuf::from(r"C:\dynare\7.1\preprocessor\dynare-preprocessor.exe");
-    assert!(
-        cands.contains(&want),
-        "candidates {cands:?} missing {want:?}"
-    );
     assert_eq!(
         cands[0],
-        PathBuf::from(r"C:\dynare\7.1\preprocessor\dynare-preprocessor.exe"),
-        "newest listing first"
+        PathBuf::from(r"C:\dynare\7.2\preprocessor\dynare-preprocessor.exe")
+    );
+    assert_eq!(
+        cands[1],
+        PathBuf::from(r"C:\dynare\7.3\preprocessor\dynare-preprocessor.exe")
+    );
+}
+
+#[test]
+fn windows_candidate_pin_precedes_other_roots() {
+    let cands = windows_common_candidates(&[
+        (
+            PathBuf::from(r"C:\Program Files\dynare"),
+            vec!["7.3".into()],
+        ),
+        (PathBuf::from(r"C:\dynare"), vec!["7.2".into()]),
+    ]);
+    assert_eq!(
+        cands[0],
+        PathBuf::from(r"C:\dynare\7.2\preprocessor\dynare-preprocessor.exe")
     );
 }
 

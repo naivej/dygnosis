@@ -94,22 +94,28 @@ pub fn find_preprocessor_from(
     None
 }
 
-/// Windows candidate paths from `(root, listdir entries)` with reverse-sorted names.
+/// Windows candidate paths from `(root, listdir entries)`, preferring the pin.
 pub fn windows_common_candidates(listings: &[(PathBuf, Vec<String>)]) -> Vec<PathBuf> {
-    let mut out = Vec::new();
+    let mut pinned = Vec::new();
+    let mut others = Vec::new();
     for (root, entries) in listings {
         let mut sorted = entries.clone();
         sorted.sort();
         sorted.reverse();
         for entry in sorted {
-            out.push(
-                root.join(entry)
-                    .join("preprocessor")
-                    .join("dynare-preprocessor.exe"),
-            );
+            let path = root
+                .join(&entry)
+                .join("preprocessor")
+                .join("dynare-preprocessor.exe");
+            if entry.eq_ignore_ascii_case("7.2") {
+                pinned.push(path);
+            } else {
+                others.push(path);
+            }
         }
     }
-    out
+    pinned.extend(others);
+    pinned
 }
 
 #[doc(hidden)]
