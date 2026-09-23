@@ -44,6 +44,96 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         stage: JsonStage::Check,
     },
     HonestyRow {
+        code: "E001",
+        fixture: "e001/opener_var_bare_row_in_own_block.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "expecting PERIODS or STDERR",
+        our_needle: "Missing 'end;' for 'shocks'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "e001/opener_var_end_no_semi.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "unexpected INITVAL, expecting ';'",
+        our_needle: "Missing 'end;' for 'model'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "e001/opener_var_decl_semi_missing.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "unexpected VAREXO",
+        our_needle: "missing its terminating semicolon",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "e001/opener_var_missing_end_control.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Unknown symbol: initval",
+        our_needle: "Missing 'end;' for 'model'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "e001/opener_var_reserved_control.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "unexpected VAR",
+        our_needle: "missing its terminating semicolon",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "e001/opener_var_statement_scoped.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "unexpected VAROBS",
+        our_needle: "missing its terminating semicolon",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E020",
+        fixture: "e001/opener_var_undeclared_use.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Unknown symbol: shocks",
+        our_needle: "Undeclared identifier 'shocks'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E020",
+        fixture: "e001/opener_var_undeclared_bare_row.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Unknown symbol: shocks",
+        our_needle: "Undeclared identifier 'shocks'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E020",
+        fixture: "e001/opener_var_declared_after.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Unknown symbol: matched_irfs",
+        our_needle: "Undeclared identifier 'matched_irfs'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
         code: "E020",
         fixture: "e020/e020_typo.mod",
         kind: HonestyKind::Error {
@@ -4441,6 +4531,96 @@ fn honesty_fire_table() {
     assert!(
         failures.is_empty(),
         "honesty fire table failed:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// `JC5`: a declared variable whose spelling is a block opener is a shape 7.1
+/// accepts, so we must emit no Error on any of them.
+///
+/// The same names drive the 29-name lock in `tests/d_block.rs`; both are quiet only
+/// while `parser::at_block_opener` reads the symbol table.
+const OPENER_QUIET_FIXTURES: &[&str] = &[
+    "e001/opener_var_used.mod",
+    "e001/opener_var_used_matched_irfs.mod",
+    "e001/opener_var_decl_only.mod",
+    "e001/opener_var_name_first.mod",
+    "e001/opener_var_in_own_block.mod",
+    "e001/opener_var_late_names.mod",
+    "e001/opener_var_skipped_block.mod",
+    "e001/opener_var_declared_bare_row.mod",
+    "e001/opener_var_declared_bare_row_first.mod",
+];
+
+#[test]
+fn opener_named_variable_files_emit_no_error() {
+    let mut failures: Vec<String> = Vec::new();
+    for rel in OPENER_QUIET_FIXTURES {
+        let path = fixture(rel);
+        let path_str = path.to_str().expect("utf-8 path");
+        let text = read_path(&path);
+        let own = check_file(&text, path_str);
+        let errors: Vec<&str> = own
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .map(|d| d.code.as_str())
+            .collect();
+        if !errors.is_empty() {
+            failures.push(format!("{rel} must emit no Error, got {errors:?}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "opener quiet rows failed:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// The 7.1 side of the same claim, name by name: every `BLOCK_OPENERS` entry except
+/// the two statement-scoped ones is accepted as a declaration name by the installed
+/// 7.1, and we stay quiet on each. This is the honesty property of slice 06 in the
+/// direction the fixture set cannot show — it covers all 29 names, not the two the
+/// fixtures lock.
+#[test]
+fn every_opener_name_is_accepted_by_71_and_quiet_here() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    let mut failures: Vec<String> = Vec::new();
+    for name in dygnosis::block_openers().iter().copied() {
+        if matches!(name, "epilogue" | "init2shocks") {
+            continue;
+        }
+        let text = format!(
+            "var y {name};\nvarexo e;\nparameters rho;\nrho = 0.95;\n\
+             model;\ny = rho*y(-1) + e + {name};\n{name} = 0.1*y;\nend;\n\
+             initval;\ny = 0;\n{name} = 0;\nend;\n\
+             shocks;\nvar e; stderr 0.01;\nend;\nstoch_simul(order = 1, nograph);\n"
+        );
+        let result = spawn(&text, Path::new("opener.mod"), &pp, JsonStage::Check);
+        if !result.success {
+            failures.push(format!(
+                "{name}: 7.1 should accept the declaration; stderr {:?} diags {:?}",
+                result.raw_stderr, result.diagnostics
+            ));
+            continue;
+        }
+        let own = analyze(&parse(&text));
+        let errors: Vec<&str> = own
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .map(|d| d.code.as_str())
+            .collect();
+        if !errors.is_empty() {
+            failures.push(format!(
+                "{name}: we emit Error on a file 7.1 accepts: {errors:?}"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "opener-name honesty failed:\n{}",
         failures.join("\n")
     );
 }

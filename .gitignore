@@ -5,3 +5,10 @@
 # Preprocessor dumps from in-place json=check (not fixtures)
 tests/fixtures/**/model/
 
+# The preprocessor writes its output into its *working directory*, not next to
+# the .mod it was given, so a probe run started inside this crate drops
+# `+<stem>/` and `<stem>/` at the root. The `+` form is MATLAB package syntax
+# and nothing hand-written here uses it. The bare `<stem>/` form is not covered
+# (a stem is any identifier), which is why probes belong under %TEMP%.
+/+*/
+

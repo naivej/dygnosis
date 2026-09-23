@@ -119,6 +119,13 @@ pub use model_info::{
     structure_summary, StructureSummary, TimingClass, TimingInfo,
 };
 pub use parser::parse;
+
+/// Every Dynare block opener the language has, in table order. The pin's lexer
+/// scopes these rules to `INITIAL`, so a spelling the file declares is an ordinary
+/// symbol inside a body.
+pub fn block_openers() -> &'static [&'static str] {
+    parser::BLOCK_OPENERS
+}
 #[doc(hidden)]
 pub use preprocessor::{find_preprocessor, run_preprocessor, JsonStage, PreprocessorResult};
 pub use refs::{ident_at, is_legal_ident, occurrences, option_command_at, rename_in_text};

@@ -30,12 +30,9 @@ const DECL_OR_BLOCK: &[&str] = &[
     "varexo",
     "parameters",
     "predetermined_variables",
-    "model",
-    "initval",
-    "endval",
-    "shocks",
-    "occbin_constraints",
-    "steady_state_model",
+    "varobs",
+    "epilogue",
+    "init2shocks",
 ];
 
 const DYNARE_COMMANDS: &[&str] = &[
@@ -261,9 +258,24 @@ fn skip_balanced(tokens: &[Token], mut i: usize, open: TokenKind, close: TokenKi
     i
 }
 
-fn opener_at(tokens: &[Token], src: &str, i: usize) -> Option<(String, Span, usize)> {
+/// A block opener at `i`: the word heads a statement, and its `;` closes that
+/// statement. A spelling the file declares as a symbol before `i` is a use, not an
+/// opener — their lexer scopes every opener rule to `INITIAL` and reads a declared
+/// name inside a body through the identifier rule, so `var y shocks;` declares two
+/// endogenous and `+ shocks` resolves against the declaration. A word whose `;` is
+/// followed by `end;` is a bare row of the open body, whose block would otherwise be
+/// empty and which 7.1 refuses.
+fn opener_at(
+    tokens: &[Token],
+    src: &str,
+    i: usize,
+    declared: &[(String, u32)],
+) -> Option<(String, Span, usize)> {
     let tok = tokens.get(i)?;
     if tok.kind != TokenKind::Ident {
+        return None;
+    }
+    if !at_statement_head(tokens, i) {
         return None;
     }
     let name = tok.text(src);
@@ -271,12 +283,23 @@ fn opener_at(tokens: &[Token], src: &str, i: usize) -> Option<(String, Span, usi
         .iter()
         .find(|k| name.eq_ignore_ascii_case(k))?
         .to_string();
+    if declared
+        .iter()
+        .any(|(spelling, start)| spelling.eq_ignore_ascii_case(&key) && *start < tok.span.start)
+    {
+        return None;
+    }
     let mut j = i + 1;
     if tokens.get(j).is_some_and(|t| t.kind == TokenKind::LParen) {
         j = skip_balanced(tokens, j, TokenKind::LParen, TokenKind::RParen);
     }
     let semi = tokens.get(j)?;
     if semi.kind != TokenKind::Semi {
+        return None;
+    }
+    if ident_eq(&tokens[j + 1], src, "end")
+        && tokens.get(j + 2).is_some_and(|t| t.kind == TokenKind::Semi)
+    {
         return None;
     }
     Some((
@@ -289,15 +312,40 @@ fn opener_at(tokens: &[Token], src: &str, i: usize) -> Option<(String, Span, usi
     ))
 }
 
+/// The token at `i` heads a statement: it is the first token, or the token after a
+/// `;`. Macro directives carry no token of their own once the file is expanded, so
+/// they are stepped over, exactly as `Parser::starts_statement` does.
+fn at_statement_head(tokens: &[Token], i: usize) -> bool {
+    let mut k = i;
+    while k > 0 && tokens[k - 1].kind == TokenKind::MacroDir {
+        k -= 1;
+    }
+    k == 0 || tokens.get(k - 1).is_some_and(|t| t.kind == TokenKind::Semi)
+}
+
+/// Every declared symbol with the offset of its declaration, for the as-of test the
+/// opener walk needs.
+fn declared_spellings(model: &Model) -> Vec<(String, u32)> {
+    model
+        .endogenous
+        .iter()
+        .chain(&model.exogenous)
+        .chain(&model.deterministic_exogenous)
+        .chain(&model.parameters)
+        .chain(&model.predetermined)
+        .map(|decl| (model.name(decl.name).to_string(), decl.span.start))
+        .collect()
+}
+
 fn is_end_semi(tokens: &[Token], src: &str, i: usize) -> bool {
     ident_eq(&tokens[i], src, "end") && tokens.get(i + 1).is_some_and(|t| t.kind == TokenKind::Semi)
 }
 
-fn complete_block_ranges(tokens: &[Token], src: &str) -> Vec<Span> {
+fn complete_block_ranges(tokens: &[Token], src: &str, declared: &[(String, u32)]) -> Vec<Span> {
     let mut ranges = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
-        if let Some((_, span, semi_i)) = opener_at(tokens, src, i) {
+        if let Some((_, span, semi_i)) = opener_at(tokens, src, i, declared) {
             let mut j = semi_i + 1;
             while j < tokens.len() {
                 if is_end_semi(tokens, src, j) {
@@ -307,7 +355,7 @@ fn complete_block_ranges(tokens: &[Token], src: &str) -> Vec<Span> {
                     });
                     break;
                 }
-                if opener_at(tokens, src, j).is_some() {
+                if opener_at(tokens, src, j, declared).is_some() {
                     break;
                 }
                 j += 1;
@@ -801,7 +849,8 @@ fn looks_like_matlab(rhs: &str) -> bool {
 fn invalid_ident_diags(model: &Model, tokens: &[Token], index: &LineIndex) -> Vec<Diagnostic> {
     let _ = index;
     let src = &model.source;
-    let mut blocks = complete_block_ranges(tokens, src);
+    let declared = declared_spellings(model);
+    let mut blocks = complete_block_ranges(tokens, src, &declared);
     // Statements the parser read claim their own spans: a `keyword=[…]` option
     // value inside one is not a declaration.
     blocks.extend(model.statement_spans());
@@ -952,6 +1001,16 @@ fn reserved_ident_diags(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
         .collect();
     for decl in decls {
         let name = model.name(decl.name);
+        // A block opener is a legal declaration name: its only lexer rule is
+        // `<INITIAL>`, so a declaration list reads it through the statement
+        // identifier rule and 7.1 accepts `var y shocks;`. The same fact silences
+        // the declaration scan in `parser::at_decl_or_block_keyword`.
+        if crate::parser::BLOCK_OPENERS
+            .iter()
+            .any(|kw| name.eq_ignore_ascii_case(kw))
+        {
+            continue;
+        }
         let Some(reason) = reserved_reason(name) else {
             continue;
         };

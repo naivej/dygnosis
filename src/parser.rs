@@ -53,6 +53,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, Vec<Range
         verbatim_ranges: Vec::new(),
         symbol_list_id: 1,
         in_model: false,
+        in_equation_body: false,
     };
     p.parse_file();
     p.record_double_quoted_strings();
@@ -351,7 +352,7 @@ const TERMINAL_COMMANDS: &[&str] = &[
     "send_endogenous_variables_to_workspace",
 ];
 
-const BLOCK_OPENERS: &[&str] = &[
+pub(crate) const BLOCK_OPENERS: &[&str] = &[
     "model",
     "initval",
     "endval",
@@ -645,6 +646,8 @@ struct Parser<'a> {
     /// groups one statement's list.
     symbol_list_id: u32,
     in_model: bool,
+    /// Inside a `model` / `model_replace` body, whose rows are expressions.
+    in_equation_body: bool,
 }
 
 impl Parser<'_> {
@@ -987,12 +990,14 @@ impl Parser<'_> {
             self.model.is_linear = true;
         }
         let body_i = self.i;
+        self.in_equation_body = true;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
             if let Some((eq, range)) = self.parse_equation_statement() {
                 self.eq_token_ranges.push(range);
                 self.model.equations.push(eq);
             }
         }
+        self.in_equation_body = false;
         if self.at_block_end() {
             self.record_missing_final("model", body_i, self.i);
         }
@@ -1051,6 +1056,7 @@ impl Parser<'_> {
         }
         let body_i = self.i;
         let mut n_equations = 0usize;
+        self.in_equation_body = true;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
             if let Some((eq, range)) = self.parse_equation_statement() {
                 self.eq_token_ranges.push(range);
@@ -1058,6 +1064,7 @@ impl Parser<'_> {
                 n_equations += 1;
             }
         }
+        self.in_equation_body = false;
         if n_equations == 0 {
             let issue_span = self.tokens.get(self.i).map(|tok| tok.span).unwrap_or(span);
             self.record_issue(ParseIssue {
@@ -3301,6 +3308,14 @@ impl Parser<'_> {
             return Some(ShapeRefuse::new(head.span, lex, "a list of symbols"));
         }
         if !self.declared_spelling(lex) {
+            return None;
+        }
+        // A block opener keeps the block reading at the head of a statement: the
+        // pin's opener rules are `<INITIAL>`-scoped, so flex never considers them
+        // inside a body and the symbol table never gets a say in `INITIAL`.
+        // `priors;` is the `priors` block even when the file also declares a
+        // variable `priors`.
+        if BLOCK_OPENERS.iter().any(|kw| lex.eq_ignore_ascii_case(kw)) {
             return None;
         }
         self.declared_head_refusal(head.span, lex)
@@ -5743,8 +5758,36 @@ impl Parser<'_> {
         self.at_block_end() || self.at_block_opener()
     }
 
+    /// A `BLOCK_OPENERS` word the enclosing body never terminated. Their lexer gives
+    /// the word the opener reading in exactly one state, `INITIAL`, and it reaches
+    /// that state three ways: the file's first token, the `;` that closes a statement
+    /// (`DynareFlex.ll:209`), and the word `end` — whose rule returns to `INITIAL`
+    /// **before** it returns `token::END`, so no `;` is needed (`:255-260`).
+    /// Everywhere else the word falls through to the identifier rule (`:1138`) and
+    /// the symbol table decides: `var y shocks;` declares two endogenous and
+    /// `+ shocks` is that variable.
+    ///
+    /// Inside a `model` / `model_replace` body two readings are rows of that body
+    /// rather than a new block, and 7.1 takes both: a declared spelling is the
+    /// variable (`model; shocks; end;` is accepted), and a word whose `;` is directly
+    /// followed by `end;` closes the body, because their `model_equation` is an
+    /// expression and 7.1 refuses an empty block (`unexpected END, expecting …`).
+    ///
+    /// Neither applies after a bare `end`: the lexer is back in `INITIAL`, where the
+    /// opener rules outrank the symbol table, which is why 7.1 refuses `end` (no `;`)
+    /// followed by `shocks;` with `unexpected SHOCKS, expecting ';'`.
     fn at_block_opener(&self) -> bool {
-        if !BLOCK_OPENERS.iter().any(|kw| self.at_ident_ci(kw)) {
+        let Some(keyword) = BLOCK_OPENERS.iter().find(|kw| self.at_ident_ci(kw)) else {
+            return false;
+        };
+        let after_bare_end = self.previous_ident_is("end");
+        if !after_bare_end && !self.starts_statement() {
+            return false;
+        }
+        if !after_bare_end
+            && self.in_equation_body
+            && self.declared_before(self.current_start(), keyword)
+        {
             return false;
         }
         let mut k = 1;
@@ -5767,9 +5810,53 @@ impl Parser<'_> {
                 k += 1;
             }
         }
-        self.peek_kind(k) == Some(TokenKind::Semi)
+        if self.peek_kind(k) != Some(TokenKind::Semi) {
+            return false;
+        }
+        after_bare_end || !(self.in_equation_body && self.peek_ident_is(k + 1, "end"))
     }
 
+    /// The cursor sits at the head of a statement, where the pin's lexer is in
+    /// `INITIAL` after a `;`: the file's first token, or the token after that `;`.
+    /// Macro directives carry no token of their own once the file is expanded, so
+    /// they are stepped over. The other way into `INITIAL` is the word `end`, which
+    /// `previous_ident_is` reads.
+    fn starts_statement(&self) -> bool {
+        let mut k = self.i;
+        while k > 0 && self.tokens[k - 1].kind == TokenKind::MacroDir {
+            k -= 1;
+        }
+        k == 0 || self.tokens[k - 1].kind == TokenKind::Semi
+    }
+
+    /// The word just before the cursor is the spelling given, case-insensitively,
+    /// with macro directives stepped over.
+    fn previous_ident_is(&self, spelling: &str) -> bool {
+        let mut k = self.i;
+        while k > 0 && self.tokens[k - 1].kind == TokenKind::MacroDir {
+            k -= 1;
+        }
+        k > 0
+            && self.tokens[k - 1].kind == TokenKind::Ident
+            && self.tokens[k - 1]
+                .text(self.src)
+                .eq_ignore_ascii_case(spelling)
+    }
+
+    /// The word `ahead` tokens on is the spelling given, case-insensitively.
+    fn peek_ident_is(&self, ahead: usize, spelling: &str) -> bool {
+        self.peek_tok(ahead).is_some_and(|t| {
+            t.kind == TokenKind::Ident && t.text(self.src).eq_ignore_ascii_case(spelling)
+        })
+    }
+
+    /// The declaration scan's break list: a `var` list is a `DYNARE_STATEMENT`, and
+    /// each word here carries a rule scoped to that state too, so each lexes to its
+    /// own token and ends the list. The five declarations are `DynareFlex.ll:111-117`
+    /// with `:667-671`, `varobs` `:124` with `:1084`, `epilogue` `:226` with `:738`,
+    /// `init2shocks` `:222` with `:458`. Every other block opener carries an
+    /// `<INITIAL>` rule only, so it falls through to the statement identifier rule and
+    /// is an ordinary name there: `var y shocks;` declares two endogenous.
     fn at_decl_or_block_keyword(&self) -> bool {
         const KS: &[&str] = &[
             "varexo_det",
@@ -5777,12 +5864,9 @@ impl Parser<'_> {
             "varexo",
             "parameters",
             "predetermined_variables",
-            "model",
-            "initval",
-            "endval",
-            "shocks",
-            "occbin_constraints",
-            "steady_state_model",
+            "varobs",
+            "epilogue",
+            "init2shocks",
         ];
         KS.iter().any(|kw| self.at_ident_ci(kw))
     }

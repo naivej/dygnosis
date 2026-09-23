@@ -3,7 +3,7 @@
 use dygnosis::explain::known_codes;
 use dygnosis::expr::ExprKind;
 use dygnosis::model::{EstimatedParamKind, ShockKind};
-use dygnosis::{analyze, parse, Diagnostic};
+use dygnosis::{analyze, block_openers, parse, Diagnostic, Severity};
 
 fn fixture(rel: &str) -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -836,5 +836,92 @@ fn e285_plus_type_mismatch() {
     assert_eq!(
         find(&diags, "E285").message,
         "Type mismatch for operands of + operator"
+    );
+}
+
+// --- 0.6.0 slice 06: every `BLOCK_OPENERS` name is a legal declaration name ---
+//
+// Driven from `dygnosis::block_openers()` so a later slice that adds a name to the
+// table cannot leave it refused. The two statement-scoped words (`epilogue`,
+// `init2shocks`) are 7.1 refusals and are checked separately.
+
+/// The 29 names 7.1 accepts as declaration names, each declared and used.
+#[test]
+fn opener_names_declared_and_used_are_quiet() {
+    let mut failures: Vec<String> = Vec::new();
+    for name in block_openers().iter().copied() {
+        if matches!(name, "epilogue" | "init2shocks") {
+            continue;
+        }
+        let src = format!(
+            "var y {name};\nvarexo e;\nparameters rho;\nrho = 0.95;\n\
+             model;\ny = rho*y(-1) + e + {name};\n{name} = 0.1*y;\nend;\n\
+             initval;\ny = 0;\n{name} = 0;\nend;\n\
+             shocks;\nvar e; stderr 0.01;\nend;\nstoch_simul(order = 1, nograph);\n"
+        );
+        let diags = analyze(&parse(&src));
+        let errors: Vec<&str> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .map(|d| d.code.as_str())
+            .collect();
+        if !errors.is_empty() {
+            failures.push(format!("{name}: {errors:?}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "a declared opener name must not draw an Error:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// The two `DYNARE_STATEMENT`-scoped words still refuse on both sides.
+#[test]
+fn opener_names_statement_scoped_still_refuse() {
+    for name in ["epilogue", "init2shocks"] {
+        let src = format!(
+            "var y {name};\nvarexo e;\nparameters rho;\nrho = 0.95;\n\
+             model;\ny = rho*y(-1) + e;\nend;\n"
+        );
+        let diags = analyze(&parse(&src));
+        assert!(
+            diags.iter().any(|d| d.code == "E001"),
+            "{name}: 7.1 refuses this declaration, expected E001, got {:?}",
+            codes(&diags)
+        );
+    }
+}
+
+/// The reach-audit pairs the fix touches: with the declaration scan corrected, the
+/// duplicate passes see an opener-named variable and 7.1's own sentences fire.
+#[test]
+fn opener_name_reaches_e030_w031_and_e111() {
+    let e030 = analyze(&parse(
+        "var y shocks;\nvarexo e shocks;\nparameters rho;\nrho = 0.95;\n\
+         model;\ny = rho*y(-1) + e + shocks;\nend;\n\
+         initval;\ny = 0;\nshocks = 0;\nend;\n",
+    ));
+    assert_eq!(
+        find(&e030, "E030").message,
+        "Symbol shocks declared twice with different types!"
+    );
+
+    let w031 = analyze(&parse(
+        "var y shocks;\nvar shocks;\nvarexo e;\nparameters rho;\nrho = 0.95;\n\
+         model;\ny = rho*y(-1) + e + shocks;\nshocks = 0.1*y;\nend;\n\
+         initval;\ny = 0;\nshocks = 0;\nend;\n",
+    ));
+    assert_eq!(find(&w031, "W031").message, "Symbol shocks declared twice.");
+
+    let e111 = analyze(&parse(
+        "var y;\nvarexo e shocks;\nparameters rho;\nrho = 0.95;\n\
+         model;\ny = rho*y(-1) + e + shocks;\nend;\n\
+         initval;\ny = 0;\nshocks = 0;\nend;\n\
+         shocks;\nvar shocks; stderr 0.1;\nvar shocks; stderr 0.2;\nend;\n",
+    ));
+    assert_eq!(
+        find(&e111, "E111").message,
+        "shocks: variance or stderr of shock on shocks declared twice"
     );
 }

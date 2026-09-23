@@ -379,3 +379,212 @@ fn e001_cascade_missing_model_end() {
         );
     }
 }
+
+// --- A declared name whose spelling is also a block opener (0.6.0 slice 06) ---
+//
+// The lexer scopes every opener rule to `INITIAL`, so a word inside a body reads as
+// an identifier and the symbol table resolves it. `var y shocks;` therefore declares
+// a second endogenous, and the file parses. The fire rows below are the shapes 7.1
+// refuses, and they keep their code.
+
+/// `var y shocks;` used in the model and in `initval`: 7.1 accepts this file.
+#[test]
+fn e001_opener_var_used_is_quiet() {
+    for rel in [
+        "e001/opener_var_used.mod",
+        "e001/opener_var_used_matched_irfs.mod",
+        "e001/opener_var_name_first.mod",
+        "e001/opener_var_in_own_block.mod",
+        "e001/opener_var_late_names.mod",
+        "e001/opener_var_skipped_block.mod",
+        "e001/opener_var_declared_bare_row.mod",
+        "e001/opener_var_declared_bare_row_first.mod",
+    ] {
+        let text = check_mod(rel);
+        let got = rust_e001(&text);
+        assert!(got.is_empty(), "{rel}: expected no E001, got {got:?}");
+        assert!(!has_structural_error(&parse(&text)));
+    }
+}
+
+/// The `declared_before` clause on its own, with no assignment row to protect it: a
+/// **bare** declared opener-named row inside the model body is an equation with a
+/// zero right-hand side, which 7.1 accepts. Every other quiet lock in this file uses
+/// a `{name} = 0.1*y;` row, so only these two fail if the clause goes.
+#[test]
+fn e001_opener_var_declared_bare_row_is_quiet() {
+    for rel in [
+        "e001/opener_var_declared_bare_row.mod",
+        "e001/opener_var_declared_bare_row_first.mod",
+    ] {
+        let text = check_mod(rel);
+        let model = parse(&text);
+        let all = analyze(&model);
+        let codes: Vec<&str> = all.iter().map(|d| d.code.as_str()).collect();
+        assert!(
+            !codes.contains(&"E001") && !codes.contains(&"E020"),
+            "{rel}: a bare declared opener-named row must be quiet, got {codes:?}"
+        );
+        // The row is stored as its own equation, not skipped as a block opener.
+        assert!(
+            model.equations.iter().any(|eq| eq.text.trim() == "shocks"),
+            "{rel}: the bare row should be stored as an equation, got {:?}",
+            model
+                .equations
+                .iter()
+                .map(|eq| eq.text.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+/// A declared opener-named variable the model never uses draws warnings only.
+#[test]
+fn e001_opener_var_decl_only_warns_without_e001() {
+    let text = check_mod("e001/opener_var_decl_only.mod");
+    let got = rust_e001(&text);
+    assert!(got.is_empty(), "expected no E001, got {got:?}");
+    let all = analyze(&parse(&text));
+    for code in ["W013", "W020"] {
+        assert!(
+            all.iter().any(|d| d.code == code),
+            "expected {code}, got {:?}",
+            all.iter().map(|d| &d.code).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// A bare opener word inside a real `shocks` body is a row 7.1 refuses, declared or
+/// not: that block's rows are `var` / `corr` / `skew` statements.
+#[test]
+fn e001_opener_var_bare_row_in_own_block() {
+    let text = check_mod("e001/opener_var_bare_row_in_own_block.mod");
+    let got = rust_e001(&text);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].code, "E001");
+    assert!(got[0].message.contains("Missing 'end;' for 'shocks'"));
+    assert_span_in(&text, &got[0], "\nshocks;\nvar e;\n", "shocks;");
+}
+
+/// An undeclared opener-shaped name reports the neighbouring **E020**, the code
+/// 7.1's own `Unknown symbol` sentence maps to.
+#[test]
+fn e001_opener_var_undeclared_use_is_e020() {
+    for rel in [
+        "e001/opener_var_undeclared_use.mod",
+        "e001/opener_var_undeclared_bare_row.mod",
+    ] {
+        let text = check_mod(rel);
+        let all = analyze(&parse(&text));
+        let codes: Vec<&str> = all.iter().map(|d| d.code.as_str()).collect();
+        assert!(
+            codes.contains(&"E020"),
+            "{rel}: expected E020, got {codes:?}"
+        );
+        assert!(
+            !codes.contains(&"E001"),
+            "{rel}: E001 is the wrong code here, got {codes:?}"
+        );
+    }
+}
+
+/// A declaration written after the model block does not help the equation: their
+/// parser registers a name when it reads the declaration.
+#[test]
+fn e001_opener_var_declared_after_still_refuses() {
+    let text = check_mod("e001/opener_var_declared_after.mod");
+    let all = analyze(&parse(&text));
+    let codes: Vec<&str> = all.iter().map(|d| d.code.as_str()).collect();
+    assert!(codes.contains(&"E020"), "expected E020, got {codes:?}");
+}
+
+/// The control set: a genuinely missing `;` or `end;` keeps its **E001**.
+#[test]
+fn e001_opener_var_controls_still_fire() {
+    for rel in [
+        "e001/opener_var_decl_semi_missing.mod",
+        "e001/opener_var_reserved_control.mod",
+        "e001/opener_var_statement_scoped.mod",
+    ] {
+        let text = check_mod(rel);
+        let got = rust_e001(&text);
+        assert_eq!(got.len(), 1, "{rel}: {got:?}");
+        assert_eq!(got[0].code, "E001");
+        assert!(
+            got[0]
+                .message
+                .contains("Declaration 'var' appears to be missing its terminating semicolon"),
+            "{rel}: {}",
+            got[0].message
+        );
+    }
+    assert_fire(
+        "e001/opener_var_missing_end_control.mod",
+        "Missing 'end;' for 'model'",
+        "model;",
+    );
+}
+
+/// An `end` with no `;` still ends the body: their lexer returns to `INITIAL` on the
+/// `end` word itself, so the next opener is an opener token again and 7.1 refuses
+/// `unexpected INITVAL, expecting ';'`. The source strings below are one shape each;
+/// the fixture is the same file on disk.
+#[test]
+fn e001_opener_var_end_without_semi_before_a_block() {
+    assert_fire(
+        "e001/opener_var_end_no_semi.mod",
+        "Missing 'end;' for 'model'",
+        "model;",
+    );
+    for (name, tail) in [
+        ("shocks", "shocks;\nvar e; stderr 0.01;\nend;\n"),
+        ("initval", "initval;\ny = 0;\nend;\n"),
+    ] {
+        let src = format!(
+            "var y;\nvarexo e;\nparameters rho;\nrho = 0.5;\n\
+             model;\ny = rho*y(-1)+e;\nend\n{tail}"
+        );
+        let text = src.clone();
+        let got = rust_e001(&text);
+        assert_eq!(got.len(), 1, "{name}: {got:?}");
+        assert_eq!(got[0].code, "E001");
+        assert!(
+            got[0].message.contains("Missing 'end;' for 'model' block"),
+            "{name}: {}",
+            got[0].message
+        );
+        assert!(has_structural_error(&parse(&text)));
+    }
+}
+
+/// Close call 2 (`06b`'s fixture): a reserved word that 7.1 accepts as a declaration
+/// name. The false **E001** is locked here so the slice that fixes it has a target.
+#[test]
+fn e001_opener_var_reserved_ident_locked_for_06b() {
+    let text = check_mod("e001/opener_var_reserved_ident.mod");
+    let got = rust_e001(&text);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0]
+        .message
+        .contains("Invalid Dynare identifier 'end': reserved"));
+    assert_span_in(&text, &got[0], "var y end;", "end");
+}
+
+/// Auto-fix is the identity on the quiet files and on the reserved-identifier one,
+/// so the false **E001** this slice closes never drove an insertion, and **06b**'s
+/// fixture does not gain one either.
+#[test]
+fn e001_opener_var_quiet_files_are_noop_for_auto_fix() {
+    for rel in [
+        "e001/opener_var_used.mod",
+        "e001/opener_var_used_matched_irfs.mod",
+        "e001/opener_var_name_first.mod",
+        "e001/opener_var_in_own_block.mod",
+        "e001/opener_var_late_names.mod",
+        "e001/opener_var_skipped_block.mod",
+        "e001/opener_var_reserved_ident.mod",
+    ] {
+        let text = check_mod(rel);
+        assert_eq!(auto_fix(&text), text, "{rel} must be an auto_fix no-op");
+    }
+}
