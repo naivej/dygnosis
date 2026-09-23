@@ -13,9 +13,8 @@ use crate::model::{
     FamilyValueKind, Init2ShocksBlock, Init2ShocksRow, IrfCalibrationBlock, IrfCalibrationRow,
     MatchedIrfsBlock, MatchedIrfsRow, MatchedIrfsWeight, MatchedIrfsWeightsBlock, MatchedMoment,
     Model, MomStatement, MomSyntax, MomentCalibrationBlock, MomentCalibrationRow, MsStatement,
-    OptimWeight,
-    ParseIssue, ParseIssueKind, ShapeRefuse, ShockGroup, SvarEquation, SvarIdentification,
-    SvarIdentificationElement,
+    OptimWeight, ParseIssue, ParseIssueKind, ShapeRefuse, ShockGroup, SvarEquation,
+    SvarIdentification, SvarIdentificationElement,
 };
 use crate::model::{
     ChangeTypeKind, ChangeTypeStmt, CommandSymbol, Complementarity, ComplementarityTriple,
@@ -27,6 +26,8 @@ use crate::model::{
     SurgeryKind, TrendVar,
 };
 use crate::span::Span;
+
+mod shock_parser;
 
 pub fn parse(text: &str) -> Model {
     let source = normalize_newlines(text);
@@ -723,6 +724,16 @@ impl Parser<'_> {
                 self.parse_histval_block();
             } else if self.at_ident_ci("shocks") || self.at_ident_ci("mshocks") {
                 self.parse_shocks_block(true);
+            } else if self.at_ident_ci("heteroskedastic_shocks") {
+                self.parse_shocks_block(false);
+            } else if self.at_ident_ci("shock_paths") {
+                self.parse_path_block(false);
+            } else if self.at_ident_ci("perfect_foresight_controlled_paths") {
+                self.parse_path_block(true);
+            } else if self.at_ident_ci("database") && self.at_statement_boundary() {
+                self.parse_database_statement();
+            } else if self.at_ident_ci("set_time") && self.at_statement_boundary() {
+                self.parse_set_time_statement();
             } else if self.at_ident_ci("occbin_constraints") {
                 self.parse_occbin_constraints_block();
             } else if self.at_ident_ci("varobs") {
@@ -1423,6 +1434,7 @@ impl Parser<'_> {
     }
 
     fn parse_endval_block(&mut self) {
+        let opener_i = self.i;
         let opener_span = self.bump_init_end_opener(false);
         let start = opener_span.start;
         let body_i = self.i;
@@ -1445,6 +1457,7 @@ impl Parser<'_> {
                 self.model.endval.push(a);
             }
         }
+        self.collect_endval_instruction(opener_i, body_i, body_end_i, end);
     }
 
     fn parse_histval_block(&mut self) {
@@ -1457,7 +1470,9 @@ impl Parser<'_> {
         if self.model.histval_block.is_none() {
             self.model.histval_block = Some(Span { start, end });
         }
-        self.model.histval_block_starts.push(self.model.histval.len());
+        self.model
+            .histval_block_starts
+            .push(self.model.histval.len());
         let saved = self.i;
         self.i = body_i;
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
@@ -2626,14 +2641,10 @@ impl Parser<'_> {
 
     /// 7.1's `syntax error, unexpected …` on the token at `index`.
     fn record_syntax_at(&mut self, index: usize, expecting: Option<&str>) {
-        let span = self
-            .tokens
-            .get(index)
-            .map(|tok| tok.span)
-            .unwrap_or(Span {
-                start: self.current_start(),
-                end: self.current_start(),
-            });
+        let span = self.tokens.get(index).map(|tok| tok.span).unwrap_or(Span {
+            start: self.current_start(),
+            end: self.current_start(),
+        });
         let unexpected = self.bison_token_name(index);
         let message = match expecting {
             Some(expected) => {
@@ -2923,10 +2934,7 @@ impl Parser<'_> {
 
     /// `values` / `weights` after `periods`. Missing both, or a repeated `values`,
     /// is the syntax error. `None` once that error is recorded.
-    fn read_irf_value_weights(
-        &mut self,
-        end_i: usize,
-    ) -> Option<IrfValueWeights> {
+    fn read_irf_value_weights(&mut self, end_i: usize) -> Option<IrfValueWeights> {
         let mut saw_values = false;
         let mut saw_weights = false;
         let mut values = Vec::new();
@@ -2968,7 +2976,11 @@ impl Parser<'_> {
             break;
         }
         if !saw_values {
-            let expecting = if saw_weights { "VALUES" } else { "VALUES or WEIGHTS" };
+            let expecting = if saw_weights {
+                "VALUES"
+            } else {
+                "VALUES or WEIGHTS"
+            };
             self.record_syntax_at(self.i, Some(expecting));
             return None;
         }
@@ -3066,7 +3078,10 @@ impl Parser<'_> {
             if !self.take_int_atom(true) {
                 return Some(self.finish_open_paren(open.start, inner_from));
             }
-            if self.colon_between_tokens(self.i.wrapping_sub(1), self.i).is_none() {
+            if self
+                .colon_between_tokens(self.i.wrapping_sub(1), self.i)
+                .is_none()
+            {
                 self.record_syntax_at(self.i, Some("':'"));
                 return Some(self.finish_open_paren(open.start, inner_from));
             }
@@ -3475,8 +3490,8 @@ impl Parser<'_> {
     }
 
     /// A dotted head at the cursor plus the offset of the identifier after it.
-    /// Every name the head carries must already be declared, matching the pin's
-    /// lexer rule that decides statement versus native line.
+    /// The leading plain name must be declared to enter the statement grammar.
+    /// A later name can be a subsample label rather than a declared symbol.
     fn dotted_head_at(&mut self) -> Option<(DottedHead, usize)> {
         if self.kind_at(0) == Some(TokenKind::LBrack) {
             let (names, after) = self.vector_head_names()?;
@@ -3551,7 +3566,7 @@ impl Parser<'_> {
         if self.kind_at(1) != Some(TokenKind::Dot) {
             return None;
         }
-        if let Some((second, _)) = self.declared_ident_at(2) {
+        if let Some((second, _)) = self.ident_at_name(2) {
             if self.kind_at(3) == Some(TokenKind::Dot) {
                 return Some((
                     DottedHead::Param {
@@ -4156,9 +4171,8 @@ impl Parser<'_> {
                 {
                     self.model.shape_refuses.push(refuse);
                 }
-            } else {
-                // The `options` / `subsamples` bodies are not read into records, but
-                // a repeated option in them is still a repeat 7.1 refuses.
+            } else if kind == DottedKind::Options {
+                // The `options` body is claimed but not read into records.
                 self.record_option_twice(self.i + open, close);
             }
             k = close - self.i;
@@ -4182,6 +4196,9 @@ impl Parser<'_> {
                 .map(|t| t.span.end)
                 .unwrap_or_else(|| self.src.len() as u32)
         };
+        if kind == DottedKind::Subsamples {
+            self.collect_subsample_statement(self.i, (self.i + k).min(self.tokens.len()));
+        }
         self.i = (self.i + k).min(self.tokens.len().saturating_sub(1));
         self.model.dotted_statements.push(DottedStatement {
             kind,
@@ -4249,6 +4266,15 @@ impl Parser<'_> {
             return FamilyValue::empty(name_span, from);
         }
         let first = &self.tokens[from];
+        if let Some((date, next)) = self.date_at(from) {
+            return FamilyValue {
+                kind: FamilyValueKind::Date,
+                span: date.span,
+                text: date.text,
+                names: Vec::new(),
+                next,
+            };
+        }
         // `A1:B10`: 7.1's `range` production reads the two halves as one value, so
         // the tail is part of this option, not a second option row. The lexer drops
         // the `:`, leaving two adjacent identifiers.
@@ -4585,7 +4611,7 @@ impl Parser<'_> {
             }
             self.bump();
         }
-        let end = self.current_start();
+        let end = self.block_end_after_consume();
         self.eat(TokenKind::Semi);
         SvarEquation {
             number,
@@ -5127,6 +5153,8 @@ impl Parser<'_> {
 
     fn parse_shocks_block(&mut self, record_stmts: bool) {
         let is_shocks = self.at_ident_ci("shocks");
+        let opener_i = self.i;
+        let keyword = self.tokens[opener_i].text(self.src).to_ascii_lowercase();
         let start = self.bump().span.start;
         if self.at(TokenKind::LParen) {
             if is_shocks {
@@ -5164,19 +5192,26 @@ impl Parser<'_> {
         };
         let body_i = self.i;
         let body_end_i = self.consume_until_end();
-        self.record_missing_end_if_unclosed("shocks", opener_span, body_i, body_end_i);
-        let end = self.current_start();
-        self.model.shocks_block = Some(Span { start, end });
-        self.collect_shock_vars(body_i, body_end_i);
-        if record_stmts {
+        self.record_missing_end_if_unclosed(&keyword, opener_span, body_i, body_end_i);
+        let end = self.block_end_after_consume();
+        if is_shocks || keyword == "mshocks" {
+            self.model.shocks_block = Some(Span { start, end });
+        }
+        let block_kind = self.shock_block_kind(opener_i, body_i);
+        if !matches!(block_kind, crate::model::ShockBlockKind::Heterogeneous) {
+            self.collect_shock_vars(body_i, body_end_i);
+        }
+        if record_stmts && matches!(block_kind, crate::model::ShockBlockKind::Regular) {
             self.model
                 .shock_stmt_block_starts
                 .push(self.model.shock_stmts.len());
             self.collect_shock_stmts(body_i, body_end_i);
         }
+        self.collect_shock_block(opener_i, body_i, body_end_i, end, block_kind);
         if self.i > body_end_i {
             self.record_missing_shocks_semis(body_i, body_end_i);
         }
+        self.record_shock_shape_refuses(opener_i, body_i, body_end_i, block_kind);
     }
 
     fn parse_varobs(&mut self) {
@@ -5893,7 +5928,13 @@ impl Parser<'_> {
                 continue;
             }
             if self.at_ident_ci("var") {
-                self.parse_shock_var_stmt(end_i);
+                // `var x; periods ...; values ...;` is deterministic and must
+                // never enter the stochastic variance checks.
+                if self.shock_var_is_scheduled(self.i, end_i) {
+                    self.skip_scheduled_shock(end_i);
+                } else {
+                    self.parse_shock_var_stmt(end_i);
+                }
             } else if self.at_ident_ci("corr") {
                 self.parse_shock_corr_stmt(end_i);
             } else if self.at_ident_ci("skew") {
@@ -7095,9 +7136,7 @@ impl Parser<'_> {
         // A bare `end` with no `;` is the closer that returns the lexer to
         // `INITIAL`. That shape keeps the missing-`end` diagnostic. `end` after
         // an operator, or `end = …`, is the END token inside the equation.
-        if self.in_equation_body
-            && lexeme.eq_ignore_ascii_case("end")
-            && !self.end_is_bare_closer()
+        if self.in_equation_body && lexeme.eq_ignore_ascii_case("end") && !self.end_is_bare_closer()
         {
             self.record_issue(ParseIssue {
                 kind: ParseIssueKind::UnexpectedEnd,
@@ -7468,6 +7507,7 @@ impl Parser<'_> {
         let mut opener: Option<String> = None;
         let mut opener_span = Span::default();
         let mut saw_datafile = false;
+        let mut stoch_options = None;
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             if !saw_ident && self.at(TokenKind::Ident) {
                 saw_ident = true;
@@ -7484,6 +7524,9 @@ impl Parser<'_> {
                 self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
                 self.record_deprecated_options_in_range(from, self.i);
                 if let Some(cmd) = opener.as_deref() {
+                    if cmd.eq_ignore_ascii_case("stoch_simul") {
+                        stoch_options = Some((from, self.i));
+                    }
                     saw_datafile =
                         self.record_skip_command_options(cmd, from, self.i) || saw_datafile;
                     self.record_option_twice(from, self.i);
@@ -7512,6 +7555,9 @@ impl Parser<'_> {
                 has_datafile: saw_datafile,
             });
         }
+        if opener.as_deref() == Some("stoch_simul") {
+            self.collect_stoch_simul_request(opener_span, stoch_options);
+        }
         self.eat(TokenKind::Semi);
     }
 
@@ -7519,6 +7565,7 @@ impl Parser<'_> {
     /// whether this statement listed `datafile=` (only `estimation` asks).
     fn record_skip_command_options(&mut self, opener: &str, from: usize, to: usize) -> bool {
         let mut saw_datafile = false;
+        self.collect_date_options(opener, from, to);
         if opener.eq_ignore_ascii_case("prior_function")
             || opener.eq_ignore_ascii_case("posterior_function")
         {
@@ -7937,9 +7984,6 @@ impl Parser<'_> {
             "deterministic_trends",
             "estimated_params_remove",
             "verbatim",
-            "heteroskedastic_shocks",
-            "shock_paths",
-            "perfect_foresight_controlled_paths",
         ];
         BLOCKS.iter().any(|kw| self.at_ident_ci(kw))
     }

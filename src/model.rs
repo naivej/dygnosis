@@ -338,6 +338,206 @@ pub enum ShockKind {
     Skew(Vec<Name>),
 }
 
+/// A written date expression, including a possible `+ INTEGER` offset.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DateExpr {
+    pub text: String,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PeriodPoint {
+    Integer(i32),
+    Date(DateExpr),
+    End,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PeriodRange {
+    pub first: PeriodPoint,
+    /// `None` for one period; `End` is legal only in exogenous `shock_paths`.
+    pub last: Option<PeriodPoint>,
+    pub span: Span,
+}
+
+/// The written value of a shock or path instruction. Expressions are never
+/// evaluated by the parser; the optional tree supports later name checks.
+#[derive(Clone, Debug)]
+pub struct WrittenValue {
+    pub text: String,
+    pub span: Span,
+    pub expr: Option<ExprId>,
+    /// Names and qualified references in a `shock_paths` value. Empty on
+    /// ordinary shock values. The raw text above remains authoritative.
+    pub path_refs: Vec<PathReference>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PathReference {
+    pub namespace: Option<String>,
+    pub name: Name,
+    pub span: Span,
+    pub lag: Option<String>,
+    pub learnt_in: Option<PeriodPoint>,
+    pub call: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShockOperation {
+    Values,
+    Add,
+    Multiply,
+    Scales,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShockBlockKind {
+    Regular,
+    Surprise,
+    LearntIn,
+    Multiplicative,
+    Heteroskedastic,
+    /// Parsed and kept apart from ordinary stochastic checks; diagnostics for
+    /// this 7.2 form belong to 0.9.
+    Heterogeneous,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ShockOptions {
+    pub overwrite: bool,
+    pub learnt_in: Option<PeriodPoint>,
+    pub learnt_in_span: Option<Span>,
+    pub relative_to_initval: bool,
+    pub heterogeneity: Option<(Name, Span)>,
+    /// Option names and spans in written order, including repeated options.
+    pub written: Vec<(String, Span)>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ScheduledShock {
+    pub name: Name,
+    pub name_span: Span,
+    pub periods: Vec<PeriodRange>,
+    pub values: Vec<WrittenValue>,
+    pub operation: ShockOperation,
+    pub span: Span,
+}
+
+/// One written shocks-family block, including its otherwise empty body.
+#[derive(Clone, Debug)]
+pub struct ShockBlock {
+    pub kind: ShockBlockKind,
+    pub options: ShockOptions,
+    pub stochastic: Vec<ShockStmt>,
+    pub scheduled: Vec<ScheduledShock>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum PathTarget {
+    Exogenous {
+        name: Name,
+        span: Span,
+    },
+    Controlled {
+        exogenize: Name,
+        exogenize_span: Span,
+        endogenize: Name,
+        endogenize_span: Span,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct PathStanza {
+    pub target: PathTarget,
+    pub periods: Vec<PeriodRange>,
+    pub values: Vec<WrittenValue>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct PathBlock {
+    pub options: ShockOptions,
+    pub stanzas: Vec<PathStanza>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct EndvalEntry {
+    pub name: Name,
+    pub name_span: Span,
+    pub value: WrittenValue,
+    pub operation: ShockOperation,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct EndvalInstruction {
+    pub learnt_in: Option<PeriodPoint>,
+    pub learnt_in_span: Option<Span>,
+    pub entries: Vec<EndvalEntry>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct DatabaseDeclaration {
+    pub names: Vec<(Name, Span)>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct SetTimeStatement {
+    pub value: DateExpr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SubsampleHead {
+    Symbol(Name, Span),
+    Std(Name, Span),
+    Corr(Name, Span, Name, Span),
+}
+
+#[derive(Clone, Debug)]
+pub struct SubsampleRange {
+    pub name: Name,
+    pub name_span: Span,
+    pub first: DateExpr,
+    pub last: DateExpr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum SubsampleInstruction {
+    Declare {
+        head: SubsampleHead,
+        ranges: Vec<SubsampleRange>,
+        span: Span,
+    },
+    Copy {
+        target: SubsampleHead,
+        source: SubsampleHead,
+        span: Span,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct DateOption {
+    pub command: String,
+    pub name: String,
+    pub value: DateExpr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct StochSimulRequest {
+    pub span: Span,
+    /// Explicit `irf=INTEGER`, including zero. `None` means no explicit value.
+    pub irf: Option<(i32, Span)>,
+    /// An explicit `irf_shocks=(...)` list; empty is different from absent.
+    pub irf_shocks: Option<Vec<(Name, Span)>>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Assignment {
     pub name: Name,
@@ -386,6 +586,17 @@ pub struct Model {
     pub shock_stmts: Vec<ShockStmt>,
     /// Flat-vector index where each parsed `shocks` block begins, including empty blocks.
     pub shock_stmt_block_starts: Vec<usize>,
+    /// Written 7.2 shock blocks in file order. `shock_stmts` above remains the
+    /// flat stochastic view used by diagnostics shipped before 0.7.
+    pub shock_blocks: Vec<ShockBlock>,
+    pub shock_paths: Vec<PathBlock>,
+    pub controlled_paths: Vec<PathBlock>,
+    pub endval_instructions: Vec<EndvalInstruction>,
+    pub databases: Vec<DatabaseDeclaration>,
+    pub subsamples: Vec<SubsampleInstruction>,
+    pub set_time: Vec<SetTimeStatement>,
+    pub date_options: Vec<DateOption>,
+    pub stoch_simul_requests: Vec<StochSimulRequest>,
     /// `varobs` names in declaration order, including repeats.
     pub varobs: Vec<ObservedVar>,
     /// First `varobs …;` statement.
@@ -1286,9 +1497,18 @@ impl Model {
     /// option values as declarations or as parameter assignments.
     pub fn statement_spans(&self) -> Vec<Span> {
         let mut spans: Vec<Span> = self
-            .ms_statements
+            .shock_blocks
             .iter()
-            .map(|stmt| stmt.span)
+            .map(|block| block.span)
+            .chain(self.shock_paths.iter().map(|block| block.span))
+            .chain(self.controlled_paths.iter().map(|block| block.span))
+            .chain(self.databases.iter().map(|decl| decl.span))
+            .chain(self.subsamples.iter().map(|item| match item {
+                SubsampleInstruction::Declare { span, .. }
+                | SubsampleInstruction::Copy { span, .. } => *span,
+            }))
+            .chain(self.set_time.iter().map(|stmt| stmt.span))
+            .chain(self.ms_statements.iter().map(|stmt| stmt.span))
             .chain(self.data_statements.iter().map(|stmt| stmt.span))
             .chain(self.dotted_statements.iter().map(|stmt| stmt.span))
             .chain(self.ms_unparsed_spans.iter().copied())
