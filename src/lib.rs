@@ -1,8 +1,7 @@
 //! Thin Dynare analysis library.
 //!
-//! Scope follows the 0.5.5 cut line in `dev_logs/0.5/0.5.5/masterplan.md`
-//! (the static refusals the preprocessor prints only when it writes MATLAB,
-//! on the file you edit).
+//! Scope follows the 0.6.0 cut line in `dev_logs/0.6/0.6.0/masterplan.md`
+//! (method of moments, matched moments and IRFs, and IRF and moment calibration).
 //! Dynare compute (steady state, BK, identification, MATLAB) stays out.
 
 pub mod auto_fix;

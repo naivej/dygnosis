@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.6.0
+
+Reads method of moments, matched moments and IRFs, and the IRF and moment calibration blocks, and reports the refusals Dynare makes on them. Codes `E382`–`E392`.
+
+Diagnostics implemented in this release:
+- **E382**–**E385** — `method_of_moments` needs `mom_method` (`GMM`, `SMM`, or `IRF_MATCHING`); GMM and SMM need `datafile`; `analytic_standard_errors` and `analytic_jacobian` need GMM; only one of the HP, one-sided HP, and bandpass filters.
+- **E386** — a `matched_moments` row is not a product of endogenous variables: `Matched moment expression has incorrect format`.
+- **E387**–**E392** — a matched-IRF shock that is not exogenous, a repeated endogenous/exogenous pair or tuple, `periods` and `values` (or `weights`) of different lengths, and a date written in `periods`.
+- **E058** and **E317** reach the name slots of `matched_irfs`, `matched_irfs_weights`, `irf_calibration`, and `moment_calibration`.
+- **E239** and **E240** reach the trailing name lists of `forecast`, `rplot`, `dynasave`, `dynatype`, and the shock-decomposition commands. `rplot` allows an endogenous or an exogenous.
+
+Other changes:
+- `dynare_list_options` knows `matched_moments`, `matched_irfs`, `matched_irfs_weights`, and `moment_calibration`.
+- A variable may be named after a block opener (`shocks`, `matched_irfs`) or after a command whose only lexer rule is at the start of a statement (`steady`, `dynatype`). `forecast`, `identification`, `simul`, `stoch_simul`, and `varobs` are still not names.
+- `model = 0.2;` and `steady = 0.9;` at the start of a statement are syntax errors, as they are in Dynare. Inside a block, `end` is the block closer, not a name.
+
 ## v0.5.5
 
 Adds the refusals the Dynare preprocessor prints only at its last stage, when it writes the MATLAB files — after its check and transform stages have already accepted the file. The file you edit is enough to decide each of them. Codes `E380`, `E381` and `W205`.
