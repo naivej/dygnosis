@@ -2,7 +2,7 @@
 
 ## v0.6.1
 
-Pins language checks and optional honesty tests to Dynare 7.2. Dygnosis itself does not invoke the official preprocessor.
+Pins language checks and optional honesty tests to Dynare 7.2.
 
 - **E243** uses 7.2's `histval: y(0) declared twice` sentence.
 - `histval_file` no longer offers `nobs` or `last_simulation_period`; either option reports Dynare's syntax error on its name. `initval_file` still accepts both.
