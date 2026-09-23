@@ -14,18 +14,21 @@ pub fn check_estimated_params(model: &Model) -> Vec<Diagnostic> {
         model,
         "estimated_params",
         &model.estimated_params,
+        &model.estimated_params_block_starts,
         true,
     ));
     out.extend(check_one_block(
         model,
         "estimated_params_init",
         &model.estimated_params_init,
+        &model.estimated_params_init_block_starts,
         false,
     ));
     out.extend(check_one_block(
         model,
         "estimated_params_bounds",
         &model.estimated_params_bounds,
+        &model.estimated_params_bounds_block_starts,
         false,
     ));
     out
@@ -35,6 +38,7 @@ fn check_one_block(
     model: &Model,
     block: &str,
     entries: &[EstimatedParam],
+    block_starts: &[usize],
     main: bool,
 ) -> Vec<Diagnostic> {
     let mut out = Vec::new();
@@ -61,7 +65,13 @@ fn check_one_block(
     let mut seen_skew: HashMap<Name, Span> = HashMap::new();
     let mut seen_corr: HashMap<(Name, Name), (String, String)> = HashMap::new();
 
-    for entry in entries {
+    for (index, entry) in entries.iter().enumerate() {
+        if block_starts.binary_search(&index).is_ok() {
+            seen_param.clear();
+            seen_stderr.clear();
+            seen_corr.clear();
+            seen_skew.clear();
+        }
         let name = model.name(entry.name);
         match entry.kind {
             EstimatedParamKind::Param => {
@@ -140,43 +150,50 @@ fn check_one_block(
         }
     }
 
-    let declared_params: HashSet<Name> = entries
-        .iter()
-        .filter(|e| e.kind == EstimatedParamKind::Param)
-        .filter(|e| !model.name(e.name).eq_ignore_ascii_case("dsge_prior_weight"))
-        .map(|e| e.name)
-        .collect();
-    if declared_params.is_empty() {
-        return out;
-    }
-    for entry in entries {
-        for id in [
-            entry.init_expr,
-            entry.lower_expr,
-            entry.upper_expr,
-            entry.mean_expr,
-            entry.std_expr,
-        ]
-        .into_iter()
-        .flatten()
-        {
-            for r in model.exprs.walk_idents(id) {
-                if !declared_params.contains(&r.name) {
-                    continue;
+    for (block_index, &start) in block_starts.iter().enumerate() {
+        let end = block_starts
+            .get(block_index + 1)
+            .copied()
+            .unwrap_or(entries.len());
+        let block_entries = &entries[start..end];
+        let declared_params: HashSet<Name> = block_entries
+            .iter()
+            .filter(|e| e.kind == EstimatedParamKind::Param)
+            .filter(|e| !model.name(e.name).eq_ignore_ascii_case("dsge_prior_weight"))
+            .map(|e| e.name)
+            .collect();
+        if declared_params.is_empty() {
+            continue;
+        }
+        for entry in block_entries {
+            for id in [
+                entry.init_expr,
+                entry.lower_expr,
+                entry.upper_expr,
+                entry.mean_expr,
+                entry.std_expr,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                for r in model.exprs.walk_idents(id) {
+                    if !declared_params.contains(&r.name) {
+                        continue;
+                    }
+                    if entry.kind == EstimatedParamKind::Param && r.name == entry.name {
+                        continue;
+                    }
+                    let used = model.name(r.name);
+                    let target = decl_target(model, entry);
+                    out.push(err(
+                        entry.span,
+                        "E248",
+                        format!(
+                            "in `{block}' block, the value of estimated parameter {used} is used in the declaration for {target}. This behaviour is undefined."
+                        ),
+                    ));
+                    break;
                 }
-                if entry.kind == EstimatedParamKind::Param && r.name == entry.name {
-                    continue;
-                }
-                let used = model.name(r.name);
-                let target = decl_target(model, entry);
-                out.push(err(
-                    entry.span,
-                    "E248",
-                    format!(
-                        "in `{block}' block, the value of estimated parameter {used} is used in the declaration for {target}. This behaviour is undefined."
-                    ),
-                ));
-                break;
             }
         }
     }

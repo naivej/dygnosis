@@ -1059,8 +1059,8 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         kind: HonestyKind::Error {
             workspace_only: false,
         },
-        their_needle: "hist_val: (y, 0) declared twice",
-        our_needle: "hist_val: (y, 0) declared twice",
+        their_needle: "histval: y(0) declared twice",
+        our_needle: "histval: y(0) declared twice",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -3547,6 +3547,26 @@ const HONESTY_FIRE: &[HonestyRow] = &[
     },
     HonestyRow {
         code: "E001",
+        fixture: "pin72/e001_histval_file_nobs.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "syntax error, unexpected NOBS",
+        our_needle: "syntax error, unexpected NOBS",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "pin72/e001_histval_file_last_simulation_period.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "syntax error, unexpected LAST_SIMULATION_PERIOD",
+        our_needle: "syntax error, unexpected LAST_SIMULATION_PERIOD",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
         fixture: "d_ms/e001_data_nobs_negative.mod",
         kind: HonestyKind::Error {
             workspace_only: false,
@@ -5312,6 +5332,55 @@ fn writer_rows_quiet_at_check_and_transform() {
         "writer rows must be quiet at check and transform:\n{}",
         failures.join("\n")
     );
+}
+
+/// Dynare 7.2 accepts repeated rows after each of these block boundaries.
+#[test]
+fn pin72_accepted_blocks_and_initval_file_options() {
+    const ACCEPTED: &[&str] = &[
+        "pin72/quiet_e111_two_shocks_blocks.mod",
+        "pin72/quiet_e111_two_corr_blocks.mod",
+        "pin72/quiet_e111_two_overwrite_shocks_blocks.mod",
+        "pin72/quiet_e111_two_overwrite_corr_blocks.mod",
+        "pin72/quiet_e243_two_histval_blocks.mod",
+        "pin72/quiet_e244_two_estimated_params_blocks.mod",
+        "pin72/quiet_e244_two_estimated_params_init_blocks.mod",
+        "pin72/quiet_e244_two_estimated_params_bounds_blocks.mod",
+        "pin72/quiet_e245_two_estimated_params_blocks.mod",
+        "pin72/quiet_e246_two_estimated_params_blocks.mod",
+        "pin72/quiet_e247_two_estimated_params_blocks.mod",
+        "pin72/quiet_e248_cross_block_value.mod",
+        "pin72/quiet_e261_two_observation_trends_blocks.mod",
+        "pin72/quiet_e273_two_generate_irfs_blocks.mod",
+        "pin72/quiet_e313_two_filter_initial_state_blocks.mod",
+        "pin72/quiet_e315_two_optim_weights_blocks.mod",
+        "pin72/quiet_e316_two_optim_weights_pairs.mod",
+        "pin72/quiet_initval_file_nobs.mod",
+        "pin72/quiet_initval_file_last_simulation_period.mod",
+    ];
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    let mut failures = Vec::new();
+    for rel in ACCEPTED {
+        let path = fixture(rel);
+        let text = read_path(&path);
+        let theirs = spawn(&text, &path, &pp, JsonStage::Check);
+        if !theirs.success {
+            failures.push(format!("{rel}: official refused: {}", theirs.raw_stderr));
+            continue;
+        }
+        let ours = check_file(&text, path.to_str().expect("utf-8 fixture path"));
+        let errors: Vec<_> = ours
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        if !errors.is_empty() {
+            failures.push(format!("{rel}: product Errors: {errors:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]

@@ -41,7 +41,10 @@ fn check_w060(model: &Model) -> Vec<Diagnostic> {
 fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
     let mut seen: HashSet<SeenKey> = HashSet::new();
     let mut diagnostics = Vec::new();
-    for stmt in &model.shock_stmts {
+    for (index, stmt) in model.shock_stmts.iter().enumerate() {
+        if model.shock_stmt_block_starts.binary_search(&index).is_ok() {
+            seen.clear();
+        }
         let span = nonempty(stmt.span);
         match &stmt.kind {
             ShockKind::Var(name) | ShockKind::Stderr(name) => {

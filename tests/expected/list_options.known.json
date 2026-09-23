@@ -1515,7 +1515,7 @@
   "histval_file": {
     "command": "histval_file",
     "known": true,
-    "n_options": 8,
+    "n_options": 6,
     "options": [
       {
         "name": "datafile",
@@ -1536,14 +1536,6 @@
       {
         "name": "last_obs",
         "description": "The observation number or the date (see"
-      },
-      {
-        "name": "last_simulation_period",
-        "description": "Assign a date to the last simulation period, i.e."
-      },
-      {
-        "name": "nobs",
-        "description": "The number of observations following first_obs <first_obs = [INTEGER1:INTEGER2]> to be used."
       },
       {
         "name": "series",

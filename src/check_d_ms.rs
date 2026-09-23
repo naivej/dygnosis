@@ -1,7 +1,7 @@
 //! MS-SBVAR family refusals (0.5.4 02): one code per distinct official sentence.
 //!
-//! Every message here is copied from the installed Dynare 7.1 (`9c61fb6e`),
-//! including their misspellings (`transitions probabilities`, `probabilites`,
+//! The MS-SBVAR messages were copied from Dynare 7.1 (`9c61fb6e`) and
+//! checked against the 7.2 pin, including their misspellings (`transitions probabilities`, `probabilites`,
 //! `subsample statement`), their missing full stops, and the bare backticks
 //! around `parameter_set`. The records are the ones 01 P-parse built
 //! (`Model::data_statements`, `ms_statements`, `dotted_statements`,
@@ -9,7 +9,7 @@
 //!
 //! Three rules keep the codes honest.
 //!
-//! - **One statement, one Error.** 7.1 exits at the first refusal inside a
+//! - **One statement, one Error.** The pin exits at the first refusal inside a
 //!   statement's parse or check pass, so each section stops at its first fire, in
 //!   the order their own code tests things.
 //! - **A shape the grammar cannot spell is not a shape we refuse.** Where a
@@ -38,10 +38,10 @@ use crate::model::{
 };
 use crate::span::Span;
 
-/// 7.1 reads the whole file, then runs each statement's check pass in file
+/// The pinned preprocessor reads the whole file, then runs each statement's check pass in file
 /// order. Both phases stop at their first refusal, so the walk does too.
 ///
-/// A shape the grammar cannot spell is a **parse**-stage refuse: 7.1's parser
+/// A shape the grammar cannot spell is a **parse**-stage refuse: its parser
 /// stops on it before the run reaches any check pass, whatever line the check
 /// pass would have been on. So the shape sweep joins the parse phase and is
 /// ordered against its units by file position.
@@ -95,7 +95,7 @@ fn containing_statement_start(spans: &[Span], refuse: &ShapeRefuse) -> u32 {
 /// The first shape refuse that belongs to the statement starting at `at`, in file
 /// order.
 ///
-/// 7.1's parser reads a statement's tokens left to right and stops at the first
+/// The pinned parser reads a statement's tokens left to right and stops at the first
 /// one its grammar cannot spell, so a shape refuse anywhere inside a statement
 /// pre-empts every sentence that statement's own actions or check pass would
 /// print — including the ones the grammar's actions print while parsing
@@ -123,19 +123,21 @@ fn unit_end(model: &Model, unit: &CheckUnit) -> u32 {
     .min(model.source.len() as u32)
 }
 
-/// Our wording for a shape 7.1 refuses with generic bison text: short, one
-/// problem, naming the command or the option. The hint names what the grammar
-/// takes there.
+/// A known token-level syntax error keeps the official text. Otherwise a
+/// generic bison refusal uses our short wording naming the command or option.
 fn shape_refuse_message(refuse: &ShapeRefuse) -> String {
-    crate::model::shape_refuse_wording(&refuse.subject, refuse.expected)
+    refuse
+        .official_message
+        .map(str::to_string)
+        .unwrap_or_else(|| crate::model::shape_refuse_wording(&refuse.subject, refuse.expected))
 }
 
-/// The refusals 7.1 prints while reading the file, in file order. Returns `true`
+/// The refusals the pin prints while reading the file, in file order. Returns `true`
 /// when one fired.
 fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
     // Every parse-time unit of the family, ordered by where it starts. The shape
     // refusals are units of their own, so a refuse written before a sentence's
-    // statement wins and one written after it loses — 7.1's parser stops at the
+    // statement wins and one written after it loses — the pinned parser stops at the
     // first of the two in file order.
     enum Unit<'a> {
         Shape(&'a ShapeRefuse),
@@ -153,7 +155,7 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
         units.push((at, Unit::Shape(refuse)));
     }
     // A top-level `symbol = …;` reaches the grammar only when the head is declared,
-    // and 7.1 refuses it while parsing when the symbol is not a parameter.
+    // and the pin refuses it while parsing when the symbol is not a parameter.
     for assignment in &model.helper_assignments {
         if declared_names(model).contains(&assignment.name) {
             units.push((assignment.span.start, Unit::TopAssignment(assignment)));
@@ -215,7 +217,7 @@ enum CheckUnit<'a> {
     Prior(&'a DottedStatement),
 }
 
-/// The refusals 7.1 prints in the check pass, in file order.
+/// The refusals the pin prints in the check pass, in file order.
 fn check_check_phase(model: &Model, out: &mut Vec<Diagnostic>) {
     let mut units: Vec<(u32, CheckUnit)> = Vec::new();
     for stmt in &model.data_statements {
@@ -243,7 +245,7 @@ fn check_check_phase(model: &Model, out: &mut Vec<Diagnostic>) {
     let mut chains: i32 = 0;
     let mut second_identification = false;
     for (at, unit) in units {
-        // 7.1's parser stops inside the statement before its check pass runs, so a
+        // The pinned parser stops inside the statement before its check pass runs, so a
         // shape refuse written anywhere in this statement beats every sentence the
         // statement would print here.
         let end = unit_end(model, &unit);
@@ -438,7 +440,7 @@ fn check_ms_estimation(stmt: &MsStatement, out: &mut Vec<Diagnostic>) -> bool {
     true
 }
 
-/// `parameter_set` is required. The `datafile` option arrives after 7.1 and is
+/// `parameter_set` is required. The `datafile` option arrives after 7.2 and is
 /// bison junk at the pin, so nothing here reads it. Returns `true` when it
 /// refused.
 fn check_conditional_forecast(stmt: &MsStatement, out: &mut Vec<Diagnostic>) -> bool {

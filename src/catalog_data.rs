@@ -392,8 +392,6 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("first_obs", "The observation number or the date (see"),
         ("first_simulation_period", "Assign a date to the first simulation period, i.e."),
         ("last_obs", "The observation number or the date (see"),
-        ("last_simulation_period", "Assign a date to the last simulation period, i.e."),
-        ("nobs", "The number of observations following first_obs <first_obs = [INTEGER1:INTEGER2]> to be used."),
         ("series", "The name of a DSERIES containing the data (see dseries-members)"),
     ]),
     ("identification", &[

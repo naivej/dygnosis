@@ -766,7 +766,14 @@ fn check_filter_initial_state(model: &Model) -> Vec<Diagnostic> {
     let excluded: HashSet<Name> = model.excluded_endogenous.iter().map(|d| d.name).collect();
     let mut seen: HashSet<(Name, i32)> = HashSet::new();
     let mut out = Vec::new();
-    for entry in &model.filter_initial_state {
+    for (index, entry) in model.filter_initial_state.iter().enumerate() {
+        if model
+            .filter_initial_state_block_starts
+            .binary_search(&index)
+            .is_ok()
+        {
+            seen.clear();
+        }
         let name = model.name(entry.name);
         // A symbol `model_remove` dropped was declared when this entry was written, and
         // 7.1 still refuses the entry — with the timing message, not the undeclared one.
@@ -849,7 +856,15 @@ fn check_optim_weights(model: &Model) -> Vec<Diagnostic> {
     let mut singles: HashSet<Name> = HashSet::new();
     let mut pairs: HashSet<(Name, Name)> = HashSet::new();
     let mut out = Vec::new();
-    for row in &model.optim_weights {
+    for (index, row) in model.optim_weights.iter().enumerate() {
+        if model
+            .optim_weights_block_starts
+            .binary_search(&index)
+            .is_ok()
+        {
+            singles.clear();
+            pairs.clear();
+        }
         if row.second.is_none() && !singles.insert(row.first) {
             out.push(err(
                 row.span,

@@ -40,7 +40,7 @@ fn ar1() -> &'static str {
 const E241_EXO: &str = "You have not set the following exogenous variables in endval: e";
 const E241_ENDO: &str = "You have not set the following endogenous variables in histval: y";
 const E242_MSG: &str = "histval: the lag on y should be less than or equal to 0";
-const E243_MSG: &str = "hist_val: (y, 0) declared twice";
+const E243_MSG: &str = "histval: y(0) declared twice";
 
 #[test]
 fn registry_known_codes_grew_to_306() {

@@ -1457,6 +1457,7 @@ impl Parser<'_> {
         if self.model.histval_block.is_none() {
             self.model.histval_block = Some(Span { start, end });
         }
+        self.model.histval_block_starts.push(self.model.histval.len());
         let saved = self.i;
         self.i = body_i;
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
@@ -1586,6 +1587,9 @@ impl Parser<'_> {
         if self.model.generate_irfs_span.is_none() {
             self.model.generate_irfs_span = Some(Span { start, end });
         }
+        self.model
+            .generate_irfs_block_starts
+            .push(self.model.generate_irfs.len());
         let saved = self.i;
         self.i = body_i;
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
@@ -1773,6 +1777,9 @@ impl Parser<'_> {
         if self.model.filter_initial_state_block.is_none() {
             self.model.filter_initial_state_block = Some(Span { start, end });
         }
+        self.model
+            .filter_initial_state_block_starts
+            .push(self.model.filter_initial_state.len());
         let saved = self.i;
         self.i = body_i;
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
@@ -4892,6 +4899,9 @@ impl Parser<'_> {
         let body_i = self.i;
         let body_end_i = self.consume_until_end();
         self.record_missing_end_if_unclosed("optim_weights", opener_span, body_i, body_end_i);
+        self.model
+            .optim_weights_block_starts
+            .push(self.model.optim_weights.len());
         let saved = self.i;
         self.i = body_i;
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
@@ -5155,6 +5165,9 @@ impl Parser<'_> {
         self.model.shocks_block = Some(Span { start, end });
         self.collect_shock_vars(body_i, body_end_i);
         if record_stmts {
+            self.model
+                .shock_stmt_block_starts
+                .push(self.model.shock_stmts.len());
             self.collect_shock_stmts(body_i, body_end_i);
         }
         if self.i > body_end_i {
@@ -5250,6 +5263,9 @@ impl Parser<'_> {
         self.record_missing_end_if_unclosed("estimated_params", opener_span, body_i, body_end_i);
         let end = self.current_start();
         self.model.estimated_params_span = Some(Span { start, end });
+        self.model
+            .estimated_params_block_starts
+            .push(self.model.estimated_params.len());
         self.collect_estimated_params(
             body_i,
             body_end_i,
@@ -5271,6 +5287,9 @@ impl Parser<'_> {
         );
         let end = self.current_start();
         self.model.estimated_params_init_span = Some(Span { start, end });
+        self.model
+            .estimated_params_init_block_starts
+            .push(self.model.estimated_params_init.len());
         self.collect_estimated_params(
             body_i,
             body_end_i,
@@ -5292,6 +5311,9 @@ impl Parser<'_> {
         );
         let end = self.current_start();
         self.model.estimated_params_bounds_span = Some(Span { start, end });
+        self.model
+            .estimated_params_bounds_block_starts
+            .push(self.model.estimated_params_bounds.len());
         self.collect_estimated_params(
             body_i,
             body_end_i,
@@ -5730,6 +5752,8 @@ impl Parser<'_> {
     }
 
     fn collect_observation_trends(&mut self, start_i: usize, end_i: usize) {
+        // Dynare clears trend_elements at the end of each block.
+        let mut seen = std::collections::HashSet::new();
         let mut i = start_i;
         while i < end_i {
             let stmt_start = i;
@@ -5745,7 +5769,7 @@ impl Parser<'_> {
                         let name = self.tokens[j].text(self.src).to_string();
                         let span = self.tokens[j].span;
                         let id = self.intern.intern(&name);
-                        if !self.model.observation_trends.iter().any(|(n, _)| *n == id) {
+                        if seen.insert(id) {
                             self.model.observation_trends.push((id, span));
                         } else {
                             self.model.observation_trends_dups.push((id, span));
@@ -7497,6 +7521,22 @@ impl Parser<'_> {
             self.model.prior_function_has_parens = true;
         }
         let opts = top_options(&self.tokens, self.src, from, to);
+        if opener.eq_ignore_ascii_case("histval_file") {
+            for opt in &opts {
+                let message = if opt.ident.eq_ignore_ascii_case("nobs") {
+                    Some("syntax error, unexpected NOBS")
+                } else if opt.ident.eq_ignore_ascii_case("last_simulation_period") {
+                    Some("syntax error, unexpected LAST_SIMULATION_PERIOD")
+                } else {
+                    None
+                };
+                if let Some(message) = message {
+                    self.model
+                        .shape_refuses
+                        .push(ShapeRefuse::official(opt.span, opener, message));
+                }
+            }
+        }
         if is_decomposition_command(opener) && self.model.with_epilogue_span.is_none() {
             if let Some(opt) = opts
                 .iter()

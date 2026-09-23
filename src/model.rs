@@ -384,13 +384,17 @@ pub struct Model {
     pub shocks_vars: Vec<Name>,
     /// `var` / `corr` statements from `shocks` blocks only (not `mshocks`).
     pub shock_stmts: Vec<ShockStmt>,
+    /// Flat-vector index where each parsed `shocks` block begins, including empty blocks.
+    pub shock_stmt_block_starts: Vec<usize>,
     /// `varobs` names in declaration order, including repeats.
     pub varobs: Vec<ObservedVar>,
     /// First `varobs …;` statement.
     pub varobs_span: Option<Span>,
     pub estimated_params: Vec<EstimatedParam>,
+    /// Flat-vector index where each `estimated_params` block begins.
+    pub estimated_params_block_starts: Vec<usize>,
     pub estimated_params_span: Option<Span>,
-    /// First occurrence of each `observation_trends` leading name.
+    /// First occurrence of each leading name within each `observation_trends` block.
     pub observation_trends: Vec<(Name, Span)>,
     pub observation_trends_span: Option<Span>,
     /// `ramsey_model` / `ramsey_policy` / `discretionary_policy` / `osr` in file order.
@@ -576,11 +580,15 @@ pub struct Model {
     /// `histval(all_values_required)`.
     pub histval_all_values_required: bool,
     pub histval: Vec<HistvalEntry>,
+    /// Flat-vector index where each `histval` block begins.
+    pub histval_block_starts: Vec<usize>,
     /// Parsed `estimated_params_init` entries (not `estimated_params`).
     pub estimated_params_init: Vec<EstimatedParam>,
+    pub estimated_params_init_block_starts: Vec<usize>,
     pub estimated_params_init_span: Option<Span>,
     /// Parsed `estimated_params_bounds` entries.
     pub estimated_params_bounds: Vec<EstimatedParam>,
+    pub estimated_params_bounds_block_starts: Vec<usize>,
     pub estimated_params_bounds_span: Option<Span>,
     pub osr_params_bounds: Vec<OsrBound>,
     /// Opener span of the first `osr_params_bounds` block.
@@ -597,9 +605,10 @@ pub struct Model {
     pub varexobs_second_span: Option<Span>,
     pub varobs_statement_count: u32,
     pub varobs_second_span: Option<Span>,
-    /// Later `observation_trends` leading names that repeat an earlier one.
+    /// Later leading names that repeat an earlier one in the same block.
     pub observation_trends_dups: Vec<(Name, Span)>,
     pub generate_irfs: Vec<GenerateIrfsElement>,
+    pub generate_irfs_block_starts: Vec<usize>,
     pub generate_irfs_span: Option<Span>,
     /// Second occurrence of an option ident in one `(…)` list.
     pub option_twice: Vec<(String, Span)>,
@@ -637,8 +646,10 @@ pub struct Model {
     pub filter_initial_state_block: Option<Span>,
     /// Parsed `filter_initial_state` entries (own vec; not `histval`).
     pub filter_initial_state: Vec<HistvalEntry>,
+    pub filter_initial_state_block_starts: Vec<usize>,
     /// Parsed `optim_weights` rows (every block concatenated).
     pub optim_weights: Vec<OptimWeight>,
+    pub optim_weights_block_starts: Vec<usize>,
     /// Parsed `ramsey_constraints` expressions (every block concatenated).
     pub ramsey_constraints: Vec<RamseyConstraint>,
     /// Every `external_function(…)` statement, file order.
@@ -779,18 +790,20 @@ impl DataStatement {
 }
 
 /// One statement the pin's grammar has no production for, recorded where the
-/// parser meets it. 7.1 refuses these with a parse-stage `syntax error,
-/// unexpected …` that names no construct, so the report carries our own wording
-/// (**E001**) on `span`, naming `subject`.
+/// parser meets it. The pinned preprocessor refuses these at parse with
+/// `syntax error, unexpected …`. E001 uses that text when `official_message`
+/// is set, and otherwise names `subject` with our generic shape wording.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShapeRefuse {
-    /// The token 7.1's parser stops on.
+    /// The token the pinned preprocessor stops on.
     pub span: Span,
     /// The command, keyword or head the message names, as written.
     pub subject: String,
-    /// What the grammar does take there, for the hint. Empty when the shape is a
-    /// whole statement the grammar has no form of at all.
+    /// What the grammar takes there for a generic hint. Empty when the whole
+    /// statement has no form or `official_message` supplies the exact text.
     pub expected: &'static str,
+    /// Exact official syntax text for a known token-level refusal, when available.
+    pub official_message: Option<&'static str>,
 }
 
 impl ShapeRefuse {
@@ -799,11 +812,21 @@ impl ShapeRefuse {
             span,
             subject: subject.into(),
             expected,
+            official_message: None,
+        }
+    }
+
+    pub fn official(span: Span, subject: impl Into<String>, message: &'static str) -> Self {
+        Self {
+            span,
+            subject: subject.into(),
+            expected: "",
+            official_message: Some(message),
         }
     }
 }
 
-/// Our wording for a shape 7.1 refuses with generic bison text: short, one
+/// Our wording for a shape with generic bison text: short, one
 /// problem, naming the command or the option. The hint names what the grammar
 /// takes there. Shared by the MS-SBVAR family (**E001** from a recorded
 /// `ShapeRefuse`) and the moment family (whose handed-over shapes are not).

@@ -292,7 +292,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E111", ExplainEntry {
         title: "Shock variance or correlation specified more than once",
-        body: "A shock's variance / standard error, or a correlation pair, is specified more than once in the shocks block. Dynare refuses: `shocks: variance or stderr of shock on e declared twice` and `shocks: covariance or correlation shock on variable pair (e, u) declared twice`.\n\n**Fix**\n\nKeep a single specification per shock variance and per correlation pair.",
+        body: "A shock's variance / standard error, or a correlation pair, is specified more than once in one shocks block. Dynare refuses: `shocks: variance or stderr of shock on e declared twice` and `shocks: covariance or correlation shock on variable pair (e, u) declared twice`.\n\n**Fix**\n\nKeep one specification per shock variance and per correlation pair in the block.",
         kind: ExplainKind::Shared,
     }),
     ("E113", ExplainEntry {
@@ -662,7 +662,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E243", ExplainEntry {
         title: "histval pair declared twice",
-        body: "The same ``(name, lag)`` pair appears twice in ``histval``. Dynare refuses: `hist_val: ({name}, {lag}) declared twice`.\n\n**Fix**\n\nKeep one assignment for that pair.",
+        body: "The same ``(name, lag)`` pair appears twice in one ``histval`` block. Dynare refuses: `histval: {name}({lag}) declared twice`.\n\n**Fix**\n\nKeep one assignment for that pair in the block.",
         kind: ExplainKind::Shared,
     }),
     ("E244", ExplainEntry {
@@ -757,7 +757,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E261", ExplainEntry {
         title: "observation_trends name declared twice",
-        body: "The same leading name appears twice in ``observation_trends``. Dynare refuses: `observation_trends: {name} declared twice`.\n\n**Fix**\n\nKeep one trend line for that name.",
+        body: "The same leading name appears twice in one ``observation_trends`` block. Dynare refuses: `observation_trends: {name} declared twice`.\n\n**Fix**\n\nKeep one trend line for that name in the block.",
         kind: ExplainKind::Shared,
     }),
     ("E262", ExplainEntry {
@@ -817,7 +817,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E273", ExplainEntry {
         title: "generate_irfs element name repeated",
-        body: "A ``generate_irfs`` element name is used more than once. Dynare refuses: `Names in the generate_irfs block must be unique but you entered '{name}' more than once.`\n\n**Fix**\n\nGive each element a distinct name.",
+        body: "A ``generate_irfs`` element name is used more than once in one block. Dynare refuses: `Names in the generate_irfs block must be unique but you entered '{name}' more than once.`\n\n**Fix**\n\nGive each element a distinct name in the block.",
         kind: ExplainKind::Shared,
     }),
     ("E274", ExplainEntry {
@@ -1017,7 +1017,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E313", ExplainEntry {
         title: "filter_initial_state entry declared twice",
-        body: "The same ``(name, lag)`` pair appears twice in ``filter_initial_state``. Dynare refuses: `filter_initial_state: (y, 0) declared twice`.\n\n**Fix**\n\nKeep one assignment per ``(name, lag)`` pair.",
+        body: "The same ``(name, lag)`` pair appears twice in one ``filter_initial_state`` block. Dynare refuses: `filter_initial_state: (y, 0) declared twice`.\n\n**Fix**\n\nKeep one assignment per ``(name, lag)`` pair in the block.",
         kind: ExplainKind::Shared,
     }),
     ("E314", ExplainEntry {
@@ -1027,12 +1027,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E315", ExplainEntry {
         title: "optim_weights variable declared twice",
-        body: "``optim_weights`` gives the same variable two weights. Dynare refuses: `optim_weights: y declared twice`.\n\n**Fix**\n\nKeep one weight per variable.",
+        body: "One ``optim_weights`` block gives the same variable two weights. Dynare refuses: `optim_weights: y declared twice`.\n\n**Fix**\n\nKeep one weight per variable in the block.",
         kind: ExplainKind::Shared,
     }),
     ("E316", ExplainEntry {
         title: "optim_weights pair declared twice",
-        body: "``optim_weights`` gives the same pair of variables two weights. Dynare refuses: `optim_weights: pair of variables (y, z) declared twice`.\n\n**Fix**\n\nKeep one weight per pair (the order of the two names matters).",
+        body: "One ``optim_weights`` block gives the same pair of variables two weights. Dynare refuses: `optim_weights: pair of variables (y, z) declared twice`.\n\n**Fix**\n\nKeep one weight per pair in the block (the order of the two names matters).",
         kind: ExplainKind::Shared,
     }),
     ("E317", ExplainEntry {

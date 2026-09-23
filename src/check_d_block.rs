@@ -26,7 +26,10 @@ pub fn check_d_block(model: &Model) -> Vec<Diagnostic> {
 fn check_histval_lag_dup(model: &Model) -> Vec<Diagnostic> {
     let mut seen: HashSet<(Name, i32)> = HashSet::new();
     let mut out = Vec::new();
-    for entry in &model.histval {
+    for (index, entry) in model.histval.iter().enumerate() {
+        if model.histval_block_starts.binary_search(&index).is_ok() {
+            seen.clear();
+        }
         let name = model.name(entry.name);
         if entry.lag > 0 {
             out.push(err(
@@ -39,7 +42,7 @@ fn check_histval_lag_dup(model: &Model) -> Vec<Diagnostic> {
             out.push(err(
                 entry.span,
                 "E243",
-                format!("hist_val: ({name}, {}) declared twice", entry.lag),
+                format!("histval: {name}({}) declared twice", entry.lag),
             ));
         }
     }
@@ -157,7 +160,14 @@ fn check_static_tag(model: &Model) -> Vec<Diagnostic> {
 fn check_generate_irfs(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let mut seen: HashSet<Name> = HashSet::new();
-    for el in &model.generate_irfs {
+    for (index, el) in model.generate_irfs.iter().enumerate() {
+        if model
+            .generate_irfs_block_starts
+            .binary_search(&index)
+            .is_ok()
+        {
+            seen.clear();
+        }
         let name = model.name(el.name);
         if !seen.insert(el.name) {
             out.push(err(
