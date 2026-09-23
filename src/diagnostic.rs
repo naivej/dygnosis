@@ -65,15 +65,43 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     if !parse_diags.is_empty() {
         return parse_diags;
     }
+    let shape_diags = crate::diag_shape::check_shape(model);
+    let shape_syntax: Vec<Diagnostic> = shape_diags
+        .iter()
+        .filter(|d| d.code == "E001")
+        .cloned()
+        .collect();
+    if !shape_syntax.is_empty() {
+        return shape_syntax;
+    }
+    let ms_diags = crate::check_d_ms::check_d_ms(model);
+    let recorded_syntax: Vec<Diagnostic> = ms_diags
+        .iter()
+        .filter(|d| d.code == "E001")
+        .cloned()
+        .collect();
+    if !recorded_syntax.is_empty() {
+        return recorded_syntax;
+    }
+    let shock_diags = crate::check_d_shocks::check_d_shocks(model);
+    let shock_parse_diags: Vec<Diagnostic> = shock_diags
+        .iter()
+        .filter(|d| d.code != "E420")
+        .cloned()
+        .collect();
+    if !shock_parse_diags.is_empty() {
+        return shock_parse_diags;
+    }
+    let clashes = crate::check_clash::check_clash(model);
     let mut out = Vec::new();
     out.extend(crate::e010::check_e010(model));
     out.extend(crate::check_e020::check_e020(model));
     out.extend(crate::check_e030::check_e030(model));
     out.extend(crate::check_occbin::check_occbin(model));
-    out.extend(crate::check_clash::check_clash(model));
+    out.extend(clashes.iter().cloned());
     out.extend(crate::check_estimation::check_estimation(model));
     out.extend(crate::check_context::check_context(model));
-    out.extend(crate::diag_shape::check_shape(model));
+    out.extend(shape_diags);
     out.extend(crate::check_w010::check_w010_family(model));
     out.extend(crate::check_e060::check_e060_family_on_model(model));
     out.extend(crate::check_w070::check_w070(model));
@@ -85,10 +113,31 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     out.extend(crate::check_w130::check_w130(model));
     out.extend(crate::check_symbol_list::check_symbol_list(model));
     out.extend(crate::check_d_block::check_d_block(model));
+    out.extend(shock_diags);
     out.extend(crate::check_d_open::check_d_open(model));
-    out.extend(crate::check_d_ms::check_d_ms(model));
+    out.extend(ms_diags);
     out.extend(crate::check_d_surgery::check_d_surgery(model));
     out.extend(crate::check_mom::check_mom(model));
+    // A parse refusal in an earlier statement stops Dynare before a later
+    // shock_paths checkPass can report the circular self reference. Written
+    // transform clashes are excluded: they run after that checkPass.
+    let earlier_nonclash_errors: Vec<Span> = out
+        .iter()
+        .filter(|d| {
+            d.severity == Severity::Error
+                && d.code != "E420"
+                && !clashes
+                    .iter()
+                    .any(|clash| clash.code == d.code && clash.span == d.span)
+        })
+        .map(|d| d.span)
+        .collect();
+    out.retain(|d| {
+        d.code != "E420"
+            || !earlier_nonclash_errors
+                .iter()
+                .any(|span| span.start < d.span.start)
+    });
     out
 }
 
@@ -118,6 +167,21 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<Vec<Diagnos
         &model, abs_path,
     ));
     let records = ws.include_records(abs_path).cloned().unwrap_or_default();
+    if !records.unresolved.is_empty() || !records.cycles.is_empty() {
+        diags.retain(|d| d.code != "W060");
+    } else if !records.resolved.is_empty() {
+        diags.retain_mut(|d| {
+            if d.code != "W060" {
+                return true;
+            }
+            if let Some(span) = ws.map_effective_span_to_root(abs_path, d.span) {
+                d.span = span;
+                true
+            } else {
+                false
+            }
+        });
+    }
     diags.extend(crate::check_e060::check_e060(&records));
     diags.extend(crate::check_e060::check_e061(&records));
     diags.extend(crate::check_e060::check_w061(ws, abs_path));

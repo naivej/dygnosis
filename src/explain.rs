@@ -43,7 +43,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 306 keys: 249 shared + 27 added + 30 skipped.
+// 333 keys: 282 shared + 27 added + 24 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -197,7 +197,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E058", ExplainEntry {
         title: "Undeclared variable in a block that names symbols",
-        body: "A block that names symbols refers to one that is not declared at all: an `initval` / `endval` entry, a `histval` lag, a `filter_initial_state` entry, an `init2shocks` pair, a `homotopy_setup` row, a `shock_groups` member, an `svar_identification` body row, a `conditional_forecast_paths` `var` row, a `std(…)` / `corr(…)` prior head name, or a name slot of a `moment_calibration` / `irf_calibration` row or of a `matched_irfs` / `matched_irfs_weights` row. Dynare refuses: `Unknown symbol: undeclared_zzz`.\n\n**Warrant**\n\nThe editor names the undeclared entry and its block; Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the variable, or remove the stray entry.",
+        body: "A block or option names a symbol that is not declared at that point in the file. This includes `initval` / `endval`, shock and path stanza targets, scoped path references, `irf_shocks`, and the older name slots listed in the catalog. Dynare refuses with `Unknown symbol: undeclared_zzz` (some sites add a full stop and a `nostrict` hint). A bare undeclared name in a `shock_paths` value is a separate no-message Dynare crash and stays quiet.\n\n**Warrant**\n\nThe editor names the undeclared entry and its block; Dynare's string is generic.\n\n**Fix**\n\nDeclare the variable before its use, or correct the name.",
         kind: ExplainKind::Shared,
     }),
     ("W051", ExplainEntry {
@@ -212,12 +212,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E059", ExplainEntry {
         title: "Name in initval/endval or a std/corr prior head is neither endogenous or exogenous",
-        body: "An `initval` or `endval` entry, a `histval` entry, or a `std(…)` / `corr(…)` prior head names a symbol that is not endogenous or exogenous (for example a parameter). Dynare refuses: `… is neither endogenous or exogenous.`\n\n**Fix**\n\nAssign parameters before the model block, or inside `steady_state_model`. Use `initval` / `endval` only for endogenous or exogenous variables, and a plain `name.prior(…)` head for a parameter.",
+        body: "An `initval` or `endval` entry, a `histval` entry, a `std(…)` / `corr(…)` prior head, or an `initval.x` reference in `shock_paths` names something other than endogenous or exogenous (for example a parameter). Dynare refuses: `… is neither endogenous or exogenous.`\n\n**Fix**\n\nUse an endogenous or exogenous name in those slots; assign a parameter before the model block or inside `steady_state_model`.",
         kind: ExplainKind::Shared,
     }),
     ("W060", ExplainEntry {
-        title: "Exogenous variables declared but no shocks block",
-        body: "One or more exogenous variables are declared in `varexo` but the file contains no `shocks` block specifying their variance-covariance structure. The model is then deterministic.\n\n**Fix**\n\nAdd a `shocks` block to define the shock processes, or remove the unused `varexo` declarations.",
+        title: "Requested IRF has no written stochastic shock size",
+        body: "A `stoch_simul` command explicitly requests IRFs with `irf>0` or `irf_shocks`, but no variance or standard error is written for a requested `varexo` shock. A bare `stoch_simul`, a `varexo` declaration alone, and an explicit zero variance do not trigger this Warning. This is an editor Warning; Dynare does not report it before MATLAB.\n\n**Fix**\n\nIf the IRF request is intended, specify a variance or standard error for the shock in a `shocks` block, or provide its shock size through the intended alternative source.",
         kind: ExplainKind::Added,
     }),
     ("W061", ExplainEntry {
@@ -292,7 +292,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E111", ExplainEntry {
         title: "Shock variance or correlation specified more than once",
-        body: "A shock's variance / standard error, or a correlation pair, is specified more than once in one shocks block. Dynare refuses: `shocks: variance or stderr of shock on e declared twice` and `shocks: covariance or correlation shock on variable pair (e, u) declared twice`.\n\n**Fix**\n\nKeep one specification per shock variance and per correlation pair in the block.",
+        body: "A shock's variance / standard error, or a covariance/correlation pair, is specified more than once in one `shocks` block. Covariance followed by correlation also counts. Dynare refuses: `shocks: variance or stderr of shock on e declared twice` and `shocks: covariance or correlation shock on variable pair (e, u) declared twice`. A later block may repeat the pair.\n\n**Fix**\n\nKeep one variance and one covariance/correlation specification per target in each block.",
         kind: ExplainKind::Shared,
     }),
     ("E113", ExplainEntry {
@@ -637,7 +637,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E240", ExplainEntry {
         title: "Wrong type in a command symbol list",
-        body: "A trailing symbol list names a declared symbol of the wrong type. Dynare refuses with one of four lists, each naming the types that command accepts: `{cmd}: Variable {name} is not one of {endogenous}`, `{endogenous, exogenous}` (``rplot``, ``dynasave``, ``dynatype``), `{endogenous, epilogue}` (``plot_shock_decomposition``), or `{parameter}` (``osr_params``, whose sentence prints `osr: `).\n\n**Fix**\n\nUse a symbol of the type the command accepts, or remove it from the list.",
+        body: "A command symbol list names a declared symbol of the wrong type. Trailing lists use the command's accepted-kind sentence (`{endogenous}`, `{endogenous, exogenous}`, `{endogenous, epilogue}`, or `{parameter}`). The `irf_shocks` option of `stoch_simul` or `estimation` uses its own sentence: `Variables passed to irf_shocks must be exogenous. Caused by: y`.\n\n**Fix**\n\nUse a symbol of the type the command or option accepts.",
         kind: ExplainKind::Shared,
     }),
     ("W201", ExplainEntry {
@@ -807,7 +807,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E271", ExplainEntry {
         title: "Option declared twice in one list",
-        body: "The same option identifier appears twice in one ``(…)`` list. Dynare refuses: `option {name} declared twice`.\n\n**Fix**\n\nKeep one copy of that option in the list.",
+        body: "The same option identifier appears twice in one `(…)` list. Dynare refuses: `option {name} declared twice`. The adjacent option lists of `mshocks` and `shock_paths` use Dynare's other sentence: `The '{name}' option is declared multiple times`.\n\n**Fix**\n\nKeep one copy of that option in the list.",
         kind: ExplainKind::Shared,
     }),
     ("E272", ExplainEntry {
@@ -1037,7 +1037,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E317", ExplainEntry {
         title: "Name is not endogenous, or is an exogenous deterministic",
-        body: "A name that must be endogenous is not. Dynare refuses `N is not endogenous.`, and a ``varexo_det`` name on a ``std(…)`` / ``corr(…)`` prior head or in the shock slot of a ``matched_irfs`` / ``matched_irfs_weights`` row gets their other sentence, `N is an exogenous deterministic.` The surfaces are the ``optim_weights`` weights, a ``conditional_forecast_paths`` `var` row, a prior head, both names of a ``moment_calibration`` row, the endogenous of an ``irf_calibration`` row, and the endogenous slot of a ``matched_irfs`` / ``matched_irfs_weights`` row.\n\n**Fix**\n\nName an endogenous variable.",
+        body: "A name has the wrong declared role in a slot that requires an endogenous variable, or a `varexo_det` name is used where only plain exogenous variables are allowed. Dynare refuses `N is not endogenous.` or `N is an exogenous deterministic.` This includes controlled-path `exogenize`, scheduled shock/path rows, `self`/`prev`/`learnt_in` references, and the older prior, calibration, and moment slots.\n\n**Fix**\n\nUse `var` for an endogenous slot and `varexo` for a plain exogenous slot.",
         kind: ExplainKind::Shared,
     }),
     ("E318", ExplainEntry {
@@ -1196,8 +1196,8 @@ Pass ``parameter_set=calibration`` (or the prior or posterior set you intend).",
         kind: ExplainKind::Shared,
     }),
     ("E343", ExplainEntry {
-        title: "conditional_forecast_paths periods and values counts differ",
-        body: "A ``var`` row of ``conditional_forecast_paths`` lists a different number of ``periods`` and ``values`` entries. Dynare refuses: `shocks/conditional_forecast_paths: variable Pie: number of periods is different from number of shock values`. A range such as ``1:4`` counts as one entry.
+        title: "Scheduled shock or conditional forecast counts differ",
+        body: "A deterministic `shocks`/`mshocks` row or `conditional_forecast_paths` row lists a different number of `periods` and values. Dynare refuses: `shocks/conditional_forecast_paths: variable Pie: number of periods is different from number of shock values`. A range such as `1:4` counts as one entry.
 
 **Fix**
 
@@ -1205,8 +1205,8 @@ Give one value per period entry.",
         kind: ExplainKind::Shared,
     }),
     ("E344", ExplainEntry {
-        title: "conditional_forecast_paths variable declared twice",
-        body: "One ``var`` name appears twice in a single ``conditional_forecast_paths`` block. Dynare refuses: `shocks/conditional_forecast_paths: variable Pie declared twice`.
+        title: "Scheduled shock or conditional forecast variable repeated",
+        body: "One `var` name appears twice in a single deterministic `shocks`/`mshocks` or `conditional_forecast_paths` block. Dynare refuses: `shocks/conditional_forecast_paths: variable Pie declared twice`.
 
 **Fix**
 
@@ -1573,7 +1573,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E387", ExplainEntry {
         title: "Name is not exogenous",
-        body: "A name in a shock slot is declared, but is neither a ``varexo`` nor a ``varexo_det``: an endogenous variable or a parameter. Dynare refuses: `{name} is not exogenous.` The slots are the ``varexo`` row of ``matched_irfs`` and of ``matched_irfs_weights``.\n\nFor the ``irf_calibration`` shock, Dynare's own sentence names the row's endogenous instead: `Variable {endo} is not an exogenous.` That sentence is this code as well.\n\n**Fix**\n\nName a ``varexo`` variable.",
+        body: "A name in a plain exogenous slot is declared as another type. Dynare refuses: `{name} is not exogenous.` These slots include scheduled and heteroskedastic shock rows, `shock_paths` targets and controlled `endogenize`, `self`/`prev`/`learnt_in` references, and the shock slots of `matched_irfs` and `matched_irfs_weights`. The `irf_calibration` shock uses Dynare's separate `Variable {endo} is not an exogenous.` sentence. A `varexo_det` name gets its own E317 sentence.\n\n**Fix**\n\nUse a plain `varexo` variable.",
         kind: ExplainKind::Shared,
     }),
     ("E388", ExplainEntry {
@@ -1599,6 +1599,171 @@ Move the call out of the ``steady_state(…)`` operator.",
     ("E392", ExplainEntry {
         title: "matched_irfs periods holds a date",
         body: "A ``periods`` entry of a ``matched_irfs`` row is written as a date such as ``2000Q1``. The row counts periods after the start of the simulation, so it takes integers and integer ranges only. Dynare refuses: `matched_irfs: dates are not allowed in the 'periods' keyword`\n\n**Fix**\n\nWrite the horizon as an integer, or as an ``a:b`` range of integers.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E393", ExplainEntry {
+        title: "Shock skewness declared twice",
+        body: "The same single-shock skewness is specified twice within one `shocks` block. Dynare refuses: `shocks: skewness of e declared twice`. A later `shocks` block may specify it again.\n\n**Fix**\n\nKeep one `skew e` row in each block.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E394", ExplainEntry {
+        title: "Shock co-skewness declared twice",
+        body: "The same three-shock co-skewness is specified twice within one `shocks` block, even if the names are reordered. Dynare refuses: `shocks: co-skewness of (v, e, u) declared twice`. A later `shocks` block may specify it again.\n\n**Fix**\n\nKeep one row for each unordered triple in a block.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E395", ExplainEntry {
+        title: "Period range runs backwards",
+        body: "An integer period range starts after it ends. Dynare refuses: `Can't have first period index greater than second index in range specification`.\n\n**Fix**\n\nPut the earlier period first.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E396", ExplainEntry {
+        title: "Ordinary shocks uses add or multiply without nondefault learning",
+        body: "An ordinary `shocks` block uses `add` or `multiply`. Dynare refuses: `shocks: 'add' keyword not allowed unless 'learnt_in' option with value >1 is passed` (or `multiply` in place of `add`). `learnt_in=1` follows the ordinary rule.\n\n**Fix**\n\nUse `values`, or use a nondefault `learnt_in` block when the later learning date is intended.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E397", ExplainEntry {
+        title: "mshocks uses add or multiply",
+        body: "A `mshocks` row uses `add` or `multiply`. Dynare refuses: `mshocks: 'add' keyword not allowed` (or `multiply` in place of `add`).\n\n**Fix**\n\nUse `values` in `mshocks`.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E398", ExplainEntry {
+        title: "Surprise shocks uses add or multiply",
+        body: "A `shocks(surprise)` row uses `add` or `multiply`. Dynare refuses: `shocks(surprise): 'add' keyword not allowed` (or `multiply` in place of `add`).\n\n**Fix**\n\nUse `values` for the surprise shock.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E399", ExplainEntry {
+        title: "Surprise shock period is a date",
+        body: "A `shocks(surprise)` period is written as a DATE. Dynare refuses: `shocks(surprise): dates are not allowed in the 'periods' keyword`.\n\n**Fix**\n\nUse an integer period or integer range.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E400", ExplainEntry {
+        title: "Shock learning period is below one",
+        body: "A `shocks` or `mshocks` `learnt_in` option is an integer below one. Dynare refuses: `shocks: value '0' is not allowed for 'learnt_in' option` (with `mshocks` in that block).\n\n**Fix**\n\nUse a positive integer or DATE.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E401", ExplainEntry {
+        title: "Shock occurs before it is learnt",
+        body: "A written integer shock period precedes the integer `learnt_in` period in `shocks` or `mshocks`. Dynare refuses: `shocks: for variable e, shock period (2) is earlier than the period in which the shock is learnt (3)` (with `mshocks` in that block).\n\n**Fix**\n\nMove the shock period to the learning period or later, or correct `learnt_in`.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E402", ExplainEntry {
+        title: "Heteroskedastic shock row repeated",
+        body: "A `heteroskedastic_shocks` block repeats a variable in the same `values` or `scales` row kind. Dynare refuses: `heteroskedastic_shocks: variable e declared twice`. One `values` and one `scales` row for the same variable are allowed.\n\n**Fix**\n\nKeep one row per variable and row kind in each block.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E403", ExplainEntry {
+        title: "Heteroskedastic periods and values differ in count",
+        body: "A `heteroskedastic_shocks` row has a different number of `periods` and `values` or `scales` entries. Dynare refuses: `heteroskedastic_shocks: variable e: number of periods is different from number of shock values`.\n\n**Fix**\n\nGive one value or scale per period entry.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E404", ExplainEntry {
+        title: "Shock path periods and values differ in count",
+        body: "An exogenous `shock_paths` stanza has a different number of `periods` and `values` entries. Dynare refuses: `shock_paths: variable e: number of periods is different from number of shock values`.\n\n**Fix**\n\nGive one expression per period entry.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E405", ExplainEntry {
+        title: "Shock path lag reaches before its period",
+        body: "An exogenous `shock_paths` expression uses a lag unavailable at its written integer period. Dynare refuses: `shock_paths: a lag of 1 is not allowed at period 1`.\n\n**Fix**\n\nMove the path to a later period or use a shorter lag.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E406", ExplainEntry {
+        title: "Controlled path periods and values differ in count",
+        body: "A controlled `shock_paths` or `perfect_foresight_controlled_paths` stanza has a different number of `periods` and `values` entries. Dynare refuses: `The number of periods is different from the number of values`.\n\n**Fix**\n\nGive one value expression per period entry.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E407", ExplainEntry {
+        title: "Bare shock path name is not a parameter",
+        body: "A bare declared name in a `shock_paths` value is not a parameter. Dynare refuses: `In the shock_paths block, parameters are the only symbols allowed without a namespace-qualifier`.\n\n**Fix**\n\nUse a parameter, or the supported namespace for the variable you mean.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E408", ExplainEntry {
+        title: "self reference has a lead",
+        body: "A `self` reference in `shock_paths` has a positive lead. Dynare refuses: `The syntax self.u cannot be used with a lead`.\n\n**Fix**\n\nUse the current value or a lag.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E409", ExplainEntry {
+        title: "Namespace lag is not an integer",
+        body: "A `self`, `prev`, `learnt_in`, or declared database reference in `shock_paths` has a lag argument that does not fold to an integer. Dynare refuses: `Symbol self.u is being treated as if it were a function (i.e., passed an argument that is not an integer).`\n\n**Fix**\n\nUse an integer lag expression.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E410", ExplainEntry {
+        title: "Namespace reference has multiple lag arguments",
+        body: "A `self`, `prev`, or declared database reference in `shock_paths` is called with more than one argument. Dynare refuses: `The parenthesis after self.u should only include a lag, since it references a variable inside a namespace`.\n\n**Fix**\n\nPass one integer lag.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E411", ExplainEntry {
+        title: "prev reference requires a later learning period",
+        body: "A `prev` reference appears in a default `shock_paths` block or `learnt_in=1`. Dynare refuses: `The syntax prev.u is not accepted in a 'shock_paths' block without the 'learnt_in' option or in a 'shock_paths(learnt_in=1)' block`.\n\n**Fix**\n\nUse a later integer or DATE `learnt_in`, or another supported reference.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E412", ExplainEntry {
+        title: "learnt_in reference period is below one",
+        body: "A `learnt_in(…)` path reference uses an integer below one. Dynare refuses: `The syntax learnt_in(0).u is not accepted`.\n\n**Fix**\n\nUse a positive informational period.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E413", ExplainEntry {
+        title: "learnt_in reference is not earlier than the path learning period",
+        body: "When both learning periods are integers, a `learnt_in(…)` reference must name an earlier period than the `shock_paths` block. Dynare refuses: `The syntax learnt_in(2).u is not accepted in a 'shock_paths' block without the 'learnt_in' option or in a 'shock_paths(learnt_in=2)' block`. Dynare does not make this integer comparison for DATE values at this stage.\n\n**Fix**\n\nUse an earlier integer period in the reference.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E414", ExplainEntry {
+        title: "Database declared twice",
+        body: "A `database` name is declared again. Dynare refuses: `Database 'db' already declared`.\n\n**Fix**\n\nDeclare each database name once.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E415", ExplainEntry {
+        title: "Shock path refers to an unknown database",
+        body: "A bare `db.x` reference in `shock_paths` names a database not declared earlier. Dynare refuses: `Unknown database: db. You may want to declare it via the 'database' command.` An unknown `db.x(1)` is parsed as a function call instead.\n\n**Fix**\n\nDeclare the database before the path, or correct its name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E416", ExplainEntry {
+        title: "Namespace reference in a controlled path",
+        body: "A controlled `shock_paths` stanza uses `self`, `prev`, `learnt_in`, or a database namespace in its value. Dynare refuses: `The syntax self.e is not accepted in an 'endogenize' stanza of a 'shock_paths' block`.\n\n**Fix**\n\nUse a plain expression or an allowed `initval`/`init` reference.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E417", ExplainEntry {
+        title: "endval change operation needs nondefault learning",
+        body: "An `endval` row uses `+=` or `*=` without `learnt_in>1` or a DATE. Dynare refuses: `endval: 'e += ...' line not allowed unless 'learnt_in' option with value >1 or date is passed` (or `*=` in place of `+=`).\n\n**Fix**\n\nUse `=`, or set the intended later `learnt_in`.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E418", ExplainEntry {
+        title: "endval learning period is below one",
+        body: "An `endval` `learnt_in` option is an integer below one. Dynare refuses: `endval: value '0' is not allowed for 'learnt_in' option`.\n\n**Fix**\n\nUse a positive integer or DATE.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E419", ExplainEntry {
+        title: "endval learnt-in row is not exogenous",
+        body: "A nondefault `endval(learnt_in=…)` row names something other than a plain exogenous variable. Dynare refuses: `endval(learnt_in=...): y is not an exogenous variable`.\n\n**Fix**\n\nUse a `varexo` name, or put the intended assignment in an ordinary `endval` block.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E420", ExplainEntry {
+        title: "Shock path refers to itself at lag zero",
+        body: "A path for `e` uses `self.e` without a lag or at lag zero. Dynare refuses: `in the definition of 'e' in a 'shock_paths' block, the use of 'self.e' without a lag is not allowed, since it is a circular reference`. `self.u` at zero is allowed in a path for `e`.\n\n**Fix**\n\nUse a lagged `self.e` or another variable.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E421", ExplainEntry {
+        title: "Path learning period is below one",
+        body: "A `shock_paths` or `perfect_foresight_controlled_paths` `learnt_in` option is an integer below one. Dynare refuses: `Value '0' is not allowed for 'learnt_in' option`.\n\n**Fix**\n\nUse a positive integer or DATE.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E422", ExplainEntry {
+        title: "Learnt-in shocks need expectation-errors commands",
+        body: "A nondefault `shocks(learnt_in=…)` or `mshocks(learnt_in=…)` block needs both expectation-errors setup and solver, without regular perfect-foresight setup or solver. Dynare refuses: `the 'shocks(learnt_in=…)' block can only be used in conjunction with the 'perfect_foresight_with_expectation_errors_setup' and 'perfect_foresight_with_expectation_errors_solver' commands.`\n\n**Fix**\n\nUse the expectation-errors setup and solver, or use the ordinary shock form.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E423", ExplainEntry {
+        title: "Learnt-in endval needs expectation-errors commands",
+        body: "A nondefault `endval(learnt_in=…)` block needs both expectation-errors setup and solver, without regular perfect-foresight setup or solver. Dynare refuses: `the 'endval(learnt_in=…)' block can only be used in conjunction with the 'perfect_foresight_with_expectation_errors_setup' and 'perfect_foresight_with_expectation_errors_solver' commands.`\n\n**Fix**\n\nUse the expectation-errors setup and solver, or use ordinary `endval`.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E424", ExplainEntry {
+        title: "Learnt-in controlled paths need expectation-errors commands",
+        body: "A nondefault `perfect_foresight_controlled_paths(learnt_in=…)` block needs both expectation-errors setup and solver, without regular perfect-foresight setup or solver. Dynare refuses: `the 'perfect_foresight_controlled_paths(learnt_in=…)' block can only be used in conjunction with the 'perfect_foresight_with_expectation_errors_setup' and 'perfect_foresight_with_expectation_errors_solver' commands.`\n\n**Fix**\n\nUse the expectation-errors setup and solver, or a default controlled-path block.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E425", ExplainEntry {
+        title: "Learnt-in shock paths need expectation-errors commands",
+        body: "A nondefault `shock_paths(learnt_in=…)` block needs both expectation-errors setup and solver, without regular perfect-foresight setup or solver. Dynare refuses: `the 'shock_paths(learnt_in=…)' block can only be used in conjunction with the 'perfect_foresight_with_expectation_errors_setup' and 'perfect_foresight_with_expectation_errors_solver' commands.`\n\n**Fix**\n\nUse the expectation-errors setup and solver, or a default shock-path block.",
         kind: ExplainKind::Shared,
     }),
     ("E186", ExplainEntry {
@@ -1639,26 +1804,6 @@ Move the call out of the ``steady_state(…)`` operator.",
     ("W187", ExplainEntry {
         title: "Generated .m nests more than 32 parentheses",
         body: "Dynare warns: `A .m file created by Dynare will have more than 32 nested parenthesis…`. Catching step: writer. Owner: skip-writer W. The trigger is the nesting depth of their generated text, not of the file. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S002", ExplainEntry {
-        title: "shocks(learnt_in) without PFEE setup and solver",
-        body: "Dynare refuses: `'shocks(learnt_in=…)' block can only be used in conjunction with…`. Catching step: transform (written clash). Owner: skip 0.7 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S003", ExplainEntry {
-        title: "endval(learnt_in) without PFEE setup and solver",
-        body: "Dynare refuses: `'endval(learnt_in=…)' block can only be used…`. Catching step: transform (written clash). Owner: skip 0.7 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S004", ExplainEntry {
-        title: "perfect_foresight_controlled_paths(learnt_in) without PFEE",
-        body: "Dynare refuses: `'perfect_foresight_controlled_paths(learnt_in=…)'…`. Catching step: transform (written clash). Owner: skip 0.7 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S005", ExplainEntry {
-        title: "shock_paths(learnt_in) without PFEE setup and solver",
-        body: "Dynare refuses: `'shock_paths(learnt_in=…)'…`. Catching step: transform (written clash). Owner: skip 0.7 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S008", ExplainEntry {
@@ -1706,11 +1851,6 @@ Move the call out of the ``steady_state(…)`` operator.",
         body: "Dynare refuses: `not a heterogeneous exogenous variable`. Catching step: check. Owner: skip 0.9 E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S037", ExplainEntry {
-        title: "shock_paths self reference without a lag",
-        body: "Dynare refuses: `the use of 'self.…' without a lag is not allowed, since it is a circular reference`. Catching step: check. Owner: skip 0.7 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
     ("S038", ExplainEntry {
         title: "PAC growth, auxname, or kind vs pac_target_info",
         body: "Dynare refuses: `PAC checkPass messages`. Catching step: check. Owner: skip 0.8 E. This code is never emitted.",
@@ -1724,11 +1864,6 @@ Move the call out of the ``steady_state(…)`` operator.",
     ("S041", ExplainEntry {
         title: "Subsample lookup and the options / subsamples bodies",
         body: "Dynare refuses: `A subsample statement has not been issued for alpha`, and the `options` / `subsamples` statement bodies are not read. Catching step: parse. Owner: skip 0.7 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
-    }),
-    ("S052", ExplainEntry {
-        title: "shock_paths body, DATE, and related parse",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.7 E (DATE / `set_time` / `database` / `shock_paths` body / `mshocks` add-multiply / surprise `stderr` / `heteroskedastic_shocks`). This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S053", ExplainEntry {

@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::expr::ExprKind;
 use crate::intern::Name;
-use crate::model::{Equation, Model, PolicyCommand};
+use crate::model::{Equation, Model, PeriodPoint, PolicyCommand, ShockBlockKind};
 use crate::span::Span;
 
 const FALLBACK: Span = Span { start: 0, end: 1 };
@@ -21,6 +21,7 @@ const E221_MSG: &str = "When estimating a DSGE-Var, the number of shocks must be
 const E179_MSG: &str = "the 'occbin_constraints' block is not compatible with commands other than 'estimation', 'stoch_simul', and 'calib_smoother'.";
 const E178_MSG: &str = "the 'shocks(surprise)' block can only be used in conjunction with the 'occbin_constraints' block.";
 const E113_MSG: &str = "the 'shock_paths' block cannot be used in conjunction with either 'shocks', 'mshocks', 'endval' or 'perfect_foresight_controlled_paths' blocks.";
+const LEARNT_GATE_SUFFIX: &str = "block can only be used in conjunction with the 'perfect_foresight_with_expectation_errors_setup' and 'perfect_foresight_with_expectation_errors_solver' commands.";
 
 pub fn check_clash(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
@@ -72,6 +73,60 @@ pub fn check_clash(model: &Model) -> Vec<Diagnostic> {
         }
     }
 
+    let learnt_gate = model.perfect_foresight_setup_span.is_some()
+        || model.perfect_foresight_solver_span.is_some()
+        || model.pfee_setup_span.is_none()
+        || model.pfee_solver_span.is_none();
+    if learnt_gate {
+        for block in &model.shock_blocks {
+            if !matches!(
+                block.kind,
+                ShockBlockKind::LearntIn | ShockBlockKind::Multiplicative
+            ) || !nondefault_learnt_in(block.options.learnt_in.as_ref())
+            {
+                continue;
+            }
+            push(
+                &mut out,
+                block.options.learnt_in_span.unwrap_or(block.span),
+                "E422",
+                &format!("the 'shocks(learnt_in=…)' {LEARNT_GATE_SUFFIX}"),
+            );
+        }
+        for block in &model.endval_instructions {
+            if nondefault_learnt_in(block.learnt_in.as_ref()) {
+                push(
+                    &mut out,
+                    block.learnt_in_span.unwrap_or(block.span),
+                    "E423",
+                    &format!("the 'endval(learnt_in=…)' {LEARNT_GATE_SUFFIX}"),
+                );
+            }
+        }
+        for block in &model.controlled_paths {
+            if nondefault_learnt_in(block.options.learnt_in.as_ref()) {
+                push(
+                    &mut out,
+                    block.options.learnt_in_span.unwrap_or(block.span),
+                    "E424",
+                    &format!(
+                        "the 'perfect_foresight_controlled_paths(learnt_in=…)' {LEARNT_GATE_SUFFIX}"
+                    ),
+                );
+            }
+        }
+        for block in &model.shock_paths {
+            if nondefault_learnt_in(block.options.learnt_in.as_ref()) {
+                push(
+                    &mut out,
+                    block.options.learnt_in_span.unwrap_or(block.span),
+                    "E425",
+                    &format!("the 'shock_paths(learnt_in=…)' {LEARNT_GATE_SUFFIX}"),
+                );
+            }
+        }
+    }
+
     if model.dsge_var_estimated.is_some() || model.dsge_var_calibrated.is_some() {
         if let Some(span) = dsge_prior_weight_decl(model) {
             push(&mut out, span, "E219", E219_MSG);
@@ -100,6 +155,11 @@ pub fn check_clash(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_default_eq_tag(model));
 
     out
+}
+
+fn nondefault_learnt_in(point: Option<&PeriodPoint>) -> bool {
+    matches!(point, Some(PeriodPoint::Date(_)))
+        || matches!(point, Some(PeriodPoint::Integer(n)) if *n > 1)
 }
 
 fn dsge_prior_weight_decl(model: &Model) -> Option<Span> {

@@ -1122,8 +1122,8 @@ fn legal_syntax_neighbours_stay_quiet() {
 
 /// The registry grew by the eleven new codes. S061 is dropped.
 #[test]
-fn registry_known_codes_grew_to_306() {
-    assert_eq!(known_codes().len(), 306);
+fn registry_known_codes_include_shock_diagnostics() {
+    assert_eq!(known_codes().len(), 333);
     for code in [
         "E382", "E383", "E384", "E385", "E386", "E387", "E388", "E389", "E390", "E391", "E392",
     ] {

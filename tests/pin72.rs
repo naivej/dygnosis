@@ -48,7 +48,7 @@ fn same_block_duplicate_after_empty_block_still_fires() {
     let base = "var y z; varexo e e2; parameters rho; rho=.5; model; y=rho*y(-1)+e+e2; z=y; end;";
     for (suffix, code) in [
         (
-            "shocks; end; shocks; var e; stderr .1; var e; stderr .2; end;",
+            "shocks(overwrite); end; shocks; var e; stderr .1; var e; stderr .2; end;",
             "E111",
         ),
         ("histval; end; histval; y(0)=1; y(0)=2; end;", "E243"),

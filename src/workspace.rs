@@ -196,6 +196,23 @@ impl Workspace {
         self.effective.get(&key)
     }
 
+    /// Map one span in the include-spliced model back to the active root file.
+    /// Included-file spans have no location in the root and return `None`.
+    pub(crate) fn map_effective_span_to_root(&mut self, uri: &str, span: Span) -> Option<Span> {
+        let key = self.ensure_loaded(uri)?;
+        let (_, segments) = self.splice_with_map(&key, &mut Vec::new(), &[]);
+        let segment = segments.iter().find(|segment| {
+            segment.spliced.start <= span.start
+                && span.end <= segment.spliced.end
+                && segment.file.as_deref() == Some(key.as_str())
+        })?;
+        let delta = span.start - segment.spliced.start;
+        Some(Span {
+            start: segment.origin.start + delta,
+            end: segment.origin.start + delta + (span.end - span.start),
+        })
+    }
+
     pub fn expand_report(&mut self, uri: &str) -> Option<&ExpandReport> {
         let key = self.ensure_loaded(uri)?;
         if !self.expand.contains_key(&key) {

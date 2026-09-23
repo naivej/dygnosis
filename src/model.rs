@@ -378,6 +378,8 @@ pub struct PathReference {
     pub name: Name,
     pub span: Span,
     pub lag: Option<String>,
+    /// Whether a parenthesized lag was written, including an empty `()`.
+    pub lag_call: bool,
     pub learnt_in: Option<PeriodPoint>,
     pub call: bool,
 }
@@ -538,6 +540,15 @@ pub struct StochSimulRequest {
     pub irf_shocks: Option<Vec<(Name, Span)>>,
 }
 
+/// The `irf_shocks` option uses the same name/type rule on `stoch_simul` and
+/// `estimation`. Names retain their written spans and command order.
+#[derive(Clone, Debug)]
+pub struct IrfShocksOption {
+    pub command: String,
+    pub span: Span,
+    pub names: Vec<(Name, Span)>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Assignment {
     pub name: Name,
@@ -597,6 +608,7 @@ pub struct Model {
     pub set_time: Vec<SetTimeStatement>,
     pub date_options: Vec<DateOption>,
     pub stoch_simul_requests: Vec<StochSimulRequest>,
+    pub irf_shocks_options: Vec<IrfShocksOption>,
     /// `varobs` names in declaration order, including repeats.
     pub varobs: Vec<ObservedVar>,
     /// First `varobs …;` statement.

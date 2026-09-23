@@ -25,8 +25,8 @@ const RUST_CODES: &[&str] = &[
     "E355", "E356", "E357", "E358", "E359", "E360", "E361", "E362", "E363", "E364", "E365", "E366",
     "E367", "E368", "E369", "E370", "E371", "E372", "E373", "E374", "E375", "E376", "E377", "E378",
     "E379", "E380", "E381", "E382", "E383", "E384", "E385", "E386", "E387", "E388", "E389", "E390",
-    "E391", "E392", "E999", "I050", "S002", "S003", "S004", "S005", "S008", "S009", "S010", "S011",
-    "S012", "S013", "S014", "S020", "S035", "S037", "S038", "S040", "S041", "S052", "S053", "S054",
+    "E391", "E392", "E393", "E394", "E395", "E396", "E397", "E398", "E399", "E400", "E401", "E402", "E403", "E404", "E405", "E406", "E407", "E408", "E409", "E410", "E411", "E412", "E413", "E414", "E415", "E416", "E417", "E418", "E419", "E420", "E421", "E422", "E423", "E424", "E425", "E999", "I050", "S008", "S009", "S010", "S011",
+    "S012", "S013", "S014", "S020", "S035", "S038", "S040", "S041", "S053", "S054",
     "S062", "S063", "W010", "W011", "W012", "W013", "W020", "W022", "W031", "W042", "W051",
     "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094",
     "W102", "W110", "W112", "W120", "W121", "W122", "W131", "W140", "W150", "W160", "W170", "W186",
@@ -53,7 +53,7 @@ const THIN_CODES: &[&str] = &[
     "E349", "E350", "E351", "E352", "E353", "E354", "E355", "E356", "E357", "E358", "E359", "E360",
     "E361", "E362", "E363", "E364", "E365", "E366", "E367", "E368", "E369", "E370", "E371", "E372",
     "E373", "E374", "E375", "E376", "E377", "E378", "E379", "E380", "E381", "E382", "E383", "E384",
-    "E385", "E386", "E387", "E388", "E389", "E390", "E391", "E392", "E999", "I050", "W010", "W011",
+    "E385", "E386", "E387", "E388", "E389", "E390", "E391", "E392", "E393", "E394", "E395", "E396", "E397", "E398", "E399", "E400", "E401", "E402", "E403", "E404", "E405", "E406", "E407", "E408", "E409", "E410", "E411", "E412", "E413", "E414", "E415", "E416", "E417", "E418", "E419", "E420", "E421", "E422", "E423", "E424", "E425", "E999", "I050", "W010", "W011",
     "W012", "W013", "W020", "W022", "W031", "W042", "W051", "W052", "W054", "W055", "W056", "W057",
     "W060", "W061", "W062", "W070", "W091", "W092", "W094", "W102", "W110", "W112", "W120", "W121",
     "W122", "W131", "W140", "W150", "W160", "W170", "W200", "W201", "W202", "W203", "W204", "W205",
@@ -79,7 +79,7 @@ const SHARED: &[&str] = &[
     "E349", "E350", "E351", "E352", "E353", "E354", "E355", "E356", "E357", "E358", "E359", "E360",
     "E361", "E362", "E363", "E364", "E365", "E366", "E367", "E368", "E369", "E370", "E371", "E372",
     "E373", "E374", "E375", "E376", "E377", "E378", "E379", "E380", "E381", "E382", "E383", "E384",
-    "E385", "E386", "E387", "E388", "E389", "E390", "E391", "E392", "W022", "W031", "W042", "W121",
+    "E385", "E386", "E387", "E388", "E389", "E390", "E391", "E392", "E393", "E394", "E395", "E396", "E397", "E398", "E399", "E400", "E401", "E402", "E403", "E404", "E405", "E406", "E407", "E408", "E409", "E410", "E411", "E412", "E413", "E414", "E415", "E416", "E417", "E418", "E419", "E420", "E421", "E422", "E423", "E424", "E425", "W022", "W031", "W042", "W121",
     "W131", "W150", "W170", "W200", "W201", "W202", "W203", "W204", "W205",
 ];
 
@@ -90,8 +90,8 @@ const ADDED: &[&str] = &[
 ];
 
 const SKIP_KEYS: &[&str] = &[
-    "E186", "E187", "E188", "E189", "E190", "E191", "S002", "S003", "S004", "S005", "S008", "S009",
-    "S010", "S011", "S012", "S013", "S014", "S020", "S035", "S037", "S038", "S040", "S041", "S052",
+    "E186", "E187", "E188", "E189", "E190", "E191", "S008", "S009",
+    "S010", "S011", "S012", "S013", "S014", "S020", "S035", "S038", "S040", "S041",
     "S053", "S054", "S062", "S063", "W186", "W187",
 ];
 
@@ -159,14 +159,14 @@ fn read_mod(archive_dir: &str) -> String {
 }
 
 #[test]
-fn known_codes_is_exactly_the_306_rust_keys() {
-    assert_eq!(SHARED.len(), 249);
+fn known_codes_matches_the_rust_keys() {
+    assert_eq!(SHARED.len(), 282);
     assert_eq!(ADDED.len(), 27);
-    assert_eq!(SKIP_KEYS.len(), 30);
-    assert_eq!(THIN_CODES.len(), 276);
-    assert_eq!(RUST_CODES.len(), 306);
+    assert_eq!(SKIP_KEYS.len(), 24);
+    assert_eq!(THIN_CODES.len(), 309);
+    assert_eq!(RUST_CODES.len(), 333);
     assert_eq!(known_codes(), RUST_CODES);
-    assert_eq!(known_codes().len(), 306);
+    assert_eq!(known_codes().len(), 333);
     assert!(!RUST_CODES.contains(&"P000"));
     assert!(RUST_CODES.contains(&"E178"));
     assert!(RUST_CODES.contains(&"E179"));
@@ -226,7 +226,7 @@ fn explain_kinds_are_shared_skipped_added() {
     assert_eq!(explain("E186").unwrap().kind, ExplainKind::Skipped);
     assert_eq!(explain("W013").unwrap().kind, ExplainKind::Added);
     assert_eq!(explain("W186").unwrap().kind, ExplainKind::Skipped);
-    assert_eq!(explain("s002").unwrap().kind, ExplainKind::Skipped);
+    assert_eq!(explain("s008").unwrap().kind, ExplainKind::Skipped);
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn p_codes_are_unknown() {
 fn lookup_is_case_insensitive() {
     assert_eq!(explain("w013").unwrap(), explain("W013").unwrap());
     assert!(render_markdown("w013").unwrap().starts_with("### w013: "));
-    assert_eq!(explain("s002").unwrap(), explain("S002").unwrap());
+    assert_eq!(explain("s008").unwrap(), explain("S008").unwrap());
     assert!(explain("dynr").is_none());
     assert!(explain("E040").is_none());
     assert!(explain("E010").is_none());
@@ -386,7 +386,7 @@ fn cli_explain_list() {
         entries.push((code, kind, title));
         i += 1;
     }
-    assert_eq!(entries.len(), 306);
+    assert_eq!(entries.len(), 333);
     assert_eq!(
         entries.iter().map(|(c, _, _)| *c).collect::<Vec<_>>(),
         RUST_CODES
@@ -408,8 +408,8 @@ fn cli_explain_list() {
     let i050 = entries.iter().find(|(c, _, _)| *c == "I050").unwrap();
     assert_eq!(i050.1, "added");
     assert_eq!(i050.2, "No initval or steady_state_model block");
-    let s002 = entries.iter().find(|(c, _, _)| *c == "S002").unwrap();
-    assert_eq!(s002.1, "skipped");
+    let s008 = entries.iter().find(|(c, _, _)| *c == "S008").unwrap();
+    assert_eq!(s008.1, "skipped");
     let w186 = entries.iter().find(|(c, _, _)| *c == "W186").unwrap();
     assert_eq!(w186.1, "skipped");
     assert_eq!(w186.2, "Possible auxiliary name in a symbol list");
@@ -420,7 +420,7 @@ fn cli_explain_list() {
     );
     assert_eq!(
         lines.get(i + 1).copied(),
-        Some("306 codes. Run `dygnosis explain <CODE>` for details.")
+        Some("333 codes. Run `dygnosis explain <CODE>` for details.")
     );
     assert!(!stdout.contains("python_dynare_lsp"));
     assert!(!stdout.contains("DYNR"));

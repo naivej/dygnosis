@@ -134,7 +134,23 @@ fn check_option_twice(model: &Model) -> Vec<Diagnostic> {
     model
         .option_twice
         .iter()
-        .map(|(name, span)| err(*span, "E271", format!("option {name} declared twice")))
+        .map(|(name, span)| {
+            let shock_option = model
+                .shock_paths
+                .iter()
+                .any(|block| block.span.start <= span.start && span.end <= block.span.end)
+                || model.shock_blocks.iter().any(|block| {
+                    block.kind == crate::model::ShockBlockKind::Multiplicative
+                        && block.span.start <= span.start
+                        && span.end <= block.span.end
+                });
+            let message = if shock_option {
+                format!("The '{name}' option is declared multiple times")
+            } else {
+                format!("option {name} declared twice")
+            };
+            err(*span, "E271", message)
+        })
         .collect()
 }
 

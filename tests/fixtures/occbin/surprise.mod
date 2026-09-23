@@ -7,5 +7,5 @@ model;
 y = rho * y(-1) + e;
 end;
 shocks(surprise);
-var e; stderr 0.01;
+var e; periods 1; values 0.01;
 end;

@@ -1,0 +1,10 @@
+var y;
+varexo e;
+parameters p;
+p = 1;
+model;
+y = e + p;
+end;
+shock_paths(overwrite overwrite);
+var e; periods 1; values p;
+end;

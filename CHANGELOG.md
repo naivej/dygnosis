@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.7.0
+
+- Reads the written shock, path, learning-date, and database forms accepted by Dynare 7.2 and reports their parse, check, and written transform refusals (`E393`–`E425`). Existing `E343`/`E344` now reach deterministic shocks; `E111` catches covariance followed by correlation and skew/co-skew duplicates have their own codes.
+- W060 now warns only for an explicit `stoch_simul` IRF request with no written stochastic shock size. It stays quiet for bare declarations, bare `stoch_simul`, explicit zero size, possible estimated or external sizes, and uncertain macro or include input. Warnings in a file with resolved includes point to the active file.
+
 ## v0.6.1
 
 Pins language checks and optional honesty tests to Dynare 7.2.

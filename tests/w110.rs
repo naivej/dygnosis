@@ -190,14 +190,10 @@ fn w110_parser_corr_1p5() {
 }
 
 #[test]
-fn w110_w060_drop() {
+fn w060_varexo_without_irf_request_is_quiet() {
     let src = check_mod("w110/w060_none.mod");
     let rust = rust_family(&src);
-    assert_eq!(rust.len(), 1);
-    assert_eq!(rust[0].code, "W060");
-    assert!(rust[0].message.contains("e, u"));
-    let underlined = underlined(&src, &rust[0]);
-    assert_eq!(underlined, "e");
+    assert!(rust.iter().all(|d| d.code != "W060"));
 }
 
 #[test]

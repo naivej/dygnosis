@@ -5157,6 +5157,7 @@ impl Parser<'_> {
         let keyword = self.tokens[opener_i].text(self.src).to_ascii_lowercase();
         let start = self.bump().span.start;
         if self.at(TokenKind::LParen) {
+            let option_start = self.i;
             if is_shocks {
                 let mut k = self.i + 1;
                 let mut depth = 1;
@@ -5180,6 +5181,12 @@ impl Parser<'_> {
                 }
             }
             self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+            if self.tokens[opener_i]
+                .text(self.src)
+                .eq_ignore_ascii_case("mshocks")
+            {
+                self.record_option_twice(option_start, self.i);
+            }
         }
         let opener_end = if self.at(TokenKind::Semi) {
             self.bump().span.end
@@ -7530,6 +7537,11 @@ impl Parser<'_> {
                     saw_datafile =
                         self.record_skip_command_options(cmd, from, self.i) || saw_datafile;
                     self.record_option_twice(from, self.i);
+                    if cmd.eq_ignore_ascii_case("stoch_simul")
+                        || cmd.eq_ignore_ascii_case("estimation")
+                    {
+                        self.collect_irf_shocks_option(cmd, from, self.i);
+                    }
                     if cmd.eq_ignore_ascii_case("extended_path")
                         && self.option_ident_in_range(from, self.i, "periods")
                     {
@@ -7556,7 +7568,18 @@ impl Parser<'_> {
             });
         }
         if opener.as_deref() == Some("stoch_simul") {
-            self.collect_stoch_simul_request(opener_span, stoch_options);
+            let end = self
+                .tokens
+                .get(self.i)
+                .map(|token| token.span.end)
+                .unwrap_or(opener_span.end);
+            self.collect_stoch_simul_request(
+                Span {
+                    start: opener_span.start,
+                    end,
+                },
+                stoch_options,
+            );
         }
         self.eat(TokenKind::Semi);
     }

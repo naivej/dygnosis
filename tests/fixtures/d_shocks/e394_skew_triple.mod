@@ -1,0 +1,9 @@
+var y;
+varexo e u v;
+model;
+y = e + u + v;
+end;
+shocks;
+skew e, u, v = 1;
+skew v, e, u = 2;
+end;

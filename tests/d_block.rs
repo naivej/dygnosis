@@ -43,8 +43,8 @@ const E242_MSG: &str = "histval: the lag on y should be less than or equal to 0"
 const E243_MSG: &str = "histval: y(0) declared twice";
 
 #[test]
-fn registry_known_codes_grew_to_306() {
-    assert_eq!(known_codes().len(), 306);
+fn registry_known_codes_include_shock_diagnostics() {
+    assert_eq!(known_codes().len(), 333);
 }
 
 #[test]

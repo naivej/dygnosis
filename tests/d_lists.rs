@@ -613,6 +613,6 @@ fn a_declared_name_of_the_right_type_is_quiet() {
 
 /// No new code ships, so the registry does not move.
 #[test]
-fn registry_known_codes_stays_306() {
-    assert_eq!(known_codes().len(), 306);
+fn registry_known_codes_include_shock_diagnostics() {
+    assert_eq!(known_codes().len(), 333);
 }

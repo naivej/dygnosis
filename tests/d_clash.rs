@@ -218,7 +218,7 @@ fn e113_shock_paths_alone_is_quiet() {
 #[test]
 fn e113_shock_paths_with_mshocks_or_endval() {
     let mshocks = analyze(&parse(
-        "var y; varexo e; parameters rho; rho = 0.5; model; y = rho * y(-1) + e; end; shock_paths; var e; periods 1; values 0; end; mshocks; var e; stderr 0.01; end;",
+        "var y; varexo e; parameters rho; rho = 0.5; model; y = rho * y(-1) + e; end; shock_paths; var e; periods 1; values 0; end; mshocks; var e; periods 1; values 1; end;",
     ));
     find(&mshocks, "E113");
 
@@ -228,7 +228,7 @@ fn e113_shock_paths_with_mshocks_or_endval() {
     find(&endval, "E113");
 
     let pfc = analyze(&parse(
-        "var y; varexo e; parameters rho; rho = 0.5; model; y = rho * y(-1) + e; end; shock_paths; var e; periods 1; values 0; end; perfect_foresight_controlled_paths; end;",
+        "var y; varexo e; parameters rho; rho = 0.5; model; y = rho * y(-1) + e; end; shock_paths; var e; periods 1; values 0; end; perfect_foresight_controlled_paths; exogenize y; periods 1; values 1; endogenize e; end;",
     ));
     find(&pfc, "E113");
 }

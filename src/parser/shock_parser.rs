@@ -3,8 +3,8 @@
 
 use super::*;
 use crate::model::{
-    DatabaseDeclaration, DateExpr, DateOption, EndvalEntry, EndvalInstruction, PathBlock,
-    PathReference, PathStanza, PathTarget, PeriodPoint, PeriodRange, ScheduledShock,
+    DatabaseDeclaration, DateExpr, DateOption, EndvalEntry, EndvalInstruction, IrfShocksOption,
+    PathBlock, PathReference, PathStanza, PathTarget, PeriodPoint, PeriodRange, ScheduledShock,
     SetTimeStatement, ShockBlock, ShockBlockKind, ShockOperation, ShockOptions, StochSimulRequest,
     SubsampleHead, SubsampleInstruction, SubsampleRange, WrittenValue,
 };
@@ -463,8 +463,10 @@ impl Parser<'_> {
             let name_tok = self.tokens[name_i].clone();
             let after_name = name_i + 1;
             let mut lag = None;
+            let mut lag_call = false;
             let mut next = after_name;
             if self.tokens.get(after_name).map(|t| t.kind) == Some(TokenKind::LParen) {
+                lag_call = true;
                 let after = skip_balanced_tokens(
                     &self.tokens,
                     after_name,
@@ -476,6 +478,26 @@ impl Parser<'_> {
                     let lag_start = self.tokens[after_name + 1].span.start as usize;
                     let lag_end = self.tokens[after - 2].span.end as usize;
                     lag = Some(self.src[lag_start..lag_end].trim().to_string());
+                }
+                if after <= after_name + 2
+                    || self.tokens.get(after.saturating_sub(2)).map(|t| t.kind)
+                        == Some(TokenKind::Comma)
+                {
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        self.tokens[after.saturating_sub(1)].span,
+                        "shock_paths",
+                        "syntax error, unexpected ')'",
+                    ));
+                } else if namespace.as_deref() == Some("learnt_in") {
+                    if let Some(comma) = (after_name + 1..after.saturating_sub(1))
+                        .find(|&j| self.tokens[j].kind == TokenKind::Comma)
+                    {
+                        self.model.shape_refuses.push(ShapeRefuse::official(
+                            self.tokens[comma].span,
+                            "shock_paths",
+                            "syntax error, unexpected COMMA",
+                        ));
+                    }
                 }
                 next = after;
             }
@@ -489,6 +511,7 @@ impl Parser<'_> {
                     end: name_tok.span.end,
                 },
                 lag,
+                lag_call,
                 learnt_in,
                 call,
             });
@@ -541,7 +564,11 @@ impl Parser<'_> {
             self.model.shock_paths_span.get_or_insert(start_tok.span);
         }
         if self.at(TokenKind::LParen) {
+            let option_start = self.i;
             self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+            if !companion {
+                self.record_option_twice(option_start, self.i);
+            }
         }
         let opener_end = if self.at(TokenKind::Semi) {
             self.bump().span.end
@@ -954,6 +981,81 @@ impl Parser<'_> {
             }
         }
         self.model.stoch_simul_requests.push(request);
+    }
+
+    pub(super) fn collect_irf_shocks_option(&mut self, command: &str, open: usize, close: usize) {
+        let mut i = open + 1;
+        while i + 2 < close {
+            if self.word_at(i, "irf")
+                && self.tokens.get(i + 1).map(|t| t.kind) == Some(TokenKind::Eq)
+            {
+                if let Some(value) = self.tokens.get(i + 2) {
+                    let message = if value.kind == TokenKind::Minus {
+                        Some("syntax error, unexpected MINUS, expecting INT_NUMBER")
+                    } else if value.kind == TokenKind::Number
+                        && !is_integer_lexeme(value.text(self.src))
+                    {
+                        Some("syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER")
+                    } else {
+                        None
+                    };
+                    if let Some(message) = message {
+                        self.model
+                            .shape_refuses
+                            .push(ShapeRefuse::official(value.span, command, message));
+                    }
+                }
+            }
+            if !self.word_at(i, "irf_shocks")
+                || self.tokens.get(i + 1).map(|t| t.kind) != Some(TokenKind::Eq)
+                || self.tokens.get(i + 2).map(|t| t.kind) != Some(TokenKind::LParen)
+            {
+                i += 1;
+                continue;
+            }
+            let option_span = self.tokens[i].span;
+            let after =
+                skip_balanced_tokens(&self.tokens, i + 2, TokenKind::LParen, TokenKind::RParen)
+                    .min(close);
+            if self.tokens.get(i + 3).map(|t| t.kind) == Some(TokenKind::RParen) {
+                self.model.shape_refuses.push(ShapeRefuse::official(
+                    self.tokens[i + 3].span,
+                    command,
+                    "syntax error, unexpected ')'",
+                ));
+            }
+            if self.tokens.get(after.saturating_sub(2)).map(|t| t.kind) == Some(TokenKind::Comma) {
+                self.model.shape_refuses.push(ShapeRefuse::official(
+                    self.tokens[after - 1].span,
+                    command,
+                    "syntax error, unexpected ')'",
+                ));
+            }
+            let mut names = Vec::new();
+            for j in i + 3..after.saturating_sub(1) {
+                if self.tokens[j].kind == TokenKind::Ident {
+                    let tok = &self.tokens[j];
+                    names.push((self.intern.intern(tok.text(self.src)), tok.span));
+                } else if self.tokens[j].kind == TokenKind::Number {
+                    let message = if is_integer_lexeme(self.tokens[j].text(self.src)) {
+                        "syntax error, unexpected INT_NUMBER"
+                    } else {
+                        "syntax error, unexpected FLOAT_NUMBER"
+                    };
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        self.tokens[j].span,
+                        command,
+                        message,
+                    ));
+                }
+            }
+            self.model.irf_shocks_options.push(IrfShocksOption {
+                command: command.to_ascii_lowercase(),
+                span: option_span,
+                names,
+            });
+            i = after;
+        }
     }
 
     fn word_at(&self, i: usize, word: &str) -> bool {

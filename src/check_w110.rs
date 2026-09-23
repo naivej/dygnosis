@@ -1,10 +1,11 @@
-//! W060 / W110–W112 shocks: missing block, duplicate specs, variance sign, corr range.
+//! W060 / W110–W112 shocks: requested IRFs, duplicate specs, variance sign, corr range.
 
 use std::collections::HashSet;
 
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::intern::Name;
-use crate::model::{Decl, EstimatedParamKind, Model, ShockKind};
+use crate::lexer::{tokenize, TokenKind};
+use crate::model::{Decl, EstimatedParamKind, Model, PeriodPoint, ShockBlockKind, ShockKind};
 use crate::span::Span;
 
 const FALLBACK: Span = Span { start: 0, end: 1 };
@@ -19,23 +20,87 @@ pub fn check_w110(model: &Model) -> Vec<Diagnostic> {
 
 fn check_w060(model: &Model) -> Vec<Diagnostic> {
     let stochastic = stochastic_exo(model);
-    if stochastic.is_empty() {
+    if stochastic.is_empty() || model.source.contains("@#") || model.source.contains("@{") {
         return Vec::new();
     }
-    if model.shocks_block.is_some() || !model.shocks_vars.is_empty() {
-        return Vec::new();
+    let exo: HashSet<Name> = stochastic.iter().map(|d| d.name).collect();
+    let mut specified = HashSet::new();
+    let mut next_block = 0;
+    let mut out = Vec::new();
+    for request in &model.stoch_simul_requests {
+        let estimated: HashSet<Name> = model
+            .estimated_params
+            .iter()
+            .filter(|row| {
+                row.kind == EstimatedParamKind::Stderr && row.span.start < request.span.start
+            })
+            .map(|row| row.name)
+            .collect();
+        while let Some(block) = model.shock_blocks.get(next_block) {
+            if block.span.start >= request.span.start {
+                break;
+            }
+            next_block += 1;
+            let regular = block.kind == ShockBlockKind::Regular
+                || (block.kind == ShockBlockKind::LearntIn
+                    && matches!(
+                        block.options.learnt_in.as_ref(),
+                        Some(PeriodPoint::Integer(1))
+                    ));
+            if !regular {
+                continue;
+            }
+            if block.options.overwrite {
+                specified.clear();
+            }
+            for stmt in &block.stochastic {
+                if let ShockKind::Var(name) | ShockKind::Stderr(name) = &stmt.kind {
+                    if exo.contains(name) {
+                        specified.insert(*name);
+                    }
+                }
+            }
+        }
+        let prior = &model.source[..request.span.start as usize];
+        if has_verbatim(prior) {
+            // Verbatim MATLAB may set M_.Sigma_e or a shock standard error.
+            continue;
+        }
+        if request.irf.is_some_and(|(value, _)| value == 0) {
+            continue;
+        }
+        if let Some(selected) = &request.irf_shocks {
+            let mut seen = HashSet::new();
+            for &(name, span) in selected {
+                if !exo.contains(&name)
+                    || specified.contains(&name)
+                    || estimated.contains(&name)
+                    || !seen.insert(name)
+                {
+                    continue;
+                }
+                out.push(Diagnostic::new(
+                    nonempty(span),
+                    Severity::Warning,
+                    "W060",
+                    format!(
+                        "stoch_simul requests an IRF for '{}', but no stochastic shock size is specified.",
+                        model.name(name)
+                    ),
+                ));
+            }
+        } else if let Some((irf, span)) = request.irf {
+            if irf > 0 && specified.is_empty() && estimated.is_empty() {
+                out.push(Diagnostic::new(
+                    nonempty(span),
+                    Severity::Warning,
+                    "W060",
+                    "stoch_simul requests IRFs, but no stochastic shock size is specified.",
+                ));
+            }
+        }
     }
-    let names: Vec<&str> = stochastic.iter().map(|d| model.name(d.name)).collect();
-    let shown = names.iter().take(5).copied().collect::<Vec<_>>().join(", ");
-    let span = nonempty(stochastic[0].span);
-    vec![Diagnostic::new(
-        span,
-        Severity::Warning,
-        "W060",
-        format!(
-            "Exogenous variable(s) declared ({shown}) but no 'shocks' block found. Add a shocks block to define the shock processes."
-        ),
-    )]
+    out
 }
 
 fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
@@ -75,7 +140,7 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                 }
             }
             ShockKind::Cov(names) => {
-                let key = SeenKey::Cov(sorted_names(model, names));
+                let key = SeenKey::Pair(sorted_names(model, names));
                 if seen.contains(&key) && names.len() >= 2 {
                     let first = model.name(names[0]);
                     let second = model.name(names[1]);
@@ -90,9 +155,40 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                 }
                 seen.insert(key);
             }
-            ShockKind::Skew(_) => {}
+            ShockKind::Skew(names) => {
+                let key = if names.len() == 1 {
+                    SeenKey::Skew(vec![names[0]; 3])
+                } else {
+                    SeenKey::Skew(sorted_names(model, names))
+                };
+                if !seen.insert(key) {
+                    if names.len() == 1 {
+                        diagnostics.push(Diagnostic::new(
+                            span,
+                            Severity::Error,
+                            "E393",
+                            format!(
+                                "shocks: skewness of {} declared twice",
+                                model.name(names[0])
+                            ),
+                        ));
+                    } else if names.len() == 3 {
+                        diagnostics.push(Diagnostic::new(
+                            span,
+                            Severity::Error,
+                            "E394",
+                            format!(
+                                "shocks: co-skewness of ({}, {}, {}) declared twice",
+                                model.name(names[0]),
+                                model.name(names[1]),
+                                model.name(names[2])
+                            ),
+                        ));
+                    }
+                }
+            }
             ShockKind::Corr { a, b } => {
-                let key = SeenKey::Corr(sorted_names(model, &[*a, *b]));
+                let key = SeenKey::Pair(sorted_names(model, &[*a, *b]));
                 if seen.contains(&key) {
                     let first = model.name(*a);
                     let second = model.name(*b);
@@ -241,7 +337,9 @@ fn check_e212(model: &Model) -> Vec<Diagnostic> {
             continue;
         };
         for r in model.exprs.walk_idents(id) {
-            if estimated.contains(&r.name) && param_names.contains(&r.name) && !hits.contains(&r.name)
+            if estimated.contains(&r.name)
+                && param_names.contains(&r.name)
+                && !hits.contains(&r.name)
             {
                 hits.push(r.name);
             }
@@ -300,8 +398,16 @@ fn nonempty(span: Span) -> Span {
 #[derive(Clone, PartialEq, Eq, Hash)]
 enum SeenKey {
     Var(Name),
-    Cov(Vec<Name>),
-    Corr(Vec<Name>),
+    Pair(Vec<Name>),
+    Skew(Vec<Name>),
+}
+
+fn has_verbatim(source: &str) -> bool {
+    tokenize(source).windows(2).any(|pair| {
+        pair[0].kind == TokenKind::Ident
+            && pair[0].text(source).eq_ignore_ascii_case("verbatim")
+            && pair[1].kind == TokenKind::Semi
+    })
 }
 
 /// Python 3 default `{value:g}` (precision 6).
