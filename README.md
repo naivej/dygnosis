@@ -19,6 +19,8 @@ Subsample checks cover named ranges, copies, and related `prior` / `options` sta
 
 Compare reports written shock setup changes in `shock_setup_changes` and a **Shock setup changes** markdown section: values, periods, learning dates, controls, and overwritten instructions. It gives source locations when the parsed text matches the file you supplied; an included instruction has no misleading root-file location. It does not calculate a realized shock path.
 
+Changed initial and terminal values, dates, database references, and heteroskedastic data settings appear beside the relevant shock setup. Changes to `shock_groups` and `init2shocks` appear in a separate **Shock analysis setup** section.
+
 ## How to use
 
 ### Command line

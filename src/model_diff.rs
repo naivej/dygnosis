@@ -1,6 +1,6 @@
 //! Structural compare of two parsed models. No numeric steady state, no solver.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -68,6 +68,18 @@ pub struct ShockSetting {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub written_target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_explicit: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_location: Option<SourceLocation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub related_setup: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub related_target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub references: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub measure: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation: Option<String>,
@@ -82,6 +94,7 @@ pub struct ShockSetting {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub released_exogenous: Option<String>,
     pub overwrite: bool,
+    #[serde(skip_serializing_if = "is_written_context_status")]
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<SourceLocation>,
@@ -173,10 +186,27 @@ impl ModelDiff {
             }
         }
 
-        if !self.shock_setup_changes.is_empty() {
+        let setup_changes: Vec<&ShockSetupChange> = self
+            .shock_setup_changes
+            .iter()
+            .filter(|change| !is_shock_analysis_change(change))
+            .collect();
+        if !setup_changes.is_empty() {
             lines.push(String::new());
             lines.push("## Shock setup changes".into());
-            for change in &self.shock_setup_changes {
+            for change in setup_changes {
+                lines.push(format!("- {}", format_shock_change(change)));
+            }
+        }
+        let analysis_changes: Vec<&ShockSetupChange> = self
+            .shock_setup_changes
+            .iter()
+            .filter(|change| is_shock_analysis_change(change))
+            .collect();
+        if !analysis_changes.is_empty() {
+            lines.push(String::new());
+            lines.push("## Shock analysis setup".into());
+            for change in analysis_changes {
                 lines.push(format!("- {}", format_shock_change(change)));
             }
         }
@@ -302,6 +332,8 @@ impl ShockInstruction {
             && self.role == other.role
             && self.target == other.target
             && self.setting.block == other.setting.block
+            && self.setting.group == other.setting.group
+            && self.setting.group_explicit == other.setting.group_explicit
             && self.setting.measure == other.setting.measure
             && self.setting.operation == other.setting.operation
             && self.setting.periods == other.setting.periods
@@ -313,8 +345,13 @@ impl ShockInstruction {
             && self.setting.status == other.setting.status
     }
 
-    fn pairing_key(&self) -> (&str, &str, &str) {
-        (self.form, self.role, &self.target)
+    fn pairing_key(&self) -> (&str, &str, &str, Option<&str>) {
+        (
+            self.form,
+            self.role,
+            &self.target,
+            self.setting.group.as_deref(),
+        )
     }
 }
 
@@ -350,6 +387,106 @@ impl<'a> VerifiedSource<'a> {
     }
 }
 
+#[derive(Default)]
+struct BaselineUse {
+    setups: BTreeSet<&'static str>,
+    targets: BTreeSet<String>,
+}
+
+#[derive(Default)]
+struct ContextRelevance {
+    baselines: BTreeMap<(String, &'static str), BaselineUse>,
+    timed: bool,
+    timing_targets: BTreeSet<String>,
+    paths: bool,
+    heteroskedastic: bool,
+    heteroskedastic_targets: BTreeSet<String>,
+}
+
+impl ContextRelevance {
+    fn for_pair(before: &Model, after: &Model) -> Self {
+        let mut relevance = Self::default();
+        relevance.add_model(before);
+        relevance.add_model(after);
+        relevance
+    }
+
+    fn add_model(&mut self, model: &Model) {
+        let regular_endval_names: HashSet<_> = model
+            .endval_instructions
+            .iter()
+            .filter(|block| is_default_learning(block.learnt_in.as_ref()))
+            .flat_map(|block| {
+                block
+                    .entries
+                    .iter()
+                    .map(|row| model.name(row.name).to_string())
+            })
+            .collect();
+        for block in &model.shock_blocks {
+            if !block.scheduled.is_empty() {
+                self.timed = true;
+            }
+            for row in &block.scheduled {
+                let target = model.name(row.name).to_string();
+                self.timing_targets.insert(target.clone());
+                if block.kind == ShockBlockKind::Multiplicative {
+                    let baseline = if block.options.relative_to_initval
+                        || !regular_endval_names.contains(&target)
+                    {
+                        "initval"
+                    } else {
+                        "endval"
+                    };
+                    let use_record = self
+                        .baselines
+                        .entry((target.clone(), baseline))
+                        .or_default();
+                    use_record.setups.insert("mshocks");
+                    use_record.targets.insert(target);
+                } else if block.kind == ShockBlockKind::Heteroskedastic {
+                    self.heteroskedastic = true;
+                    self.heteroskedastic_targets.insert(target);
+                }
+            }
+            if block.kind == ShockBlockKind::Heteroskedastic {
+                self.heteroskedastic = true;
+            }
+        }
+        self.paths |= !model.shock_paths.is_empty();
+        for block in &model.shock_paths {
+            for stanza in &block.stanzas {
+                self.timed = true;
+                let path_name = path_target(model, &stanza.target).1;
+                self.timing_targets.insert(path_name.clone());
+                for value in &stanza.values {
+                    for reference in &value.path_refs {
+                        if matches!(reference.namespace.as_deref(), Some("initval" | "init")) {
+                            let name = model.name(reference.name).to_string();
+                            let use_record = self.baselines.entry((name, "initval")).or_default();
+                            use_record.setups.insert("shock_paths");
+                            use_record.targets.insert(path_name.clone());
+                        }
+                    }
+                }
+            }
+        }
+        for block in &model.controlled_paths {
+            for stanza in &block.stanzas {
+                self.timed = true;
+                self.timing_targets
+                    .insert(path_target(model, &stanza.target).1);
+            }
+        }
+        for block in &model.endval_instructions {
+            for row in &block.entries {
+                self.timed = true;
+                self.timing_targets.insert(model.name(row.name).to_string());
+            }
+        }
+    }
+}
+
 fn diff_shock_setup(
     before: &Model,
     after: &Model,
@@ -358,8 +495,9 @@ fn diff_shock_setup(
 ) -> Vec<ShockSetupChange> {
     let before_source = VerifiedSource::new(before, source_before);
     let after_source = VerifiedSource::new(after, source_after);
-    let old = shock_instructions(before, before_source.as_ref());
-    let new = shock_instructions(after, after_source.as_ref());
+    let relevance = ContextRelevance::for_pair(before, after);
+    let old = shock_instructions(before, before_source.as_ref(), &relevance);
+    let new = shock_instructions(after, after_source.as_ref(), &relevance);
     let mut used_old = vec![false; old.len()];
     let mut used_new = vec![false; new.len()];
 
@@ -562,6 +700,12 @@ fn base_shock_setting(
         block: block.into(),
         domain: None,
         written_target: None,
+        group: None,
+        group_explicit: None,
+        group_location: None,
+        related_setup: None,
+        related_target: None,
+        references: None,
         measure: None,
         operation: None,
         periods: None,
@@ -592,7 +736,11 @@ enum ShockBlockRef<'a> {
     Endval(&'a EndvalInstruction),
 }
 
-fn shock_instructions(model: &Model, source: Option<&VerifiedSource<'_>>) -> Vec<ShockInstruction> {
+fn shock_instructions(
+    model: &Model,
+    source: Option<&VerifiedSource<'_>>,
+    relevance: &ContextRelevance,
+) -> Vec<ShockInstruction> {
     let mut blocks = Vec::new();
     for block in &model.shock_blocks {
         if block.kind != ShockBlockKind::Heterogeneous {
@@ -621,6 +769,9 @@ fn shock_instructions(model: &Model, source: Option<&VerifiedSource<'_>>) -> Vec
             ShockBlockRef::Endval(block) => append_endval_block(&mut out, model, block, source),
         }
     }
+    append_context_instructions(&mut out, model, source, relevance);
+    append_analysis_instructions(&mut out, model, source);
+    out.sort_by_key(|item| item.span.start);
     out
 }
 
@@ -632,7 +783,7 @@ fn mark_superseded(out: &mut [ShockInstruction], mut applies: impl FnMut(&ShockB
     }
 }
 
-fn block_learning<'a>(options: &'a ShockOptions) -> Option<(&'a PeriodPoint, Option<Span>)> {
+fn block_learning(options: &ShockOptions) -> Option<(&PeriodPoint, Option<Span>)> {
     options
         .learnt_in
         .as_ref()
@@ -980,7 +1131,364 @@ fn append_endval_block(
     }
 }
 
+struct ContextSpec<'a> {
+    role: &'static str,
+    target: String,
+    block: &'a str,
+    related_setup: &'a str,
+    related_target: Option<String>,
+    measure: Option<&'a str>,
+    values: Option<Vec<String>>,
+    span: Span,
+}
+
+fn context_instruction(
+    model: &Model,
+    source: Option<&VerifiedSource<'_>>,
+    spec: ContextSpec<'_>,
+) -> ShockInstruction {
+    let mut setting = base_shock_setting(spec.block, None, None, model, spec.span, source);
+    setting.related_setup = Some(spec.related_setup.into());
+    setting.related_target = spec.related_target;
+    setting.measure = spec.measure.map(str::to_string);
+    setting.values = spec.values;
+    setting.status = "written".into();
+    ShockInstruction {
+        form: "shock_context",
+        role: spec.role,
+        target: spec.target,
+        setting,
+        bucket: ShockBucket::Other,
+        span: spec.span,
+    }
+}
+
+fn append_context_instructions(
+    out: &mut Vec<ShockInstruction>,
+    model: &Model,
+    source: Option<&VerifiedSource<'_>>,
+    relevance: &ContextRelevance,
+) {
+    append_baseline_context(out, model, source, relevance);
+    if relevance.timed {
+        let related_target = if relevance.timing_targets.len() == 1 {
+            relevance.timing_targets.iter().next().cloned()
+        } else {
+            None
+        };
+        for statement in &model.set_time {
+            out.push(context_instruction(
+                model,
+                source,
+                ContextSpec {
+                    role: "time",
+                    target: "set_time".into(),
+                    block: "set_time",
+                    related_setup: "shock timing",
+                    related_target: related_target.clone(),
+                    measure: None,
+                    values: Some(vec![statement.value.text.clone()]),
+                    span: statement.value.span,
+                },
+            ));
+        }
+        for option in &model.date_options {
+            if !matches!(
+                option.command.as_str(),
+                "perfect_foresight_setup" | "perfect_foresight_with_expectation_errors_setup"
+            ) || !matches!(
+                option.name.as_str(),
+                "first_simulation_period" | "last_simulation_period"
+            ) {
+                continue;
+            }
+            out.push(context_instruction(
+                model,
+                source,
+                ContextSpec {
+                    role: "time",
+                    target: format!("{}.{}", option.command, option.name),
+                    block: &option.command,
+                    related_setup: "shock timing",
+                    related_target: related_target.clone(),
+                    measure: Some(&option.name),
+                    values: Some(vec![option.value.text.clone()]),
+                    span: option.span,
+                },
+            ));
+        }
+    }
+    if relevance.paths {
+        for declaration in &model.databases {
+            for (name, span) in &declaration.names {
+                let namespace = model.name(*name);
+                let mut item = context_instruction(
+                    model,
+                    source,
+                    ContextSpec {
+                        role: "database",
+                        target: namespace.into(),
+                        block: "database",
+                        related_setup: "shock_paths",
+                        related_target: None,
+                        measure: None,
+                        values: None,
+                        span: *span,
+                    },
+                );
+                let mut references = Vec::new();
+                let mut referring_targets = HashSet::new();
+                for block in &model.shock_paths {
+                    for stanza in &block.stanzas {
+                        for value in &stanza.values {
+                            if value
+                                .path_refs
+                                .iter()
+                                .any(|reference| reference.namespace.as_deref() == Some(namespace))
+                            {
+                                referring_targets.insert(path_target(model, &stanza.target).1);
+                                if !references.contains(&value.text) {
+                                    references.push(value.text.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                item.setting.related_target = only_target(referring_targets);
+                if !references.is_empty() {
+                    item.setting.references = Some(references);
+                }
+                out.push(item);
+            }
+        }
+    }
+    if relevance.heteroskedastic {
+        let heteroskedastic_target = if relevance.heteroskedastic_targets.len() == 1 {
+            relevance.heteroskedastic_targets.iter().next().cloned()
+        } else {
+            None
+        };
+        for statement in &model.estimation_statements {
+            for option in &statement.data_options {
+                let target = if option.name.eq_ignore_ascii_case("first_obs") {
+                    "estimation.first_obs"
+                } else {
+                    "estimation.source"
+                };
+                out.push(context_instruction(
+                    model,
+                    source,
+                    ContextSpec {
+                        role: "data_source",
+                        target: target.into(),
+                        block: "estimation",
+                        related_setup: "heteroskedastic_shocks",
+                        related_target: heteroskedastic_target.clone(),
+                        measure: Some(&option.name),
+                        values: Some(vec![written_option_value(model, option)]),
+                        span: option_value_span(option),
+                    },
+                ));
+            }
+        }
+        for statement in &model.data_statements {
+            for option in &statement.options {
+                if !matches!(
+                    option.name.to_ascii_lowercase().as_str(),
+                    "file" | "series" | "first_obs"
+                ) {
+                    continue;
+                }
+                let target = if option.name.eq_ignore_ascii_case("first_obs") {
+                    "data.first_obs"
+                } else {
+                    "data.source"
+                };
+                out.push(context_instruction(
+                    model,
+                    source,
+                    ContextSpec {
+                        role: "data_source",
+                        target: target.into(),
+                        block: "data",
+                        related_setup: "heteroskedastic_shocks",
+                        related_target: heteroskedastic_target.clone(),
+                        measure: Some(&option.name),
+                        values: Some(vec![written_option_value(model, option)]),
+                        span: option_value_span(option),
+                    },
+                ));
+            }
+        }
+    }
+}
+
+fn only_target(targets: HashSet<String>) -> Option<String> {
+    if targets.len() == 1 {
+        targets.into_iter().next()
+    } else {
+        None
+    }
+}
+
+fn option_value_span(option: &crate::model::FamilyOption) -> Span {
+    Span {
+        start: option.span.start,
+        end: option.value_span.end,
+    }
+}
+
+fn written_option_value(model: &Model, option: &crate::model::FamilyOption) -> String {
+    source_text(model, option.value_span)
+        .map(str::trim)
+        .map(str::to_string)
+        .unwrap_or_else(|| option.value_text.clone())
+}
+
+fn written_assignment_value(model: &Model, assignment: &Assignment) -> String {
+    source_text(model, assignment.span)
+        .and_then(|text| text.split_once('=').map(|(_, value)| value))
+        .map(|value| value.trim().trim_end_matches(';').trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| assignment.expression.clone())
+}
+
+fn append_baseline_context(
+    out: &mut Vec<ShockInstruction>,
+    model: &Model,
+    source: Option<&VerifiedSource<'_>>,
+    relevance: &ContextRelevance,
+) {
+    for ((target, baseline), usage) in &relevance.baselines {
+        let related_setup = usage
+            .setups
+            .iter()
+            .copied()
+            .collect::<Vec<_>>()
+            .join(" and ");
+        let related_target = if usage.targets.len() == 1 {
+            usage.targets.iter().next().cloned()
+        } else {
+            None
+        };
+        if *baseline == "initval" {
+            for assignment in &model.initval {
+                if model.name(assignment.name) == target {
+                    out.push(context_instruction(
+                        model,
+                        source,
+                        ContextSpec {
+                            role: "baseline",
+                            target: target.clone(),
+                            block: "initval",
+                            related_setup: &related_setup,
+                            related_target: related_target.clone(),
+                            measure: None,
+                            values: Some(vec![written_assignment_value(model, assignment)]),
+                            span: assignment.span,
+                        },
+                    ));
+                }
+            }
+        } else {
+            for block in &model.endval_instructions {
+                if !is_default_learning(block.learnt_in.as_ref()) {
+                    continue;
+                }
+                for row in &block.entries {
+                    if model.name(row.name) == target {
+                        out.push(context_instruction(
+                            model,
+                            source,
+                            ContextSpec {
+                                role: "baseline",
+                                target: target.clone(),
+                                block: "endval",
+                                related_setup: &related_setup,
+                                related_target: related_target.clone(),
+                                measure: Some(operation_name(row.operation)),
+                                values: Some(vec![row.value.text.clone()]),
+                                span: row.span,
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn append_analysis_instructions(
+    out: &mut Vec<ShockInstruction>,
+    model: &Model,
+    source: Option<&VerifiedSource<'_>>,
+) {
+    for block in &model.shock_group_blocks {
+        for row in &model.shock_groups[block.row_start..block.row_end] {
+            let mut setting =
+                base_shock_setting("shock_groups", None, None, model, row.span, source);
+            setting.group = Some(block.group.clone());
+            setting.group_explicit = Some(block.group_span.is_some());
+            setting.status = "written".into();
+            setting.group_location = block
+                .group_span
+                .or(Some(block.span))
+                .and_then(|span| source.and_then(|source| source.location(span)));
+            setting.values = Some(
+                row.members
+                    .iter()
+                    .map(|(name, _)| model.name(*name).to_string())
+                    .collect(),
+            );
+            out.push(ShockInstruction {
+                form: "shock_group",
+                role: "membership",
+                target: row.label.clone(),
+                setting,
+                bucket: ShockBucket::Other,
+                span: row.span,
+            });
+        }
+    }
+    for block in &model.init2shocks_blocks {
+        for row in &block.rows {
+            let mut setting =
+                base_shock_setting("init2shocks", None, None, model, row.span, source);
+            setting.group = Some(block.group.clone());
+            setting.group_explicit = Some(block.group_span.is_some());
+            setting.status = "written".into();
+            setting.group_location = block
+                .group_span
+                .or(Some(block.span))
+                .and_then(|span| source.and_then(|source| source.location(span)));
+            setting.values = Some(vec![model.name(row.exo).into()]);
+            out.push(ShockInstruction {
+                form: "init2shocks",
+                role: "attribution",
+                target: model.name(row.endo).into(),
+                setting,
+                bucket: ShockBucket::Other,
+                span: row.span,
+            });
+        }
+    }
+}
+
+fn is_shock_analysis_change(change: &ShockSetupChange) -> bool {
+    matches!(change.form.as_str(), "shock_group" | "init2shocks")
+}
+
+fn is_written_context_status(status: &String) -> bool {
+    status == "written"
+}
+
 fn format_shock_change(change: &ShockSetupChange) -> String {
+    if change.form == "shock_context" {
+        return format_context_change(change);
+    }
+    if is_shock_analysis_change(change) {
+        return format_analysis_change(change);
+    }
     let setting = change.after.as_ref().or(change.before.as_ref());
     let measurement_error =
         setting.and_then(|setting| setting.domain.as_deref()) == Some("measurement_error");
@@ -1015,7 +1523,11 @@ fn format_shock_change(change: &ShockSetupChange) -> String {
         }
         (None, None) => "changed".into(),
     };
-    let location = match (&change.before, &change.after) {
+    format!("{prefix}: {detail}{}", change_location(change))
+}
+
+fn change_location(change: &ShockSetupChange) -> String {
+    match (&change.before, &change.after) {
         (Some(before), Some(after)) => match (&before.location, &after.location) {
             (Some(a), Some(b)) => format!(" (before line {}; after line {})", a.line, b.line),
             (Some(a), None) => format!(" (before line {})", a.line),
@@ -1033,8 +1545,132 @@ fn format_shock_change(change: &ShockSetupChange) -> String {
             .map(|loc| format!(" (after line {})", loc.line))
             .unwrap_or_default(),
         _ => String::new(),
+    }
+}
+
+fn format_context_change(change: &ShockSetupChange) -> String {
+    let setting = change.after.as_ref().or(change.before.as_ref());
+    let related = setting.and_then(|setting| setting.related_setup.as_deref());
+    let affected = setting
+        .and_then(|setting| setting.related_target.as_deref())
+        .filter(|target| *target != change.target)
+        .map(|target| format!(" for {}", markdown_escape(target)))
+        .unwrap_or_default();
+    let title = match change.role.as_str() {
+        "baseline" => format!(
+            "{} — written baseline for {}{}",
+            markdown_escape(&change.target),
+            markdown_escape(related.unwrap_or("shock setup")),
+            affected
+        ),
+        "time" => format!(
+            "Shock timing — {}{}",
+            markdown_escape(&change.target),
+            affected
+        ),
+        "database" => format!(
+            "Shock path database — {}{}",
+            markdown_escape(&change.target),
+            affected
+        ),
+        "data_source" => format!(
+            "Heteroskedastic data — {}{}",
+            markdown_escape(&change.target),
+            affected
+        ),
+        _ => format!("Shock context — {}", markdown_escape(&change.target)),
     };
-    format!("{prefix}: {detail}{location}")
+    let detail = match (&change.before, &change.after) {
+        (None, Some(after)) => format!("added: {}", context_setting_summary(after)),
+        (Some(before), None) => format!("removed: {}", context_setting_summary(before)),
+        (Some(before), Some(after)) => {
+            let fields = changed_setting_fields(before, after);
+            if fields.is_empty() {
+                "changed".into()
+            } else {
+                fields.join("; ")
+            }
+        }
+        (None, None) => "changed".into(),
+    };
+    format!("{title}: {detail}{}", change_location(change))
+}
+
+fn context_setting_summary(setting: &ShockSetting) -> String {
+    let mut parts = vec![markdown_escape(&setting.block)];
+    if let Some(measure) = &setting.measure {
+        parts.push(markdown_escape(measure));
+    }
+    if let Some(values) = &setting.values {
+        parts.push(markdown_list(values));
+    }
+    if let Some(references) = &setting.references {
+        parts.push(format!("referenced by {}", markdown_list(references)));
+    }
+    parts.join(" ")
+}
+
+fn format_analysis_change(change: &ShockSetupChange) -> String {
+    let setting = change.after.as_ref().or(change.before.as_ref());
+    let group = setting
+        .and_then(|setting| setting.group.as_deref())
+        .unwrap_or("default");
+    let label = if change.form == "shock_group" {
+        "shock group"
+    } else {
+        "initial-condition attribution"
+    };
+    let prefix = format!(
+        "{} / {} — {label}",
+        markdown_escape(group),
+        markdown_escape(&change.target)
+    );
+    let value_label = if change.form == "shock_group" {
+        "members"
+    } else {
+        "attributed to"
+    };
+    let detail = match (&change.before, &change.after) {
+        (None, Some(after)) => format!(
+            "added: {value_label} {}",
+            markdown_optional_list(after.values.as_deref())
+        ),
+        (Some(before), None) => format!(
+            "removed: {value_label} {}",
+            markdown_optional_list(before.values.as_deref())
+        ),
+        (Some(before), Some(after)) => {
+            let mut fields = Vec::new();
+            if before.group_explicit != after.group_explicit {
+                fields.push(format!(
+                    "block name {} → {}",
+                    analysis_group_option(before),
+                    analysis_group_option(after)
+                ));
+            }
+            if before.values != after.values {
+                fields.push(format!(
+                    "{value_label} {} → {}",
+                    markdown_optional_list(before.values.as_deref()),
+                    markdown_optional_list(after.values.as_deref())
+                ));
+            }
+            fields.join("; ")
+        }
+        (None, None) => "changed".into(),
+    };
+    format!("{prefix}: {detail}{}", change_location(change))
+}
+
+fn analysis_group_option(setting: &ShockSetting) -> String {
+    if setting.group_explicit == Some(true) {
+        format!(
+            "name={}",
+            markdown_escape(setting.group.as_deref().unwrap_or("default"))
+        )
+    } else {
+        "bare default".into()
+    }
 }
 
 fn setting_summary(setting: &ShockSetting) -> String {

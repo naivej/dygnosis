@@ -13,7 +13,7 @@ use crate::model::{
     FamilyValueKind, Init2ShocksBlock, Init2ShocksRow, IrfCalibrationBlock, IrfCalibrationRow,
     MatchedIrfsBlock, MatchedIrfsRow, MatchedIrfsWeight, MatchedIrfsWeightsBlock, MatchedMoment,
     Model, MomStatement, MomSyntax, MomentCalibrationBlock, MomentCalibrationRow, MsStatement,
-    OptimWeight, ParseIssue, ParseIssueKind, ShapeRefuse, ShockGroup, SvarEquation,
+    OptimWeight, ParseIssue, ParseIssueKind, ShapeRefuse, ShockGroup, ShockGroupBlock, SvarEquation,
     SvarIdentification, SvarIdentificationElement,
 };
 use crate::model::{
@@ -2155,7 +2155,11 @@ impl Parser<'_> {
         let body_i = self.i;
         let body_end_i = self.consume_until_end();
         self.record_missing_end_if_unclosed("init2shocks", opener_span, body_i, body_end_i);
-        let group = self.group_name_from_opener(opener_span);
+        let (group, group_span) = self.group_name_from_opener(opener_span);
+        let span = Span {
+            start: opener_span.start,
+            end: self.block_end_after_consume(),
+        };
         let mut rows = Vec::new();
         let saved = self.i;
         self.i = body_i;
@@ -2179,7 +2183,12 @@ impl Parser<'_> {
         self.i = saved;
         self.model
             .init2shocks_blocks
-            .push(Init2ShocksBlock { group, rows });
+            .push(Init2ShocksBlock {
+                group,
+                group_span,
+                rows,
+                span,
+            });
     }
 
     /// Two symbols through `;`: `a b;` or `a, b;`.
@@ -2276,11 +2285,17 @@ impl Parser<'_> {
         let body_i = self.i;
         let body_end_i = self.consume_until_end();
         self.record_missing_end_if_unclosed("shock_groups", opener_span, body_i, body_end_i);
+        let (group, group_span) = self.group_name_from_opener(opener_span);
+        let span = Span {
+            start: opener_span.start,
+            end: self.block_end_after_consume(),
+        };
         let saved = self.i;
         self.i = body_i;
+        let row_start = self.model.shock_groups.len();
         self.model
             .shock_group_block_starts
-            .push(self.model.shock_groups.len());
+            .push(row_start);
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::Semi) || self.at(TokenKind::Comma) {
                 self.bump();
@@ -2299,6 +2314,13 @@ impl Parser<'_> {
             }
         }
         self.i = saved;
+        self.model.shock_group_blocks.push(ShockGroupBlock {
+            group,
+            group_span,
+            row_start,
+            row_end: self.model.shock_groups.len(),
+            span,
+        });
     }
 
     fn parse_shock_group(&mut self, end_i: usize) -> Option<ShockGroup> {
@@ -2331,11 +2353,19 @@ impl Parser<'_> {
             }
             self.bump();
         }
-        self.eat(TokenKind::Semi);
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
         Some(ShockGroup {
             label,
             label_span,
             members,
+            span: Span {
+                start: label_tok.span.start,
+                end,
+            },
         })
     }
 
@@ -5342,21 +5372,20 @@ impl Parser<'_> {
     }
 
     /// `name=value` option of a block opener, as the group name.
-    fn group_name_from_opener(&self, opener_span: Span) -> String {
-        let raw = self
-            .src
-            .get(opener_span.start as usize..opener_span.end as usize)
-            .unwrap_or("");
-        let Some(pos) = raw.find('=') else {
-            return "default".to_string();
-        };
-        let value = raw[pos + 1..]
-            .trim()
-            .trim_end_matches(';')
-            .trim()
-            .trim_end_matches(')')
-            .trim();
-        unquote_string(value)
+    fn group_name_from_opener(&self, opener_span: Span) -> (String, Option<Span>) {
+        let value = self
+            .tokens
+            .iter()
+            .filter(|token| {
+                token.span.start >= opener_span.start && token.span.end <= opener_span.end
+            })
+            .skip_while(|token| token.kind != TokenKind::Eq)
+            .nth(1)
+            .filter(|token| token.kind == TokenKind::Ident);
+        match value {
+            Some(token) => (token.text(self.src).to_string(), Some(token.span)),
+            None => ("default".to_string(), None),
+        }
     }
 
     fn parse_occbin_constraints_block(&mut self) {
@@ -7883,6 +7912,7 @@ impl Parser<'_> {
         let mut opener: Option<String> = None;
         let mut opener_span = Span::default();
         let mut saw_datafile = false;
+        let mut estimation_data_options = Vec::new();
         let mut stoch_options = None;
         let mut saw_trailing_symbol = false;
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
@@ -7929,6 +7959,16 @@ impl Parser<'_> {
                     }
                     saw_datafile =
                         self.record_skip_command_options(cmd, from, self.i) || saw_datafile;
+                    if cmd.eq_ignore_ascii_case("estimation") {
+                        estimation_data_options.extend(
+                            self.read_family_options(from, self.i)
+                                .into_iter()
+                                .filter(|option| {
+                                    option.name.eq_ignore_ascii_case("datafile")
+                                        || option.name.eq_ignore_ascii_case("first_obs")
+                                }),
+                        );
+                    }
                     self.record_option_twice(from, self.i);
                     if cmd.eq_ignore_ascii_case("stoch_simul")
                         || cmd.eq_ignore_ascii_case("estimation")
@@ -7977,6 +8017,7 @@ impl Parser<'_> {
             self.model.estimation_statements.push(EstimationStatement {
                 span: opener_span,
                 has_datafile: saw_datafile,
+                data_options: estimation_data_options,
             });
         }
         if opener.as_deref() == Some("stoch_simul") {

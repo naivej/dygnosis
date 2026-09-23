@@ -250,7 +250,9 @@ pub struct Init2ShocksRow {
 #[derive(Clone, Debug)]
 pub struct Init2ShocksBlock {
     pub group: String,
+    pub group_span: Option<Span>,
     pub rows: Vec<Init2ShocksRow>,
+    pub span: Span,
 }
 
 /// One `name, expr, expr;` row of a `homotopy_setup` block.
@@ -268,6 +270,17 @@ pub struct ShockGroup {
     /// The label token's span (inside the quotes for a quoted label).
     pub label_span: Span,
     pub members: Vec<(Name, Span)>,
+    pub span: Span,
+}
+
+/// One named or default `shock_groups` block over the existing flat row list.
+#[derive(Clone, Debug)]
+pub struct ShockGroupBlock {
+    pub group: String,
+    pub group_span: Option<Span>,
+    pub row_start: usize,
+    pub row_end: usize,
+    pub span: Span,
 }
 
 /// Deprecated command / model option recorded from an option-list identifier.
@@ -898,6 +911,9 @@ pub struct Model {
     pub homotopy_rows: Vec<HomotopyRow>,
     /// Members of every `shock_groups` block, file order.
     pub shock_groups: Vec<ShockGroup>,
+    /// Named/default block identities and spans for compare. Diagnostics keep
+    /// using `shock_group_block_starts` and the flat rows above.
+    pub shock_group_blocks: Vec<ShockGroupBlock>,
     /// Flat-vec index where each `shock_groups` block's rows begin. Their reuse
     /// warning compares labels within one block only (each block is its own
     /// statement; probed on 7.1), so the check needs the boundaries.
@@ -1407,12 +1423,14 @@ pub struct EstimationDsgeVarStmt {
 }
 
 /// One `estimation` statement, in file order.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct EstimationStatement {
     /// The command identifier's span. The **E227** row points here.
     pub span: Span,
     /// This statement carried `datafile=`.
     pub has_datafile: bool,
+    /// Only the written options that locate heteroskedastic observations.
+    pub data_options: Vec<FamilyOption>,
 }
 
 /// A literal `@#include` filename plus the directive's byte span.

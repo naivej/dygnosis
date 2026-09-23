@@ -6,6 +6,7 @@
 - Subsample declarations, copies, and named `prior` / `options` uses now report missing or repeated ranges (`E427`–`E430`) and invalid final target types at Write (`E431`). A model use after `var_remove` reports `E426`; command lists recognize removed and model-local names through `E240`. Written denominator cancellation reaches `E278`, and malformed DATE and handed-over command forms reach `E001`. Mixed-type `corr(A,B).options` uses `E379`.
 - W060 now warns only for an explicit `stoch_simul` IRF request with no written stochastic shock size. It stays quiet for bare declarations, bare `stoch_simul`, explicit zero size, possible estimated or external sizes, and uncertain macro or include input. Warnings in a file with resolved includes point to the active file.
 - Compare adds `shock_setup_changes` and a **Shock setup changes** markdown section for stochastic, scheduled, surprise, multiplicative, heteroskedastic, controlled, and terminal instructions. It shows written values, timing, learning dates, controls, and overwrite status, with source locations when the input text can be verified against the parsed file. It does not infer realized paths or solver results.
+- Compare also shows changed initial and terminal values, time settings, database references, and heteroskedastic data settings beside affected shocks; `shock_groups` and `init2shocks` changes have a separate **Shock analysis setup** section.
 
 ## v0.6.1
 
