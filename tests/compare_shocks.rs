@@ -99,7 +99,7 @@ fn surprise_and_learnt_in_keep_their_written_settings() {
     assert_eq!(item["after"]["operation"], "multiply");
 
     let mshocks_a = "varexo e; mshocks(learnt_in=2024Q1); var e; periods 2024Q2; values 1.1; end;";
-    let mshocks_b = "varexo e; mshocks(learnt_in=2024Q2,relative_to_initval); var e; periods 2024Q3; values 1.2; end;";
+    let mshocks_b = "varexo e; mshocks(learnt_in=2024Q2 relative_to_initval); var e; periods 2024Q3; values 1.2; end;";
     let mshocks = compare(mshocks_a, mshocks_b);
     let item = row(&mshocks, "scheduled_shock", "e");
     assert_eq!(item["before"]["learnt_in"]["kind"], "date");
@@ -266,14 +266,14 @@ fn mshocks_overwrite_keeps_stochastic_size_active() {
 fn paths_overwrite_uses_typed_learning_period() {
     let base = "varexo e; shock_paths(learnt_in=2); var e; periods 3; values 1; end;\n";
     let different = format!(
-        "{base}shock_paths(learnt_in=2024Q1,overwrite); var e; periods 2024Q2; values 2; end;"
+        "{base}shock_paths(learnt_in=2024Q1 overwrite); var e; periods 2024Q2; values 2; end;"
     );
     let diff = compare(base, &different);
     assert!(rows(&diff)
         .iter()
         .all(|row| row["after"]["status"] != "superseded"));
     let same =
-        format!("{base}shock_paths(learnt_in=2,overwrite); var e; periods 4; values 2; end;");
+        format!("{base}shock_paths(learnt_in=2 overwrite); var e; periods 4; values 2; end;");
     let diff = compare(base, &same);
     assert!(rows(&diff)
         .iter()
@@ -284,7 +284,7 @@ fn paths_overwrite_uses_typed_learning_period() {
 fn path_overwrite_supersedes_exogenous_and_controlled_rows() {
     let before = "var y; varexo e; shock_paths(learnt_in=2); var e; periods 3; values 1; exogenize y; periods 3; values 2; endogenize e; end;";
     let after = format!(
-        "{before} shock_paths(learnt_in=2,overwrite); var e; periods 4; values 3; exogenize y; periods 4; values 4; endogenize e; end;"
+        "{before} shock_paths(learnt_in=2 overwrite); var e; periods 4; values 3; exogenize y; periods 4; values 4; endogenize e; end;"
     );
     let diff = compare(before, &after);
     assert!(rows(&diff).iter().any(|item| {
@@ -382,7 +382,7 @@ fn shock_paths_date_overwrite_uses_the_same_typed_key() {
     for (second, replaced) in [("2025Q1", true), ("2025Q2", false), ("2025M1", false)] {
         let text = format!(
             "varexo e; shock_paths(learnt_in=2024Q4+1); var e; periods 2026Q1; values 1; end; \
-             shock_paths(learnt_in={second},overwrite); var e; periods 2026Q2; values 2; end;"
+             shock_paths(learnt_in={second} overwrite); var e; periods 2026Q2; values 2; end;"
         );
         let diff = compare("varexo e;", &text);
         let old = rows(&diff)
@@ -481,4 +481,80 @@ fn identical_setup_produces_no_changes_or_solver_claims() {
     let blob = diff.to_string();
     assert!(!blob.contains("steady_state"));
     assert!(!blob.contains("computed"));
+}
+
+#[test]
+fn installed_dynare_accepts_compare_option_neighbours() {
+    use std::path::Path;
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let binary = Path::new("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    if !binary.is_file() {
+        return;
+    }
+    let temp_root = std::env::temp_dir().canonicalize().expect("temp root");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let directory = temp_root.join(format!(
+        "dygnosis_compare_options_{}_{}",
+        std::process::id(),
+        nonce
+    ));
+    std::fs::create_dir(&directory).expect("create isolated probe directory");
+    let prefix = "var y; varexo e; model; y=e; end; ";
+    let probes = [
+        (
+            "mshocks_ok.mod",
+            "mshocks(learnt_in=2 relative_to_initval); var e; periods 3; values 1.2; end;",
+            true,
+        ),
+        (
+            "mshocks_comma.mod",
+            "mshocks(learnt_in=2,relative_to_initval); var e; periods 3; values 1.2; end;",
+            false,
+        ),
+        (
+            "paths_ok.mod",
+            "shock_paths(learnt_in=2 overwrite); var e; periods 3; values 2; end;",
+            true,
+        ),
+        (
+            "paths_comma.mod",
+            "shock_paths(learnt_in=2,overwrite); var e; periods 3; values 2; end;",
+            false,
+        ),
+    ];
+    let mut results = Vec::new();
+    for (name, body, accepted) in probes {
+        std::fs::write(directory.join(name), format!("{prefix}{body}"))
+            .expect("write compare probe");
+        let output = Command::new(binary)
+            .current_dir(&directory)
+            .arg(name)
+            .arg("json=check")
+            .arg("onlyjson")
+            .output()
+            .expect("run Dynare 7.2");
+        results.push((name, accepted, output));
+    }
+    let resolved = directory.canonicalize().expect("probe directory");
+    assert!(resolved.starts_with(&temp_root));
+    std::fs::remove_dir_all(&resolved).expect("remove isolated probe directory");
+    for (name, accepted, output) in results {
+        let message = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.status.success(), accepted, "{name}: {message}");
+        if !accepted {
+            assert!(
+                message.contains("syntax error, unexpected COMMA"),
+                "{name}: {message}"
+            );
+        }
+    }
 }
