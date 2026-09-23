@@ -143,6 +143,11 @@ mod tests {
         let src = "parameters betta;\nbetta = 0.99;\n";
         assert_eq!(rename_in_text(src, "betta", "1bad"), src);
         assert_eq!(rename_in_text(src, "betta", "log"), src);
+        assert_eq!(rename_in_text(src, "betta", "stoch_simul"), src);
+        assert_eq!(rename_in_text(src, "betta", "var"), src);
+        let steady = rename_in_text(src, "betta", "steady");
+        assert!(steady.contains("steady"));
+        assert!(!steady.contains("betta"));
         let out = rename_in_text(src, "betta", "beta_disc");
         assert!(out.contains("beta_disc"));
         assert!(!out.contains("betta"));

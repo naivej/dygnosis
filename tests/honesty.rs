@@ -4625,6 +4625,95 @@ fn every_opener_name_is_accepted_by_71_and_quiet_here() {
     );
 }
 
+/// `<INITIAL>`-only command words are legal declaration names. The five words
+/// with a `<DYNARE_STATEMENT>` rule are not. `end` in an initval row is the closer.
+#[test]
+fn initial_command_names_match_71() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    let legal = [
+        "calib_smoother",
+        "check",
+        "dynasave",
+        "dynatype",
+        "estimated_params",
+        "estimation",
+        "model_diagnostics",
+        "model_info",
+        "osr",
+        "perfect_foresight_setup",
+        "perfect_foresight_solver",
+        "resid",
+        "steady",
+    ];
+    let mut failures: Vec<String> = Vec::new();
+    for name in legal {
+        let text = format!(
+            "var y {name};\nvarexo e;\nparameters rho;\nrho = 0.95;\n\
+             model;\ny = rho*y(-1) + e + {name};\n{name} = 0.1*y;\nend;\n\
+             initval;\ny = 0;\n{name} = 0;\nend;\n\
+             shocks;\nvar e; stderr 0.01;\nend;\nstoch_simul(order = 1, nograph);\n"
+        );
+        let result = spawn(&text, Path::new("cmd.mod"), &pp, JsonStage::Check);
+        if !result.success {
+            failures.push(format!("{name}: 7.1 refused a legal name"));
+            continue;
+        }
+        let own = analyze(&parse(&text));
+        let errors: Vec<&str> = own
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .map(|d| d.code.as_str())
+            .collect();
+        if !errors.is_empty() {
+            failures.push(format!(
+                "{name}: we Error on a file 7.1 accepts: {errors:?}"
+            ));
+        }
+    }
+    let end_row = "\
+var y end;
+varexo e;
+parameters rho;
+rho = 0.9;
+model;
+y = rho*y(-1) + e;
+end;
+initval;
+y = 0;
+end = 0;
+end;
+shocks;
+var e; stderr 0.01;
+end;
+stoch_simul(order=1, irf=0, nograph);
+";
+    let theirs = spawn(end_row, Path::new("end.mod"), &pp, JsonStage::Check);
+    if !they_mention(&theirs, "unexpected IDENTIFIER") {
+        failures.push(format!(
+            "end = 0 in initval: 7.1 did not say unexpected IDENTIFIER: {}",
+            theirs.raw_stderr
+        ));
+    }
+    let ours = analyze(&parse(end_row));
+    if !ours
+        .iter()
+        .any(|d| d.message.contains("unexpected IDENTIFIER"))
+    {
+        failures.push(format!(
+            "end = 0 in initval: we did not report their sentence: {:?}",
+            ours.iter().map(|d| d.message.as_str()).collect::<Vec<_>>()
+        ));
+    }
+    assert!(
+        failures.is_empty(),
+        "command-name honesty failed:\n{}",
+        failures.join("\n")
+    );
+}
+
 #[test]
 fn extra_cycle_warning_is_library_only() {
     let path = fixture("e060/cycle/a.mod");

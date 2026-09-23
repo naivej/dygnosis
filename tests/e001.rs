@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use dygnosis::span::LineIndex;
-use dygnosis::{analyze, auto_fix, check_parse, has_structural_error, parse, TextEdit};
+use dygnosis::{analyze, auto_fix, check_parse, has_structural_error, parse, Severity, TextEdit};
 
 const ARCHIVES: &[&str] = &[
     "trend_rbc_gov_inv",
@@ -557,17 +557,17 @@ fn e001_opener_var_end_without_semi_before_a_block() {
     }
 }
 
-/// Close call 2 (`06b`'s fixture): a reserved word that 7.1 accepts as a declaration
-/// name. The false **E001** is locked here so the slice that fixes it has a target.
+/// `var y end;` declares a name. 7.1 accepts the declaration at check. `end` is
+/// not a reserved identifier; a use inside a block is a different refuse.
 #[test]
-fn e001_opener_var_reserved_ident_locked_for_06b() {
+fn declared_end_is_not_a_reserved_identifier() {
     let text = check_mod("e001/opener_var_reserved_ident.mod");
     let got = rust_e001(&text);
-    assert_eq!(got.len(), 1, "{got:?}");
-    assert!(got[0]
-        .message
-        .contains("Invalid Dynare identifier 'end': reserved"));
-    assert_span_in(&text, &got[0], "var y end;", "end");
+    assert!(
+        got.iter()
+            .all(|d| !d.message.contains("Invalid Dynare identifier")),
+        "{got:?}"
+    );
 }
 
 /// Auto-fix is the identity on the quiet files and on the reserved-identifier one,
@@ -586,5 +586,218 @@ fn e001_opener_var_quiet_files_are_noop_for_auto_fix() {
     ] {
         let text = check_mod(rel);
         assert_eq!(auto_fix(&text), text, "{rel} must be an auto_fix no-op");
+    }
+}
+
+/// The 13 `<INITIAL>`-only command words are legal names. The five words that
+/// also have a `<DYNARE_STATEMENT>` rule still refuse.
+#[test]
+fn initial_command_names_used_in_the_model_are_quiet() {
+    for name in [
+        "calib_smoother",
+        "check",
+        "dynasave",
+        "dynatype",
+        "estimated_params",
+        "estimation",
+        "model_diagnostics",
+        "model_info",
+        "osr",
+        "perfect_foresight_setup",
+        "perfect_foresight_solver",
+        "resid",
+        "steady",
+    ] {
+        let src = format!(
+            "var y {name};\nvarexo e;\nparameters rho;\nrho = 0.95;\n\
+             model;\ny = rho*y(-1) + e + {name};\n{name} = 0.1*y;\nend;\n\
+             initval;\ny = 0;\n{name} = 0;\nend;\n\
+             shocks;\nvar e; stderr 0.01;\nend;\nstoch_simul(order = 1, nograph);\n"
+        );
+        let errors: Vec<_> = analyze(&parse(&src))
+            .into_iter()
+            .filter(|d| d.severity == Severity::Error)
+            .map(|d| format!("{} {}", d.code, d.message))
+            .collect();
+        assert!(errors.is_empty(), "{name} is a legal name, got {errors:?}");
+    }
+}
+
+#[test]
+fn statement_scoped_command_names_still_refuse() {
+    for name in [
+        "forecast",
+        "identification",
+        "simul",
+        "stoch_simul",
+        "varobs",
+    ] {
+        let src = format!(
+            "var y {name};\nvarexo e;\nparameters rho;\nrho = 0.95;\n\
+             model;\ny = rho*y(-1) + e;\nend;\n"
+        );
+        let got = rust_e001(&src);
+        assert!(
+            got.iter().any(|d| d.code == "E001"),
+            "{name}: 7.1 refuses this declaration, got {got:?}"
+        );
+    }
+}
+
+/// `end = 0;` inside `initval` is the closer, not a row. 7.1 refuses it.
+#[test]
+fn end_assignment_inside_initval_is_their_syntax_error() {
+    let src = "\
+var y end;
+varexo e;
+parameters rho;
+rho = 0.9;
+model;
+y = rho*y(-1) + e;
+end;
+initval;
+y = 0;
+end = 0;
+end;
+shocks;
+var e; stderr 0.01;
+end;
+stoch_simul(order=1, irf=0, nograph);
+";
+    let got = rust_e001(src);
+    let hit = got
+        .iter()
+        .find(|d| d.message.contains("unexpected IDENTIFIER"))
+        .unwrap_or_else(|| panic!("{got:?}"));
+    assert_eq!(
+        hit.message,
+        "syntax error, unexpected IDENTIFIER, expecting ';'"
+    );
+}
+
+/// `end` inside an equation is the closer token. 7.1: `syntax error, unexpected END`.
+#[test]
+fn end_inside_an_equation_is_unexpected_end() {
+    for src in [
+        "var y end;\nvarexo e;\nparameters rho;\nrho = 0.9;\nmodel;\ny = rho*y(-1) + e + end + 0;\nend;\n",
+        "var y end;\nvarexo e;\nparameters rho;\nrho = 0.9;\nmodel;\nend = 0.1*y;\ny = rho*y(-1) + e;\nend;\n",
+    ] {
+        let got = rust_e001(src);
+        let hit = got
+            .iter()
+            .find(|d| d.message.contains("unexpected END"))
+            .unwrap_or_else(|| panic!("{got:?}"));
+        assert_eq!(hit.message, "syntax error, unexpected END");
+    }
+}
+
+/// `end = 0;` inside `histval` is the closer, same as in `initval`.
+#[test]
+fn end_assignment_inside_histval_still_refuses() {
+    let src = "\
+var y end;
+varexo e;
+parameters rho;
+rho = 0.9;
+model;
+y = rho*y(-1) + e;
+end;
+histval;
+y(0) = 0;
+end = 0;
+end;
+";
+    let got = rust_e001(src);
+    assert!(
+        got.iter()
+            .any(|d| d.message.contains("unexpected IDENTIFIER")),
+        "{got:?}"
+    );
+}
+
+/// `+ end` inside the model is the closer. The equation does not parse, and the
+/// declaration itself is not a reserved-identifier error.
+#[test]
+fn end_used_in_an_equation_still_refuses() {
+    let src = "\
+var y end;
+varexo e;
+parameters rho;
+rho = 0.9;
+model;
+y = rho*y(-1) + e + end;
+end;
+";
+    let got = rust_e001(src);
+    assert!(
+        got.iter().any(|d| d.code == "E001"),
+        "using end in an equation must still refuse: {got:?}"
+    );
+    assert!(
+        got.iter()
+            .all(|d| !d.message.contains("Invalid Dynare identifier")),
+        "{got:?}"
+    );
+}
+
+/// A declared opener name inside an expression block is that name. 7.1 accepts
+/// `matched_moments; shocks; end;` when `shocks` is declared.
+#[test]
+fn declared_opener_row_in_matched_moments_is_quiet() {
+    let src = "\
+var y shocks;
+varexo e;
+parameters a;
+a = 0.5;
+model;
+y = a*y(-1) + e + shocks;
+end;
+matched_moments;
+shocks;
+end;
+shocks;
+var e; stderr 0.01;
+end;
+stoch_simul(order=1, irf=0, nograph);
+";
+    let errors: Vec<_> = analyze(&parse(src))
+        .into_iter()
+        .filter(|d| d.severity == Severity::Error)
+        .map(|d| d.message)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "a declared name in matched_moments must not be a missing end: {errors:?}"
+    );
+}
+
+/// `name = value` at statement head, when `name` is an `<INITIAL>` keyword.
+/// 7.1 refuses `syntax error, unexpected EQUAL, expecting ';' or '('`.
+#[test]
+fn keyword_followed_by_eq_is_their_syntax_error() {
+    for (name, decl) in [
+        ("model", "parameters model;"),
+        ("steady", "parameters steady;"),
+        ("shocks", "parameters shocks;"),
+    ] {
+        let src = format!(
+            "var y;\nvarexo e;\n{decl}\n{name} = 0.2;\n\
+             model;\ny = 0.2*y(-1) + e;\nend;\n\
+             shocks;\nvar e; stderr 0.01;\nend;\n\
+             stoch_simul(order=1, irf=0, nograph);\n"
+        );
+        let got = rust_e001(&src);
+        let hit = got
+            .iter()
+            .find(|d| d.message.contains("unexpected EQUAL"))
+            .unwrap_or_else(|| panic!("{name}: {got:?}"));
+        assert_eq!(
+            hit.message,
+            "syntax error, unexpected EQUAL, expecting ';' or '('"
+        );
+        assert!(
+            !got.iter().any(|d| d.message.contains("Missing 'end;'")),
+            "{name} must not swallow the real block: {got:?}"
+        );
     }
 }

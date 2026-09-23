@@ -35,24 +35,12 @@ const DECL_OR_BLOCK: &[&str] = &[
     "init2shocks",
 ];
 
-const DYNARE_COMMANDS: &[&str] = &[
-    "steady",
-    "check",
-    "resid",
-    "stoch_simul",
-    "simul",
-    "estimation",
-    "osr",
-    "calib_smoother",
-    "forecast",
-    "identification",
-    "dynasave",
-    "dynatype",
-    "model_diagnostics",
-    "model_info",
-    "perfect_foresight_setup",
-    "perfect_foresight_solver",
-];
+/// Words that are not identifiers even inside a statement: each has a
+/// `<DYNARE_STATEMENT>` lexer rule, so `var y stoch_simul;` is a syntax error.
+/// An `<INITIAL>`-only command (`steady`, `check`, `dynatype`, …) is a legal
+/// name there and is not in this list. At statement head that same word is
+/// still the command: `steady = 0.9;` is `parser::INITIAL_COMMANDS`.
+const DYNARE_COMMANDS: &[&str] = &["stoch_simul", "simul", "forecast", "identification"];
 
 const TERMINAL_COMMANDS: &[&str] = &[
     "stoch_simul",
@@ -111,19 +99,17 @@ const BUILTINS: &[&str] = &[
 
 const EXPRESSION_OPERATOR_RESERVED: &[&str] = &["var_expectation", "pac_target_nonstationary"];
 
+/// Declaration keywords and `varobs`. Each has a `<DYNARE_STATEMENT>` rule, so
+/// none of them can be a declared name. Block openers and `<INITIAL>`-only
+/// commands are legal names and are not listed here. `end` is legal in a
+/// declaration list (its only rule is `<DYNARE_BLOCK>`); a use inside a block
+/// is the closer, which the block parsers refuse.
 const RESERVED_BLOCK_KEYWORDS: &[&str] = &[
     "var",
     "varexo",
     "varexo_det",
     "parameters",
     "predetermined_variables",
-    "model",
-    "end",
-    "initval",
-    "endval",
-    "shocks",
-    "steady_state_model",
-    "estimated_params",
     "varobs",
 ];
 
@@ -619,6 +605,21 @@ fn format_recorded_issues(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
                     None,
                 ));
             }
+            ParseIssueKind::UnexpectedEqual => out.push(e001(
+                issue.span,
+                "syntax error, unexpected EQUAL, expecting ';' or '('".to_string(),
+                None,
+            )),
+            ParseIssueKind::UnexpectedEndAssign => out.push(e001(
+                issue.span,
+                "syntax error, unexpected IDENTIFIER, expecting ';'".to_string(),
+                None,
+            )),
+            ParseIssueKind::UnexpectedEnd => out.push(e001(
+                issue.span,
+                "syntax error, unexpected END".to_string(),
+                None,
+            )),
             ParseIssueKind::KeywordTypo { found, correct } => {
                 let start = index.position(src, issue.span.start);
                 let end = index.position(src, issue.span.end);
@@ -1001,10 +1002,11 @@ fn reserved_ident_diags(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
         .collect();
     for decl in decls {
         let name = model.name(decl.name);
-        // A block opener is a legal declaration name: its only lexer rule is
-        // `<INITIAL>`, so a declaration list reads it through the statement
-        // identifier rule and 7.1 accepts `var y shocks;`. The same fact silences
-        // the declaration scan in `parser::at_decl_or_block_keyword`.
+        // A block opener whose lexer rule is `<INITIAL>` only is a legal
+        // declaration name: a declaration list reads it as an identifier, and
+        // 7.1 accepts `var y shocks;`. `epilogue` and `init2shocks` also have a
+        // `<DYNARE_STATEMENT>` rule, so the declaration scan still refuses them;
+        // skipping the reserved-identifier line here only avoids a second E001.
         if crate::parser::BLOCK_OPENERS
             .iter()
             .any(|kw| name.eq_ignore_ascii_case(kw))

@@ -389,6 +389,32 @@ pub(crate) const BLOCK_OPENERS: &[&str] = &[
     "perfect_foresight_controlled_paths",
 ];
 
+/// Command words whose lexer rule is `<INITIAL>`. Four of them (`stoch_simul`,
+/// `simul`, `forecast`, `identification`) also have a `<DYNARE_STATEMENT>` rule;
+/// `varobs` is the fifth such word and is not here, because the declaration scan
+/// already ends the list on it. At statement head, `name = …` is the keyword
+/// token followed by `=`, which 7.1 refuses. Inside a block the `<INITIAL>`-only
+/// spellings can be declared names; that reading is not this list.
+const INITIAL_COMMANDS: &[&str] = &[
+    "steady",
+    "check",
+    "resid",
+    "stoch_simul",
+    "simul",
+    "estimation",
+    "osr",
+    "calib_smoother",
+    "forecast",
+    "identification",
+    "dynasave",
+    "dynatype",
+    "model_diagnostics",
+    "model_info",
+    "perfect_foresight_setup",
+    "perfect_foresight_solver",
+    "estimated_params",
+];
+
 const PRIOR_SHAPES: &[&str] = &[
     "beta_pdf",
     "gamma_pdf",
@@ -653,6 +679,20 @@ struct Parser<'a> {
 impl Parser<'_> {
     fn parse_file(&mut self) {
         while !self.at(TokenKind::Eof) {
+            // `model = 0.2;` and `steady = 0.9;` are not assignments and not
+            // blocks. The `<INITIAL>` rule returns the keyword, and the grammar
+            // wants `;` or `(`.
+            if self.at_keyword_followed_by_eq() {
+                self.record_issue(ParseIssue {
+                    kind: ParseIssueKind::UnexpectedEqual,
+                    span: self.tokens[self.i + 1].span,
+                });
+                while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+                    self.bump();
+                }
+                self.eat(TokenKind::Semi);
+                continue;
+            }
             if self.at_ident_ci("var") {
                 let decls = self.parse_declaration("var");
                 self.model.endogenous.extend(decls);
@@ -1330,11 +1370,14 @@ impl Parser<'_> {
         let opener_span = self.bump_plain_opener();
         let start = opener_span.start;
         let body_i = self.i;
+        // Same body as `model`: an opener spelling is an identifier here.
+        self.in_equation_body = true;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
             if let Some((eq, _)) = self.parse_equation_statement() {
                 self.model.steady_state_equations.push(eq);
             }
         }
+        self.in_equation_body = false;
         if self.at_block_end() {
             self.record_missing_final("steady_state_model", body_i, self.i);
         }
@@ -1358,6 +1401,9 @@ impl Parser<'_> {
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::Semi) {
                 self.bump();
+                continue;
+            }
+            if self.refuse_end_word(body_end_i) {
                 continue;
             }
             let before = self.i;
@@ -1387,6 +1433,13 @@ impl Parser<'_> {
         let end = self.block_end_after_consume();
         self.model.endval_block = Some(Span { start, end });
         for (raw, span) in self.statements_in(body_i, body_end_i) {
+            if statement_is_end_word(&raw) {
+                self.record_issue(ParseIssue {
+                    kind: ParseIssueKind::UnexpectedEndAssign,
+                    span,
+                });
+                continue;
+            }
             if let Some(a) = self.assignment_from(&raw, span) {
                 self.model.endval.push(a);
             }
@@ -1408,6 +1461,9 @@ impl Parser<'_> {
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::Semi) {
                 self.bump();
+                continue;
+            }
+            if self.refuse_end_word(body_end_i) {
                 continue;
             }
             let before = self.i;
@@ -1603,6 +1659,9 @@ impl Parser<'_> {
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::Semi) {
                 self.bump();
+                continue;
+            }
+            if self.refuse_end_word(body_end_i) {
                 continue;
             }
             let before = self.i;
@@ -2077,6 +2136,9 @@ impl Parser<'_> {
 
     /// `matched_moments;` one model expression per `;`, `end;`.
     fn parse_matched_moments_block(&mut self) {
+        // A row is one expression. A declared opener spelling (`shocks;`) is that
+        // expression, which 7.1 accepts; it is not the next block.
+        self.in_equation_body = true;
         let (opener_span, _, body_i, body_end_i) = self.bump_block_opener("matched_moments");
         let end = self.block_end_after_consume();
         self.model.matched_moments_blocks.push(Span {
@@ -2098,6 +2160,7 @@ impl Parser<'_> {
                 break;
             }
         }
+        self.in_equation_body = false;
         self.i = saved;
     }
 
@@ -2820,12 +2883,22 @@ impl Parser<'_> {
     }
 
     /// The token after a keyword is one a statement may begin with: `(` or `;`.
-    /// `data = 0.5;` is not a `data` statement ? 7.1 refuses it as an assignment.
+    /// `data = 0.5;` is not a `data` statement — 7.1 reads `data` as a name there.
     fn at_command_shape(&self, ahead: usize) -> bool {
         matches!(
             self.kind_at(ahead),
             Some(TokenKind::LParen) | Some(TokenKind::Semi)
         )
+    }
+
+    /// `model = 0.2;` / `steady = 0.9;` at statement head. The `<INITIAL>` rule
+    /// returns the keyword, so `=` is a syntax error, not an assignment.
+    fn at_keyword_followed_by_eq(&self) -> bool {
+        if self.peek_kind(1) != Some(TokenKind::Eq) {
+            return false;
+        }
+        BLOCK_OPENERS.iter().any(|kw| self.at_ident_ci(kw))
+            || INITIAL_COMMANDS.iter().any(|kw| self.at_ident_ci(kw))
     }
 
     /// A dotted head at the cursor plus the offset of the identifier after it.
@@ -5421,6 +5494,29 @@ impl Parser<'_> {
         }
     }
 
+    /// `end` inside a block is the closer. `end = 0;` is not a row. 7.1's
+    /// sentence on the initval shape is `syntax error, unexpected IDENTIFIER,
+    /// expecting ';'`. The span is the token after `end` (the `=`).
+    fn refuse_end_word(&mut self, body_end_i: usize) -> bool {
+        if !self.at_ident("end") {
+            return false;
+        }
+        let span = self
+            .tokens
+            .get(self.i + 1)
+            .map(|t| t.span)
+            .unwrap_or(self.tokens[self.i].span);
+        self.record_issue(ParseIssue {
+            kind: ParseIssueKind::UnexpectedEndAssign,
+            span,
+        });
+        while self.i < body_end_i && !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+            self.bump();
+        }
+        self.eat(TokenKind::Semi);
+        true
+    }
+
     fn parse_named_assignment(&mut self) -> Option<Assignment> {
         if !self.looks_like_assignment_start() {
             self.skip_to_stmt_end();
@@ -5767,7 +5863,8 @@ impl Parser<'_> {
     /// the symbol table decides: `var y shocks;` declares two endogenous and
     /// `+ shocks` is that variable.
     ///
-    /// Inside a `model` / `model_replace` body two readings are rows of that body
+    /// Inside a `model`, `model_replace`, `steady_state_model`, or
+    /// `matched_moments` body two readings are rows of that body
     /// rather than a new block, and 7.1 takes both: a declared spelling is the
     /// variable (`model; shocks; end;` is accepted), and a word whose `;` is directly
     /// followed by `end;` closes the body, because their `model_equation` is an
@@ -6381,9 +6478,42 @@ impl Parser<'_> {
         None
     }
 
+    /// The cursor is just past an `end` word. It is the bare closer when it
+    /// heads the statement and the next token is not `=` or an operator.
+    fn end_is_bare_closer(&self) -> bool {
+        let end_i = self.i.saturating_sub(1);
+        let boundary = end_i == 0
+            || matches!(
+                self.tokens[end_i - 1].kind,
+                TokenKind::Semi | TokenKind::MacroDir
+            );
+        if !boundary {
+            return false;
+        }
+        matches!(
+            self.tokens.get(self.i).map(|t| t.kind),
+            None | Some(TokenKind::Eof | TokenKind::Ident | TokenKind::Semi)
+        )
+    }
+
     fn parse_ident_expr(&mut self) -> ExprId {
         let tok = self.bump();
         let lexeme = self.lexeme(&tok).to_string();
+        // Inside a block the word `end` is the closer, never a name. `+ end + 0`
+        // and `end = 0.1*y` are `syntax error, unexpected END`. `end;` is the
+        // closer and never reaches here.
+        // A bare `end` with no `;` is the closer that returns the lexer to
+        // `INITIAL`. That shape keeps the missing-`end` diagnostic. `end` after
+        // an operator, or `end = …`, is the END token inside the equation.
+        if self.in_equation_body
+            && lexeme.eq_ignore_ascii_case("end")
+            && !self.end_is_bare_closer()
+        {
+            self.record_issue(ParseIssue {
+                kind: ParseIssueKind::UnexpectedEnd,
+                span: tok.span,
+            });
+        }
         let name = self.intern.intern(&lexeme);
         if self.at(TokenKind::Dot) && self.peek_kind(1) == Some(TokenKind::Ident) {
             self.bump();
@@ -7765,6 +7895,20 @@ fn is_builtin_function(name: &str) -> bool {
         "adl",
     ];
     BUILTINS.iter().any(|b| name.eq_ignore_ascii_case(b))
+}
+
+/// An assignment-block row whose first word is `end` (`end = 0;`). `endogenous`
+/// is a different word.
+fn statement_is_end_word(raw: &str) -> bool {
+    let t = raw.trim();
+    let Some(rest) = t.get(3..) else {
+        return false;
+    };
+    t[..3].eq_ignore_ascii_case("end")
+        && !rest
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 #[cfg(test)]

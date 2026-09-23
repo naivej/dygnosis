@@ -1,7 +1,6 @@
-// inventory: e001_opener_var_reserved_ident, e001_opener_var_reserved_ident_end
-// Close call 2: a declared name whose spelling is in `DYNARE_COMMANDS` (16 words) or
-// `RESERVED_BLOCK_KEYWORDS` (13). 7.1 accepts this declaration, and we report a false
-// `Invalid Dynare identifier`. Slice 06b owns the fix.
+// inventory: e001_opener_var_reserved_ident
+// `var y end;` is a declaration 7.1 accepts at check. `end` is not a reserved
+// identifier. A use of the name inside a block is a different refuse.
 var y end;
 varexo e;
 parameters rho;

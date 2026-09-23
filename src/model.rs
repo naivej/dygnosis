@@ -1184,6 +1184,15 @@ pub enum ParseIssueKind {
         found: String,
         correct: String,
     },
+    /// At statement head an `<INITIAL>` keyword followed by `=` is that keyword,
+    /// not an assignment. 7.1: `syntax error, unexpected EQUAL, expecting ';' or '('`.
+    UnexpectedEqual,
+    /// `end = 0;` inside an assignment block. `end` is the closer, so this is
+    /// not a name. 7.1: `syntax error, unexpected IDENTIFIER, expecting ';'`.
+    UnexpectedEndAssign,
+    /// `end` used as a name inside an equation. The block rule returns `END`.
+    /// 7.1: `syntax error, unexpected END`.
+    UnexpectedEnd,
     MissingShocksSemi {
         family: ShocksSemiFamily,
         /// Next keyword, `var` name, or `stderr`/`corr` depending on `family`.
