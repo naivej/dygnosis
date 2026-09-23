@@ -2297,8 +2297,7 @@ impl Parser<'_> {
                 return None;
             }
         };
-        let (values, value_exprs, weights, weight_exprs) = match self.read_irf_value_weights(end_i)
-        {
+        let value_weights = match self.read_irf_value_weights(end_i) {
             Some(lists) => lists,
             None => {
                 self.i = end_i;
@@ -2312,10 +2311,10 @@ impl Parser<'_> {
             exogenous,
             exogenous_span,
             periods,
-            values,
-            value_exprs,
-            weights,
-            weight_exprs,
+            values: value_weights.values,
+            value_exprs: value_weights.value_exprs,
+            weights: value_weights.weights,
+            weight_exprs: value_weights.weight_exprs,
             span: Span { start, end },
         })
     }
@@ -2927,7 +2926,7 @@ impl Parser<'_> {
     fn read_irf_value_weights(
         &mut self,
         end_i: usize,
-    ) -> Option<(Vec<Span>, Vec<ExprId>, Vec<Span>, Vec<ExprId>)> {
+    ) -> Option<IrfValueWeights> {
         let mut saw_values = false;
         let mut saw_weights = false;
         let mut values = Vec::new();
@@ -2973,7 +2972,12 @@ impl Parser<'_> {
             self.record_syntax_at(self.i, Some(expecting));
             return None;
         }
-        Some((values, value_exprs, weights, weight_exprs))
+        Some(IrfValueWeights {
+            values,
+            value_exprs,
+            weights,
+            weight_exprs,
+        })
     }
 
     /// One `value_list`. A bare signed number is an entry. A `(expression)` is an
@@ -8475,6 +8479,14 @@ enum PeriodKind {
     Date,
     Minus,
     Other,
+}
+
+/// Values and optional weights parsed from one matched IRF row.
+struct IrfValueWeights {
+    values: Vec<Span>,
+    value_exprs: Vec<ExprId>,
+    weights: Vec<Span>,
+    weight_exprs: Vec<ExprId>,
 }
 
 /// One integer or one date in a period list, before a `:`.
