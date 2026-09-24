@@ -455,6 +455,12 @@
       }
     ]
   },
+  "deterministic_trends": {
+    "command": "deterministic_trends",
+    "known": true,
+    "n_options": 0,
+    "options": []
+  },
   "discretionary_policy": {
     "command": "discretionary_policy",
     "known": true,
@@ -3289,29 +3295,35 @@
     "options": [
       {
         "name": "auxiliary_model_name",
-        "description": ""
+        "description": "Name of a var_model or trend_component_model used for PAC expectations. Omit for model-consistent expectations."
       },
       {
         "name": "auxname",
-        "description": ""
+        "description": "Name of the auxiliary variable for the PAC expectation term; unavailable with pac_target_info."
       },
       {
         "name": "discount",
-        "description": ""
+        "description": "Declared parameter used as the PAC discount factor."
       },
       {
         "name": "growth",
-        "description": ""
+        "description": "Expression for the growth-neutrality correction; unavailable with pac_target_info."
       },
       {
         "name": "kind",
-        "description": ""
+        "description": "Target form in the auxiliary model: ll, dl, or dd; unavailable with pac_target_info or model-consistent expectations."
       },
       {
         "name": "model_name",
-        "description": ""
+        "description": "Name referenced by pac_expectation(name) and optionally pac_target_info(name)."
       }
     ]
+  },
+  "pac_target_info": {
+    "command": "pac_target_info",
+    "known": true,
+    "n_options": 0,
+    "options": []
   },
   "perfect_foresight_setup": {
     "command": "perfect_foresight_setup",
@@ -5016,16 +5028,51 @@
     "n_options": 3,
     "options": [
       {
+        "name": "eqtags",
+        "description": "Equation name tags selected from the model block to build this trend component model."
+      },
+      {
         "name": "model_name",
-        "description": ""
+        "description": "Name of this trend component model for use as an auxiliary_model_name."
       },
       {
         "name": "targets",
-        "description": ""
+        "description": "Subset of eqtags naming the trend targets."
+      }
+    ]
+  },
+  "var_expectation_model": {
+    "command": "var_expectation_model",
+    "known": true,
+    "n_options": 7,
+    "options": [
+      {
+        "name": "auxiliary_model_name",
+        "description": "Name of a var_model or trend_component_model used for this expectation."
       },
       {
-        "name": "trend_component_model_eq_tags",
-        "description": ""
+        "name": "discount",
+        "description": "Numeric literal or parameter used as the discount factor."
+      },
+      {
+        "name": "expression",
+        "description": "Variable or linear combination to forecast; use instead of variable."
+      },
+      {
+        "name": "horizon",
+        "description": "Forecast period or range of periods; the upper bound may be Inf."
+      },
+      {
+        "name": "model_name",
+        "description": "Name referenced by var_expectation(name) in model equations."
+      },
+      {
+        "name": "time_shift",
+        "description": "Non-positive integer shift of the information set."
+      },
+      {
+        "name": "variable",
+        "description": "Variable to forecast; use instead of expression."
       }
     ]
   },
@@ -5036,15 +5083,15 @@
     "options": [
       {
         "name": "eqtags",
-        "description": ""
+        "description": "Equation name tags selected from the model block to build this VAR."
       },
       {
         "name": "model_name",
-        "description": ""
+        "description": "Name of this VAR model for use as an auxiliary_model_name."
       },
       {
-        "name": "var_structural",
-        "description": ""
+        "name": "structural",
+        "description": "Bare flag allowing contemporaneous variables from the VAR system in each selected equation."
       }
     ]
   }

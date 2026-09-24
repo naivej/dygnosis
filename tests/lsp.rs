@@ -1161,6 +1161,191 @@ async fn completion_offers_the_moment_family_keywords() {
     }
 }
 
+#[tokio::test]
+async fn semi_structural_options_reach_completion_and_hover() {
+    let text = include_str!("fixtures/p_pac/accepted_family.mod");
+    let uri = Url::parse("file:///tmp/semi_structural_options.mod").unwrap();
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.to_string(), 1))
+        .await;
+
+    for (command, option, help, expected) in [
+        (
+            "var_model",
+            "structural",
+            "Bare flag",
+            vec!["eqtags", "model_name", "structural"],
+        ),
+        (
+            "trend_component_model",
+            "targets",
+            "Subset of eqtags",
+            vec!["eqtags", "model_name", "targets"],
+        ),
+        (
+            "var_expectation_model",
+            "discount",
+            "Numeric literal or parameter",
+            vec![
+                "auxiliary_model_name",
+                "discount",
+                "expression",
+                "horizon",
+                "model_name",
+                "time_shift",
+                "variable",
+            ],
+        ),
+        (
+            "pac_model",
+            "discount",
+            "Declared parameter",
+            vec![
+                "auxiliary_model_name",
+                "auxname",
+                "discount",
+                "growth",
+                "kind",
+                "model_name",
+            ],
+        ),
+    ] {
+        let opener = format!("{command}(");
+        let start = text.find(&opener).unwrap();
+        let option_byte = start + text[start..].find(option).unwrap();
+        let md = hover_markdown(
+            service
+                .inner()
+                .hover(HoverParams {
+                    text_document_position_params: tdp(uri.clone(), text, option_byte),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .expect("hover rpc")
+                .expect("option hover"),
+        );
+        assert!(md.contains(help), "{command}.{option} hover: {md}");
+        let labels = completion_labels(
+            service
+                .inner()
+                .completion(CompletionParams {
+                    text_document_position: tdp(uri.clone(), text, start + opener.len()),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                    context: None,
+                })
+                .await
+                .expect("completion rpc")
+                .expect("option completion"),
+        );
+        assert_eq!(labels, expected, "{command} options");
+    }
+}
+
+#[tokio::test]
+async fn semi_structural_names_reach_completion_and_hover() {
+    let text = format!(
+        "{}\ndeterministic_trends; x(0.1); end;\n",
+        include_str!("fixtures/p_pac/accepted_family.mod")
+    );
+    let uri = Url::parse("file:///tmp/semi_structural_names.mod").unwrap();
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+
+    let response = service
+        .inner()
+        .completion(CompletionParams {
+            text_document_position: tdp(uri.clone(), &text, text.len()),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .expect("completion rpc")
+        .expect("name completion");
+    let items = match response {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    for (name, help, kind) in [
+        (
+            "var_model",
+            "VAR auxiliary model",
+            CompletionItemKind::KEYWORD,
+        ),
+        (
+            "trend_component_model",
+            "trend component auxiliary model",
+            CompletionItemKind::KEYWORD,
+        ),
+        (
+            "var_expectation_model",
+            "named forecast",
+            CompletionItemKind::KEYWORD,
+        ),
+        (
+            "pac_model",
+            "PAC expectation model",
+            CompletionItemKind::KEYWORD,
+        ),
+        (
+            "pac_target_info",
+            "needs auxname and kind",
+            CompletionItemKind::KEYWORD,
+        ),
+        (
+            "deterministic_trends",
+            "deterministic trends",
+            CompletionItemKind::KEYWORD,
+        ),
+        (
+            "var_expectation",
+            "named var_expectation_model",
+            CompletionItemKind::FUNCTION,
+        ),
+        (
+            "pac_expectation",
+            "named pac_model",
+            CompletionItemKind::FUNCTION,
+        ),
+        (
+            "pac_target_nonstationary",
+            "nonstationary part",
+            CompletionItemKind::FUNCTION,
+        ),
+    ] {
+        let item = items.iter().find(|item| item.label == name).unwrap();
+        assert_eq!(item.kind, Some(kind), "{name} kind");
+        let Some(Documentation::String(doc)) = &item.documentation else {
+            panic!("{name} completion is missing text help");
+        };
+        assert!(doc.contains(help), "{name} completion: {doc}");
+        let written_name = if name == "deterministic_trends" {
+            "deterministic_trends;".to_string()
+        } else {
+            format!("{name}(")
+        };
+        let byte = text.find(&written_name).unwrap();
+        let md = hover_markdown(
+            service
+                .inner()
+                .hover(HoverParams {
+                    text_document_position_params: tdp(uri.clone(), &text, byte),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .expect("hover rpc")
+                .expect("name hover"),
+        );
+        assert!(md.contains(help), "{name} hover: {md}");
+    }
+}
+
 /// The two IRF blocks the catalog gained: `overwrite` reaches hover and
 /// completion through the command name before the parenthesis.
 #[tokio::test]

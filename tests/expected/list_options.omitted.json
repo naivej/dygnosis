@@ -1,5 +1,5 @@
 {
-  "n_commands": 85,
+  "n_commands": 88,
   "commands": [
     "bvar_density",
     "bvar_forecast",
@@ -11,6 +11,7 @@
     "corr",
     "data",
     "database",
+    "deterministic_trends",
     "discretionary_policy",
     "endval",
     "estimation",
@@ -55,6 +56,7 @@
     "options",
     "osr",
     "pac_model",
+    "pac_target_info",
     "perfect_foresight_controlled_paths",
     "perfect_foresight_setup",
     "perfect_foresight_solver",
@@ -85,6 +87,7 @@
     "svar_global_identification_check",
     "svar_identification",
     "trend_component_model",
+    "var_expectation_model",
     "var_model"
   ]
 }

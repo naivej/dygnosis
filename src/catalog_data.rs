@@ -5,6 +5,30 @@ const SHOCKS_OVERWRITE: &str = "Regular shocks clear earlier deterministic sched
 const MSHOCKS_OVERWRITE: &str = "Clears earlier deterministic shocks; with learnt_in, replaces shocks and mshocks for the same learning period.";
 const LEARNT_IN: &str = "Integer period or date when agents learn this block's settings.";
 
+pub(crate) const FAMILY_COMMAND_HELP: &[(&str, &str)] = &[
+    ("var_model", "Select tagged model equations to form a VAR auxiliary model."),
+    ("trend_component_model", "Select tagged model equations and targets to form a trend component auxiliary model."),
+    ("var_expectation_model", "Define a named forecast using a VAR or trend component auxiliary model."),
+    ("pac_model", "Define a PAC expectation model, optionally using a VAR or trend component auxiliary model."),
+    ("pac_target_info", "Describe a named PAC target with target, auxname_target_nonstationary, and component rows. Each component needs auxname and kind; growth is optional for dd/dl and forbidden for ll."),
+    ("deterministic_trends", "Specify deterministic trends in an independent block: deterministic_trends; variable(expression); ... end;"),
+];
+
+pub(crate) const FAMILY_OPERATOR_HELP: &[(&str, &str)] = &[
+    (
+        "var_expectation",
+        "Use the forecast from the named var_expectation_model in a model equation.",
+    ),
+    (
+        "pac_expectation",
+        "Use the expectation from the named pac_model in a model equation.",
+    ),
+    (
+        "pac_target_nonstationary",
+        "Use the nonstationary part of a composite target from the named pac_model.",
+    ),
+];
+
 pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
     ("bvar_density", &[
         ("bvar_prior_decay", ""),
@@ -124,6 +148,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("xls_sheet", "The name of the sheet with the data in an Excel file."),
     ]),
     ("database", &[]),
+    ("deterministic_trends", &[]),
     ("discretionary_policy", &[
         ("aim_solver", "Deprecated option equivalent to setting dr=aim."),
         ("analytical_girf", ""),
@@ -866,13 +891,14 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("tolf", "Convergence criterion for termination based on the function value."),
     ]),
     ("pac_model", &[
-        ("auxiliary_model_name", ""),
-        ("auxname", ""),
-        ("discount", ""),
-        ("growth", ""),
-        ("kind", ""),
-        ("model_name", ""),
+        ("auxiliary_model_name", "Name of a var_model or trend_component_model used for PAC expectations. Omit for model-consistent expectations."),
+        ("auxname", "Name of the auxiliary variable for the PAC expectation term; unavailable with pac_target_info."),
+        ("discount", "Declared parameter used as the PAC discount factor."),
+        ("growth", "Expression for the growth-neutrality correction; unavailable with pac_target_info."),
+        ("kind", "Target form in the auxiliary model: ll, dl, or dd; unavailable with pac_target_info or model-consistent expectations."),
+        ("model_name", "Name referenced by pac_expectation(name) and optionally pac_target_info(name)."),
     ]),
+    ("pac_target_info", &[]),
     ("perfect_foresight_controlled_paths", &[
         ("learnt_in", LEARNT_IN),
     ]),
@@ -1383,14 +1409,23 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
     ("svar_global_identification_check", &[]),
     ("svar_identification", &[]),
     ("trend_component_model", &[
-        ("model_name", ""),
-        ("targets", ""),
-        ("trend_component_model_eq_tags", ""),
+        ("eqtags", "Equation name tags selected from the model block to build this trend component model."),
+        ("model_name", "Name of this trend component model for use as an auxiliary_model_name."),
+        ("targets", "Subset of eqtags naming the trend targets."),
+    ]),
+    ("var_expectation_model", &[
+        ("auxiliary_model_name", "Name of a var_model or trend_component_model used for this expectation."),
+        ("discount", "Numeric literal or parameter used as the discount factor."),
+        ("expression", "Variable or linear combination to forecast; use instead of variable."),
+        ("horizon", "Forecast period or range of periods; the upper bound may be Inf."),
+        ("model_name", "Name referenced by var_expectation(name) in model equations."),
+        ("time_shift", "Non-positive integer shift of the information set."),
+        ("variable", "Variable to forecast; use instead of expression."),
     ]),
     ("var_model", &[
-        ("eqtags", ""),
-        ("model_name", ""),
-        ("var_structural", ""),
+        ("eqtags", "Equation name tags selected from the model block to build this VAR."),
+        ("model_name", "Name of this VAR model for use as an auxiliary_model_name."),
+        ("structural", "Bare flag allowing contemporaneous variables from the VAR system in each selected equation."),
     ]),
 ];
 

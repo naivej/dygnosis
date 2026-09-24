@@ -832,6 +832,40 @@ fn the_mom_family_blocks_are_known_commands() {
 }
 
 #[test]
+fn semi_structural_catalog_reaches_list_options_tool() {
+    for (command, count) in [
+        ("var_model", 3),
+        ("trend_component_model", 3),
+        ("var_expectation_model", 7),
+        ("pac_model", 6),
+        ("pac_target_info", 0),
+        ("deterministic_trends", 0),
+    ] {
+        let payload = dynare_list_options(Some(&command.to_uppercase()));
+        assert_eq!(payload["command"], command, "{command}");
+        assert_eq!(payload["known"], true, "{command}");
+        assert_eq!(payload["n_options"], count, "{command}");
+        assert!(
+            payload["options"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|entry| entry["description"]
+                    .as_str()
+                    .is_some_and(|text| !text.is_empty())),
+            "{command} has an option without help"
+        );
+    }
+    for operator in [
+        "var_expectation",
+        "pac_expectation",
+        "pac_target_nonstationary",
+    ] {
+        assert_eq!(dynare_list_options(Some(operator))["known"], false);
+    }
+}
+
+#[test]
 fn find_references_betta_skips_comment() {
     let base = read_mod("trend_rbc_gov_inv");
     let text = format!("// betta\n{base}");

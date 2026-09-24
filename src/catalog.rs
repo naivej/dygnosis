@@ -11,6 +11,16 @@ use serde::Serialize;
 #[path = "catalog_data.rs"]
 mod catalog_data;
 
+pub(crate) use catalog_data::{FAMILY_COMMAND_HELP, FAMILY_OPERATOR_HELP};
+
+/// Short help for the semi-structural command, block, and operator names.
+pub(crate) fn family_help(name: &str) -> Option<&'static str> {
+    FAMILY_COMMAND_HELP
+        .iter()
+        .chain(FAMILY_OPERATOR_HELP)
+        .find_map(|(key, help)| key.eq_ignore_ascii_case(name).then_some(*help))
+}
+
 /// One command option as serialized in the known-command `list_options` payload.
 #[derive(Clone, Debug, Serialize)]
 pub struct NamedOption {

@@ -110,6 +110,73 @@ fn option_names(command: &str) -> Vec<&str> {
 }
 
 #[test]
+fn semi_structural_family_matches_dynare_72_options() {
+    for (command, expected) in [
+        ("var_model", vec!["eqtags", "model_name", "structural"]),
+        (
+            "trend_component_model",
+            vec!["eqtags", "model_name", "targets"],
+        ),
+        (
+            "var_expectation_model",
+            vec![
+                "auxiliary_model_name",
+                "discount",
+                "expression",
+                "horizon",
+                "model_name",
+                "time_shift",
+                "variable",
+            ],
+        ),
+        (
+            "pac_model",
+            vec![
+                "auxiliary_model_name",
+                "auxname",
+                "discount",
+                "growth",
+                "kind",
+                "model_name",
+            ],
+        ),
+    ] {
+        assert_eq!(option_names(command), expected, "{command}");
+        assert!(
+            command_options(command)
+                .iter()
+                .all(|(_, description)| !description.is_empty()),
+            "{command} has an option without help"
+        );
+    }
+    assert!(command_options("var_expectation_model")
+        .iter()
+        .find(|(name, _)| *name == "variable")
+        .unwrap()
+        .1
+        .contains("forecast"));
+    assert_ne!(
+        command_options("var_expectation_model")
+            .iter()
+            .find(|(name, _)| *name == "variable")
+            .unwrap()
+            .1,
+        option_doc("variable")
+    );
+    for block in ["pac_target_info", "deterministic_trends"] {
+        assert!(is_known_command(block), "{block}");
+        assert!(command_options(block).is_empty(), "{block}");
+    }
+    for operator in [
+        "var_expectation",
+        "pac_expectation",
+        "pac_target_nonstationary",
+    ] {
+        assert!(!is_known_command(operator), "{operator} is not a command");
+    }
+}
+
+#[test]
 fn occbin_constraints_is_catalogued_block() {
     assert!(is_known_command("occbin_constraints"));
     assert!(is_known_command("OCCBIN_CONSTRAINTS"));
@@ -141,7 +208,7 @@ fn occbin_constraints_is_catalogued_block() {
     assert_eq!(upper, payload);
 
     let omitted = to_value(list_options(None));
-    assert_eq!(omitted["n_commands"], 85);
+    assert_eq!(omitted["n_commands"], 88);
     let i = omitted["commands"]
         .as_array()
         .unwrap()

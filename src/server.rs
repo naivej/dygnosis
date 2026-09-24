@@ -9,7 +9,9 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, ClientSocket, LanguageServer, LspService, Server};
 
-use crate::catalog::{command_options, option_doc};
+use crate::catalog::{
+    command_options, family_help, option_doc, FAMILY_COMMAND_HELP, FAMILY_OPERATOR_HELP,
+};
 use crate::diagnostic::{check_file, check_in_workspace};
 use crate::expand::{EquationOrigin, OriginFrame};
 use crate::explain;
@@ -201,6 +203,9 @@ impl Backend {
                 }
                 return Some(markdown_hover(md, range));
             }
+        }
+        if let Some(help) = family_help(&word) {
+            return Some(markdown_hover(format!("**`{word}`**\n\n{help}"), range));
         }
         let model = inner.workspace.get_model(pos.text_document.uri.as_str())?;
         let md = decl_hover_markdown(model, &word)?;
@@ -1685,7 +1690,7 @@ fn ranges_overlap(left: Range, right: Range) -> bool {
 
 fn default_completions(model: &Model) -> Vec<CompletionItem> {
     let mut items = Vec::new();
-    for (kw, doc) in DYNARE_KEYWORDS {
+    for (kw, doc) in DYNARE_KEYWORDS.iter().chain(FAMILY_COMMAND_HELP) {
         items.push(CompletionItem {
             label: (*kw).into(),
             kind: Some(CompletionItemKind::KEYWORD),
@@ -1721,7 +1726,7 @@ fn default_completions(model: &Model) -> Vec<CompletionItem> {
             ..CompletionItem::default()
         });
     }
-    for (name, doc) in BUILTIN_FNS {
+    for (name, doc) in BUILTIN_FNS.iter().chain(FAMILY_OPERATOR_HELP) {
         items.push(CompletionItem {
             label: (*name).into(),
             kind: Some(CompletionItemKind::FUNCTION),
