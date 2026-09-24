@@ -29,6 +29,7 @@ use crate::model::{
 use crate::span::Span;
 
 mod shock_parser;
+mod pac_parser;
 
 #[derive(Clone, Debug)]
 enum FoldKey {
@@ -895,6 +896,12 @@ impl Parser<'_> {
                 self.in_model = true;
                 self.parse_model_block();
                 self.in_model = false;
+            } else if let Some(kind) = self.at_semi_structural_command() {
+                self.parse_semi_structural_command(kind);
+            } else if self.at_ident_ci("pac_target_info") {
+                self.parse_pac_target_info_block();
+            } else if self.at_ident_ci("deterministic_trends") {
+                self.parse_deterministic_trends_block();
             } else if self.at_ident_ci("steady_state_model") {
                 self.parse_ss_block();
             } else if self.at_ident_ci("initval") {
@@ -7535,6 +7542,9 @@ impl Parser<'_> {
         if lexeme.eq_ignore_ascii_case("steady_state") {
             return self.parse_steady_state(tok);
         }
+        if let Some(kind) = pac_parser::named_operator_kind(&lexeme) {
+            return self.parse_named_model_operator(tok, name, kind);
+        }
         if self.looks_like_timing() && !is_builtin_function(&lexeme) {
             return self.parse_timing(name, tok);
         }
@@ -9114,6 +9124,8 @@ fn is_builtin_function(name: &str) -> bool {
         "norminv",
         "logncdf",
         "pac_expectation",
+        "var_expectation",
+        "pac_target_nonstationary",
         "diff",
         "adl",
     ];

@@ -93,6 +93,8 @@ const BUILTINS: &[&str] = &[
     "steady_state",
     "expectation",
     "pac_expectation",
+    "var_expectation",
+    "pac_target_nonstationary",
     "diff",
     "adl",
 ];
@@ -432,6 +434,9 @@ fn format_recorded_issues(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for issue in &model.parse_issues {
         match &issue.kind {
+            ParseIssueKind::BisonSyntax(message) => {
+                out.push(e001(issue.span, message.clone(), None));
+            }
             ParseIssueKind::MissingEnd {
                 keyword,
                 next_block_label,

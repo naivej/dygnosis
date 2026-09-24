@@ -43,6 +43,122 @@ pub struct Equation {
     pub complementarity: Option<Complementarity>,
 }
 
+/// The four top-level semi-structural model commands. Their option sets differ
+/// in Dynare's grammar, so a command keeps its kind as well as its written rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SemiStructuralKind {
+    VarModel,
+    TrendComponentModel,
+    VarExpectationModel,
+    PacModel,
+}
+
+#[derive(Clone, Debug)]
+pub struct SemiStructuralCommand {
+    pub kind: SemiStructuralKind,
+    pub span: Span,
+    pub options: Vec<SemiStructuralOption>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SemiStructuralOption {
+    /// Option word as written, including its case.
+    pub name: String,
+    pub span: Span,
+    pub value: SemiStructuralValue,
+}
+
+#[derive(Clone, Debug)]
+pub enum SemiStructuralValue {
+    Flag,
+    Symbol {
+        name: Name,
+        span: Span,
+    },
+    /// `eqtags` and `targets` are lists of quoted equation-tag strings.
+    Tags(Vec<(String, Span)>),
+    Expression(WrittenExpression),
+    Integer {
+        text: String,
+        span: Span,
+    },
+    Horizon {
+        first: String,
+        last: String,
+        span: Span,
+    },
+    Kind {
+        text: String,
+        span: Span,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct WrittenExpression {
+    pub text: String,
+    pub span: Span,
+    pub expr: Option<ExprId>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NamedModelOperatorKind {
+    VarExpectation,
+    PacExpectation,
+    PacTargetNonstationary,
+}
+
+#[derive(Clone, Debug)]
+pub struct NamedModelOperator {
+    pub kind: NamedModelOperatorKind,
+    pub name: Name,
+    pub operator_span: Span,
+    pub name_span: Span,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct PacTargetInfoBlock {
+    pub name: Name,
+    pub name_span: Span,
+    pub span: Span,
+    pub rows: Vec<PacTargetInfoRow>,
+}
+
+#[derive(Clone, Debug)]
+pub enum PacTargetInfoRow {
+    Target(WrittenExpression),
+    AuxnameTargetNonstationary { name: Name, span: Span },
+    Component(PacTargetComponent),
+}
+
+#[derive(Clone, Debug)]
+pub struct PacTargetComponent {
+    pub component: WrittenExpression,
+    pub rows: Vec<PacTargetComponentRow>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum PacTargetComponentRow {
+    Growth(WrittenExpression),
+    Auxname { name: Name, span: Span },
+    Kind { text: String, span: Span },
+}
+
+#[derive(Clone, Debug)]
+pub struct DeterministicTrendsBlock {
+    pub span: Span,
+    pub rows: Vec<DeterministicTrendRow>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DeterministicTrendRow {
+    pub name: Name,
+    pub name_span: Span,
+    pub expression: WrittenExpression,
+    pub span: Span,
+}
+
 /// One `model_remove` / `model_replace` statement and what it matched.
 #[derive(Clone, Debug)]
 pub struct EquationSurgery {
@@ -593,6 +709,12 @@ pub struct Model {
     pub param_assignments: Vec<Assignment>,
     pub helper_assignments: Vec<Assignment>,
     pub equations: Vec<Equation>,
+    pub semi_structural_commands: Vec<SemiStructuralCommand>,
+    pub named_model_operators: Vec<NamedModelOperator>,
+    pub pac_target_info: Vec<PacTargetInfoBlock>,
+    pub deterministic_trends: Vec<DeterministicTrendsBlock>,
+    /// A repeated leading name within one independent `deterministic_trends` block.
+    pub deterministic_trends_dups: Vec<(Name, Span)>,
     /// `model_remove` / `model_replace` statements, file order, with what each removed.
     pub equation_surgery: Vec<EquationSurgery>,
     /// Endogenous a `model_remove` dropped from the model (7.1's `excludedVariable`
@@ -1479,6 +1601,8 @@ pub struct ParseIssue {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParseIssueKind {
+    /// Pinned Bison syntax sentence while reading a new surface.
+    BisonSyntax(String),
     MissingEnd {
         keyword: String,
         last_stmt_semi: Option<u32>,
@@ -1552,9 +1676,12 @@ impl Model {
     /// option values as declarations or as parameter assignments.
     pub fn statement_spans(&self) -> Vec<Span> {
         let mut spans: Vec<Span> = self
-            .shock_blocks
+            .semi_structural_commands
             .iter()
-            .map(|block| block.span)
+            .map(|command| command.span)
+            .chain(self.pac_target_info.iter().map(|block| block.span))
+            .chain(self.deterministic_trends.iter().map(|block| block.span))
+            .chain(self.shock_blocks.iter().map(|block| block.span))
             .chain(self.shock_paths.iter().map(|block| block.span))
             .chain(self.controlled_paths.iter().map(|block| block.span))
             .chain(self.databases.iter().map(|decl| decl.span))

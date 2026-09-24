@@ -13,6 +13,7 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
     let has_context = !model.varobs.is_empty()
         || !model.observation_trends.is_empty()
         || !model.estimated_params.is_empty()
+        || !model.deterministic_trends_dups.is_empty()
         || model.estimated_params_span.is_some()
         || model.varobs_span.is_some();
     if !has_context {
@@ -68,22 +69,25 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
 
     if model.varobs_statement_count >= 2 {
         diagnostics.push(Diagnostic::new(
-            model.varobs_second_span.unwrap_or(span_or_fallback(model.varobs_span)),
+            model
+                .varobs_second_span
+                .unwrap_or(span_or_fallback(model.varobs_span)),
             Severity::Error,
             "E258",
             "varobs: you cannot have several 'varobs' statements in the same MOD file",
         ));
     }
 
-    for (name, span) in &model.observation_trends_dups {
+    for (name, span) in model
+        .observation_trends_dups
+        .iter()
+        .chain(&model.deterministic_trends_dups)
+    {
         diagnostics.push(Diagnostic::new(
             nonempty_or(*span, model.observation_trends_span),
             Severity::Error,
             "E261",
-            format!(
-                "observation_trends: {} declared twice",
-                model.name(*name)
-            ),
+            format!("observation_trends: {} declared twice", model.name(*name)),
         ));
     }
 
