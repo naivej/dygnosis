@@ -3,8 +3,8 @@
 ![dygnosis](media/logo_s.png) is a second Dynare preprocessor living in your editor that
 
 - powers MCP for agents and LSP for humans, with code intelligence while typing;
-- internally rewrites the model and maps checks on the transformed model back to the original `.mod`;
-- checks almost all issues covered by the Dynare (7.2) preprocessor, and more.
+- checks written `.mod` files against many Dynare 7.2 preprocessor refusals before MATLAB;
+- includes extra warnings for issues Dynare does not report.
 
 Limitations by design
 
@@ -12,6 +12,8 @@ Limitations by design
 - **A few Dynare messages have no match here.** One is about the MATLAB code Dynare writes out, not about your model. In others Dynare crashes instead of printing anything. Either way there is nothing to show you.
 - **Checks that depend on how you run Dynare are skipped.** Some come from command-line options, others need a compiler on your machine. They say nothing about the `.mod` file.
 - **Numbers are left to MATLAB.** Steady state, stability, and whether the model solves are computed there, not here. Use the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit) for seamless integration with MATLAB.
+
+Semi-structural support covers `var_model`, `trend_component_model`, `var_expectation_model`, `pac_model`, `pac_target_info`, and their named expectation operators. `deterministic_trends` is an independent block. LSP and MCP share the diagnostic core. LSP hover and completion, and MCP `dynare_list_options`, use the same command catalog.
 
 ## How to use
 

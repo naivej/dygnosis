@@ -724,8 +724,8 @@ fn equation_operators(model: &Model, equation: &crate::model::Equation) -> Vec<R
     out
 }
 
-/// Only written clashes. S012 and S014 require rewritten equations and stay
-/// silent here. This return value joins `check_clash` in the stage gate.
+/// Written clashes, including direct PAC operator and fixed generated-name
+/// cases. Remaining S012/S014 rewrites stay silent without a source mapping.
 pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
     let var_models = model_names(model, SemiStructuralKind::VarModel);
     let trend_models = model_names(model, SemiStructuralKind::TrendComponentModel);
@@ -875,22 +875,6 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
             return out;
         }
     }
-
-    for command in &model.semi_structural_commands {
-        if command.kind != SemiStructuralKind::PacModel {
-            continue;
-        }
-        if let Some((auxiliary, span)) = symbol_option(command, "auxiliary_model_name") {
-            if !var_models.contains(&auxiliary) && !trend_models.contains(&auxiliary) {
-                out.push(error(
-                    span,
-                    "E446",
-                    "aux_model_name not recognized as VAR model or Trend Component model",
-                ));
-                return out;
-            }
-        }
-    }
     for equation in model.equations.iter().filter(|equation| !equation.is_local) {
         for operator in equation_operators(model, equation) {
             if operator.kind == NamedModelOperatorKind::VarExpectation
@@ -908,7 +892,413 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
             }
         }
     }
+
+    let pac_models = model_names(model, SemiStructuralKind::PacModel);
+    // PacModelTable stores models in a sorted set. Transform runs the whole
+    // sequence below for one model before moving to the next model name.
+    let mut pac_commands: Vec<_> = model
+        .semi_structural_commands
+        .iter()
+        .filter(|command| command.kind == SemiStructuralKind::PacModel)
+        .filter_map(|command| {
+            symbol_option(command, "model_name").map(|(name, span)| (command, name, span))
+        })
+        .collect();
+    pac_commands.sort_by(|a, b| model.name(a.1).cmp(model.name(b.1)));
+    let mut generated_vars = HashSet::new();
+    for (command, name, name_span) in pac_commands {
+        if let Some(growth) = expression_option(command, "growth") {
+            if let Some(span) = written_nonlinear_growth(model, growth) {
+                out.push(error(
+                    span,
+                    "E448",
+                    "PAC growth must be a linear combination of variables",
+                ));
+                return out;
+            }
+        }
+        let target_rows = model
+            .pac_target_info
+            .iter()
+            .filter(|block| block.name == name)
+            .flat_map(|block| &block.rows);
+        if let Some(target) = target_rows
+            .clone()
+            .filter_map(|row| match row {
+                PacTargetInfoRow::Target(target) => Some(target),
+                _ => None,
+            })
+            .last()
+        {
+            if written_target_product_without_lhs(model, target) {
+                out.push(error(
+                    target.span,
+                    "E458",
+                    format!(
+                        "there is no equation whose LHS is equal to the 'target' of 'pac_target_info({})'",
+                        model.name(name)
+                    ),
+                ));
+                return out;
+            }
+        }
+        if let Some((target_name, span)) = target_rows
+            .clone()
+            .filter_map(|row| match row {
+                PacTargetInfoRow::AuxnameTargetNonstationary { name, span } => Some((*name, *span)),
+                _ => None,
+            })
+            .last()
+        {
+            if let Some(diag) = generated_pac_variable_clash(
+                model,
+                model.name(target_name),
+                span,
+                &mut generated_vars,
+                true,
+            ) {
+                out.push(diag);
+                return out;
+            }
+        }
+        if let Some((auxiliary, span)) = symbol_option(command, "auxiliary_model_name") {
+            if !var_models.contains(&auxiliary) && !trend_models.contains(&auxiliary) {
+                out.push(error(
+                    span,
+                    "E446",
+                    "aux_model_name not recognized as VAR model or Trend Component model",
+                ));
+                return out;
+            }
+        }
+        let uses: Vec<_> = model
+            .equations
+            .iter()
+            .filter(|equation| !equation.is_local)
+            .filter_map(|equation| {
+                equation_operators(model, equation)
+                    .into_iter()
+                    .find(|operator| {
+                        operator.kind == NamedModelOperatorKind::PacExpectation
+                            && operator.name == name
+                    })
+            })
+            .collect();
+        if uses.is_empty() {
+            out.push(error(
+                name_span,
+                "E449",
+                format!(
+                    "the model does not contain the 'pac_expectation({})' operator.",
+                    model.name(name)
+                ),
+            ));
+            return out;
+        }
+        if uses.len() > 1 {
+            out.push(error(
+                uses[1].span,
+                "E450",
+                format!(
+                    "It is not possible to use 'pac_expectation({})' in several equations.",
+                    model.name(name)
+                ),
+            ));
+            return out;
+        }
+        if let Some(diag) =
+            pac_generated_name_clash(model, command, name, &var_models, &mut generated_vars)
+        {
+            out.push(diag);
+            return out;
+        }
+    }
+    for (index, equation) in model
+        .equations
+        .iter()
+        .filter(|equation| !equation.is_local)
+        .enumerate()
+    {
+        for operator in equation_operators(model, equation) {
+            if operator.kind == NamedModelOperatorKind::PacExpectation
+                && !pac_models.contains(&operator.name)
+            {
+                out.push(error(
+                    operator.span,
+                    "E451",
+                    format!(
+                        "in equation {}, the pac_expectation operator references an unknown pac_model",
+                        equation_label(model, index)
+                    ),
+                ));
+                return out;
+            }
+        }
+    }
+    for (index, equation) in model
+        .equations
+        .iter()
+        .filter(|equation| !equation.is_local)
+        .enumerate()
+    {
+        for operator in equation_operators(model, equation) {
+            if operator.kind == NamedModelOperatorKind::PacTargetNonstationary
+                && !model
+                    .pac_target_info
+                    .iter()
+                    .any(|block| block.name == operator.name)
+            {
+                out.push(error(
+                    operator.span,
+                    "E452",
+                    format!("in equation {}, the pac_target_nonstationary operator does not match a corresponding 'pac_target_info' block", equation_label(model, index)),
+                ));
+                return out;
+            }
+        }
+    }
     out
+}
+
+fn equation_label(model: &Model, target_index: usize) -> String {
+    let equations: Vec<_> = model
+        .equations
+        .iter()
+        .filter(|equation| !equation.is_local)
+        .collect();
+    let mut used: HashSet<String> = equations
+        .iter()
+        .filter_map(|equation| equation.tag_map.get("name"))
+        .filter(|name| !name.is_empty())
+        .cloned()
+        .collect();
+    for (index, equation) in equations.into_iter().enumerate() {
+        if let Some(explicit) = equation.tag_map.get("name").filter(|name| !name.is_empty()) {
+            if index == target_index {
+                return explicit.clone();
+            }
+            continue;
+        }
+        let lhs_name = equation.lhs_expr.and_then(|lhs| {
+            if let ExprKind::Ident { name, .. } = &model.exprs.get(lhs).kind {
+                is_endogenous(model, *name).then(|| model.name(*name).to_string())
+            } else {
+                None
+            }
+        });
+        let label = lhs_name
+            .filter(|name| !used.contains(name))
+            .unwrap_or_else(|| (index + 1).to_string());
+        used.insert(label.clone());
+        if index == target_index {
+            return label;
+        }
+    }
+    (target_index + 1).to_string()
+}
+
+fn written_declaration(model: &Model, name: &str) -> Option<Span> {
+    model
+        .endogenous
+        .iter()
+        .chain(&model.exogenous)
+        .chain(&model.deterministic_exogenous)
+        .chain(&model.parameters)
+        .chain(&model.model_local_variables)
+        .find(|decl| model.name(decl.name) == name)
+        .map(|decl| decl.span)
+        .or_else(|| {
+            model
+                .trend_vars
+                .iter()
+                .find(|decl| model.name(decl.name) == name)
+                .map(|decl| decl.span)
+        })
+}
+
+fn generated_pac_variable_clash(
+    model: &Model,
+    name: &str,
+    written_name_span: Span,
+    generated_vars: &mut HashSet<String>,
+    target_nonstationary: bool,
+) -> Option<Diagnostic> {
+    let (code, operator) = if target_nonstationary {
+        ("E457", "pac_target_nonstationary")
+    } else {
+        ("E456", "pac_expectation")
+    };
+    if let Some(span) = written_declaration(model, name) {
+        return Some(error(span, code, format!("the variable/parameter '{name}' conflicts with a variable that will be generated for a '{operator}' expression. Please rename it.")));
+    }
+    if !generated_vars.insert(name.to_string()) {
+        return Some(error(written_name_span, code, format!("the variable/parameter '{name}' conflicts with a variable that will be generated for a '{operator}' expression. Please rename it.")));
+    }
+    None
+}
+
+fn pac_generated_name_clash(
+    model: &Model,
+    command: &SemiStructuralCommand,
+    name: Name,
+    var_models: &HashSet<Name>,
+    generated_vars: &mut HashSet<String>,
+) -> Option<Diagnostic> {
+    let pac = model.name(name);
+    let auxiliary = symbol_option(command, "auxiliary_model_name").map(|(name, _)| name);
+    let has_var = auxiliary.is_some_and(|name| var_models.contains(&name));
+    let target_infos = model
+        .pac_target_info
+        .iter()
+        .filter(|block| block.name == name);
+
+    if option(command, "growth").is_some() {
+        let generated = format!("{pac}_pac_growth_neutrality_correction");
+        if let Some(span) = written_declaration(model, &generated) {
+            return Some(error(span, "E453", format!("The variable/parameter '{generated}' conflicts with the auxiliary parameter that will be generated for the growth neutrality correction of the '{pac}' PAC model. Please rename that parameter.")));
+        }
+    }
+    if target_infos.clone().next().is_none() {
+        if auxiliary.is_none() {
+            let aux = symbol_option(command, "auxname");
+            let aux_name = aux
+                .map(|(name, _)| model.name(name).to_string())
+                .unwrap_or_else(|| format!("mce_Z1_{pac}"));
+            if let Some(diag) = generated_pac_variable_clash(
+                model,
+                &aux_name,
+                aux.map_or(command.span, |(_, span)| span),
+                generated_vars,
+                false,
+            ) {
+                return Some(diag);
+            }
+            let generated = format!("mce_alpha_{pac}_1");
+            if let Some(span) = written_declaration(model, &generated) {
+                return Some(error(span, "E454", format!("The variable/parameter '{generated}' conflicts with a parameter that will be generated for the '{pac}' PAC model. Please rename it.")));
+            }
+        } else {
+            if has_var {
+                let generated = format!("h_{pac}_constant");
+                if let Some(span) = written_declaration(model, &generated) {
+                    return Some(error(span, "E455", format!("the variable/parameter '{generated}' conflicts with some auxiliary parameter that will be generated for the '{pac}' PAC model. Please rename that parameter.")));
+                }
+            }
+            let aux = symbol_option(command, "auxname");
+            let aux_name = aux
+                .map(|(name, _)| model.name(name).to_string())
+                .unwrap_or_else(|| format!("pac_expectation_{pac}"));
+            if let Some(diag) = generated_pac_variable_clash(
+                model,
+                &aux_name,
+                aux.map_or(command.span, |(_, span)| span),
+                generated_vars,
+                false,
+            ) {
+                return Some(diag);
+            }
+        }
+        return None;
+    }
+
+    if auxiliary.is_none() {
+        let generated = format!("mce_alpha_{pac}_1");
+        if let Some(span) = written_declaration(model, &generated) {
+            return Some(error(span, "E454", format!("The variable/parameter '{generated}' conflicts with a parameter that will be generated for the '{pac}' PAC model. Please rename it.")));
+        }
+    }
+    let mut component_idx = 0;
+    for block in target_infos {
+        for row in &block.rows {
+            if let PacTargetInfoRow::Component(component) = row {
+                component_idx += 1;
+                let name_component = format!("{pac}_component{component_idx}");
+                if has_var {
+                    let generated = format!("h_{name_component}_constant");
+                    if let Some(span) = written_declaration(model, &generated) {
+                        return Some(error(span, "E455", format!("the variable/parameter '{generated}' conflicts with some auxiliary parameter that will be generated for the '{pac}' PAC model. Please rename that parameter.")));
+                    }
+                }
+                if let Some((aux_name, span)) = component.rows.iter().rev().find_map(|field| {
+                    if let PacTargetComponentRow::Auxname { name, span } = field {
+                        Some((model.name(*name), *span))
+                    } else {
+                        None
+                    }
+                }) {
+                    if let Some(diag) =
+                        generated_pac_variable_clash(model, aux_name, span, generated_vars, false)
+                    {
+                        return Some(diag);
+                    }
+                }
+                if component
+                    .rows
+                    .iter()
+                    .any(|row| matches!(row, PacTargetComponentRow::Growth(_)))
+                {
+                    let generated = format!("{name_component}_pac_growth_neutrality_correction");
+                    if let Some(span) = written_declaration(model, &generated) {
+                        return Some(error(span, "E455", format!("the variable/parameter '{generated}' conflicts with some auxiliary parameter that will be generated for the '{pac}' PAC model. Please rename that parameter.")));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+// A product of two directly written endogenous/exogenous names stays nonlinear
+// through Dynare's unary and diff substitutions. Other growth forms need the
+// rewritten expression before we can mirror their matcher refusal.
+fn written_nonlinear_growth(model: &Model, growth: &WrittenExpression) -> Option<Span> {
+    let id = growth.expr?;
+    let ExprKind::Binary {
+        op: BinOp::Mul,
+        lhs,
+        rhs,
+    } = &model.exprs.get(id).kind
+    else {
+        return None;
+    };
+    let variable = |id| match &model.exprs.get(id).kind {
+        ExprKind::Ident { name, .. } => is_endogenous(model, *name) || is_exogenous(model, *name),
+        _ => false,
+    };
+    (variable(*lhs) && variable(*rhs)).then_some(growth.span)
+}
+
+// Only the direct X*X target is decided here. Dynare can add an equation for
+// a unary or diff target during transformation, so those shapes stay silent.
+fn written_target_product_without_lhs(model: &Model, target: &WrittenExpression) -> bool {
+    let Some(id) = target.expr else { return false };
+    let ExprKind::Binary {
+        op: BinOp::Mul,
+        lhs,
+        rhs,
+    } = &model.exprs.get(id).kind
+    else {
+        return false;
+    };
+    let (ExprKind::Ident { name: left, .. }, ExprKind::Ident { name: right, .. }) =
+        (&model.exprs.get(*lhs).kind, &model.exprs.get(*rhs).kind)
+    else {
+        return false;
+    };
+    if left != right || !is_endogenous(model, *left) {
+        return false;
+    }
+    !model.equations.iter().filter(|equation| !equation.is_local).any(|equation| {
+        equation.lhs_expr.is_some_and(|lhs| {
+            let ExprKind::Binary {
+                op: BinOp::Mul,
+                lhs,
+                rhs,
+            } = &model.exprs.get(lhs).kind else { return false };
+            matches!((&model.exprs.get(*lhs).kind, &model.exprs.get(*rhs).kind),
+                (ExprKind::Ident { name: a, .. }, ExprKind::Ident { name: b, .. }) if a == left && b == right)
+        })
+    })
 }
 
 fn is_endogenous(model: &Model, name: Name) -> bool {

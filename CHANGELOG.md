@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.0
+
+- Reads Dynare 7.2 `var_model`, `trend_component_model`, `var_expectation_model`, `pac_model`, and `pac_target_info`, plus their named model operators. The independent `deterministic_trends` block is also checked. Parse summaries and equation tools still show the equations you wrote.
+- Reports the family's parse and PAC target checks, selected VAR/trend equation shape and tag errors, VAR and PAC expectation name errors, and written PAC growth, target, operator-use, and fixed generated-name clashes (`E432`–`E458`, `W206`). Shared `E021` and `E058` now reach applicable family fields. Diagnostics use the same core in LSP and MCP.
+- Adds Dynare 7.2 option names and descriptions to completion, hover, and `dynare_list_options`. These include bare `structural` and `eqtags`; `pac_target_info` body rows remain block content rather than command options.
+- Checks that require Dynare's generated equations, substituted expressions, or lag-derived auxiliary names remain silent until their source causes can be mapped. The installed 7.2 PAC example passes the check-stage smoke test; it prints an unused-parameter warning.
+
 ## v0.7.0
 
 - Reads the written shock, path, learning-date, and database forms accepted by Dynare 7.2 and reports their parse, check, and written transform refusals (`E393`–`E425`). Existing `E343`/`E344` now reach deterministic shocks; `E111` catches covariance followed by correlation and skew/co-skew duplicates have their own codes.

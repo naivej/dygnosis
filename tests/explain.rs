@@ -29,7 +29,7 @@ const RUST_CODES: &[&str] = &[
     "E403", "E404", "E405", "E406", "E407", "E408", "E409", "E410", "E411", "E412", "E413", "E414",
     "E415", "E416", "E417", "E418", "E419", "E420", "E421", "E422", "E423", "E424", "E425", "E426",
     "E427", "E428", "E429", "E430", "E431", "E432", "E433", "E434", "E435", "E436", "E437", "E438",
-    "E439", "E440", "E441", "E442", "E443", "E444", "E445", "E446", "E447", "E999", "I050", "S008",
+    "E439", "E440", "E441", "E442", "E443", "E444", "E445", "E446", "E447", "E448", "E449", "E450", "E451", "E452", "E453", "E454", "E455", "E456", "E457", "E458", "E999", "I050", "S008",
     "S012", "S014", "S020", "S035", "S040", "S054", "S063", "W010", "W011", "W012", "W013", "W020",
     "W022", "W031", "W042", "W051", "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W062",
     "W070", "W091", "W092", "W094", "W102", "W110", "W112", "W120", "W121", "W122", "W131", "W140",
@@ -61,7 +61,7 @@ const THIN_CODES: &[&str] = &[
     "E409", "E410", "E411", "E412", "E413", "E414", "E415", "E416", "E417", "E418", "E419", "E420",
     "E421", "E422", "E423", "E424", "E425", "E426", "E427", "E428", "E429", "E430", "E431", "E432",
     "E433", "E434", "E435", "E436", "E437", "E438", "E439", "E440", "E441", "E442", "E443", "E444",
-    "E445", "E446", "E447", "E999", "I050", "W010", "W011", "W012", "W013", "W020", "W022", "W031",
+    "E445", "E446", "E447", "E448", "E449", "E450", "E451", "E452", "E453", "E454", "E455", "E456", "E457", "E458", "E999", "I050", "W010", "W011", "W012", "W013", "W020", "W022", "W031",
     "W042", "W051", "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W062", "W070", "W091",
     "W092", "W094", "W102", "W110", "W112", "W120", "W121", "W122", "W131", "W140", "W150", "W160",
     "W170", "W200", "W201", "W202", "W203", "W204", "W205", "W206",
@@ -92,7 +92,7 @@ const SHARED: &[&str] = &[
     "E409", "E410", "E411", "E412", "E413", "E414", "E415", "E416", "E417", "E418", "E419", "E420",
     "E421", "E422", "E423", "E424", "E425", "E426", "E427", "E428", "E429", "E430", "E431", "E432",
     "E433", "E434", "E435", "E436", "E437", "E438", "E439", "E440", "E441", "E442", "E443", "E444",
-    "E445", "E446", "E447", "W022", "W031", "W042", "W121", "W131", "W150", "W170", "W200", "W201",
+    "E445", "E446", "E447", "E448", "E449", "E450", "E451", "E452", "E453", "E454", "E455", "E456", "E457", "E458", "W022", "W031", "W042", "W121", "W131", "W150", "W170", "W200", "W201",
     "W202", "W203", "W204", "W205", "W206",
 ];
 
@@ -172,13 +172,13 @@ fn read_mod(archive_dir: &str) -> String {
 
 #[test]
 fn known_codes_matches_the_rust_keys() {
-    assert_eq!(SHARED.len(), 305);
+    assert_eq!(SHARED.len(), 316);
     assert_eq!(ADDED.len(), 27);
     assert_eq!(SKIP_KEYS.len(), 16);
-    assert_eq!(THIN_CODES.len(), 332);
-    assert_eq!(RUST_CODES.len(), 348);
+    assert_eq!(THIN_CODES.len(), 343);
+    assert_eq!(RUST_CODES.len(), 359);
     assert_eq!(known_codes(), RUST_CODES);
-    assert_eq!(known_codes().len(), 348);
+    assert_eq!(known_codes().len(), 359);
     assert!(!RUST_CODES.contains(&"P000"));
     assert!(RUST_CODES.contains(&"E178"));
     assert!(RUST_CODES.contains(&"E179"));
@@ -398,7 +398,7 @@ fn cli_explain_list() {
         entries.push((code, kind, title));
         i += 1;
     }
-    assert_eq!(entries.len(), 348);
+    assert_eq!(entries.len(), 359);
     assert_eq!(
         entries.iter().map(|(c, _, _)| *c).collect::<Vec<_>>(),
         RUST_CODES
@@ -432,7 +432,7 @@ fn cli_explain_list() {
     );
     assert_eq!(
         lines.get(i + 1).copied(),
-        Some("348 codes. Run `dygnosis explain <CODE>` for details.")
+        Some("359 codes. Run `dygnosis explain <CODE>` for details.")
     );
     assert!(!stdout.contains("python_dynare_lsp"));
     assert!(!stdout.contains("DYNR"));
