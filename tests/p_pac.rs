@@ -17,6 +17,10 @@ fn fixture(name: &str) -> String {
 }
 
 fn pinned_binary() -> Option<PathBuf> {
+    let pinned = PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    if pinned.is_file() {
+        return Some(pinned);
+    }
     find_preprocessor(None).filter(|path| {
         path.components()
             .any(|part| part.as_os_str().to_string_lossy() == "7.2")

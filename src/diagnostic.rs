@@ -65,6 +65,10 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     if !parse_diags.is_empty() {
         return parse_diags;
     }
+    let pac_parse_diags = crate::check_d_pac::check_parse(model);
+    if !pac_parse_diags.is_empty() {
+        return pac_parse_diags;
+    }
     let shape_diags = crate::diag_shape::check_shape(model);
     let shape_syntax: Vec<Diagnostic> = shape_diags
         .iter()
@@ -100,12 +104,40 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     if !shock_parse_diags.is_empty() {
         return shock_parse_diags;
     }
-    let clashes = crate::check_clash::check_clash(model);
+    let mut clashes = crate::check_clash::check_clash(model);
+    clashes.extend(crate::check_d_pac::check_transform(model));
+    let equation_parse = crate::check_e020::check_e020(model);
+    let declaration_parse = crate::check_e030::check_e030(model);
+    let occbin_diags = crate::check_occbin::check_occbin(model);
+    let observed_diags = crate::check_w090::check_w090(model);
+    let block_diags = crate::check_d_block::check_d_block(model);
+    let open_diags = crate::check_d_open::check_d_open(model);
+    let surgery_parse = crate::check_d_surgery::check_d_surgery(model);
+    // The equation/declaration/surgery families are parsed before checkPass.
+    // Mixed families contribute only the named parse refusals below. In
+    // particular, a check-stage Error elsewhere must not suppress an earlier
+    // PAC checkPass refusal.
+    let parse_refused = equation_parse
+        .iter()
+        .chain(&declaration_parse)
+        .chain(&surgery_parse)
+        .any(|diag| diag.severity == Severity::Error)
+        || occbin_diags.iter().any(|diag| diag.code == "E182")
+        || observed_diags
+            .iter()
+            .any(|diag| matches!(diag.code.as_str(), "E093" | "E261"))
+        || block_diags.iter().any(|diag| diag.code == "E271")
+        || open_diags.iter().any(|diag| {
+            matches!(
+                diag.code.as_str(),
+                "E058" | "E059" | "E288" | "E289" | "E290" | "E291" | "E292" | "E293" | "E294"
+            )
+        });
     let mut out = Vec::new();
     out.extend(crate::e010::check_e010(model));
-    out.extend(crate::check_e020::check_e020(model));
-    out.extend(crate::check_e030::check_e030(model));
-    out.extend(crate::check_occbin::check_occbin(model));
+    out.extend(equation_parse);
+    out.extend(declaration_parse);
+    out.extend(occbin_diags);
     out.extend(clashes.iter().cloned());
     out.extend(crate::check_estimation::check_estimation(model));
     out.extend(crate::check_context::check_context(model));
@@ -113,22 +145,25 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     out.extend(crate::check_w010::check_w010_family(model));
     out.extend(crate::check_e060::check_e060_family_on_model(model));
     out.extend(crate::check_w070::check_w070(model));
-    out.extend(crate::check_w090::check_w090(model));
+    out.extend(observed_diags);
     out.extend(crate::check_estimated_params::check_estimated_params(model));
     out.extend(crate::check_w100::check_w100(model));
     out.extend(crate::check_w110::check_w110(model));
     out.extend(crate::check_w120::check_w120_family(model));
     out.extend(crate::check_w130::check_w130(model));
     out.extend(crate::check_symbol_list::check_symbol_list(model));
-    out.extend(crate::check_d_block::check_d_block(model));
+    out.extend(block_diags);
     out.extend(shock_diags);
-    out.extend(crate::check_d_open::check_d_open(model));
+    out.extend(open_diags);
     // E271 is already emitted for each repeated option by check_shape. The
     // dotted parse walk uses the first duplicate only to stop a later head
     // type refusal from pre-empting that statement.
     out.extend(ms_diags.into_iter().filter(|d| d.code != "E271"));
-    out.extend(crate::check_d_surgery::check_d_surgery(model));
+    out.extend(surgery_parse);
     out.extend(crate::check_mom::check_mom(model));
+    if !parse_refused {
+        out.extend(crate::check_d_pac::check_check(model));
+    }
     // The subsample type gate is in writeOutput, after every parse, check and
     // transform refusal. A prior Error keeps the writer from running.
     if out
@@ -140,9 +175,6 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     // These generic parse refusals can enter through later diagnostic passes.
     // Dynare finishes parsing the whole file before checkPass, so any of them
     // stops E420 regardless of its written position.
-    let parse_refused = out
-        .iter()
-        .any(|d| matches!(d.code.as_str(), "E020" | "E030" | "E093" | "E271"));
     if parse_refused {
         out.retain(|d| d.code != "E420");
     }

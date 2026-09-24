@@ -45,7 +45,7 @@ pub struct Equation {
 
 /// The four top-level semi-structural model commands. Their option sets differ
 /// in Dynare's grammar, so a command keeps its kind as well as its written rows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SemiStructuralKind {
     VarModel,
     TrendComponentModel,

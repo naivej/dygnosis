@@ -1,0 +1,10 @@
+// inventory: d_pac_quiet_var_structural
+var y z;
+varexo e e2;
+parameters b;
+b = 0.8;
+model;
+  [name='Y'] y = b*z+e;
+  [name='Z'] z = z(-1)+e2;
+end;
+var_model(model_name=v,eqtags=['Y'],structural);
