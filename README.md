@@ -3,17 +3,15 @@
 ![dygnosis](media/logo_s.png) is a second Dynare preprocessor living in your editor that
 
 - powers MCP for agents and LSP for humans, with code intelligence while typing;
-- checks written `.mod` files against many Dynare 7.2 preprocessor refusals before MATLAB;
-- includes extra warnings for issues Dynare does not report.
+- catches many problems Dynare 7.2 would report before MATLAB runs and points to them in your `.mod` file;
+- adds warnings for possible problems Dynare does not report.
 
 Limitations by design
 
-- **Checks on a rewritten model are not reported.** Dynare rearranges your equations before some of its checks, adding extra variables and turning leads and lags around. When a check complains about that version, there is no matching place in the file you edit, so dygnosis stays quiet.
-- **A few Dynare messages have no match here.** One is about the MATLAB code Dynare writes out, not about your model. In others Dynare crashes instead of printing anything. Either way there is nothing to show you.
-- **Checks that depend on how you run Dynare are skipped.** Some come from command-line options, others need a compiler on your machine. They say nothing about the `.mod` file.
-- **Numbers are left to MATLAB.** Steady state, stability, and whether the model solves are computed there, not here. Use the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit) for seamless integration with MATLAB.
-
-Semi-structural support covers `var_model`, `trend_component_model`, `var_expectation_model`, `pac_model`, `pac_target_info`, and their named expectation operators. `deterministic_trends` is an independent block. LSP and MCP share the diagnostic core. LSP hover and completion, and MCP `dynare_list_options`, use the same command catalog.
+- **Problems after equation rewriting.** Dynare changes equations and adds helper variables before some checks. Dygnosis can report a problem found at that stage when the `.mod` you wrote is enough to decide it. It stays quiet when the problem depends on equations Dynare creates and cannot be tied back to your file.
+- **Some Dynare messages cannot be shown.** A few concern MATLAB or Octave code Dynare writes rather than your `.mod` file; other cases crash without an error message. Dygnosis does not invent a diagnostic for those cases.
+- **Run-dependent checks.** Dygnosis does not infer checks that depend on Dynare command-line options or a compiler installed on your machine.
+- **Numerical results.** MATLAB or Octave computes steady states, stability, and whether the model solves. Dygnosis stops before those calculations. For editor and agent integration of MATLAB, see the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit).
 
 ## How to use
 
