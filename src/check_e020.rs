@@ -15,6 +15,21 @@ pub fn check_e020(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
+/// Aggregate-written equations plus every per-dimension heterogeneous body, in
+/// file order. The official preprocessor resolves symbols while it parses each
+/// body, so the shipped walkers see both (probe `r32`: an unknown symbol in a
+/// heterogeneous equation refuses at parse).
+pub(crate) fn all_model_equations(model: &Model) -> Vec<&Equation> {
+    let mut eqs: Vec<&Equation> = model.equations.iter().collect();
+    eqs.extend(
+        model
+            .heterogeneous_models
+            .iter()
+            .flat_map(|block| block.equations.iter()),
+    );
+    eqs
+}
+
 fn check_e023(model: &Model) -> Vec<Diagnostic> {
     let endo: HashSet<Name> = model.endogenous.iter().map(|d| d.name).collect();
     let mut seen = HashSet::new();
@@ -52,7 +67,7 @@ fn check_e024(model: &Model) -> Vec<Diagnostic> {
     }
     let mut seen = HashSet::new();
     let mut diagnostics = Vec::new();
-    for eq in &model.equations {
+    for eq in all_model_equations(model) {
         for r in model.ident_refs(eq) {
             if r.timing == 0 || !det.contains(&r.name) || !seen.insert(r.name) {
                 continue;
@@ -79,7 +94,7 @@ fn check_e024(model: &Model) -> Vec<Diagnostic> {
 
 fn check_e025(model: &Model) -> Vec<Diagnostic> {
     let declared = declared_symbol_names(model);
-    let mut eqs: Vec<&Equation> = model.equations.iter().collect();
+    let mut eqs = all_model_equations(model);
     eqs.sort_by_key(|eq| (eq.span.start, eq.span.end));
 
     let mut first_definition: HashMap<Name, u32> = HashMap::new();
@@ -170,9 +185,8 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
             .iter()
             .flat_map(|surgery| surgery.removed.iter().map(|row| &row.equation))
     };
-    let pound: HashSet<Name> = model
-        .equations
-        .iter()
+    let pound: HashSet<Name> = all_model_equations(model)
+        .into_iter()
         .chain(removed_equations())
         .filter_map(|eq| model_local_name(model, eq).map(|(n, _)| n))
         .collect();
@@ -204,6 +218,13 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
         .equations
         .iter()
         .map(|eq| (eq, false))
+        .chain(
+            model
+                .heterogeneous_models
+                .iter()
+                .flat_map(|block| block.equations.iter())
+                .map(|eq| (eq, false)),
+        )
         .chain(removed_equations().map(|eq| (eq, true)))
         .collect();
     eqs.sort_by_key(|(eq, _)| (eq.span.start, eq.span.end));

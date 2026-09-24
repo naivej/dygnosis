@@ -110,7 +110,16 @@ pub fn equations(model: &Model) -> Vec<EquationRow> {
 
 pub fn count_gap(model: &Model) -> CountGap {
     let n_equations = collapsed_equation_count(model);
-    let n_endogenous = model.endogenous.len();
+    // The official transform-stage count compares the aggregate tree with the
+    // plain-endogenous symbol count (`endo_nbr()` collects `endogenous` only,
+    // not `heterogeneousEndogenous`); the per-dimension counts are a separate
+    // refusal. Heterogeneous declarations therefore stay out of both sides, so
+    // opposing tree gaps cannot cancel.
+    let n_endogenous = model
+        .endogenous
+        .iter()
+        .filter(|d| d.heterogeneity.is_none())
+        .count();
     CountGap {
         n_endogenous,
         n_equations,
@@ -209,6 +218,7 @@ fn unreferenced_endogenous(model: &Model) -> Vec<String> {
     model
         .endogenous
         .iter()
+        .filter(|d| d.heterogeneity.is_none())
         .filter(|d| !referenced.contains(&d.name))
         .map(|d| model.name(d.name).to_string())
         .collect()

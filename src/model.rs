@@ -15,6 +15,66 @@ pub struct Decl {
     pub span: Span,
     pub long_name: Option<String>,
     pub log_transform: bool,
+    /// `heterogeneity=<symbol>` on the declaration: the dimension name and the
+    /// value identifier's span.
+    pub heterogeneity: Option<(Name, Span)>,
+}
+
+/// One name of a `heterogeneity_dimension` statement, file order (one record
+/// per name, each carrying the whole statement's span).
+#[derive(Clone, Debug)]
+pub struct HeterogeneityDimension {
+    pub name: Name,
+    pub name_span: Span,
+    /// Statement keyword through `;`.
+    pub span: Span,
+}
+
+/// One `model(heterogeneity=d); … end;` block. The written equations live
+/// here; `Model::equations` stays the aggregate-written list.
+#[derive(Clone, Debug)]
+pub struct HeterogeneousModelBlock {
+    /// The dimension name and its identifier span in the opener.
+    pub dimension: Name,
+    pub dimension_span: Span,
+    /// Opener through `end;`.
+    pub span: Span,
+    /// The body's written equations, in file order, tags and `#` locals included.
+    pub equations: Vec<Equation>,
+}
+
+/// Which `heterogeneity_*` command a record is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeterogeneityCommandKind {
+    LoadSteadyState,
+    ComputeSteadyState,
+    Solve,
+    Simulate,
+}
+
+/// One `heterogeneity_load_steady_state` / `heterogeneity_compute_steady_state` /
+/// `heterogeneity_solve` / `heterogeneity_simulate` statement.
+#[derive(Clone, Debug)]
+pub struct HeterogeneityCommand {
+    pub kind: HeterogeneityCommandKind,
+    /// Command spelling as written.
+    pub command: String,
+    /// Command keyword through the terminating `;`.
+    pub span: Span,
+    /// Written options with their name/value spans.
+    pub options: Vec<HeterogeneityOption>,
+    /// `heterogeneity_simulate`'s trailing symbol list, source order.
+    pub simulate_names: Vec<(Name, Span)>,
+}
+
+/// One written option of a `heterogeneity_*` command.
+#[derive(Clone, Debug)]
+pub struct HeterogeneityOption {
+    /// Option name as written, including its case.
+    pub name: String,
+    pub name_span: Span,
+    /// `name=value`: the raw value text and its span. `None` for a bare flag.
+    pub value: Option<(String, Span)>,
 }
 
 #[derive(Clone, Debug)]
@@ -1063,6 +1123,13 @@ pub struct Model {
     /// the file, with the sentence it prints. Syntax errors, and the two
     /// sentences no code owns.
     pub mom_syntax: Vec<MomSyntax>,
+    /// Every `heterogeneity_dimension` name, file order (one record per name).
+    pub heterogeneity_dimensions: Vec<HeterogeneityDimension>,
+    /// `model(heterogeneity=d); … end;` blocks, file order. `equations` above
+    /// stays written-aggregate so `n_model_equations` is unchanged.
+    pub heterogeneous_models: Vec<HeterogeneousModelBlock>,
+    /// Every `heterogeneity_*` command statement, file order.
+    pub heterogeneity_commands: Vec<HeterogeneityCommand>,
 }
 
 /// One parse-stage sentence on a moment or calibration block.
@@ -1706,6 +1773,9 @@ impl Model {
             .chain(self.matched_irfs_weights.iter().map(|block| block.span))
             .chain(self.moment_calibration.iter().map(|block| block.span))
             .chain(self.irf_calibration.iter().map(|block| block.span))
+            .chain(self.heterogeneity_dimensions.iter().map(|dim| dim.span))
+            .chain(self.heterogeneous_models.iter().map(|block| block.span))
+            .chain(self.heterogeneity_commands.iter().map(|stmt| stmt.span))
             .collect();
         spans.sort_by_key(|span| (span.start, span.end));
         spans

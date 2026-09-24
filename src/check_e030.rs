@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::expr::ExprKind;
 use crate::intern::Name;
-use crate::model::{DerivSpec, Equation, Model};
+use crate::model::{DerivSpec, Model};
 use crate::span::Span;
 
 pub fn check_e030(model: &Model) -> Vec<Diagnostic> {
@@ -101,7 +101,9 @@ fn check_duplicate_declarations(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_model_local_dups(model: &Model) -> Vec<Diagnostic> {
-    let mut eqs: Vec<&Equation> = model.equations.iter().collect();
+    // Heterogeneous bodies declare `#` locals the same way, and 7.2 refuses a
+    // repeat there while parsing (probe: `Local model variable a declared twice.`).
+    let mut eqs = crate::check_e020::all_model_equations(model);
     eqs.sort_by_key(|eq| (eq.span.start, eq.span.end));
 
     let mut seen = HashSet::new();

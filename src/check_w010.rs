@@ -36,6 +36,11 @@ pub fn check_w010(model: &Model) -> Vec<Diagnostic> {
         if assigned.contains(&p.name) {
             continue;
         }
+        // A heterogeneous parameter takes its value from the loaded steady
+        // state, not from an assignment; 7.2 accepts it unassigned.
+        if p.heterogeneity.is_some() {
+            continue;
+        }
         let name = model.name(p.name);
         diagnostics.push(Diagnostic::new(
             p.span,
@@ -126,7 +131,7 @@ pub fn check_w020(model: &Model) -> Vec<Diagnostic> {
     if !has_static {
         return Vec::new();
     }
-    let referenced = model_eq_refs(model);
+    let referenced = model_and_het_eq_refs(model);
     unused_decls(
         model,
         &model.endogenous,
@@ -142,7 +147,11 @@ pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
     if model.equations.is_empty() {
         return Vec::new();
     }
-    let referenced = model_eq_refs(model);
+    // The official unused-exogenous check counts a heterogeneous body as a use
+    // (a plain exogenous used only there accepts at check). A
+    // heterogeneous-declared exogenous is exempt: the binary accepts one that
+    // no tree, block, or shock row uses at all.
+    let referenced = model_and_het_eq_refs(model);
     // `Model::exogenous` holds `varexo_det` names too; 7.1's unused check covers
     // plain `varexo` only, so filter them out as the other plain-`varexo`
     // readers do — an unused `varexo_det` is accepted there.
@@ -157,6 +166,9 @@ pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
         .iter()
         .filter(|d| !exo_det.contains(&d.name))
     {
+        if d.heterogeneity.is_some() {
+            continue;
+        }
         if referenced.contains(&d.name) {
             continue;
         }
@@ -177,7 +189,7 @@ pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
     if model.equations.is_empty() {
         return Vec::new();
     }
-    let mut referenced = model_eq_refs(model);
+    let mut referenced = model_and_het_eq_refs(model);
     for eq in &model.steady_state_equations {
         for r in model.ident_refs(eq) {
             referenced.insert(r.name);
@@ -341,6 +353,21 @@ fn model_eq_refs(model: &Model) -> HashSet<Name> {
     for eq in &model.equations {
         for r in model.ident_refs(eq) {
             refs.insert(r.name);
+        }
+    }
+    refs
+}
+
+/// `model_eq_refs` plus every heterogeneous body's references. The official
+/// unused-endogenous/parameter warnings count a heterogeneous body as a use
+/// (`ph` used only there prints no `Parameter(s) … not used in the model`).
+fn model_and_het_eq_refs(model: &Model) -> HashSet<Name> {
+    let mut refs = model_eq_refs(model);
+    for block in &model.heterogeneous_models {
+        for eq in &block.equations {
+            for r in model.ident_refs(eq) {
+                refs.insert(r.name);
+            }
         }
     }
     refs

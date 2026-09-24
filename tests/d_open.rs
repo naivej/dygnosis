@@ -443,7 +443,10 @@ fn quiet_files_stay_quiet() {
         ("d_open/quiet_homotopy.mod", &["E332", "E001"]),
         ("d_open/quiet_shock_groups.mod", &["E333", "E001"]),
         ("d_open/quiet_bvar.mod", &["E001"]),
-        ("d_open/quiet_heterogeneity.mod", &["E001"]),
+        (
+            "d_open/quiet_heterogeneity.mod",
+            &["E001", "E020", "E030", "W031"],
+        ),
     ];
     let mut failures = Vec::new();
     for (fixture, expected_quiet) in quiets {
@@ -605,8 +608,19 @@ fn deflator_declaration_declares_endo_and_keeps_expr() {
 fn var_heterogeneity_is_not_e001() {
     let got = diags("d_open/quiet_heterogeneity.mod");
     quiet(&got, "E001");
+    quiet(&got, "E020");
+    quiet(&got, "E030");
+    quiet(&got, "W031");
     let model = parse(&fixture("d_open/quiet_heterogeneity.mod"));
-    assert!(model.endogenous.iter().any(|d| model.name(d.name) == "yh"));
+    let yh = model
+        .endogenous
+        .iter()
+        .find(|d| model.name(d.name) == "yh")
+        .expect("yh should be endogenous");
+    let (dim, _) = yh.heterogeneity.expect("yh should carry its dimension");
+    assert_eq!(model.name(dim), "d");
+    assert_eq!(model.heterogeneity_dimensions.len(), 1);
+    assert_eq!(model.name(model.heterogeneity_dimensions[0].name), "d");
 }
 
 #[test]

@@ -13,23 +13,23 @@ use crate::model::{
     FamilyValueKind, Init2ShocksBlock, Init2ShocksRow, IrfCalibrationBlock, IrfCalibrationRow,
     MatchedIrfsBlock, MatchedIrfsRow, MatchedIrfsWeight, MatchedIrfsWeightsBlock, MatchedMoment,
     Model, MomStatement, MomSyntax, MomentCalibrationBlock, MomentCalibrationRow, MsStatement,
-    OptimWeight, ParseIssue, ParseIssueKind, ShapeRefuse, ShockGroup, ShockGroupBlock, SvarEquation,
-    SvarIdentification, SvarIdentificationElement,
+    OptimWeight, ParseIssue, ParseIssueKind, ShapeRefuse, ShockGroup, ShockGroupBlock,
+    SvarEquation, SvarIdentification, SvarIdentificationElement,
 };
 use crate::model::{
     ChangeTypeKind, ChangeTypeStmt, CommandSymbol, Complementarity, ComplementarityTriple,
     DeprecatedOption, DerivSpec, EquationSurgery, EstimatedParam, EstimatedParamKind,
-    EstimationDsgeVarStmt, ExternalFunctionStmt, GenerateIrfsElement, HistvalEntry, HomotopyRow,
-    IncludeDirective, IncludePathDirective, MacroDirective, MacroInterp, NonstationaryVar,
-    ObservedVar, OccbinConstraint, OccbinExpr, OsrBound, PolicyCommand, PolicyCommandStatement,
-    RamseyConstraint, RemovedEquation, ShockKind, ShockStmt, ShocksSemiFamily, SurgeryExit,
-    SurgeryKind, TrendVar,
-    VarRemovedName,
+    EstimationDsgeVarStmt, ExternalFunctionStmt, GenerateIrfsElement, HeterogeneityCommand,
+    HeterogeneityCommandKind, HeterogeneityDimension, HeterogeneityOption, HeterogeneousModelBlock,
+    HistvalEntry, HomotopyRow, IncludeDirective, IncludePathDirective, MacroDirective, MacroInterp,
+    NonstationaryVar, ObservedVar, OccbinConstraint, OccbinExpr, OsrBound, PolicyCommand,
+    PolicyCommandStatement, RamseyConstraint, RemovedEquation, ShockKind, ShockStmt,
+    ShocksSemiFamily, SurgeryExit, SurgeryKind, TrendVar, VarRemovedName,
 };
 use crate::span::Span;
 
-mod shock_parser;
 mod pac_parser;
+mod shock_parser;
 
 #[derive(Clone, Debug)]
 enum FoldKey {
@@ -285,6 +285,40 @@ fn handed_option_command(cmd: &str) -> bool {
         || cmd.eq_ignore_ascii_case("realtime_shock_decomposition")
         || cmd.eq_ignore_ascii_case("initial_condition_decomposition")
         || cmd.eq_ignore_ascii_case("plot_shock_decomposition")
+}
+
+/// The internal option name 7.2's twice-refusal prints (`option check.tolf
+/// declared twice` on a repeated `tolf`; `DynareBison.yy` maps each `o_` rule).
+/// `heterogeneity_solve` and `heterogeneity_simulate` options map to their
+/// written names.
+fn hetero_option_path(name: &str) -> String {
+    match name.to_ascii_lowercase().as_str() {
+        "filename" => "steady_state_file_name".to_string(),
+        "variable" => "steady_state_variable_name".to_string(),
+        "tolf" => "check.tolf".to_string(),
+        "forward_max_iter" => "forward.max_iter".to_string(),
+        "forward_tol" => "forward.tol".to_string(),
+        "forward_check_every" => "forward.check_every".to_string(),
+        "forward_verbosity" => "forward.verbosity".to_string(),
+        "time_iteration_max_iter" => "time_iteration.max_iter".to_string(),
+        "time_iteration_tol" => "time_iteration.tol".to_string(),
+        "time_iteration_learning_rate" => "time_iteration.learning_rate".to_string(),
+        "time_iteration_verbosity" => "time_iteration.verbosity".to_string(),
+        "time_iteration_solver_tolf" => "time_iteration.solver_tolf".to_string(),
+        "time_iteration_solver_tolx" => "time_iteration.solver_tolx".to_string(),
+        "time_iteration_solver_factor" => "time_iteration.solver_factor".to_string(),
+        "time_iteration_solver_max_iter" => "time_iteration.solver_max_iter".to_string(),
+        "time_iteration_solver_stop_on_error" => "time_iteration.solver_stop_on_error".to_string(),
+        "time_iteration_early_stopping" => "time_iteration.early_stopping".to_string(),
+        "calibration_tolf" => "calibration.tolf".to_string(),
+        "calibration_max_iter" => "calibration.max_iter".to_string(),
+        "calibration_verbosity" => "calibration.verbosity".to_string(),
+        "calibration_target_equations" => "calibration.target_equations".to_string(),
+        "tex" => "TeX".to_string(),
+        "irf_plot_threshold" => "impulse_responses.plot_threshold".to_string(),
+        "print" | "noprint" => "noprint".to_string(),
+        other => other.to_string(),
+    }
 }
 
 fn date_option_consumer(command: &str, option: &str) -> bool {
@@ -990,8 +1024,7 @@ impl Parser<'_> {
                 self.parse_equation_surgery(false);
             } else if self.at_ident_ci("model_replace") {
                 self.parse_equation_surgery(true);
-            } else if self.at_ident_ci("var_remove")
-                && self.peek_kind(1) == Some(TokenKind::Ident)
+            } else if self.at_ident_ci("var_remove") && self.peek_kind(1) == Some(TokenKind::Ident)
             {
                 self.parse_var_remove_statement();
             } else if self.at_ms_family_command().is_some() && self.at_statement_boundary() {
@@ -1011,6 +1044,10 @@ impl Parser<'_> {
                 && self.at_statement_boundary()
             {
                 self.parse_data_statement();
+            } else if self.at_ident_ci("heterogeneity_dimension") {
+                self.parse_heterogeneity_dimension();
+            } else if self.at_heterogeneity_command() {
+                self.parse_heterogeneity_command();
             } else if self.at_dotted_statement().is_some() && self.at_statement_boundary() {
                 self.parse_dotted_statement();
             } else if self.at_handed_over_statement() && self.at_statement_boundary() {
@@ -1036,16 +1073,23 @@ impl Parser<'_> {
     fn parse_declaration(&mut self, keyword: &str) -> Vec<Decl> {
         let start = self.current_start();
         let keyword_is_var = self.at_ident_ci("var");
+        let keyword_is_varexo = self.at_ident_ci("varexo");
         let keyword_is_parameters = self.at_ident_ci("parameters");
         self.bump();
         let mut log_transform = false;
         let mut log_deflator = false;
         let mut deflator = None;
+        let mut heterogeneity = None;
         if self.at(TokenKind::LParen) {
-            let (log, is_log_deflator, expr) = self.parse_declaration_options();
+            let (log, is_log_deflator, expr, het) = self.parse_declaration_options();
             log_transform = keyword_is_var && log;
             log_deflator = is_log_deflator;
             deflator = expr;
+            // `heterogeneity=` is grammatical on these three kinds only
+            // (7.2 `DynareBison.yy`); the other declarations take no option list.
+            if keyword_is_var || keyword_is_varexo || keyword_is_parameters {
+                heterogeneity = het;
+            }
         }
         let kw_range_end = self.current_start();
         let mut decls = Vec::new();
@@ -1107,6 +1151,7 @@ impl Parser<'_> {
                     span: tok.span,
                     long_name: None,
                     log_transform,
+                    heterogeneity,
                 });
                 continue;
             }
@@ -1149,16 +1194,40 @@ impl Parser<'_> {
         decls
     }
 
-    /// `var(?)` option list: `log`, `deflator=`, `log_deflator=`, other `=value`s skipped.
-    fn parse_declaration_options(&mut self) -> (bool, bool, Option<ExprId>) {
+    /// `var(?)` option list: `log`, `deflator=`, `log_deflator=`, other `=value`s
+    /// skipped, and 7.2's `heterogeneity=<symbol>`. Once `heterogeneity` opens the
+    /// list the grammar takes no second option, so the pinned parser stops on the
+    /// next token with `syntax error, unexpected COMMA, expecting ')'` — recorded
+    /// on that token. A `heterogeneity` that is not the list's first option keeps
+    /// today's lenient reading.
+    fn parse_declaration_options(&mut self) -> (bool, bool, Option<ExprId>, Option<(Name, Span)>) {
         let mut log = false;
         let mut log_deflator = false;
         let mut deflator = None;
         let mut saw_deflator = false;
+        let mut heterogeneity = None;
+        let mut first_option = true;
         self.bump();
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) {
             if self.at(TokenKind::Ident) {
                 let lex = self.lexeme(&self.tokens[self.i]).to_string();
+                if first_option && lex.eq_ignore_ascii_case("heterogeneity") {
+                    first_option = false;
+                    self.bump();
+                    if self.at(TokenKind::Eq) {
+                        self.bump();
+                        if self.at(TokenKind::Ident) {
+                            let tok = self.bump();
+                            let name = self.lexeme(&tok).to_string();
+                            heterogeneity = Some((self.intern.intern(&name), tok.span));
+                            if !self.at(TokenKind::RParen) && !self.at(TokenKind::Eof) {
+                                self.hetero_bison_refuse(self.i, Some("')'"));
+                            }
+                        }
+                    }
+                    continue;
+                }
+                first_option = false;
                 if lex.eq_ignore_ascii_case("log") {
                     log = true;
                     self.bump();
@@ -1193,7 +1262,7 @@ impl Parser<'_> {
             self.bump();
         }
         self.eat(TokenKind::RParen);
-        (log, log_deflator, deflator)
+        (log, log_deflator, deflator, heterogeneity)
     }
 
     fn skip_option_value(&mut self) {
@@ -1210,6 +1279,12 @@ impl Parser<'_> {
 
     fn parse_model_block(&mut self) {
         let start = self.bump().span.start;
+        if self.at(TokenKind::LParen) {
+            if let Some((dimension, dimension_span)) = self.heterogeneous_model_dimension() {
+                self.parse_heterogeneous_model_body(start, dimension, dimension_span);
+                return;
+            }
+        }
         let mut linear = false;
         if self.at(TokenKind::LParen) {
             let from = self.i;
@@ -1247,6 +1322,249 @@ impl Parser<'_> {
         }
         let end = self.finish_block_named("model", opener_span, body_i);
         self.model.model_block = Some(Span { start, end });
+    }
+
+    /// `(dimension, span)` when the `model(…)` option list opens a heterogeneous
+    /// body: exactly `heterogeneity=<symbol>`, or that shape followed by tokens
+    /// the grammar refuses — the pinned parser stops on the offending token with
+    /// `syntax error, unexpected COMMA, expecting ')'`. Any other list keeps the
+    /// aggregate reading.
+    fn heterogeneous_model_dimension(&mut self) -> Option<(Name, Span)> {
+        let first = self.tokens.get(self.i + 1)?;
+        if first.kind != TokenKind::Ident
+            || !self.lexeme(first).eq_ignore_ascii_case("heterogeneity")
+        {
+            return None;
+        }
+        if self.peek_kind(2) != Some(TokenKind::Eq) {
+            return None;
+        }
+        let value_index = self.i + 3;
+        let (dimension_span, dimension_lex) = {
+            let value = self.tokens.get(value_index)?;
+            if value.kind != TokenKind::Ident {
+                return None;
+            }
+            (value.span, self.lexeme(value).to_string())
+        };
+        match self.tokens.get(value_index + 1).map(|t| t.kind) {
+            None | Some(TokenKind::RParen) => {}
+            _ => self.hetero_bison_refuse(value_index + 1, Some("')'")),
+        }
+        let dimension = self.intern.intern(&dimension_lex);
+        Some((dimension, dimension_span))
+    }
+
+    /// The body of `model(heterogeneity=d); … end;`. Equations go into the
+    /// per-dimension record; the aggregate list, `model_block`, and `is_linear`
+    /// are untouched. An empty body is the pinned `unexpected END` sentence.
+    fn parse_heterogeneous_model_body(
+        &mut self,
+        start: u32,
+        dimension: Name,
+        dimension_span: Span,
+    ) {
+        if self.at(TokenKind::LParen) {
+            self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+        }
+        let opener_end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        let opener_span = Span {
+            start,
+            end: opener_end,
+        };
+        let body_i = self.i;
+        self.in_equation_body = true;
+        let mut equations = Vec::new();
+        while !self.at(TokenKind::Eof) && !self.at_block_stop() {
+            if let Some((eq, range)) = self.parse_equation_statement() {
+                self.eq_token_ranges.push(range);
+                equations.push(eq);
+            }
+        }
+        self.in_equation_body = false;
+        if equations.is_empty() && self.at_block_end() {
+            self.hetero_bison_refuse(self.i, None);
+        }
+        if self.at_block_end() {
+            self.record_missing_final("model", body_i, self.i);
+        }
+        let end = self.finish_block_named("model", opener_span, body_i);
+        self.model
+            .heterogeneous_models
+            .push(HeterogeneousModelBlock {
+                dimension,
+                dimension_span,
+                span: Span { start, end },
+                equations,
+            });
+    }
+
+    /// `heterogeneity_dimension name1, name2;` — one record per name, file order.
+    fn parse_heterogeneity_dimension(&mut self) {
+        let start = self.bump().span.start;
+        let mut names: Vec<(Name, Span)> = Vec::new();
+        while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::Ident) {
+                let tok = self.bump();
+                let name = self.lexeme(&tok).to_string();
+                names.push((self.intern.intern(&name), tok.span));
+            } else {
+                self.bump();
+            }
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        self.eat(TokenKind::Semi);
+        let span = Span { start, end };
+        for (name, name_span) in names {
+            self.model
+                .heterogeneity_dimensions
+                .push(HeterogeneityDimension {
+                    name,
+                    name_span,
+                    span,
+                });
+        }
+    }
+
+    fn at_heterogeneity_command(&self) -> bool {
+        self.at_ident_ci("heterogeneity_load_steady_state")
+            || self.at_ident_ci("heterogeneity_compute_steady_state")
+            || self.at_ident_ci("heterogeneity_solve")
+            || self.at_ident_ci("heterogeneity_simulate")
+    }
+
+    /// One `heterogeneity_*` statement: written options with spans (the twice
+    /// refusal keys on 7.2's internal option name), and `heterogeneity_simulate`'s
+    /// trailing symbol list. A malformed list recovers to the next `;`.
+    fn parse_heterogeneity_command(&mut self) {
+        let opener = self.bump();
+        let start = opener.span.start;
+        let command = self.lexeme(&opener).to_string();
+        let kind = if command.eq_ignore_ascii_case("heterogeneity_load_steady_state") {
+            HeterogeneityCommandKind::LoadSteadyState
+        } else if command.eq_ignore_ascii_case("heterogeneity_compute_steady_state") {
+            HeterogeneityCommandKind::ComputeSteadyState
+        } else if command.eq_ignore_ascii_case("heterogeneity_solve") {
+            HeterogeneityCommandKind::Solve
+        } else {
+            HeterogeneityCommandKind::Simulate
+        };
+        let mut options = Vec::new();
+        let mut seen: HashMap<String, ()> = HashMap::new();
+        if self.at(TokenKind::LParen) {
+            self.bump();
+            while !self.at(TokenKind::RParen)
+                && !self.at(TokenKind::Semi)
+                && !self.at(TokenKind::Eof)
+            {
+                if !self.at(TokenKind::Ident) {
+                    self.bump();
+                    continue;
+                }
+                let name_tok = self.bump();
+                let name = self.lexeme(&name_tok).to_string();
+                let mut value = None;
+                if self.at(TokenKind::Eq) {
+                    self.bump();
+                    value = self.read_hetero_option_value();
+                }
+                if seen.insert(name.to_ascii_lowercase(), ()).is_some() {
+                    self.model
+                        .option_twice
+                        .push((hetero_option_path(&name), name_tok.span));
+                }
+                options.push(HeterogeneityOption {
+                    name,
+                    name_span: name_tok.span,
+                    value,
+                });
+            }
+            if self.at(TokenKind::RParen) {
+                self.bump();
+            }
+        }
+        let mut simulate_names = Vec::new();
+        if kind == HeterogeneityCommandKind::Simulate {
+            loop {
+                match self.tokens.get(self.i).map(|t| t.kind) {
+                    Some(TokenKind::Ident) => {
+                        let tok = self.bump();
+                        let name = self.lexeme(&tok).to_string();
+                        simulate_names.push((self.intern.intern(&name), tok.span));
+                    }
+                    Some(TokenKind::Comma) => {
+                        self.bump();
+                    }
+                    _ => break,
+                }
+            }
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        self.eat(TokenKind::Semi);
+        self.model
+            .heterogeneity_commands
+            .push(HeterogeneityCommand {
+                kind,
+                command,
+                span: Span { start, end },
+                options,
+                simulate_names,
+            });
+    }
+
+    /// The raw written value of a `heterogeneity_*` option, through the comma,
+    /// closing paren, or semicolon at nesting depth zero.
+    fn read_hetero_option_value(&mut self) -> Option<(String, Span)> {
+        let start = self.current_start();
+        let from = self.i;
+        let mut depth = 0_i32;
+        while !self.at(TokenKind::Eof) {
+            match self.tokens[self.i].kind {
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen if depth == 0 => break,
+                TokenKind::RParen => depth -= 1,
+                TokenKind::Comma | TokenKind::Semi if depth == 0 => break,
+                _ => {}
+            }
+            self.bump();
+        }
+        if self.i == from {
+            return None;
+        }
+        let end = self.tokens[self.i - 1].span.end;
+        let text = self.src[start as usize..end as usize].trim().to_string();
+        Some((text, Span { start, end }))
+    }
+
+    /// The pinned Bison sentence on the token at `index`, as a parse-stage E001
+    /// with the official text verbatim (P-pac's mechanism).
+    fn hetero_bison_refuse(&mut self, index: usize, expected: Option<&str>) {
+        let Some(tok) = self.tokens.get(index) else {
+            return;
+        };
+        let unexpected = self.bison_token_name(index);
+        let message = match expected {
+            Some(expected) => {
+                format!("syntax error, unexpected {unexpected}, expecting {expected}")
+            }
+            None => format!("syntax error, unexpected {unexpected}"),
+        };
+        self.model.parse_issues.push(ParseIssue {
+            kind: ParseIssueKind::BisonSyntax(message),
+            span: tok.span,
+        });
     }
 
     /// `model_remove(TAGS);` and `model_replace(TAGS); BODY end;`. 7.1 removes the
@@ -2188,14 +2506,12 @@ impl Parser<'_> {
             }
         }
         self.i = saved;
-        self.model
-            .init2shocks_blocks
-            .push(Init2ShocksBlock {
-                group,
-                group_span,
-                rows,
-                span,
-            });
+        self.model.init2shocks_blocks.push(Init2ShocksBlock {
+            group,
+            group_span,
+            rows,
+            span,
+        });
     }
 
     /// Two symbols through `;`: `a b;` or `a, b;`.
@@ -2300,9 +2616,7 @@ impl Parser<'_> {
         let saved = self.i;
         self.i = body_i;
         let row_start = self.model.shock_groups.len();
-        self.model
-            .shock_group_block_starts
-            .push(row_start);
+        self.model.shock_group_block_starts.push(row_start);
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::Semi) || self.at(TokenKind::Comma) {
                 self.bump();
@@ -3764,7 +4078,10 @@ impl Parser<'_> {
         head
     }
 
-    fn dotted_head_at_with_gate(&mut self, require_declared_plain: bool) -> Option<(DottedHead, usize)> {
+    fn dotted_head_at_with_gate(
+        &mut self,
+        require_declared_plain: bool,
+    ) -> Option<(DottedHead, usize)> {
         if self.kind_at(0) == Some(TokenKind::LBrack) {
             let (names, after) = self.vector_head_names()?;
             return Some((DottedHead::Vec { names }, after));
@@ -4236,7 +4553,11 @@ impl Parser<'_> {
         }
         if lex.eq_ignore_ascii_case("dynasave") || lex.eq_ignore_ascii_case("dynatype") {
             if self.kind_at(1) != Some(TokenKind::LParen) {
-                let next = self.tokens.get(self.i + 1).map(|tok| tok.span).unwrap_or(head.span);
+                let next = self
+                    .tokens
+                    .get(self.i + 1)
+                    .map(|tok| tok.span)
+                    .unwrap_or(head.span);
                 return Some(ShapeRefuse::official(
                     next,
                     lex,
@@ -4254,7 +4575,11 @@ impl Parser<'_> {
             if self.kind_at(3) != Some(TokenKind::RParen) {
                 let token = &self.tokens[self.i + 3];
                 return Some(if token.kind == TokenKind::Comma {
-                    ShapeRefuse::official(token.span, lex, "syntax error, unexpected COMMA, expecting ')'")
+                    ShapeRefuse::official(
+                        token.span,
+                        lex,
+                        "syntax error, unexpected COMMA, expecting ')'",
+                    )
                 } else {
                     ShapeRefuse::new(token.span, lex, "one filename")
                 });
@@ -6291,13 +6616,17 @@ impl Parser<'_> {
                 // never enter the stochastic variance checks.
                 if self.shock_var_is_scheduled(self.i, end_i) {
                     self.skip_scheduled_shock(end_i);
-                } else {
-                    self.parse_shock_var_stmt(end_i);
+                } else if let Some(stmt) = self.parse_shock_var_stmt(end_i) {
+                    self.model.shock_stmts.push(stmt);
                 }
             } else if self.at_ident_ci("corr") {
-                self.parse_shock_corr_stmt(end_i);
+                if let Some(stmt) = self.parse_shock_corr_stmt(end_i) {
+                    self.model.shock_stmts.push(stmt);
+                }
             } else if self.at_ident_ci("skew") {
-                self.parse_shock_skew_stmt(end_i);
+                if let Some(stmt) = self.parse_shock_skew_stmt(end_i) {
+                    self.model.shock_stmts.push(stmt);
+                }
             } else {
                 while self.i < end_i && !self.at(TokenKind::Semi) {
                     self.bump();
@@ -6310,7 +6639,7 @@ impl Parser<'_> {
         self.i = saved;
     }
 
-    fn parse_shock_var_stmt(&mut self, end_i: usize) {
+    pub(super) fn parse_shock_var_stmt(&mut self, end_i: usize) -> Option<ShockStmt> {
         let start = self.current_start();
         self.bump();
         let mut names = Vec::new();
@@ -6341,7 +6670,7 @@ impl Parser<'_> {
             is_stderr = true;
         }
         if names.is_empty() {
-            return;
+            return None;
         }
         let kind = if is_stderr {
             ShockKind::Stderr(names[0])
@@ -6350,15 +6679,15 @@ impl Parser<'_> {
         } else {
             ShockKind::Cov(names)
         };
-        self.model.shock_stmts.push(ShockStmt {
+        Some(ShockStmt {
             kind,
             rhs,
             rhs_expr,
             span: Span { start, end },
-        });
+        })
     }
 
-    fn parse_shock_corr_stmt(&mut self, end_i: usize) {
+    pub(super) fn parse_shock_corr_stmt(&mut self, end_i: usize) -> Option<ShockStmt> {
         let start = self.current_start();
         self.bump();
         let mut names = Vec::new();
@@ -6380,9 +6709,9 @@ impl Parser<'_> {
         };
         let end = self.finish_shock_stmt(end_i);
         if names.len() < 2 || !has_eq {
-            return;
+            return None;
         }
-        self.model.shock_stmts.push(ShockStmt {
+        Some(ShockStmt {
             kind: ShockKind::Corr {
                 a: names[0],
                 b: names[1],
@@ -6390,10 +6719,10 @@ impl Parser<'_> {
             rhs,
             rhs_expr,
             span: Span { start, end },
-        });
+        })
     }
 
-    fn parse_shock_skew_stmt(&mut self, end_i: usize) {
+    pub(super) fn parse_shock_skew_stmt(&mut self, end_i: usize) -> Option<ShockStmt> {
         let start = self.current_start();
         self.bump();
         let mut names = Vec::new();
@@ -6415,14 +6744,14 @@ impl Parser<'_> {
         };
         let end = self.finish_shock_stmt(end_i);
         if names.is_empty() || !has_eq {
-            return;
+            return None;
         }
-        self.model.shock_stmts.push(ShockStmt {
+        Some(ShockStmt {
             kind: ShockKind::Skew(names),
             rhs,
             rhs_expr,
             span: Span { start, end },
-        });
+        })
     }
 
     fn parse_folded_rhs(&mut self) -> (Option<ExprId>, Option<f64>) {
@@ -7958,9 +8287,9 @@ impl Parser<'_> {
                                 "syntax error, unexpected ')'",
                             ));
                         }
-                        if let Some(refuse) = crate::shape_gate::handed_option_refusal(
-                            self.src, cmd, &options,
-                        ) {
+                        if let Some(refuse) =
+                            crate::shape_gate::handed_option_refusal(self.src, cmd, &options)
+                        {
                             self.model.shape_refuses.push(refuse);
                         }
                     }
@@ -8000,11 +8329,9 @@ impl Parser<'_> {
                 let word = self.lexeme(&self.tokens[self.i]).to_string();
                 if let Some(message) = reserved_trailing_option_error(&word) {
                     let span = self.tokens[self.i].span;
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        span,
-                        &cmd,
-                        message,
-                    ));
+                    self.model
+                        .shape_refuses
+                        .push(ShapeRefuse::official(span, &cmd, message));
                     self.bump();
                     continue;
                 }
@@ -8085,7 +8412,10 @@ impl Parser<'_> {
             || opener.eq_ignore_ascii_case("perfect_foresight_with_expectation_errors_setup")
         {
             for opt in &opts {
-                if !matches!(opt.ident.to_ascii_lowercase().as_str(), "first_simulation_period" | "last_simulation_period") {
+                if !matches!(
+                    opt.ident.to_ascii_lowercase().as_str(),
+                    "first_simulation_period" | "last_simulation_period"
+                ) {
                     continue;
                 }
                 let parsed_date = self.model.date_options.iter().any(|row| {

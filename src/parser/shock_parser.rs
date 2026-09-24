@@ -5,8 +5,8 @@ use super::*;
 use crate::model::{
     DatabaseDeclaration, DateExpr, DateOption, EndvalEntry, EndvalInstruction, IrfShocksOption,
     PathBlock, PathReference, PathStanza, PathTarget, PeriodPoint, PeriodRange, ScheduledShock,
-    SetTimeStatement, ShockBlock, ShockBlockKind, ShockOperation, ShockOptions, StochSimulRequest,
-    SubsampleHead, SubsampleInstruction, SubsampleRange, WrittenValue,
+    SetTimeStatement, ShockBlock, ShockBlockKind, ShockOperation, ShockOptions, ShockStmt,
+    StochSimulRequest, SubsampleHead, SubsampleInstruction, SubsampleRange, WrittenValue,
 };
 
 impl Parser<'_> {
@@ -135,6 +135,8 @@ impl Parser<'_> {
                 .filter(|stmt| stmt.span.start >= body_start && stmt.span.start < body_end)
                 .cloned()
                 .collect()
+        } else if kind == ShockBlockKind::Heterogeneous {
+            self.read_stochastic_rows(body_i, body_end_i)
         } else {
             Vec::new()
         };
@@ -145,6 +147,40 @@ impl Parser<'_> {
             scheduled,
             span: Span { start, end },
         });
+    }
+
+    /// The stochastic rows of a `shocks(heterogeneity=d)` body: kinds, names,
+    /// folded values, and spans as for Regular blocks, kept on the block record
+    /// so nothing merges with the flat `shock_stmts` view.
+    fn read_stochastic_rows(&mut self, start_i: usize, end_i: usize) -> Vec<ShockStmt> {
+        let saved = self.i;
+        self.i = start_i;
+        let mut rows = Vec::new();
+        while self.i < end_i {
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                continue;
+            }
+            let row = if self.at_ident_ci("var") && !self.shock_var_is_scheduled(self.i, end_i) {
+                self.parse_shock_var_stmt(end_i)
+            } else if self.at_ident_ci("corr") {
+                self.parse_shock_corr_stmt(end_i)
+            } else if self.at_ident_ci("skew") {
+                self.parse_shock_skew_stmt(end_i)
+            } else {
+                None
+            };
+            if let Some(row) = row {
+                rows.push(row);
+                continue;
+            }
+            while self.i < end_i && !self.at(TokenKind::Semi) {
+                self.bump();
+            }
+            self.eat(TokenKind::Semi);
+        }
+        self.i = saved;
+        rows
     }
 
     fn read_scheduled_row(
@@ -1298,6 +1334,62 @@ impl Parser<'_> {
         true
     }
 
+    /// The heterogeneous `shocks` opener takes only `heterogeneity=d` with an
+    /// optional single `overwrite`, in either order. The pinned parser stops on
+    /// the first token after that shape with `expecting ')'`; a differently
+    /// shaped list is left to its later owner (02).
+    fn record_hetero_shock_opener_refuse(&mut self, opener_i: usize, body_i: usize) -> bool {
+        if self.tokens.get(opener_i + 1).map(|t| t.kind) != Some(TokenKind::LParen) {
+            return false;
+        }
+        let Some(close_i) =
+            (opener_i + 2..body_i).find(|&i| self.tokens[i].kind == TokenKind::RParen)
+        else {
+            return false;
+        };
+        let word_ci = |parser: &Self, i: usize| -> Option<String> {
+            let tok = parser.tokens.get(i)?;
+            (tok.kind == TokenKind::Ident).then(|| tok.text(parser.src).to_ascii_lowercase())
+        };
+        let kind_at = |parser: &Self, i: usize, kind: TokenKind| {
+            parser.tokens.get(i).map(|t| t.kind) == Some(kind)
+        };
+        let shape_end = if word_ci(self, opener_i + 2).as_deref() == Some("overwrite")
+            && kind_at(self, opener_i + 3, TokenKind::Comma)
+            && word_ci(self, opener_i + 4).as_deref() == Some("heterogeneity")
+            && kind_at(self, opener_i + 5, TokenKind::Eq)
+            && kind_at(self, opener_i + 6, TokenKind::Ident)
+        {
+            Some(opener_i + 7)
+        } else if word_ci(self, opener_i + 2).as_deref() == Some("heterogeneity")
+            && kind_at(self, opener_i + 3, TokenKind::Eq)
+            && kind_at(self, opener_i + 4, TokenKind::Ident)
+        {
+            let mut end = opener_i + 5;
+            if kind_at(self, end, TokenKind::Comma)
+                && word_ci(self, end + 1).as_deref() == Some("overwrite")
+            {
+                end += 2;
+            }
+            Some(end)
+        } else {
+            None
+        };
+        let Some(shape_end) = shape_end else {
+            return false;
+        };
+        if shape_end >= close_i {
+            return false;
+        }
+        let unexpected = self.bison_token_name(shape_end);
+        self.model.shape_refuses.push(ShapeRefuse::official(
+            self.tokens[shape_end].span,
+            "shocks",
+            format!("syntax error, unexpected {unexpected}, expecting ')'"),
+        ));
+        true
+    }
+
     /// The six 0.7 openers have different option grammars. Keep the
     /// heterogeneous `shocks` variant with its later owner.
     fn record_shock_opener_refuse(
@@ -1307,9 +1399,10 @@ impl Parser<'_> {
         kind: Option<ShockBlockKind>,
     ) -> bool {
         let command = self.tokens[opener_i].text(self.src).to_ascii_lowercase();
-        if kind == Some(ShockBlockKind::Heterogeneous)
-            || self.tokens.get(opener_i + 1).map(|t| t.kind) != Some(TokenKind::LParen)
-        {
+        if kind == Some(ShockBlockKind::Heterogeneous) {
+            return self.record_hetero_shock_opener_refuse(opener_i, body_i);
+        }
+        if self.tokens.get(opener_i + 1).map(|t| t.kind) != Some(TokenKind::LParen) {
             return false;
         }
         let Some(close_i) =

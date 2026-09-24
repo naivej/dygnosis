@@ -609,6 +609,23 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
             ));
         }
     }
+    // Heterogeneous bodies take the same `⟂` / `_|_` conditions, and 7.2 refuses
+    // a wrong form there like anywhere else. The `mcp` reading of those bodies is
+    // the heterogeneous owner's (02), so only the form check walks them here.
+    for block in &model.heterogeneous_models {
+        for eq in &block.equations {
+            let Some(comp) = eq.complementarity.as_ref() else {
+                continue;
+            };
+            if comp.matched.is_none() {
+                out.push(error(
+                    comp.span,
+                    "E183",
+                    "Complementarity condition has an incorrect form",
+                ));
+            }
+        }
+    }
     if illegal_block {
         return;
     }

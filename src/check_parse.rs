@@ -1092,7 +1092,7 @@ fn merged_equation_diags(
 ) -> Vec<Diagnostic> {
     let src = &model.source;
     let mut out = Vec::new();
-    for eq in &model.equations {
+    for eq in crate::check_e020::all_model_equations(model) {
         if eq.text.trim_start().starts_with('#') {
             continue;
         }
@@ -1313,7 +1313,7 @@ fn merged_assignment_diags(
 
 fn unbalanced_paren_diags(model: &Model, tokens: &[Token]) -> Vec<Diagnostic> {
     let mut out = Vec::new();
-    for eq in &model.equations {
+    for eq in crate::check_e020::all_model_equations(model) {
         let toks = tokens_in_span(tokens, eq.span);
         let mut depth = 0i32;
         let mut orphan = false;

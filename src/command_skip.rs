@@ -6,6 +6,15 @@ use crate::span::Span;
 /// 0.1 command names that are not in `COMMAND_OPTIONS`.
 const PARSE_SKIP_EXTRAS: &[&str] = &["dynasave", "dynatype", "model_diagnostics"];
 
+/// 0.9 P-hank: the heterogeneity family is parsed, not skipped.
+const PARSED_FAMILY: &[&str] = &[
+    "heterogeneity_compute_steady_state",
+    "heterogeneity_dimension",
+    "heterogeneity_load_steady_state",
+    "heterogeneity_simulate",
+    "heterogeneity_solve",
+];
+
 /// The pin's `DynareFlex.ll` `INITIAL` keyword set (`9c61fb6e`): every spelling that
 /// makes a line enter a Dynare statement on its own. A top-level line whose head is
 /// neither one of these nor a declared symbol is native MATLAB text, and 7.1 makes
@@ -155,6 +164,9 @@ pub(crate) fn is_pin_statement_keyword(name: &str) -> bool {
 
 /// Catalog command or 0.1 extra. A command *statement* is this name plus `(` or `;`, not `=`.
 pub(crate) fn is_parse_skip_command(name: &str) -> bool {
+    if PARSED_FAMILY.iter().any(|c| name.eq_ignore_ascii_case(c)) {
+        return false;
+    }
     crate::catalog::is_known_command(name)
         || PARSE_SKIP_EXTRAS
             .iter()
