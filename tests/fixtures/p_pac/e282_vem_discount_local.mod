@@ -1,0 +1,11 @@
+// inventory: p_pac_e282_vem_discount_local
+var y;
+varexo e;
+parameters b;
+b=.8;
+model;
+  #loc=0.5;
+  [name='Y'] y=b*y(-1)+e;
+end;
+var_model(model_name=v,eqtags=['Y']);
+var_expectation_model(model_name=a,variable=y,auxiliary_model_name=v,horizon=1,discount=loc);

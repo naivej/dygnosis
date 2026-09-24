@@ -271,3 +271,118 @@ fn pinned_pac_example_keeps_written_equations() {
     assert_eq!(model.pac_target_info[0].rows.len(), 4);
     assert_eq!(model.named_model_operators.len(), 2);
 }
+
+#[test]
+fn ordinary_expression_slots_keep_parse_scope_rules() {
+    let binary = pinned_binary();
+    for (file, code, message, offending) in [
+        (
+            "e001_deterministic_timing.mod",
+            "E001",
+            "Using variable y with a lead or a lag is not allowed in this context",
+            "y(-1)",
+        ),
+        (
+            "e001_vem_discount_timing.mod",
+            "E001",
+            "Using variable y with a lead or a lag is not allowed in this context",
+            "y(-1)",
+        ),
+        (
+            "e282_deterministic_local.mod",
+            "E282",
+            "Variable loc not allowed outside model declaration. Its scope is only inside model.",
+            "loc",
+        ),
+        (
+            "e282_vem_discount_local.mod",
+            "E282",
+            "Variable loc not allowed outside model declaration. Its scope is only inside model.",
+            "loc",
+        ),
+        (
+            "e001_deterministic_zero_timing.mod",
+            "E001",
+            "Using variable y with a lead or a lag is not allowed in this context",
+            "y(0)",
+        ),
+        (
+            "e001_vem_discount_zero_timing.mod",
+            "E001",
+            "Using variable y with a lead or a lag is not allowed in this context",
+            "y(0)",
+        ),
+        (
+            "e279_deterministic_external.mod",
+            "E279",
+            "Symbol 'helper' is the name of a MATLAB/Octave function, and cannot be used as a variable.",
+            "helper",
+        ),
+        (
+            "e279_vem_discount_external.mod",
+            "E279",
+            "Symbol 'helper' is the name of a MATLAB/Octave function, and cannot be used as a variable.",
+            "helper",
+        ),
+        (
+            "e310_deterministic_trend.mod",
+            "E310",
+            "Variable A not allowed outside model declaration, because it is a trend variable.",
+            "A",
+        ),
+        (
+            "e310_vem_discount_trend.mod",
+            "E310",
+            "Variable A not allowed outside model declaration, because it is a trend variable.",
+            "A",
+        ),
+        (
+            "e442_vem_discount_adhoc_call.mod",
+            "E442",
+            "The discount factor must be a constant expression or a parameter",
+            "ghost(-1)",
+        ),
+    ] {
+        let source = fixture(file);
+        let diagnostics = analyze(&parse(&source));
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|diag| diag.severity == dygnosis::Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "{file}: {diagnostics:?}");
+        assert_eq!(errors[0].code, code, "{file}");
+        assert_eq!(errors[0].message, message, "{file}");
+        assert_eq!(
+            &source[errors[0].span.start as usize..errors[0].span.end as usize],
+            offending,
+            "{file}"
+        );
+        if let Some(binary) = binary.as_deref() {
+            let (accepted, report) = official_check(&source, binary);
+            assert!(!accepted, "7.2 accepted {file}");
+            assert!(report.contains(message), "{file}: {report}");
+        }
+    }
+    for (file, stage) in [
+        ("quiet_deterministic_current.mod", JsonStage::Check),
+        ("quiet_vem_discount_param.mod", JsonStage::Transform),
+        ("quiet_deterministic_adhoc_call.mod", JsonStage::Check),
+    ] {
+        let source = fixture(file);
+        let diagnostics = analyze(&parse(&source));
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|diag| diag.severity == dygnosis::Severity::Error),
+            "{file}: {diagnostics:?}"
+        );
+        if let Some(binary) = binary.as_deref() {
+            let result = run_preprocessor(&source, binary, None, Duration::from_secs(30), stage);
+            assert!(
+                result.success,
+                "7.2 refused {file}: {} {}",
+                result.raw_stdout, result.raw_stderr
+            );
+        }
+    }
+}

@@ -96,6 +96,7 @@ const FIRES: &[Fire] = &[
     Fire { file: "e451_untagged_lhs.mod", code: "E451", message: "in equation y, the pac_expectation operator references an unknown pac_model", stage: JsonStage::Transform, span: "nope" },
     Fire { file: "e451_used_local.mod", code: "E451", message: "in equation Y, the pac_expectation operator references an unknown pac_model", stage: JsonStage::Transform, span: "pterm" },
     Fire { file: "e452_no_target.mod", code: "E452", message: "in equation Y, the pac_target_nonstationary operator does not match a corresponding 'pac_target_info' block", stage: JsonStage::Transform, span: "nope" },
+    Fire { file: "e452_target_without_pac_model.mod", code: "E452", message: "in equation X, the pac_target_nonstationary operator does not match a corresponding 'pac_target_info' block", stage: JsonStage::Transform, span: "p" },
     Fire { file: "e452_untagged_lhs.mod", code: "E452", message: "in equation y, the pac_target_nonstationary operator does not match a corresponding 'pac_target_info' block", stage: JsonStage::Transform, span: "nope" },
     Fire { file: "e453_growth_name_clash.mod", code: "E453", message: "The variable/parameter 'p_pac_growth_neutrality_correction' conflicts with the auxiliary parameter that will be generated for the growth neutrality correction of the 'p' PAC model. Please rename that parameter.", stage: JsonStage::Transform, span: "p_pac_growth_neutrality_correction" },
     Fire { file: "e454_mce_alpha_clash.mod", code: "E454", message: "The variable/parameter 'mce_alpha_p_1' conflicts with a parameter that will be generated for the 'p' PAC model. Please rename it.", stage: JsonStage::Transform, span: "mce_alpha_p_1" },
@@ -128,6 +129,17 @@ fn official_fire_table() {
             .find(|diag| diag.code == fire.code)
             .unwrap_or_else(|| panic!("{} missing {}: {diagnostics:?}", fire.file, fire.code));
         assert_eq!(ours.message, fire.message, "{}", fire.file);
+        if fire.code.starts_with('E') {
+            assert_eq!(
+                diagnostics
+                    .iter()
+                    .filter(|diag| diag.severity == Severity::Error)
+                    .count(),
+                1,
+                "{} must lock one refusal: {diagnostics:?}",
+                fire.file
+            );
+        }
         assert_eq!(
             ours.severity,
             if fire.code.starts_with('W') {

@@ -759,63 +759,16 @@ impl<'a> Ctx<'a> {
     }
 
     fn syntax_in(&self, block: Span) -> bool {
-        self.model.mom_syntax.iter().any(|syn| {
-            syn.span.start >= block.start && syn.span.start < block.end
-        })
+        self.model
+            .mom_syntax
+            .iter()
+            .any(|syn| syn.span.start >= block.start && syn.span.start < block.end)
     }
 
     /// An expression outside `model`: a `#` local, a trend, an external function
-    /// used as a name, or any lead or lag. A parameter is legal.
+    /// used as a name, or a parenthesized declared variable. A parameter is legal.
     fn outside_expr(&self, id: ExprId) -> Option<Diagnostic> {
-        for ident in self.model.exprs.walk_idents(id) {
-            let name = self.model.name(ident.name);
-            let external = self.model.external_function_names.contains(&ident.name);
-            if ident.timing != 0 {
-                if external {
-                    // `helper(1)` is a call, not a lead.
-                    continue;
-                }
-                let end = ident.timing_span.map(|t| t.end).unwrap_or(ident.span.end);
-                return Some(err(
-                    Span {
-                        start: ident.span.start,
-                        end,
-                    },
-                    "E001",
-                    format!(
-                        "Using variable {name} with a lead or a lag is not allowed in this context"
-                    ),
-                ));
-            }
-            if external {
-                return Some(err(
-                    ident.span,
-                    "E279",
-                    format!(
-                        "Symbol '{name}' is the name of a MATLAB/Octave function, and cannot be used as a variable."
-                    ),
-                ));
-            }
-            if self.model_locals.contains(&ident.name) {
-                return Some(err(
-                    ident.span,
-                    "E282",
-                    format!(
-                        "Variable {name} not allowed outside model declaration. Its scope is only inside model."
-                    ),
-                ));
-            }
-            if self.model.trend_vars.iter().any(|trend| trend.name == ident.name) {
-                return Some(err(
-                    ident.span,
-                    "E310",
-                    format!(
-                        "Variable {name} not allowed outside model declaration, because it is a trend variable."
-                    ),
-                ));
-            }
-        }
-        None
+        outside_model_expression_with_locals(self.model, id, &self.model_locals)
     }
 
     fn source(&self, span: Span) -> &str {
@@ -1305,6 +1258,114 @@ impl<'a> Ctx<'a> {
             index: ONE_INDEX,
         }
     }
+}
+
+/// Parse-time symbol rules for ordinary expressions outside `model`.
+/// Semi-structural discount and deterministic-trend expressions share this
+/// grammar with moment option expressions.
+pub(crate) fn outside_model_expression(model: &Model, id: ExprId) -> Option<Diagnostic> {
+    let model_locals: HashSet<Name> = model
+        .equations
+        .iter()
+        .filter(|eq| eq.is_local)
+        .filter_map(|eq| match eq.lhs_expr.map(|id| &model.exprs.get(id).kind) {
+            Some(ExprKind::Ident { name, .. }) => Some(*name),
+            _ => None,
+        })
+        .collect();
+    outside_model_expression_with_locals(model, id, &model_locals)
+}
+
+fn outside_model_expression_with_locals(
+    model: &Model,
+    id: ExprId,
+    model_locals: &HashSet<Name>,
+) -> Option<Diagnostic> {
+    for ident in model.exprs.walk_idents(id) {
+        let name = model.name(ident.name);
+        let external = model.external_function_names.contains(&ident.name);
+        if ident.timing_span.is_some() {
+            if external {
+                // `helper(1)` is a call, not a lead.
+                continue;
+            }
+            if symbol_exists_before(model, ident.name, ident.span.start) {
+                return Some(err(
+                    Span {
+                        start: ident.span.start,
+                        end: ident.timing_span.unwrap().end,
+                    },
+                    "E001",
+                    format!(
+                        "Using variable {name} with a lead or a lag is not allowed in this context"
+                    ),
+                ));
+            }
+            // A first use such as ghost(-1) is an ad hoc function call in an
+            // ordinary expression. Dynare checks the value later, if needed.
+            continue;
+        }
+        if external {
+            return Some(err(
+                ident.span,
+                "E279",
+                format!(
+                    "Symbol '{name}' is the name of a MATLAB/Octave function, and cannot be used as a variable."
+                ),
+            ));
+        }
+        if model_locals.contains(&ident.name) {
+            return Some(err(
+                ident.span,
+                "E282",
+                format!(
+                    "Variable {name} not allowed outside model declaration. Its scope is only inside model."
+                ),
+            ));
+        }
+        if model
+            .trend_vars
+            .iter()
+            .any(|trend| trend.name == ident.name)
+        {
+            return Some(err(
+                ident.span,
+                "E310",
+                format!(
+                    "Variable {name} not allowed outside model declaration, because it is a trend variable."
+                ),
+            ));
+        }
+    }
+    None
+}
+
+fn symbol_exists_before(model: &Model, name: Name, at: u32) -> bool {
+    model
+        .endogenous
+        .iter()
+        .chain(&model.exogenous)
+        .chain(&model.deterministic_exogenous)
+        .chain(&model.parameters)
+        .chain(&model.model_local_variables)
+        .chain(&model.excluded_endogenous)
+        .any(|decl| decl.name == name && decl.span.start < at)
+        || model
+            .trend_vars
+            .iter()
+            .any(|trend| trend.name == name && trend.span.start < at)
+        || model.equations.iter().any(|equation| {
+            equation.is_local
+                && equation.span.start < at
+                && equation.lhs_expr.is_some_and(|lhs| {
+                    matches!(&model.exprs.get(lhs).kind, ExprKind::Ident { name: local, .. } if *local == name)
+                })
+        })
+        || (model.mod_file_locals.contains(&name)
+            && model.exprs.iter().any(|(_, expr)| {
+                matches!(&expr.kind, ExprKind::Ident { name: prior, .. } if *prior == name)
+                    && expr.span.start < at
+            }))
 }
 
 /// Their `AddUMinus`.

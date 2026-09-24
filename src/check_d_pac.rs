@@ -139,6 +139,16 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
                 }
             }
             SemiStructuralKind::VarExpectationModel => {
+                // Its discount is an ordinary expression, not a model
+                // expression. ParsingDriver refuses forbidden symbol uses
+                // while reading it, before checking the discount's form.
+                if let Some(refusal) = expression_option(command, "discount")
+                    .and_then(|discount| discount.expr)
+                    .and_then(|id| crate::check_mom::outside_model_expression(model, id))
+                {
+                    out.push(refusal);
+                    continue;
+                }
                 let variable = symbol_option(command, "variable");
                 let expression = expression_option(command, "expression");
                 if variable.is_some() && expression.is_some() {
@@ -232,6 +242,14 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
     }
     for block in &model.deterministic_trends {
         for row in &block.rows {
+            if let Some(refusal) = row
+                .expression
+                .expr
+                .and_then(|id| crate::check_mom::outside_model_expression(model, id))
+            {
+                out.push(refusal);
+                continue;
+            }
             if !declared_before(model, row.name, row.name_span.start) {
                 out.push(error(
                     row.name_span,
@@ -292,35 +310,36 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
             .or_default()
             .push(block);
     }
-    for command in model
+    let pac_commands: BTreeMap<_, _> = model
         .semi_structural_commands
         .iter()
         .filter(|command| command.kind == SemiStructuralKind::PacModel)
-    {
-        let Some((name, _)) = symbol_option(command, "model_name") else {
-            continue;
-        };
-        let name = model.name(name);
-        if target_infos.contains_key(name) {
-            for field in ["growth", "auxname", "kind"] {
-                if let Some(row) = option(command, field) {
-                    let article = if field == "auxname" { "an" } else { "a" };
-                    out.push(error(
-                        row.span,
-                        "E437",
-                        format!("for PAC model '{name}', it is not possible to declare {article} '{field}' option in the 'pac_model' command when there is also a 'pac_target_info' block"),
-                    ));
-                    break;
-                }
+        .filter_map(|command| {
+            symbol_option(command, "model_name").map(|(name, _)| (model.name(name), command))
+        })
+        .collect();
+    // PacModelTable::checkPass walks its sorted growth, auxname, then kind
+    // maps. A refusal exits immediately, before target-info field checks.
+    for field in ["growth", "auxname", "kind"] {
+        for (name, command) in &pac_commands {
+            let Some(row) = option(command, field) else {
+                continue;
+            };
+            if target_infos.contains_key(name) {
+                let article = if field == "auxname" { "an" } else { "a" };
+                return vec![error(
+                    row.span,
+                    "E437",
+                    format!("for PAC model '{name}', it is not possible to declare {article} '{field}' option in the 'pac_model' command when there is also a 'pac_target_info' block"),
+                )];
             }
-        } else if option(command, "auxiliary_model_name").is_none()
-            && option(command, "kind").is_some()
-        {
-            out.push(error(
-                option(command, "kind").unwrap().span,
-                "E437",
-                format!("for PAC model '{name}', it is not possible to declare a 'kind' option in the 'pac_model' command since this is a MCE model"),
-            ));
+            if field == "kind" && option(command, "auxiliary_model_name").is_none() {
+                return vec![error(
+                    row.span,
+                    "E437",
+                    format!("for PAC model '{name}', it is not possible to declare a 'kind' option in the 'pac_model' command since this is a MCE model"),
+                )];
+            }
         }
     }
     for (name, blocks) in target_infos {
@@ -339,20 +358,18 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
             }
         }
         if !target {
-            out.push(error(
+            return vec![error(
                 span,
                 "E438",
                 format!("the block 'pac_target_info({name})' is missing the 'target' statement"),
-            ));
-            continue;
+            )];
         }
         if !nonstationary_aux {
-            out.push(error(
+            return vec![error(
                 span,
                 "E438",
                 format!("the block 'pac_target_info({name})' is missing the 'auxname_target_nonstationary' statement"),
-            ));
-            continue;
+            )];
         }
         for component in components {
             let auxname = component
@@ -368,65 +385,54 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
                 .iter()
                 .any(|row| matches!(row, PacTargetComponentRow::Growth(_)));
             if !auxname {
-                out.push(error(
+                return vec![error(
                     component.span,
                     "E438",
                     format!("the block 'pac_target_info({name})' is missing the 'auxname' statement in some 'component'"),
-                ));
-                break;
+                )];
             }
             let Some(kind) = kind else {
-                out.push(error(
+                return vec![error(
                     component.span,
                     "E438",
                     format!("the block 'pac_target_info({name})' is missing the 'kind' statement in some 'component'"),
-                ));
-                break;
+                )];
             };
             if kind.eq_ignore_ascii_case("ll") && growth {
-                out.push(error(
+                return vec![error(
                     component.span,
                     "E438",
                     format!("in the block 'pac_target_info({name})', a component of 'kind ll' (i.e. stationary) has a 'growth' option. This is not permitted."),
-                ));
-                break;
+                )];
             }
             if kind.eq_ignore_ascii_case("dd") || kind.eq_ignore_ascii_case("dl") {
                 nonstationary_component = true;
             }
         }
-        if out.iter().any(|diag| diag.severity == Severity::Error) {
-            continue;
-        }
         if !nonstationary_component {
-            out.push(error(
+            return vec![error(
                 span,
                 "E438",
                 format!("the block 'pac_target_info({name})' must contain at least one nonstationary component (i.e. of 'kind' equal to either 'dd' or 'dl')."),
-            ));
+            )];
         }
     }
     // Reading an undeclared name in these model-expression slots creates an
     // implicit exogenous in Dynare. If the main model never uses it, checkPass
     // refuses with the existing unused-exogenous sentence. PAC growth (both
     // option and component row) exempts its exogenous names from that check.
-    if !out.iter().any(|diag| diag.severity == Severity::Error) {
-        let unused = unused_implicit_exogenous(model);
-        if let Some((_, span)) = unused.first() {
-            let names = unused
-                .iter()
-                .map(|(name, _)| model.name(*name))
-                .collect::<Vec<_>>()
-                .join(" ");
-            out.push(error(
-                *span,
-                "E021",
-                format!("{names} not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior."),
-            ));
-        }
-    }
-    if out.iter().any(|diag| diag.severity == Severity::Error) {
-        return out;
+    let unused = unused_implicit_exogenous(model);
+    if let Some((_, span)) = unused.first() {
+        let names = unused
+            .iter()
+            .map(|(name, _)| model.name(*name))
+            .collect::<Vec<_>>()
+            .join(" ");
+        return vec![error(
+            *span,
+            "E021",
+            format!("{names} not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior."),
+        )];
     }
     for block in &model.deterministic_trends {
         for row in &block.rows {
@@ -1043,10 +1049,11 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
     {
         for operator in equation_operators(model, equation) {
             if operator.kind == NamedModelOperatorKind::PacTargetNonstationary
-                && !model
-                    .pac_target_info
-                    .iter()
-                    .any(|block| block.name == operator.name)
+                && (!pac_models.contains(&operator.name)
+                    || !model
+                        .pac_target_info
+                        .iter()
+                        .any(|block| block.name == operator.name))
             {
                 out.push(error(
                     operator.span,

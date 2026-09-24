@@ -1897,8 +1897,8 @@ Move the call out of the ``steady_state(…)`` operator.",
         kind: ExplainKind::Shared,
     }),
     ("E452", ExplainEntry {
-        title: "Nonstationary PAC target has no matching block",
-        body: "A written model equation uses pac_target_nonstationary(NAME) without matching pac_target_info(NAME). Dynare refuses at transform: `the pac_target_nonstationary operator does not match a corresponding 'pac_target_info' block`.\n\n**Fix**\n\nAdd the matching target-info block or correct the operator name.",
+        title: "Nonstationary PAC target cannot be matched",
+        body: "A written model equation uses pac_target_nonstationary(NAME) when the named pac_model or pac_target_info block is missing. Dynare refuses at transform: `the pac_target_nonstationary operator does not match a corresponding 'pac_target_info' block`.\n\n**Fix**\n\nAdd the missing PAC model or target-info block, or correct the operator name.",
         kind: ExplainKind::Shared,
     }),
     ("E453", ExplainEntry {
