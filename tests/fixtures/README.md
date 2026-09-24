@@ -33,7 +33,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 | `d_check/` | check-class fires (`E200`–`E218`, `W200`) and their quiets |
 | `occbin/` | library OccBin structure (`occbin_constraints`, tag map, `⟂` / `_|_`, `shocks(surprise)`) and D-occbin fire files (`E170`–`E177`, `E180`–`E185`, `W170`). `e178_surprise.mod` is the E178 honesty fire (`periods`/`values`). |
 | `mom/` | the five moment / IRF-calibration blocks and the `method_of_moments` statement. The seven structure files (0.6.0 01) are legal shapes 7.1 accepts. Fire files cover **E382**–**E392**, the handed-over **E001**, and the syntax 0.6.0 07 keeps (one shape each: a bad option word, a period or lag the grammar cannot spell, a row-keyword shape, a bad row beside a stored one, an expression slot of the wrong kind, a dotted moment row). |
-| `d_pac/` | Dynare 7.2 semi-structural parse, PAC check, and written transform refusals; accepted neighbours; and a quiet control for an unmapped S012 rewrite. Each fire tests one cause at its official catching step. |
+| `d_pac/` | Dynare 7.2 semi-structural parse, PAC check, and written transform refusals; accepted neighbours; and a quiet control for an unmapped E193 rewrite. Each fire tests one cause at its official catching step. |
 | `pin72/` | Dynare 7.2 accepted repetitions in separate blocks, removed `histval_file` option fires, and retained `initval_file` controls. |
 | `lists/` | the trailing symbol lists. Fire files cover **E239** / **E240** on the nine commands 0.6.0 03b starts walking (`forecast`, `rplot`, `dynasave`, `dynatype`, the four decomposition commands) and on the audit's six trigger edges, one problem each; quiet files cover the legal list on each command, `rplot e;`, the aux pass-over, and the `osr_params AUX_EXPECT_1` abort. |
 
@@ -41,7 +41,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 
 ## Inventory
 
-[`inventory.json`](inventory.json) is the list of triggers. One row per trigger, not one row per code letter. Every **emit** and **added** `known_codes()` key has a row (`E999` is `documented-only`). Skip keys (`E186`–`E191`, `W186`–`W187`, `S008`, `S012`, `S014`, `S020`, `S035`, `S040`, `S054`, `S063`) have none. Out / vacated codes (`E040`, `W040`, `W041`, `I041`, `W071`, `I070`, `I071`, `W080`, `W081`, `DYNR`, `E060`) have none.
+[`inventory.json`](inventory.json) is the list of triggers. One row per trigger, not one row per code letter. Every **emit** and **added** `known_codes()` key has a row (`E999` is `documented-only`). Skip keys (`E186`–`E194`, `W186`–`W187`, `S020`, `S035`, `S040`, `S054`, `S063`) have none. Out / vacated codes (`E040`, `W040`, `W041`, `I041`, `W071`, `I070`, `I071`, `W080`, `W081`, `DYNR`, `E060`) have none.
 
 | Field | Meaning |
 |-------|---------|

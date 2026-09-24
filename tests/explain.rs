@@ -9,7 +9,7 @@ const RUST_CODES: &[&str] = &[
     "E061", "E062", "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E104",
     "E111", "E113", "E130", "E170", "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E178",
     "E179", "E180", "E181", "E182", "E183", "E184", "E185", "E186", "E187", "E188", "E189", "E190",
-    "E191", "E200", "E201", "E202", "E203", "E204", "E205", "E206", "E207", "E208", "E209", "E210",
+    "E191", "E192", "E193", "E194", "E200", "E201", "E202", "E203", "E204", "E205", "E206", "E207", "E208", "E209", "E210",
     "E211", "E212", "E213", "E214", "E215", "E216", "E217", "E218", "E219", "E220", "E221", "E222",
     "E223", "E224", "E225", "E226", "E227", "E228", "E229", "E230", "E231", "E232", "E233", "E234",
     "E235", "E236", "E237", "E238", "E239", "E240", "E241", "E242", "E243", "E244", "E245", "E246",
@@ -29,8 +29,8 @@ const RUST_CODES: &[&str] = &[
     "E403", "E404", "E405", "E406", "E407", "E408", "E409", "E410", "E411", "E412", "E413", "E414",
     "E415", "E416", "E417", "E418", "E419", "E420", "E421", "E422", "E423", "E424", "E425", "E426",
     "E427", "E428", "E429", "E430", "E431", "E432", "E433", "E434", "E435", "E436", "E437", "E438",
-    "E439", "E440", "E441", "E442", "E443", "E444", "E445", "E446", "E447", "E448", "E449", "E450", "E451", "E452", "E453", "E454", "E455", "E456", "E457", "E458", "E999", "I050", "S008",
-    "S012", "S014", "S020", "S035", "S040", "S054", "S063", "W010", "W011", "W012", "W013", "W020",
+    "E439", "E440", "E441", "E442", "E443", "E444", "E445", "E446", "E447", "E448", "E449", "E450", "E451", "E452", "E453", "E454", "E455", "E456", "E457", "E458", "E999", "I050",
+    "S020", "S035", "S040", "S054", "S063", "W010", "W011", "W012", "W013", "W020",
     "W022", "W031", "W042", "W051", "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W062",
     "W070", "W091", "W092", "W094", "W102", "W110", "W112", "W120", "W121", "W122", "W131", "W140",
     "W150", "W160", "W170", "W186", "W187", "W200", "W201", "W202", "W203", "W204", "W205", "W206",
@@ -103,7 +103,7 @@ const ADDED: &[&str] = &[
 ];
 
 const SKIP_KEYS: &[&str] = &[
-    "E186", "E187", "E188", "E189", "E190", "E191", "S008", "S012", "S014", "S020", "S035", "S040",
+    "E186", "E187", "E188", "E189", "E190", "E191", "E192", "E193", "E194", "S020", "S035", "S040",
     "S054", "S063", "W186", "W187",
 ];
 
@@ -238,7 +238,9 @@ fn explain_kinds_are_shared_skipped_added() {
     assert_eq!(explain("E186").unwrap().kind, ExplainKind::Skipped);
     assert_eq!(explain("W013").unwrap().kind, ExplainKind::Added);
     assert_eq!(explain("W186").unwrap().kind, ExplainKind::Skipped);
-    assert_eq!(explain("s008").unwrap().kind, ExplainKind::Skipped);
+    for code in ["e192", "e193", "e194"] {
+        assert_eq!(explain(code).unwrap().kind, ExplainKind::Skipped);
+    }
 }
 
 #[test]
@@ -311,7 +313,7 @@ fn p_codes_are_unknown() {
 fn lookup_is_case_insensitive() {
     assert_eq!(explain("w013").unwrap(), explain("W013").unwrap());
     assert!(render_markdown("w013").unwrap().starts_with("### w013: "));
-    assert_eq!(explain("s008").unwrap(), explain("S008").unwrap());
+    assert_eq!(explain("e192").unwrap(), explain("E192").unwrap());
     assert!(explain("dynr").is_none());
     assert!(explain("E040").is_none());
     assert!(explain("E010").is_none());
@@ -420,8 +422,8 @@ fn cli_explain_list() {
     let i050 = entries.iter().find(|(c, _, _)| *c == "I050").unwrap();
     assert_eq!(i050.1, "added");
     assert_eq!(i050.2, "No initval or steady_state_model block");
-    let s008 = entries.iter().find(|(c, _, _)| *c == "S008").unwrap();
-    assert_eq!(s008.1, "skipped");
+    let e192 = entries.iter().find(|(c, _, _)| *c == "E192").unwrap();
+    assert_eq!(e192.1, "skipped");
     let w186 = entries.iter().find(|(c, _, _)| *c == "W186").unwrap();
     assert_eq!(w186.1, "skipped");
     assert_eq!(w186.2, "Possible auxiliary name in a symbol list");

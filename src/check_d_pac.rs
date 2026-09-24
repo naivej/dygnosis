@@ -731,7 +731,7 @@ fn equation_operators(model: &Model, equation: &crate::model::Equation) -> Vec<R
 }
 
 /// Written clashes, including direct PAC operator and fixed generated-name
-/// cases. Remaining S012/S014 rewrites stay silent without a source mapping.
+/// cases. Remaining E193/E194 rewrites stay silent without a source mapping.
 pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
     let var_models = model_names(model, SemiStructuralKind::VarModel);
     let trend_models = model_names(model, SemiStructuralKind::TrendComponentModel);

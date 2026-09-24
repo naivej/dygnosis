@@ -1976,19 +1976,19 @@ Move the call out of the ``steady_state(…)`` operator.",
         body: "Dynare warns: `A .m file created by Dynare will have more than 32 nested parenthesis…`. Catching step: writer. Owner: skip-writer W. The trigger is the nesting depth of their generated text, not of the file. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S008", ExplainEntry {
+    ("E192", ExplainEntry {
         title: "Heterogeneous model equation count after AUX",
-        body: "Dynare refuses: `There are <n> equations but <m> endogenous variables in the model for heterogeneity dimension`. Catching step: transform (rewrite). Owner: skip-rewrite E (0.9). This code is never emitted.",
+        body: "Dynare refuses: `There are <n> equations but <m> endogenous variables in the model for heterogeneity dimension`. Catching step: transform (rewrite). Owner: unversioned skip-rewrite E. The count is known only after Dynare creates auxiliary equations and cannot be mapped to the edited file yet. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S012", ExplainEntry {
+    ("E193", ExplainEntry {
         title: "TCM or PAC rewrite",
-        body: "Dynare refuses some trend-component and PAC forms only after unary, diff, auxiliary, or equation rewrites. Catching step: transform (rewrite). Owner: skip-rewrite E. Direct written growth, target, PAC-use, and fixed generated-name clashes have E448–E450 and E453–E458. This code is never emitted.",
+        body: "Dynare refuses some trend-component and PAC forms only after unary, diff, auxiliary, or equation rewrites. Catching step: transform (rewrite). Owner: unversioned skip-rewrite E. Direct written growth, target, PAC-use, and fixed generated-name clashes have E448–E450 and E453–E458. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S014", ExplainEntry {
+    ("E194", ExplainEntry {
         title: "Remaining pac_expectation after substitution",
-        body: "Dynare refuses a PAC operator left after substitution. Catching step: transform (rewrite). Directly written unmatched pac_expectation and pac_target_nonstationary are E451 and E452; any remaining rewrite-only case needs a source-mapped internal rewrite. Owner: skip-rewrite E. This code is never emitted.",
+        body: "Dynare refuses a PAC operator left after substitution. Catching step: transform (rewrite). Directly written unmatched pac_expectation and pac_target_nonstationary are E451 and E452; any remaining rewrite-only case needs a source-mapped internal rewrite. Owner: unversioned skip-rewrite E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
     ("S020", ExplainEntry {
