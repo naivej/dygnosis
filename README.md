@@ -13,14 +13,6 @@ Limitations by design
 - **Checks that depend on how you run Dynare are skipped.** Some come from command-line options, others need a compiler on your machine. They say nothing about the `.mod` file.
 - **Numbers are left to MATLAB.** Steady state, stability, and whether the model solves are computed there, not here. Use the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit) for seamless integration with MATLAB.
 
-Shock checks read written `shocks`, `mshocks`, `heteroskedastic_shocks`, and `shock_paths` instructions, including periods and learning dates. For a selected `stoch_simul(irf_shocks=(…))` list, W060 names each shock missing a written stochastic size. With an explicit positive `irf` and no selected list, it warns only when no plain exogenous shock has a written size at all. It stays quiet when the relevant plain exogenous shock has an estimated standard error, external code may supply its size, or macros and includes leave the setup uncertain. An observed-variable measurement-error estimate alone does not silence it. `irf=0`, a bare `varexo` declaration, and a bare `stoch_simul` stay quiet. These checks do not calculate IRFs.
-
-Subsample checks cover named ranges, copies, and related `prior` / `options` statements. They report a missing declaration or range name and a target type Dynare would reject when writing its output. Diagnostics also catch a variable used after `var_remove`, a denominator such as `y/(y-y)`, and invalid command or DATE syntax.
-
-Compare reports written shock setup changes in `shock_setup_changes` and a **Shock setup changes** markdown section: values, periods, learning dates, controls, and overwritten instructions. It gives source locations when the parsed text matches the file you supplied; an included instruction has no misleading root-file location. It does not calculate a realized shock path.
-
-Changed initial and terminal values, dates, database references, and heteroskedastic data settings appear beside the relevant shock setup. Changes to `shock_groups` and `init2shocks` appear in a separate **Shock analysis setup** section.
-
 ## How to use
 
 ### Command line
