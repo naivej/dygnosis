@@ -1225,7 +1225,16 @@ impl Parser<'_> {
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) {
             if self.at(TokenKind::Ident) {
                 let lex = self.lexeme(&self.tokens[self.i]).to_string();
-                if first_option && lex.eq_ignore_ascii_case("heterogeneity") {
+                if lex.eq_ignore_ascii_case("heterogeneity") {
+                    if !first_option {
+                        self.push_bison(
+                            self.tokens[self.i].span,
+                            "syntax error, unexpected HETEROGENEITY, expecting DEFLATOR"
+                                .to_string(),
+                        );
+                        self.bump();
+                        continue;
+                    }
                     first_option = false;
                     self.bump();
                     if self.at(TokenKind::Eq) {
@@ -1238,6 +1247,8 @@ impl Parser<'_> {
                                 self.hetero_bison_refuse(self.i, Some("')'"));
                             }
                         }
+                    } else {
+                        self.hetero_bison_refuse(self.i, Some("EQUAL"));
                     }
                     continue;
                 }
@@ -1351,6 +1362,11 @@ impl Parser<'_> {
             return None;
         }
         if self.peek_kind(2) != Some(TokenKind::Eq) {
+            // `model(heterogeneity)` with no value: the grammar wants EQUAL, and
+            // the pinned parser stops on the next token (the closing paren).
+            if self.tokens.get(self.i + 2).is_some() {
+                self.hetero_bison_refuse(self.i + 2, Some("EQUAL"));
+            }
             return None;
         }
         let value_index = self.i + 3;
@@ -1428,6 +1444,9 @@ impl Parser<'_> {
                 let tok = self.bump();
                 let name = self.lexeme(&tok).to_string();
                 names.push((self.intern.intern(&name), tok.span));
+            } else if self.at(TokenKind::Number) {
+                self.hetero_bison_refuse(self.i, None);
+                self.bump();
             } else {
                 self.bump();
             }
@@ -1477,6 +1496,19 @@ impl Parser<'_> {
         let mut seen: HashMap<String, ()> = HashMap::new();
         if self.at(TokenKind::LParen) {
             self.bump();
+            if self.at(TokenKind::RParen)
+                && matches!(
+                    kind,
+                    HeterogeneityCommandKind::Solve | HeterogeneityCommandKind::Simulate
+                )
+            {
+                let expected = if kind == HeterogeneityCommandKind::Solve {
+                    Some("TRUNCATION_HORIZON")
+                } else {
+                    None
+                };
+                self.hetero_bison_refuse(self.i, expected);
+            }
             while !self.at(TokenKind::RParen)
                 && !self.at(TokenKind::Semi)
                 && !self.at(TokenKind::Eof)
@@ -1487,9 +1519,20 @@ impl Parser<'_> {
                 }
                 let name_tok = self.bump();
                 let name = self.lexeme(&name_tok).to_string();
+                if kind != HeterogeneityCommandKind::Simulate && name.eq_ignore_ascii_case("print")
+                {
+                    self.push_bison(
+                        name_tok.span,
+                        "syntax error, unexpected PRINT, expecting FILENAME or TOLF or VARIABLE"
+                            .to_string(),
+                    );
+                }
                 let mut value = None;
                 if self.at(TokenKind::Eq) {
                     self.bump();
+                    if name.eq_ignore_ascii_case("tolf") && self.at(TokenKind::Minus) {
+                        self.hetero_bison_refuse(self.i, Some("FLOAT_NUMBER or INT_NUMBER"));
+                    }
                     value = self.read_hetero_option_value();
                 }
                 // `option_num` refuses on the internal name. `print` and
@@ -1509,6 +1552,9 @@ impl Parser<'_> {
                     name_span: name_tok.span,
                     value,
                 });
+            }
+            if self.at(TokenKind::Semi) {
+                self.hetero_bison_refuse(self.i, Some("COMMA or ')'"));
             }
             if self.at(TokenKind::RParen) {
                 self.bump();
@@ -1584,9 +1630,13 @@ impl Parser<'_> {
             }
             None => format!("syntax error, unexpected {unexpected}"),
         };
+        self.push_bison(tok.span, message);
+    }
+
+    fn push_bison(&mut self, span: Span, message: String) {
         self.model.parse_issues.push(ParseIssue {
             kind: ParseIssueKind::BisonSyntax(message),
-            span: tok.span,
+            span,
         });
     }
 
@@ -5627,6 +5677,9 @@ impl Parser<'_> {
     /// `optim_weights;` rows `symbol expr;` / `symbol, symbol expr;` `end;`
     fn parse_optim_weights_block(&mut self) {
         let opener_span = self.bump_plain_opener();
+        if self.model.optim_weights_span.is_none() {
+            self.model.optim_weights_span = Some(opener_span);
+        }
         let body_i = self.i;
         let body_end_i = self.consume_until_end();
         self.record_missing_end_if_unclosed("optim_weights", opener_span, body_i, body_end_i);
@@ -8829,6 +8882,8 @@ impl Parser<'_> {
                 self.model.use_dll_span = Some(span);
             } else if lex.eq_ignore_ascii_case("no_static") && self.model.no_static_span.is_none() {
                 self.model.no_static_span = Some(span);
+            } else if lex.eq_ignore_ascii_case("block") && self.model.model_block_option.is_none() {
+                self.model.model_block_option = Some(span);
             }
         }
     }

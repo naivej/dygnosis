@@ -797,6 +797,8 @@ pub struct Model {
     pub initval: Vec<Assignment>,
     pub endval: Vec<Assignment>,
     pub is_linear: bool,
+    /// Identifier span of `block` inside an aggregate `model(…)` option list.
+    pub model_block_option: Option<Span>,
     pub model_block: Option<Span>,
     pub ss_block: Option<Span>,
     pub initval_block: Option<Span>,
@@ -849,6 +851,8 @@ pub struct Model {
     pub osr_params: Vec<Name>,
     /// True iff an `optim_weights;` … `end;` block is present.
     pub has_optim_weights: bool,
+    /// Keyword span of the first `optim_weights` block.
+    pub optim_weights_span: Option<Span>,
     /// Identifier span of each top-level `simul` command (not `stoch_simul`).
     pub simul_spans: Vec<Span>,
     /// Identifier span of the first `ramsey_policy`.

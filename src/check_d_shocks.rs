@@ -159,6 +159,27 @@ pub fn check_d_shocks(model: &Model) -> Vec<Diagnostic> {
 
 fn check_stochastic_names(model: &Model, roles: &Roles, out: &mut Vec<Diagnostic>) {
     for block in &model.shock_blocks {
+        if block.kind == ShockBlockKind::Heterogeneous {
+            for stmt in &block.stochastic {
+                let names: Vec<Name> = match &stmt.kind {
+                    ShockKind::Var(name) | ShockKind::Stderr(name) => vec![*name],
+                    ShockKind::Cov(names) | ShockKind::Skew(names) => names.clone(),
+                    ShockKind::Corr { a, b } => vec![*a, *b],
+                };
+                for name in names {
+                    if !roles.known(name, stmt.span) {
+                        error(
+                            out,
+                            stmt.span,
+                            "E058",
+                            format!("Unknown symbol: {}.", model.name(name)),
+                        );
+                        return;
+                    }
+                }
+            }
+            continue;
+        }
         if block.kind != ShockBlockKind::Regular {
             continue;
         }

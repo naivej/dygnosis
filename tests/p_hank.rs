@@ -61,10 +61,17 @@ fn quiet_file(name: &str, binary: Option<&Path>) -> dygnosis::model::Model {
             .any(|diag| diag.severity == dygnosis::Severity::Error),
         "{name}: unexpected Error {diagnostics:?}"
     );
+    let distinct_dims = model
+        .heterogeneity_dimensions
+        .iter()
+        .map(|dim| dim.name)
+        .collect::<std::collections::HashSet<_>>()
+        .len();
     assert!(
-        !diagnostics
-            .iter()
-            .any(|diag| diag.severity == dygnosis::Severity::Warning),
+        diagnostics.iter().all(|diag| {
+            diag.severity != dygnosis::Severity::Warning
+                || (diag.code == "W207" && distinct_dims > 1)
+        }),
         "{name}: unexpected Warning {diagnostics:?}"
     );
     if let Some(binary) = binary {
@@ -345,7 +352,23 @@ fn accepted_family_keeps_written_structure() {
 #[test]
 fn two_dimensions_stay_separate_records() {
     let binary = pinned_binary();
-    let model = quiet_file("quiet_two_dimensions.mod", binary.as_deref());
+    let source = fixture("quiet_two_dimensions.mod");
+    let model = parse(&source);
+    let diagnostics = analyze(&model);
+    assert!(
+        diagnostics.iter().any(|diag| diag.code == "W207"),
+        "second dimension is W207: {diagnostics:?}"
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diag| diag.severity == dygnosis::Severity::Error),
+        "{diagnostics:?}"
+    );
+    if let Some(ref binary) = binary {
+        let (accepted, report) = official_check(&source, binary);
+        assert!(accepted, "7.2 refused quiet_two_dimensions.mod: {report}");
+    }
     let names: Vec<&str> = model
         .heterogeneity_dimensions
         .iter()
@@ -391,13 +414,19 @@ fn unknown_dimension_is_stored_and_stays_silent() {
     let model = parse(&source);
     assert!(declared_dimension(&model, "yh"));
     let diagnostics = analyze(&model);
-    assert!(
-        !diagnostics
+    let ours = diagnostics
+        .iter()
+        .find(|diag| diag.code == "E459")
+        .expect("unknown dimension is E459");
+    assert_eq!(ours.message, "Unknown heterogeneity dimension: d");
+    assert_eq!(
+        diagnostics
             .iter()
-            .any(|diag| diag.severity == dygnosis::Severity::Error),
-        "S054 is 02's; slice 01 stores the shape: {diagnostics:?}"
+            .filter(|diag| diag.severity == dygnosis::Severity::Error)
+            .count(),
+        1,
+        "{diagnostics:?}"
     );
-    assert!(!diagnostics.iter().any(|diag| diag.code == "E001"));
     if let Some(ref binary) = binary {
         let (accepted, report) = official_check(&source, binary);
         assert!(!accepted);

@@ -1991,30 +1991,115 @@ Move the call out of the ``steady_state(…)`` operator.",
         body: "Dynare refuses a PAC operator left after substitution. Catching step: transform (rewrite). Directly written unmatched pac_expectation and pac_target_nonstationary are E451 and E452; any remaining rewrite-only case needs a source-mapped internal rewrite. Owner: unversioned skip-rewrite E. This code is never emitted.",
         kind: ExplainKind::Skipped,
     }),
-    ("S020", ExplainEntry {
-        title: "Heterogeneity with an unsupported command or option",
-        body: "Dynare refuses: `'<cmd>' … is not supported for heterogeneous models`. Catching step: check. Owner: skip 0.9 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
+    ("E459", ExplainEntry {
+        title: "Unknown heterogeneity dimension",
+        body: "A ``var``, ``varexo``, ``parameters``, ``model``, or ``shocks`` option names a heterogeneity dimension that was not declared. Dynare refuses: `Unknown heterogeneity dimension: ghost`.\n\n**Fix**\n\nDeclare the dimension with ``heterogeneity_dimension``, or correct the name.",
+        kind: ExplainKind::Shared,
     }),
-    ("S035", ExplainEntry {
-        title: "Heterogeneous shocks with a bad type",
-        body: "Dynare refuses: `not a heterogeneous exogenous variable`. Catching step: check. Owner: skip 0.9 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
+    ("E460", ExplainEntry {
+        title: "Heterogeneity dimension declared twice",
+        body: "The same heterogeneity dimension name is declared again. Dynare refuses: `Heterogeneity dimension 'd' already declared`.\n\n**Fix**\n\nKeep one declaration of that name.",
+        kind: ExplainKind::Shared,
     }),
-    ("S040", ExplainEntry {
-        title: "Heterogeneous lead or lag bound",
-        body: "Dynare refuses: `In model(heterogeneity=…), equation N: …`. Catching step: check. Owner: skip 0.9 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
+    ("E461", ExplainEntry {
+        title: "Heterogeneous symbol in planner_objective",
+        body: "``planner_objective`` uses a heterogeneous variable or parameter. Dynare refuses: `Symbol 'a' cannot be used in 'planner_objective', because it is heterogeneous.`\n\n**Fix**\n\nUse an aggregate variable in the planner objective.",
+        kind: ExplainKind::Shared,
     }),
-    ("S054", ExplainEntry {
-        title: "Heterogeneity dimension unknown or twice",
-        body: "Dynare refuses: `various`. Catching step: parse. Owner: skip 0.9 E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
+    ("E462", ExplainEntry {
+        title: "Heterogeneous symbol in occbin_constraints",
+        body: "``occbin_constraints`` uses a heterogeneous variable or parameter. Dynare refuses: `Symbol 'a' cannot be used in 'occbin_constraints', because it is heterogeneous.`\n\n**Fix**\n\nUse an aggregate variable in the constraint.",
+        kind: ExplainKind::Shared,
     }),
-    ("S063", ExplainEntry {
-        title: "Heterogeneous operator inside epilogue",
-        body: "Dynare refuses: `… forbidden in epilogue` / `… because it is heterogeneous`. Catching step: check for the remaining heterogeneous case. The three named VAR/PAC operators shipped at parse in 0.8 as E445. Owner: skip 0.9 E (heterogeneous). This code is never emitted.",
-        kind: ExplainKind::Skipped,
+    ("E463", ExplainEntry {
+        title: "Heterogeneous symbol outside the model",
+        body: "A heterogeneous variable or parameter is used outside a model declaration. Dynare refuses: `Symbol 'a' cannot be used outside model declaration, because it is heterogeneous.`\n\n**Fix**\n\nUse the name inside its ``model(heterogeneity=…)`` block, or aggregate it with ``SUM``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E464", ExplainEntry {
+        title: "Heterogeneous symbol in the epilogue",
+        body: "The ``epilogue`` block uses a heterogeneous variable or parameter. Dynare refuses: `Symbol 'a' cannot be used in epilogue block, because it is heterogeneous.`\n\n**Fix**\n\nUse an aggregate variable in the epilogue.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E465", ExplainEntry {
+        title: "Heterogeneous shock variance on the wrong type",
+        body: "A ``shocks(heterogeneity=…)`` block sets a variance on a name that is not a heterogeneous exogenous variable. Dynare refuses: `shocks: setting a variance on 'y' is not allowed, because it is not a heterogeneous exogenous variable`.\n\n**Fix**\n\nSet the variance on a ``varexo(heterogeneity=…)`` name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E466", ExplainEntry {
+        title: "Heterogeneous shock standard error on the wrong type",
+        body: "A ``shocks(heterogeneity=…)`` block sets a standard error on a name that is not a heterogeneous exogenous variable. Dynare refuses: `shocks: setting a standard error on 'y' is not allowed, because it is not a heterogeneous exogenous variable`.\n\n**Fix**\n\nSet the standard error on a ``varexo(heterogeneity=…)`` name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E467", ExplainEntry {
+        title: "Heterogeneous shock covariance on the wrong type",
+        body: "A ``shocks(heterogeneity=…)`` covariance names something other than heterogeneous exogenous variables. Dynare refuses: `shocks: setting a covariance between 'y' and 'e'is not allowed; covariances can only be specified for heterogeneous exogenous variables`.\n\n**Fix**\n\nName two ``varexo(heterogeneity=…)`` variables.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E468", ExplainEntry {
+        title: "Heterogeneous shock correlation on the wrong type",
+        body: "A ``shocks(heterogeneity=…)`` correlation names something other than heterogeneous exogenous variables. Dynare refuses: `shocks: setting a correlation between 'y' and 'e'is not allowed; covariances can only be specified for heterogeneous exogenous variables`.\n\n**Fix**\n\nName two ``varexo(heterogeneity=…)`` variables.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E469", ExplainEntry {
+        title: "Lagged heterogeneous exogenous variable",
+        body: "A heterogeneous model equation lags a heterogeneous exogenous variable. Dynare refuses: `In model(heterogeneity=d), equation 1: lagged heterogeneous exogenous variable 'eh' is not supported.`\n\n**Fix**\n\nUse the shock contemporaneously.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E470", ExplainEntry {
+        title: "Lead on a heterogeneous exogenous variable",
+        body: "A heterogeneous model equation leads a heterogeneous exogenous variable. Dynare refuses: `In model(heterogeneity=d), equation 1: lead on heterogeneous exogenous variable 'eh(+1)' is not supported.`\n\n**Fix**\n\nUse the shock contemporaneously.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E471", ExplainEntry {
+        title: "Heterogeneous endogenous lag beyond -1",
+        body: "A heterogeneous endogenous variable is lagged by more than one period. Dynare refuses: `In model(heterogeneity=d), equation 1: heterogeneous endogenous variable 'a' with lag -2 is not supported (maximum lag is -1).`\n\n**Fix**\n\nKeep the lag at ``-1`` or contemporaneous.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E472", ExplainEntry {
+        title: "Heterogeneous endogenous lead beyond +1",
+        body: "A heterogeneous endogenous variable is led by more than one period. Dynare refuses: `In model(heterogeneity=d), equation 1: heterogeneous endogenous variable 'a' with lead 2 is not supported (maximum lead is +1).`\n\n**Fix**\n\nKeep the lead at ``+1`` or contemporaneous.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E473", ExplainEntry {
+        title: "Non-separable heterogeneous lead and lag",
+        body: "A heterogeneous equation combines a lead and a lagged state inside a non-separable expression. Dynare refuses with that block's equation number and the source line: `In model(heterogeneity=d), equation N (line L):` followed by `Non-separable expression 'log(a(-1)+a(1))'  combines forward-looking variables with lagged states and is not supported.`\n\n**Fix**\n\nKeep the lead and the lag in separate additive terms, such as ``a(-1) + a(+1)``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E474", ExplainEntry {
+        title: "Command not supported for heterogeneous models",
+        body: "A heterogeneity dimension is declared together with ``model(block)`` or a command Dynare 7.2 does not run on heterogeneous models. Dynare refuses, for example: `The 'check' command is not supported for heterogeneous models` or `the 'block' option of the 'model' block is not supported for heterogeneous models`.\n\n**Fix**\n\nRemove that command or option, or drop the heterogeneity dimension.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E475", ExplainEntry {
+        title: "SUM inside a heterogeneous model",
+        body: "``SUM`` appears inside ``model(heterogeneity=…)``. Dynare refuses: `The SUM() operator cannot be used inside a model(heterogeneity=...) block`.\n\n**Fix**\n\nUse ``SUM`` only in the aggregate model.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E476", ExplainEntry {
+        title: "SUM argument is not one variable",
+        body: "``SUM`` in the aggregate model is given something other than one variable. Dynare refuses: `The argument to the SUM() operator must be a single variable`.\n\n**Fix**\n\nPass one variable, such as ``SUM(a)``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E477", ExplainEntry {
+        title: "SUM argument has a lead or lag",
+        body: "``SUM`` is applied to a lead or a lag. Dynare refuses: `The argument to the SUM() operator must not have a lead or lag`.\n\n**Fix**\n\nPass the contemporaneous variable.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E478", ExplainEntry {
+        title: "SUM argument is not a heterogeneous endogenous variable",
+        body: "``SUM`` is applied to a name that is not a heterogeneous endogenous variable. Dynare refuses: `The argument to the SUM() operator must be a heterogeneous endogenous variable`.\n\n**Fix**\n\nPass a ``var(heterogeneity=…)`` name.",
+        kind: ExplainKind::Shared,
+    }),
+    ("E479", ExplainEntry {
+        title: "mcp tag in a heterogeneous model",
+        body: "A heterogeneous equation uses an ``[mcp=…]`` tag on a declared variable. Dynare refuses: `'mcp' tags are not allowed in heterogeneous model blocks`. An unknown left-hand side keeps the existing variable error, and ``mcp`` together with ``⟂`` keeps **E180**.\n\n**Fix**\n\nWrite the condition with ``⟂`` or ``_|_``.",
+        kind: ExplainKind::Shared,
+    }),
+    ("W207", ExplainEntry {
+        title: "More than one heterogeneity dimension",
+        body: "The file declares a second distinct heterogeneity dimension. Dynare 7.2's preprocessor accepts that file, but its MATLAB steady-state routines refuse more than one dimension. This warning is ours: `Dynare 7.2 cannot load or compute a heterogeneous steady state with more than one heterogeneity dimension.`\n\nA repeated name is **E460**, not this warning. One dimension stays quiet.\n\n**Fix**\n\nKeep a single heterogeneity dimension.",
+        kind: ExplainKind::Added,
     }),
 ];
 

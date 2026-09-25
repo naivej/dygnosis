@@ -69,6 +69,10 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     if !pac_parse_diags.is_empty() {
         return pac_parse_diags;
     }
+    let hank_parse_diags = crate::check_d_hank::check_parse(model);
+    if !hank_parse_diags.is_empty() {
+        return hank_parse_diags;
+    }
     let shape_diags = crate::diag_shape::check_shape(model);
     let shape_syntax: Vec<Diagnostic> = shape_diags
         .iter()
@@ -163,6 +167,13 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     out.extend(crate::check_mom::check_mom(model));
     if !parse_refused {
         out.extend(crate::check_d_pac::check_check(model));
+    }
+    let hank_mcp = crate::check_d_hank::check_mcp(model);
+    let hank_parse_stopped = parse_refused || hank_mcp.iter().any(|diag| diag.code == "E479");
+    out.extend(hank_mcp);
+    out.extend(crate::check_d_hank::check_second_dimension(model));
+    if !hank_parse_stopped {
+        out.extend(crate::check_d_hank::check_check(model));
     }
     // The subsample type gate is in writeOutput, after every parse, check and
     // transform refusal. A prior Error keeps the writer from running.

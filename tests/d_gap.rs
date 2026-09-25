@@ -194,5 +194,5 @@ fn epilogue_duplicate_keeps_its_own_error() {
 
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 359);
+    assert_eq!(known_codes().len(), 376);
 }

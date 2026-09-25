@@ -9,6 +9,7 @@ pub mod catalog;
 pub mod check_clash;
 pub mod check_context;
 pub mod check_d_block;
+pub mod check_d_hank;
 pub mod check_d_ms;
 pub mod check_d_open;
 pub mod check_d_pac;

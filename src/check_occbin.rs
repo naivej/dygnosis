@@ -84,6 +84,56 @@ fn check_mcp_form(model: &Model, eq: &Equation, out: &mut Vec<Diagnostic>) {
     }
 }
 
+/// Heterogeneous `[mcp]` stops at the variable lookup. A declared name is
+/// **E479** in `check_d_hank`; the endogenous and constant checks never run.
+fn check_het_mcp_lhs(model: &Model, eq: &Equation, out: &mut Vec<Diagnostic>) {
+    let Some(value) = eq.tag_map.get("mcp") else {
+        return;
+    };
+    let tokens: Vec<Token> = tokenize(value)
+        .into_iter()
+        .filter(|t| t.kind != TokenKind::Eof)
+        .collect();
+    let Some(i) = tokens.iter().position(|t| {
+        matches!(
+            t.kind,
+            TokenKind::Lt | TokenKind::Gt | TokenKind::Le | TokenKind::Ge
+        )
+    }) else {
+        out.push(error(
+            eq.span,
+            "E265",
+            "'mcp' tag does not contain an inequality",
+        ));
+        return;
+    };
+    let lhs = &tokens[..i];
+    if !mcp_lhs_is_var(lhs) {
+        out.push(error(
+            eq.span,
+            "E262",
+            "Left-hand side of expression in 'mcp' tag is not a variable",
+        ));
+        return;
+    }
+    let name = lhs[0].text(value);
+    let declared = model
+        .endogenous
+        .iter()
+        .chain(&model.exogenous)
+        .chain(&model.deterministic_exogenous)
+        .chain(&model.parameters)
+        .chain(&model.model_local_variables)
+        .any(|decl| model.name(decl.name) == name);
+    if !declared {
+        out.push(error(
+            eq.span,
+            "E262",
+            "Left-hand side of expression in 'mcp' tag is not a variable",
+        ));
+    }
+}
+
 fn mcp_lhs_is_var(tokens: &[Token]) -> bool {
     if tokens.is_empty() || tokens[0].kind != TokenKind::Ident {
         return false;
@@ -614,15 +664,31 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
     // the heterogeneous owner's (02), so only the form check walks them here.
     for block in &model.heterogeneous_models {
         for eq in &block.equations {
-            let Some(comp) = eq.complementarity.as_ref() else {
-                continue;
-            };
-            if comp.matched.is_none() {
+            if let Some(comp) = eq.complementarity.as_ref() {
+                if comp.matched.is_none() {
+                    out.push(error(
+                        comp.span,
+                        "E183",
+                        "Complementarity condition has an incorrect form",
+                    ));
+                }
+            }
+            if eq.tag_map.contains_key("mcp") && eq.complementarity.is_some() {
                 out.push(error(
-                    comp.span,
-                    "E183",
-                    "Complementarity condition has an incorrect form",
+                    eq.span,
+                    "E180",
+                    "Can't have both an 'mcp' tag and a complementarity condition after the perpendicular symbol",
                 ));
+            } else if eq.tag_map.contains_key("mcp") {
+                let mut warning = Diagnostic::new(
+                    eq.span,
+                    Severity::Warning,
+                    "W170",
+                    "Specifying complementarity conditions with the 'mcp' tag is obsolete. Use ⟂ or _|_ after the equation.",
+                );
+                warning.tags.push(2);
+                out.push(warning);
+                check_het_mcp_lhs(model, eq, out);
             }
         }
     }
