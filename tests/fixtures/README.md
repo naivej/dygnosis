@@ -41,7 +41,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 
 ## Inventory
 
-[`inventory.json`](inventory.json) is the list of triggers. One row per trigger, not one row per code letter. Every **emit** and **added** `known_codes()` key has a row (`E999` is `documented-only`). Skip keys (`E186`–`E194`, `W186`–`W187`, `S020`, `S035`, `S040`, `S054`, `S063`) have none. Out / vacated codes (`E040`, `W040`, `W041`, `I041`, `W071`, `I070`, `I071`, `W080`, `W081`, `DYNR`, `E060`) have none.
+[`inventory.json`](inventory.json) is the list of triggers. One row per trigger, not one row per code letter. Every **emit** and **added** `known_codes()` key has a row (`E999` is `documented-only`). Skip keys (`E186`–`E194`, `W186`–`W187`) have none. Out / vacated codes (`E040`, `W040`, `W041`, `I041`, `W071`, `I070`, `I071`, `W080`, `W081`, `DYNR`, `E060`) have none.
 
 | Field | Meaning |
 |-------|---------|

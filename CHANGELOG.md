@@ -1,10 +1,13 @@
 # Changelog
 
-## Unreleased (0.9.0)
+## v0.9.0
 
 - Reads Dynare 7.2 heterogeneity dimensions, declarations, model blocks, shock rows, and the four heterogeneity commands while keeping aggregate and heterogeneous equations separate.
 - `dynare_model_info` shows aggregate counts and per-dimension heterogeneous counts; `dynare_equations` returns heterogeneous rows with dimension and source origin. Variable hover and outline use timing from heterogeneous equations.
 - `dynare_expand` and the editor's effective-model view include heterogeneous equations in their origin lists. The expand count covers all counted written model equations and reports aggregate and per-dimension counts separately.
+- Reports the written heterogeneity refusals (`E459`–`E479` and the recorded `E001` shapes) and warns on a second distinct heterogeneity dimension (`W207`). The per-dimension equation count after auxiliary equations stays silent (`E192`).
+- Adds Dynare 7.2 names and descriptions for the heterogeneity commands and options to completion, hover, and `dynare_list_options`. `SUM` is operator help. `heterogeneity` is listed on `shocks`.
+- `shock_setup_changes` pairs heterogeneous variance, standard-error, covariance, and correlation rows by dimension, and shows the written settings, overwrite status, and source locations.
 
 ## v0.8.0
 
