@@ -48,7 +48,7 @@ const TOOLS: &[(&str, &str)] = &[
     ),
     (
         "dynare_compare_models",
-        "Compare two .mod files by names, calibrations, and equations.",
+        "Compare two .mod files by names, calibrations, equations (names and tags), and written shock setup.",
     ),
     (
         "dynare_find_references",
@@ -1374,7 +1374,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_compare_models",
-        description = "Compare two .mod files by names, calibrations, and equations."
+        description = "Compare two .mod files by names, calibrations, equations (names and tags), and written shock setup."
     )]
     fn compare_models_tool(
         &self,

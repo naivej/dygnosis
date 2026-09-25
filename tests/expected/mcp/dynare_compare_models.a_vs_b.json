@@ -4,7 +4,11 @@
   ],
   "added_equations": [
     {
+      "domain": "aggregate",
+      "dimension": null,
       "index": 1,
+      "name": null,
+      "tags": {},
       "text": "n = rho*n(-1)+u"
     }
   ],
@@ -29,7 +33,11 @@
   ],
   "removed_equations": [
     {
+      "domain": "aggregate",
+      "dimension": null,
       "index": 1,
+      "name": null,
+      "tags": {},
       "text": "k =(1-delta)*k(-1)+e"
     }
   ],
@@ -40,5 +48,6 @@
     "alpha",
     "delta"
   ],
-  "shock_setup_changes": []
+  "shock_setup_changes": [],
+  "unmatched_same_name": []
 }
