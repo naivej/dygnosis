@@ -2031,13 +2031,6 @@ fn fmt_opts() -> FormattingOptions {
     }
 }
 
-fn inlay_label(h: &InlayHint) -> String {
-    match &h.label {
-        InlayHintLabel::String(s) => s.clone(),
-        InlayHintLabel::LabelParts(parts) => parts.iter().map(|p| p.value.as_str()).collect(),
-    }
-}
-
 fn assert_no_out_json(json: &str) {
     for forbidden in [
         "dynare/computeSteadyState",
@@ -2054,12 +2047,12 @@ fn assert_no_out_json(json: &str) {
 #[test]
 fn initialize_capabilities_wave_c() {
     let result = initialize_result();
-    assert!(result.capabilities.inlay_hint_provider.is_some());
+    assert!(result.capabilities.inlay_hint_provider.is_none());
     assert!(result.capabilities.folding_range_provider.is_some());
     assert!(result.capabilities.selection_range_provider.is_some());
     assert!(result.capabilities.document_link_provider.is_some());
     assert!(result.capabilities.semantic_tokens_provider.is_some());
-    assert!(result.capabilities.code_lens_provider.is_some());
+    assert!(result.capabilities.code_lens_provider.is_none());
     assert!(result.capabilities.call_hierarchy_provider.is_some());
     assert!(result.capabilities.document_formatting_provider.is_some());
     assert!(result
@@ -2088,10 +2081,12 @@ fn initialize_capabilities_wave_c() {
 
     let json = serde_json::to_string(&result).expect("serialize initialize result");
     assert_no_out_json(&json);
+    assert!(!json.contains("inlayHintProvider"), "{json}");
+    assert!(!json.contains("codeLensProvider"), "{json}");
 }
 
 #[tokio::test]
-async fn inlay_betta_assignment_has_arrow_number() {
+async fn inlay_hint_is_not_provided() {
     let text = read_mod("trend_rbc_gov_inv");
     let uri = archive_url("trend_rbc_gov_inv");
     let (service, _socket) = new_service();
@@ -2099,7 +2094,7 @@ async fn inlay_betta_assignment_has_arrow_number() {
         .inner()
         .did_open(open_params(uri.clone(), text.clone(), 1))
         .await;
-    let hints = service
+    let err = service
         .inner()
         .inlay_hint(InlayHintParams {
             text_document: TextDocumentIdentifier { uri },
@@ -2107,16 +2102,8 @@ async fn inlay_betta_assignment_has_arrow_number() {
             work_done_progress_params: WorkDoneProgressParams::default(),
         })
         .await
-        .expect("inlay rpc")
-        .expect("hints");
-    let joined: String = hints.iter().map(inlay_label).collect::<Vec<_>>().join(" ");
-    assert!(
-        joined.contains('→') && joined.chars().any(|c| c.is_ascii_digit()),
-        "inlay labels: {joined}"
-    );
-    assert!(!joined.contains("SS OK"));
-    assert!(!joined.contains("residual"));
-    assert!(!joined.contains("Compute"));
+        .expect_err("inlay hints are not provided");
+    assert_eq!(err.code, tower_lsp::jsonrpc::ErrorCode::MethodNotFound);
 }
 
 #[tokio::test]
@@ -2704,7 +2691,7 @@ async fn semantic_tokens_full_classifies_betta_or_y() {
 }
 
 #[tokio::test]
-async fn code_lens_structure_summary_no_out() {
+async fn code_lens_is_not_provided() {
     let text = read_mod("trend_rbc_gov_inv");
     let uri = archive_url("trend_rbc_gov_inv");
     let (service, _socket) = new_service();
@@ -2712,49 +2699,23 @@ async fn code_lens_structure_summary_no_out() {
         .inner()
         .did_open(open_params(uri.clone(), text, 1))
         .await;
-    let lenses = service
+    let err = service
         .inner()
         .code_lens(CodeLensParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            text_document: TextDocumentIdentifier { uri },
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         })
         .await
-        .expect("lens rpc")
-        .expect("lenses");
-    let titles: Vec<String> = lenses
-        .iter()
-        .filter_map(|l| l.command.as_ref().map(|c| c.title.clone()))
-        .collect();
-    let joined = titles.join(" | ");
-    assert!(
-        joined.contains("endogenous") && joined.contains("varexo"),
-        "lenses: {joined}"
-    );
-    assert!(
-        !lenses.iter().any(|l| {
-            l.command
-                .as_ref()
-                .is_some_and(|c| c.command == "dynare/runPreprocessor")
-        }),
-        "runPreprocessor must not be a code lens; titles: {joined}"
-    );
-    for bad in [
-        "Compute Steady State",
-        "Run Dynare",
-        "MATLAB",
-        "computeSteadyState",
-    ] {
-        assert!(!joined.contains(bad), "lens contains {bad:?}: {joined}");
-    }
-    assert!(
-        !lenses.iter().any(|l| {
-            l.command
-                .as_ref()
-                .is_some_and(|c| c.command == "dynare/showEffectiveModel")
-        }),
-        "showEffectiveModel must not be a code lens"
-    );
+        .expect_err("code lens is not provided");
+    assert_eq!(err.code, tower_lsp::jsonrpc::ErrorCode::MethodNotFound);
+    let commands = initialize_result()
+        .capabilities
+        .execute_command_provider
+        .expect("executeCommand")
+        .commands;
+    assert!(commands.iter().any(|c| c == "dynare/showEffectiveModel"));
+    assert!(!commands.iter().any(|c| c == "dynare/runPreprocessor"));
 }
 
 #[tokio::test]
