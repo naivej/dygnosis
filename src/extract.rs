@@ -1,18 +1,23 @@
 //! Private equation extraction. Later slices extend this engine.
 //!
-//! This slice closes an ordinary aggregate selection. It does not register an MCP tool.
+//! This slice closes an ordinary aggregate selection on the effective compilation
+//! unit: overlays, includes, macros, and equation surgery. It does not register
+//! an MCP tool.
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
+use crate::check_e060::check_e063;
+use crate::expand::{expand_report, ExpandReport};
 use crate::expr::{ExprId, ExprKind};
 use crate::intern::Name;
 use crate::model::{Decl, Equation, ExternalFunctionStmt, Model, TrendVar};
 use crate::parser::parse;
 use crate::span::Span;
+use crate::workspace::Workspace;
 
-/// Caller inputs. `files` and `dimension` are part of the later contract;
-/// this slice refuses them when they are set.
+/// Caller inputs. `dimension` is the later heterogeneous scope; this slice
+/// refuses it. `files` is the companion map for the MCP compilation unit.
 #[derive(Clone, Debug, Default)]
 pub struct ExtractRequest {
     pub file_content: String,
@@ -63,7 +68,7 @@ pub struct SelectedEquation {
     pub tags: BTreeMap<String, String>,
 }
 
-/// Where a selected row was read. `frames` stays empty until includes and macros.
+/// Where a selected row was read. `frames` follows the expand map.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExtractOrigin {
     pub domain: EquationDomain,
@@ -127,14 +132,14 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
             "dimension narrows to a heterogeneous scope this step does not retain",
         ));
     }
-    if !request.files.is_empty() {
+
+    let Some(unit) = prepare(request) else {
         return Ok(unsupported(
             UnsupportedKind::CompilationUnit,
-            "companion files are not applied yet",
+            "the compilation unit could not be expanded",
         ));
-    }
-
-    let model = parse(&request.file_content);
+    };
+    let model = &unit.model;
     let aggregate = matching_indexes(&model.equations, request);
     if heterogeneous_match(&model, request) {
         return Ok(unsupported(
@@ -143,7 +148,13 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
         ));
     }
     if aggregate.is_empty() {
-        if !model.macro_type_errors.is_empty() {
+        if unit.missing_include {
+            return Ok(unsupported(
+                UnsupportedKind::Include,
+                "a required include did not resolve, so the selection may be incomplete",
+            ));
+        }
+        if !model.macro_type_errors.is_empty() || !check_e063(model).is_empty() {
             return Ok(unsupported(
                 UnsupportedKind::Macro,
                 "macro expansion failed and no equation matched",
@@ -160,43 +171,104 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
         });
     }
 
-    let closure = close(&model, &aggregate);
-    if let Some(reason) = refuse(&model, &aggregate, &closure) {
+    let closure = close(model, &aggregate);
+    if let Some(reason) = refuse(model, &aggregate, &closure, unit.missing_include) {
         return Ok(unsupported(reason.0, reason.1));
     }
 
     let selected_equations = aggregate
         .iter()
-        .map(|&idx| selected_row(&model, idx))
+        .map(|&idx| selected_row(model, idx))
         .collect::<Vec<_>>();
-    let origins = selected_equations
+    let origins = aggregate
         .iter()
-        .map(|row| ExtractOrigin {
-            domain: row.domain,
-            dimension: row.dimension.clone(),
-            index: row.index,
-            role: row.role,
-            span: model.equations[aggregate[row_pos(&selected_equations, row)]].span,
-            file: request.active_file.clone(),
-            frames: Vec::new(),
-        })
+        .map(|&idx| origin_row(model, &unit.report, idx, request.active_file.as_deref()))
         .collect();
 
     Ok(ExtractResult {
         status: ExtractStatus::Ok,
-        fragment: Some(render(&model, &aggregate, &closure)),
+        fragment: Some(render(model, &aggregate, &closure)),
         selected_equations,
         origins,
-        omitted_context: omitted(&model),
+        omitted_context: omitted(model),
         explanation: String::new(),
         unsupported: None,
     })
 }
 
-fn row_pos(rows: &[SelectedEquation], row: &SelectedEquation) -> usize {
-    rows.iter()
-        .position(|item| item.index == row.index)
-        .unwrap_or(0)
+struct Unit {
+    model: Model,
+    report: ExpandReport,
+    missing_include: bool,
+}
+
+/// MCP object-tool rule: splice only when `active_file` is a key in `files`.
+fn prepare(request: &ExtractRequest) -> Option<Unit> {
+    let Some(active) = request
+        .active_file
+        .as_deref()
+        .filter(|active| request.files.contains_key(*active))
+    else {
+        let model = parse(&request.file_content);
+        let report = expand_report(&request.file_content);
+        return Some(Unit {
+            model,
+            report,
+            missing_include: false,
+        });
+    };
+    let mut files = request.files.clone();
+    files.insert(active.to_string(), request.file_content.clone());
+    let mut ws = Workspace::new();
+    for (name, content) in &files {
+        ws.update_document(name, content);
+    }
+    let model = ws.get_effective_model(active).cloned()?;
+    let report = ws.expand_report(active).cloned()?;
+    let missing_include = !ws.find_unresolved_includes(active).is_empty()
+        || !ws.find_circular_includes(active).is_empty();
+    Some(Unit {
+        model,
+        report,
+        missing_include,
+    })
+}
+
+fn origin_row(
+    model: &Model,
+    report: &ExpandReport,
+    eq_index: usize,
+    active_file: Option<&str>,
+) -> ExtractOrigin {
+    let counted = counted_index(model, eq_index);
+    let mapped = report.aggregate_origins.get(counted);
+    let row = selected_row(model, eq_index);
+    let frames = mapped
+        .map(|origin| {
+            origin
+                .origin_frames
+                .iter()
+                .map(|frame| OriginFrame {
+                    kind: frame.kind.clone(),
+                    span: frame.origin_span,
+                    file: frame.origin_uri.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ExtractOrigin {
+        domain: row.domain,
+        dimension: row.dimension,
+        index: row.index,
+        role: row.role,
+        span: mapped
+            .map(|origin| origin.origin_span)
+            .unwrap_or(model.equations[eq_index].span),
+        file: mapped
+            .and_then(|origin| origin.origin_uri.clone())
+            .or_else(|| active_file.map(str::to_string)),
+        frames,
+    }
 }
 
 fn unsupported(kind: UnsupportedKind, detail: impl Into<String>) -> ExtractResult {
@@ -464,11 +536,12 @@ fn refuse(
     model: &Model,
     selected: &[usize],
     closure: &Closure,
+    missing_include: bool,
 ) -> Option<(UnsupportedKind, String)> {
     if let Some(detail) = macro_block(model, selected, closure) {
         return Some((UnsupportedKind::Macro, detail));
     }
-    if let Some(detail) = include_block(model, closure) {
+    if let Some(detail) = include_block(model, closure, missing_include) {
         return Some((UnsupportedKind::Include, detail));
     }
     if let Some(detail) = heterogeneous_decl(model, closure) {
@@ -489,19 +562,16 @@ fn refuse(
 fn macro_block(model: &Model, selected: &[usize], closure: &Closure) -> Option<String> {
     let retained = retained_indexes(model, selected, closure);
     for idx in &retained {
-        let eq = &model.equations[*idx];
-        let text = slice_through_semi(&model.source, eq.span);
-        if text.contains("@{") || text.contains("@#") {
-            return Some("a retained equation still contains unexpanded macro text".to_string());
-        }
-        if for_bodies(model)
-            .iter()
-            .any(|body| overlaps(eq.span, *body))
-        {
-            return Some("a retained equation is inside a macro loop body".to_string());
+        let text = equation_line(model, *idx);
+        if contains_macro(&text) {
+            return Some("macro expansion failed on text this extract would retain".to_string());
         }
     }
-    if declaration_has_macro(model, closure) {
+    if declaration_has_macro(model, closure)
+        || declaration_lines(model, closure)
+            .iter()
+            .any(|line| contains_macro(line))
+    {
         return Some("a retained declaration still contains unexpanded macro text".to_string());
     }
     for (span, _, _) in &model.macro_type_errors {
@@ -515,7 +585,20 @@ fn macro_block(model: &Model, selected: &[usize], closure: &Closure) -> Option<S
             return Some("macro expansion failed on text this extract would retain".to_string());
         }
     }
+    for diag in check_e063(model) {
+        if retained
+            .iter()
+            .any(|idx| overlaps(diag.span, model.equations[*idx].span))
+            || declaration_statement_overlaps(model, closure, diag.span)
+        {
+            return Some("macro expansion failed on text this extract would retain".to_string());
+        }
+    }
     None
+}
+
+fn contains_macro(text: &str) -> bool {
+    text.contains("@{") || text.contains("@#")
 }
 
 fn for_bodies(model: &Model) -> Vec<Span> {
@@ -552,16 +635,40 @@ fn declaration_has_macro(model: &Model, closure: &Closure) -> bool {
             }
             let stmt = statement_around(&model.source, decl.span);
             let text = &model.source[stmt.start as usize..stmt.end as usize];
-            if text.contains("@{") || text.contains("@#") {
-                return true;
+            if !contains_macro(text) {
+                continue;
+            }
+            match expanded_decl_line(model, decl, text) {
+                Some(line) if !contains_macro(&line) => {}
+                _ => return true,
             }
         }
     }
     false
 }
 
-fn include_block(model: &Model, closure: &Closure) -> Option<String> {
-    if model.includes.is_empty() {
+fn declaration_statement_overlaps(model: &Model, closure: &Closure, span: Span) -> bool {
+    let lists = [
+        &model.endogenous,
+        &model.deterministic_exogenous,
+        &model.exogenous,
+        &model.parameters,
+        &model.predetermined,
+    ];
+    lists.iter().any(|decls| {
+        decls.iter().any(|decl| {
+            let name = model.name(decl.name);
+            if !closure.symbols.contains(name) && !closure.locals.contains(name) {
+                return false;
+            }
+            let stmt = statement_around(&model.source, decl.span);
+            overlaps(span, stmt)
+        })
+    })
+}
+
+fn include_block(model: &Model, closure: &Closure, missing_include: bool) -> Option<String> {
+    if model.includes.is_empty() && !missing_include {
         return None;
     }
     let missing = closure
@@ -743,7 +850,7 @@ fn render(model: &Model, selected: &[usize], closure: &Closure) -> String {
         .unwrap_or_else(|| "model;".to_string());
     let mut body = vec![opener];
     for idx in retained_indexes(model, selected, closure) {
-        body.push(slice_through_semi(&model.source, model.equations[idx].span));
+        body.push(equation_line(model, idx));
     }
     body.push("end;".to_string());
     if !lines.is_empty() {
@@ -791,9 +898,76 @@ fn declaration_lines(model: &Model, closure: &Closure) -> Vec<String> {
     let mut seen = HashSet::new();
     chunks
         .into_iter()
-        .filter(|(start, _)| seen.insert(*start))
+        .filter(|(start, line)| seen.insert((*start, line.clone())))
         .map(|(_, line)| line)
         .collect()
+}
+
+fn equation_line(model: &Model, idx: usize) -> String {
+    let eq = &model.equations[idx];
+    let raw = slice_through_semi(&model.source, eq.span);
+    if contains_macro(&raw)
+        || for_bodies(model)
+            .iter()
+            .any(|body| overlaps(eq.span, *body))
+    {
+        return expanded_equation(eq);
+    }
+    raw
+}
+
+fn expanded_equation(eq: &Equation) -> String {
+    let mut out = String::new();
+    if !eq.tag_map.is_empty() {
+        let parts: Vec<String> = eq
+            .tag_map
+            .iter()
+            .map(|(key, value)| {
+                if value.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{key}='{value}'")
+                }
+            })
+            .collect();
+        out.push('[');
+        out.push_str(&parts.join(", "));
+        out.push_str("]\n");
+    }
+    let body = eq.text.trim();
+    if contains_macro(body) {
+        return body.to_string();
+    }
+    out.push_str(body);
+    if !body.ends_with(';') {
+        out.push(';');
+    }
+    out
+}
+
+fn expanded_decl_line(model: &Model, decl: &Decl, stmt: &str) -> Option<String> {
+    let mut rest = skip_noise(stmt.trim().trim_end_matches(';').trim());
+    let keyword = take_ident(&mut rest)?;
+    let name = model.name(decl.name);
+    if contains_macro(name) {
+        return None;
+    }
+    let mut line = keyword;
+    if decl.log_transform {
+        line.push_str("(log)");
+    }
+    line.push(' ');
+    line.push_str(name);
+    if let Some(long_name) = &decl.long_name {
+        if contains_macro(long_name) {
+            return None;
+        }
+        line.push_str(" (long_name='");
+        line.push_str(long_name);
+        line.push_str("')");
+    }
+    line.push(';');
+    Some(line)
 }
 
 fn push_decl_lines(
@@ -808,13 +982,17 @@ fn push_decl_lines(
             continue;
         }
         let stmt = statement_around(&model.source, decl.span);
+        let text = &model.source[stmt.start as usize..stmt.end as usize];
+        if contains_macro(text) {
+            if let Some(line) = expanded_decl_line(model, decl, text) {
+                out.push((decl.span.start, line));
+            }
+            continue;
+        }
         if !seen.insert(stmt.start) {
             continue;
         }
-        if let Some(line) = filter_declaration(
-            &model.source[stmt.start as usize..stmt.end as usize],
-            needed,
-        ) {
+        if let Some(line) = filter_declaration(text, needed) {
             out.push((stmt.start, line));
         }
     }
@@ -1470,6 +1648,199 @@ end;
             "{fragment}"
         );
         assert!(!fragment.contains("name='skip'"), "{fragment}");
+    }
+
+    #[test]
+    fn include_keeps_the_included_equation_and_its_origin() {
+        let root = "\
+var y;
+model;
+@#include \"body.inc\"
+end;
+";
+        let body = "\
+[name='eq']
+y = 1;
+";
+        let mut request = req(root, &["eq"], &[]);
+        request.active_file = Some("root.mod".to_string());
+        request
+            .files
+            .insert("root.mod".to_string(), root.to_string());
+        request
+            .files
+            .insert("body.inc".to_string(), body.to_string());
+        let result = extract(&request).unwrap();
+        assert_eq!(result.status, ExtractStatus::Ok);
+        let fragment = result.fragment.unwrap();
+        assert!(fragment.contains("var y;"), "{fragment}");
+        assert!(fragment.contains("[name='eq']"), "{fragment}");
+        assert!(fragment.contains("y = 1;"), "{fragment}");
+        assert!(!fragment.contains("@#include"), "{fragment}");
+        let origin = &result.origins[0];
+        let file = origin.file.as_deref().unwrap_or("");
+        assert!(file.contains("body.inc"), "{file}");
+        let slice = &body[origin.span.start as usize..origin.span.end as usize];
+        assert!(slice.contains("y = 1"), "{slice}");
+    }
+
+    #[test]
+    fn macro_loop_writes_instances_and_keeps_the_source_origin() {
+        let src = "\
+var x;
+@#define is = 1:2
+@#define js = 1:2
+model;
+@#for i in is
+@#for j in js
+[name='row']
+x = @{i};
+@#endfor
+@#endfor
+end;
+";
+        let mut request = req(src, &["row"], &[]);
+        request.active_file = Some("loop.mod".to_string());
+        let result = extract(&request).unwrap();
+        assert_eq!(result.status, ExtractStatus::Ok);
+        let fragment = result.fragment.unwrap();
+        assert!(fragment.contains("x = 1;"), "{fragment}");
+        assert!(fragment.contains("x = 2;"), "{fragment}");
+        assert!(fragment.contains("[name='row']"), "{fragment}");
+        assert!(!fragment.contains("@{"), "{fragment}");
+        assert!(!fragment.contains("@#"), "{fragment}");
+        assert_eq!(result.selected_equations.len(), 4);
+        assert_eq!(result.origins.len(), 4);
+        let span = result.origins[0].span;
+        assert!(result.origins.iter().all(|origin| origin.span == span));
+        assert!(result.origins.iter().all(|origin| {
+            origin.file.as_deref() == Some("loop.mod") && origin.frames.len() == 2
+        }));
+        assert!(result
+            .origins
+            .iter()
+            .all(|origin| origin.frames.iter().all(|frame| frame.kind == "for")));
+        let body = &src[span.start as usize..span.end as usize];
+        assert!(body.contains("x = @{i}"), "{body}");
+        assert!(!body.contains("@#for"), "{body}");
+    }
+
+    #[test]
+    fn overlay_replaces_the_active_file() {
+        let stored = "\
+var y;
+model;
+[name='old']
+y = 0;
+end;
+";
+        let overlay = "\
+@#include \"decl.inc\"
+model;
+[name='eq']
+y = 1;
+end;
+";
+        let mut request = req(overlay, &["eq"], &[]);
+        request.active_file = Some("root.mod".to_string());
+        request
+            .files
+            .insert("root.mod".to_string(), stored.to_string());
+        request
+            .files
+            .insert("decl.inc".to_string(), "var y;\n".to_string());
+        let result = extract(&request).unwrap();
+        assert_eq!(result.status, ExtractStatus::Ok);
+        let fragment = result.fragment.unwrap();
+        assert!(fragment.contains("var y;"), "{fragment}");
+        assert!(fragment.contains("y = 1;"), "{fragment}");
+        assert!(!fragment.contains("name='old'"), "{fragment}");
+        let old = extract(&req(stored, &["old"], &[])).unwrap();
+        assert_eq!(old.status, ExtractStatus::Ok);
+
+        let mut hidden = request.clone();
+        hidden.names = vec!["old".to_string()];
+        let missed = extract(&hidden).unwrap();
+        assert_eq!(missed.status, ExtractStatus::Empty);
+        assert_eq!(missed.fragment.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn unresolved_expansion_and_missing_include_have_no_fragment() {
+        let unknown = "\
+var y;
+model;
+[name='eq']
+y = @{UNDEF};
+end;
+";
+        let failed = extract(&req(unknown, &["eq"], &[])).unwrap();
+        assert_eq!(failed.status, ExtractStatus::UnsupportedContext);
+        assert!(failed.fragment.is_none());
+        assert_eq!(failed.unsupported.unwrap().kind, UnsupportedKind::Macro);
+
+        let root = "\
+@#include \"other.mod\"
+model;
+[name='eq']
+y = 0;
+end;
+";
+        let mut request = req(root, &["eq"], &[]);
+        request.active_file = Some("root.mod".to_string());
+        request
+            .files
+            .insert("root.mod".to_string(), root.to_string());
+        let include = extract(&request).unwrap();
+        assert_eq!(include.status, ExtractStatus::UnsupportedContext);
+        assert!(include.fragment.is_none());
+        assert_eq!(include.unsupported.unwrap().kind, UnsupportedKind::Include);
+
+        let only_in_include = "\
+@#include \"body.inc\"
+var y;
+model;
+[name='other']
+y = 0;
+end;
+";
+        let mut hidden = req(only_in_include, &["hidden"], &[]);
+        hidden.active_file = Some("root.mod".to_string());
+        hidden
+            .files
+            .insert("root.mod".to_string(), only_in_include.to_string());
+        let dropped = extract(&hidden).unwrap();
+        assert_eq!(dropped.status, ExtractStatus::UnsupportedContext);
+        assert!(dropped.fragment.is_none());
+    }
+
+    #[test]
+    fn equation_surgery_keeps_the_replacement_only() {
+        let src = "\
+var y, c;
+model;
+[name='keep']
+y = 0;
+[name='drop']
+c = 1;
+end;
+model_remove([name='drop']);
+model_replace([name='keep']);
+[name='keep']
+y = 2;
+end;
+";
+        let kept = extract(&req(src, &["keep"], &[])).unwrap();
+        assert_eq!(kept.status, ExtractStatus::Ok);
+        let fragment = kept.fragment.unwrap();
+        assert!(fragment.contains("y = 2;"), "{fragment}");
+        assert!(!fragment.contains("y = 0"), "{fragment}");
+        assert!(!fragment.contains("name='drop'"), "{fragment}");
+        assert_eq!(kept.selected_equations.len(), 1);
+
+        let dropped = extract(&req(src, &["drop"], &[])).unwrap();
+        assert_eq!(dropped.status, ExtractStatus::Empty);
+        assert_eq!(dropped.fragment.as_deref(), Some(""));
     }
 
     #[test]
