@@ -29,12 +29,21 @@ pub struct ParameterChange {
 }
 
 /// Near-match pairing of one removed and one added equation.
+/// Names and tags are side-specific; there is no single `index`, `name`, or `tags`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct EquationChange {
     pub index_old: usize,
     pub index_new: usize,
     pub text_old: String,
     pub text_new: String,
+    /// `aggregate` for rows this compare emits. Heterogeneous rows are a later slice.
+    pub domain: String,
+    /// Null for an aggregate equation.
+    pub dimension: Option<String>,
+    pub name_old: Option<String>,
+    pub name_new: Option<String>,
+    pub tags_old: BTreeMap<String, String>,
+    pub tags_new: BTreeMap<String, String>,
 }
 
 /// One counted equation in an add/remove list. `index` is the equation-object identity.
@@ -42,6 +51,22 @@ pub struct EquationChange {
 pub struct IndexedEquation {
     pub index: usize,
     pub text: String,
+    /// `aggregate` for rows this compare emits. Heterogeneous rows are a later slice.
+    pub domain: String,
+    /// Null for an aggregate equation.
+    pub dimension: Option<String>,
+    /// Null when the equation has no nonempty `name` tag.
+    pub name: Option<String>,
+    /// Full written tag map, including empty-string flags and the `name` key.
+    pub tags: BTreeMap<String, String>,
+}
+
+/// Leftover rows that share a nonempty name present on both sides and were not paired as a change.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct UnmatchedSameName {
+    pub name: String,
+    pub removed: Vec<IndexedEquation>,
+    pub added: Vec<IndexedEquation>,
 }
 
 /// A verified location in the source file the caller supplied.
@@ -141,6 +166,8 @@ pub struct ModelDiff {
     pub added_equations: Vec<IndexedEquation>,
     pub removed_equations: Vec<IndexedEquation>,
     pub changed_equations: Vec<EquationChange>,
+    /// Aggregate leftovers only. Empty when every shared name was paired or absent.
+    pub unmatched_same_name: Vec<UnmatchedSameName>,
     pub shock_setup_changes: Vec<ShockSetupChange>,
 }
 
@@ -218,10 +245,21 @@ impl ModelDiff {
             lines.push(String::new());
             lines.push("## Changed equations".into());
             for e in &self.changed_equations {
-                lines.push(format!(
-                    "- [{} -> {}]: `{}` -> `{}`",
-                    e.index_old, e.index_new, e.text_old, e.text_new
-                ));
+                lines.push(format_changed_equation(e));
+            }
+        }
+
+        if !self.unmatched_same_name.is_empty() {
+            lines.push(String::new());
+            lines.push("## Unmatched same name".into());
+            for group in &self.unmatched_same_name {
+                lines.push(format!("- `{}`", markdown_escape(&group.name)));
+                for eq in &group.removed {
+                    lines.push(format!("  - removed {}", format_equation_row(eq)));
+                }
+                for eq in &group.added {
+                    lines.push(format!("  - added {}", format_equation_row(eq)));
+                }
             }
         }
 
@@ -229,7 +267,7 @@ impl ModelDiff {
             lines.push(String::new());
             lines.push("## Added equations".into());
             for eq in &self.added_equations {
-                lines.push(format!("- [{}] `{}`", eq.index, eq.text));
+                lines.push(format_listed_equation(eq));
             }
         }
 
@@ -237,7 +275,7 @@ impl ModelDiff {
             lines.push(String::new());
             lines.push("## Removed equations".into());
             for eq in &self.removed_equations {
-                lines.push(format!("- [{}] `{}`", eq.index, eq.text));
+                lines.push(format_listed_equation(eq));
             }
         }
 
@@ -274,7 +312,7 @@ pub fn compare_models_with_sources(
     let common_params: HashSet<String> = par_a.intersection(&par_b).cloned().collect();
     let changed_parameter_values = changed_params(model_a, model_b, &common_params);
 
-    let (added_eq, removed_eq, changed_eq) = diff_equations(model_a, model_b);
+    let (added_eq, removed_eq, changed_eq, unmatched_same_name) = diff_equations(model_a, model_b);
 
     ModelDiff {
         added_endogenous: sorted_diff(&end_b, &end_a),
@@ -290,6 +328,7 @@ pub fn compare_models_with_sources(
         added_equations: added_eq,
         removed_equations: removed_eq,
         changed_equations: changed_eq,
+        unmatched_same_name,
         shock_setup_changes: diff_shock_setup(model_a, model_b, source_a, source_b),
     }
 }
@@ -2006,6 +2045,79 @@ fn normalize_equation(text: &str) -> String {
     s.trim_end_matches(';').trim().to_string()
 }
 
+const AGGREGATE_DOMAIN: &str = "aggregate";
+
+fn counted_equations(model: &Model) -> Vec<EquationRow> {
+    equations(model)
+        .into_iter()
+        .filter(|row| !normalize_equation(&row.text).is_empty())
+        .collect()
+}
+
+fn equation_name(row: &EquationRow) -> Option<&str> {
+    if row.name.is_empty() {
+        None
+    } else {
+        Some(row.name.as_str())
+    }
+}
+
+fn name_counts(rows: &[EquationRow]) -> HashMap<&str, usize> {
+    let mut counts = HashMap::new();
+    for row in rows {
+        if let Some(name) = equation_name(row) {
+            *counts.entry(name).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn indexes_named(rows: &[EquationRow], name: &str) -> Vec<usize> {
+    rows.iter()
+        .enumerate()
+        .filter(|(_, row)| equation_name(row) == Some(name))
+        .map(|(index, _)| index)
+        .collect()
+}
+
+fn same_body(left: &EquationRow, right: &EquationRow) -> bool {
+    normalize_equation(&left.text) == normalize_equation(&right.text) && left.tags == right.tags
+}
+
+/// Two nonempty names pair only when they are the same name. An unnamed row may pair with either.
+fn names_compatible(left: &EquationRow, right: &EquationRow) -> bool {
+    match (equation_name(left), equation_name(right)) {
+        (Some(old), Some(new)) => old == new,
+        _ => true,
+    }
+}
+
+fn indexed_equation(row: &EquationRow) -> IndexedEquation {
+    IndexedEquation {
+        index: row.index,
+        text: row.text.clone(),
+        domain: AGGREGATE_DOMAIN.to_string(),
+        dimension: None,
+        name: equation_name(row).map(str::to_string),
+        tags: row.tags.clone(),
+    }
+}
+
+fn equation_change(old: &EquationRow, new: &EquationRow) -> EquationChange {
+    EquationChange {
+        index_old: old.index,
+        index_new: new.index,
+        text_old: old.text.clone(),
+        text_new: new.text.clone(),
+        domain: AGGREGATE_DOMAIN.to_string(),
+        dimension: None,
+        name_old: equation_name(old).map(str::to_string),
+        name_new: equation_name(new).map(str::to_string),
+        tags_old: old.tags.clone(),
+        tags_new: new.tags.clone(),
+    }
+}
+
 fn diff_equations(
     a: &Model,
     b: &Model,
@@ -2013,60 +2125,174 @@ fn diff_equations(
     Vec<IndexedEquation>,
     Vec<IndexedEquation>,
     Vec<EquationChange>,
+    Vec<UnmatchedSameName>,
 ) {
-    let mut norm_a: HashMap<String, Vec<EquationRow>> = HashMap::new();
-    for row in equations(a) {
-        let key = normalize_equation(&row.text);
-        if !key.is_empty() {
-            norm_a.entry(key).or_default().push(row);
-        }
-    }
-    let mut norm_b: HashMap<String, Vec<EquationRow>> = HashMap::new();
-    for row in equations(b) {
-        let key = normalize_equation(&row.text);
-        if !key.is_empty() {
-            norm_b.entry(key).or_default().push(row);
-        }
-    }
-
-    let keys_a: HashSet<String> = norm_a.keys().cloned().collect();
-    let keys_b: HashSet<String> = norm_b.keys().cloned().collect();
-
-    let mut leftover_removed = Vec::new();
-    let mut leftover_added = Vec::new();
-    for key in keys_a.union(&keys_b) {
-        let na = norm_a.get(key).map(|v| v.len()).unwrap_or(0);
-        let nb = norm_b.get(key).map(|v| v.len()).unwrap_or(0);
-        let shared = na.min(nb);
-        if let Some(list) = norm_a.get(key) {
-            leftover_removed.extend(list.iter().skip(shared).cloned());
-        }
-        if let Some(list) = norm_b.get(key) {
-            leftover_added.extend(list.iter().skip(shared).cloned());
-        }
-    }
-
-    let (changed, leftover_removed, leftover_added) =
-        pair_changed(leftover_removed, leftover_added);
-
-    let mut added: Vec<IndexedEquation> = leftover_added
-        .into_iter()
-        .map(|e| IndexedEquation {
-            index: e.index,
-            text: e.text,
-        })
+    let old_rows = counted_equations(a);
+    let new_rows = counted_equations(b);
+    let old_counts = name_counts(&old_rows);
+    let new_counts = name_counts(&new_rows);
+    let mut names: Vec<&str> = old_counts
+        .keys()
+        .copied()
+        .chain(new_counts.keys().copied())
         .collect();
-    added.sort_by_key(|e| e.index);
-    let mut removed: Vec<IndexedEquation> = leftover_removed
-        .into_iter()
-        .map(|e| IndexedEquation {
-            index: e.index,
-            text: e.text,
-        })
-        .collect();
-    removed.sort_by_key(|e| e.index);
+    names.sort_unstable();
+    names.dedup();
 
-    (added, removed, changed)
+    let mut used_old = HashSet::new();
+    let mut used_new = HashSet::new();
+    let mut bypass_old = HashSet::new();
+    let mut bypass_new = HashSet::new();
+    let mut changes = Vec::new();
+
+    for name in &names {
+        let old_n = old_counts.get(name).copied().unwrap_or(0);
+        let new_n = new_counts.get(name).copied().unwrap_or(0);
+        if old_n == 1 && new_n == 1 {
+            let i = indexes_named(&old_rows, name)[0];
+            let j = indexes_named(&new_rows, name)[0];
+            used_old.insert(i);
+            used_new.insert(j);
+            if !same_body(&old_rows[i], &new_rows[j]) {
+                changes.push(equation_change(&old_rows[i], &new_rows[j]));
+            }
+        } else if old_n > 1 || new_n > 1 {
+            let old_idx = indexes_named(&old_rows, name);
+            let new_idx = indexes_named(&new_rows, name);
+            let mut taken_new = HashSet::new();
+            for i in &old_idx {
+                if let Some(j) = new_idx
+                    .iter()
+                    .copied()
+                    .find(|j| !taken_new.contains(j) && same_body(&old_rows[*i], &new_rows[*j]))
+                {
+                    taken_new.insert(j);
+                    used_old.insert(*i);
+                    used_new.insert(j);
+                }
+            }
+            for i in old_idx {
+                if !used_old.contains(&i) {
+                    bypass_old.insert(i);
+                }
+            }
+            for j in new_idx {
+                if !used_new.contains(&j) {
+                    bypass_new.insert(j);
+                }
+            }
+        }
+    }
+
+    let free_old: Vec<usize> = (0..old_rows.len())
+        .filter(|i| !used_old.contains(i) && !bypass_old.contains(i))
+        .collect();
+    let free_new: Vec<usize> = (0..new_rows.len())
+        .filter(|i| !used_new.contains(i) && !bypass_new.contains(i))
+        .collect();
+    let mut old_by_text: HashMap<String, Vec<usize>> = HashMap::new();
+    for i in &free_old {
+        old_by_text
+            .entry(normalize_equation(&old_rows[*i].text))
+            .or_default()
+            .push(*i);
+    }
+    let mut new_by_text: HashMap<String, Vec<usize>> = HashMap::new();
+    for j in &free_new {
+        new_by_text
+            .entry(normalize_equation(&new_rows[*j].text))
+            .or_default()
+            .push(*j);
+    }
+    let text_keys: HashSet<String> = old_by_text
+        .keys()
+        .cloned()
+        .chain(new_by_text.keys().cloned())
+        .collect();
+    for key in text_keys {
+        let olds = old_by_text.get(&key).cloned().unwrap_or_default();
+        let news = new_by_text.get(&key).cloned().unwrap_or_default();
+        let mut taken = HashSet::new();
+        for i in olds {
+            if let Some(j) = news
+                .iter()
+                .copied()
+                .find(|j| !taken.contains(j) && names_compatible(&old_rows[i], &new_rows[*j]))
+            {
+                taken.insert(j);
+                used_old.insert(i);
+                used_new.insert(j);
+                if old_rows[i].tags != new_rows[j].tags {
+                    changes.push(equation_change(&old_rows[i], &new_rows[j]));
+                }
+            }
+        }
+    }
+
+    let left_old: Vec<EquationRow> = (0..old_rows.len())
+        .filter(|i| !used_old.contains(i) && !bypass_old.contains(i))
+        .map(|i| old_rows[i].clone())
+        .collect();
+    let left_new: Vec<EquationRow> = (0..new_rows.len())
+        .filter(|i| !used_new.contains(i) && !bypass_new.contains(i))
+        .map(|i| new_rows[i].clone())
+        .collect();
+    let (near, left_old, left_new) = pair_changed(left_old, left_new);
+    changes.extend(near);
+    changes.sort_by_key(|change| (change.index_old, change.index_new));
+
+    let mut removed_rows = left_old;
+    removed_rows.extend(bypass_old.iter().map(|i| old_rows[*i].clone()));
+    let mut added_rows = left_new;
+    added_rows.extend(bypass_new.iter().map(|i| new_rows[*i].clone()));
+
+    let mut removed: Vec<IndexedEquation> = removed_rows.iter().map(indexed_equation).collect();
+    removed.sort_by_key(|row| row.index);
+    let mut added: Vec<IndexedEquation> = added_rows.iter().map(indexed_equation).collect();
+    added.sort_by_key(|row| row.index);
+
+    let unmatched = unmatched_same_name(&old_rows, &new_rows, &removed, &added);
+    (added, removed, changes, unmatched)
+}
+
+fn unmatched_same_name(
+    old_rows: &[EquationRow],
+    new_rows: &[EquationRow],
+    removed: &[IndexedEquation],
+    added: &[IndexedEquation],
+) -> Vec<UnmatchedSameName> {
+    let old_counts = name_counts(old_rows);
+    let new_counts = name_counts(new_rows);
+    let mut names: Vec<&str> = old_counts
+        .keys()
+        .copied()
+        .filter(|name| new_counts.contains_key(name))
+        .collect();
+    names.sort_unstable();
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let removed: Vec<IndexedEquation> = removed
+                .iter()
+                .filter(|row| row.name.as_deref() == Some(name))
+                .cloned()
+                .collect();
+            let added: Vec<IndexedEquation> = added
+                .iter()
+                .filter(|row| row.name.as_deref() == Some(name))
+                .cloned()
+                .collect();
+            if removed.is_empty() && added.is_empty() {
+                None
+            } else {
+                Some(UnmatchedSameName {
+                    name: name.to_string(),
+                    removed,
+                    added,
+                })
+            }
+        })
+        .collect()
 }
 
 fn pair_changed(
@@ -2080,6 +2306,9 @@ fn pair_changed(
     for (i, r) in removed.iter().enumerate() {
         let rt = normalize_equation(&r.text);
         for (j, add) in added.iter().enumerate() {
+            if !names_compatible(r, add) {
+                continue;
+            }
             let at = normalize_equation(&add.text);
             let max_len = rt.len().max(at.len());
             if max_len == 0 {
@@ -2102,12 +2331,7 @@ fn pair_changed(
         }
         used_r.insert(i);
         used_a.insert(j);
-        changes.push(EquationChange {
-            index_old: removed[i].index,
-            index_new: added[j].index,
-            text_old: removed[i].text.clone(),
-            text_new: added[j].text.clone(),
-        });
+        changes.push(equation_change(&removed[i], &added[j]));
     }
     changes.sort_by_key(|c| (c.index_old, c.index_new));
     let leftover_removed: Vec<EquationRow> = removed
@@ -2123,6 +2347,75 @@ fn pair_changed(
         .map(|(_, e)| e)
         .collect();
     (changes, leftover_removed, leftover_added)
+}
+
+fn format_changed_equation(change: &EquationChange) -> String {
+    let old_label = equation_label(change.name_old.as_deref(), &change.tags_old);
+    let new_label = equation_label(change.name_new.as_deref(), &change.tags_new);
+    let head = if old_label.is_empty() && new_label.is_empty() {
+        format!("- [{} -> {}]", change.index_old, change.index_new)
+    } else {
+        format!(
+            "- [{} -> {}] {} -> {}",
+            change.index_old,
+            change.index_new,
+            side_label(&old_label),
+            side_label(&new_label)
+        )
+    };
+    format!("{head}\n  `{}`\n  `{}`", change.text_old, change.text_new)
+}
+
+fn format_listed_equation(row: &IndexedEquation) -> String {
+    let label = equation_label(row.name.as_deref(), &row.tags);
+    if label.is_empty() {
+        format!("- [{}] `{}`", row.index, row.text)
+    } else {
+        format!("- [{}] {}\n  `{}`", row.index, label, row.text)
+    }
+}
+
+fn format_equation_row(row: &IndexedEquation) -> String {
+    let tags = distinguishing_tags(&row.tags);
+    if tags.is_empty() {
+        format!("[{}] `{}`", row.index, row.text)
+    } else {
+        format!("[{}] {tags} `{}`", row.index, row.text)
+    }
+}
+
+fn side_label(label: &str) -> String {
+    if label.is_empty() {
+        "`unnamed`".to_string()
+    } else {
+        label.to_string()
+    }
+}
+
+fn equation_label(name: Option<&str>, tags: &BTreeMap<String, String>) -> String {
+    let mut parts = Vec::new();
+    if let Some(name) = name {
+        parts.push(format!("`{}`", markdown_escape(name)));
+    }
+    let tags = distinguishing_tags(tags);
+    if !tags.is_empty() {
+        parts.push(tags);
+    }
+    parts.join(" ")
+}
+
+fn distinguishing_tags(tags: &BTreeMap<String, String>) -> String {
+    tags.iter()
+        .filter(|(key, _)| key.as_str() != "name")
+        .map(|(key, value)| {
+            if value.is_empty() {
+                format!("[{}]", markdown_escape(key))
+            } else {
+                format!("[{}={}]", markdown_escape(key), markdown_escape(value))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn levenshtein(a: &str, b: &str) -> usize {

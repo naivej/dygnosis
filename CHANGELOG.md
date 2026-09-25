@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.0
+
+- Compare pairs aggregate equations by name first. A unique name pairs across reordering; a repeated name pairs only when the normalized text and tags match. Equation rows include each side's name and tags, and `unmatched_same_name` groups leftovers that still share a name.
+
 ## v0.9.0
 
 - Reads Dynare 7.2 heterogeneity dimensions, declarations, model blocks, shock rows, and the four heterogeneity commands while keeping aggregate and heterogeneous equations separate.
