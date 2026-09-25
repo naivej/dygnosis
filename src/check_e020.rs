@@ -30,6 +30,47 @@ pub(crate) fn all_model_equations(model: &Model) -> Vec<&Equation> {
     eqs
 }
 
+/// One data tree per list: the aggregate model, then each heterogeneous block.
+/// `AddLocalVariable` is per tree, so a `#` name may be defined once in each.
+pub(crate) fn equation_trees(model: &Model) -> Vec<Vec<&Equation>> {
+    let mut agg: Vec<&Equation> = model.equations.iter().collect();
+    agg.sort_by_key(|eq| (eq.span.start, eq.span.end));
+    let mut trees = vec![agg];
+    for block in &model.heterogeneous_models {
+        let mut eqs: Vec<&Equation> = block.equations.iter().collect();
+        eqs.sort_by_key(|eq| (eq.span.start, eq.span.end));
+        trees.push(eqs);
+    }
+    trees
+}
+
+fn local_names(model: &Model, eqs: &[&Equation]) -> HashSet<Name> {
+    eqs.iter()
+        .filter_map(|eq| model_local_name(model, eq).map(|(name, _)| name))
+        .collect()
+}
+
+/// Earliest `#` definition of each name, across every tree.
+fn earliest_local_defs(model: &Model, trees: &[Vec<&Equation>]) -> HashMap<Name, u32> {
+    let mut earliest = HashMap::new();
+    for tree in trees {
+        for eq in tree {
+            let Some((name, _)) = model_local_name(model, eq) else {
+                continue;
+            };
+            earliest
+                .entry(name)
+                .and_modify(|start: &mut u32| {
+                    if eq.span.start < *start {
+                        *start = eq.span.start;
+                    }
+                })
+                .or_insert(eq.span.start);
+        }
+    }
+    earliest
+}
+
 fn check_e023(model: &Model) -> Vec<Diagnostic> {
     let endo: HashSet<Name> = model.endogenous.iter().map(|d| d.name).collect();
     let mut seen = HashSet::new();
@@ -97,7 +138,6 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
     let mut eqs = all_model_equations(model);
     eqs.sort_by_key(|eq| (eq.span.start, eq.span.end));
 
-    let mut first_definition: HashMap<Name, u32> = HashMap::new();
     let mut seen_shadowing = HashSet::new();
     let mut diagnostics = Vec::new();
 
@@ -105,47 +145,61 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
         let Some((name, span)) = model_local_name(model, eq) else {
             continue;
         };
-        first_definition.entry(name).or_insert(eq.span.start);
         if declared.contains(&name) && seen_shadowing.insert(name) {
             diagnostics.push(shadowing_diag(model, name, span));
         }
     }
 
-    let mut visible_locals = HashSet::new();
-    let mut seen_early = HashSet::new();
-    for eq in &eqs {
-        let local = model_local_name(model, eq).map(|(n, _)| n);
-        for r in model.ident_refs(eq) {
-            if local == Some(r.name) {
-                continue;
+    // The pound-LHS refusal is per tree. A definition in an earlier tree has
+    // already made the name a model local, so a later tree may use it before
+    // its own definition. A use before any definition, in the tree that then
+    // defines it, still refuses.
+    let trees = equation_trees(model);
+    let earliest = earliest_local_defs(model, &trees);
+    for tree in &trees {
+        let first_definition = local_def_starts(model, tree);
+        let mut visible_locals = HashSet::new();
+        let mut seen_early = HashSet::new();
+        for eq in tree {
+            let local = model_local_name(model, eq).map(|(n, _)| n);
+            for r in model.ident_refs(eq) {
+                if local == Some(r.name) {
+                    continue;
+                }
+                let Some(&def_start) = first_definition.get(&r.name) else {
+                    continue;
+                };
+                if visible_locals.contains(&r.name)
+                    || declared.contains(&r.name)
+                    || seen_early.contains(&r.name)
+                {
+                    continue;
+                }
+                if eq.span.start >= def_start {
+                    continue;
+                }
+                if earliest
+                    .get(&r.name)
+                    .is_some_and(|start| *start < def_start)
+                {
+                    continue;
+                }
+                seen_early.insert(r.name);
+                let name = model.name(r.name);
+                diagnostics.push(Diagnostic {
+                    span: r.span,
+                    severity: Severity::Error,
+                    code: "E025".to_string(),
+                    message: format!(
+                        "{name} has wrong type or was already used on the right-hand side. You cannot use it on the left-hand side of a pound ('#') expression"
+                    ),
+                    fix: None,
+                    tags: Vec::new(),
+                });
             }
-            let Some(&def_start) = first_definition.get(&r.name) else {
-                continue;
-            };
-            if visible_locals.contains(&r.name)
-                || declared.contains(&r.name)
-                || seen_early.contains(&r.name)
-            {
-                continue;
+            if let Some(n) = local {
+                visible_locals.insert(n);
             }
-            if eq.span.start >= def_start {
-                continue;
-            }
-            seen_early.insert(r.name);
-            let name = model.name(r.name);
-            diagnostics.push(Diagnostic {
-                span: r.span,
-                severity: Severity::Error,
-                code: "E025".to_string(),
-                message: format!(
-                    "{name} has wrong type or was already used on the right-hand side. You cannot use it on the left-hand side of a pound ('#') expression"
-                ),
-                fix: None,
-                tags: Vec::new(),
-            });
-        }
-        if let Some(n) = local {
-            visible_locals.insert(n);
         }
     }
 
@@ -185,11 +239,19 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
             .iter()
             .flat_map(|surgery| surgery.removed.iter().map(|row| &row.equation))
     };
-    let pound: HashSet<Name> = all_model_equations(model)
-        .into_iter()
-        .chain(removed_equations())
-        .filter_map(|eq| model_local_name(model, eq).map(|(n, _)| n))
-        .collect();
+    // A `#` local is visible only inside its own tree. A name defined in
+    // another tree before this use crashes 7.2 with no sentence
+    // (`UnknownLocalVariableException`); a use before every definition is
+    // `Unknown symbol`.
+    let trees = equation_trees(model);
+    let mut pounds: Vec<HashSet<Name>> =
+        trees.iter().map(|tree| local_names(model, tree)).collect();
+    for eq in removed_equations() {
+        if let Some((name, _)) = model_local_name(model, eq) {
+            pounds[0].insert(name);
+        }
+    }
+    let earliest = earliest_local_defs(model, &trees);
     let shocks: HashSet<Name> = model.shocks_vars.iter().copied().collect();
     let assigned: HashSet<Name> = model
         .param_assignments
@@ -242,7 +304,9 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
             if removed && model.dropped_by_surgery_after(r.name, eq.span.start) {
                 continue;
             }
-            if visible.contains(&r.name) || pound.contains(&r.name) {
+            if visible.contains(&r.name)
+                || local_hides_unknown(model, eq, r.name, r.span.start, &pounds, &earliest)
+            {
                 continue;
             }
             if model.mod_file_locals.contains(&r.name)
@@ -447,6 +511,48 @@ fn all_declared_name_strings(model: &Model) -> HashSet<String> {
         .chain(&model.parameters)
         .map(|d| model.name(d.name).to_string())
         .collect()
+}
+
+/// `true` when `name` is not an unknown symbol in `eq`'s tree.
+///
+/// Same-tree `#` definitions hide it (an early use is E025, not E020). A
+/// definition in another tree that starts before this use is the crash shape
+/// with no official sentence, so it stays quiet too.
+fn local_hides_unknown(
+    model: &Model,
+    eq: &Equation,
+    name: Name,
+    use_start: u32,
+    pounds: &[HashSet<Name>],
+    earliest: &HashMap<Name, u32>,
+) -> bool {
+    let tree = equation_tree_index(model, eq);
+    if pounds.get(tree).is_some_and(|pound| pound.contains(&name)) {
+        return true;
+    }
+    earliest
+        .get(&name)
+        .is_some_and(|def_start| *def_start <= use_start)
+}
+
+fn equation_tree_index(model: &Model, eq: &Equation) -> usize {
+    model
+        .heterogeneous_models
+        .iter()
+        .position(|block| block.equations.iter().any(|other| std::ptr::eq(other, eq)))
+        .map(|index| index + 1)
+        .unwrap_or(0)
+}
+
+fn local_def_starts(model: &Model, eqs: &[&Equation]) -> HashMap<Name, u32> {
+    let mut first = HashMap::new();
+    for eq in eqs {
+        let Some((name, _)) = model_local_name(model, eq) else {
+            continue;
+        };
+        first.entry(name).or_insert(eq.span.start);
+    }
+    first
 }
 
 fn model_local_name(model: &Model, eq: &Equation) -> Option<(Name, Span)> {

@@ -101,36 +101,37 @@ fn check_duplicate_declarations(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_model_local_dups(model: &Model) -> Vec<Diagnostic> {
-    // Heterogeneous bodies declare `#` locals the same way, and 7.2 refuses a
-    // repeat there while parsing (probe: `Local model variable a declared twice.`).
-    let mut eqs = crate::check_e020::all_model_equations(model);
-    eqs.sort_by_key(|eq| (eq.span.start, eq.span.end));
-
-    let mut seen = HashSet::new();
+    // `AddLocalVariable` is per data tree. A second `#` of the same name inside
+    // one tree refuses (`Local model variable a declared twice.`); the same
+    // name in the aggregate model and a heterogeneous block, or in two
+    // dimensions, is accepted.
     let mut diagnostics = Vec::new();
-    for eq in eqs {
-        if !eq.model_local {
-            continue;
-        }
-        let Some(id) = eq.lhs_expr else {
-            continue;
-        };
-        let ExprKind::Ident {
-            name, ident_span, ..
-        } = &model.exprs.get(id).kind
-        else {
-            continue;
-        };
-        if !seen.insert(*name) {
-            let name = model.name(*name);
-            diagnostics.push(Diagnostic {
-                span: *ident_span,
-                severity: Severity::Error,
-                code: "E030".to_string(),
-                message: format!("Local model variable {name} declared twice."),
-                fix: None,
-                tags: Vec::new(),
-            });
+    for tree in crate::check_e020::equation_trees(model) {
+        let mut seen = HashSet::new();
+        for eq in tree {
+            if !eq.model_local {
+                continue;
+            }
+            let Some(id) = eq.lhs_expr else {
+                continue;
+            };
+            let ExprKind::Ident {
+                name, ident_span, ..
+            } = &model.exprs.get(id).kind
+            else {
+                continue;
+            };
+            if !seen.insert(*name) {
+                let name = model.name(*name);
+                diagnostics.push(Diagnostic {
+                    span: *ident_span,
+                    severity: Severity::Error,
+                    code: "E030".to_string(),
+                    message: format!("Local model variable {name} declared twice."),
+                    fix: None,
+                    tags: Vec::new(),
+                });
+            }
         }
     }
     diagnostics

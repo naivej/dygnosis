@@ -210,7 +210,12 @@ fn planner_expected_delta(model: &Model) -> Option<i32> {
 
 fn unreferenced_endogenous(model: &Model) -> Vec<String> {
     let mut referenced = HashSet::new();
-    for eq in &model.equations {
+    for eq in model.equations.iter().chain(
+        model
+            .heterogeneous_models
+            .iter()
+            .flat_map(|block| block.equations.iter()),
+    ) {
         for r in model.ident_refs(eq) {
             referenced.insert(r.name);
         }

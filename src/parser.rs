@@ -1476,10 +1476,17 @@ impl Parser<'_> {
                     self.bump();
                     value = self.read_hetero_option_value();
                 }
-                if seen.insert(name.to_ascii_lowercase(), ()).is_some() {
-                    self.model
-                        .option_twice
-                        .push((hetero_option_path(&name), name_tok.span));
+                // `option_num` refuses on the internal name. `print` and
+                // `noprint` are both `noprint`, and only `heterogeneity_simulate`
+                // accepts that pair; the other commands reject `print` as a token.
+                let internal = hetero_option_path(&name);
+                let key = if kind == HeterogeneityCommandKind::Simulate {
+                    internal.clone()
+                } else {
+                    name.to_ascii_lowercase()
+                };
+                if seen.insert(key, ()).is_some() {
+                    self.model.option_twice.push((internal, name_tok.span));
                 }
                 options.push(HeterogeneityOption {
                     name,

@@ -568,17 +568,8 @@ fn heterogeneous_pound_locals_follow_the_official_order() {
         assert!(report.contains(&ours.message), "{report}");
     }
 
-    // A defined-then-used local: 7.2 crashes with no message, so dygnosis
-    // stays quiet (the shock_paths bare-name crash precedent).
-    let source = fixture("quiet_het_pound_local.mod");
-    let model = parse(&source);
-    let diagnostics = analyze(&model);
-    assert!(
-        !diagnostics
-            .iter()
-            .any(|diag| diag.severity == dygnosis::Severity::Error),
-        "{diagnostics:?}"
-    );
+    // A defined-then-used local in one heterogeneous body is accepted.
+    quiet_file("quiet_het_pound_local.mod", binary.as_deref());
 }
 
 #[test]
@@ -806,5 +797,213 @@ fn installed_hank_example_keeps_written_view() {
     if let Some(ref binary) = binary {
         let (accepted, report) = official_check(&source, binary);
         assert!(accepted, "7.2 refused the installed example: {report}");
+    }
+}
+
+#[test]
+fn pound_locals_are_scoped_to_one_data_tree() {
+    let binary = pinned_binary();
+    // The same `#` name in the aggregate model and in each dimension is a
+    // different `AddLocalVariable` table. 7.2 accepts the file.
+    quiet_file("quiet_local_per_tree.mod", binary.as_deref());
+
+    // A use before every definition is `Unknown symbol`, even when a later
+    // tree defines the name. It is not the pound-LHS sentence.
+    let source = fixture("fire_e020_other_tree_local.mod");
+    let diagnostics = analyze(&parse(&source));
+    assert!(
+        diagnostics.iter().any(|diag| diag.code == "E020"),
+        "missing E020: {diagnostics:?}"
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diag| diag.code == "E025" || diag.code == "E030"),
+        "other-tree local must not be E025 or E030: {diagnostics:?}"
+    );
+    if let Some(ref binary) = binary {
+        let (accepted, report) = official_check(&source, binary);
+        assert!(!accepted);
+        assert!(report.contains("Unknown symbol: a"), "{report}");
+    }
+
+    // The pound-LHS refusal still fires inside the tree that defines the name,
+    // and the other tree's own definition is not a second declaration.
+    let source = fixture("fire_e025_same_tree_other_def.mod");
+    let diagnostics = analyze(&parse(&source));
+    let ours = diagnostics
+        .iter()
+        .find(|diag| diag.code == "E025")
+        .unwrap_or_else(|| panic!("missing E025: {diagnostics:?}"));
+    assert_eq!(
+        ours.message,
+        "a has wrong type or was already used on the right-hand side. You cannot use it on the left-hand side of a pound ('#') expression"
+    );
+    assert!(
+        !diagnostics.iter().any(|diag| diag.code == "E030"),
+        "cross-tree `#a` is not declared twice: {diagnostics:?}"
+    );
+    if let Some(ref binary) = binary {
+        let (accepted, report) = official_check(&source, binary);
+        assert!(!accepted);
+        assert!(report.contains(&ours.message), "{report}");
+    }
+
+    // A later tree that uses a local defined only in an earlier tree crashes
+    // with no ERROR sentence. Stay quiet.
+    let source = fixture("quiet_cross_tree_local_use.mod");
+    let diagnostics = analyze(&parse(&source));
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diag| diag.severity == dygnosis::Severity::Error
+                || diag.severity == dygnosis::Severity::Warning),
+        "{diagnostics:?}"
+    );
+    if let Some(ref binary) = binary {
+        let result = run_preprocessor(
+            &source,
+            binary,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Check,
+        );
+        let report = format!("{} {}", result.raw_stdout, result.raw_stderr);
+        assert!(report.contains("UnknownLocalVariableException"), "{report}");
+        assert!(!report.contains("ERROR:"), "{report}");
+    }
+}
+
+#[test]
+fn heterogeneous_only_model_still_checks_unused_names() {
+    let binary = pinned_binary();
+    // An unused heterogeneous endogenous is not in `endo_nbr`. Accepted.
+    quiet_file("quiet_unused_het_endo.mod", binary.as_deref());
+
+    let source = fixture("fire_e021_het_only.mod");
+    let diagnostics = analyze(&parse(&source));
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|diag| diag.severity == dygnosis::Severity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "{diagnostics:?}");
+    assert_eq!(errors[0].code, "E021");
+    assert_eq!(
+        errors[0].message,
+        "e2 not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior."
+    );
+    if let Some(ref binary) = binary {
+        let (accepted, report) = official_check(&source, binary);
+        assert!(!accepted);
+        assert!(report.contains(&errors[0].message), "{report}");
+    }
+
+    let source = fixture("fire_w022_het_only.mod");
+    let diagnostics = analyze(&parse(&source));
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diag| diag.severity == dygnosis::Severity::Error),
+        "{diagnostics:?}"
+    );
+    let ours = diagnostics
+        .iter()
+        .find(|diag| diag.code == "W022")
+        .unwrap_or_else(|| panic!("missing W022: {diagnostics:?}"));
+    assert_eq!(ours.message, "Parameter(s) p not used in the model");
+    if let Some(ref binary) = binary {
+        let (accepted, report) = official_check(&source, binary);
+        assert!(accepted, "{report}");
+        assert!(
+            report.contains("Parameter(s) p  not used in the model"),
+            "{report}"
+        );
+    }
+
+    let source = fixture("fire_w020_het_only.mod");
+    let diagnostics = analyze(&parse(&source));
+    let ours = diagnostics
+        .iter()
+        .find(|diag| diag.code == "W020")
+        .unwrap_or_else(|| panic!("missing W020: {diagnostics:?}"));
+    assert_eq!(
+        ours.message,
+        "Endogenous variable 'y' is declared but never referenced in the model block."
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diag| diag.severity == dygnosis::Severity::Error),
+        "{diagnostics:?}"
+    );
+    if let Some(ref binary) = binary {
+        let transform = run_preprocessor(
+            &source,
+            binary,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Transform,
+        );
+        let report = format!("{} {}", transform.raw_stdout, transform.raw_stderr);
+        assert!(!transform.success);
+        assert!(report.contains("y not used in the model block"), "{report}");
+    }
+}
+
+#[test]
+fn simulate_print_and_noprint_are_one_option() {
+    let binary = pinned_binary();
+    let source = fixture("fire_simulate_print_noprint.mod");
+    let diagnostics = analyze(&parse(&source));
+    let ours = diagnostics
+        .iter()
+        .find(|diag| diag.code == "E271")
+        .unwrap_or_else(|| panic!("missing E271: {diagnostics:?}"));
+    assert_eq!(ours.message, "option noprint declared twice");
+    assert_eq!(
+        &source[ours.span.start as usize..ours.span.end as usize],
+        "noprint"
+    );
+    if let Some(ref binary) = binary {
+        let (accepted, report) = official_check(&source, binary);
+        assert!(!accepted);
+        assert!(report.contains("option noprint declared twice"), "{report}");
+    }
+}
+
+#[test]
+fn count_warning_does_not_name_a_heterogeneous_use() {
+    let binary = pinned_binary();
+    let source = fixture("fire_w013_het_use.mod");
+    let diagnostics = analyze(&parse(&source));
+    let ours = diagnostics
+        .iter()
+        .find(|diag| diag.code == "W013")
+        .unwrap_or_else(|| panic!("missing W013: {diagnostics:?}"));
+    assert!(
+        ours.message
+            .contains("1 equation(s) but 2 endogenous variable(s)"),
+        "{}",
+        ours.message
+    );
+    assert!(
+        !ours.message.contains("remove z"),
+        "z is used in the heterogeneous body: {}",
+        ours.message
+    );
+    if let Some(ref binary) = binary {
+        let transform = run_preprocessor(
+            &source,
+            binary,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Transform,
+        );
+        let report = format!("{} {}", transform.raw_stdout, transform.raw_stderr);
+        assert!(!transform.success);
+        assert!(
+            report.contains("There are 1 equations but 2 endogenous variables!"),
+            "{report}"
+        );
     }
 }

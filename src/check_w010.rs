@@ -6,7 +6,7 @@ use crate::diagnostic::{Diagnostic, Severity};
 use crate::expr::{BinOp, ExprId, ExprKind, UnOp};
 use crate::intern::Name;
 use crate::lexer::{tokenize, TokenKind};
-use crate::model::{Assignment, Equation, Model};
+use crate::model::{Assignment, Decl, Equation, Model};
 use crate::span::{LineIndex, Span};
 
 const RUN_COMMANDS: &[&str] = &[
@@ -124,17 +124,19 @@ pub fn check_w012(model: &Model) -> Vec<Diagnostic> {
 }
 
 pub fn check_w020(model: &Model) -> Vec<Diagnostic> {
-    let has_static = model
-        .equations
-        .iter()
-        .any(|eq| !eq.is_local && !eq.dynamic_tag);
+    let has_static = written_model_equations(model).any(|eq| !eq.is_local && !eq.dynamic_tag);
     if !has_static {
         return Vec::new();
     }
     let referenced = model_and_het_eq_refs(model);
+    // `findUnusedEndogenous` collects `SymbolType::endogenous` only. A
+    // heterogeneous endogenous that nothing uses is accepted.
     unused_decls(
         model,
-        &model.endogenous,
+        model
+            .endogenous
+            .iter()
+            .filter(|decl| decl.heterogeneity.is_none()),
         &referenced,
         "W020",
         Severity::Warning,
@@ -144,7 +146,7 @@ pub fn check_w020(model: &Model) -> Vec<Diagnostic> {
 }
 
 pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
-    if model.equations.is_empty() {
+    if !has_written_model(model) {
         return Vec::new();
     }
     // The official unused-exogenous check counts a heterogeneous body as a use
@@ -186,7 +188,7 @@ pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
 }
 
 pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
-    if model.equations.is_empty() {
+    if !has_written_model(model) {
         return Vec::new();
     }
     let mut referenced = model_and_het_eq_refs(model);
@@ -373,9 +375,22 @@ fn model_and_het_eq_refs(model: &Model) -> HashSet<Name> {
     refs
 }
 
-fn unused_decls(
+fn has_written_model(model: &Model) -> bool {
+    written_model_equations(model).next().is_some()
+}
+
+fn written_model_equations(model: &Model) -> impl Iterator<Item = &Equation> {
+    model.equations.iter().chain(
+        model
+            .heterogeneous_models
+            .iter()
+            .flat_map(|block| block.equations.iter()),
+    )
+}
+
+fn unused_decls<'a>(
     model: &Model,
-    decls: &[crate::model::Decl],
+    decls: impl IntoIterator<Item = &'a Decl>,
     referenced: &HashSet<Name>,
     code: &str,
     severity: Severity,
