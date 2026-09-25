@@ -135,15 +135,9 @@ fn assert_linear_code(id: &str, needle: &str, code: &str) {
     let want = range_of(&src, needle);
     let matched: Vec<_> = rust
         .iter()
-        .filter(|d| {
-            d.code == code && (d.start_line, d.start_char, d.end_line, d.end_char) == want
-        })
+        .filter(|d| d.code == code && (d.start_line, d.start_char, d.end_line, d.end_char) == want)
         .collect();
-    assert_eq!(
-        matched.len(),
-        1,
-        "{id} {code} at {needle:?}, got {rust:?}"
-    );
+    assert_eq!(matched.len(), 1, "{id} {code} at {needle:?}, got {rust:?}");
 }
 
 fn assert_w140_quiet(id: &str, rel: &str) {

@@ -11,7 +11,8 @@ const E201_MSG: &str = "At least one model equation must be declared!";
 const E205_MSG: &str = "A .mod file cannot contain both one of {perfect_foresight_solver, simul, perfect_foresight_with_expectation_errors_solver} and one of {stoch_simul, estimation, osr, ramsey_policy, discretionary_policy}. This is not possible: one cannot mix perfect foresight context with stochastic context in the same file.";
 const E206_MSG: &str = "In 'model' block, 'use_dll' option is not compatible with 'bytecode'";
 const E207_MSG: &str = "no_static option is incompatible with stoch_simul, estimation, osr, ramsey_policy, discretionary_policy, steady and check commands";
-const E213_MSG: &str = "A 'perfect_foresight_setup' command must come before 'perfect_foresight_solver'";
+const E213_MSG: &str =
+    "A 'perfect_foresight_setup' command must come before 'perfect_foresight_solver'";
 const E214_MSG: &str = "A 'perfect_foresight_with_expectation_errors_setup' command must come before 'perfect_foresight_with_expectation_errors_solver'";
 const E216_MSG: &str = "the 'periods' option of 'extended_path' is mandatory";
 
@@ -46,7 +47,9 @@ pub fn check_context(model: &Model) -> Vec<Diagnostic> {
     }
 
     if model.no_static_span.is_some()
-        && (model.is_stochastic_context() || model.check_span.is_some() || model.steady_span.is_some())
+        && (model.is_stochastic_context()
+            || model.check_span.is_some()
+            || model.steady_span.is_some())
     {
         let span = model.no_static_span.unwrap_or(FALLBACK);
         push(&mut out, span, "E207", E207_MSG);
@@ -138,7 +141,10 @@ fn mix_span(model: &Model) -> Option<Span> {
     {
         stoch.push(span);
     }
-    if model.policy_commands.contains(&crate::model::PolicyCommand::Osr) {
+    if model
+        .policy_commands
+        .contains(&crate::model::PolicyCommand::Osr)
+    {
         if let Some(s) = model.policy_command_span {
             stoch.push(s);
         }

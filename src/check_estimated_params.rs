@@ -204,10 +204,7 @@ fn decl_target(model: &Model, entry: &EstimatedParam) -> String {
     match entry.kind {
         EstimatedParamKind::Corr => {
             let a = model.name(entry.name);
-            let b = entry
-                .corr_with
-                .map(|n| model.name(n))
-                .unwrap_or("");
+            let b = entry.corr_with.map(|n| model.name(n)).unwrap_or("");
             format!("correlation between {a} and {b}")
         }
         EstimatedParamKind::Skew => format!("skewness of {}", model.name(entry.name)),

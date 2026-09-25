@@ -41,6 +41,7 @@ pub mod equations;
 pub mod expand;
 pub mod explain;
 pub mod expr;
+pub(crate) mod extract;
 pub mod format;
 pub mod include_resolver;
 pub mod intern;
