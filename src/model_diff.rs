@@ -63,6 +63,9 @@ pub struct WrittenPeriod {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ShockSetting {
     pub block: String,
+    /// Heterogeneity dimension for a `shocks(heterogeneity=…)` row. Absent on ordinary shocks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heterogeneity: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub domain: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -308,6 +311,8 @@ enum DateKey {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ShockBucket {
     Stochastic,
+    /// Covariance matrix `M_.heterogeneity(d).Sigma_e` for one dimension name.
+    Heterogeneous(String),
     Skew(String),
     Deterministic,
     Surprise,
@@ -332,6 +337,7 @@ impl ShockInstruction {
             && self.role == other.role
             && self.target == other.target
             && self.setting.block == other.setting.block
+            && self.setting.heterogeneity == other.setting.heterogeneity
             && self.setting.group == other.setting.group
             && self.setting.group_explicit == other.setting.group_explicit
             && self.setting.measure == other.setting.measure
@@ -345,12 +351,13 @@ impl ShockInstruction {
             && self.setting.status == other.setting.status
     }
 
-    fn pairing_key(&self) -> (&str, &str, &str, Option<&str>) {
+    fn pairing_key(&self) -> (&str, &str, &str, Option<&str>, Option<&str>) {
         (
             self.form,
             self.role,
             &self.target,
             self.setting.group.as_deref(),
+            self.setting.heterogeneity.as_deref(),
         )
     }
 }
@@ -698,6 +705,7 @@ fn base_shock_setting(
         learnt_in.map(|(point, written_span)| written_period(model, point, written_span));
     ShockSetting {
         block: block.into(),
+        heterogeneity: None,
         domain: None,
         written_target: None,
         group: None,
@@ -743,9 +751,7 @@ fn shock_instructions(
 ) -> Vec<ShockInstruction> {
     let mut blocks = Vec::new();
     for block in &model.shock_blocks {
-        if block.kind != ShockBlockKind::Heterogeneous {
-            blocks.push((block.span.start, ShockBlockRef::Shocks(block)));
-        }
+        blocks.push((block.span.start, ShockBlockRef::Shocks(block)));
     }
     for block in &model.shock_paths {
         blocks.push((block.span.start, ShockBlockRef::Path(block)));
@@ -783,6 +789,64 @@ fn mark_superseded(out: &mut [ShockInstruction], mut applies: impl FnMut(&ShockB
     }
 }
 
+/// `HeterogeneousShocksStatement::writeOutput` zeros `M_.heterogeneity(d).Sigma_e`
+/// only when `overwrite` is set, then writes this block. Other dimensions and
+/// ordinary `M_.Sigma_e` are left alone. An empty overwrite block is that
+/// dimension's reset.
+fn append_heterogeneous_shock_block(
+    out: &mut Vec<ShockInstruction>,
+    model: &Model,
+    block: &ShockBlock,
+    source: Option<&VerifiedSource<'_>>,
+) {
+    let Some(dimension) = block
+        .options
+        .heterogeneity
+        .as_ref()
+        .map(|(name, _)| model.name(*name).to_string())
+    else {
+        return;
+    };
+    let bucket = ShockBucket::Heterogeneous(dimension.clone());
+    if block.options.overwrite {
+        mark_superseded(out, |existing| {
+            existing == &ShockBucket::Heterogeneous(dimension.clone())
+        });
+    }
+
+    let mut written = Vec::new();
+    for stmt in &block.stochastic {
+        if matches!(stmt.kind, ShockKind::Skew(_)) {
+            continue;
+        }
+        let mut item = stochastic_instruction(model, stmt, &block.options, source);
+        item.setting.heterogeneity = Some(dimension.clone());
+        item.bucket = bucket.clone();
+        written.push(item);
+    }
+    written.sort_by_key(|item| item.span.start);
+    if written.is_empty() && block.options.overwrite {
+        let mut setting = base_shock_setting(
+            "shocks",
+            Some(&block.options),
+            None,
+            model,
+            block.span,
+            source,
+        );
+        setting.heterogeneity = Some(dimension);
+        out.push(ShockInstruction {
+            form: "shock_reset",
+            role: "reset",
+            target: "heterogeneous variance/covariance settings".into(),
+            setting,
+            bucket,
+            span: block.span,
+        });
+    }
+    out.extend(written);
+}
+
 fn block_learning(options: &ShockOptions) -> Option<(&PeriodPoint, Option<Span>)> {
     options
         .learnt_in
@@ -797,6 +861,10 @@ fn append_shock_block(
     source: Option<&VerifiedSource<'_>>,
 ) {
     let opts = &block.options;
+    if block.kind == ShockBlockKind::Heterogeneous {
+        append_heterogeneous_shock_block(out, model, block, source);
+        return;
+    }
     let block_name = match block.kind {
         ShockBlockKind::Multiplicative => "mshocks",
         ShockBlockKind::Surprise => "shocks(surprise)",
@@ -1509,7 +1577,15 @@ fn format_shock_change(change: &ShockSetupChange) -> String {
     let shown_target = setting
         .and_then(|setting| setting.written_target.as_deref())
         .unwrap_or(&change.target);
-    let prefix = format!("{} — {label}", markdown_escape(shown_target));
+    let dimension = setting.and_then(|setting| setting.heterogeneity.as_deref());
+    let prefix = match dimension {
+        Some(dimension) => format!(
+            "{} — {label} (heterogeneity {})",
+            markdown_escape(shown_target),
+            markdown_escape(dimension)
+        ),
+        None => format!("{} — {label}", markdown_escape(shown_target)),
+    };
     let detail = match (&change.before, &change.after) {
         (None, Some(after)) => format!("added: {}", setting_summary(after)),
         (Some(before), None) => format!("removed: {}", setting_summary(before)),
@@ -1721,6 +1797,13 @@ fn changed_setting_fields(before: &ShockSetting, after: &ShockSetting) -> Vec<St
             "form {} → {}",
             markdown_escape(&before.block),
             markdown_escape(&after.block)
+        ));
+    }
+    if before.heterogeneity != after.heterogeneity {
+        fields.push(format!(
+            "heterogeneity {} → {}",
+            markdown_optional(before.heterogeneity.as_deref()),
+            markdown_optional(after.heterogeneity.as_deref())
         ));
     }
     if before.domain != after.domain {
