@@ -4,8 +4,35 @@
 const SHOCKS_OVERWRITE: &str = "Regular shocks clear earlier deterministic schedules and variance, standard-error, covariance, correlation, and measurement-error settings; other skew rows remain. Surprise shocks replace earlier surprise shocks; learnt_in replaces shocks and mshocks for the same learning period.";
 const MSHOCKS_OVERWRITE: &str = "Clears earlier deterministic shocks; with learnt_in, replaces shocks and mshocks for the same learning period.";
 const LEARNT_IN: &str = "Integer period or date when agents learn this block's settings.";
+const HET_FILENAME: &str = "Path to the MAT file that holds the steady-state structure. Quote it when it has a path or an extension. If omitted, load the structure from the workspace variable named by variable.";
+const HET_VARIABLE: &str = "Name of the steady-state structure. With filename, the name inside the MAT file; without filename, a workspace variable. Default: steady_state.";
+pub(crate) const HETEROGENEITY_OPTION: &str = "Heterogeneity dimension name.";
 
 pub(crate) const FAMILY_COMMAND_HELP: &[(&str, &str)] = &[
+    (
+        "heterogeneity_dimension",
+        "Declare one or more heterogeneity dimension names.",
+    ),
+    (
+        "heterogeneity",
+        "Name the heterogeneity dimension on var, varexo, parameters, model, or shocks.",
+    ),
+    (
+        "heterogeneity_load_steady_state",
+        "Load a pre-computed heterogeneous steady state from a MAT file or a workspace variable.",
+    ),
+    (
+        "heterogeneity_compute_steady_state",
+        "Compute the heterogeneous steady state, optionally calibrating free parameters.",
+    ),
+    (
+        "heterogeneity_solve",
+        "Compute the linearized heterogeneous-agent solution.",
+    ),
+    (
+        "heterogeneity_simulate",
+        "Compute IRFs or a simulation for a heterogeneous-agent model.",
+    ),
     ("var_model", "Select tagged model equations to form a VAR auxiliary model."),
     ("trend_component_model", "Select tagged model equations and targets to form a trend component auxiliary model."),
     ("var_expectation_model", "Define a named forecast using a VAR or trend component auxiliary model."),
@@ -26,6 +53,10 @@ pub(crate) const FAMILY_OPERATOR_HELP: &[(&str, &str)] = &[
     (
         "pac_target_nonstationary",
         "Use the nonstationary part of a composite target from the named pac_model.",
+    ),
+    (
+        "SUM",
+        "Integral of one contemporaneous heterogeneous endogenous variable in an aggregate model equation.",
     ),
 ];
 
@@ -380,7 +411,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("calibration_target_equations", "List of aggregate equations to use as calibration targets."),
         ("calibration_tolf", "Convergence tolerance for the Broyden solver on aggregate residuals."),
         ("calibration_verbosity", "Verbosity level for calibration output."),
-        ("filename", "Name of the Excel file to write."),
+        ("filename", HET_FILENAME),
         ("forward_check_every", "Check distribution convergence every INTEGER iterations."),
         ("forward_max_iter", "Maximum number of forward iterations for the stationary distribution."),
         ("forward_tol", "Convergence tolerance for the stationary distribution (L1 norm)."),
@@ -395,26 +426,28 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("time_iteration_solver_tolx", "Tolerance on the step size for the trust-region solver."),
         ("time_iteration_tol", "Convergence tolerance on policy functions (sup-norm)."),
         ("time_iteration_verbosity", "Verbosity level for time iteration."),
-        ("variable", "When filename <filename = FILENAME> is provided, this is the variable name within the MAT file to load."),
+        ("variable", HET_VARIABLE),
     ]),
+    ("heterogeneity_dimension", &[]),
     ("heterogeneity_load_steady_state", &[
-        ("filename", "Name of the Excel file to write."),
-        ("tolf", "Convergence criterion for termination based on the function value."),
-        ("variable", "When filename <filename = FILENAME> is provided, this is the variable name within the MAT file to load."),
+        ("filename", HET_FILENAME),
+        ("tolf", "Tolerance for the residual check on aggregate equations. Default: 1e-6."),
+        ("variable", HET_VARIABLE),
     ]),
     ("heterogeneity_simulate", &[
-        ("drop", "Number of points (burn-in) dropped at the beginning of simulation before computing the summary statistics."),
-        ("graph_format", "graph_format = ( FORMAT, FORMAT..."),
+        ("drop", "Number of initial periods to drop."),
+        ("graph", "Same switch as nograph."),
+        ("graph_format", "Output format for the graphs."),
         ("irf", "Number of periods on which to compute the IRFs."),
         ("irf_plot_threshold", "Threshold size for plotting IRFs."),
         ("irf_shocks", "The exogenous variables for which to compute IRFs."),
         ("nodisplay", "Do not display the graphs, but still save them to disk (unless nograph is used)."),
-        ("nograph", ":noindex:"),
-        ("noprint", "Don’t print anything."),
+        ("nograph", "Suppresses graph generation."),
+        ("noprint", "Suppresses printing of results."),
         ("periods", "Number of periods of the simulation."),
-        ("print", "Print results (opposite of noprint)."),
-        ("relative_irf", "Requests the computation of normalized IRFs."),
-        ("tex", "Requests the printing of results and graphs in TeX tables and graphics that can be later directly included in LaTeX files."),
+        ("print", "Enables printing of results."),
+        ("relative_irf", "Requests IRFs as percentage deviations from steady state for a unit shock."),
+        ("tex", "Writes TeX for the IRF figures."),
     ]),
     ("heterogeneity_solve", &[
         ("truncation_horizon", "Time horizon for Jacobian computations."),
@@ -1264,6 +1297,7 @@ pub(crate) static COMMAND_OPTIONS: &[(&str, &[(&str, &str)])] = &[
         ("overwrite", "Replaces earlier shock_paths blocks and perfect_foresight_controlled_paths entries for the same learnt_in value."),
     ]),
     ("shocks", &[
+        ("heterogeneity", HETEROGENEITY_OPTION),
         ("learnt_in", LEARNT_IN),
         ("overwrite", SHOCKS_OVERWRITE),
         ("surprise", "Makes each specified temporary shock unanticipated by agents."),

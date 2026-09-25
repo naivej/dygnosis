@@ -1,5 +1,5 @@
 {
-  "n_commands": 88,
+  "n_commands": 89,
   "commands": [
     "bvar_density",
     "bvar_forecast",
@@ -21,6 +21,7 @@
     "forecast",
     "generate_irfs",
     "heterogeneity_compute_steady_state",
+    "heterogeneity_dimension",
     "heterogeneity_load_steady_state",
     "heterogeneity_simulate",
     "heterogeneity_solve",

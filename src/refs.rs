@@ -70,8 +70,8 @@ pub fn rename_in_text(src: &str, old: &str, new: &str) -> String {
     out
 }
 
-/// Command name if `byte_offset` sits inside a known command's parenthesised option list.
-pub fn option_command_at(src: &str, byte_offset: u32) -> Option<String> {
+/// Identifier immediately before the parenthesis that contains `byte_offset`.
+pub fn option_owner_at(src: &str, byte_offset: u32) -> Option<String> {
     let tokens = tokenize(src);
     let mut owners: Vec<String> = Vec::new();
     let mut last_ident: Option<String> = None;
@@ -104,9 +104,16 @@ pub fn option_command_at(src: &str, byte_offset: u32) -> Option<String> {
     }
     let cmd = owners.last()?;
     if cmd.is_empty() {
-        return None;
+        None
+    } else {
+        Some(cmd.clone())
     }
-    if crate::catalog::is_known_command(cmd) {
+}
+
+/// Command name if `byte_offset` sits inside a known command's parenthesised option list.
+pub fn option_command_at(src: &str, byte_offset: u32) -> Option<String> {
+    let cmd = option_owner_at(src, byte_offset)?;
+    if crate::catalog::is_known_command(&cmd) {
         Some(cmd.to_ascii_lowercase())
     } else {
         None

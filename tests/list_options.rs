@@ -177,6 +177,112 @@ fn semi_structural_family_matches_dynare_72_options() {
 }
 
 #[test]
+fn heterogeneity_family_matches_dynare_72_options() {
+    for (command, expected) in [
+        (
+            "heterogeneity_load_steady_state",
+            vec!["filename", "tolf", "variable"],
+        ),
+        ("heterogeneity_solve", vec!["truncation_horizon"]),
+        (
+            "heterogeneity_simulate",
+            vec![
+                "drop",
+                "graph",
+                "graph_format",
+                "irf",
+                "irf_plot_threshold",
+                "irf_shocks",
+                "nodisplay",
+                "nograph",
+                "noprint",
+                "periods",
+                "print",
+                "relative_irf",
+                "tex",
+            ],
+        ),
+        (
+            "heterogeneity_compute_steady_state",
+            vec![
+                "calibration_max_iter",
+                "calibration_target_equations",
+                "calibration_tolf",
+                "calibration_verbosity",
+                "filename",
+                "forward_check_every",
+                "forward_max_iter",
+                "forward_tol",
+                "forward_verbosity",
+                "time_iteration_early_stopping",
+                "time_iteration_learning_rate",
+                "time_iteration_max_iter",
+                "time_iteration_solver_factor",
+                "time_iteration_solver_max_iter",
+                "time_iteration_solver_stop_on_error",
+                "time_iteration_solver_tolf",
+                "time_iteration_solver_tolx",
+                "time_iteration_tol",
+                "time_iteration_verbosity",
+                "variable",
+            ],
+        ),
+    ] {
+        assert_eq!(option_names(command), expected, "{command}");
+        assert!(
+            command_options(command)
+                .iter()
+                .all(|(_, description)| !description.is_empty()),
+            "{command} has an option without help"
+        );
+    }
+    let variable = command_options("heterogeneity_load_steady_state")
+        .iter()
+        .find(|(name, _)| *name == "variable")
+        .unwrap()
+        .1;
+    assert_ne!(variable, option_doc("variable"));
+    assert!(variable.contains("workspace"));
+    assert!(command_options("heterogeneity_load_steady_state")
+        .iter()
+        .find(|(name, _)| *name == "filename")
+        .unwrap()
+        .1
+        .contains("MAT file"));
+    let print = command_options("heterogeneity_simulate")
+        .iter()
+        .find(|(name, _)| *name == "print")
+        .unwrap()
+        .1;
+    let noprint = command_options("heterogeneity_simulate")
+        .iter()
+        .find(|(name, _)| *name == "noprint")
+        .unwrap()
+        .1;
+    assert!(!print.to_ascii_lowercase().contains("invalid"));
+    assert!(!noprint.to_ascii_lowercase().contains("invalid"));
+    assert!(is_known_command("heterogeneity_dimension"));
+    assert!(command_options("heterogeneity_dimension").is_empty());
+    assert!(!is_known_command("SUM"));
+    assert!(!is_known_command("heterogeneity"));
+    assert!(option_names("shocks").contains(&"heterogeneity"));
+    assert_eq!(
+        command_options("shocks")
+            .iter()
+            .find(|(name, _)| *name == "heterogeneity")
+            .unwrap()
+            .1,
+        "Heterogeneity dimension name."
+    );
+    for command in ["mshocks", "var_model", "stoch_simul"] {
+        assert!(
+            !option_names(command).contains(&"heterogeneity"),
+            "{command}"
+        );
+    }
+}
+
+#[test]
 fn occbin_constraints_is_catalogued_block() {
     assert!(is_known_command("occbin_constraints"));
     assert!(is_known_command("OCCBIN_CONSTRAINTS"));
@@ -208,7 +314,7 @@ fn occbin_constraints_is_catalogued_block() {
     assert_eq!(upper, payload);
 
     let omitted = to_value(list_options(None));
-    assert_eq!(omitted["n_commands"], 88);
+    assert_eq!(omitted["n_commands"], 89);
     let i = omitted["commands"]
         .as_array()
         .unwrap()
@@ -534,7 +640,10 @@ fn overwrite_docs_match_each_block() {
 #[test]
 fn pinned_72_shock_and_date_catalog_has_only_opener_options() {
     for (command, expected) in [
-        ("shocks", vec!["learnt_in", "overwrite", "surprise"]),
+        (
+            "shocks",
+            vec!["heterogeneity", "learnt_in", "overwrite", "surprise"],
+        ),
         (
             "mshocks",
             vec!["learnt_in", "overwrite", "relative_to_initval"],
@@ -583,7 +692,7 @@ fn pinned_72_shock_and_date_catalog_has_only_opener_options() {
     ] {
         assert!(!option_doc(option).is_empty(), "{option}");
     }
-    assert!(!option_names("shocks").contains(&"heterogeneity"));
+    assert!(option_names("shocks").contains(&"heterogeneity"));
     assert!(!option_names("mshocks").contains(&"surprise"));
     assert!(!option_names("shock_paths").contains(&"relative_to_initval"));
     for body_word in ["periods", "values", "scales", "exogenize", "endogenize"] {
