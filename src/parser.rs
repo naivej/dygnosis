@@ -882,21 +882,6 @@ fn closed_tex_name(raw: &str) -> Option<String> {
     Some(inner.to_string())
 }
 
-/// Contents of a closed quoted string. The quotes are not part of the metadata.
-fn unquoted_string(raw: &str) -> Option<String> {
-    let mut chars = raw.chars();
-    let open = chars.next()?;
-    if open != '\'' && open != '"' {
-        return None;
-    }
-    let mut body: String = chars.collect();
-    if !body.ends_with(open) {
-        return None;
-    }
-    body.pop();
-    Some(body)
-}
-
 fn is_ident_only(s: &str) -> bool {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
