@@ -267,6 +267,42 @@
       "notes": "invalid ident c-x ; auto_fix noop"
     },
     {
+      "id": "e001_non_ascii_trailing",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/non_ascii_trailing.mod",
+      "source": "e001.rs::e001_non_ascii_trailing_declaration",
+      "cluster": "e001/non_ascii_trailing.mod",
+      "notes": "trailing non-ASCII declaration character"
+    },
+    {
+      "id": "e001_non_ascii_ident",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/non_ascii_ident.mod",
+      "source": "e001.rs::e001_non_ascii_identifier",
+      "cluster": "e001/non_ascii_ident.mod",
+      "notes": "entirely non-ASCII declaration name"
+    },
+    {
+      "id": "e001_unicode_display_quiet",
+      "codes": [
+        "E001"
+      ],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/unicode_display_quiet.mod",
+      "source": "e001.rs::e001_unicode_display_and_complementarity_stay_quiet",
+      "cluster": "e001/unicode_display_quiet.mod",
+      "notes": "unicode comments, long_name, TeX, equation name"
+    },
+    {
       "id": "e001_reserved_log",
       "codes": [
         "E001"

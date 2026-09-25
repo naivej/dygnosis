@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.0
+
+- A non-ASCII character in a declaration name (a trailing accent in `var café;`, or an entirely non-ASCII name) is `E001` with Dynare's `character unrecognized by lexer`. Unicode comments, `long_name`, TeX names, and equation-name strings stay accepted, as does the complementarity operator.
+
 ## v0.9.0
 
 - Reads Dynare 7.2 heterogeneity dimensions, declarations, model blocks, shock rows, and the four heterogeneity commands while keeping aggregate and heterogeneous equations separate.

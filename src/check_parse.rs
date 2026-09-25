@@ -918,9 +918,106 @@ fn invalid_ident_diags(model: &Model, tokens: &[Token], index: &LineIndex) -> Ve
             t += 1;
         }
         flush_invalid_runs(src, tokens, &kept, &mut out);
+        push_unrecognized_decl_gaps(src, tokens, body_start_i, k, &mut out);
         i = k + 1;
     }
     out
+}
+
+/// Non-ASCII characters the lexer skips inside a declaration list. Dynare's
+/// `<*>.` rule refuses them with `character unrecognized by lexer` and does not
+/// return. Comments, parenthesized options, and `$…$` TeX are not part of the
+/// name. The character is not tokenized, so it is not a new identifier surface.
+fn push_unrecognized_decl_gaps(
+    src: &str,
+    tokens: &[Token],
+    body_start: usize,
+    semi: usize,
+    out: &mut Vec<Diagnostic>,
+) {
+    if body_start == 0 || semi >= tokens.len() {
+        return;
+    }
+    let mut prev_end = tokens[body_start - 1].span.end;
+    let mut t = body_start;
+    while t < semi {
+        if tokens[t].kind == TokenKind::Latex {
+            push_unrecognized_gap(src, prev_end, tokens[t].span.start, out);
+            prev_end = tokens[t].span.end;
+            t += 1;
+            continue;
+        }
+        if tokens[t].kind == TokenKind::LParen {
+            push_unrecognized_gap(src, prev_end, tokens[t].span.start, out);
+            let next = skip_balanced(tokens, t, TokenKind::LParen, TokenKind::RParen);
+            if next == t {
+                break;
+            }
+            prev_end = tokens[next - 1].span.end;
+            t = next;
+            continue;
+        }
+        push_unrecognized_gap(src, prev_end, tokens[t].span.start, out);
+        prev_end = tokens[t].span.end;
+        t += 1;
+    }
+    push_unrecognized_gap(src, prev_end, tokens[semi].span.start, out);
+}
+
+fn push_unrecognized_gap(src: &str, from: u32, to: u32, out: &mut Vec<Diagnostic>) {
+    let end = to as usize;
+    let mut i = from as usize;
+    if i > end || end > src.len() {
+        return;
+    }
+    while i < end {
+        let rest = &src[i..end];
+        if rest.starts_with("//") || rest.starts_with('%') {
+            while i < end && !src[i..].starts_with('\n') {
+                i += src[i..].chars().next().map(char::len_utf8).unwrap_or(1);
+            }
+            continue;
+        }
+        if rest.starts_with("/*") {
+            if let Some(rel) = src[i + 2..end].find("*/") {
+                i = i + 2 + rel + 2;
+            } else {
+                i = end;
+            }
+            continue;
+        }
+        let Some(ch) = src[i..].chars().next() else {
+            break;
+        };
+        let len = ch.len_utf8();
+        if i + len > end {
+            break;
+        }
+        if ch.is_ascii() {
+            i += len;
+            continue;
+        }
+        let run_start = i;
+        i += len;
+        while i < end {
+            let Some(c) = src[i..].chars().next() else {
+                break;
+            };
+            let n = c.len_utf8();
+            if i + n > end || c.is_ascii() {
+                break;
+            }
+            i += n;
+        }
+        out.push(e001(
+            Span {
+                start: run_start as u32,
+                end: i as u32,
+            },
+            "character unrecognized by lexer".to_string(),
+            None,
+        ));
+    }
 }
 
 fn is_dynare_ident(s: &str) -> bool {

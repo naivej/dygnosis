@@ -10,7 +10,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 
 | Folder | Open this when you want |
 |--------|--------------------------|
-| `e001/` | a file that does not parse (missing `end;`, missing `;`, a keyword typo, a declared variable named after a block opener). Auto-fix uses these too. The `opener_var_*` group is 0.6.0 06: a declared opener name is a legal symbol (quiet files), and the fire files are the shapes 7.1 refuses. `opener_var_declared_bare_row*.mod` is the `declared_before` clause on its own; `opener_var_end_no_semi.mod` is an `end` written without its `;`. `opener_var_reserved_ident.mod` is `var y end;`, a declaration 7.1 accepts at check. |
+| `e001/` | a file that does not parse (missing `end;`, missing `;`, a keyword typo, a declared variable named after a block opener, a non-ASCII declaration name). Auto-fix uses these too. The `opener_var_*` group is 0.6.0 06: a declared opener name is a legal symbol (quiet files), and the fire files are the shapes 7.1 refuses. `opener_var_declared_bare_row*.mod` is the `declared_before` clause on its own; `opener_var_end_no_semi.mod` is an `end` written without its `;`. `opener_var_reserved_ident.mod` is `var y end;`, a declaration 7.1 accepts at check. `non_ascii_trailing.mod` and `non_ascii_ident.mod` are the declaration characters Dynare's lexer refuses; `unicode_display_quiet.mod` keeps those characters in comments, `long_name`, TeX, and an equation name. |
 | `e010/` | too many or too few equations vs variables, including Ramsey/discretionary −N |
 | `e020/` | a name used in the model that was never declared |
 | `e030/` | the same name declared twice (for example `var` and `varexo`) |

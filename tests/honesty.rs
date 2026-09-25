@@ -35,6 +35,26 @@ struct HonestyRow {
 const HONESTY_FIRE: &[HonestyRow] = &[
     HonestyRow {
         code: "E001",
+        fixture: "e001/non_ascii_trailing.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "character unrecognized by lexer",
+        our_needle: "character unrecognized by lexer",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "e001/non_ascii_ident.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "character unrecognized by lexer",
+        our_needle: "character unrecognized by lexer",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
         fixture: "e001/delete_model_end.mod",
         kind: HonestyKind::Error {
             workspace_only: false,
@@ -5388,6 +5408,25 @@ fn same_ground_warning_absent_on_quiet_archive() {
             own.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
         );
     }
+}
+
+#[test]
+fn unicode_display_accepted_at_check() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    let path = fixture("e001/unicode_display_quiet.mod");
+    let path_str = path.to_str().expect("utf-8 path");
+    let text = read_path(&path);
+    let result = spawn(&text, &path, &pp, JsonStage::Check);
+    assert!(
+        result.success,
+        "unicode display should be accepted: {:?}",
+        result.diagnostics
+    );
+    assert_no_error(&check_file(&text, path_str), "unicode display check_file");
+    assert_no_error(&analyze(&parse(&text)), "unicode display analyze()");
 }
 
 #[test]

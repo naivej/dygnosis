@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use dygnosis::lexer::{tokenize, TokenKind};
 use dygnosis::span::LineIndex;
 use dygnosis::{analyze, auto_fix, check_parse, has_structural_error, parse, Severity, TextEdit};
 
@@ -344,6 +345,50 @@ fn e001_invalid_ident_c_minus_x() {
         "Invalid Dynare identifier 'c-x'",
         "c-x",
     );
+}
+
+#[test]
+fn e001_non_ascii_trailing_declaration() {
+    assert_fire(
+        "e001/non_ascii_trailing.mod",
+        "character unrecognized by lexer",
+        "é",
+    );
+}
+
+#[test]
+fn e001_non_ascii_identifier() {
+    assert_fire(
+        "e001/non_ascii_ident.mod",
+        "character unrecognized by lexer",
+        "日本",
+    );
+}
+
+#[test]
+fn e001_unicode_display_and_complementarity_stay_quiet() {
+    let text = check_mod("e001/unicode_display_quiet.mod");
+    let got = rust_e001(&text);
+    assert!(
+        got.is_empty(),
+        "unicode comments, long_name, TeX, and equation names must stay quiet, got {got:?}"
+    );
+    for rel in ["occbin/perp.mod", "p_hank/quiet_perp_spellings.mod"] {
+        let body = check_mod(rel);
+        let diags = rust_e001(&body);
+        assert!(
+            diags
+                .iter()
+                .all(|d| !d.message.contains("character unrecognized by lexer")),
+            "{rel} must keep the complementarity operator, got {diags:?}"
+        );
+    }
+    let kinds = tokenize("y = 1 ⟂ x _|_ z;");
+    let perp = kinds
+        .iter()
+        .filter(|t| t.kind == TokenKind::Perpendicular)
+        .count();
+    assert_eq!(perp, 2, "both complementarity spellings stay tokens");
 }
 
 #[test]
