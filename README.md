@@ -46,7 +46,7 @@ Limitations by design
 |------|---------|
 | `dynare_diagnose` | Full diagnostics |
 | `dynare_model_info` | Names, counts, timing, block flags |
-| `dynare_compare_models` | Diff names, parameter values, equations (by name and tags), and written shock setup |
+| `dynare_compare_models` | Diff names, symbol kind and metadata, parameter values, equations (by name and tags), and written shock setup |
 | `dynare_find_references` | Uses of a name |
 | `dynare_rename` | Rename a name |
 | `dynare_auto_fix` | Stored fixes, one file |

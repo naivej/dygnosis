@@ -14,6 +14,8 @@ pub struct Decl {
     pub name: Name,
     pub span: Span,
     pub long_name: Option<String>,
+    /// Text inside a written `$…$` after this name. Absent when none was written.
+    pub tex_name: Option<String>,
     pub log_transform: bool,
     /// `heterogeneity=<symbol>` on the declaration: the dimension name and the
     /// value identifier's span.

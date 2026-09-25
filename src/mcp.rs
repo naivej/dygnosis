@@ -1374,7 +1374,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_compare_models",
-        description = "Compare two .mod files by names, calibrations, equations (names and tags), and written shock setup."
+        description = "Compare two .mod files by names, symbol kind and metadata, calibrations, equations (names and tags), and written shock setup."
     )]
     fn compare_models_tool(
         &self,

@@ -26,7 +26,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 | `format/` | ugly spacing / macros / `verbatim`. Pair is `name.mod` plus `name.formatted.mod`. No `// inventory:` line. |
 | `check_dir/` | a tree for `dygnosis check DIR` (recurse `*.mod`, skip `+` directories; explicit `.inc` still as FILE) |
 | `equations/` | counted equation object (library reader + MCP duplicate `[name=]` tag) |
-| `compare/` | aggregate equation compare pairs (names, tags, regimes). No `// inventory:` line. |
+| `compare/` | aggregate equation compare pairs (names, tags, regimes) and symbol kind or metadata pairs. No `// inventory:` line. |
 | `lsp/` | document-symbol outline (timing-class groups; empty group omitted) |
 | `companions/` | related files next to a `.mod` (convention SS / run script, catalog `datafile` / `mode_file`, leftover quotes, ident helpers). Named unresolved fire W160; sibling `_steadystate.m` quiets I050. |
 | `expand/` | library `expand_report` (effective text + origin map). Not a diagnostic. |

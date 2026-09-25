@@ -876,6 +876,27 @@ fn is_flag_word(word: &Option<String>, flag: &str) -> bool {
         .is_some_and(|lex| lex.eq_ignore_ascii_case(flag))
 }
 
+/// Inner text of a closed `$…$` token. An unclosed `$` is not a TeX name.
+fn closed_tex_name(raw: &str) -> Option<String> {
+    let inner = raw.strip_prefix('$')?.strip_suffix('$')?;
+    Some(inner.to_string())
+}
+
+/// Contents of a closed quoted string. The quotes are not part of the metadata.
+fn unquoted_string(raw: &str) -> Option<String> {
+    let mut chars = raw.chars();
+    let open = chars.next()?;
+    if open != '\'' && open != '"' {
+        return None;
+    }
+    let mut body: String = chars.collect();
+    if !body.ends_with(open) {
+        return None;
+    }
+    body.pop();
+    Some(body)
+}
+
 fn is_ident_only(s: &str) -> bool {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
@@ -1106,15 +1127,25 @@ impl Parser<'_> {
             }
         }
         let kw_range_end = self.current_start();
-        let mut decls = Vec::new();
+        let mut decls: Vec<Decl> = Vec::new();
         let mut recorded_missing = false;
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
             if self.at(TokenKind::Latex) {
-                self.bump();
+                let tok = self.bump();
+                if let Some(tex) = closed_tex_name(self.lexeme(&tok)) {
+                    if let Some(decl) = decls.last_mut() {
+                        decl.tex_name = Some(tex);
+                    }
+                }
                 continue;
             }
             if self.at(TokenKind::LParen) {
-                self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                let long_name = self.parse_symbol_long_name();
+                if let Some(long_name) = long_name {
+                    if let Some(decl) = decls.last_mut() {
+                        decl.long_name = Some(long_name);
+                    }
+                }
                 continue;
             }
             if self.at(TokenKind::Comma) {
@@ -1164,6 +1195,7 @@ impl Parser<'_> {
                     name: id,
                     span: tok.span,
                     long_name: None,
+                    tex_name: None,
                     log_transform,
                     heterogeneity,
                 });
@@ -1206,6 +1238,42 @@ impl Parser<'_> {
             }
         }
         decls
+    }
+
+    /// Per-symbol `(long_name='…', …)`. The last `long_name` wins. Other keys are ignored.
+    fn parse_symbol_long_name(&mut self) -> Option<String> {
+        self.bump();
+        let mut depth = 1;
+        let mut long_name = None;
+        while !self.at(TokenKind::Eof) && depth > 0 {
+            if self.at(TokenKind::LParen) {
+                depth += 1;
+                self.bump();
+                continue;
+            }
+            if self.at(TokenKind::RParen) {
+                depth -= 1;
+                self.bump();
+                continue;
+            }
+            if depth == 1
+                && self.at(TokenKind::Ident)
+                && self.lexeme(&self.tokens[self.i]) == "long_name"
+                && self.peek_kind(1) == Some(TokenKind::Eq)
+                && self.peek_kind(2) == Some(TokenKind::String)
+            {
+                self.bump();
+                self.bump();
+                let tok = self.bump();
+                let raw = self.lexeme(&tok).to_string();
+                if let Some(text) = unquoted_string(&raw) {
+                    long_name = Some(text);
+                }
+                continue;
+            }
+            self.bump();
+        }
+        long_name
     }
 
     /// `var(?)` option list: `log`, `deflator=`, `log_deflator=`, other `=value`s
