@@ -4,9 +4,10 @@
 
 - A non-ASCII character in a declaration name (a trailing accent in `var café;`, or an entirely non-ASCII name) is `E001` with Dynare's `character unrecognized by lexer`. Unicode comments, `long_name`, TeX names, and equation-name strings stay accepted, as does the complementarity operator.
 - An Added Warning can be silenced with `// dygnosis:disable CODE` on its line, `// dygnosis:disable-next-line CODE` on the line above, or `// dygnosis:disable-file CODE` for that file. Several codes go on one comment, separated by commas. `vsd:disable` and `vsd:disable-file` still work. The same comment is honored by the editor, `dygnosis check`, `dynare_diagnose`, and stored fixes. Errors, Information, and warnings Dynare itself reports are unchanged.
-- Information notes `I208`, `I209`, and `I210` summarize missing equation `name` tags, missing declaration `long_name`s, and numeric literals written in model equations. Each note is one count for the compilation unit. They are writing preferences, not Dynare refusals, and a disable comment does not silence them.
+- Information codes `I208`, `I209`, and `I210` summarize missing equation `name` tags, missing declaration `long_name`s, and numeric literals written in model equations. Each note is one count for the compilation unit. They are writing preferences, not Dynare refusals, and a disable comment does not silence them.
 - Compare pairs aggregate equations by name first. A unique name pairs across reordering; a repeated name pairs only when the normalized text and tags match. Equation rows include each side's name and tags, and `unmatched_same_name` groups leftovers that still share a name.
 - Removes parameter-value inlay hints and the model-counts code lens. Folded assignment values stay on hover and in compare. Counts stay in `dynare_model_info`.
+- `dynare_format` formats a `.mod` file with the same rules as the editor. It returns the full text when the formatting changes, and reports when the file is already formatted or cannot be formatted. `formatIndent` is `tab` or 1–8 spaces, as in the editor.
 
 ## v0.9.0
 

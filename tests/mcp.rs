@@ -6,10 +6,10 @@ use dygnosis::span::{LineIndex, Position};
 use dygnosis::{
     analyze, auto_fix, check_e060, check_e061, check_w061, check_w160, count_gap, dynare_auto_fix,
     dynare_compare_models, dynare_diagnose, dynare_equations, dynare_expand, dynare_explain,
-    dynare_find_references, dynare_list_diagnostic_codes, dynare_list_options, dynare_model_info,
-    dynare_related_files, dynare_rename, explain_equation, has_structural_error, parse, quiet_i050,
-    registered_tool_names, tools_list_json, Diagnostic, McpReference, McpWorkspaceReference,
-    Workspace,
+    dynare_find_references, dynare_format, dynare_list_diagnostic_codes, dynare_list_options,
+    dynare_model_info, dynare_related_files, dynare_rename, explain_equation, has_structural_error,
+    parse, quiet_i050, registered_tool_names, tools_list_json, Diagnostic, McpReference,
+    McpWorkspaceReference, Workspace,
 };
 use serde_json::{json, Value};
 
@@ -26,6 +26,7 @@ const RUST_TOOLS: &[&str] = &[
     "dynare_equations",
     "dynare_related_files",
     "dynare_expand",
+    "dynare_format",
 ];
 
 const DROPPED_TOOLS: &[&str] = &[
@@ -497,17 +498,18 @@ fn rename_map(value: Value) -> HashMap<String, String> {
 }
 
 #[test]
-fn registered_tools_are_twelve() {
+fn registered_tools_include_format() {
     let names = registered_tool_names();
     assert_eq!(names, RUST_TOOLS);
-    assert_eq!(names.len(), 12);
+    assert_eq!(names.len(), 13);
     assert_eq!(names[9], "dynare_equations");
     assert_eq!(names[10], "dynare_related_files");
     assert_eq!(names[11], "dynare_expand");
+    assert_eq!(names[12], "dynare_format");
 
     let list = tools_list_json();
     let tools = list["tools"].as_array().expect("tools array");
-    assert_eq!(tools.len(), 12);
+    assert_eq!(tools.len(), 13);
     assert_eq!(
         tools[9]["description"],
         "List aggregate and dimension-labelled heterogeneous equations with text, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds."
@@ -515,6 +517,10 @@ fn registered_tools_are_twelve() {
     assert_eq!(
         tools[11]["description"],
         "Return the full compilation unit after include splice and macro expand, with origin jumps for counted aggregate and heterogeneous equations."
+    );
+    assert_eq!(
+        tools[12]["description"],
+        "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it."
     );
 
     let blob = serde_json::to_string(&tools_list_json()).expect("tools list json");
@@ -536,11 +542,86 @@ fn registered_tools_are_twelve() {
             "tools/list must not contain {phrase:?}: {blob}"
         );
     }
-    for name in ["dynare_count_gap", "dynare_explain_equation"] {
+    for name in [
+        "dynare_count_gap",
+        "dynare_explain_equation",
+        "dynare_extract",
+        "dynare_workspace_diagnose",
+    ] {
         assert!(
             !blob.contains(name),
             "tools/list must not contain {name}: {blob}"
         );
+    }
+}
+
+fn assert_format_keys(body: &Value) {
+    for key in ["status", "formatted_text", "reason"] {
+        assert!(body.get(key).is_some(), "missing {key}: {body}");
+    }
+    for key in [
+        "line",
+        "column",
+        "end_line",
+        "end_column",
+        "range",
+        "cursor",
+    ] {
+        assert!(body.get(key).is_none(), "{key} must not be set: {body}");
+    }
+}
+
+#[test]
+fn dynare_format_patch_workflow_and_settings() {
+    let patch = "var y;\nmodel;\ny=1;\nend;\n";
+    let once = dynare_format(patch, None).expect("default indent");
+    assert_format_keys(&once);
+    assert_eq!(once["status"], "changed");
+    assert!(once["reason"].is_null());
+    let formatted = once["formatted_text"].as_str().expect("full text");
+    assert_eq!(formatted, dygnosis::format_text(patch, "\t").unwrap());
+    assert!(formatted.contains("\ty = 1;"));
+
+    let twice = dynare_format(formatted, None).expect("second pass");
+    assert_format_keys(&twice);
+    assert_eq!(twice["status"], "unchanged");
+    assert!(twice["formatted_text"].is_null());
+    assert!(twice["reason"].is_null());
+
+    let four = dynare_format(patch, Some(&json!(4))).expect("indent 4");
+    assert_eq!(four["status"], "changed");
+    assert_eq!(
+        four["formatted_text"].as_str().unwrap(),
+        dygnosis::format_text(patch, "    ").unwrap()
+    );
+    let four_text = dynare_format(patch, Some(&json!("4"))).expect("indent string");
+    assert_eq!(four_text["formatted_text"], four["formatted_text"]);
+    let tab = dynare_format(patch, Some(&json!("  tab  "))).expect("tab word");
+    assert_eq!(tab["formatted_text"], once["formatted_text"]);
+    assert!(dynare_format(patch, Some(&Value::Null))
+        .unwrap()
+        .get("formatted_text")
+        .unwrap()
+        .eq(&once["formatted_text"]));
+
+    for bad in [
+        json!(0),
+        json!(9),
+        json!(-1),
+        json!(1.5),
+        json!("spaces"),
+        json!(true),
+    ] {
+        let err = dynare_format(patch, Some(&bad)).expect_err("bad indent");
+        assert!(err.contains("formatIndent"), "{bad}: {err}");
+    }
+
+    for empty in ["", "   \n", " \n\t\n"] {
+        let body = dynare_format(empty, None).expect("empty");
+        assert_format_keys(&body);
+        assert_eq!(body["status"], "unsupported");
+        assert!(body["formatted_text"].is_null());
+        assert_eq!(body["reason"], "nothing to format");
     }
 }
 

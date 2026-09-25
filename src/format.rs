@@ -1,5 +1,7 @@
 //! Semantics-preserving formatter. Whitespace only; comments and `@#` stay verbatim.
 
+use serde_json::Value;
+
 use crate::lexer::{tokenize, TokenKind};
 
 const BLOCK_OPENERS: &[&str] = &[
@@ -24,19 +26,65 @@ const BLOCK_OPENERS: &[&str] = &[
 
 const UNSAFE_CHARS: &[char] = &['\'', '"', '[', ']', '{', '}', '@', '#', '%', ':', '\\', '!'];
 
-/// Reformat whole-file text, or `None` to leave it unchanged.
-pub fn format_text(text: &str, indent_unit: &str) -> Option<String> {
+/// Whole-file format result. `format_text` is `Some` only for [`FormatOutcome::Changed`].
+pub enum FormatOutcome {
+    Changed(String),
+    Unchanged,
+    Unsupported(&'static str),
+}
+
+/// Same decision as [`format_text`], with unchanged and unsupported kept apart.
+pub fn format_outcome(text: &str, indent_unit: &str) -> FormatOutcome {
     if text.trim().is_empty() {
-        return None;
+        return FormatOutcome::Unsupported("nothing to format");
     }
-    let formatted = reformat(text, indent_unit)?;
+    let Some(formatted) = reformat(text, indent_unit) else {
+        return FormatOutcome::Unsupported("formatter cannot reformat this file");
+    };
     if formatted == text {
-        return None;
+        return FormatOutcome::Unchanged;
     }
     if canonical(&formatted) != canonical(text) {
+        return FormatOutcome::Unsupported("formatting would change more than whitespace");
+    }
+    FormatOutcome::Changed(formatted)
+}
+
+/// Reformat whole-file text, or `None` to leave it unchanged.
+pub fn format_text(text: &str, indent_unit: &str) -> Option<String> {
+    match format_outcome(text, indent_unit) {
+        FormatOutcome::Changed(formatted) => Some(formatted),
+        FormatOutcome::Unchanged | FormatOutcome::Unsupported(_) => None,
+    }
+}
+
+/// LSP `formatIndent`: `tab`, or a whole number of spaces from 1 to 8.
+pub fn parse_format_indent(value: &Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("tab") {
+            return Some("\t".into());
+        }
+        if s.chars().all(|c| c.is_ascii_digit()) {
+            if let Ok(n) = s.parse::<usize>() {
+                if (1..=8).contains(&n) {
+                    return Some(" ".repeat(n));
+                }
+            }
+        }
         return None;
     }
-    Some(formatted)
+    if let Some(n) = value.as_u64() {
+        if (1..=8).contains(&n) {
+            return Some(" ".repeat(n as usize));
+        }
+    }
+    if let Some(n) = value.as_i64() {
+        if (1..=8).contains(&n) {
+            return Some(" ".repeat(n as usize));
+        }
+    }
+    None
 }
 
 /// Format inclusive line range `[start_line, end_line]`.
