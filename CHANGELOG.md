@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- An Added Warning can be silenced with `// dygnosis:disable CODE` on its line, `// dygnosis:disable-next-line CODE` on the line above, or `// dygnosis:disable-file CODE` for that file. Several codes go on one comment, separated by commas. `vsd:disable` and `vsd:disable-file` still work. The same comment is honored by the editor, `dygnosis check`, `dynare_diagnose`, and stored fixes. Errors, information notes, and warnings Dynare itself reports are unchanged.
+
 ## v0.9.0
 
 - Reads Dynare 7.2 heterogeneity dimensions, declarations, model blocks, shock rows, and the four heterogeneity commands while keeping aggregate and heterogeneous equations separate.

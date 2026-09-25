@@ -73,7 +73,7 @@ pub fn auto_fix(text: &str) -> String {
         text = apply_fix(&text, &fixes);
     }
     let model = parse(&text);
-    let fixes: Vec<TextEdit> = analyze(&model)
+    let fixes: Vec<TextEdit> = crate::suppress::apply_model(&model, analyze(&model))
         .into_iter()
         .filter(|d| PASS2_CODES.contains(&d.code.as_str()))
         .filter_map(|d| d.fix)

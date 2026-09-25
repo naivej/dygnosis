@@ -166,7 +166,8 @@ pub fn dynare_diagnose(
     files: Option<&HashMap<String, String>>,
 ) -> Vec<McpDiagnostic> {
     let Some(files) = nonempty_map(files) else {
-        let diags = analyze(&parse(file_content));
+        let model = parse(file_content);
+        let diags = crate::suppress::apply_model(&model, analyze(&model));
         return diagnostics_to_json(file_content, &diags);
     };
     let Some(active) = active_file.filter(|a| files.contains_key(*a)) else {
