@@ -76,7 +76,7 @@ const TOOLS: &[(&str, &str)] = &[
     ),
     (
         "dynare_equations",
-        "List aggregate and dimension-labelled heterogeneous equations with lhs, rhs, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds.",
+        "List aggregate and dimension-labelled heterogeneous equations with text, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds.",
     ),
     (
         "dynare_related_files",
@@ -393,8 +393,6 @@ fn equation_row_json(
         "index": row.index,
         "name": row.name,
         "text": row.text,
-        "lhs": row.lhs,
-        "rhs": row.rhs,
         "static_tag": row.static_tag,
         "dynamic_tag": row.dynamic_tag,
         "idents": idents,
@@ -1477,7 +1475,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_equations",
-        description = "List aggregate and dimension-labelled heterogeneous equations with lhs, rhs, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds."
+        description = "List aggregate and dimension-labelled heterogeneous equations with text, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds."
     )]
     fn equations_tool(&self, Parameters(params): Parameters<EquationsParams>) -> CallToolResult {
         let index = params.index.map(|i| i as usize);

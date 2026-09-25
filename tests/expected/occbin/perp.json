@@ -10,8 +10,6 @@
       "index": 0,
       "name": "",
       "text": "i = 0",
-      "lhs": "i",
-      "rhs": "0",
       "tags": {},
       "complementarity": {
         "text": "i >= 0",

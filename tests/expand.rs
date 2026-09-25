@@ -439,8 +439,6 @@ fn us_re09_equation_keys_unchanged() {
             index: _,
             name: _,
             text: _,
-            lhs: _,
-            rhs: _,
             span: _,
             static_tag: _,
             dynamic_tag: _,

@@ -127,7 +127,9 @@ fn agent_views_keep_aggregate_and_heterogeneous_equations_separate() {
     assert_eq!(block["dimension"], "d");
     assert_eq!(block["equations"].as_array().unwrap().len(), 1);
     let row = &block["equations"][0];
-    assert_eq!(row["lhs"], "yh");
+    assert_eq!(row["text"], "yh = ph*yh(-1)+eh");
+    assert!(row.get("lhs").is_none(), "lhs must be omitted: {row}");
+    assert!(row.get("rhs").is_none(), "rhs must be omitted: {row}");
     assert_eq!(row["origin"]["line"], 15);
     assert!(row["idents"].as_array().unwrap().iter().any(|ident| {
         ident["name"] == "yh" && ident["timing"] == -1 && ident["timing_class"] == "predetermined"
@@ -138,8 +140,8 @@ fn agent_views_keep_aggregate_and_heterogeneous_equations_separate() {
     let named = dynare_equations(&named_source, None, None, Some("household law"), None);
     assert!(named["equations"].as_array().unwrap().is_empty());
     assert_eq!(
-        named["heterogeneous_equations"][0]["equations"][0]["lhs"],
-        "yh"
+        named["heterogeneous_equations"][0]["equations"][0]["text"],
+        "yh = ph*yh(-1)+eh"
     );
     assert!(named["heterogeneous_equations"][0]["equations"][0]["explain"].is_string());
 }

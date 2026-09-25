@@ -61,8 +61,7 @@
         }
       ],
       "index": 0,
-      "lhs": "y",
-      "rhs": "exp(z)*kg(-1)^alphag*k(-1)^alppha*n^(1-alppha-alphag)"
+      "text": "y = exp(z)*kg(-1)^alphag*k(-1)^alppha*n^(1-alppha-alphag)"
     },
     {
       "idents": [
@@ -96,8 +95,7 @@
         }
       ],
       "index": 1,
-      "lhs": "w",
-      "rhs": "(1-alppha-alphag)*y/n"
+      "text": "w =(1-alppha-alphag)*y/n"
     },
     {
       "idents": [
@@ -126,8 +124,7 @@
         }
       ],
       "index": 2,
-      "lhs": "rk",
-      "rhs": "alppha*y/k(-1)"
+      "text": "rk = alppha*y/k(-1)"
     },
     {
       "idents": [
@@ -166,8 +163,7 @@
         }
       ],
       "index": 3,
-      "lhs": "c^(-1)",
-      "rhs": "(betta/(1+gam))*c(+1)^(-1)*(rk(+1)+1-delta)"
+      "text": "c^(-1) =(betta/(1+gam))*c(+1)^(-1)*(rk(+1)+1-delta)"
     },
     {
       "idents": [
@@ -201,8 +197,7 @@
         }
       ],
       "index": 4,
-      "lhs": "psi*n^phhi*c",
-      "rhs": "w"
+      "text": "psi*n^phhi*c = w"
     },
     {
       "idents": [
@@ -236,8 +231,7 @@
         }
       ],
       "index": 5,
-      "lhs": "(1+gam)*k",
-      "rhs": "(1-delta)*k(-1)+invest"
+      "text": "(1+gam)*k =(1-delta)*k(-1)+invest"
     },
     {
       "idents": [
@@ -271,8 +265,7 @@
         }
       ],
       "index": 6,
-      "lhs": "(1+gam)*kg",
-      "rhs": "(1-deltag)*kg(-1)+ig"
+      "text": "(1+gam)*kg =(1-deltag)*kg(-1)+ig"
     },
     {
       "idents": [
@@ -302,8 +295,7 @@
         }
       ],
       "index": 7,
-      "lhs": "y",
-      "rhs": "c+invest+ig"
+      "text": "y = c+invest+ig"
     },
     {
       "idents": [
@@ -331,8 +323,7 @@
         }
       ],
       "index": 8,
-      "lhs": "z",
-      "rhs": "rhoz*z(-1)+eps_z"
+      "text": "z = rhoz*z(-1)+eps_z"
     },
     {
       "idents": [
@@ -370,8 +361,7 @@
         }
       ],
       "index": 9,
-      "lhs": "log(ig)",
-      "rhs": "(1-rho_ig)*log(ig_ss)+rho_ig*log(ig(-1))+eps_ig"
+      "text": "log(ig) =(1-rho_ig)*log(ig_ss)+rho_ig*log(ig(-1))+eps_ig"
     },
     {
       "idents": [
@@ -389,8 +379,7 @@
         }
       ],
       "index": 10,
-      "lhs": "log_y",
-      "rhs": "log(y)"
+      "text": "log_y = log(y)"
     },
     {
       "idents": [
@@ -408,8 +397,7 @@
         }
       ],
       "index": 11,
-      "lhs": "log_c",
-      "rhs": "log(c)"
+      "text": "log_c = log(c)"
     },
     {
       "idents": [
@@ -427,8 +415,7 @@
         }
       ],
       "index": 12,
-      "lhs": "log_k",
-      "rhs": "log(k)"
+      "text": "log_k = log(k)"
     },
     {
       "idents": [
@@ -446,8 +433,7 @@
         }
       ],
       "index": 13,
-      "lhs": "log_kg",
-      "rhs": "log(kg)"
+      "text": "log_kg = log(kg)"
     },
     {
       "idents": [
@@ -465,8 +451,7 @@
         }
       ],
       "index": 14,
-      "lhs": "log_ig",
-      "rhs": "log(ig)"
+      "text": "log_ig = log(ig)"
     },
     {
       "idents": [
@@ -484,8 +469,7 @@
         }
       ],
       "index": 15,
-      "lhs": "log_n",
-      "rhs": "log(n)"
+      "text": "log_n = log(n)"
     }
   ]
 }

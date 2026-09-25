@@ -10,16 +10,12 @@
       "index": 0,
       "name": "",
       "text": "is = rhos*is(-1)+e",
-      "lhs": "is",
-      "rhs": "rhos*is(-1)+e",
       "tags": {}
     },
     {
       "index": 1,
       "name": "policy",
       "text": "i = is",
-      "lhs": "i",
-      "rhs": "is",
       "tags": {
         "name": "policy",
         "relax": "ELB"
@@ -29,8 +25,6 @@
       "index": 2,
       "name": "policy",
       "text": "i = 0",
-      "lhs": "i",
-      "rhs": "0",
       "tags": {
         "bind": "ELB",
         "name": "policy"

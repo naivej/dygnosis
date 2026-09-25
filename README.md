@@ -53,7 +53,7 @@ Limitations by design
 | `dynare_explain` | Help for a diagnostic code |
 | `dynare_list_diagnostic_codes` | List all diagnostic codes, classified as shared, skipped, or added relative to Dynare |
 | `dynare_list_options` | Options for a command |
-| `dynare_equations` | Equations with lhs, rhs, timing, tags, complementarity, origin, and the equation-count gap |
+| `dynare_equations` | Equations with text, timing, tags, complementarity, origin, and the equation-count gap |
 | `dynare_related_files` | Includes and companions for the active `.mod` |
 | `dynare_expand` | Effective text after `@#if` / `@#for` / `@{…}` and includes, plus origin for each counted equation |
 
