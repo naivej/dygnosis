@@ -13,16 +13,13 @@ const E223_MSG: &str = "If dsge_prior_weight is in the estimated_params block, t
 const E224_MSG: &str = "If dsge_prior_weight is in the estimated_params block, the dsge_var option must be passed to the estimation statement.";
 const E225_MSG: &str = "The estimation statement requires a dsge_var option to be passed if the dsge_varlag option is passed.";
 const E226_MSG: &str = "An estimation statement cannot take more than one dsge_var option.";
-const E227_MSG: &str =
-    "The estimation statement requires a data file to be supplied via the datafile option.";
+const E227_MSG: &str = "The estimation statement requires a data file to be supplied via the datafile option.";
 const E228_MSG: &str = "The mode_file option of the estimation statement is incompatible with the use_calibration option of the estimated_params_init block.";
-const E229_MSG: &str =
-    "The mh_tune_jscale and mh_jscale options of the estimation statement are incompatible.";
+const E229_MSG: &str = "The mh_tune_jscale and mh_jscale options of the estimation statement are incompatible.";
 const E230_MSG: &str = "The option mh_tune_guess in estimation statement cannot be used without option mh_tune_jscale.";
 const E231_MSG: &str = "The filter_algorithm=gmf option is incompatible with proposal_approximation=montecarlo in the estimation statement.";
 const E232_MSG: &str = "The filter_algorithm=gmf option is incompatible with distribution_approximation=montecarlo in the estimation statement.";
-const E234_MSG: &str =
-    "both the 'prior_function' and 'posterior_function' commands require the 'function' option";
+const E234_MSG: &str = "both the 'prior_function' and 'posterior_function' commands require the 'function' option";
 
 /// True when a `data` statement carrying `file` or `series` is written **before**
 /// `at`. 7.1 sets that flag when the statement's own check pass runs, and the
@@ -40,10 +37,7 @@ pub fn check_estimation(model: &Model) -> Vec<Diagnostic> {
     let has_dsge_var = model.dsge_var_estimated.is_some() || model.dsge_var_calibrated.is_some();
 
     if model.dsge_var_estimated.is_some() && !weight_in_est {
-        let span = model
-            .dsge_var_estimated
-            .or(model.estimation_span)
-            .unwrap_or(FALLBACK);
+        let span = model.dsge_var_estimated.or(model.estimation_span).unwrap_or(FALLBACK);
         push(&mut out, span, "E222", E222_MSG);
     }
     if weight_in_est && model.dsge_var_calibrated.is_some() {
@@ -80,10 +74,7 @@ pub fn check_estimation(model: &Model) -> Vec<Diagnostic> {
         push(&mut out, span, "E228", E228_MSG);
     }
     if model.mh_tune_jscale_span.is_some() && model.mh_jscale_span.is_some() {
-        let span = model
-            .mh_jscale_span
-            .or(model.mh_tune_jscale_span)
-            .unwrap_or(FALLBACK);
+        let span = model.mh_jscale_span.or(model.mh_tune_jscale_span).unwrap_or(FALLBACK);
         push(&mut out, span, "E229", E229_MSG);
     }
     if model.mh_tune_guess_span.is_some() && model.mh_tune_jscale_span.is_none() {
@@ -131,7 +122,10 @@ pub fn check_estimation(model: &Model) -> Vec<Diagnostic> {
         }
     }
     if model.prior_function_has_parens && !model.prior_function_has_function {
-        if let Some(span) = model.prior_function_span.or(model.posterior_function_span) {
+        if let Some(span) = model
+            .prior_function_span
+            .or(model.posterior_function_span)
+        {
             push(&mut out, span, "E234", E234_MSG);
         }
     }

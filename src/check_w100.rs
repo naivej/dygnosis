@@ -19,10 +19,12 @@ const E215_MSG: &str = "discretionary_policy: the instruments option is required
 
 pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let has_ramsey = model
-        .policy_commands
-        .iter()
-        .any(|c| matches!(c, PolicyCommand::RamseyModel | PolicyCommand::RamseyPolicy));
+    let has_ramsey = model.policy_commands.iter().any(|c| {
+        matches!(
+            c,
+            PolicyCommand::RamseyModel | PolicyCommand::RamseyPolicy
+        )
+    });
     let has_disc = model
         .policy_commands
         .contains(&PolicyCommand::DiscretionaryPolicy);
