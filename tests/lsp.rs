@@ -1705,6 +1705,36 @@ async fn shock_overwrite_hover_uses_its_block_description() {
 }
 
 #[tokio::test]
+async fn heterogeneous_shocks_overwrite_hover_names_that_dimension() {
+    const HET: &str = "Clears earlier variance, standard-error, covariance, and correlation settings for this heterogeneity dimension.";
+    for text in [
+        "heterogeneity_dimension d;\nvarexo(heterogeneity=d) e;\nshocks(heterogeneity=d, overwrite);\nvar e; stderr 0.01;\nend;\n",
+        "heterogeneity_dimension d;\nvarexo(heterogeneity=d) e;\nshocks(overwrite, heterogeneity=d);\nvar e; stderr 0.01;\nend;\n",
+    ] {
+        let uri = Url::parse("file:///tmp/het_shocks_overwrite.mod").unwrap();
+        let (service, _socket) = new_service();
+        service
+            .inner()
+            .did_open(open_params(uri.clone(), text.to_string(), 1))
+            .await;
+        let option_byte = text.find("overwrite").unwrap();
+        let md = hover_markdown(
+            service
+                .inner()
+                .hover(HoverParams {
+                    text_document_position_params: tdp(uri, text, option_byte),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .expect("hover rpc")
+                .expect("hover"),
+        );
+        assert!(md.contains(HET), "hover: {md}");
+        assert!(!md.contains("other skew rows remain"), "hover: {md}");
+    }
+}
+
+#[tokio::test]
 async fn completion_includes_exogenous() {
     let text = read_mod("trend_rbc_gov_inv");
     let uri = archive_url("trend_rbc_gov_inv");

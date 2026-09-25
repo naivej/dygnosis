@@ -2,6 +2,7 @@
 //! `python_dynare_lsp/dynare_catalog.py`.
 
 const SHOCKS_OVERWRITE: &str = "Regular shocks clear earlier deterministic schedules and variance, standard-error, covariance, correlation, and measurement-error settings; other skew rows remain. Surprise shocks replace earlier surprise shocks; learnt_in replaces shocks and mshocks for the same learning period.";
+pub(crate) const HET_SHOCKS_OVERWRITE: &str = "Clears earlier variance, standard-error, covariance, and correlation settings for this heterogeneity dimension.";
 const MSHOCKS_OVERWRITE: &str = "Clears earlier deterministic shocks; with learnt_in, replaces shocks and mshocks for the same learning period.";
 const LEARNT_IN: &str = "Integer period or date when agents learn this block's settings.";
 const HET_FILENAME: &str = "Path to the MAT file that holds the steady-state structure. Quote it when it has a path or an extension. If omitted, load the structure from the workspace variable named by variable.";

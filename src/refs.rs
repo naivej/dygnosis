@@ -110,6 +110,39 @@ pub fn option_owner_at(src: &str, byte_offset: u32) -> Option<String> {
     }
 }
 
+/// True when `name` appears in the parenthesis group that contains `byte_offset`.
+/// The innermost group wins. A `;` closes any open groups before it.
+pub fn enclosing_paren_has_ident(src: &str, byte_offset: u32, name: &str) -> bool {
+    let tokens = tokenize(src);
+    let mut open_at: Vec<usize> = Vec::new();
+    let mut containing: Option<(usize, usize)> = None;
+    for (i, tok) in tokens.iter().enumerate() {
+        if tok.kind == TokenKind::Eof {
+            break;
+        }
+        match tok.kind {
+            TokenKind::Semi => open_at.clear(),
+            TokenKind::LParen => open_at.push(i),
+            TokenKind::RParen => {
+                if let Some(start) = open_at.pop() {
+                    let inside =
+                        tokens[start].span.end <= byte_offset && byte_offset < tok.span.start;
+                    if inside && containing.is_none() {
+                        containing = Some((start, i));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some((start, end)) = containing else {
+        return false;
+    };
+    tokens[start + 1..end]
+        .iter()
+        .any(|tok| tok.kind == TokenKind::Ident && tok.text(src).eq_ignore_ascii_case(name))
+}
+
 /// Command name if `byte_offset` sits inside a known command's parenthesised option list.
 pub fn option_command_at(src: &str, byte_offset: u32) -> Option<String> {
     let cmd = option_owner_at(src, byte_offset)?;
@@ -143,6 +176,31 @@ mod tests {
         let hits = occurrences(src, "betta");
         assert_eq!(hits.len(), 2);
         assert!(occurrences(src, "").is_empty());
+    }
+
+    #[test]
+    fn enclosing_paren_sees_heterogeneity_on_either_side_of_overwrite() {
+        let before = "shocks(heterogeneity=d, overwrite);";
+        let on_overwrite = before.find("overwrite").unwrap() as u32;
+        assert!(enclosing_paren_has_ident(
+            before,
+            on_overwrite,
+            "heterogeneity"
+        ));
+        let after = "shocks(overwrite, heterogeneity=d);";
+        let on_overwrite = after.find("overwrite").unwrap() as u32;
+        assert!(enclosing_paren_has_ident(
+            after,
+            on_overwrite,
+            "heterogeneity"
+        ));
+        let regular = "shocks(overwrite);";
+        let on_overwrite = regular.find("overwrite").unwrap() as u32;
+        assert!(!enclosing_paren_has_ident(
+            regular,
+            on_overwrite,
+            "heterogeneity"
+        ));
     }
 
     #[test]

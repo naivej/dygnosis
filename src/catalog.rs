@@ -11,7 +11,9 @@ use serde::Serialize;
 #[path = "catalog_data.rs"]
 mod catalog_data;
 
-pub(crate) use catalog_data::{FAMILY_COMMAND_HELP, FAMILY_OPERATOR_HELP, HETEROGENEITY_OPTION};
+pub(crate) use catalog_data::{
+    FAMILY_COMMAND_HELP, FAMILY_OPERATOR_HELP, HETEROGENEITY_OPTION, HET_SHOCKS_OVERWRITE,
+};
 
 /// Short help for the semi-structural command, block, and operator names.
 pub(crate) fn family_help(name: &str) -> Option<&'static str> {

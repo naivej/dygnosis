@@ -11,7 +11,7 @@ use tower_lsp::{Client, ClientSocket, LanguageServer, LspService, Server};
 
 use crate::catalog::{
     command_options, family_help, option_doc, FAMILY_COMMAND_HELP, FAMILY_OPERATOR_HELP,
-    HETEROGENEITY_OPTION,
+    HETEROGENEITY_OPTION, HET_SHOCKS_OVERWRITE,
 };
 use crate::diagnostic::{check_file, check_in_workspace};
 use crate::expand::{EquationOrigin, OriginFrame};
@@ -24,7 +24,10 @@ use crate::model_info::{
     assigned_number, classify_variable_timing, format_structure_lens, format_timing_line,
     structure_summary, TimingClass,
 };
-use crate::refs::{ident_at, is_legal_ident, occurrences, option_command_at, option_owner_at};
+use crate::refs::{
+    enclosing_paren_has_ident, ident_at, is_legal_ident, occurrences, option_command_at,
+    option_owner_at,
+};
 use crate::span::{LineIndex, Span};
 use crate::workspace::Workspace;
 use crate::{Severity, VERSION};
@@ -193,11 +196,7 @@ impl Backend {
                 .find(|(name, _)| name.eq_ignore_ascii_case(&word))
             {
                 let mut md = format!("**`{cmd}` option**: `{word}`");
-                let description = if command_doc.is_empty() {
-                    option_doc(name)
-                } else {
-                    *command_doc
-                };
+                let description = shocks_overwrite_doc(&doc.text, byte, &cmd, name, command_doc);
                 if !description.is_empty() {
                     md.push_str("\n\n");
                     md.push_str(description);
@@ -348,12 +347,15 @@ impl Backend {
         if let Some(cmd) = option_command_at(&doc.text, byte) {
             let items = command_options(&cmd)
                 .iter()
-                .map(|(name, doc_str)| CompletionItem {
-                    label: (*name).into(),
-                    kind: Some(CompletionItemKind::PROPERTY),
-                    detail: Some(format!("{cmd} option")),
-                    documentation: Some(Documentation::String((*doc_str).into())),
-                    ..CompletionItem::default()
+                .map(|(name, doc_str)| {
+                    let documentation = shocks_overwrite_doc(&doc.text, byte, &cmd, name, doc_str);
+                    CompletionItem {
+                        label: (*name).into(),
+                        kind: Some(CompletionItemKind::PROPERTY),
+                        detail: Some(format!("{cmd} option")),
+                        documentation: Some(Documentation::String(documentation.into())),
+                        ..CompletionItem::default()
+                    }
                 })
                 .collect::<Vec<_>>();
             if items.is_empty() {
@@ -1622,6 +1624,26 @@ fn origin_frame_json(workspace: &Workspace, frame: &OriginFrame) -> Value {
         )),
     );
     Value::Object(obj)
+}
+
+fn shocks_overwrite_doc(
+    src: &str,
+    byte: u32,
+    cmd: &str,
+    name: &str,
+    command_doc: &'static str,
+) -> &'static str {
+    if cmd.eq_ignore_ascii_case("shocks")
+        && name.eq_ignore_ascii_case("overwrite")
+        && enclosing_paren_has_ident(src, byte, "heterogeneity")
+    {
+        return HET_SHOCKS_OVERWRITE;
+    }
+    if command_doc.is_empty() {
+        option_doc(name)
+    } else {
+        command_doc
+    }
 }
 
 fn heterogeneity_declaration_head(src: &str, byte: u32) -> Option<String> {
