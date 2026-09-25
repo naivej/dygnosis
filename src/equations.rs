@@ -1,9 +1,11 @@
 //! Counted model equations, per-use idents, and the W013 count gap.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::model::{Complementarity, Equation, Model};
-use crate::model_info::{classify_variable_timing, TimingClass};
+use crate::model_info::{
+    classify_aggregate_variable_timing, classify_variable_timing, TimingClass,
+};
 use crate::span::Span;
 
 /// One counted model equation (`!is_local && !static_tag`). `index` is 0-based
@@ -21,6 +23,14 @@ pub struct EquationRow {
     pub idents: Vec<EquationIdent>,
     pub tags: BTreeMap<String, String>,
     pub complementarity: Option<Complementarity>,
+}
+
+/// Written equations from one heterogeneous model block. Equation indices
+/// continue across blocks of the same dimension.
+pub(crate) struct HeterogeneousEquationBlockRows {
+    pub block_index: usize,
+    pub dimension: String,
+    pub equations: Vec<EquationRow>,
 }
 
 /// One identifier use in an equation (lhs then rhs; ident nodes only).
@@ -65,47 +75,80 @@ pub struct CountGap {
 }
 
 pub fn equations(model: &Model) -> Vec<EquationRow> {
-    let timing = classify_variable_timing(model);
+    let timing = classify_aggregate_variable_timing(model);
     let mut rows = Vec::new();
     for eq in &model.equations {
         if !is_counted(eq) {
             continue;
         }
-        let index = rows.len();
-        let idents = model
-            .ident_refs(eq)
-            .into_iter()
-            .map(|r| {
-                let name = model.name(r.name).to_string();
-                let class = ident_class(model, r.name);
-                let timing_class = if class == IdentClass::Endogenous {
-                    timing.get(&name).map(|info| info.class)
-                } else {
-                    None
-                };
-                EquationIdent {
-                    name,
-                    timing: r.timing,
-                    class,
-                    timing_class,
-                }
-            })
-            .collect();
-        rows.push(EquationRow {
-            index,
-            name: eq.name.clone(),
-            text: eq.text.clone(),
-            lhs: eq.lhs.clone(),
-            rhs: eq.rhs.clone(),
-            span: eq.span,
-            static_tag: eq.static_tag,
-            dynamic_tag: eq.dynamic_tag,
-            idents,
-            tags: eq.tag_map.clone(),
-            complementarity: eq.complementarity.clone(),
-        });
+        rows.push(equation_row(model, eq, rows.len(), &timing));
     }
     rows
+}
+
+pub(crate) fn heterogeneous_equations(model: &Model) -> Vec<HeterogeneousEquationBlockRows> {
+    let timing = classify_variable_timing(model);
+    let mut next_index = HashMap::new();
+    model
+        .heterogeneous_models
+        .iter()
+        .enumerate()
+        .map(|(block_index, block)| {
+            let index = next_index.entry(block.dimension).or_insert(0usize);
+            let mut rows = Vec::new();
+            for eq in &block.equations {
+                if is_counted(eq) {
+                    rows.push(equation_row(model, eq, *index, &timing));
+                    *index += 1;
+                }
+            }
+            HeterogeneousEquationBlockRows {
+                block_index,
+                dimension: model.name(block.dimension).to_string(),
+                equations: rows,
+            }
+        })
+        .collect()
+}
+
+fn equation_row(
+    model: &Model,
+    eq: &Equation,
+    index: usize,
+    timing: &HashMap<String, crate::model_info::TimingInfo>,
+) -> EquationRow {
+    let idents = model
+        .ident_refs(eq)
+        .into_iter()
+        .map(|reference| {
+            let name = model.name(reference.name).to_string();
+            let class = ident_class(model, reference.name);
+            let timing_class = if class == IdentClass::Endogenous {
+                timing.get(&name).map(|info| info.class)
+            } else {
+                None
+            };
+            EquationIdent {
+                name,
+                timing: reference.timing,
+                class,
+                timing_class,
+            }
+        })
+        .collect();
+    EquationRow {
+        index,
+        name: eq.name.clone(),
+        text: eq.text.clone(),
+        lhs: eq.lhs.clone(),
+        rhs: eq.rhs.clone(),
+        span: eq.span,
+        static_tag: eq.static_tag,
+        dynamic_tag: eq.dynamic_tag,
+        idents,
+        tags: eq.tag_map.clone(),
+        complementarity: eq.complementarity.clone(),
+    }
 }
 
 pub fn count_gap(model: &Model) -> CountGap {

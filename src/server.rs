@@ -980,10 +980,11 @@ impl Backend {
         let Some(report) = inner.workspace.expand_report(uri.as_str()).cloned() else {
             return json!({"success": false, "message": "Document not available"});
         };
+        let has_heterogeneous = !report.heterogeneous_origins.is_empty();
         let origins: Vec<Value> = report
             .origins
             .iter()
-            .map(|origin| equation_origin_json(&inner.workspace, origin))
+            .map(|origin| equation_origin_json(&inner.workspace, origin, has_heterogeneous))
             .collect();
         json!({
             "uri": uri.as_str(),
@@ -1551,9 +1552,23 @@ fn origin_uri_json(path_key: Option<&str>) -> Option<String> {
         .map(|u| u.to_string())
 }
 
-fn equation_origin_json(workspace: &Workspace, origin: &EquationOrigin) -> Value {
+fn equation_origin_json(
+    workspace: &Workspace,
+    origin: &EquationOrigin,
+    has_heterogeneous: bool,
+) -> Value {
     let mut obj = serde_json::Map::new();
     obj.insert("index".into(), json!(origin.index));
+    if has_heterogeneous {
+        obj.insert("scope_index".into(), json!(origin.scope_index));
+        if let Some(dimension) = &origin.dimension {
+            obj.insert("scope".into(), json!("heterogeneous"));
+            obj.insert("dimension".into(), json!(dimension));
+            obj.insert("block_index".into(), json!(origin.block_index));
+        } else {
+            obj.insert("scope".into(), json!("aggregate"));
+        }
+    }
     if let Some(uri) = origin_uri_json(origin.origin_uri.as_deref()) {
         obj.insert("origin_uri".into(), json!(uri));
     }

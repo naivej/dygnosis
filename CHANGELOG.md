@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased (0.9.0)
+
+- Reads Dynare 7.2 heterogeneity dimensions, declarations, model blocks, shock rows, and the four heterogeneity commands while keeping aggregate and heterogeneous equations separate.
+- `dynare_model_info` shows aggregate counts and per-dimension heterogeneous counts; `dynare_equations` returns heterogeneous rows with dimension and source origin. Variable hover and outline use timing from heterogeneous equations.
+- `dynare_expand` and the editor's effective-model view include heterogeneous equations in their origin lists. The expand count covers all counted written model equations and reports aggregate and per-dimension counts separately.
+
 ## v0.8.0
 
 - Reads Dynare 7.2 `var_model`, `trend_component_model`, `var_expectation_model`, `pac_model`, and `pac_target_info`, plus their named model operators. The independent `deterministic_trends` block is also checked. Parse summaries and equation tools still show the equations you wrote.

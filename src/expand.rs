@@ -1,5 +1,7 @@
 //! Expand view plus origin map (`expand_report`).
 
+use std::collections::HashMap;
+
 use crate::equations::equations;
 use crate::lexer::{tokenize, Token};
 use crate::macro_expand::{expand_macros_traced, FrameRec, TokenTrace};
@@ -9,13 +11,26 @@ use crate::span::Span;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpandReport {
     pub effective_text: String,
+    /// Counted equations across the aggregate and all heterogeneous trees.
     pub n_equations: usize,
+    /// Equation origins in expanded file order.
     pub origins: Vec<EquationOrigin>,
+    /// Aggregate equation origins, indexed by the aggregate equation view.
+    pub aggregate_origins: Vec<EquationOrigin>,
+    /// Counted equations in each heterogeneous model block, in block order.
+    pub heterogeneous_origins: Vec<Vec<EquationOrigin>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EquationOrigin {
+    /// Zero-based position among all counted equations in the expanded file.
     pub index: usize,
+    /// Zero-based position in the aggregate tree or named heterogeneity dimension.
+    pub scope_index: usize,
+    /// `None` for an aggregate equation.
+    pub dimension: Option<String>,
+    /// Written heterogeneous block index, when `dimension` is set.
+    pub block_index: Option<usize>,
     pub origin_span: Span,
     pub origin_uri: Option<String>,
     pub origin_frames: Vec<OriginFrame>,
@@ -51,16 +66,17 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
     let (tokens, traces, arena) = expand_macros_traced(&source, raw);
     debug_assert_eq!(tokens.len(), traces.len());
     let (model, ranges) = parse_expanded(&source, tokens.clone());
-    debug_assert_eq!(model.equations.len(), ranges.len());
+    debug_assert_eq!(model.equations.len(), ranges.aggregate.len());
+    debug_assert_eq!(model.heterogeneous_models.len(), ranges.heterogeneous.len());
     let effective_text = join_lexemes(&source, &tokens);
     let counted = equations(&model);
-    let mut origins = Vec::with_capacity(counted.len());
+    let mut pending = Vec::new();
     let mut counted_i = 0usize;
     for (eq_index, eq) in model.equations.iter().enumerate() {
         if eq.is_local || eq.static_tag {
             continue;
         }
-        let range = &ranges[eq_index];
+        let range = &ranges.aggregate[eq_index];
         let origin = origin_for_row(
             counted_i,
             &tokens[range.start..range.end],
@@ -68,14 +84,56 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
             &arena,
             map,
         );
-        origins.push(origin);
+        pending.push((range.start, origin));
         counted_i += 1;
     }
-    debug_assert_eq!(counted.len(), origins.len());
+    debug_assert_eq!(counted.len(), counted_i);
+    let mut dimension_indices = HashMap::new();
+    for (block_index, (block, block_ranges)) in model
+        .heterogeneous_models
+        .iter()
+        .zip(ranges.heterogeneous.iter())
+        .enumerate()
+    {
+        debug_assert_eq!(block.equations.len(), block_ranges.len());
+        let scope_index = dimension_indices.entry(block.dimension).or_insert(0usize);
+        for (eq, range) in block.equations.iter().zip(block_ranges.iter()) {
+            if eq.is_local || eq.static_tag {
+                continue;
+            }
+            let mut origin = origin_for_row(
+                *scope_index,
+                &tokens[range.start..range.end],
+                &traces[range.start..range.end],
+                &arena,
+                map,
+            );
+            origin.dimension = Some(model.name(block.dimension).to_string());
+            origin.block_index = Some(block_index);
+            pending.push((range.start, origin));
+            *scope_index += 1;
+        }
+    }
+    pending.sort_by_key(|(token_start, _)| *token_start);
+    let mut origins = Vec::with_capacity(pending.len());
+    let mut aggregate_origins = Vec::with_capacity(counted.len());
+    let mut heterogeneous_origins = vec![Vec::new(); model.heterogeneous_models.len()];
+    for (_, mut origin) in pending {
+        origin.index = origins.len();
+        if let Some(block_index) = origin.block_index {
+            heterogeneous_origins[block_index].push(origin.clone());
+        } else {
+            aggregate_origins.push(origin.clone());
+        }
+        origins.push(origin);
+    }
+    debug_assert_eq!(counted.len(), aggregate_origins.len());
     ExpandReport {
         effective_text,
-        n_equations: counted.len(),
+        n_equations: origins.len(),
         origins,
+        aggregate_origins,
+        heterogeneous_origins,
     }
 }
 
@@ -149,6 +207,9 @@ fn origin_for_row(
 
     EquationOrigin {
         index,
+        scope_index: index,
+        dimension: None,
+        block_index: None,
         origin_span,
         origin_uri,
         origin_frames,

@@ -2,11 +2,16 @@
 //! generic codes reach the new surfaces exactly where 7.2 refuses, and the
 //! Bison-shape E001s carry the pinned sentences.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use dygnosis::model::{HeterogeneityCommandKind, ShockBlockKind, ShockKind};
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage};
+use dygnosis::{
+    analyze, classify_variable_timing, dynare_equations, dynare_expand, dynare_model_info,
+    expand_report, find_preprocessor, parse, run_preprocessor, structure_summary, JsonStage,
+    TimingClass,
+};
 
 fn fixture(name: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -88,6 +93,112 @@ fn declared_dimension(model: &dygnosis::model::Model, name: &str) -> bool {
                     .heterogeneity
                     .is_some_and(|(dim, _)| model.name(dim) == "d")
         })
+}
+
+#[test]
+fn agent_views_keep_aggregate_and_heterogeneous_equations_separate() {
+    let source = fixture("accepted_family.mod");
+    let model = parse(&source);
+    let timing = classify_variable_timing(&model);
+    assert_eq!(timing["yh"].class, TimingClass::Predetermined);
+    assert_eq!(timing["yh"].offsets, [-1, 0]);
+    assert_eq!(structure_summary(&model).endogenous, 2);
+
+    let info = dynare_model_info(&source, None, None);
+    assert_eq!(info["n_endogenous"], 2);
+    assert_eq!(info["n_equations"], 2);
+    assert_eq!(info["endogenous"], serde_json::json!(["y", "c"]));
+    let dimension = &info["heterogeneity_dimensions"][0];
+    assert_eq!(dimension["dimension"], "d");
+    assert_eq!(dimension["n_endogenous"], 1);
+    assert_eq!(dimension["n_equations"], 1);
+    assert_eq!(dimension["predetermined"], serde_json::json!(["yh"]));
+
+    let equations = dynare_equations(&source, None, None, None, None);
+    assert_eq!(equations["equations"].as_array().unwrap().len(), 2);
+    let block = &equations["heterogeneous_equations"][0];
+    assert_eq!(block["dimension"], "d");
+    assert_eq!(block["equations"].as_array().unwrap().len(), 1);
+    let row = &block["equations"][0];
+    assert_eq!(row["lhs"], "yh");
+    assert_eq!(row["origin"]["line"], 15);
+    assert!(row["idents"].as_array().unwrap().iter().any(|ident| {
+        ident["name"] == "yh" && ident["timing"] == -1 && ident["timing_class"] == "predetermined"
+    }));
+
+    let named_source =
+        source.replacen("yh = ph*yh(-1)", "[name='household law'] yh = ph*yh(-1)", 1);
+    let named = dynare_equations(&named_source, None, None, Some("household law"), None);
+    assert!(named["equations"].as_array().unwrap().is_empty());
+    assert_eq!(
+        named["heterogeneous_equations"][0]["equations"][0]["lhs"],
+        "yh"
+    );
+    assert!(named["heterogeneous_equations"][0]["equations"][0]["explain"].is_string());
+}
+
+#[test]
+fn heterogeneous_equation_origin_resolves_an_include() {
+    let files = HashMap::from([
+        (
+            "main.mod".to_string(),
+            "heterogeneity_dimension d;\nvar y;\nvar(heterogeneity=d) a;\nmodel; y=SUM(a); end;\nmodel(heterogeneity=d);\n@#include \"het.inc\"\nend;\n".to_string(),
+        ),
+        ("het.inc".to_string(), "a = a(-1);\n".to_string()),
+    ]);
+    let result = dynare_equations(
+        &files["main.mod"],
+        Some("main.mod"),
+        Some(&files),
+        None,
+        None,
+    );
+    let row = &result["heterogeneous_equations"][0]["equations"][0];
+    assert_eq!(row["origin_uri"], "het.inc");
+    assert_eq!(row["origin"]["line"], 1);
+
+    let expanded = dynare_expand(&files["main.mod"], Some("main.mod"), Some(&files));
+    assert_eq!(expanded["n_equations"], 2);
+    assert_eq!(expanded["origins"][1]["scope"], "heterogeneous");
+    assert_eq!(expanded["origins"][1]["origin_uri"], "het.inc");
+}
+
+#[test]
+fn expanded_hank_counts_both_trees_in_file_order() {
+    let source = "heterogeneity_dimension d;\nvar y;\nvar(heterogeneity=d) a;\nmodel(heterogeneity=d);\na = a(-1);\nend;\nmodel;\ny = SUM(a);\nend;\n";
+    let report = expand_report(source);
+    assert_eq!(report.n_equations, 2);
+    assert_eq!(report.origins.len(), 2);
+    assert_eq!(report.aggregate_origins.len(), 1);
+    assert_eq!(report.heterogeneous_origins[0].len(), 1);
+    assert_eq!(report.origins[0].dimension.as_deref(), Some("d"));
+    assert_eq!(report.origins[1].dimension, None);
+
+    let expanded = dynare_expand(source, None, None);
+    assert_eq!(expanded["n_equations"], 2);
+    assert_eq!(expanded["n_aggregate_equations"], 1);
+    assert_eq!(expanded["n_heterogeneous_equations"], 1);
+    assert_eq!(expanded["heterogeneity_dimensions"][0]["n_equations"], 1);
+    assert_eq!(expanded["origins"][0]["index"], 0);
+    assert_eq!(expanded["origins"][0]["scope"], "heterogeneous");
+    assert_eq!(expanded["origins"][0]["dimension"], "d");
+    assert_eq!(expanded["origins"][0]["scope_index"], 0);
+    assert_eq!(expanded["origins"][1]["index"], 1);
+    assert_eq!(expanded["origins"][1]["scope"], "aggregate");
+    assert_eq!(expanded["origins"][1]["scope_index"], 0);
+    let effective = expanded["effective_text"].as_str().unwrap();
+    assert!(
+        effective.contains("model(heterogeneity = d)"),
+        "{effective}"
+    );
+    assert!(effective.contains("model ; y = SUM(a)"), "{effective}");
+
+    let equations = dynare_equations(source, None, None, None, None);
+    assert_eq!(equations["equations"][0]["origin"]["line"], 8);
+    assert_eq!(
+        equations["heterogeneous_equations"][0]["equations"][0]["origin"]["line"],
+        5
+    );
 }
 
 #[test]

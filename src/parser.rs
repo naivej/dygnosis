@@ -164,7 +164,12 @@ pub fn parse(text: &str) -> Model {
     model
 }
 
-pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, Vec<Range<usize>>) {
+pub(crate) struct EquationTokenRanges {
+    pub aggregate: Vec<Range<usize>>,
+    pub heterogeneous: Vec<Vec<Range<usize>>>,
+}
+
+pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationTokenRanges) {
     let mut p = Parser {
         src,
         tokens,
@@ -172,6 +177,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, Vec<Range
         intern: Interner::default(),
         model: Model::default(),
         eq_token_ranges: Vec::new(),
+        hetero_eq_token_ranges: Vec::new(),
         verbatim_ranges: Vec::new(),
         symbol_list_id: 1,
         in_model: false,
@@ -191,11 +197,18 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, Vec<Range
         intern,
         mut model,
         eq_token_ranges,
+        hetero_eq_token_ranges,
         ..
     } = p;
     model.source = src.to_string();
     model.intern = intern;
-    (model, eq_token_ranges)
+    (
+        model,
+        EquationTokenRanges {
+            aggregate: eq_token_ranges,
+            heterogeneous: hetero_eq_token_ranges,
+        },
+    )
 }
 
 struct TopOption {
@@ -881,6 +894,7 @@ struct Parser<'a> {
     intern: Interner,
     model: Model,
     eq_token_ranges: Vec<Range<usize>>,
+    hetero_eq_token_ranges: Vec<Vec<Range<usize>>>,
     /// Token ranges of `verbatim; ? end;` bodies, whose text 7.1 passes through raw.
     verbatim_ranges: Vec<Range<usize>>,
     /// Bumped once per statement that lists names, so `CommandSymbol::list_id`
@@ -1379,9 +1393,10 @@ impl Parser<'_> {
         let body_i = self.i;
         self.in_equation_body = true;
         let mut equations = Vec::new();
+        let mut ranges = Vec::new();
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
             if let Some((eq, range)) = self.parse_equation_statement() {
-                self.eq_token_ranges.push(range);
+                ranges.push(range);
                 equations.push(eq);
             }
         }
@@ -1401,6 +1416,7 @@ impl Parser<'_> {
                 span: Span { start, end },
                 equations,
             });
+        self.hetero_eq_token_ranges.push(ranges);
     }
 
     /// `heterogeneity_dimension name1, name2;` — one record per name, file order.

@@ -510,11 +510,11 @@ fn registered_tools_are_twelve() {
     assert_eq!(tools.len(), 12);
     assert_eq!(
         tools[9]["description"],
-        "List counted model equations with lhs, rhs, idents, origin jump, and the equation-count gap. Optional name or index also returns explain markdown."
+        "List aggregate and dimension-labelled heterogeneous equations with lhs, rhs, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds."
     );
     assert_eq!(
         tools[11]["description"],
-        "Return the compilation unit after include splice and macro expand, with origin jumps from each counted equation to the source that wrote it."
+        "Return the full compilation unit after include splice and macro expand, with origin jumps for counted aggregate and heterogeneous equations."
     );
 
     let blob = serde_json::to_string(&tools_list_json()).expect("tools list json");

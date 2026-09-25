@@ -66,10 +66,10 @@ description: Write, run, debug, modify, and review Dynare .mod files across the 
 | -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | R1 | **注释一律用 §0 选定语言；注释以外一律英文/ASCII**。覆盖本 skill 生成的**全部代码文件**——`.mod` 与配套 `.m`（run 脚本/稳态文件/绘图封装）注释同规则。`long_name`、`[name=]`、标识符、字符串禁止非 ASCII                          | ✅`[name='Euler equation']` 上方加该语言注释；❌ `[name='欧拉方程']` 或 `[name='オイラー方程式']` |
 | R2 | **时序 = 决定期**（期末存量）。状态变量当期带滞后；运动律左边是期末存量                                                                                                                                                                           | ✅`y=...k(-1)...` 与 `k=invest+(1-delta)*k(-1);`；❌ 生产函数里写 `k`                             |
-| R3 | **varexo 只放创新项**；持续过程（AR 等）是内生变量                                                                                                                                                                                                | ✅`var z; varexo eps_z;`；❌ `varexo z;`                                                            |
-| R4 | **方程数 = 内生变量数**（例外：`ramsey_model`/`discretionary_policy` 少 1 条）                                                                                                                                                                | 写完模型块数一遍                                                                                        |
+| R3 | 普通 **varexo 只放创新项**；持续过程（AR 等）是内生变量。`varexo(heterogeneity=...)` 的个体冲击状态按 heterogeneity.md 核对                                                                                                                              | ✅`var z; varexo eps_z;`；❌普通 `varexo z;`                                                      |
+| R4 | **方程数 = 内生变量数**（例外：`ramsey_model`/`discretionary_policy` 少 1 条）；HANK 按总量层与每个异质维度分别核对                                                                                                                                | 写完模型块数一遍                                                                                        |
 | R5 | **禁用命名**：`i`、`inv`、`e`、`E`、Dynare 命令/MATLAB 函数名；希腊字母写 `alppha`/`betta`/`gam`；投资写 `invest`                                                                                                                 | ❌`var i;`；❌ `parameters beta;`                                                                   |
-| R6 | **随机情形禁用** `max/min/abs/sign/比较算子`（摄动在拐点给错误导数）；完全预见可用                                                                                                                                                              | 偶尔约束 → OccBin，不是 `>=`                                                                         |
+| R6 | **随机情形禁用** `max/min/abs/sign/比较算子`（摄动在拐点给错误导数）；完全预见可用；HANK 异质模型块的 `⟂` 互补条件按 heterogeneity.md 的官方语法写                                                                                                             | 偶尔约束 → OccBin；HANK 约束 → `⟂`                                                                 |
 | R7 | 每条语句 `;` 结尾、每块 `end;` 结尾、一行一条；参数先赋值后用                                                                                                                                                                                       | 未知行首会被当原生 MATLAB                                                                               |
 | R8 | **非线性优先**：默认写原始非线性方程组（FOC/约束/外生过程），让 Dynare 做泰勒展开，不手推线性化。**仅两种情况写线性化**并 `model(linear);`：① `discretionary_policy`（Dynare 技术要求）；② 用户明确要线性版或复制的论文只给线性化系统 | ✅ 非线性 RBC 用原始 FOC；`discretionary_policy` 用 `model(linear);`                                |
 
@@ -281,14 +281,14 @@ description: Write, run, debug, modify, and review Dynare .mod files across the 
                八节逐节展开 + 两处硬查的完整说明见 workflow-detail.md「第4步」阶段1。
 
         阶段2  先列变量清单：写文件头 + var/varexo/parameters 三类声明（含 long_name），
-               **只声明、不写方程**；逐一核对：所有内生量都进 var、只有创新项进 varexo(R3)、
+               **只声明、不写方程**；逐一核对：所有内生量都进 var、普通 varexo 只有创新项(R3)、
                参数齐全。把清单整理好作为后续方程的基准，确认无误再进阶段3。
 
         ══ 第一跑：结构验证 ══════════════════════════════════════════
         阶段3  写：模型方程（model...end;）+ 参数赋值
                逐条对应推导里的 FOC，加 [name=] 标注。
                ▶ 立即用 MATLAB MCP 跑 Dynare（noclearall nointeractive）
-               ✔ 通过标准："Found N equation(s)" 中 N = var 变量数；预处理无报错；
+               ✔ 通过标准：普通模型中 "Found N equation(s)" 的 N = var 变量数；HANK 按 references/heterogeneity.md 分层核对；预处理无报错；
                  无 R5 命名警告（如 alpha/beta 未改写）。
                ✘ 未通过：修复报错后重跑，不得写阶段4。
         ══════════════════════════════════════════════════════════════

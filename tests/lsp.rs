@@ -786,6 +786,36 @@ async fn hover_endogenous_includes_timing() {
 }
 
 #[tokio::test]
+async fn hover_heterogeneous_endogenous_uses_its_model_timing() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/p_hank/accepted_family.mod")
+        .canonicalize()
+        .expect("HANK fixture");
+    let text = fs::read_to_string(&path)
+        .expect("HANK source")
+        .replace("\r\n", "\n");
+    let uri = file_url(&path);
+    let byte = text.find("yh(-1)").expect("heterogeneous lag");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+    let hover = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: tdp(uri, &text, byte),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover rpc")
+        .expect("hover");
+    let md = hover_markdown(hover);
+    assert!(md.contains("predetermined"), "hover: {md}");
+    assert!(md.contains("t-1"), "hover: {md}");
+}
+
+#[tokio::test]
 async fn hover_stoch_simul_option() {
     let text = read_mod("trend_rbc_gov_inv");
     let uri = archive_url("trend_rbc_gov_inv");
@@ -2889,6 +2919,34 @@ async fn show_effective_model_whole_eq_for() {
             "origin_uri {origin_uri}"
         );
     }
+}
+
+#[tokio::test]
+async fn show_effective_model_hank_includes_heterogeneous_origins() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/p_hank/accepted_family.mod")
+        .canonicalize()
+        .expect("HANK fixture");
+    let text = fs::read_to_string(&path)
+        .expect("HANK source")
+        .replace("\r\n", "\n");
+    let uri = file_url(&path);
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text, 1))
+        .await;
+    let payload = show_effective_payload(&service, &uri).await;
+    let origins = payload["origins"].as_array().expect("origins");
+    assert_eq!(origins.len(), 3);
+    assert_eq!(origins[0]["scope"], "aggregate");
+    assert_eq!(origins[2]["scope"], "heterogeneous");
+    assert_eq!(origins[2]["dimension"], "d");
+    assert_eq!(origins[2]["index"], 2);
+    assert!(payload["effective_text"]
+        .as_str()
+        .unwrap()
+        .contains("model(heterogeneity = d)"));
 }
 
 #[tokio::test]

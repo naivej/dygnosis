@@ -14,13 +14,13 @@ Auclert-Bardóczy-Rognlie-Straub (2021, 序列空间雅可比) 的思想。模�
 
 ## 核心声明与算子
 
-- `heterogeneity_dimension`：声明一个异质性维度（如按财富/生产率离散化的家庭分布）。
+- `heterogeneity_dimension`：声明一个异质性维度（如按财富/生产率离散化的家庭分布）。Dynare 7.2 的求稳态流程目前只支持一个维度；预处理通过两个不同维度不代表模型能运行。
 - `var(heterogeneity=NAME) ...;` / `varexo(heterogeneity=NAME) ...;`：声明属于该维度的**异质变量/冲击**
   （每个体一份，随分布变化）。
 - `model(heterogeneity=NAME); ... end;`：**异质主体模型块**，写个体的最优化一阶条件/预算约束（如家庭的
   欧拉方程、资产积累），方程在该维度上对每个体成立。
 - `shocks(heterogeneity=NAME); ... end;`：**异质冲击块**（个体特异冲击的分布/离散化）。
-- `SUM(expr)`：**聚合算子**，把异质表达式按分布加总成总量（如 `SUM(a)` = 总资产）。
+- `SUM(a)`：**聚合算子**，把一个当期异质内生变量按分布加总成总量（如 `SUM(a)` = 总资产）。参数、外生变量、带超前或滞后的变量，以及 `SUM(a+b)` 都不是它的参数形式。
 
 总量层用**普通的 `var/varexo/model`**（不带 heterogeneity=），写总量恒等式/市场出清/政策规则，并通过
 `SUM(...)` 引用个体加总。手册 §4.26 把声明拆成：异质性维度 → 异质变量声明 → 异质主体模型块 →
@@ -31,13 +31,13 @@ Auclert-Bardóczy-Rognlie-Straub (2021, 序列空间雅可比) 的思想。模�
 heterogeneity_dimension hh;                 // 家庭维度
 
 var(heterogeneity=hh) a c;                  // 个体资产、消费（随分布）
-varexo(heterogeneity=hh) e;                 // 个体特异生产率冲击
+varexo(heterogeneity=hh) idio_e;            // 个体特异生产率状态
 
 parameters bet gam r_ss ...;
 
 model(heterogeneity=hh);                    // 个体问题（每个体成立）
    c^(-gam) = bet*(1+r)*c(+1)^(-gam);       // 欧拉方程
-   a = (1+r)*a(-1) + w*e - c;               // 个体预算/资产积累
+   a = (1+r)*a(-1) + w*idio_e - c;          // 个体预算/资产积累
 end;
 
 var K r w;                                  // 总量变量
@@ -86,7 +86,9 @@ Dynare `examples/` 提供（与 shade-econ/sequence-jacobian 同模型）：
 
 - **稳态是难点**：能用外部成熟代码（SSJ 等）算好稳态再 `load`，通常比纯靠 Dynare `compute` 稳。两条路按
   模型复杂度选。
-- 个体层只写**个体一阶条件/约束**，总量耦合一律经 `SUM()`；别在个体块里手写加总。
+- 个体层只写**个体一阶条件/约束**。总量层要对异质内生变量做分布加总时写 `SUM(a)`；直接写 `a` 不表示加总。异质外生变量或参数也不能作为 `SUM()` 的参数，应按官方示例明确它们如何进入总量方程。
+- 核对方程时分别数总量 `var` 与普通 `model` 的方程，以及每个维度的异质 `var` 与其 `model(heterogeneity=...)` 方程。`#` 局部定义不算模型方程；变换后 Dynare 还可能增加辅助方程。
+- 普通 `varexo` 的创新项规则不套用到 `varexo(heterogeneity=...)`：后者可表示离散化的个体冲击状态。
 - 该框架新、API 仍可能调整：**以你所装 Dynare 版本的 example mods + 手册 §4.26 为准**，本文件给的是框架与
   命令清单，块内精确关键字以官方示例为权威。
 - 与"含几类异质家庭"的有限异质（TANK/多代理）不同：这里是**连续分布**、分布本身是状态。少数离散类型用
@@ -150,17 +152,3 @@ irf_Y_G = oo_.heterogeneity.dr.G.Y.G(1:20, 1) * 0.01;
 
 参考：Dynare 7.0 发布说明（heterogeneity 框架）；手册 §4.26；example mods（与 SSJ 同模型）；
 Auclert-Bardóczy-Rognlie-Straub (2021)、Bhandari-Bourany-Evans-Golosov (2023)。
-
----
-
-# 手册增补（Dynare 7.0+ §4.26 Heterogeneity）
-
-- 声明：`heterogeneity_dimension`；`var/varexo/model/shocks(heterogeneity=NAME)`；聚合算子 `SUM()`。
-- 块结构（§4.26.1）：异质性维度 → 异质变量声明 → 异质主体模型块 → 异质冲击块 → 总量变量声明 →
-  总量冲击块 → 总量模型块。
-- 求解（§4.26.2）：`heterogeneity_load_steady_state`（载入）/ `heterogeneity_compute_steady_state`（时间迭代内算，
-  可校准）→ helper functions → `heterogeneity_solve`（总量动态）→ `heterogeneity_simulate`（IRF/随机模拟，
-  含 news 冲击）。
-- 示例：`krusell_smith_1998.mod`、`hank_one_asset.mod`、`hank_two_assets.mod`（= shade-econ SSJ 同模型）。
-- 解法：Bhandari et al. (2023) + Auclert et al. (2021, 序列空间雅可比)。
-- **块内精确语法以官方 example mods + 手册 §4.26 为权威**（功能新、仍演进）。

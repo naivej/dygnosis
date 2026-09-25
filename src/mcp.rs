@@ -16,13 +16,18 @@ use serde_json::{json, Value};
 use crate::auto_fix::auto_fix;
 use crate::catalog::list_options;
 use crate::diagnostic::{analyze, check_in_workspace, Diagnostic, Severity};
-use crate::equations::{count_gap, equations, explain_equation, CountGap, EquationRow};
+use crate::equations::{
+    count_gap, equations, explain_equation, heterogeneous_equations, CountGap, EquationRow,
+};
 use crate::expand::{expand_report, EquationOrigin, ExpandReport, OriginFrame};
 use crate::explain;
 use crate::include_resolver::{normalize_uri, path_key};
+use crate::intern::Name;
 use crate::model::Model;
 use crate::model_diff::{compare_models_with_sources, CompareSource};
-use crate::model_info::{classify_variable_timing, TimingClass};
+use crate::model_info::{
+    classify_aggregate_variable_timing, classify_variable_timing, TimingClass,
+};
 use crate::parser::{normalize_newlines, parse};
 use crate::refs::{is_legal_ident, occurrences, rename_in_text};
 use crate::span::{LineIndex, Span};
@@ -39,7 +44,7 @@ const TOOLS: &[(&str, &str)] = &[
     ),
     (
         "dynare_model_info",
-        "Summarise a .mod file: names, counts, timing, and block flags.",
+        "Summarise aggregate and per-dimension heterogeneous names, counts, timing, and block flags.",
     ),
     (
         "dynare_compare_models",
@@ -71,7 +76,7 @@ const TOOLS: &[(&str, &str)] = &[
     ),
     (
         "dynare_equations",
-        "List counted model equations with lhs, rhs, idents, origin jump, and the equation-count gap. Optional name or index also returns explain markdown.",
+        "List aggregate and dimension-labelled heterogeneous equations with lhs, rhs, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds.",
     ),
     (
         "dynare_related_files",
@@ -79,7 +84,7 @@ const TOOLS: &[(&str, &str)] = &[
     ),
     (
         "dynare_expand",
-        "Return the compilation unit after include splice and macro expand, with origin jumps from each counted equation to the source that wrote it.",
+        "Return the full compilation unit after include splice and macro expand, with origin jumps for counted aggregate and heterogeneous equations.",
     ),
 ];
 
@@ -183,7 +188,8 @@ fn diagnose_in_workspace(active_file: &str, files: &HashMap<String, String>) -> 
     diagnostics_to_json(text, &own)
 }
 
-/// Timing lists and counts from the equation AST, plus ParseSummary flags.
+/// Aggregate timing lists and counts, per-dimension heterogeneous summaries,
+/// and ParseSummary flags.
 /// No `blocks` key.
 pub fn dynare_model_info(
     file_content: &str,
@@ -193,8 +199,9 @@ pub fn dynare_model_info(
     model_info_json(&mcp_parse_model(file_content, active_file, files, false))
 }
 
-/// Counted model equations plus the whole-file count gap. Optional `name` or
-/// `index` also attaches per-row explain markdown. Include map: same as
+/// Counted aggregate and heterogeneous equations, with the aggregate count
+/// gap. `name` searches both kinds; `index` selects an aggregate row. Both
+/// filters attach per-row explain markdown. Include map: same as
 /// `dynare_model_info` (`synthesize_missing_active = false`).
 pub fn dynare_equations(
     file_content: &str,
@@ -205,6 +212,7 @@ pub fn dynare_equations(
 ) -> Value {
     let unit = mcp_unit(file_content, active_file, files);
     let rows = equations(&unit.model);
+    let heterogeneous = heterogeneous_equations(&unit.model);
     let gap = count_gap(&unit.model);
     let mut out = json!({
         "equations": [],
@@ -223,7 +231,10 @@ pub fn dynare_equations(
         }
         (Some(want), None) => {
             let hits: Vec<&EquationRow> = rows.iter().filter(|row| row.name == want).collect();
-            if hits.is_empty() {
+            let heterogeneous_hit = heterogeneous
+                .iter()
+                .any(|block| block.equations.iter().any(|row| row.name == want));
+            if hits.is_empty() && !heterogeneous_hit {
                 out["message"] = json!(format!("no equation named '{want}'"));
             } else {
                 out["equations"] = Value::Array(
@@ -248,6 +259,41 @@ pub fn dynare_equations(
             }
         }
     }
+    if !heterogeneous.is_empty() && index.is_none() {
+        out["heterogeneous_equations"] = Value::Array(
+            heterogeneous
+                .iter()
+                .filter_map(|block| {
+                    let selected: Vec<Value> = block
+                        .equations
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, row)| match (name, index) {
+                            (None, None) => true,
+                            (Some(want), None) => row.name == want,
+                            _ => false,
+                        })
+                        .map(|(local_index, row)| {
+                            let origin = unit
+                                .report
+                                .heterogeneous_origins
+                                .get(block.block_index)
+                                .and_then(|origins| origins.get(local_index));
+                            equation_row_json(row, origin, &unit, name.is_some())
+                        })
+                        .collect();
+                    if name.is_some() && selected.is_empty() {
+                        return None;
+                    }
+                    Some(json!({
+                        "block_index": block.block_index,
+                        "dimension": block.dimension,
+                        "equations": selected,
+                    }))
+                })
+                .collect(),
+        );
+    }
     out
 }
 
@@ -262,21 +308,53 @@ pub fn dynare_expand(
     files: Option<&HashMap<String, String>>,
 ) -> Value {
     let unit = mcp_unit(file_content, active_file, files);
+    let has_heterogeneous = !unit.report.heterogeneous_origins.is_empty();
     let origins: Vec<Value> = unit
         .report
         .origins
         .iter()
         .map(|origin| {
             let mut v = json!({ "index": origin.index });
+            if has_heterogeneous {
+                v["scope_index"] = json!(origin.scope_index);
+                if let Some(dimension) = &origin.dimension {
+                    v["scope"] = json!("heterogeneous");
+                    v["dimension"] = json!(dimension);
+                    v["block_index"] = json!(origin.block_index);
+                } else {
+                    v["scope"] = json!("aggregate");
+                }
+            }
             attach_origin(&mut v, origin, &unit);
             v
         })
         .collect();
-    json!({
+    let mut result = json!({
         "effective_text": unit.report.effective_text,
         "n_equations": unit.report.n_equations,
         "origins": origins,
-    })
+    });
+    if has_heterogeneous {
+        result["n_aggregate_equations"] = json!(unit.report.aggregate_origins.len());
+        result["n_heterogeneous_equations"] =
+            json!(unit.report.n_equations - unit.report.aggregate_origins.len());
+        result["heterogeneity_dimensions"] = Value::Array(
+            heterogeneous_dimension_names(&unit.model)
+                .into_iter()
+                .map(|dimension| {
+                    let name = unit.model.name(dimension);
+                    let count = unit
+                        .report
+                        .origins
+                        .iter()
+                        .filter(|origin| origin.dimension.as_deref() == Some(name))
+                        .count();
+                    json!({ "dimension": name, "n_equations": count })
+                })
+                .collect(),
+        );
+    }
+    result
 }
 
 fn count_gap_json(gap: &CountGap) -> Value {
@@ -393,6 +471,8 @@ impl McpUnit {
                 effective_text: String::new(),
                 n_equations: 0,
                 origins: Vec::new(),
+                aggregate_origins: Vec::new(),
+                heterogeneous_origins: Vec::new(),
             });
         let mut sources = HashMap::new();
         for uri in ws.document_uris() {
@@ -438,9 +518,9 @@ impl McpUnit {
 
 fn origin_for(unit: &McpUnit, index: usize) -> Option<&EquationOrigin> {
     unit.report
-        .origins
+        .aggregate_origins
         .get(index)
-        .filter(|origin| origin.index == index)
+        .filter(|origin| origin.scope_index == index)
 }
 
 fn attach_origin(target: &mut Value, origin: &EquationOrigin, unit: &McpUnit) {
@@ -574,19 +654,22 @@ fn model_info_json(model: &Model) -> Value {
     let endogenous: Vec<String> = model
         .endogenous
         .iter()
+        .filter(|decl| decl.heterogeneity.is_none())
         .map(|d| model.name(d.name).to_string())
         .collect();
     let exogenous: Vec<String> = model
         .exogenous
         .iter()
+        .filter(|decl| decl.heterogeneity.is_none())
         .map(|d| model.name(d.name).to_string())
         .collect();
     let parameters: Vec<String> = model
         .parameters
         .iter()
+        .filter(|decl| decl.heterogeneity.is_none())
         .map(|d| model.name(d.name).to_string())
         .collect();
-    let timing = classify_variable_timing(model);
+    let timing = classify_aggregate_variable_timing(model);
     let mut static_vars = Vec::new();
     let mut predetermined = Vec::new();
     let mut forward_looking = Vec::new();
@@ -600,6 +683,63 @@ fn model_info_json(model: &Model) -> Value {
         }
     }
     let summary = model.summary();
+    let heterogeneous_timing = classify_variable_timing(model);
+    let heterogeneous_dimensions: Vec<Value> = heterogeneous_dimension_names(model)
+        .into_iter()
+        .map(|dimension| {
+            let names: Vec<String> = model
+                .endogenous
+                .iter()
+                .filter(|decl| decl.heterogeneity.map(|(name, _)| name) == Some(dimension))
+                .map(|decl| model.name(decl.name).to_string())
+                .collect();
+            let shocks: Vec<String> = model
+                .exogenous
+                .iter()
+                .filter(|decl| decl.heterogeneity.map(|(name, _)| name) == Some(dimension))
+                .map(|decl| model.name(decl.name).to_string())
+                .collect();
+            let params: Vec<String> = model
+                .parameters
+                .iter()
+                .filter(|decl| decl.heterogeneity.map(|(name, _)| name) == Some(dimension))
+                .map(|decl| model.name(decl.name).to_string())
+                .collect();
+            let mut static_vars = Vec::new();
+            let mut predetermined = Vec::new();
+            let mut forward_looking = Vec::new();
+            let mut mixed = Vec::new();
+            for name in &names {
+                match heterogeneous_timing.get(name).map(|info| info.class) {
+                    Some(TimingClass::Mixed) => mixed.push(name.clone()),
+                    Some(TimingClass::ForwardLooking) => forward_looking.push(name.clone()),
+                    Some(TimingClass::Predetermined) => predetermined.push(name.clone()),
+                    _ => static_vars.push(name.clone()),
+                }
+            }
+            let n_equations = model
+                .heterogeneous_models
+                .iter()
+                .filter(|block| block.dimension == dimension)
+                .flat_map(|block| block.equations.iter())
+                .filter(|eq| !eq.is_local && !eq.static_tag)
+                .count();
+            json!({
+                "dimension": model.name(dimension),
+                "n_endogenous": names.len(),
+                "endogenous": names,
+                "n_exogenous": shocks.len(),
+                "exogenous": shocks,
+                "n_parameters": params.len(),
+                "parameters": params,
+                "n_equations": n_equations,
+                "static": static_vars,
+                "predetermined": predetermined,
+                "forward_looking": forward_looking,
+                "mixed": mixed,
+            })
+        })
+        .collect();
     json!({
         "n_endogenous": endogenous.len(),
         "endogenous": endogenous,
@@ -626,7 +766,37 @@ fn model_info_json(model: &Model) -> Value {
         "has_steady_state_model_block": summary.has_steady_state_model_block,
         "has_initval_block": summary.has_initval_block,
         "has_shocks_block": summary.has_shocks_block,
+        "heterogeneity_dimensions": heterogeneous_dimensions,
     })
+}
+
+fn heterogeneous_dimension_names(model: &Model) -> Vec<Name> {
+    let mut seen = HashSet::new();
+    let mut names = Vec::new();
+    for name in model
+        .heterogeneity_dimensions
+        .iter()
+        .map(|dimension| dimension.name)
+        .chain(
+            model
+                .endogenous
+                .iter()
+                .chain(model.exogenous.iter())
+                .chain(model.parameters.iter())
+                .filter_map(|decl| decl.heterogeneity.map(|(name, _)| name)),
+        )
+        .chain(
+            model
+                .heterogeneous_models
+                .iter()
+                .map(|block| block.dimension),
+        )
+    {
+        if seen.insert(name) {
+            names.push(name);
+        }
+    }
+    names
 }
 
 /// `explain::render_markdown`, or the unknown-code string using Rust `known_codes()`.
@@ -1176,7 +1346,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_model_info",
-        description = "Summarise a .mod file: names, counts, timing, and block flags."
+        description = "Summarise aggregate and per-dimension heterogeneous names, counts, timing, and block flags."
     )]
     fn model_info_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
         let info = match nonempty_map(params.files.as_ref()) {
@@ -1306,7 +1476,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_equations",
-        description = "List counted model equations with lhs, rhs, idents, origin jump, and the equation-count gap. Optional name or index also returns explain markdown."
+        description = "List aggregate and dimension-labelled heterogeneous equations with lhs, rhs, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds."
     )]
     fn equations_tool(&self, Parameters(params): Parameters<EquationsParams>) -> CallToolResult {
         let index = params.index.map(|i| i as usize);
@@ -1364,7 +1534,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_expand",
-        description = "Return the compilation unit after include splice and macro expand, with origin jumps from each counted equation to the source that wrote it."
+        description = "Return the full compilation unit after include splice and macro expand, with origin jumps for counted aggregate and heterogeneous equations."
     )]
     fn expand_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
         let value = match nonempty_map(params.files.as_ref()) {
@@ -1410,6 +1580,12 @@ mod tests {
             .collect();
         want.sort_unstable();
         assert_eq!(got, want);
+
+        for name in ["dynare_model_info", "dynare_equations", "dynare_expand"] {
+            let expected = TOOLS.iter().find(|(tool, _)| *tool == name).unwrap().1;
+            let actual = listed.iter().find(|tool| tool.name == name).unwrap();
+            assert_eq!(actual.description.as_deref(), Some(expected));
+        }
 
         let blob = serde_json::to_string(&listed).expect("tools json");
         for phrase in [
