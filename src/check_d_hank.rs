@@ -358,13 +358,7 @@ fn walk_aggregate_sum(model: &Model, id: ExprId, found: &mut Option<Diagnostic>)
     let expr = model.exprs.get(id);
     match &expr.kind {
         ExprKind::Call { callee, args } if model.name(*callee).eq_ignore_ascii_case("sum") => {
-            let diag = if args.len() != 1 {
-                error(
-                    expr.span,
-                    "E476",
-                    "The argument to the SUM() operator must be a single variable",
-                )
-            } else if !is_plain_ident(model, args[0]) {
+            let diag = if args.len() != 1 || !is_plain_ident(model, args[0]) {
                 error(
                     expr.span,
                     "E476",

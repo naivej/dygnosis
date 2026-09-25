@@ -934,7 +934,7 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
                 PacTargetInfoRow::Target(target) => Some(target),
                 _ => None,
             })
-            .last()
+            .next_back()
         {
             if written_target_product_without_lhs(model, target) {
                 out.push(error(
@@ -954,7 +954,7 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
                 PacTargetInfoRow::AuxnameTargetNonstationary { name, span } => Some((*name, *span)),
                 _ => None,
             })
-            .last()
+            .next_back()
         {
             if let Some(diag) = generated_pac_variable_clash(
                 model,

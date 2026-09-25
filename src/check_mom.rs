@@ -1284,7 +1284,7 @@ fn outside_model_expression_with_locals(
     for ident in model.exprs.walk_idents(id) {
         let name = model.name(ident.name);
         let external = model.external_function_names.contains(&ident.name);
-        if ident.timing_span.is_some() {
+        if let Some(timing) = ident.timing_span {
             if external {
                 // `helper(1)` is a call, not a lead.
                 continue;
@@ -1293,7 +1293,7 @@ fn outside_model_expression_with_locals(
                 return Some(err(
                     Span {
                         start: ident.span.start,
-                        end: ident.timing_span.unwrap().end,
+                        end: timing.end,
                     },
                     "E001",
                     format!(

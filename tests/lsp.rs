@@ -991,7 +991,7 @@ async fn heterogeneity_names_reach_completion_and_hover() {
         let items = match service
             .inner()
             .completion(CompletionParams {
-                text_document_position: tdp(uri.clone(), &text, start),
+                text_document_position: tdp(uri.clone(), text, start),
                 work_done_progress_params: WorkDoneProgressParams::default(),
                 partial_result_params: PartialResultParams::default(),
                 context: None,

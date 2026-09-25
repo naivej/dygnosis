@@ -325,10 +325,9 @@ fn parse_refusal_preempts_pac_check() {
 #[test]
 fn rewrite_rows_stay_silent_without_mapping() {
     let binary = pinned_binary();
-    for (file, text) in [(
-        "rewrite_s012_tcm_nondiff.mod",
-        "does not have the diff operator applied to it yet you are trying to undiff it.",
-    )] {
+    let file = "rewrite_s012_tcm_nondiff.mod";
+    let text = "does not have the diff operator applied to it yet you are trying to undiff it.";
+    {
         let source = fixture(file);
         let diagnostics = analyze(&parse(&source));
         assert!(
