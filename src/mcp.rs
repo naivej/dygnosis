@@ -21,6 +21,7 @@ use crate::equations::{
 };
 use crate::expand::{expand_report, EquationOrigin, ExpandReport, OriginFrame};
 use crate::explain;
+use crate::format::{format_outcome, parse_format_indent, FormatOutcome};
 use crate::include_resolver::{normalize_uri, path_key};
 use crate::intern::Name;
 use crate::model::Model;
@@ -85,6 +86,10 @@ const TOOLS: &[(&str, &str)] = &[
     (
         "dynare_expand",
         "Return the full compilation unit after include splice and macro expand, with origin jumps for counted aggregate and heterogeneous equations.",
+    ),
+    (
+        "dynare_format",
+        "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it.",
     ),
 ];
 
@@ -1202,6 +1207,32 @@ fn is_dropped_code(code: &str) -> bool {
     OUT_CODES.contains(&code)
 }
 
+const FORMAT_INDENT_ERROR: &str = "formatIndent must be \"tab\" or a whole number from 1 to 8";
+
+/// Format `file_content` with the editor's rules.
+///
+/// `format_indent` omitted or JSON null uses a tab. Invalid settings are an error.
+/// `formatted_text` is the full file only when `status` is `changed`.
+pub fn dynare_format(
+    file_content: &str,
+    format_indent: Option<&Value>,
+) -> Result<Value, &'static str> {
+    let unit = match format_indent {
+        None | Some(Value::Null) => "\t".to_string(),
+        Some(value) => parse_format_indent(value).ok_or(FORMAT_INDENT_ERROR)?,
+    };
+    let (status, formatted_text, reason) = match format_outcome(file_content, &unit) {
+        FormatOutcome::Changed(text) => ("changed", Some(text), None),
+        FormatOutcome::Unchanged => ("unchanged", None, None),
+        FormatOutcome::Unsupported(reason) => ("unsupported", None, Some(reason)),
+    };
+    Ok(json!({
+        "status": status,
+        "formatted_text": formatted_text,
+        "reason": reason,
+    }))
+}
+
 fn tool_json(value: Value) -> CallToolResult {
     CallToolResult::structured(value)
 }
@@ -1227,6 +1258,13 @@ struct DygnosisMcp;
 #[derive(Debug, Deserialize, JsonSchema)]
 struct FileContentParams {
     file_content: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct FormatParams {
+    file_content: String,
+    #[serde(default, rename = "formatIndent")]
+    format_indent: Option<Value>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1559,6 +1597,20 @@ impl DygnosisMcp {
         };
         tool_json(value)
     }
+
+    #[tool(
+        name = "dynare_format",
+        description = "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it."
+    )]
+    fn format_tool(
+        &self,
+        Parameters(params): Parameters<FormatParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        match dynare_format(&params.file_content, params.format_indent.as_ref()) {
+            Ok(value) => Ok(tool_json(value)),
+            Err(message) => Err(rmcp::ErrorData::invalid_params(message, None)),
+        }
+    }
 }
 
 #[tool_handler(name = "dygnosis")]
@@ -1580,7 +1632,12 @@ mod tests {
         want.sort_unstable();
         assert_eq!(got, want);
 
-        for name in ["dynare_model_info", "dynare_equations", "dynare_expand"] {
+        for name in [
+            "dynare_model_info",
+            "dynare_equations",
+            "dynare_expand",
+            "dynare_format",
+        ] {
             let expected = TOOLS.iter().find(|(tool, _)| *tool == name).unwrap().1;
             let actual = listed.iter().find(|tool| tool.name == name).unwrap();
             assert_eq!(actual.description.as_deref(), Some(expected));
@@ -1604,5 +1661,49 @@ mod tests {
 
         let info = DygnosisMcp.get_info();
         assert_eq!(info.server_info.name, "dygnosis");
+
+        let format_tool = listed
+            .iter()
+            .find(|tool| tool.name == "dynare_format")
+            .unwrap();
+        let schema = serde_json::to_string(&format_tool.input_schema).expect("format schema");
+        assert!(schema.contains("file_content"), "{schema}");
+        assert!(schema.contains("formatIndent"), "{schema}");
+        for name in ["dynare_extract", "dynare_workspace_diagnose"] {
+            assert!(
+                !blob.contains(name),
+                "stdio tools/list must not contain {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn format_tool_changed_and_bad_indent() {
+        let server = DygnosisMcp;
+        let changed = server
+            .format_tool(Parameters(FormatParams {
+                file_content: "var y;\nmodel;\ny=1;\nend;\n".into(),
+                format_indent: None,
+            }))
+            .expect("format");
+        let body = changed.structured_content.expect("structured");
+        assert_eq!(body["status"], "changed");
+        assert!(body["formatted_text"]
+            .as_str()
+            .unwrap()
+            .contains("\ty = 1;"));
+        assert!(body["reason"].is_null());
+        for key in ["line", "column", "range", "cursor"] {
+            assert!(body.get(key).is_none(), "{key}");
+        }
+
+        let err = server
+            .format_tool(Parameters(FormatParams {
+                file_content: "var y;\n".into(),
+                format_indent: Some(json!(0)),
+            }))
+            .expect_err("bad indent");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("formatIndent"));
     }
 }

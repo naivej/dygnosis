@@ -105,9 +105,10 @@ pub use format::{format_range, format_text};
 pub use include_resolver::{find_workspace_root, resolve_companion_path, resolve_include_path};
 pub use mcp::{
     dynare_auto_fix, dynare_compare_models, dynare_diagnose, dynare_equations, dynare_expand,
-    dynare_explain, dynare_find_references, dynare_list_diagnostic_codes, dynare_list_options,
-    dynare_model_info, dynare_related_files, dynare_rename, registered_tool_names, tools_list_json,
-    DiagnosticCodeItem, McpDiagnostic, McpReference, McpWorkspaceReference,
+    dynare_explain, dynare_find_references, dynare_format, dynare_list_diagnostic_codes,
+    dynare_list_options, dynare_model_info, dynare_related_files, dynare_rename,
+    registered_tool_names, tools_list_json, DiagnosticCodeItem, McpDiagnostic, McpReference,
+    McpWorkspaceReference,
 };
 pub use model::{
     CalibrationRange, Complementarity, ComplementarityTriple, DeprecatedOption, EstimatedParam,

@@ -16,7 +16,7 @@ use crate::catalog::{
 use crate::diagnostic::{check_file, check_in_workspace};
 use crate::expand::{EquationOrigin, OriginFrame};
 use crate::explain;
-use crate::format::{format_range, format_text};
+use crate::format::{format_range, format_text, parse_format_indent};
 use crate::lexer::{tokenize, TokenKind};
 use crate::model::{Decl, Equation, Model};
 use crate::model_diff::{compare_models_with_sources, CompareSource};
@@ -2154,34 +2154,6 @@ fn equation_at<'a>(
         let rng = span_range(index, text, eq.span);
         if range_has_pos(rng, pos) {
             return Some(eq);
-        }
-    }
-    None
-}
-
-fn parse_format_indent(value: &Value) -> Option<String> {
-    if let Some(s) = value.as_str() {
-        let s = s.trim();
-        if s.eq_ignore_ascii_case("tab") {
-            return Some("\t".into());
-        }
-        if s.chars().all(|c| c.is_ascii_digit()) {
-            if let Ok(n) = s.parse::<usize>() {
-                if (1..=8).contains(&n) {
-                    return Some(" ".repeat(n));
-                }
-            }
-        }
-        return None;
-    }
-    if let Some(n) = value.as_u64() {
-        if (1..=8).contains(&n) {
-            return Some(" ".repeat(n as usize));
-        }
-    }
-    if let Some(n) = value.as_i64() {
-        if (1..=8).contains(&n) {
-            return Some(" ".repeat(n as usize));
         }
     }
     None
