@@ -3,6 +3,7 @@
 ## v0.10.0
 
 - A non-ASCII character in a declaration name (a trailing accent in `var café;`, or an entirely non-ASCII name) is `E001` with Dynare's `character unrecognized by lexer`. Unicode comments, `long_name`, TeX names, and equation-name strings stay accepted, as does the complementarity operator.
+- An Added Warning can be silenced with `// dygnosis:disable CODE` on its line, `// dygnosis:disable-next-line CODE` on the line above, or `// dygnosis:disable-file CODE` for that file. Several codes go on one comment, separated by commas. `vsd:disable` and `vsd:disable-file` still work. The same comment is honored by the editor, `dygnosis check`, `dynare_diagnose`, and stored fixes. Errors, Information, and warnings Dynare itself reports are unchanged.
 
 ## v0.9.0
 

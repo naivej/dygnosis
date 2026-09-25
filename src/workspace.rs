@@ -213,6 +213,32 @@ impl Workspace {
         })
     }
 
+    /// Map a span in the include-spliced model to the physical file that owns
+    /// its start. `None` when no segment owns that start, or the segment has
+    /// no file. Callers must not treat that as the root file.
+    pub(crate) fn map_effective_origin(&mut self, uri: &str, span: Span) -> Option<(String, Span)> {
+        let key = self.ensure_loaded(uri)?;
+        let (_, segments) = self.splice_with_map(&key, &mut Vec::new(), &[]);
+        let segment = segments
+            .iter()
+            .find(|s| span.start >= s.spliced.start && span.start < s.spliced.end)
+            .or_else(|| {
+                segments
+                    .last()
+                    .filter(|s| span.start == s.spliced.end && s.spliced.start < s.spliced.end)
+            })?;
+        let file = segment.file.clone()?;
+        let delta = span.start.saturating_sub(segment.spliced.start);
+        let len = span.end.saturating_sub(span.start);
+        Some((
+            file,
+            Span {
+                start: segment.origin.start + delta,
+                end: segment.origin.start + delta + len,
+            },
+        ))
+    }
+
     pub fn expand_report(&mut self, uri: &str) -> Option<&ExpandReport> {
         let key = self.ensure_loaded(uri)?;
         if !self.expand.contains_key(&key) {

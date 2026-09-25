@@ -38,7 +38,7 @@ Limitations by design
 - Code actions and auto-fix where a fix is stored
 - Folding, inlay hints, and links into `@#include` files and companions (e.g. `FILENAME_steadystate.m`)
 - Show the effective model (`dynare/showEffectiveModel`): text after `@#if` / `@#for` / `@{…}` and includes, with origin jump from each counted equation
-- Diagnostics while typing and on save
+- Diagnostics while typing and on save. An Added Warning can be silenced with a `//` comment: `dygnosis:disable CODE` on that line, `dygnosis:disable-next-line CODE` on the line above, or `dygnosis:disable-file CODE` anywhere in that file. Separate codes with commas. `vsd:disable` and `vsd:disable-file` are older names for the line and file forms. Errors, notes, and warnings Dynare itself reports stay visible.
 
 ### MCP tools
 
