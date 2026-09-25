@@ -8,12 +8,7 @@ use crate::span::Span;
 const RANGE_CAP: usize = 10_000;
 
 type MacroTypeError = (Span, &'static str, String);
-type ExpandTracedFull = (
-    Vec<Token>,
-    Vec<TokenTrace>,
-    Vec<FrameRec>,
-    Vec<MacroTypeError>,
-);
+type ExpandTracedFull = (Vec<Token>, Vec<TokenTrace>, Vec<FrameRec>, Vec<MacroTypeError>);
 
 #[derive(Clone, Debug)]
 enum MacroVal {
@@ -521,7 +516,9 @@ fn parse_define_eval(
         let l = eval_macro_atom(left, defines);
         let r = eval_macro_atom(right, defines);
         return match (l, r) {
-            (Ok(MacroVal::Int(a)), Ok(MacroVal::Int(b))) => Ok(Some((name, MacroVal::Int(a + b)))),
+            (Ok(MacroVal::Int(a)), Ok(MacroVal::Int(b))) => {
+                Ok(Some((name, MacroVal::Int(a + b))))
+            }
             (Ok(_), Ok(_)) => Err(()),
             _ => Ok(None),
         };

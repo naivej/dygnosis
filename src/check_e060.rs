@@ -358,12 +358,7 @@ pub fn check_e060_family_on_model(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_e065(model));
     out.extend(check_e381(model));
     for (span, code, message) in &model.macro_type_errors {
-        out.push(Diagnostic::new(
-            *span,
-            Severity::Error,
-            *code,
-            message.clone(),
-        ));
+        out.push(Diagnostic::new(*span, Severity::Error, *code, message.clone()));
     }
     out
 }
