@@ -813,6 +813,206 @@ async fn hover_heterogeneous_endogenous_uses_its_model_timing() {
     let md = hover_markdown(hover);
     assert!(md.contains("predetermined"), "hover: {md}");
     assert!(md.contains("t-1"), "hover: {md}");
+    assert!(!md.to_ascii_lowercase().contains("unused"), "hover: {md}");
+}
+
+#[tokio::test]
+async fn hover_heterogeneous_only_lag_is_not_unused() {
+    let text = "heterogeneity_dimension d;\nvar y;\nvar(heterogeneity=d) a;\nmodel;\ny = 0;\nend;\nmodel(heterogeneity=d);\na = a(-1);\nend;\n";
+    let uri = Url::parse("file:///tmp/het_only_lag.mod").unwrap();
+    let byte = text.rfind("a(-1)").expect("lag");
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.to_string(), 1))
+        .await;
+    let md = hover_markdown(
+        service
+            .inner()
+            .hover(HoverParams {
+                text_document_position_params: tdp(uri, text, byte),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("hover rpc")
+            .expect("hover"),
+    );
+    assert!(md.contains("Endogenous"), "hover: {md}");
+    assert!(md.contains("predetermined"), "hover: {md}");
+    assert!(md.contains("t-1"), "hover: {md}");
+    assert!(!md.to_ascii_lowercase().contains("unused"), "hover: {md}");
+    assert!(
+        !md.contains("appears at t\n") && !md.ends_with("appears at t"),
+        "hover: {md}"
+    );
+}
+
+#[tokio::test]
+async fn heterogeneity_names_reach_completion_and_hover() {
+    let text = include_str!("fixtures/p_hank/accepted_family.mod").replace("\r\n", "\n");
+    let uri = Url::parse("file:///tmp/het_names.mod").unwrap();
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.clone(), 1))
+        .await;
+
+    let response = service
+        .inner()
+        .completion(CompletionParams {
+            text_document_position: tdp(uri.clone(), &text, text.len()),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .expect("completion rpc")
+        .expect("name completion");
+    let items = match response {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    for (name, help, kind) in [
+        (
+            "heterogeneity_dimension",
+            "heterogeneity dimension names",
+            CompletionItemKind::KEYWORD,
+        ),
+        (
+            "heterogeneity_load_steady_state",
+            "MAT file or a workspace variable",
+            CompletionItemKind::KEYWORD,
+        ),
+        (
+            "heterogeneity_compute_steady_state",
+            "optionally calibrating",
+            CompletionItemKind::KEYWORD,
+        ),
+        (
+            "heterogeneity_solve",
+            "linearized heterogeneous-agent",
+            CompletionItemKind::KEYWORD,
+        ),
+        (
+            "heterogeneity_simulate",
+            "IRFs or a simulation",
+            CompletionItemKind::KEYWORD,
+        ),
+        (
+            "heterogeneity",
+            "var, varexo, parameters, model, or shocks",
+            CompletionItemKind::KEYWORD,
+        ),
+        (
+            "SUM",
+            "contemporaneous heterogeneous endogenous",
+            CompletionItemKind::FUNCTION,
+        ),
+    ] {
+        let item = items.iter().find(|item| item.label == name).unwrap();
+        assert_eq!(item.kind, Some(kind), "{name} kind");
+        let Some(Documentation::String(doc)) = &item.documentation else {
+            panic!("{name} completion is missing text help");
+        };
+        assert!(doc.contains(help), "{name} completion: {doc}");
+        let needle = if name == "heterogeneity" {
+            "var(heterogeneity"
+        } else {
+            name
+        };
+        let byte = text.find(needle).unwrap() + needle.len() - name.len();
+        let md = hover_markdown(
+            service
+                .inner()
+                .hover(HoverParams {
+                    text_document_position_params: tdp(uri.clone(), &text, byte),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .expect("hover rpc")
+                .expect("name hover"),
+        );
+        let hover_help = if name == "heterogeneity" {
+            "dimension name"
+        } else {
+            help
+        };
+        assert!(md.contains(hover_help), "{name} hover: {md}");
+    }
+
+    let opener = "heterogeneity_simulate(";
+    let start = text.find(opener).unwrap();
+    let labels = completion_labels(
+        service
+            .inner()
+            .completion(CompletionParams {
+                text_document_position: tdp(uri.clone(), &text, start + opener.len()),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .expect("completion rpc")
+            .expect("option completion"),
+    );
+    assert!(labels.iter().any(|label| label == "print"));
+    assert!(labels.iter().any(|label| label == "noprint"));
+    assert!(labels.iter().any(|label| label == "graph"));
+    let print_byte = start + text[start..].find("irf").unwrap();
+    let md = hover_markdown(
+        service
+            .inner()
+            .hover(HoverParams {
+                text_document_position_params: tdp(uri.clone(), &text, print_byte),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("hover rpc")
+            .expect("irf hover"),
+    );
+    assert!(md.contains("heterogeneity_simulate"), "hover: {md}");
+    assert!(md.contains("IRFs"), "hover: {md}");
+
+    let text = "var(heterogeneity=d) a;\nvarexo(heterogeneity=d) e;\nparameters(heterogeneity=d) p;\nmodel(heterogeneity=d);\na = a(-1);\nend;\nshocks(heterogeneity=d, overwrite);\nvar e; stderr 0.01;\nend;\nshocks(overwrite, heterogeneity=d);\nvar e; stderr 0.02;\nend;\n";
+    let uri = Url::parse("file:///tmp/het_option_completion.mod").unwrap();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.to_string(), 1))
+        .await;
+    for opener in [
+        "var(",
+        "varexo(",
+        "parameters(",
+        "model(",
+        "shocks(",
+        "shocks(overwrite, ",
+    ] {
+        let start = text.find(opener).unwrap() + opener.len();
+        let items = match service
+            .inner()
+            .completion(CompletionParams {
+                text_document_position: tdp(uri.clone(), &text, start),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .expect("completion rpc")
+            .expect("option completion")
+        {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        let item = items
+            .iter()
+            .find(|item| item.label == "heterogeneity")
+            .unwrap_or_else(|| panic!("{opener} missing heterogeneity: {items:?}"));
+        assert_eq!(item.kind, Some(CompletionItemKind::PROPERTY), "{opener}");
+        let Some(Documentation::String(doc)) = &item.documentation else {
+            panic!("{opener} missing option help");
+        };
+        assert!(doc.contains("dimension name"), "{opener}: {doc}");
+    }
 }
 
 #[tokio::test]

@@ -133,7 +133,9 @@ pub fn block_openers() -> &'static [&'static str] {
 }
 #[doc(hidden)]
 pub use preprocessor::{find_preprocessor, run_preprocessor, JsonStage, PreprocessorResult};
-pub use refs::{ident_at, is_legal_ident, occurrences, option_command_at, rename_in_text};
+pub use refs::{
+    ident_at, is_legal_ident, occurrences, option_command_at, option_owner_at, rename_in_text,
+};
 pub use workspace::{CycleRecord, IncludeRecords, ResolvedInclude, UnresolvedInclude, Workspace};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

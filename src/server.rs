@@ -11,6 +11,7 @@ use tower_lsp::{Client, ClientSocket, LanguageServer, LspService, Server};
 
 use crate::catalog::{
     command_options, family_help, option_doc, FAMILY_COMMAND_HELP, FAMILY_OPERATOR_HELP,
+    HETEROGENEITY_OPTION,
 };
 use crate::diagnostic::{check_file, check_in_workspace};
 use crate::expand::{EquationOrigin, OriginFrame};
@@ -23,7 +24,7 @@ use crate::model_info::{
     assigned_number, classify_variable_timing, format_structure_lens, format_timing_line,
     structure_summary, TimingClass,
 };
-use crate::refs::{ident_at, is_legal_ident, occurrences, option_command_at};
+use crate::refs::{ident_at, is_legal_ident, occurrences, option_command_at, option_owner_at};
 use crate::span::{LineIndex, Span};
 use crate::workspace::Workspace;
 use crate::{Severity, VERSION};
@@ -204,6 +205,12 @@ impl Backend {
                 return Some(markdown_hover(md, range));
             }
         }
+        if word.eq_ignore_ascii_case("heterogeneity") {
+            if let Some(head) = heterogeneity_declaration_head(&doc.text, byte) {
+                let md = format!("**`{head}` option**: `heterogeneity`\n\n{HETEROGENEITY_OPTION}");
+                return Some(markdown_hover(md, range));
+            }
+        }
         if let Some(help) = family_help(&word) {
             return Some(markdown_hover(format!("**`{word}`**\n\n{help}"), range));
         }
@@ -353,6 +360,15 @@ impl Backend {
                 return None;
             }
             return Some(CompletionResponse::Array(items));
+        }
+        if let Some(head) = heterogeneity_declaration_head(&doc.text, byte) {
+            return Some(CompletionResponse::Array(vec![CompletionItem {
+                label: "heterogeneity".into(),
+                kind: Some(CompletionItemKind::PROPERTY),
+                detail: Some(format!("{head} option")),
+                documentation: Some(Documentation::String(HETEROGENEITY_OPTION.into())),
+                ..CompletionItem::default()
+            }]));
         }
         let model = inner.workspace.get_model(pos.text_document.uri.as_str())?;
         Some(CompletionResponse::Array(default_completions(model)))
@@ -1606,6 +1622,18 @@ fn origin_frame_json(workspace: &Workspace, frame: &OriginFrame) -> Value {
         )),
     );
     Value::Object(obj)
+}
+
+fn heterogeneity_declaration_head(src: &str, byte: u32) -> Option<String> {
+    let owner = option_owner_at(src, byte)?;
+    if ["var", "varexo", "parameters", "model"]
+        .iter()
+        .any(|head| owner.eq_ignore_ascii_case(head))
+    {
+        Some(owner.to_ascii_lowercase())
+    } else {
+        None
+    }
 }
 
 fn markdown_hover(value: String, range: Option<Range>) -> Hover {

@@ -1369,7 +1369,7 @@
       },
       {
         "name": "filename",
-        "description": "Name of the Excel file to write."
+        "description": "Path to the MAT file that holds the steady-state structure. Quote it when it has a path or an extension. If omitted, load the structure from the workspace variable named by variable."
       },
       {
         "name": "forward_check_every",
@@ -1429,7 +1429,7 @@
       },
       {
         "name": "variable",
-        "description": "When filename <filename = FILENAME> is provided, this is the variable name within the MAT file to load."
+        "description": "Name of the steady-state structure. With filename, the name inside the MAT file; without filename, a workspace variable. Default: steady_state."
       }
     ]
   },
@@ -1440,30 +1440,34 @@
     "options": [
       {
         "name": "filename",
-        "description": "Name of the Excel file to write."
+        "description": "Path to the MAT file that holds the steady-state structure. Quote it when it has a path or an extension. If omitted, load the structure from the workspace variable named by variable."
       },
       {
         "name": "tolf",
-        "description": "Convergence criterion for termination based on the function value."
+        "description": "Tolerance for the residual check on aggregate equations. Default: 1e-6."
       },
       {
         "name": "variable",
-        "description": "When filename <filename = FILENAME> is provided, this is the variable name within the MAT file to load."
+        "description": "Name of the steady-state structure. With filename, the name inside the MAT file; without filename, a workspace variable. Default: steady_state."
       }
     ]
   },
   "heterogeneity_simulate": {
     "command": "heterogeneity_simulate",
     "known": true,
-    "n_options": 12,
+    "n_options": 13,
     "options": [
       {
         "name": "drop",
-        "description": "Number of points (burn-in) dropped at the beginning of simulation before computing the summary statistics."
+        "description": "Number of initial periods to drop."
+      },
+      {
+        "name": "graph",
+        "description": "Same switch as nograph."
       },
       {
         "name": "graph_format",
-        "description": "graph_format = ( FORMAT, FORMAT..."
+        "description": "Output format for the graphs."
       },
       {
         "name": "irf",
@@ -1483,11 +1487,11 @@
       },
       {
         "name": "nograph",
-        "description": ":noindex:"
+        "description": "Suppresses graph generation."
       },
       {
         "name": "noprint",
-        "description": "Don’t print anything."
+        "description": "Suppresses printing of results."
       },
       {
         "name": "periods",
@@ -1495,15 +1499,15 @@
       },
       {
         "name": "print",
-        "description": "Print results (opposite of noprint)."
+        "description": "Enables printing of results."
       },
       {
         "name": "relative_irf",
-        "description": "Requests the computation of normalized IRFs."
+        "description": "Requests IRFs as percentage deviations from steady state for a unit shock."
       },
       {
         "name": "tex",
-        "description": "Requests the printing of results and graphs in TeX tables and graphics that can be later directly included in LaTeX files."
+        "description": "Writes TeX for the IRF figures."
       }
     ]
   },

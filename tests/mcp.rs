@@ -866,6 +866,55 @@ fn semi_structural_catalog_reaches_list_options_tool() {
 }
 
 #[test]
+fn heterogeneity_catalog_reaches_list_options_tool() {
+    for (command, count) in [
+        ("heterogeneity_dimension", 0),
+        ("heterogeneity_load_steady_state", 3),
+        ("heterogeneity_compute_steady_state", 20),
+        ("heterogeneity_solve", 1),
+        ("heterogeneity_simulate", 13),
+    ] {
+        let payload = dynare_list_options(Some(&command.to_uppercase()));
+        assert_eq!(payload["command"], command, "{command}");
+        assert_eq!(payload["known"], true, "{command}");
+        assert_eq!(payload["n_options"], count, "{command}");
+        assert!(
+            payload["options"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|entry| entry["description"]
+                    .as_str()
+                    .is_some_and(|text| !text.is_empty())),
+            "{command} has an option without help"
+        );
+    }
+    for name in ["SUM", "sum", "heterogeneity"] {
+        assert_eq!(dynare_list_options(Some(name))["known"], false, "{name}");
+    }
+    let print = dynare_list_options(Some("heterogeneity_simulate"))["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "print")
+        .unwrap()["description"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let noprint = dynare_list_options(Some("heterogeneity_simulate"))["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "noprint")
+        .unwrap()["description"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(print.contains("printing"));
+    assert!(noprint.contains("printing"));
+}
+
+#[test]
 fn find_references_betta_skips_comment() {
     let base = read_mod("trend_rbc_gov_inv");
     let text = format!("// betta\n{base}");
