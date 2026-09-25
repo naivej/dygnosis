@@ -8,6 +8,7 @@
 - Compare pairs aggregate equations by name first. A unique name pairs across reordering; a repeated name pairs only when the normalized text and tags match. Equation rows include each side's name and tags, and `unmatched_same_name` groups leftovers that still share a name.
 - Removes parameter-value inlay hints and the model-counts code lens. Folded assignment values stay on hover and in compare. Counts stay in `dynare_model_info`.
 - `dynare_format` formats a `.mod` file with the same rules as the editor. It returns the full text when the formatting changes, and reports when the file is already formatted or cannot be formatted. `formatIndent` is `tab` or 1–8 spaces, as in the editor.
+- Compare reports `symbols_changed` for a shared name whose declaration kind, `long_name`, or TeX name differs, including metadata that was added or removed. Missing metadata stays empty rather than being filled with the symbol name. Parameter value changes stay in `changed_parameter_values`. A kind change across `var`, `varexo`, and `parameters` also stays in the existing added and removed name lists. A change between `varexo` and `varexo_det`, or between an aggregate declaration and the same command with a heterogeneity dimension, stays on that command's list and is reported in `symbols_changed`.
 
 ## v0.9.0
 

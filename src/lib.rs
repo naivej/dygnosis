@@ -122,8 +122,8 @@ pub use model::{
 };
 pub use model_diff::{
     compare_models, compare_models_with_sources, CompareSource, EquationChange, IndexedEquation,
-    ModelDiff, ParameterChange, ShockSetting, ShockSetupChange, SourceLocation, UnmatchedSameName,
-    WrittenPeriod,
+    ModelDiff, ParameterChange, ShockSetting, ShockSetupChange, SourceLocation, SymbolChange,
+    SymbolSide, UnmatchedSameName, WrittenPeriod,
 };
 pub use model_info::{
     assigned_number, classify_variable_timing, format_structure_lens, format_timing_line,

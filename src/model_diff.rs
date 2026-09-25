@@ -28,6 +28,22 @@ pub struct ParameterChange {
     pub new_raw: String,
 }
 
+/// One side of a shared symbol. Null metadata means the file did not write it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SymbolSide {
+    pub kind: String,
+    pub long_name: Option<String>,
+    pub tex_name: Option<String>,
+}
+
+/// A shared name whose kind or explicit metadata differs. Sorted by `name`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SymbolChange {
+    pub name: String,
+    pub before: SymbolSide,
+    pub after: SymbolSide,
+}
+
 /// Near-match pairing of one removed and one added equation.
 /// Names and tags are side-specific; there is no single `index`, `name`, or `tags`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -163,6 +179,8 @@ pub struct ModelDiff {
     pub removed_parameters: Vec<String>,
     pub common_parameters: Vec<String>,
     pub changed_parameter_values: Vec<ParameterChange>,
+    /// Shared names whose kind or explicit `long_name` / TeX differs. Empty when none do.
+    pub symbols_changed: Vec<SymbolChange>,
     pub added_equations: Vec<IndexedEquation>,
     pub removed_equations: Vec<IndexedEquation>,
     pub changed_equations: Vec<EquationChange>,
@@ -213,6 +231,14 @@ impl ModelDiff {
                         p.name, p.old_raw, p.new_raw
                     ));
                 }
+            }
+        }
+
+        if !self.symbols_changed.is_empty() {
+            lines.push(String::new());
+            lines.push("## Changed symbols".into());
+            for symbol in &self.symbols_changed {
+                lines.push(format!("- {}", format_symbol_change(symbol)));
             }
         }
 
@@ -325,6 +351,7 @@ pub fn compare_models_with_sources(
         removed_parameters: sorted_diff(&par_a, &par_b),
         common_parameters: sorted_intersect(&par_a, &par_b),
         changed_parameter_values,
+        symbols_changed: symbols_changed(model_a, model_b),
         added_equations: added_eq,
         removed_equations: removed_eq,
         changed_equations: changed_eq,
@@ -1964,6 +1991,130 @@ fn markdown_escape(value: &str) -> String {
         }
     }
     out
+}
+
+fn symbols_changed(before: &Model, after: &Model) -> Vec<SymbolChange> {
+    let old = symbol_index(before);
+    let new = symbol_index(after);
+    old.into_iter()
+        .filter_map(|(name, old_side)| {
+            let new_side = new.get(&name)?;
+            if &old_side == new_side {
+                None
+            } else {
+                Some(SymbolChange {
+                    name,
+                    before: old_side,
+                    after: new_side.clone(),
+                })
+            }
+        })
+        .collect()
+}
+
+fn symbol_index(model: &Model) -> BTreeMap<String, SymbolSide> {
+    let det_spans: HashSet<(u32, u32)> = model
+        .deterministic_exogenous
+        .iter()
+        .map(|decl| (decl.span.start, decl.span.end))
+        .collect();
+    let mut ranked: Vec<(u32, String, SymbolSide)> = Vec::new();
+    push_symbols(
+        &mut ranked,
+        model,
+        &model.endogenous,
+        "var",
+        &det_spans,
+        false,
+    );
+    push_symbols(
+        &mut ranked,
+        model,
+        &model.deterministic_exogenous,
+        "varexo_det",
+        &det_spans,
+        false,
+    );
+    push_symbols(
+        &mut ranked,
+        model,
+        &model.exogenous,
+        "varexo",
+        &det_spans,
+        true,
+    );
+    push_symbols(
+        &mut ranked,
+        model,
+        &model.parameters,
+        "parameters",
+        &det_spans,
+        false,
+    );
+    ranked.sort_by(|left, right| left.1.cmp(&right.1).then(left.0.cmp(&right.0)));
+    let mut out = BTreeMap::new();
+    for (_span, name, side) in ranked {
+        out.entry(name).or_insert(side);
+    }
+    out
+}
+
+fn push_symbols(
+    out: &mut Vec<(u32, String, SymbolSide)>,
+    model: &Model,
+    decls: &[Decl],
+    command: &str,
+    det_spans: &HashSet<(u32, u32)>,
+    skip_det_clone: bool,
+) {
+    for decl in decls {
+        if skip_det_clone && det_spans.contains(&(decl.span.start, decl.span.end)) {
+            continue;
+        }
+        out.push((
+            decl.span.start,
+            model.name(decl.name).to_string(),
+            SymbolSide {
+                kind: symbol_kind(model, command, decl),
+                long_name: decl.long_name.clone(),
+                tex_name: decl.tex_name.clone(),
+            },
+        ));
+    }
+}
+
+fn symbol_kind(model: &Model, command: &str, decl: &Decl) -> String {
+    match decl.heterogeneity {
+        Some((dimension, _)) => {
+            format!("{command}(heterogeneity={})", model.name(dimension))
+        }
+        None => command.to_string(),
+    }
+}
+
+fn format_symbol_change(change: &SymbolChange) -> String {
+    format!(
+        "`{}`: {} -> {}",
+        markdown_escape(&change.name),
+        format_symbol_side(&change.before),
+        format_symbol_side(&change.after)
+    )
+}
+
+fn format_symbol_side(side: &SymbolSide) -> String {
+    format!(
+        "`{}`, long_name {}, tex {}",
+        markdown_escape(&side.kind),
+        format_metadata(side.long_name.as_deref()),
+        format_metadata(side.tex_name.as_deref())
+    )
+}
+
+fn format_metadata(value: Option<&str>) -> String {
+    match value {
+        Some(text) => format!("`{}`", markdown_escape(text)),
+        None => "none".to_string(),
+    }
 }
 
 fn names(model: &Model, decls: &[Decl]) -> HashSet<String> {

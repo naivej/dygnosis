@@ -876,6 +876,27 @@ fn is_flag_word(word: &Option<String>, flag: &str) -> bool {
         .is_some_and(|lex| lex.eq_ignore_ascii_case(flag))
 }
 
+/// Inner text of a closed `$…$` token. An unclosed `$` is not a TeX name.
+fn closed_tex_name(raw: &str) -> Option<String> {
+    let inner = raw.strip_prefix('$')?.strip_suffix('$')?;
+    Some(inner.to_string())
+}
+
+/// Contents of a closed quoted string. The quotes are not part of the metadata.
+fn unquoted_string(raw: &str) -> Option<String> {
+    let mut chars = raw.chars();
+    let open = chars.next()?;
+    if open != '\'' && open != '"' {
+        return None;
+    }
+    let mut body: String = chars.collect();
+    if !body.ends_with(open) {
+        return None;
+    }
+    body.pop();
+    Some(body)
+}
+
 fn is_ident_only(s: &str) -> bool {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
@@ -1110,7 +1131,12 @@ impl Parser<'_> {
         let mut recorded_missing = false;
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
             if self.at(TokenKind::Latex) {
-                self.bump();
+                let tok = self.bump();
+                if let Some(tex) = closed_tex_name(self.lexeme(&tok)) {
+                    if let Some(decl) = decls.last_mut() {
+                        decl.tex_name = Some(tex);
+                    }
+                }
                 continue;
             }
             if self.at(TokenKind::LParen) {
@@ -1169,6 +1195,7 @@ impl Parser<'_> {
                     name: id,
                     span: tok.span,
                     long_name: None,
+                    tex_name: None,
                     log_transform,
                     heterogeneity,
                 });
