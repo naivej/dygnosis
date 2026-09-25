@@ -1,4 +1,4 @@
-//! Structural model notes for hover and code lens. No `blocks`, no BK.
+//! Structural model notes for hover and model counts. No `blocks`, no BK.
 
 use std::collections::{HashMap, HashSet};
 
@@ -38,7 +38,7 @@ pub fn classify_variable_timing(model: &Model) -> HashMap<String, TimingInfo> {
     classify_timing(model, true)
 }
 
-/// Aggregate-only timing for the aggregate model lens and MCP summary.
+/// Aggregate-only timing for aggregate counts and the MCP summary.
 pub(crate) fn classify_aggregate_variable_timing(model: &Model) -> HashMap<String, TimingInfo> {
     classify_timing(model, false)
 }
@@ -114,7 +114,7 @@ pub fn format_timing_line(info: &TimingInfo) -> String {
     )
 }
 
-/// Counts for the informational model-block code lens. No BK; no Python labels.
+/// Aggregate endogenous, timing-class, and varexo counts. No BK; no Python labels.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructureSummary {
     pub endogenous: usize,
@@ -172,7 +172,7 @@ pub fn structure_summary(model: &Model) -> StructureSummary {
     }
 }
 
-/// Informational lens title. No Compute Steady State / solver names.
+/// One-line form of [`StructureSummary`]. No Compute Steady State or solver names.
 pub fn format_structure_lens(summary: &StructureSummary) -> String {
     format!(
         "{} endogenous: {} predetermined, {} forward-looking, {} static · {} varexo · max lead {}, max lag {}",

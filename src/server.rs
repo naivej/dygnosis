@@ -21,8 +21,7 @@ use crate::lexer::{tokenize, TokenKind};
 use crate::model::{Decl, Equation, Model};
 use crate::model_diff::{compare_models_with_sources, CompareSource};
 use crate::model_info::{
-    assigned_number, classify_variable_timing, format_structure_lens, format_timing_line,
-    structure_summary, TimingClass,
+    assigned_number, classify_variable_timing, format_timing_line, TimingClass,
 };
 use crate::refs::{
     enclosing_paren_has_ident, ident_at, is_legal_ident, occurrences, option_command_at,
@@ -535,40 +534,6 @@ impl Backend {
         }
     }
 
-    fn inlay_hints(&self, uri: &Url, range: Range) -> Option<Vec<InlayHint>> {
-        let inner = self.lock_inner();
-        let doc = inner.docs.get(uri)?;
-        let model = inner.workspace.get_model(uri.as_str())?;
-        let index = LineIndex::new(&doc.text);
-        let mut hints = Vec::new();
-        for a in &model.param_assignments {
-            let start = index.position(&doc.text, a.span.start);
-            if !pos_in_range(Position::new(start.line, start.character), range) {
-                continue;
-            }
-            let name = model.name(a.name);
-            let Some(n) = assigned_number(model, name) else {
-                continue;
-            };
-            let end = index.position(&doc.text, a.span.end);
-            hints.push(InlayHint {
-                position: Position::new(end.line, end.character),
-                label: InlayHintLabel::String(format!(" → {}", g_format(n))),
-                kind: Some(InlayHintKind::TYPE),
-                text_edits: None,
-                tooltip: None,
-                padding_left: Some(true),
-                padding_right: None,
-                data: None,
-            });
-        }
-        if hints.is_empty() {
-            None
-        } else {
-            Some(hints)
-        }
-    }
-
     fn folding_ranges(&self, uri: &Url) -> Option<Vec<FoldingRange>> {
         let inner = self.lock_inner();
         let doc = inner.docs.get(uri)?;
@@ -891,30 +856,6 @@ impl Backend {
             result_id: None,
             data,
         })
-    }
-
-    fn code_lenses(&self, uri: &Url) -> Option<Vec<CodeLens>> {
-        let inner = self.lock_inner();
-        let doc = inner.docs.get(uri)?;
-        let model = inner.workspace.get_model(uri.as_str())?;
-        let block = model.model_block?;
-        if model.endogenous.is_empty() {
-            return None;
-        }
-        let index = LineIndex::new(&doc.text);
-        let start = index.position(&doc.text, block.start);
-        let summary = structure_summary(model);
-        let title = format_structure_lens(&summary);
-        let range = Range::new(Position::new(start.line, 0), Position::new(start.line, 0));
-        Some(vec![CodeLens {
-            range,
-            command: Some(Command {
-                title,
-                command: String::new(),
-                arguments: None,
-            }),
-            data: None,
-        }])
     }
 
     fn format_document(&self, uri: &Url) -> Option<Vec<TextEdit>> {
@@ -1346,10 +1287,6 @@ impl LanguageServer for Backend {
         Ok(self.linked_ranges(&params.text_document_position_params))
     }
 
-    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
-        Ok(self.inlay_hints(&params.text_document.uri, params.range))
-    }
-
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         Ok(self.folding_ranges(&params.text_document.uri))
     }
@@ -1381,10 +1318,6 @@ impl LanguageServer for Backend {
         Ok(self
             .semantic_tokens(&params.text_document.uri, Some(params.range))
             .map(SemanticTokensRangeResult::Tokens))
-    }
-
-    async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
-        Ok(self.code_lenses(&params.text_document.uri))
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
@@ -1457,7 +1390,6 @@ pub fn initialize_result() -> InitializeResult {
             })),
             code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
             linked_editing_range_provider: Some(LinkedEditingRangeServerCapabilities::Simple(true)),
-            inlay_hint_provider: Some(OneOf::Left(true)),
             folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
             selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
             document_link_provider: Some(DocumentLinkOptions {
@@ -1484,9 +1416,6 @@ pub fn initialize_result() -> InitializeResult {
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
             ),
-            code_lens_provider: Some(CodeLensOptions {
-                resolve_provider: Some(false),
-            }),
             document_formatting_provider: Some(OneOf::Left(true)),
             document_range_formatting_provider: Some(OneOf::Left(true)),
             execute_command_provider: Some(ExecuteCommandOptions {
@@ -2046,19 +1975,6 @@ pub async fn run_tcp(host: &str, port: u16) {
     let (read, write) = tokio::io::split(stream);
     let (service, socket) = new_service();
     Server::new(read, write, socket).serve(service).await;
-}
-
-fn g_format(n: f64) -> String {
-    let mut s = format!("{n:.6}");
-    if s.contains('.') {
-        while s.ends_with('0') {
-            s.pop();
-        }
-        if s.ends_with('.') {
-            s.pop();
-        }
-    }
-    s
 }
 
 fn pos_in_range(pos: Position, range: Range) -> bool {
