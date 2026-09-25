@@ -62,7 +62,6 @@
         }
       ],
       "index": 0,
-      "lhs": "y",
       "name": "production function",
       "origin": {
         "column": 1,
@@ -70,7 +69,6 @@
         "end_line": 83,
         "line": 82
       },
-      "rhs": "exp(z)*kg(-1)^alphag*k(-1)^alppha*n^(1-alppha-alphag)",
       "static_tag": false,
       "tags": {
         "name": "production function"
@@ -110,7 +108,6 @@
         }
       ],
       "index": 1,
-      "lhs": "w",
       "name": "labor demand FOC",
       "origin": {
         "column": 1,
@@ -118,7 +115,6 @@
         "end_line": 87,
         "line": 86
       },
-      "rhs": "(1-alppha-alphag)*y/n",
       "static_tag": false,
       "tags": {
         "name": "labor demand FOC"
@@ -153,7 +149,6 @@
         }
       ],
       "index": 2,
-      "lhs": "rk",
       "name": "capital rental rate FOC",
       "origin": {
         "column": 1,
@@ -161,7 +156,6 @@
         "end_line": 91,
         "line": 90
       },
-      "rhs": "alppha*y/k(-1)",
       "static_tag": false,
       "tags": {
         "name": "capital rental rate FOC"
@@ -206,7 +200,6 @@
         }
       ],
       "index": 3,
-      "lhs": "c^(-1)",
       "name": "consumption Euler equation",
       "origin": {
         "column": 1,
@@ -214,7 +207,6 @@
         "end_line": 97,
         "line": 96
       },
-      "rhs": "(betta/(1+gam))*c(+1)^(-1)*(rk(+1)+1-delta)",
       "static_tag": false,
       "tags": {
         "name": "consumption Euler equation"
@@ -254,7 +246,6 @@
         }
       ],
       "index": 4,
-      "lhs": "psi*n^phhi*c",
       "name": "labor supply FOC",
       "origin": {
         "column": 1,
@@ -262,7 +253,6 @@
         "end_line": 101,
         "line": 100
       },
-      "rhs": "w",
       "static_tag": false,
       "tags": {
         "name": "labor supply FOC"
@@ -302,7 +292,6 @@
         }
       ],
       "index": 5,
-      "lhs": "(1+gam)*k",
       "name": "private capital law of motion",
       "origin": {
         "column": 1,
@@ -310,7 +299,6 @@
         "end_line": 107,
         "line": 106
       },
-      "rhs": "(1-delta)*k(-1)+invest",
       "static_tag": false,
       "tags": {
         "name": "private capital law of motion"
@@ -350,7 +338,6 @@
         }
       ],
       "index": 6,
-      "lhs": "(1+gam)*kg",
       "name": "public capital law of motion",
       "origin": {
         "column": 1,
@@ -358,7 +345,6 @@
         "end_line": 111,
         "line": 110
       },
-      "rhs": "(1-deltag)*kg(-1)+ig",
       "static_tag": false,
       "tags": {
         "name": "public capital law of motion"
@@ -394,7 +380,6 @@
         }
       ],
       "index": 7,
-      "lhs": "y",
       "name": "resource constraint",
       "origin": {
         "column": 1,
@@ -402,7 +387,6 @@
         "end_line": 117,
         "line": 116
       },
-      "rhs": "c+invest+ig",
       "static_tag": false,
       "tags": {
         "name": "resource constraint"
@@ -436,7 +420,6 @@
         }
       ],
       "index": 8,
-      "lhs": "z",
       "name": "TFP process",
       "origin": {
         "column": 1,
@@ -444,7 +427,6 @@
         "end_line": 123,
         "line": 122
       },
-      "rhs": "rhoz*z(-1)+eps_z",
       "static_tag": false,
       "tags": {
         "name": "TFP process"
@@ -488,7 +470,6 @@
         }
       ],
       "index": 9,
-      "lhs": "log(ig)",
       "name": "government investment process",
       "origin": {
         "column": 1,
@@ -496,7 +477,6 @@
         "end_line": 127,
         "line": 126
       },
-      "rhs": "(1-rho_ig)*log(ig_ss)+rho_ig*log(ig(-1))+eps_ig",
       "static_tag": false,
       "tags": {
         "name": "government investment process"
@@ -520,7 +500,6 @@
         }
       ],
       "index": 10,
-      "lhs": "log_y",
       "name": "log output",
       "origin": {
         "column": 1,
@@ -528,7 +507,6 @@
         "end_line": 133,
         "line": 132
       },
-      "rhs": "log(y)",
       "static_tag": false,
       "tags": {
         "name": "log output"
@@ -552,7 +530,6 @@
         }
       ],
       "index": 11,
-      "lhs": "log_c",
       "name": "log consumption",
       "origin": {
         "column": 1,
@@ -560,7 +537,6 @@
         "end_line": 136,
         "line": 135
       },
-      "rhs": "log(c)",
       "static_tag": false,
       "tags": {
         "name": "log consumption"
@@ -584,7 +560,6 @@
         }
       ],
       "index": 12,
-      "lhs": "log_k",
       "name": "log private capital",
       "origin": {
         "column": 1,
@@ -592,7 +567,6 @@
         "end_line": 139,
         "line": 138
       },
-      "rhs": "log(k)",
       "static_tag": false,
       "tags": {
         "name": "log private capital"
@@ -616,7 +590,6 @@
         }
       ],
       "index": 13,
-      "lhs": "log_kg",
       "name": "log public capital",
       "origin": {
         "column": 1,
@@ -624,7 +597,6 @@
         "end_line": 142,
         "line": 141
       },
-      "rhs": "log(kg)",
       "static_tag": false,
       "tags": {
         "name": "log public capital"
@@ -648,7 +620,6 @@
         }
       ],
       "index": 14,
-      "lhs": "log_ig",
       "name": "log government investment",
       "origin": {
         "column": 1,
@@ -656,7 +627,6 @@
         "end_line": 145,
         "line": 144
       },
-      "rhs": "log(ig)",
       "static_tag": false,
       "tags": {
         "name": "log government investment"
@@ -680,7 +650,6 @@
         }
       ],
       "index": 15,
-      "lhs": "log_n",
       "name": "log labor",
       "origin": {
         "column": 1,
@@ -688,7 +657,6 @@
         "end_line": 148,
         "line": 147
       },
-      "rhs": "log(n)",
       "static_tag": false,
       "tags": {
         "name": "log labor"

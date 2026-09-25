@@ -38,8 +38,6 @@ fn dump_lib(model: &dygnosis::Model) -> serde_json::Value {
                 "index": row.index,
                 "name": row.name,
                 "text": row.text,
-                "lhs": row.lhs,
-                "rhs": row.rhs,
                 "tags": row.tags,
             });
             if let Some(comp) = row.complementarity {
@@ -146,8 +144,13 @@ fn perp_mod_records_complementarity() {
         .expect("perp.mod complementarity");
     assert_eq!(row.text, "i = 0");
     assert!(!row.text.contains('⟂'));
-    assert!(!row.lhs.contains('⟂'));
-    assert!(!row.rhs.contains('⟂'));
+    let written = model
+        .equations
+        .iter()
+        .find(|eq| eq.text == "i = 0")
+        .expect("perp equation");
+    assert!(!written.lhs.contains('⟂'));
+    assert!(!written.rhs.contains('⟂'));
     assert!(
         comp.text.contains("i >= 0"),
         "complementarity text {}",
@@ -273,8 +276,6 @@ fn square_invariants_list_vs_count_known_codes() {
     assert_eq!(rows[0].index, 0);
     assert_eq!(rows[0].name, "");
     assert_eq!(rows[0].text, "is = rhos*is(-1)+e");
-    assert_eq!(rows[0].lhs, "is");
-    assert_eq!(rows[0].rhs, "rhos*is(-1)+e");
     assert!(!rows[0].static_tag);
     assert!(!rows[0].dynamic_tag);
     assert!(!rows[0].idents.is_empty());

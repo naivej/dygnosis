@@ -2,8 +2,6 @@
 
 index: 0
 flags: (none)
-lhs: `y`
-rhs: `rho*y(-1)+c(+1)+e`
 
 - `y`: endogenous, offset 0, predetermined
 - `rho`: parameter, offset 0

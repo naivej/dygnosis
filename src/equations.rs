@@ -15,8 +15,6 @@ pub struct EquationRow {
     pub index: usize,
     pub name: String,
     pub text: String,
-    pub lhs: String,
-    pub rhs: String,
     pub span: Span,
     pub static_tag: bool,
     pub dynamic_tag: bool,
@@ -140,8 +138,6 @@ fn equation_row(
         index,
         name: eq.name.clone(),
         text: eq.text.clone(),
-        lhs: eq.lhs.clone(),
-        rhs: eq.rhs.clone(),
         span: eq.span,
         static_tag: eq.static_tag,
         dynamic_tag: eq.dynamic_tag,
@@ -184,10 +180,7 @@ pub fn explain_equation(row: &EquationRow) -> String {
         (false, true) => "dynamic".to_string(),
         (true, true) => "static, dynamic".to_string(),
     };
-    let mut out = format!(
-        "### {title}\n\nindex: {}\nflags: {flags}\nlhs: `{}`\nrhs: `{}`\n\n",
-        row.index, row.lhs, row.rhs
-    );
+    let mut out = format!("### {title}\n\nindex: {}\nflags: {flags}\n\n", row.index);
     for id in &row.idents {
         out.push_str(&format!(
             "- `{}`: {}, offset {}",

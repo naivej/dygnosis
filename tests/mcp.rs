@@ -279,14 +279,14 @@ fn assert_counted_row_keys(row: &Value) {
         "index",
         "name",
         "text",
-        "lhs",
-        "rhs",
         "idents",
         "static_tag",
         "dynamic_tag",
     ] {
         assert!(row.get(key).is_some(), "{key} required: {row}");
     }
+    assert!(row.get("lhs").is_none(), "lhs must be omitted: {row}");
+    assert!(row.get("rhs").is_none(), "rhs must be omitted: {row}");
     assert_tags_object(row);
     assert!(row.get("span").is_none(), "span must be omitted: {row}");
     assert_counted_origin(row);
@@ -510,7 +510,7 @@ fn registered_tools_are_twelve() {
     assert_eq!(tools.len(), 12);
     assert_eq!(
         tools[9]["description"],
-        "List aggregate and dimension-labelled heterogeneous equations with lhs, rhs, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds."
+        "List aggregate and dimension-labelled heterogeneous equations with text, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds."
     );
     assert_eq!(
         tools[11]["description"],
@@ -1556,7 +1556,8 @@ fn dynare_equations_trend_rbc_gov_inv() {
 
     let eqs = payload["equations"].as_array().expect("equations");
     assert_eq!(eqs[0]["index"], 0);
-    assert_eq!(eqs[0]["lhs"], "y");
+    assert!(eqs[0].get("lhs").is_none(), "lhs must be omitted");
+    assert!(eqs[0].get("rhs").is_none(), "rhs must be omitted");
     assert_eq!(eqs[0]["idents"][2]["name"], "kg");
     assert_eq!(eqs[0]["idents"][2]["timing"], -1);
     assert_eq!(payload["count_gap"]["n_equations"], 16);
@@ -1567,8 +1568,8 @@ fn dynare_equations_trend_rbc_gov_inv() {
         assert!(row.get("span").is_none(), "span must be omitted: {row}");
         assert!(row.get("name").is_some(), "name required: {row}");
         assert!(row.get("text").is_some(), "text required: {row}");
-        assert!(row.get("lhs").is_some());
-        assert!(row.get("rhs").is_some());
+        assert!(row.get("lhs").is_none(), "lhs must be omitted: {row}");
+        assert!(row.get("rhs").is_none(), "rhs must be omitted: {row}");
         assert!(row.get("static_tag").is_some());
         assert!(row.get("dynamic_tag").is_some());
         assert!(row.get("idents").is_some());
@@ -1759,8 +1760,8 @@ fn dynare_equations_perp() {
         !row["text"].as_str().expect("text").contains('⟂'),
         "text must not contain ⟂: {row}"
     );
-    assert_eq!(row["lhs"], "i");
-    assert_eq!(row["rhs"], "0");
+    assert!(row.get("lhs").is_none(), "lhs must be omitted: {row}");
+    assert!(row.get("rhs").is_none(), "rhs must be omitted: {row}");
     assert_eq!(row["tags"], json!({}));
     let comp = row
         .get("complementarity")

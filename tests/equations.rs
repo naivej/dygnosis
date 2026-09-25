@@ -52,8 +52,6 @@ fn reader_skips_local_and_static_indexes() {
     assert_eq!(rows[0].index, 0);
     assert_eq!(rows[0].name, "euler");
     assert_eq!(rows[0].text, "y = rho*y(-1)+c(+1)+e");
-    assert_eq!(rows[0].lhs, "y");
-    assert_eq!(rows[0].rhs, "rho*y(-1)+c(+1)+e");
     assert!(!rows[0].static_tag);
     assert!(!rows[0].dynamic_tag);
     assert_eq!(
@@ -85,8 +83,6 @@ fn reader_skips_local_and_static_indexes() {
     assert_eq!(rows[1].index, 1);
     assert_eq!(rows[1].name, "");
     assert_eq!(rows[1].text, "c = tau+foo");
-    assert_eq!(rows[1].lhs, "c");
-    assert_eq!(rows[1].rhs, "tau+foo");
     assert!(!rows[1].static_tag);
     assert!(rows[1].dynamic_tag);
     assert_eq!(
@@ -176,8 +172,14 @@ fn residual_without_eq_keeps_empty_sides() {
     let model = parse("var y;\nmodel;\ny;\nend;\n");
     let rows = equations(&model);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].lhs, "");
-    assert_eq!(rows[0].rhs, "");
+    assert_eq!(rows[0].text, "y");
+    let written = model
+        .equations
+        .iter()
+        .find(|eq| eq.text == "y")
+        .expect("residual equation");
+    assert_eq!(written.lhs, "");
+    assert_eq!(written.rhs, "");
 }
 
 #[test]
@@ -218,8 +220,7 @@ fn dump_lib(model: &dygnosis::Model) -> serde_json::Value {
         .map(|row: EquationRow| {
             serde_json::json!({
                 "index": row.index,
-                "lhs": row.lhs,
-                "rhs": row.rhs,
+                "text": row.text,
                 "idents": row.idents.into_iter().map(|id| {
                     let mut v = serde_json::json!({
                         "name": id.name,
@@ -261,7 +262,8 @@ fn trend_rbc_gov_inv_library_dump() {
     assert_eq!(got["count_gap"]["delta"], 0);
     assert_eq!(got["count_gap"]["expected_delta"], serde_json::Value::Null);
     assert_eq!(got["equations"][0]["index"], 0);
-    assert_eq!(got["equations"][0]["lhs"], "y");
+    assert!(got["equations"][0].get("lhs").is_none());
+    assert!(got["equations"][0].get("rhs").is_none());
     assert_eq!(got["equations"][0]["idents"][0]["name"], "y");
     assert_eq!(got["equations"][0]["idents"][1]["name"], "z");
     assert_eq!(got["equations"][0]["idents"][2]["name"], "kg");
