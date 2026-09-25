@@ -347,5 +347,5 @@ fn refused_tag_list_does_not_remove_an_equation() {
 
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(dygnosis::explain::known_codes().len(), 376);
+    assert_eq!(dygnosis::explain::known_codes().len(), 379);
 }

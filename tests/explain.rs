@@ -32,11 +32,11 @@ const RUST_CODES: &[&str] = &[
     "E436", "E437", "E438", "E439", "E440", "E441", "E442", "E443", "E444", "E445", "E446", "E447",
     "E448", "E449", "E450", "E451", "E452", "E453", "E454", "E455", "E456", "E457", "E458", "E459",
     "E460", "E461", "E462", "E463", "E464", "E465", "E466", "E467", "E468", "E469", "E470", "E471",
-    "E472", "E473", "E474", "E475", "E476", "E477", "E478", "E479", "E999", "I050", "W010", "W011",
-    "W012", "W013", "W020", "W022", "W031", "W042", "W051", "W052", "W054", "W055", "W056", "W057",
-    "W060", "W061", "W062", "W070", "W091", "W092", "W094", "W102", "W110", "W112", "W120", "W121",
-    "W122", "W131", "W140", "W150", "W160", "W170", "W186", "W187", "W200", "W201", "W202", "W203",
-    "W204", "W205", "W206", "W207",
+    "E472", "E473", "E474", "E475", "E476", "E477", "E478", "E479", "E999", "I050", "I208", "I209",
+    "I210", "W010", "W011", "W012", "W013", "W020", "W022", "W031", "W042", "W051", "W052", "W054",
+    "W055", "W056", "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094", "W102", "W110",
+    "W112", "W120", "W121", "W122", "W131", "W140", "W150", "W160", "W170", "W186", "W187", "W200",
+    "W201", "W202", "W203", "W204", "W205", "W206", "W207",
 ];
 
 const THIN_CODES: &[&str] = &[
@@ -67,10 +67,10 @@ const THIN_CODES: &[&str] = &[
     "E445", "E446", "E447", "E448", "E449", "E450", "E451", "E452", "E453", "E454", "E455", "E456",
     "E457", "E458", "E459", "E460", "E461", "E462", "E463", "E464", "E465", "E466", "E467", "E468",
     "E469", "E470", "E471", "E472", "E473", "E474", "E475", "E476", "E477", "E478", "E479", "E999",
-    "I050", "W010", "W011", "W012", "W013", "W020", "W022", "W031", "W042", "W051", "W052", "W054",
-    "W055", "W056", "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094", "W102", "W110",
-    "W112", "W120", "W121", "W122", "W131", "W140", "W150", "W160", "W170", "W200", "W201", "W202",
-    "W203", "W204", "W205", "W206", "W207",
+    "I050", "I208", "I209", "I210", "W010", "W011", "W012", "W013", "W020", "W022", "W031", "W042",
+    "W051", "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W062", "W070", "W091", "W092",
+    "W094", "W102", "W110", "W112", "W120", "W121", "W122", "W131", "W140", "W150", "W160", "W170",
+    "W200", "W201", "W202", "W203", "W204", "W205", "W206", "W207",
 ];
 
 const SHARED: &[&str] = &[
@@ -106,9 +106,9 @@ const SHARED: &[&str] = &[
 ];
 
 const ADDED: &[&str] = &[
-    "E999", "I050", "W010", "W011", "W012", "W013", "W020", "W051", "W052", "W054", "W055", "W056",
-    "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094", "W102", "W110", "W112", "W120",
-    "W122", "W140", "W160", "W207",
+    "E999", "I050", "I208", "I209", "I210", "W010", "W011", "W012", "W013", "W020", "W051", "W052",
+    "W054", "W055", "W056", "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094", "W102",
+    "W110", "W112", "W120", "W122", "W140", "W160", "W207",
 ];
 
 const SKIP_KEYS: &[&str] = &[
@@ -181,12 +181,12 @@ fn read_mod(archive_dir: &str) -> String {
 #[test]
 fn known_codes_matches_the_rust_keys() {
     assert_eq!(SHARED.len(), 337);
-    assert_eq!(ADDED.len(), 28);
+    assert_eq!(ADDED.len(), 31);
     assert_eq!(SKIP_KEYS.len(), 11);
-    assert_eq!(THIN_CODES.len(), 365);
-    assert_eq!(RUST_CODES.len(), 376);
+    assert_eq!(THIN_CODES.len(), 368);
+    assert_eq!(RUST_CODES.len(), 379);
     assert_eq!(known_codes(), RUST_CODES);
-    assert_eq!(known_codes().len(), 376);
+    assert_eq!(known_codes().len(), 379);
     assert!(!RUST_CODES.contains(&"P000"));
     assert!(RUST_CODES.contains(&"E178"));
     assert!(RUST_CODES.contains(&"E179"));
@@ -408,7 +408,7 @@ fn cli_explain_list() {
         entries.push((code, kind, title));
         i += 1;
     }
-    assert_eq!(entries.len(), 376);
+    assert_eq!(entries.len(), 379);
     assert_eq!(
         entries.iter().map(|(c, _, _)| *c).collect::<Vec<_>>(),
         RUST_CODES
@@ -442,7 +442,7 @@ fn cli_explain_list() {
     );
     assert_eq!(
         lines.get(i + 1).copied(),
-        Some("376 codes. Run `dygnosis explain <CODE>` for details.")
+        Some("379 codes. Run `dygnosis explain <CODE>` for details.")
     );
     assert!(!stdout.contains("python_dynare_lsp"));
     assert!(!stdout.contains("DYNR"));

@@ -1106,7 +1106,7 @@ impl Parser<'_> {
             }
         }
         let kw_range_end = self.current_start();
-        let mut decls = Vec::new();
+        let mut decls: Vec<Decl> = Vec::new();
         let mut recorded_missing = false;
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
             if self.at(TokenKind::Latex) {
@@ -1114,7 +1114,12 @@ impl Parser<'_> {
                 continue;
             }
             if self.at(TokenKind::LParen) {
-                self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                let long_name = self.take_symbol_long_name();
+                if let Some(text) = long_name {
+                    if let Some(decl) = decls.last_mut() {
+                        decl.long_name = Some(text);
+                    }
+                }
                 continue;
             }
             if self.at(TokenKind::Comma) {
@@ -1206,6 +1211,40 @@ impl Parser<'_> {
             }
         }
         decls
+    }
+
+    /// Per-name partition `(long_name='…')`. Dynare stores that string on the
+    /// symbol. Other keys in the same parentheses are left unread. `None` when
+    /// the group has no `long_name` key. An empty quoted value is `Some("")`.
+    fn take_symbol_long_name(&mut self) -> Option<String> {
+        self.bump();
+        let mut found: Option<String> = None;
+        let mut depth = 1i32;
+        while depth > 0 && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::LParen) {
+                depth += 1;
+                self.bump();
+                continue;
+            }
+            if self.at(TokenKind::RParen) {
+                depth -= 1;
+                self.bump();
+                continue;
+            }
+            if depth == 1 && self.at(TokenKind::Ident) {
+                let tok = self.bump();
+                if self.lexeme(&tok) == "long_name" && self.at(TokenKind::Eq) {
+                    self.bump();
+                    if self.at(TokenKind::String) {
+                        let value = self.bump();
+                        found = Some(unquote_string(self.lexeme(&value)));
+                    }
+                }
+                continue;
+            }
+            self.bump();
+        }
+        found
     }
 
     /// `var(?)` option list: `log`, `deflator=`, `log_deflator=`, other `=value`s

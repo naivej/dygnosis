@@ -1,0 +1,13 @@
+var y (long_name='output') ${y}$;
+varexo e (long_name='shock');
+varexo_det tau (long_name='tax');
+parameters beta (long_name='discount');
+beta = 0.99;
+predetermined_variables y;
+model_local_variable z;
+model;
+[name='euler'] y = beta*y(-1) + e + tau;
+[static] y = 1;
+# z = 4;
+end;
+stoch_simul(irf=20);

@@ -1088,7 +1088,10 @@ fn the_syntax_s061_held_is_their_sentence() {
         // A `#` local or a trend name in the slot is already a symbol. Registering
         // it again as a mod-file local makes E281 fire on the model, which 7.1
         // does not print for these files.
-        if matches!(*name, "fmom_ex_loc" | "fmom_ex_trend" | "fmom_ex_helper" | "fmom_wt_helper") {
+        if matches!(
+            *name,
+            "fmom_ex_loc" | "fmom_ex_trend" | "fmom_ex_helper" | "fmom_wt_helper"
+        ) {
             assert!(
                 got.iter().all(|d| d.code != "E281"),
                 "{name} must not emit E281: {:?}",
@@ -1123,7 +1126,7 @@ fn legal_syntax_neighbours_stay_quiet() {
 /// The registry grew by the eleven new codes. S061 is dropped.
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 376);
+    assert_eq!(known_codes().len(), 379);
     for code in [
         "E382", "E383", "E384", "E385", "E386", "E387", "E388", "E389", "E390", "E391", "E392",
     ] {

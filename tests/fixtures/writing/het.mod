@@ -1,0 +1,11 @@
+heterogeneity_dimension d;
+var y (long_name='output');
+var(heterogeneity=d) c;
+parameters beta (long_name='discount');
+model;
+[name='agg'] y = beta*y(-1);
+end;
+model(heterogeneity=d);
+c = c(-1);
+c = 3;
+end;

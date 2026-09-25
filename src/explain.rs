@@ -43,7 +43,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 333 keys: 282 shared + 27 added + 24 skipped.
+// 379 keys: 337 shared + 31 added + 11 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -158,6 +158,21 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("I050", ExplainEntry {
         title: "No initval or steady_state_model block",
         body: "The file declares variables and equations but does not include an `initval` or `steady_state_model` block. This check is presence only; this tool does not compute a numerical steady state. A sibling FILENAME_steadystate.m also counts as presence.\n\n**Fix**\n\nAdd an `initval` block with initial guesses, or a `steady_state_model` block with closed-form assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).",
+        kind: ExplainKind::Added,
+    }),
+    ("I208", ExplainEntry {
+        title: "Counted equation has no name tag",
+        body: "At least one counted model equation has no nonempty `name` tag. This is a writing preference, not a Dynare refusal.\n\n`#` locals and `[static]` replacement rows are not counted. One note gives the count for the compilation unit.\n\nMalformed or required tags still report their Dynare errors.",
+        kind: ExplainKind::Added,
+    }),
+    ("I209", ExplainEntry {
+        title: "Declaration has no long_name",
+        body: "At least one `var`, `varexo`, `varexo_det`, or `parameters` name has no nonempty explicit `long_name`. This is a writing preference, not a Dynare refusal.\n\nEach declared symbol is counted once in its scope. Declarations that come from a resolved macro are included. Generated auxiliaries, model-local names, and other declaration kinds are not counted.",
+        kind: ExplainKind::Added,
+    }),
+    ("I210", ExplainEntry {
+        title: "Number written in an equation",
+        body: "A written model equation contains a numeric literal other than 0 or 1. This is a writing preference, not a Dynare refusal. The note does not evaluate parameter values or rewrite calibration.\n\n`[static]` equations are included. `#` definitions are not. Timing offsets, tags, options, comments, and strings are not counted. A unary minus uses the literal's magnitude, so `-1` is quiet.",
         kind: ExplainKind::Added,
     }),
     ("W010", ExplainEntry {

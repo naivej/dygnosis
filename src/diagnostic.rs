@@ -222,6 +222,9 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
                 .any(|clash| clash.code == d.code && clash.span == d.span)
         });
     }
+    if !out.iter().any(|d| d.code == "E001") {
+        out.extend(crate::check_writing::writing_summaries(model));
+    }
     out
 }
 
@@ -253,8 +256,9 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<Vec<Diagnos
     ));
     diags = crate::suppress::apply_effective(ws, abs_path, diags);
     let records = ws.include_records(abs_path).cloned().unwrap_or_default();
-    if !records.unresolved.is_empty() || !records.cycles.is_empty() {
-        diags.retain(|d| d.code != "W060");
+    let expansion_blocked = !records.unresolved.is_empty() || !records.cycles.is_empty();
+    if expansion_blocked {
+        diags.retain(|d| d.code != "W060" && !crate::check_writing::is_writing_code(&d.code));
     } else if !records.resolved.is_empty() {
         diags.retain_mut(|d| {
             if d.code != "W060" {
@@ -267,6 +271,9 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<Vec<Diagnos
                 false
             }
         });
+    }
+    if !expansion_blocked {
+        place_writing_anchors(ws, abs_path, &mut diags);
     }
     let mut extra = Vec::new();
     extra.extend(crate::check_e060::check_e060(&records));
@@ -285,6 +292,43 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<Vec<Diagnos
     diags.extend(extra);
     crate::check_w160::quiet_i050(&mut diags, &companions);
     Some(diags)
+}
+
+/// Rewrite I208–I210 onto the file that owns the first site.
+/// A span that crosses two files keeps only its first byte.
+fn place_writing_anchors(ws: &mut Workspace, root: &str, diags: &mut Vec<Diagnostic>) {
+    diags.retain_mut(|diag| {
+        if !crate::check_writing::is_writing_code(&diag.code) {
+            return true;
+        }
+        let Some(span) = mapped_writing_span(ws, root, diag.span) else {
+            return false;
+        };
+        diag.span = span;
+        true
+    });
+}
+
+fn mapped_writing_span(ws: &mut Workspace, root: &str, span: Span) -> Option<Span> {
+    let (file, origin) = ws.map_effective_origin(root, span)?;
+    if span.end > span.start.saturating_add(1) {
+        let tail = Span {
+            start: span.end - 1,
+            end: span.end,
+        };
+        if let Some((end_file, _)) = ws.map_effective_origin(root, tail) {
+            if end_file != file {
+                let short = Span {
+                    start: span.start,
+                    end: span.start.saturating_add(1).min(span.end),
+                };
+                return ws
+                    .map_effective_origin(root, short)
+                    .map(|(_, mapped)| mapped);
+            }
+        }
+    }
+    Some(origin)
 }
 
 fn severity_label(severity: Severity) -> &'static str {
