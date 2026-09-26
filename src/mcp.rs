@@ -21,6 +21,10 @@ use crate::equations::{
 };
 use crate::expand::{expand_report, EquationOrigin, ExpandReport, OriginFrame};
 use crate::explain;
+use crate::extract::{
+    extract, EquationDomain, EquationRole, ExtractError, ExtractRequest, ExtractResult,
+    ExtractStatus,
+};
 use crate::format::{format_outcome, parse_format_indent, FormatOutcome};
 use crate::include_resolver::{normalize_uri, path_key};
 use crate::intern::Name;
@@ -90,6 +94,10 @@ const TOOLS: &[(&str, &str)] = &[
     (
         "dynare_format",
         "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it. Empty or whitespace-only input is unchanged.",
+    ),
+    (
+        "dynare_extract",
+        "Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model.",
     ),
 ];
 
@@ -1250,6 +1258,211 @@ pub fn dynare_format(
     }))
 }
 
+const EMPTY_SELECTOR: &str = "names or tags must select at least one equation";
+
+/// Extract a named equation group and the context it needs.
+///
+/// `names` are OR. `tags` are AND. When both are set, a row must satisfy both.
+/// `dimension` searches only that heterogeneity dimension. Omit it to search
+/// aggregate and heterogeneous scopes. An empty selector is an error. No match
+/// is `empty` with `fragment` `""`. Unresolved expansion and a PAC or VAR
+/// expectation in the closure are `unsupported_context` with `fragment` null.
+pub fn dynare_extract(
+    file_content: &str,
+    active_file: Option<&str>,
+    files: Option<&HashMap<String, String>>,
+    names: &[String],
+    tags: &HashMap<String, String>,
+    dimension: Option<&str>,
+) -> Result<Value, &'static str> {
+    let request = ExtractRequest {
+        file_content: file_content.to_string(),
+        active_file: active_file.map(str::to_string),
+        files: files
+            .map(|map| {
+                map.iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        names: names.to_vec(),
+        tags: tags
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+        dimension: dimension.map(str::to_string),
+    };
+    match extract(&request) {
+        Err(ExtractError::EmptySelector) => Err(EMPTY_SELECTOR),
+        Ok(result) => {
+            let overlaid = active_file
+                .zip(nonempty_map(files))
+                .map(|(active, map)| overlay_files(file_content, active, map));
+            let files = overlaid.as_ref().or(files);
+            Ok(extract_json(&result, file_content, files))
+        }
+    }
+}
+
+fn extract_json(
+    result: &ExtractResult,
+    file_content: &str,
+    files: Option<&HashMap<String, String>>,
+) -> Value {
+    let selected_equations: Vec<Value> = result
+        .selected_equations
+        .iter()
+        .map(|row| {
+            json!({
+                "domain": domain_name(row.domain),
+                "dimension": row.dimension,
+                "index": row.index,
+                "name": row.name,
+                "role": role_name(row.role),
+                "tags": row.tags,
+            })
+        })
+        .collect();
+    let origins: Vec<Value> = result
+        .origins
+        .iter()
+        .map(|origin| extract_origin_json(origin, file_content, files))
+        .collect();
+    let omitted_context: Vec<Value> = result
+        .omitted_context
+        .iter()
+        .map(|item| json!({ "kind": item.kind, "detail": item.detail }))
+        .collect();
+    json!({
+        "status": extract_status(result.status),
+        "fragment": result.fragment,
+        "selected_equations": selected_equations,
+        "origins": origins,
+        "omitted_context": omitted_context,
+        "explanation": result.explanation,
+    })
+}
+
+fn extract_origin_json(
+    origin: &crate::extract::ExtractOrigin,
+    file_content: &str,
+    files: Option<&HashMap<String, String>>,
+) -> Value {
+    let text = extract_source(origin.file.as_deref(), file_content, files);
+    let mut value = match text {
+        Some(text) if span_fits(text, origin.span) => range_json(origin.span, text),
+        _ => json!({
+            "line": null,
+            "column": null,
+            "end_line": null,
+            "end_column": null,
+        }),
+    };
+    value["domain"] = json!(domain_name(origin.domain));
+    value["dimension"] = json!(origin.dimension);
+    value["index"] = json!(origin.index);
+    value["role"] = json!(role_name(origin.role));
+    value["file"] = json!(extract_caller_file(origin.file.as_deref(), files));
+    if !origin.frames.is_empty() {
+        value["frames"] = json!(origin
+            .frames
+            .iter()
+            .map(|frame| {
+                let frame_text = extract_source(frame.file.as_deref(), file_content, files);
+                let mut row = match frame_text {
+                    Some(text) if span_fits(text, frame.span) => range_json(frame.span, text),
+                    _ => json!({
+                        "line": null,
+                        "column": null,
+                        "end_line": null,
+                        "end_column": null,
+                    }),
+                };
+                row["kind"] = json!(frame.kind);
+                if let Some(variable) = &frame.variable {
+                    row["variable"] = json!(variable);
+                }
+                if let Some(value) = &frame.value {
+                    row["value"] = json!(value);
+                }
+                row["file"] = json!(extract_caller_file(frame.file.as_deref(), files));
+                row
+            })
+            .collect::<Vec<_>>());
+    }
+    value
+}
+
+fn span_fits(text: &str, span: Span) -> bool {
+    let end = span.end as usize;
+    end <= text.len() && text.is_char_boundary(span.start as usize) && text.is_char_boundary(end)
+}
+
+fn extract_source<'a>(
+    file: Option<&str>,
+    file_content: &'a str,
+    files: Option<&'a HashMap<String, String>>,
+) -> Option<&'a str> {
+    let Some(file) = file else {
+        return Some(file_content);
+    };
+    let Some(files) = files else {
+        return Some(file_content);
+    };
+    if let Some(text) = files.get(file) {
+        return Some(text);
+    }
+    let wanted = normalize_uri(file);
+    let mut hits = files.iter().filter(|(key, _)| normalize_uri(key) == wanted);
+    let first = hits.next()?;
+    if hits.next().is_some() {
+        return None;
+    }
+    Some(first.1)
+}
+
+fn extract_caller_file(
+    file: Option<&str>,
+    files: Option<&HashMap<String, String>>,
+) -> Option<String> {
+    let file = file?;
+    let Some(files) = files else {
+        return Some(file.to_string());
+    };
+    if files.contains_key(file) {
+        return Some(file.to_string());
+    }
+    let wanted = normalize_uri(file);
+    let mut hits = files.keys().filter(|key| normalize_uri(key) == wanted);
+    let first = hits.next()?;
+    if hits.next().is_some() {
+        return Some(file.to_string());
+    }
+    Some(first.clone())
+}
+
+fn extract_status(status: ExtractStatus) -> &'static str {
+    match status {
+        ExtractStatus::Ok => "ok",
+        ExtractStatus::Empty => "empty",
+        ExtractStatus::UnsupportedContext => "unsupported_context",
+    }
+}
+
+fn domain_name(domain: EquationDomain) -> &'static str {
+    match domain {
+        EquationDomain::Aggregate => "aggregate",
+        EquationDomain::Heterogeneous => "heterogeneous",
+    }
+}
+
+fn role_name(role: EquationRole) -> &'static str {
+    match role {
+        EquationRole::Requested => "requested",
+        EquationRole::Companion => "companion",
+    }
+}
+
 fn tool_json(value: Value) -> CallToolResult {
     CallToolResult::structured(value)
 }
@@ -1282,6 +1495,21 @@ struct FormatParams {
     file_content: String,
     #[serde(default, rename = "formatIndent")]
     format_indent: Option<Value>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ExtractParams {
+    file_content: String,
+    #[serde(default)]
+    active_file: Option<String>,
+    #[serde(default)]
+    files: Option<HashMap<String, String>>,
+    #[serde(default)]
+    names: Vec<String>,
+    #[serde(default)]
+    tags: HashMap<String, String>,
+    #[serde(default)]
+    dimension: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1628,6 +1856,27 @@ impl DygnosisMcp {
             Err(message) => Err(rmcp::ErrorData::invalid_params(message, None)),
         }
     }
+
+    #[tool(
+        name = "dynare_extract",
+        description = "Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model."
+    )]
+    fn extract_tool(
+        &self,
+        Parameters(params): Parameters<ExtractParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        match dynare_extract(
+            &params.file_content,
+            params.active_file.as_deref(),
+            params.files.as_ref(),
+            &params.names,
+            &params.tags,
+            params.dimension.as_deref(),
+        ) {
+            Ok(value) => Ok(tool_json(value)),
+            Err(message) => Err(rmcp::ErrorData::invalid_params(message, None)),
+        }
+    }
 }
 
 #[tool_handler(name = "dygnosis")]
@@ -1654,6 +1903,7 @@ mod tests {
             "dynare_equations",
             "dynare_expand",
             "dynare_format",
+            "dynare_extract",
         ] {
             let expected = TOOLS.iter().find(|(tool, _)| *tool == name).unwrap().1;
             let actual = listed.iter().find(|tool| tool.name == name).unwrap();
@@ -1686,12 +1936,79 @@ mod tests {
         let schema = serde_json::to_string(&format_tool.input_schema).expect("format schema");
         assert!(schema.contains("file_content"), "{schema}");
         assert!(schema.contains("formatIndent"), "{schema}");
-        for name in ["dynare_extract", "dynare_workspace_diagnose"] {
+        let extract_tool = listed
+            .iter()
+            .find(|tool| tool.name == "dynare_extract")
+            .unwrap();
+        let extract_schema =
+            serde_json::to_string(&extract_tool.input_schema).expect("extract schema");
+        for field in [
+            "file_content",
+            "active_file",
+            "files",
+            "names",
+            "tags",
+            "dimension",
+        ] {
             assert!(
-                !blob.contains(name),
-                "stdio tools/list must not contain {name}"
+                extract_schema.contains(field),
+                "missing {field}: {extract_schema}"
             );
         }
+        assert!(
+            !blob.contains("dynare_workspace_diagnose"),
+            "stdio tools/list must not contain dynare_workspace_diagnose"
+        );
+    }
+
+    #[test]
+    fn extract_tool_rejects_an_empty_selector() {
+        let server = DygnosisMcp;
+        let err = server
+            .extract_tool(Parameters(ExtractParams {
+                file_content: "var y;\nmodel;\n[name='eq']\ny = 0;\nend;\n".into(),
+                active_file: None,
+                files: None,
+                names: Vec::new(),
+                tags: HashMap::new(),
+                dimension: None,
+            }))
+            .expect_err("empty selector");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("names or tags"));
+    }
+
+    #[test]
+    fn extract_origin_uses_the_replacement_for_the_active_file() {
+        let mut files = HashMap::new();
+        files.insert(
+            "root.mod".into(),
+            "var y;\nmodel;\n[name='old']\ny = 0;\nend;\n".into(),
+        );
+        let fresh = "var y;\nmodel;\n[name='eq']\ny = 1;\nend;\n";
+        let value = dynare_extract(
+            fresh,
+            Some("root.mod"),
+            Some(&files),
+            &["eq".into()],
+            &HashMap::new(),
+            None,
+        )
+        .expect("extract");
+        assert_eq!(value["status"], "ok");
+        assert!(value["fragment"].as_str().unwrap().contains("name='eq'"));
+        let origin = &value["origins"][0];
+        assert_eq!(origin["file"], "root.mod");
+        assert!(origin["line"].as_u64().is_some(), "{origin}");
+        let index = LineIndex::new(fresh);
+        let start = index.offset(
+            fresh,
+            crate::span::Position {
+                line: origin["line"].as_u64().unwrap() as u32 - 1,
+                character: origin["column"].as_u64().unwrap() as u32 - 1,
+            },
+        ) as usize;
+        assert!(fresh[start..].starts_with('['), "{origin} in {fresh}");
     }
 
     #[test]

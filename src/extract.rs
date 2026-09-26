@@ -1,11 +1,11 @@
-//! Private equation extraction. Later slices extend this engine.
+//! Equation extraction for `dynare_extract`.
 //!
-//! The engine selects aggregate equations from the effective compilation unit
-//! and retains the declarations, locals, static/dynamic partners, and OccBin
-//! regime companions those equations need. It does not register an MCP tool.
-#![allow(dead_code)]
+//! The engine selects equations from the effective compilation unit and retains
+//! the declarations, locals, heterogeneity dimension, static/dynamic partners,
+//! and OccBin regime companions those equations need. Aggregate and
+//! heterogeneous rows stay separate even when an index or a name matches.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::check_e060::check_e063;
 use crate::check_writing::model_structure;
@@ -17,8 +17,8 @@ use crate::parser::parse;
 use crate::span::Span;
 use crate::workspace::Workspace;
 
-/// Caller inputs. `dimension` is the later heterogeneous scope; this slice
-/// refuses it. `files` is the companion map for the MCP compilation unit.
+/// Caller inputs. `dimension` searches one heterogeneity dimension. Omit it to
+/// search aggregate and heterogeneous scopes. `files` is the companion map.
 #[derive(Clone, Debug, Default)]
 pub struct ExtractRequest {
     pub file_content: String,
@@ -45,8 +45,6 @@ pub enum ExtractStatus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EquationDomain {
     Aggregate,
-    /// Filled when a later slice retains heterogeneous rows.
-    #[allow(dead_code)]
     Heterogeneous,
 }
 
@@ -101,9 +99,7 @@ pub struct OmittedContext {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnsupportedKind {
-    HeterogeneousDimension,
     CompilationUnit,
-    Heterogeneous,
     Pac,
     Include,
     Macro,
@@ -130,12 +126,6 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
     if request.names.is_empty() && request.tags.is_empty() {
         return Err(ExtractError::EmptySelector);
     }
-    if request.dimension.is_some() {
-        return Ok(unsupported(
-            UnsupportedKind::HeterogeneousDimension,
-            "dimension narrows to a heterogeneous scope this step does not retain",
-        ));
-    }
 
     let Some(unit) = prepare(request) else {
         return Ok(unsupported(
@@ -144,42 +134,43 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
         ));
     };
     let model = &unit.model;
-    let aggregate = matching_indexes(&model.equations, request);
-    if heterogeneous_match(model, request) {
-        return Ok(unsupported(
-            UnsupportedKind::Heterogeneous,
-            "a matching equation is in a heterogeneous model block",
-        ));
-    }
+    let hits = matching_places(model, request);
     if let Some((kind, detail)) = unresolved_selection(model, unit.missing_include) {
         return Ok(unsupported(kind, detail));
     }
-    if aggregate.is_empty() {
+    if hits.is_empty() {
+        let explanation = match &request.dimension {
+            Some(dimension) => {
+                format!("No equation matched the selectors in dimension `{dimension}`.")
+            }
+            None => "No equation matched the selectors.".to_string(),
+        };
         return Ok(ExtractResult {
             status: ExtractStatus::Empty,
             fragment: Some(String::new()),
             selected_equations: Vec::new(),
             origins: Vec::new(),
             omitted_context: Vec::new(),
-            explanation: "No equation matched the selectors.".to_string(),
+            explanation,
             unsupported: None,
         });
     }
 
-    let kept = kept_equations(model, &aggregate);
-    let kept_indexes: Vec<usize> = kept.iter().map(|row| row.index).collect();
-    let closure = close(model, &kept_indexes);
-    if let Some(reason) = refuse(model, &kept_indexes, &closure, unit.missing_include) {
+    let kept = kept_equations(model, &hits);
+    let kept_places: Vec<EqRef> = kept.iter().map(|row| row.place).collect();
+    let closure = close(model, &kept_places);
+    if let Some(reason) = refuse(model, &kept_places, &closure, unit.missing_include) {
         return Ok(unsupported(reason.0, reason.1));
     }
-    let (occbin, occbin_omitted) = match occbin_setup(model, &kept_indexes) {
+    let retained = retained_places(model, &kept_places, &closure);
+    let (occbin, occbin_omitted) = match occbin_setup(model, &kept_places, &retained) {
         Ok(pair) => pair,
         Err(detail) => return Ok(unsupported(UnsupportedKind::Macro, detail)),
     };
 
     let selected_equations = kept
         .iter()
-        .map(|row| selected_row(model, row.index, row.role))
+        .map(|row| selected_row(model, row.place, row.role))
         .collect::<Vec<_>>();
     let origins = kept
         .iter()
@@ -187,9 +178,10 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
             origin_row(
                 model,
                 &unit.report,
-                row.index,
+                row.place,
                 row.role,
                 request.active_file.as_deref(),
+                &unit.static_origins,
             )
         })
         .collect();
@@ -198,7 +190,7 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
 
     Ok(ExtractResult {
         status: ExtractStatus::Ok,
-        fragment: Some(render(model, &kept_indexes, &closure, occbin.as_ref())),
+        fragment: Some(render(model, &kept_places, &closure, occbin.as_ref())),
         selected_equations,
         origins,
         omitted_context,
@@ -207,10 +199,27 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
     })
 }
 
+/// One written equation. `block` is `None` for the aggregate model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct EqRef {
+    block: Option<usize>,
+    index: usize,
+}
+
 struct Unit {
     model: Model,
     report: ExpandReport,
     missing_include: bool,
+    /// `[static]` rows are absent from the expand map. After an include splice
+    /// their equation span is in the spliced buffer, so this records the file
+    /// the span was read from.
+    static_origins: Vec<StaticOrigin>,
+}
+
+struct StaticOrigin {
+    place: EqRef,
+    file: Option<String>,
+    span: Span,
 }
 
 /// Map-free input parses `file_content` alone.
@@ -227,6 +236,7 @@ fn prepare(request: &ExtractRequest) -> Option<Unit> {
             model,
             report,
             missing_include: false,
+            static_origins: Vec::new(),
         });
     }
     let active = request.active_file.as_deref()?;
@@ -240,26 +250,55 @@ fn prepare(request: &ExtractRequest) -> Option<Unit> {
     let report = ws.expand_report(active).cloned()?;
     let missing_include = !ws.find_unresolved_includes(active).is_empty()
         || !ws.find_circular_includes(active).is_empty();
+    let static_origins = static_origins(&mut ws, active, &model);
     Some(Unit {
         model,
         report,
         missing_include,
+        static_origins,
     })
+}
+
+fn static_origins(ws: &mut Workspace, active: &str, model: &Model) -> Vec<StaticOrigin> {
+    let mut out = Vec::new();
+    let mut record = |block, index, eq: &Equation| {
+        if !eq.static_tag {
+            return;
+        }
+        let Some((file, span)) = ws.map_effective_origin(active, eq.span) else {
+            return;
+        };
+        out.push(StaticOrigin {
+            place: EqRef { block, index },
+            file: Some(file),
+            span,
+        });
+    };
+    for (index, eq) in model.equations.iter().enumerate() {
+        record(None, index, eq);
+    }
+    for (block, het) in model.heterogeneous_models.iter().enumerate() {
+        for (index, eq) in het.equations.iter().enumerate() {
+            record(Some(block), index, eq);
+        }
+    }
+    out
 }
 
 fn origin_row(
     model: &Model,
     report: &ExpandReport,
-    eq_index: usize,
+    place: EqRef,
     role: EquationRole,
     active_file: Option<&str>,
+    static_origins: &[StaticOrigin],
 ) -> ExtractOrigin {
-    let row = selected_row(model, eq_index, role);
-    // Static equations are not in the expand map. Their span is the equation
-    // itself; a counted row uses the aggregate origin at that counted index.
-    let mapped = row
-        .index
-        .and_then(|counted| report.aggregate_origins.get(counted));
+    let row = selected_row(model, place, role);
+    // Static equations are not in the expand map. A counted row uses the
+    // origin at that counted index. A static row uses the include map when
+    // the equation span sits in a spliced buffer.
+    let mapped = mapped_origin(model, report, place);
+    let located = static_origins.iter().find(|origin| origin.place == place);
     let frames = mapped
         .map(|origin| {
             origin
@@ -282,11 +321,32 @@ fn origin_row(
         role: row.role,
         span: mapped
             .map(|origin| origin.origin_span)
-            .unwrap_or(model.equations[eq_index].span),
+            .or_else(|| located.map(|origin| origin.span))
+            .unwrap_or(eq_at(model, place).span),
         file: mapped
             .and_then(|origin| origin.origin_uri.clone())
+            .or_else(|| located.and_then(|origin| origin.file.clone()))
             .or_else(|| active_file.map(str::to_string)),
         frames,
+    }
+}
+
+fn mapped_origin<'a>(
+    model: &Model,
+    report: &'a ExpandReport,
+    place: EqRef,
+) -> Option<&'a crate::expand::EquationOrigin> {
+    let counted = public_index(model, place)?;
+    match place.block {
+        None => report.aggregate_origins.get(counted),
+        Some(block) => {
+            let offset = counted_offset_in_block(model, block, place.index)?;
+            report
+                .heterogeneous_origins
+                .get(block)
+                .and_then(|origins| origins.get(offset))
+                .filter(|origin| origin.scope_index == counted)
+        }
     }
 }
 
@@ -303,22 +363,59 @@ fn unsupported(kind: UnsupportedKind, detail: impl Into<String>) -> ExtractResul
     }
 }
 
-fn matching_indexes(equations: &[Equation], request: &ExtractRequest) -> Vec<usize> {
-    equations
-        .iter()
-        .enumerate()
-        .filter(|(_, eq)| !eq.is_local && matches_selector(eq, request))
-        .map(|(idx, _)| idx)
-        .collect()
+/// Selector hits in source order. A set `dimension` searches only that
+/// heterogeneity dimension. An omitted dimension searches every scope.
+/// An aggregate row and a heterogeneous row are never the same hit.
+fn matching_places(model: &Model, request: &ExtractRequest) -> Vec<EqRef> {
+    let mut hits = Vec::new();
+    if request.dimension.is_none() {
+        for (index, eq) in model.equations.iter().enumerate() {
+            if !eq.is_local && matches_selector(eq, request) {
+                hits.push(EqRef { block: None, index });
+            }
+        }
+    }
+    for (block, model_block) in model.heterogeneous_models.iter().enumerate() {
+        let name = model.name(model_block.dimension);
+        if request
+            .dimension
+            .as_deref()
+            .is_some_and(|wanted| wanted != name)
+        {
+            continue;
+        }
+        for (index, eq) in model_block.equations.iter().enumerate() {
+            if !eq.is_local && matches_selector(eq, request) {
+                hits.push(EqRef {
+                    block: Some(block),
+                    index,
+                });
+            }
+        }
+    }
+    hits.sort_by(|left, right| {
+        eq_at(model, *left)
+            .span
+            .start
+            .cmp(&eq_at(model, *right).span.start)
+            .then(left.block.cmp(&right.block))
+            .then(left.index.cmp(&right.index))
+    });
+    hits
 }
 
-fn heterogeneous_match(model: &Model, request: &ExtractRequest) -> bool {
-    model.heterogeneous_models.iter().any(|block| {
-        block
-            .equations
-            .iter()
-            .any(|eq| !eq.is_local && matches_selector(eq, request))
-    })
+fn eq_at(model: &Model, place: EqRef) -> &Equation {
+    match place.block {
+        None => &model.equations[place.index],
+        Some(block) => &model.heterogeneous_models[block].equations[place.index],
+    }
+}
+
+fn equations_in(model: &Model, block: Option<usize>) -> &[Equation] {
+    match block {
+        None => &model.equations,
+        Some(block) => &model.heterogeneous_models[block].equations,
+    }
 }
 
 fn matches_selector(eq: &Equation, request: &ExtractRequest) -> bool {
@@ -333,101 +430,114 @@ fn matches_selector(eq: &Equation, request: &ExtractRequest) -> bool {
 
 struct Closure {
     symbols: BTreeSet<String>,
-    locals: BTreeSet<String>,
+    /// Model-local names, each tied to the model block that defines them.
+    /// `None` is the aggregate model.
+    locals: BTreeSet<(Option<usize>, String)>,
     externals: BTreeSet<String>,
 }
 
-fn close(model: &Model, selected: &[usize]) -> Closure {
+fn close(model: &Model, selected: &[EqRef]) -> Closure {
     let mut closure = Closure {
         symbols: BTreeSet::new(),
         locals: BTreeSet::new(),
         externals: BTreeSet::new(),
     };
-    let mut pending_eq: Vec<usize> = selected.to_vec();
-    let mut seen_eq = HashSet::new();
-    while let Some(idx) = pending_eq.pop() {
-        if !seen_eq.insert(idx) {
-            continue;
-        }
-        let eq = &model.equations[idx];
-        let mut idents = Vec::new();
-        let mut calls = Vec::new();
-        if let Some(id) = eq.lhs_expr {
-            walk(model, id, &mut idents, &mut calls);
-        }
-        if let Some(id) = eq.rhs_expr {
-            walk(model, id, &mut idents, &mut calls);
-        }
-        let defined = eq.is_local.then(|| local_name(model, eq)).flatten();
-        for name in idents {
-            let text = model.name(name).to_string();
-            if defined.as_deref() == Some(text.as_str()) {
-                continue;
-            }
-            if local_index(model, &text).is_some() {
-                if closure.locals.insert(text.clone()) {
-                    if let Some(local_idx) = local_index(model, &text) {
-                        pending_eq.push(local_idx);
-                    }
-                }
-            } else {
-                closure.symbols.insert(text);
-            }
-        }
-        for name in calls {
-            let text = model.name(name).to_string();
-            if is_pac_name(&text) {
-                closure.symbols.insert(text);
-            } else if is_external(model, &text) {
-                closure.externals.insert(text);
-            }
-        }
+    let mut pending: Vec<EqRef> = selected.to_vec();
+    let mut seen = HashSet::new();
+    while let Some(place) = pending.pop() {
+        absorb(model, place, &mut closure, &mut pending, &mut seen);
     }
     loop {
         let locals_before = closure.locals.len();
         grow_declaration_context(model, &mut closure);
-        for name in &closure.locals {
-            if let Some(idx) = local_index(model, name) {
-                if !seen_eq.contains(&idx) {
-                    pending_eq.push(idx);
+        for (block, name) in &closure.locals {
+            if let Some(index) = local_index_in(model, *block, name) {
+                let place = EqRef {
+                    block: *block,
+                    index,
+                };
+                if !seen.contains(&place) {
+                    pending.push(place);
                 }
             }
         }
-        if pending_eq.is_empty() && closure.locals.len() == locals_before {
+        if pending.is_empty() && closure.locals.len() == locals_before {
             break;
         }
-        while let Some(idx) = pending_eq.pop() {
-            if !seen_eq.insert(idx) {
-                continue;
-            }
-            let eq = &model.equations[idx];
-            let mut idents = Vec::new();
-            let mut calls = Vec::new();
-            if let Some(id) = eq.lhs_expr {
-                walk(model, id, &mut idents, &mut calls);
-            }
-            if let Some(id) = eq.rhs_expr {
-                walk(model, id, &mut idents, &mut calls);
-            }
-            let defined = eq.is_local.then(|| local_name(model, eq)).flatten();
-            for name in idents {
-                let text = model.name(name).to_string();
-                if defined.as_deref() == Some(text.as_str()) {
-                    continue;
-                }
-                if local_index(model, &text).is_some() {
-                    if closure.locals.insert(text.clone()) {
-                        if let Some(local_idx) = local_index(model, &text) {
-                            pending_eq.push(local_idx);
-                        }
-                    }
-                } else {
-                    closure.symbols.insert(text);
-                }
-            }
+        while let Some(place) = pending.pop() {
+            absorb(model, place, &mut closure, &mut pending, &mut seen);
         }
     }
     closure
+}
+
+fn absorb(
+    model: &Model,
+    place: EqRef,
+    closure: &mut Closure,
+    pending: &mut Vec<EqRef>,
+    seen: &mut HashSet<EqRef>,
+) {
+    if !seen.insert(place) {
+        return;
+    }
+    let eq = eq_at(model, place);
+    let mut idents = Vec::new();
+    let mut calls = Vec::new();
+    if let Some(id) = eq.lhs_expr {
+        walk(model, id, &mut idents, &mut calls);
+    }
+    if let Some(id) = eq.rhs_expr {
+        walk(model, id, &mut idents, &mut calls);
+    }
+    let defined = eq.is_local.then(|| local_name(model, eq)).flatten();
+    for name in idents {
+        let text = model.name(name).to_string();
+        if defined.as_deref() == Some(text.as_str()) {
+            continue;
+        }
+        if let Some(local_idx) = local_index_in(model, place.block, &text) {
+            if closure.locals.insert((place.block, text)) {
+                pending.push(EqRef {
+                    block: place.block,
+                    index: local_idx,
+                });
+            }
+        } else {
+            closure.symbols.insert(text);
+        }
+    }
+    for name in calls {
+        let text = model.name(name).to_string();
+        if is_pac_name(&text) {
+            closure.symbols.insert(text);
+        } else if is_external(model, &text) {
+            closure.externals.insert(text);
+        }
+    }
+}
+
+fn closure_has_local(closure: &Closure, name: &str) -> bool {
+    closure.locals.iter().any(|(_, local)| local == name)
+}
+
+/// A `model_local_variable` declaration counts only in the block that uses it.
+fn decl_matches_local(model: &Model, closure: &Closure, decl: &Decl) -> bool {
+    let name = model.name(decl.name);
+    closure.locals.iter().any(|(block, local)| {
+        local == name && local_scope_matches(model, *block, decl.heterogeneity.map(|(dim, _)| dim))
+    })
+}
+
+fn local_scope_matches(model: &Model, block: Option<usize>, dimension: Option<Name>) -> bool {
+    match (block, dimension) {
+        (None, None) => true,
+        (Some(index), Some(dimension)) => model
+            .heterogeneous_models
+            .get(index)
+            .is_some_and(|het| model.name(het.dimension) == model.name(dimension)),
+        _ => false,
+    }
 }
 
 fn grow_declaration_context(model: &Model, closure: &mut Closure) {
@@ -476,8 +586,8 @@ fn push_expr_symbols(model: &Model, id: ExprId, closure: &mut Closure) {
     walk(model, id, &mut idents, &mut calls);
     for name in idents {
         let text = model.name(name).to_string();
-        if local_index(model, &text).is_some() {
-            closure.locals.insert(text);
+        if local_index_in(model, None, &text).is_some() {
+            closure.locals.insert((None, text));
         } else {
             closure.symbols.insert(text);
         }
@@ -529,9 +639,8 @@ fn local_name(model: &Model, eq: &Equation) -> Option<String> {
     }
 }
 
-fn local_index(model: &Model, name: &str) -> Option<usize> {
-    model
-        .equations
+fn local_index_in(model: &Model, block: Option<usize>, name: &str) -> Option<usize> {
+    equations_in(model, block)
         .iter()
         .position(|eq| eq.is_local && local_name(model, eq).as_deref() == Some(name))
 }
@@ -575,7 +684,7 @@ fn unresolved_selection(model: &Model, missing_include: bool) -> Option<(Unsuppo
 
 fn refuse(
     model: &Model,
-    selected: &[usize],
+    selected: &[EqRef],
     closure: &Closure,
     missing_include: bool,
 ) -> Option<(UnsupportedKind, String)> {
@@ -585,17 +694,14 @@ fn refuse(
     if let Some(detail) = include_block(model, closure, missing_include) {
         return Some((UnsupportedKind::Include, detail));
     }
-    if let Some(detail) = heterogeneous_decl(model, closure) {
-        return Some((UnsupportedKind::Heterogeneous, detail));
-    }
     if let Some(detail) = pac_block(model, selected, closure) {
         return Some((UnsupportedKind::Pac, detail));
     }
     None
 }
 
-fn macro_block(model: &Model, selected: &[usize], closure: &Closure) -> Option<String> {
-    let retained = retained_indexes(model, selected, closure);
+fn macro_block(model: &Model, selected: &[EqRef], closure: &Closure) -> Option<String> {
+    let retained = retained_places(model, selected, closure);
     for idx in &retained {
         let text = equation_line(model, *idx);
         if contains_macro(&text) {
@@ -603,7 +709,7 @@ fn macro_block(model: &Model, selected: &[usize], closure: &Closure) -> Option<S
         }
     }
     if declaration_has_macro(model, closure)
-        || declaration_lines(model, closure)
+        || declaration_lines(model, closure, &retained)
             .iter()
             .any(|line| contains_macro(line))
     {
@@ -615,7 +721,7 @@ fn macro_block(model: &Model, selected: &[usize], closure: &Closure) -> Option<S
             .is_some_and(|block| overlaps(*span, block))
             || retained
                 .iter()
-                .any(|idx| overlaps(*span, model.equations[*idx].span))
+                .any(|place| overlaps(*span, eq_at(model, *place).span))
         {
             return Some("macro expansion failed on text this extract would retain".to_string());
         }
@@ -623,7 +729,7 @@ fn macro_block(model: &Model, selected: &[usize], closure: &Closure) -> Option<S
     for diag in check_e063(model) {
         if retained
             .iter()
-            .any(|idx| overlaps(diag.span, model.equations[*idx].span))
+            .any(|place| overlaps(diag.span, eq_at(model, *place).span))
             || declaration_statement_overlaps(model, closure, diag.span)
         {
             return Some("macro expansion failed on text this extract would retain".to_string());
@@ -665,7 +771,7 @@ fn declaration_has_macro(model: &Model, closure: &Closure) -> bool {
     for decls in lists {
         for decl in decls {
             let name = model.name(decl.name);
-            if !closure.symbols.contains(name) && !closure.locals.contains(name) {
+            if !closure.symbols.contains(name) {
                 continue;
             }
             let stmt = statement_around(&model.source, decl.span);
@@ -679,7 +785,20 @@ fn declaration_has_macro(model: &Model, closure: &Closure) -> bool {
             }
         }
     }
-    false
+    model.model_local_variables.iter().any(|decl| {
+        if !decl_matches_local(model, closure, decl) {
+            return false;
+        }
+        let stmt = statement_around(&model.source, decl.span);
+        let text = &model.source[stmt.start as usize..stmt.end as usize];
+        if !contains_macro(text) {
+            return false;
+        }
+        match expanded_decl_line(model, decl, text) {
+            Some(line) if !contains_macro(&line) => false,
+            _ => true,
+        }
+    })
 }
 
 fn declaration_statement_overlaps(model: &Model, closure: &Closure, span: Span) -> bool {
@@ -693,12 +812,18 @@ fn declaration_statement_overlaps(model: &Model, closure: &Closure, span: Span) 
     lists.iter().any(|decls| {
         decls.iter().any(|decl| {
             let name = model.name(decl.name);
-            if !closure.symbols.contains(name) && !closure.locals.contains(name) {
+            if !closure.symbols.contains(name) {
                 return false;
             }
             let stmt = statement_around(&model.source, decl.span);
             overlaps(span, stmt)
         })
+    }) || model.model_local_variables.iter().any(|decl| {
+        if !decl_matches_local(model, closure, decl) {
+            return false;
+        }
+        let stmt = statement_around(&model.source, decl.span);
+        overlaps(span, stmt)
     })
 }
 
@@ -709,7 +834,7 @@ fn include_block(model: &Model, closure: &Closure, missing_include: bool) -> Opt
     let missing = closure
         .symbols
         .iter()
-        .find(|name| !declared(model, name) && local_index(model, name).is_none());
+        .find(|name| !declared(model, name) && !closure_has_local(closure, name));
     missing.map(|name| format!("include may declare `{name}`, which this file does not"))
 }
 
@@ -730,38 +855,18 @@ fn decl_has(decls: &[Decl], model: &Model, name: &str) -> bool {
     decls.iter().any(|decl| model.name(decl.name) == name)
 }
 
-fn heterogeneous_decl(model: &Model, closure: &Closure) -> Option<String> {
-    let lists = [
-        &model.endogenous,
-        &model.exogenous,
-        &model.deterministic_exogenous,
-        &model.parameters,
-    ];
-    for decls in lists {
-        for decl in decls {
-            if closure.symbols.contains(model.name(decl.name)) && decl.heterogeneity.is_some() {
-                return Some(format!(
-                    "declaration of `{}` carries a heterogeneity dimension",
-                    model.name(decl.name)
-                ));
-            }
-        }
-    }
-    None
-}
-
-fn pac_block(model: &Model, selected: &[usize], closure: &Closure) -> Option<String> {
-    let retained = retained_indexes(model, selected, closure);
+fn pac_block(model: &Model, selected: &[EqRef], closure: &Closure) -> Option<String> {
+    let retained = retained_places(model, selected, closure);
     for operator in &model.named_model_operators {
         if retained
             .iter()
-            .any(|idx| overlaps(operator.span, model.equations[*idx].span))
+            .any(|place| overlaps(operator.span, eq_at(model, *place).span))
         {
             return Some("a retained equation uses a PAC or VAR expectation operator".to_string());
         }
     }
-    for idx in &retained {
-        let eq = &model.equations[*idx];
+    for place in &retained {
+        let eq = eq_at(model, *place);
         if expr_has_pac(model, eq.lhs_expr) || expr_has_pac(model, eq.rhs_expr) {
             return Some("a retained equation uses a PAC or VAR expectation operator".to_string());
         }
@@ -780,52 +885,85 @@ fn expr_has_pac(model: &Model, id: Option<ExprId>) -> bool {
 }
 
 struct KeptEquation {
-    index: usize,
+    place: EqRef,
     role: EquationRole,
 }
 
 /// Selector hits, plus the static/dynamic partners and OccBin same-name
-/// regimes of those hits, in source order. A row that matched the selector
-/// stays `Requested`. Companions are not walked again, so an equation that
-/// only shares a left-hand symbol with a partner is not kept.
-fn kept_equations(model: &Model, requested: &[usize]) -> Vec<KeptEquation> {
-    let mut role_of = vec![None; model.equations.len()];
-    for &idx in requested {
-        if role_of[idx].is_none() {
-            role_of[idx] = Some(EquationRole::Requested);
+/// regimes of those hits, in source order. Partners stay inside one scope:
+/// the aggregate model, or one heterogeneity dimension. A row that matched
+/// the selector stays `Requested`. Companions are not walked again.
+fn kept_equations(model: &Model, requested: &[EqRef]) -> Vec<KeptEquation> {
+    let mut roles = HashMap::new();
+    for &place in requested {
+        roles.entry(place).or_insert(EquationRole::Requested);
+    }
+    for &place in requested {
+        for other in related_equations(model, place) {
+            roles.entry(other).or_insert(EquationRole::Companion);
         }
     }
-    let hits: Vec<usize> = requested.to_vec();
-    for idx in hits {
-        for other in related_equations(model, idx) {
-            if role_of[other].is_none() {
-                role_of[other] = Some(EquationRole::Companion);
-            }
-        }
-    }
-    role_of
+    let mut kept: Vec<KeptEquation> = roles
         .into_iter()
-        .enumerate()
-        .filter_map(|(index, role)| role.map(|role| KeptEquation { index, role }))
-        .collect()
+        .map(|(place, role)| KeptEquation { place, role })
+        .collect();
+    kept.sort_by(|left, right| {
+        let left_eq = eq_at(model, left.place);
+        let right_eq = eq_at(model, right.place);
+        left_eq
+            .span
+            .start
+            .cmp(&right_eq.span.start)
+            .then(left.place.block.cmp(&right.place.block))
+            .then(left.place.index.cmp(&right.place.index))
+    });
+    kept
 }
 
-fn related_equations(model: &Model, idx: usize) -> Vec<usize> {
-    let eq = &model.equations[idx];
+fn related_equations(model: &Model, place: EqRef) -> Vec<EqRef> {
+    let eq = eq_at(model, place);
     if eq.is_local {
         return Vec::new();
     }
-    model
-        .equations
-        .iter()
-        .enumerate()
-        .filter(|(other_idx, other)| {
-            *other_idx != idx
+    let scope = scope_key(model, place);
+    let mut others = Vec::new();
+    if scope.is_none() {
+        for (index, other) in model.equations.iter().enumerate() {
+            let other_place = EqRef { block: None, index };
+            if other_place != place
                 && !other.is_local
                 && (static_dynamic_partner(model, eq, other) || occbin_same_name(eq, other))
-        })
-        .map(|(other_idx, _)| other_idx)
-        .collect()
+            {
+                others.push(other_place);
+            }
+        }
+        return others;
+    }
+    for (block, model_block) in model.heterogeneous_models.iter().enumerate() {
+        if Some(model_block.dimension) != scope {
+            continue;
+        }
+        for (index, other) in model_block.equations.iter().enumerate() {
+            let other_place = EqRef {
+                block: Some(block),
+                index,
+            };
+            if other_place != place
+                && !other.is_local
+                && (static_dynamic_partner(model, eq, other) || occbin_same_name(eq, other))
+            {
+                others.push(other_place);
+            }
+        }
+    }
+    others
+}
+
+/// `None` is the aggregate model. `Some` is one heterogeneity dimension.
+fn scope_key(model: &Model, place: EqRef) -> Option<crate::intern::Name> {
+    place
+        .block
+        .map(|block| model.heterogeneous_models[block].dimension)
 }
 
 /// Another equation is a partner when either side is `[static]` or `[dynamic]`
@@ -840,7 +978,7 @@ fn static_dynamic_partner(model: &Model, left: &Equation, right: &Equation) -> b
     same_name || same_lhs
 }
 
-/// A bind/relax equation keeps every other aggregate equation with its name.
+/// A bind/relax equation keeps every other equation in the same scope with its name.
 fn occbin_same_name(left: &Equation, right: &Equation) -> bool {
     !left.name.is_empty()
         && left.name == right.name
@@ -857,12 +995,13 @@ struct OccbinPiece {
 /// contains `@#` or `@{` cannot be rendered.
 fn occbin_setup(
     model: &Model,
-    kept: &[usize],
+    kept: &[EqRef],
+    retained: &[EqRef],
 ) -> Result<(Option<OccbinPiece>, Vec<OmittedContext>), String> {
     let mut needed = Vec::new();
     let mut seen = HashSet::new();
-    for &idx in kept {
-        for name in tag_constraint_names(&model.equations[idx]) {
+    for &place in kept {
+        for name in tag_constraint_names(eq_at(model, place)) {
             if seen.insert(name.clone()) {
                 needed.push(name);
             }
@@ -900,10 +1039,10 @@ fn occbin_setup(
         }
         parts.push(text);
     }
-    let before_model = model.model_block.is_some_and(|block| {
+    let before_model = earliest_model_start(model, retained).is_some_and(|start| {
         defined
             .iter()
-            .all(|constraint| constraint.span.start < block.start)
+            .all(|constraint| constraint.span.start < start)
     });
     Ok((
         Some(OccbinPiece {
@@ -945,46 +1084,88 @@ fn lhs_symbol(model: &Model, eq: &Equation) -> Option<Name> {
     }
 }
 
-fn retained_indexes(model: &Model, selected: &[usize], closure: &Closure) -> Vec<usize> {
-    let mut indexes = selected.to_vec();
-    for (idx, eq) in model.equations.iter().enumerate() {
-        if eq.is_local && local_name(model, eq).is_some_and(|name| closure.locals.contains(&name)) {
-            indexes.push(idx);
+fn retained_places(model: &Model, selected: &[EqRef], closure: &Closure) -> Vec<EqRef> {
+    let mut places = selected.to_vec();
+    for (block, name) in &closure.locals {
+        if let Some(index) = local_index_in(model, *block, name) {
+            places.push(EqRef {
+                block: *block,
+                index,
+            });
         }
     }
-    indexes.sort_unstable();
-    indexes.dedup();
-    indexes
+    places.sort_by(|left, right| {
+        eq_at(model, *left)
+            .span
+            .start
+            .cmp(&eq_at(model, *right).span.start)
+            .then(left.block.cmp(&right.block))
+            .then(left.index.cmp(&right.index))
+    });
+    places.dedup();
+    places
+}
+
+fn earliest_model_start(model: &Model, retained: &[EqRef]) -> Option<u32> {
+    let mut start = None;
+    let mut consider = |at: u32| {
+        start = Some(start.map_or(at, |cur: u32| cur.min(at)));
+    };
+    if retained.iter().any(|place| place.block.is_none()) {
+        if let Some(block) = model.model_block {
+            consider(block.start);
+        }
+    }
+    for place in retained {
+        if let Some(block) = place.block {
+            consider(model.heterogeneous_models[block].span.start);
+        }
+    }
+    start
 }
 
 fn overlaps(left: Span, right: Span) -> bool {
     left.start < right.end && right.start < left.end
 }
 
-fn selected_row(model: &Model, eq_index: usize, role: EquationRole) -> SelectedEquation {
-    let eq = &model.equations[eq_index];
+fn selected_row(model: &Model, place: EqRef, role: EquationRole) -> SelectedEquation {
+    let eq = eq_at(model, place);
     let name = if eq.name.is_empty() {
         None
     } else {
         Some(eq.name.clone())
     };
+    let (domain, dimension) = match place.block {
+        None => (EquationDomain::Aggregate, None),
+        Some(block) => (
+            EquationDomain::Heterogeneous,
+            Some(
+                model
+                    .name(model.heterogeneous_models[block].dimension)
+                    .to_string(),
+            ),
+        ),
+    };
     SelectedEquation {
-        domain: EquationDomain::Aggregate,
-        dimension: None,
-        index: equation_index(model, eq_index),
+        domain,
+        dimension,
+        index: public_index(model, place),
         name,
         role,
         tags: eq.tag_map.clone(),
     }
 }
 
-/// `[static]` is not a counted equation. Every other non-local row keeps the
-/// counted index it already had.
-fn equation_index(model: &Model, eq_index: usize) -> Option<usize> {
-    if model.equations[eq_index].static_tag {
-        None
-    } else {
-        Some(counted_index(model, eq_index))
+/// `[static]` is not a counted equation. Aggregate counted rows keep their
+/// counted index. Heterogeneous counted rows keep the continuing index inside
+/// that dimension.
+fn public_index(model: &Model, place: EqRef) -> Option<usize> {
+    if eq_at(model, place).static_tag {
+        return None;
+    }
+    match place.block {
+        None => Some(counted_index(model, place.index)),
+        Some(block) => Some(heterogeneous_counted_index(model, block, place.index)),
     }
 }
 
@@ -998,27 +1179,56 @@ fn counted_index(model: &Model, eq_index: usize) -> usize {
         - 1
 }
 
+fn heterogeneous_counted_index(model: &Model, block: usize, eq_index: usize) -> usize {
+    let dimension = model.heterogeneous_models[block].dimension;
+    let mut count = 0;
+    for (block_index, model_block) in model.heterogeneous_models.iter().enumerate() {
+        if model_block.dimension != dimension {
+            continue;
+        }
+        for (index, eq) in model_block.equations.iter().enumerate() {
+            if block_index == block && index == eq_index {
+                return count;
+            }
+            if !eq.is_local && !eq.static_tag {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// Position among counted equations of one heterogeneous block. The expand
+/// map stores one origin per counted row of that block.
+fn counted_offset_in_block(model: &Model, block: usize, eq_index: usize) -> Option<usize> {
+    let equations = &model.heterogeneous_models[block].equations;
+    if equations[eq_index].is_local || equations[eq_index].static_tag {
+        return None;
+    }
+    Some(
+        equations
+            .iter()
+            .take(eq_index + 1)
+            .filter(|eq| !eq.is_local && !eq.static_tag)
+            .count()
+            - 1,
+    )
+}
+
 fn render(
     model: &Model,
-    selected: &[usize],
+    selected: &[EqRef],
     closure: &Closure,
     occbin: Option<&OccbinPiece>,
 ) -> String {
-    let mut lines = declaration_lines(model, closure);
-    let opener = model
-        .model_block
-        .map(|span| model_opener(&model.source, span))
-        .unwrap_or_else(|| "model;".to_string());
-    let mut body = vec![opener];
-    for idx in retained_indexes(model, selected, closure) {
-        body.push(equation_line(model, idx));
-    }
-    body.push("end;".to_string());
-    let model_text = body.join("\n");
+    let retained = retained_places(model, selected, closure);
+    let mut lines = declaration_lines(model, closure, &retained);
     if let Some(piece) = occbin.filter(|piece| piece.before_model) {
         push_section(&mut lines, &piece.text);
     }
-    push_section(&mut lines, &model_text);
+    for text in model_sections(model, &retained) {
+        push_section(&mut lines, &text);
+    }
     if let Some(piece) = occbin.filter(|piece| !piece.before_model) {
         push_section(&mut lines, &piece.text);
     }
@@ -1029,6 +1239,47 @@ fn render(
     text
 }
 
+fn model_sections(model: &Model, retained: &[EqRef]) -> Vec<String> {
+    let mut sections = Vec::new();
+    if retained.iter().any(|place| place.block.is_none()) {
+        let start = model.model_block.map(|span| span.start).unwrap_or(u32::MAX);
+        sections.push((start, model_section(model, None, retained)));
+    }
+    let mut seen_blocks = BTreeSet::new();
+    for place in retained {
+        let Some(block) = place.block else {
+            continue;
+        };
+        if !seen_blocks.insert(block) {
+            continue;
+        }
+        sections.push((
+            model.heterogeneous_models[block].span.start,
+            model_section(model, Some(block), retained),
+        ));
+    }
+    sections.sort_by_key(|(start, _)| *start);
+    sections.into_iter().map(|(_, text)| text).collect()
+}
+
+fn model_section(model: &Model, block: Option<usize>, retained: &[EqRef]) -> String {
+    let opener = match block {
+        None => model
+            .model_block
+            .map(|span| model_opener(&model.source, span))
+            .unwrap_or_else(|| "model;".to_string()),
+        Some(block) => model_opener(&model.source, model.heterogeneous_models[block].span),
+    };
+    let mut body = vec![opener];
+    for place in retained {
+        if place.block == block {
+            body.push(equation_line(model, *place));
+        }
+    }
+    body.push("end;".to_string());
+    body.join("\n")
+}
+
 fn push_section(lines: &mut Vec<String>, section: &str) {
     if !lines.is_empty() {
         lines.push(String::new());
@@ -1036,8 +1287,9 @@ fn push_section(lines: &mut Vec<String>, section: &str) {
     lines.push(section.to_string());
 }
 
-fn declaration_lines(model: &Model, closure: &Closure) -> Vec<String> {
+fn declaration_lines(model: &Model, closure: &Closure, retained: &[EqRef]) -> Vec<String> {
     let mut chunks: Vec<(u32, String)> = Vec::new();
+    push_dimension_lines(&mut chunks, model, closure, retained);
     push_decl_lines(&mut chunks, model, &model.endogenous, &closure.symbols);
     push_decl_lines(
         &mut chunks,
@@ -1047,12 +1299,7 @@ fn declaration_lines(model: &Model, closure: &Closure) -> Vec<String> {
     );
     push_decl_lines(&mut chunks, model, &model.exogenous, &closure.symbols);
     push_decl_lines(&mut chunks, model, &model.parameters, &closure.symbols);
-    push_decl_lines(
-        &mut chunks,
-        model,
-        &model.model_local_variables,
-        &closure.locals,
-    );
+    push_local_decl_lines(&mut chunks, model, &model.model_local_variables, closure);
     push_decl_lines(&mut chunks, model, &model.predetermined, &closure.symbols);
     push_trend_lines(&mut chunks, model, &model.trend_vars, &closure.symbols);
     for stmt in &model.external_functions {
@@ -1075,8 +1322,8 @@ fn declaration_lines(model: &Model, closure: &Closure) -> Vec<String> {
         .collect()
 }
 
-fn equation_line(model: &Model, idx: usize) -> String {
-    let eq = &model.equations[idx];
+fn equation_line(model: &Model, place: EqRef) -> String {
+    let eq = eq_at(model, place);
     let raw = slice_through_semi(&model.source, eq.span);
     if contains_macro(&raw)
         || for_bodies(model)
@@ -1128,22 +1375,27 @@ fn expanded_decl_line(model: &Model, decl: &Decl, stmt: &str) -> Option<String> 
         return None;
     }
     let mut options = Vec::new();
-    if decl.log_transform {
-        options.push("log".to_string());
-    }
-    if let Some(row) = model
-        .nonstationary_vars
-        .iter()
-        .find(|row| row.name == decl.name && row.span == decl.span)
-    {
-        let id = row.deflator?;
-        let text = expr_text(model, id)?;
-        let key = if row.log_deflator {
-            "log_deflator"
-        } else {
-            "deflator"
-        };
-        options.push(format!("{key}={text}"));
+    if let Some((dimension, _)) = decl.heterogeneity {
+        // The grammar takes `heterogeneity=` alone. A second option is a syntax error.
+        options.push(format!("heterogeneity={}", model.name(dimension)));
+    } else {
+        if decl.log_transform {
+            options.push("log".to_string());
+        }
+        if let Some(row) = model
+            .nonstationary_vars
+            .iter()
+            .find(|row| row.name == decl.name && row.span == decl.span)
+        {
+            let id = row.deflator?;
+            let text = expr_text(model, id)?;
+            let key = if row.log_deflator {
+                "log_deflator"
+            } else {
+                "deflator"
+            };
+            options.push(format!("{key}={text}"));
+        }
     }
     let mut line = keyword;
     if !options.is_empty() {
@@ -1186,6 +1438,95 @@ fn expr_text(model: &Model, id: ExprId) -> Option<String> {
     match &expr.kind {
         ExprKind::Ident { name, timing, .. } if *timing == 0 => Some(model.name(*name).to_string()),
         _ => None,
+    }
+}
+
+fn push_dimension_lines(
+    out: &mut Vec<(u32, String)>,
+    model: &Model,
+    closure: &Closure,
+    retained: &[EqRef],
+) {
+    let mut needed = BTreeSet::new();
+    for place in retained {
+        if let Some(block) = place.block {
+            needed.insert(
+                model
+                    .name(model.heterogeneous_models[block].dimension)
+                    .to_string(),
+            );
+        }
+    }
+    for decls in [
+        &model.endogenous,
+        &model.exogenous,
+        &model.deterministic_exogenous,
+        &model.parameters,
+    ] {
+        for decl in decls {
+            if !closure.symbols.contains(model.name(decl.name)) {
+                continue;
+            }
+            if let Some((dimension, _)) = decl.heterogeneity {
+                needed.insert(model.name(dimension).to_string());
+            }
+        }
+    }
+    let mut groups: BTreeMap<u32, Vec<&crate::model::HeterogeneityDimension>> = BTreeMap::new();
+    for dimension in &model.heterogeneity_dimensions {
+        groups
+            .entry(dimension.span.start)
+            .or_default()
+            .push(dimension);
+    }
+    for (start, dims) in groups {
+        let keep: Vec<_> = dims
+            .iter()
+            .filter(|dimension| needed.contains(model.name(dimension.name)))
+            .collect();
+        if keep.is_empty() {
+            continue;
+        }
+        let line = if keep.len() == dims.len() {
+            slice_through_semi(&model.source, dims[0].span)
+        } else {
+            let names = keep
+                .iter()
+                .map(|dimension| model.name(dimension.name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("heterogeneity_dimension {names};")
+        };
+        out.push((start, line));
+    }
+}
+
+fn push_local_decl_lines(
+    out: &mut Vec<(u32, String)>,
+    model: &Model,
+    decls: &[Decl],
+    closure: &Closure,
+) {
+    let mut seen = HashSet::new();
+    for decl in decls {
+        if !decl_matches_local(model, closure, decl) {
+            continue;
+        }
+        let needed = BTreeSet::from([model.name(decl.name).to_string()]);
+        let stmt = statement_around(&model.source, decl.span);
+        let text = &model.source[stmt.start as usize..stmt.end as usize];
+        if contains_macro(text) {
+            if let Some(line) = expanded_decl_line(model, decl, text) {
+                out.push((decl.span.start, line));
+            }
+            continue;
+        }
+        if !seen.insert(stmt.start) {
+            continue;
+        }
+        if let Some(line) = filter_declaration(text, &needed) {
+            out.push((stmt.start, line));
+        }
     }
 }
 
@@ -1494,17 +1835,25 @@ fn omitted(model: &Model) -> Vec<OmittedContext> {
             detail: "initval, endval, and histval blocks are not in the fragment".to_string(),
         });
     }
-    if model.stoch_simul_span.is_some()
+    let classic_execution = model.stoch_simul_span.is_some()
         || model.estimation_span.is_some()
         || !model.simul_spans.is_empty()
         || model.perfect_foresight_solver_span.is_some()
         || model.perfect_foresight_setup_span.is_some()
         || model.steady_span.is_some()
-        || model.check_span.is_some()
-    {
+        || model.check_span.is_some();
+    let heterogeneity_execution = !model.heterogeneity_commands.is_empty();
+    if classic_execution || heterogeneity_execution {
+        let detail = if heterogeneity_execution && !classic_execution {
+            "heterogeneity steady-state, solve, and simulate commands are not in the fragment"
+        } else if heterogeneity_execution {
+            "simulation, estimation, and heterogeneity commands are not in the fragment"
+        } else {
+            "simulation and estimation commands are not in the fragment"
+        };
         out.push(OmittedContext {
             kind: "execution".to_string(),
-            detail: "simulation and estimation commands are not in the fragment".to_string(),
+            detail: detail.to_string(),
         });
     }
     out
@@ -1693,21 +2042,217 @@ end;
     }
 
     #[test]
-    fn passed_dimension_is_unsupported() {
+    fn unknown_dimension_is_empty() {
         let mut request = req(CLOSURE, &["euler"], &[]);
         request.dimension = Some("h".to_string());
         let result = extract(&request).unwrap();
-        assert_eq!(result.status, ExtractStatus::UnsupportedContext);
-        assert!(result.fragment.is_none());
-        assert_eq!(
-            result.unsupported.unwrap().kind,
-            UnsupportedKind::HeterogeneousDimension
-        );
+        assert_eq!(result.status, ExtractStatus::Empty);
+        assert_eq!(result.fragment.as_deref(), Some(""));
+        assert!(result.selected_equations.is_empty());
+        assert!(result.explanation.contains("dimension `h`"));
     }
 
     #[test]
-    fn heterogeneous_match_is_unsupported() {
+    fn heterogeneous_equation_keeps_its_dimension_and_declaration() {
         let src = "\
+heterogeneity_dimension h, g;
+parameters beta;
+var y;
+var(heterogeneity=h) c, k;
+var(heterogeneity=g) d;
+model;
+  [name='agg']
+  y = 0;
+end;
+model(heterogeneity=h);
+  # rho = 0.9;
+  [name='het']
+  c = beta * rho * c(-1);
+  [name='other']
+  k = 1;
+end;
+model(heterogeneity=g);
+  [name='gone']
+  d = 1;
+end;
+heterogeneity_solve;
+";
+        let het = extract(&req(src, &["het"], &[])).unwrap();
+        assert_eq!(het.status, ExtractStatus::Ok);
+        let fragment = het.fragment.expect("fragment");
+        assert!(
+            fragment.contains("heterogeneity_dimension h;"),
+            "{fragment}"
+        );
+        assert!(
+            !fragment.contains("heterogeneity_dimension h, g"),
+            "{fragment}"
+        );
+        assert!(!fragment.contains("heterogeneity=g"), "{fragment}");
+        assert!(fragment.contains("parameters beta;"), "{fragment}");
+        assert!(fragment.contains("var(heterogeneity=h) c;"), "{fragment}");
+        assert!(
+            !fragment.contains("var(heterogeneity=h) c, k"),
+            "{fragment}"
+        );
+        assert!(!fragment.contains('k'), "{fragment}");
+        assert!(!fragment.contains("var y"), "{fragment}");
+        assert!(fragment.contains("# rho = 0.9;"), "{fragment}");
+        assert!(fragment.contains("model(heterogeneity=h);"), "{fragment}");
+        assert!(fragment.contains("c = beta * rho * c(-1);"), "{fragment}");
+        assert!(!fragment.contains("name='agg'"), "{fragment}");
+        assert!(!fragment.contains("name='other'"), "{fragment}");
+        assert!(!fragment.contains("name='gone'"), "{fragment}");
+        assert!(!fragment.contains("\nmodel;"), "{fragment}");
+        assert!(!fragment.contains("heterogeneity_solve"), "{fragment}");
+        assert_eq!(het.selected_equations.len(), 1);
+        let row = &het.selected_equations[0];
+        assert_eq!(row.domain, EquationDomain::Heterogeneous);
+        assert_eq!(row.dimension.as_deref(), Some("h"));
+        assert_eq!(row.index, Some(0));
+        assert_eq!(row.name.as_deref(), Some("het"));
+        assert_eq!(row.role, EquationRole::Requested);
+        assert_eq!(het.origins.len(), 1);
+        assert_eq!(het.origins[0].domain, EquationDomain::Heterogeneous);
+        assert_eq!(het.origins[0].dimension.as_deref(), Some("h"));
+        assert_eq!(het.origins[0].index, Some(0));
+        assert_eq!(het.origins[0].role, EquationRole::Requested);
+        assert!(het
+            .omitted_context
+            .iter()
+            .any(|item| item.kind == "execution"));
+
+        let agg = extract(&req(src, &["agg"], &[])).unwrap();
+        assert_eq!(agg.status, ExtractStatus::Ok);
+        let agg_fragment = agg.fragment.expect("fragment");
+        assert!(agg_fragment.contains("name='agg'"), "{agg_fragment}");
+        assert!(agg_fragment.contains("var y;"), "{agg_fragment}");
+        assert!(!agg_fragment.contains("heterogeneity"), "{agg_fragment}");
+        assert_eq!(agg.selected_equations[0].domain, EquationDomain::Aggregate);
+        assert_eq!(agg.selected_equations[0].dimension, None);
+        assert_eq!(agg.selected_equations[0].index, Some(0));
+
+        let mut narrowed = req(src, &["het"], &[]);
+        narrowed.dimension = Some("g".to_string());
+        let missed = extract(&narrowed).unwrap();
+        assert_eq!(missed.status, ExtractStatus::Empty);
+        assert_eq!(missed.fragment.as_deref(), Some(""));
+        assert!(missed.explanation.contains("dimension `g`"));
+    }
+
+    #[test]
+    fn aggregate_and_heterogeneous_rows_stay_distinct() {
+        let src = "\
+heterogeneity_dimension h;
+var y;
+var(heterogeneity=h) c;
+model;
+  [name='eq']
+  y = 0;
+end;
+model(heterogeneity=h);
+  [name='eq']
+  c = 1;
+end;
+";
+        let both = extract(&req(src, &["eq"], &[])).unwrap();
+        assert_eq!(both.status, ExtractStatus::Ok);
+        assert_eq!(both.selected_equations.len(), 2);
+        assert_eq!(both.selected_equations[0].domain, EquationDomain::Aggregate);
+        assert_eq!(both.selected_equations[0].dimension, None);
+        assert_eq!(both.selected_equations[0].index, Some(0));
+        assert_eq!(both.selected_equations[0].role, EquationRole::Requested);
+        assert_eq!(
+            both.selected_equations[1].domain,
+            EquationDomain::Heterogeneous
+        );
+        assert_eq!(both.selected_equations[1].dimension.as_deref(), Some("h"));
+        assert_eq!(both.selected_equations[1].index, Some(0));
+        assert_eq!(both.selected_equations[1].role, EquationRole::Requested);
+        assert_eq!(both.origins[0].index, Some(0));
+        assert_eq!(both.origins[1].index, Some(0));
+        assert_eq!(both.origins[0].domain, EquationDomain::Aggregate);
+        assert_eq!(both.origins[1].domain, EquationDomain::Heterogeneous);
+        let fragment = both.fragment.expect("fragment");
+        assert!(fragment.contains("\nmodel;"), "{fragment}");
+        assert!(fragment.contains("model(heterogeneity=h);"), "{fragment}");
+        assert!(fragment.contains("y = 0;"), "{fragment}");
+        assert!(fragment.contains("c = 1;"), "{fragment}");
+
+        let mut only_h = req(src, &["eq"], &[]);
+        only_h.dimension = Some("h".to_string());
+        let het = extract(&only_h).unwrap();
+        assert_eq!(het.selected_equations.len(), 1);
+        assert_eq!(
+            het.selected_equations[0].domain,
+            EquationDomain::Heterogeneous
+        );
+        assert!(!het.fragment.unwrap().contains("y = 0"));
+    }
+
+    #[test]
+    fn heterogeneous_partners_stay_inside_the_dimension() {
+        let src = "\
+heterogeneity_dimension h;
+var y;
+var(heterogeneity=h) c;
+model;
+  [name='agg']
+  y = 0;
+  [static]
+  y = 1;
+end;
+model(heterogeneity=h);
+  [name='eq']
+  c = 0;
+  [static]
+  c = 1;
+  [name='also']
+  c = 2;
+end;
+model(heterogeneity=h);
+  [name='later']
+  c = 3;
+end;
+";
+        let result = extract(&req(src, &["eq"], &[])).unwrap();
+        assert_eq!(result.status, ExtractStatus::Ok);
+        assert_eq!(result.selected_equations.len(), 2);
+        assert_eq!(result.selected_equations[0].role, EquationRole::Requested);
+        assert_eq!(result.selected_equations[0].index, Some(0));
+        assert_eq!(result.selected_equations[0].dimension.as_deref(), Some("h"));
+        assert_eq!(result.selected_equations[1].role, EquationRole::Companion);
+        assert_eq!(result.selected_equations[1].index, None);
+        assert_eq!(result.origins[1].role, EquationRole::Companion);
+        assert_eq!(result.origins[1].index, None);
+        let fragment = result.fragment.expect("fragment");
+        assert!(fragment.contains("c = 0;"), "{fragment}");
+        assert!(fragment.contains("c = 1;"), "{fragment}");
+        assert!(!fragment.contains("c = 2"), "{fragment}");
+        assert!(!fragment.contains("c = 3"), "{fragment}");
+        assert!(!fragment.contains("name='also'"), "{fragment}");
+        assert!(!fragment.contains("name='later'"), "{fragment}");
+        assert!(!fragment.contains("y = 0"), "{fragment}");
+        assert!(!fragment.contains("y = 1"), "{fragment}");
+
+        let later = extract(&req(src, &["later"], &[])).unwrap();
+        assert_eq!(later.selected_equations.len(), 2);
+        assert_eq!(later.selected_equations[0].role, EquationRole::Companion);
+        assert_eq!(later.selected_equations[0].index, None);
+        assert_eq!(later.selected_equations[1].role, EquationRole::Requested);
+        assert_eq!(later.selected_equations[1].index, Some(2));
+        assert_eq!(
+            later.selected_equations[1].domain,
+            EquationDomain::Heterogeneous
+        );
+        let later_fragment = later.fragment.expect("fragment");
+        assert!(later_fragment.contains("c = 3;"), "{later_fragment}");
+        assert!(later_fragment.contains("[static]"), "{later_fragment}");
+        assert!(!later_fragment.contains("c = 0"), "{later_fragment}");
+        assert!(!later_fragment.contains("c = 2"), "{later_fragment}");
+        assert!(!later_fragment.contains("name='also'"), "{later_fragment}");
+
+        let cross = "\
 heterogeneity_dimension h;
 var y;
 var(heterogeneity=h) c;
@@ -1716,21 +2261,78 @@ model;
   y = 0;
 end;
 model(heterogeneity=h);
-  [name='het']
-  c = c(-1);
+  [static]
+  y = 1;
 end;
 ";
-        let het = extract(&req(src, &["het"], &[])).unwrap();
-        assert_eq!(het.status, ExtractStatus::UnsupportedContext);
-        assert!(het.fragment.is_none());
-        assert_eq!(
-            het.unsupported.unwrap().kind,
-            UnsupportedKind::Heterogeneous
+        let agg = extract(&req(cross, &["agg"], &[])).unwrap();
+        assert_eq!(agg.selected_equations.len(), 1);
+        let agg_fragment = agg.fragment.expect("fragment");
+        assert!(!agg_fragment.contains("y = 1"), "{agg_fragment}");
+        assert!(
+            !agg_fragment.contains("model(heterogeneity=h)"),
+            "{agg_fragment}"
         );
 
-        let agg = extract(&req(src, &["agg"], &[])).unwrap();
-        assert_eq!(agg.status, ExtractStatus::Ok);
-        assert!(agg.fragment.unwrap().contains("name='agg'"));
+        let occbin = "\
+heterogeneity_dimension h;
+var y;
+var(heterogeneity=h) c;
+model;
+  [name='policy', relax='ELB']
+  y = 3;
+end;
+model(heterogeneity=h);
+  [name='policy', bind='ELB']
+  c = 2;
+end;
+";
+        let mut het_policy = req(occbin, &["policy"], &[]);
+        het_policy.dimension = Some("h".to_string());
+        let policy = extract(&het_policy).unwrap();
+        assert_eq!(policy.status, ExtractStatus::Ok);
+        assert_eq!(policy.selected_equations.len(), 1);
+        assert_eq!(policy.selected_equations[0].index, Some(0));
+        assert_eq!(policy.selected_equations[0].role, EquationRole::Requested);
+        let policy_fragment = policy.fragment.expect("fragment");
+        assert!(policy_fragment.contains("c = 2;"), "{policy_fragment}");
+        assert!(!policy_fragment.contains("y = 3"), "{policy_fragment}");
+        assert!(policy
+            .omitted_context
+            .iter()
+            .any(|item| item.kind == "occbin_setup" && item.detail.contains("`ELB`")));
+
+        let aggregate_policy = extract(&req(occbin, &["policy"], &[("relax", "ELB")])).unwrap();
+        assert_eq!(aggregate_policy.selected_equations.len(), 1);
+        assert_eq!(
+            aggregate_policy.selected_equations[0].domain,
+            EquationDomain::Aggregate
+        );
+        assert!(!aggregate_policy.fragment.unwrap().contains("c = 2"));
+    }
+
+    #[test]
+    fn heterogeneous_pac_has_no_fragment() {
+        let src = "\
+heterogeneity_dimension h;
+var(heterogeneity=h) c;
+parameters b;
+model(heterogeneity=h);
+  [name='p']
+  c = b*pac_expectation(nope);
+  [name='plain']
+  c = b;
+end;
+";
+        let pac = extract(&req(src, &["p"], &[])).unwrap();
+        assert_eq!(pac.status, ExtractStatus::UnsupportedContext);
+        assert!(pac.fragment.is_none());
+        assert_eq!(pac.unsupported.unwrap().kind, UnsupportedKind::Pac);
+        assert!(pac.explanation.contains("PAC"));
+
+        let plain = extract(&req(src, &["plain"], &[])).unwrap();
+        assert_eq!(plain.status, ExtractStatus::Ok);
+        assert!(!plain.fragment.unwrap().contains("pac_expectation"));
     }
 
     #[test]
@@ -2471,8 +3073,9 @@ end;
     }
 
     #[test]
-    fn tools_list_has_no_dynare_extract() {
+    fn tools_list_includes_dynare_extract() {
         let names = registered_tool_names();
-        assert!(!names.contains(&"dynare_extract"));
+        assert!(names.contains(&"dynare_extract"));
+        assert!(!names.contains(&"dynare_workspace_diagnose"));
     }
 }

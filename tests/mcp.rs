@@ -6,10 +6,10 @@ use dygnosis::span::{LineIndex, Position};
 use dygnosis::{
     analyze, auto_fix, check_e060, check_e061, check_w061, check_w160, count_gap, dynare_auto_fix,
     dynare_compare_models, dynare_diagnose, dynare_equations, dynare_expand, dynare_explain,
-    dynare_find_references, dynare_format, dynare_list_diagnostic_codes, dynare_list_options,
-    dynare_model_info, dynare_related_files, dynare_rename, explain_equation, has_structural_error,
-    parse, quiet_i050, registered_tool_names, tools_list_json, Diagnostic, McpReference,
-    McpWorkspaceReference, Workspace,
+    dynare_extract, dynare_find_references, dynare_format, dynare_list_diagnostic_codes,
+    dynare_list_options, dynare_model_info, dynare_related_files, dynare_rename, explain_equation,
+    has_structural_error, parse, quiet_i050, registered_tool_names, tools_list_json, Diagnostic,
+    McpReference, McpWorkspaceReference, Workspace,
 };
 use serde_json::{json, Value};
 
@@ -27,6 +27,7 @@ const RUST_TOOLS: &[&str] = &[
     "dynare_related_files",
     "dynare_expand",
     "dynare_format",
+    "dynare_extract",
 ];
 
 const DROPPED_TOOLS: &[&str] = &[
@@ -501,15 +502,16 @@ fn rename_map(value: Value) -> HashMap<String, String> {
 fn registered_tools_include_format() {
     let names = registered_tool_names();
     assert_eq!(names, RUST_TOOLS);
-    assert_eq!(names.len(), 13);
+    assert_eq!(names.len(), 14);
     assert_eq!(names[9], "dynare_equations");
     assert_eq!(names[10], "dynare_related_files");
     assert_eq!(names[11], "dynare_expand");
     assert_eq!(names[12], "dynare_format");
+    assert_eq!(names[13], "dynare_extract");
 
     let list = tools_list_json();
     let tools = list["tools"].as_array().expect("tools array");
-    assert_eq!(tools.len(), 13);
+    assert_eq!(tools.len(), 14);
     assert_eq!(
         tools[9]["description"],
         "List aggregate and dimension-labelled heterogeneous equations with text, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds."
@@ -521,6 +523,10 @@ fn registered_tools_include_format() {
     assert_eq!(
         tools[12]["description"],
         "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it. Empty or whitespace-only input is unchanged."
+    );
+    assert_eq!(
+        tools[13]["description"],
+        "Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model."
     );
 
     let blob = serde_json::to_string(&tools_list_json()).expect("tools list json");
@@ -545,7 +551,6 @@ fn registered_tools_include_format() {
     for name in [
         "dynare_count_gap",
         "dynare_explain_equation",
-        "dynare_extract",
         "dynare_workspace_diagnose",
     ] {
         assert!(
@@ -623,6 +628,114 @@ fn dynare_format_patch_workflow_and_settings() {
         assert!(body["formatted_text"].is_null());
         assert!(body["reason"].is_null());
     }
+}
+
+#[test]
+fn dynare_extract_focused_workflow() {
+    let root = "@#include \"body.inc\"\n";
+    let body = "\
+heterogeneity_dimension h;
+parameters beta;
+var(heterogeneity=h) c;
+model(heterogeneity=h);
+[name='euler']
+c = beta * c(-1);
+end;
+";
+    let mut files = HashMap::new();
+    files.insert("body.inc".to_string(), body.to_string());
+    let names = vec!["euler".to_string()];
+    let tags = HashMap::new();
+    let result = dynare_extract(root, Some("root.mod"), Some(&files), &names, &tags, None)
+        .expect("heterogeneous extract");
+    for key in [
+        "status",
+        "fragment",
+        "selected_equations",
+        "origins",
+        "omitted_context",
+        "explanation",
+    ] {
+        assert!(result.get(key).is_some(), "missing {key}: {result}");
+    }
+    assert_eq!(result["status"], "ok");
+    let fragment = result["fragment"].as_str().expect("fragment");
+    assert!(
+        fragment.contains("heterogeneity_dimension h;"),
+        "{fragment}"
+    );
+    assert!(fragment.contains("parameters beta;"), "{fragment}");
+    assert!(fragment.contains("var(heterogeneity=h) c;"), "{fragment}");
+    assert!(fragment.contains("model(heterogeneity=h);"), "{fragment}");
+    assert!(fragment.contains("c = beta * c(-1);"), "{fragment}");
+    assert!(!fragment.contains("@#include"), "{fragment}");
+    assert!(!fragment.contains("stoch_simul"), "{fragment}");
+    let rows = result["selected_equations"].as_array().expect("rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["domain"], "heterogeneous");
+    assert_eq!(rows[0]["dimension"], "h");
+    assert_eq!(rows[0]["index"], 0);
+    assert_eq!(rows[0]["name"], "euler");
+    assert_eq!(rows[0]["role"], "requested");
+    let origins = result["origins"].as_array().expect("origins");
+    assert_eq!(origins.len(), 1);
+    assert_eq!(origins[0]["role"], "requested");
+    assert_eq!(origins[0]["index"], 0);
+    assert_eq!(origins[0]["domain"], "heterogeneous");
+    assert_eq!(origins[0]["dimension"], "h");
+    assert_eq!(origins[0]["file"], "body.inc");
+
+    let missed = dynare_extract(
+        root,
+        Some("root.mod"),
+        Some(&files),
+        &names,
+        &tags,
+        Some("g"),
+    )
+    .expect("unknown dimension");
+    assert_eq!(missed["status"], "empty");
+    assert_eq!(missed["fragment"], "");
+    assert!(missed["explanation"]
+        .as_str()
+        .unwrap()
+        .contains("dimension `g`"));
+
+    let macro_src = "\
+var x;
+@#define is = 1:2
+model;
+@#for i in is
+[name='row']
+x = @{i};
+@#endfor
+end;
+";
+    let expanded =
+        dynare_extract(macro_src, None, None, &["row".into()], &tags, None).expect("macro extract");
+    assert_eq!(expanded["status"], "ok");
+    let expanded_text = expanded["fragment"].as_str().unwrap();
+    assert!(expanded_text.contains("x = 1;"), "{expanded_text}");
+    assert!(expanded_text.contains("x = 2;"), "{expanded_text}");
+    assert!(!expanded_text.contains("@#"), "{expanded_text}");
+    assert_eq!(expanded["selected_equations"].as_array().unwrap().len(), 2);
+
+    let pac_src = "\
+var y;
+parameters b;
+model;
+[name='p']
+y = b*pac_expectation(nope);
+end;
+";
+    let pac = dynare_extract(pac_src, None, None, &["p".into()], &tags, None).expect("pac");
+    assert_eq!(pac["status"], "unsupported_context");
+    assert!(pac["fragment"].is_null());
+    assert_eq!(pac["selected_equations"].as_array().unwrap().len(), 0);
+    assert!(pac["explanation"].as_str().unwrap().contains("PAC"));
+
+    let err = dynare_extract(pac_src, None, None, &[], &tags, None).expect_err("empty selector");
+    assert!(err.contains("names or tags"), "{err}");
 }
 
 #[test]
