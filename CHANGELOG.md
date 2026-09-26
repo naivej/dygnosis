@@ -13,6 +13,7 @@
 - Removes parameter-value inlay hints and the model-counts code lens. Folded assignment values stay on hover and in compare. Counts stay in `dynare_model_info`.
 - `dynare_format` formats a `.mod` file with the same rules as the editor. It returns the full text when the formatting changes. Empty or whitespace-only input, and a file that is already formatted, are `unchanged`. Formatting that cannot be done safely is `unsupported`. `formatIndent` is `tab` or 1–8 spaces, as in the editor.
 - Compare reports `symbols_changed` for a shared name whose declaration kind, `long_name`, or TeX name differs, including metadata that was added or removed. Missing metadata stays empty rather than being filled with the symbol name. Parameter value changes stay in `changed_parameter_values`. A kind change across `var`, `varexo`, and `parameters` also stays in the existing added and removed name lists. A change between `varexo` and `varexo_det`, or between an aggregate declaration and the same command with a heterogeneity dimension, stays on that command's list and is reported in `symbols_changed`.
+- The editor can insert a shocks template for ordinary aggregate `varexo` names. Each unfinished row is commented out, including the `shocks` block, so the insertion does not add a syntax error. `varexo_det` and heterogeneous exogenous names are left out, and no standard deviation is filled in. A `shocks(heterogeneity=…)` block does not hide the action. The action is not applied on its own.
 
 ## v0.9.0
 

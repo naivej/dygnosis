@@ -478,6 +478,52 @@ impl Backend {
         }
     }
 
+    fn shock_template(&self, params: &CodeActionParams) -> Option<CodeAction> {
+        let kind = CodeActionKind::REFACTOR;
+        if !action_kind_requested(&params.context.only, &kind) {
+            return None;
+        }
+        let uri = &params.text_document.uri;
+        let mut inner = self.lock_inner();
+        let text = inner.docs.get(uri)?.text.clone();
+        let names = {
+            let model = inner.workspace.get_effective_model(uri.as_str())?;
+            if crate::shock_template::has_ordinary_shocks(model) {
+                return None;
+            }
+            let names = crate::shock_template::aggregate_varexo_names(model);
+            if names.is_empty() {
+                return None;
+            }
+            names
+        };
+        let edit = crate::shock_template::insertion(&text, &names)?;
+        let index = LineIndex::new(&text);
+        let pos = index.position_utf16(&text, edit.byte);
+        let position = Position::new(pos.line, pos.character);
+        let mut changes = HashMap::new();
+        changes.insert(
+            uri.clone(),
+            vec![TextEdit {
+                range: Range::new(position, position),
+                new_text: edit.new_text,
+            }],
+        );
+        Some(CodeAction {
+            title: "Insert shocks template".into(),
+            kind: Some(kind),
+            diagnostics: None,
+            edit: Some(WorkspaceEdit {
+                changes: Some(changes),
+                ..WorkspaceEdit::default()
+            }),
+            command: None,
+            is_preferred: Some(false),
+            disabled: None,
+            data: None,
+        })
+    }
+
     fn linked_ranges(&self, pos: &TextDocumentPositionParams) -> Option<LinkedEditingRanges> {
         let inner = self.lock_inner();
         let doc = inner.docs.get(&pos.text_document.uri)?;
@@ -1277,7 +1323,15 @@ impl LanguageServer for Backend {
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
-        Ok(self.quick_fixes(&params))
+        let mut actions = self.quick_fixes(&params).unwrap_or_default();
+        if let Some(action) = self.shock_template(&params) {
+            actions.push(CodeActionOrCommand::CodeAction(action));
+        }
+        if actions.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(actions))
+        }
     }
 
     async fn linked_editing_range(
@@ -1682,6 +1736,19 @@ fn fix_title(d: &crate::Diagnostic) -> String {
         }
     }
     format!("Apply fix for {}", d.code)
+}
+
+fn action_kind_requested(only: &Option<Vec<CodeActionKind>>, kind: &CodeActionKind) -> bool {
+    match only {
+        None => true,
+        Some(kinds) => {
+            let got = kind.as_str();
+            kinds.iter().any(|want| {
+                let want = want.as_str();
+                got == want || got.starts_with(&format!("{want}."))
+            })
+        }
+    }
 }
 
 fn ranges_overlap(left: Range, right: Range) -> bool {

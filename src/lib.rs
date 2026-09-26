@@ -59,6 +59,7 @@ pub mod preprocessor;
 pub mod refs;
 pub mod server;
 mod shape_gate;
+pub(crate) mod shock_template;
 pub mod span;
 pub mod workspace;
 pub(crate) mod workspace_diagnose;
