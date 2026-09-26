@@ -186,7 +186,7 @@ impl Backend {
         let inner = self.lock_inner();
         let doc = inner.docs.get(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
-        let byte = index.offset(&doc.text, span_pos(pos.position));
+        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, span) = ident_at(&doc.text, byte)?;
         let range = Some(span_range(&index, &doc.text, span));
         if let Some(cmd) = option_command_at(&doc.text, byte) {
@@ -242,7 +242,7 @@ impl Backend {
         let inner = self.lock_inner();
         let doc = inner.docs.get(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
-        let byte = index.offset(&doc.text, span_pos(pos.position));
+        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, _) = ident_at(&doc.text, byte)?;
         let model = inner.workspace.get_model(pos.text_document.uri.as_str())?;
         let decl = find_decl(model, &word)?;
@@ -258,7 +258,7 @@ impl Backend {
         let doc = inner.docs.get(uri)?;
         let text = doc.text.clone();
         let index = LineIndex::new(&text);
-        let byte = index.offset(&text, span_pos(pos.position));
+        let byte = index.offset_utf16(&text, span_pos(pos.position));
         let covering = inner
             .workspace
             .companion_records(uri.as_str())
@@ -300,7 +300,7 @@ impl Backend {
         let inner = self.lock_inner();
         let doc = inner.docs.get(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
-        let byte = index.offset(&doc.text, span_pos(pos.position));
+        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, _) = ident_at(&doc.text, byte)?;
         let locs = occurrences(&doc.text, &word)
             .into_iter()
@@ -322,7 +322,7 @@ impl Backend {
         let inner = self.lock_inner();
         let doc = inner.docs.get(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
-        let byte = index.offset(&doc.text, span_pos(pos.position));
+        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, _) = ident_at(&doc.text, byte)?;
         let hits = occurrences(&doc.text, &word)
             .into_iter()
@@ -342,7 +342,7 @@ impl Backend {
         let inner = self.lock_inner();
         let doc = inner.docs.get(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
-        let byte = index.offset(&doc.text, span_pos(pos.position));
+        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         if let Some(cmd) = option_command_at(&doc.text, byte) {
             let items = command_options(&cmd)
                 .iter()
@@ -379,7 +379,7 @@ impl Backend {
         let inner = self.lock_inner();
         let doc = inner.docs.get(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
-        let byte = index.offset(&doc.text, span_pos(pos.position));
+        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, span) = ident_at(&doc.text, byte)?;
         if !is_legal_ident(&word) {
             return None;
@@ -397,7 +397,7 @@ impl Backend {
         let inner = self.lock_inner();
         let doc = inner.docs.get(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
-        let byte = index.offset(&doc.text, span_pos(pos.position));
+        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, _) = ident_at(&doc.text, byte)?;
         if !is_legal_ident(&word) || !is_declared_in_open(&inner, &word) {
             return None;
@@ -450,8 +450,8 @@ impl Backend {
             let title = fix_title(lib);
             let edit = TextEdit {
                 range: Range::new(
-                    Position::new(fix.start_line, fix.start_char),
-                    Position::new(fix.end_line, fix.end_char),
+                    lsp_pos_from_scalar(&index, &doc.text, fix.start_line, fix.start_char),
+                    lsp_pos_from_scalar(&index, &doc.text, fix.end_line, fix.end_char),
                 ),
                 new_text: fix.new_text.clone(),
             };
@@ -482,7 +482,7 @@ impl Backend {
         let inner = self.lock_inner();
         let doc = inner.docs.get(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
-        let byte = index.offset(&doc.text, span_pos(pos.position));
+        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, _) = ident_at(&doc.text, byte)?;
         if !is_declared_in_open(&inner, &word) {
             return None;
@@ -551,8 +551,8 @@ impl Backend {
             let Some(span) = span else {
                 continue;
             };
-            let start = index.position(&doc.text, span.start);
-            let end = index.position(&doc.text, span.end);
+            let start = index.position_utf16(&doc.text, span.start);
+            let end = index.position_utf16(&doc.text, span.end);
             if start.line < end.line {
                 ranges.push(FoldingRange {
                     start_line: start.line,
@@ -576,8 +576,8 @@ impl Backend {
                     .is_some_and(|d| COND.contains(&d.kind.as_str()))
             {
                 let opener = stack.pop().unwrap();
-                let start = index.position(&doc.text, opener.span.start);
-                let end = index.position(&doc.text, directive.span.end);
+                let start = index.position_utf16(&doc.text, opener.span.start);
+                let end = index.position_utf16(&doc.text, directive.span.end);
                 if start.line < end.line {
                     ranges.push(FoldingRange {
                         start_line: start.line,
@@ -590,8 +590,8 @@ impl Backend {
                 }
             } else if kind == "endfor" && stack.last().is_some_and(|d| d.kind == "for") {
                 let opener = stack.pop().unwrap();
-                let start = index.position(&doc.text, opener.span.start);
-                let end = index.position(&doc.text, directive.span.end);
+                let start = index.position_utf16(&doc.text, opener.span.start);
+                let end = index.position_utf16(&doc.text, directive.span.end);
                 if start.line < end.line {
                     ranges.push(FoldingRange {
                         start_line: start.line,
@@ -630,7 +630,7 @@ impl Backend {
         let mut out = Vec::new();
         for &pos in positions {
             let mut chain = Vec::new();
-            let byte = index.offset(&doc.text, span_pos(pos));
+            let byte = index.offset_utf16(&doc.text, span_pos(pos));
             if let Some((_, span)) = ident_at(&doc.text, byte) {
                 chain.push(span_range(&index, &doc.text, span));
             }
@@ -794,7 +794,7 @@ impl Backend {
                 continue;
             }
             let name = tok.text(&doc.text);
-            let start = index.position(&doc.text, tok.span.start);
+            let start = index.position_utf16(&doc.text, tok.span.start);
             if let Some(range) = range {
                 if !pos_in_range_half_open(Position::new(start.line, start.character), range) {
                     continue;
@@ -827,11 +827,11 @@ impl Backend {
                     }
                 }
             }
-            let end = index.position(&doc.text, tok.span.end);
+            let end = index.position_utf16(&doc.text, tok.span.end);
             let length = if start.line == end.line {
                 end.character.saturating_sub(start.character)
             } else {
-                tok.span.end - tok.span.start
+                tok.text(&doc.text).encode_utf16().count() as u32
             };
             raw.push((start.line, start.character, length, ttype, mods));
         }
@@ -960,7 +960,7 @@ impl Backend {
         let doc = inner.docs.get(&pos.text_document.uri)?;
         let model = inner.workspace.get_model(pos.text_document.uri.as_str())?;
         let index = LineIndex::new(&doc.text);
-        let byte = index.offset(&doc.text, span_pos(pos.position));
+        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let mut items = Vec::new();
         if let Some((word, _)) = ident_at(&doc.text, byte) {
             if find_decl(model, &word).is_some() {
@@ -1427,6 +1427,7 @@ pub fn initialize_result() -> InitializeResult {
                 work_done_progress_options: WorkDoneProgressOptions::default(),
             }),
             call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
+            position_encoding: Some(PositionEncodingKind::UTF16),
             ..ServerCapabilities::default()
         },
         server_info: Some(ServerInfo {
@@ -1447,8 +1448,8 @@ fn library_to_lsp(text: &str, diags: &[crate::Diagnostic]) -> Vec<Diagnostic> {
         .iter()
         .filter(|d| !is_dropped_code(&d.code))
         .map(|d| {
-            let start = index.position(text, d.span.start);
-            let end = index.position(text, d.span.end);
+            let start = index.position_utf16(text, d.span.start);
+            let end = index.position_utf16(text, d.span.end);
             Diagnostic {
                 range: Range::new(
                     Position::new(start.line, start.character),
@@ -1472,9 +1473,16 @@ fn span_pos(pos: Position) -> crate::span::Position {
     }
 }
 
+/// A stored fix uses scalar columns. The edit sent to the editor is UTF-16.
+fn lsp_pos_from_scalar(index: &LineIndex, text: &str, line: u32, character: u32) -> Position {
+    let byte = index.offset(text, crate::span::Position { line, character });
+    let pos = index.position_utf16(text, byte);
+    Position::new(pos.line, pos.character)
+}
+
 fn span_range(index: &LineIndex, text: &str, span: Span) -> Range {
-    let start = index.position(text, span.start);
-    let end = index.position(text, span.end);
+    let start = index.position_utf16(text, span.start);
+    let end = index.position_utf16(text, span.end);
     Range::new(
         Position::new(start.line, start.character),
         Position::new(end.line, end.character),
@@ -2004,16 +2012,28 @@ fn range_strictly_contains(outer: Range, inner: Range) -> bool {
     pos_in_range(inner.start, outer) && pos_in_range(inner.end, outer)
 }
 
+fn line_end_utf16(text: &str, line: u32) -> u32 {
+    let index = LineIndex::new(text);
+    let last = index.position_utf16(text, text.len() as u32).line;
+    if line > last {
+        return 0;
+    }
+    let byte = index.offset_utf16(
+        text,
+        crate::span::Position {
+            line,
+            character: u32::MAX,
+        },
+    );
+    index.position_utf16(text, byte).character
+}
+
 fn full_document_range(text: &str) -> Range {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let last = lines.last().copied().unwrap_or("");
-    let last = last.strip_suffix('\r').unwrap_or(last);
+    let index = LineIndex::new(text);
+    let line = index.position_utf16(text, text.len() as u32).line;
     Range::new(
         Position::new(0, 0),
-        Position::new(
-            lines.len().saturating_sub(1) as u32,
-            last.chars().count() as u32,
-        ),
+        Position::new(line, line_end_utf16(text, line)),
     )
 }
 
@@ -2025,11 +2045,7 @@ fn full_document_edit(old_text: &str, new_text: String) -> TextEdit {
 }
 
 fn line_range_edit(text: &str, start_line: u32, end_line: u32, replacement: String) -> TextEdit {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let end = lines
-        .get(end_line as usize)
-        .map(|l| l.strip_suffix('\r').unwrap_or(l).chars().count() as u32)
-        .unwrap_or(0);
+    let end = line_end_utf16(text, end_line);
     TextEdit {
         range: Range::new(Position::new(start_line, 0), Position::new(end_line, end)),
         new_text: replacement,

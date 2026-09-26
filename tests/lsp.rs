@@ -213,6 +213,57 @@ fn initialize_capabilities_wave_a() {
     }
 }
 
+#[allow(deprecated)]
+fn init_params(capabilities: ClientCapabilities) -> InitializeParams {
+    InitializeParams {
+        process_id: None,
+        root_path: None,
+        root_uri: None,
+        initialization_options: None,
+        capabilities,
+        trace: None,
+        workspace_folders: None,
+        client_info: None,
+        locale: None,
+    }
+}
+
+#[tokio::test]
+async fn initialize_advertises_utf16() {
+    let (service, _socket) = new_service();
+    let offered = [
+        ClientCapabilities::default(),
+        ClientCapabilities {
+            general: Some(GeneralClientCapabilities {
+                position_encodings: Some(vec![PositionEncodingKind::UTF8]),
+                ..GeneralClientCapabilities::default()
+            }),
+            ..ClientCapabilities::default()
+        },
+        ClientCapabilities {
+            general: Some(GeneralClientCapabilities {
+                position_encodings: Some(vec![
+                    PositionEncodingKind::UTF8,
+                    PositionEncodingKind::UTF16,
+                ]),
+                ..GeneralClientCapabilities::default()
+            }),
+            ..ClientCapabilities::default()
+        },
+    ];
+    for capabilities in offered {
+        let result = service
+            .inner()
+            .initialize(init_params(capabilities))
+            .await
+            .expect("initialize");
+        assert_eq!(
+            result.capabilities.position_encoding,
+            Some(PositionEncodingKind::UTF16)
+        );
+    }
+}
+
 #[tokio::test]
 async fn open_trend_rbc_gov_inv_thin_codes() {
     let text = read_mod("trend_rbc_gov_inv");
@@ -506,7 +557,7 @@ async fn workspace_diagnostic_lists_open_docs() {
 
 fn pos_at(text: &str, byte: usize) -> Position {
     let index = dygnosis::span::LineIndex::new(text);
-    let p = index.position(text, byte as u32);
+    let p = index.position_utf16(text, byte as u32);
     Position::new(p.line, p.character)
 }
 
@@ -631,14 +682,14 @@ fn zero_start_range() -> Range {
 
 fn slice_range(text: &str, range: Range) -> String {
     let index = dygnosis::span::LineIndex::new(text);
-    let start = index.offset(
+    let start = index.offset_utf16(
         text,
         dygnosis::span::Position {
             line: range.start.line,
             character: range.start.character,
         },
     );
-    let end = index.offset(
+    let end = index.offset_utf16(
         text,
         dygnosis::span::Position {
             line: range.end.line,
@@ -653,14 +704,14 @@ fn apply_edits(text: &str, edits: &[TextEdit]) -> String {
         .iter()
         .map(|e| {
             let index = dygnosis::span::LineIndex::new(text);
-            let start = index.offset(
+            let start = index.offset_utf16(
                 text,
                 dygnosis::span::Position {
                     line: e.range.start.line,
                     character: e.range.start.character,
                 },
             );
-            let end = index.offset(
+            let end = index.offset_utf16(
                 text,
                 dygnosis::span::Position {
                     line: e.range.end.line,
@@ -676,6 +727,72 @@ fn apply_edits(text: &str, edits: &[TextEdit]) -> String {
         out.replace_range(start as usize..end as usize, new);
     }
     out
+}
+
+#[tokio::test]
+async fn utf16_emoji_diagnostic_and_rename() {
+    let text = "var \u{1F600}\u{1F600}y;\n";
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("utf16-emoji.mod");
+    let uri = Url::from_file_path(&path).expect("file url");
+    let y = text.find('y').unwrap();
+
+    let mcp = dygnosis::dynare_diagnose(text, None, None);
+    let mcp_e001 = mcp
+        .iter()
+        .find(|d| d.code == "E001")
+        .expect("MCP E001 on the emoji");
+    assert_eq!(mcp_e001.line, 1);
+    assert_eq!(mcp_e001.end_column, 7);
+
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.to_string(), 1))
+        .await;
+    let items = pull_items(
+        service
+            .inner()
+            .diagnostic(pull_params(uri.clone()))
+            .await
+            .expect("pull"),
+    );
+    let lsp_e001 = items
+        .iter()
+        .find(|d| diag_code(d) == "E001")
+        .expect("LSP E001 on the emoji");
+    assert_eq!(lsp_e001.range.end.line, 0);
+    assert_eq!(lsp_e001.range.end.character, 8);
+    assert_ne!(lsp_e001.range.end.character + 1, mcp_e001.end_column);
+
+    let hover = service
+        .inner()
+        .hover(HoverParams {
+            text_document_position_params: tdp(uri.clone(), text, y),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover rpc")
+        .expect("hover");
+    let hover_range = hover.range.expect("hover range");
+    assert_eq!(hover_range.start.character, 8);
+    assert_eq!(slice_range(text, hover_range), "y");
+
+    let edit = service
+        .inner()
+        .rename(RenameParams {
+            text_document_position: tdp(uri.clone(), text, y),
+            new_name: "z".into(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("rename rpc")
+        .expect("rename edit");
+    let edits = edit.changes.expect("changes").remove(&uri).expect("edits");
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].range.start.character, 8);
+    assert_eq!(edits[0].range.end.character, 9);
+    assert_eq!(slice_range(text, edits[0].range), "y");
+    assert_eq!(apply_edits(text, &edits), "var \u{1F600}\u{1F600}z;\n");
 }
 
 fn first_assignment_betta(text: &str) -> usize {
@@ -2015,7 +2132,7 @@ fn full_range(text: &str) -> Range {
         Position::new(0, 0),
         Position::new(
             lines.len().saturating_sub(1) as u32,
-            last.chars().count() as u32,
+            last.encode_utf16().count() as u32,
         ),
     )
 }
@@ -2667,14 +2784,14 @@ async fn semantic_tokens_full_classifies_betta_or_y() {
             line += tok.delta_line;
             col = tok.delta_start;
         }
-        let start = index.offset(
+        let start = index.offset_utf16(
             &text,
             dygnosis::span::Position {
                 line,
                 character: col,
             },
         );
-        let end = index.offset(
+        let end = index.offset_utf16(
             &text,
             dygnosis::span::Position {
                 line,
