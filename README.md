@@ -57,6 +57,7 @@ Limitations by design
 | `dynare_related_files` | Includes and companions for the active `.mod` |
 | `dynare_expand` | Effective text after `@#if` / `@#for` / `@{…}` and includes, plus origin for each counted equation |
 | `dynare_format` | Format a `.mod` file with the editor's rules. Returns the full text only when it changes. Empty or whitespace-only input is unchanged |
+| `dynare_workspace_diagnose` | Check several root `.mod` files. Pass a files map and roots, or paths to files and directories. One failed root does not drop the others |
 
 ## Credits
 

@@ -82,9 +82,7 @@ impl Workspace {
     /// Overlay workspace. Include lookup does not read file bodies from disk.
     ///
     /// Keys are stored as given. This path does not canonicalize, lowercase,
-    /// or collapse `..`. Slice 14 is the first non-test caller of batch
-    /// diagnose, which is what constructs this workspace today.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// or collapse `..`.
     pub(crate) fn overlay_documents(files: &BTreeMap<String, String>) -> Self {
         let mut ws = Self {
             overlay_only: true,
@@ -434,12 +432,7 @@ impl Workspace {
                 None => candidates.push(name.clone()),
             }
             if !candidates.contains(&name) {
-                candidates.push(name.clone());
-            }
-            if let Some(only) = unique_overlay_suffix(&name, self.docs.keys()) {
-                if !candidates.contains(&only) {
-                    candidates.push(only);
-                }
+                candidates.push(name);
             }
         }
         candidates
@@ -827,21 +820,6 @@ fn overlay_join(parent: &str, name: &str) -> String {
     } else {
         format!("{parent}/{name}")
     }
-}
-
-fn unique_overlay_suffix<'a>(name: &str, keys: impl Iterator<Item = &'a String>) -> Option<String> {
-    let mut found = None;
-    for key in keys {
-        let hit = key == name || key.ends_with(&format!("/{name}"));
-        if !hit {
-            continue;
-        }
-        if found.is_some() {
-            return None;
-        }
-        found = Some(key.clone());
-    }
-    found
 }
 
 fn includepath_dirs_for(key: &str, model: &Model) -> Vec<PathBuf> {
