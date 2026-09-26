@@ -291,6 +291,30 @@
       "notes": "entirely non-ASCII declaration name"
     },
     {
+      "id": "e001_non_ascii_equation",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/non_ascii_equation.mod",
+      "source": "e001.rs::e001_non_ascii_equation",
+      "cluster": "e001/non_ascii_equation.mod",
+      "notes": "non-ASCII character in an equation"
+    },
+    {
+      "id": "e001_non_ascii_shock",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/non_ascii_shock.mod",
+      "source": "e001.rs::e001_non_ascii_shock",
+      "cluster": "e001/non_ascii_shock.mod",
+      "notes": "non-ASCII shock name"
+    },
+    {
       "id": "e001_unicode_display_quiet",
       "codes": [
         "E001"
@@ -8101,6 +8125,7 @@
     {"id": "d_hank_w207_with_lag", "codes": ["W207", "E469"], "kind": "harness", "package": "d_hank", "fixture": "tests/fixtures/d_hank/w207_with_lag.mod", "source": "d_hank.rs::accepted_neighbours", "cluster": "d_hank/w207_with_lag.mod", "notes": "w207_with_lag.mod locks W207, E469."},
     {"id": "d_hank_e001_model_no_value", "codes": ["E001"], "kind": "fire", "package": "d_hank", "fixture": "tests/fixtures/d_hank/e001_model_no_value.mod", "source": "d_hank.rs::official_fire_table", "cluster": "d_hank/e001_model_no_value.mod", "notes": "model(heterogeneity) with no value refuses syntax error, unexpected ')', expecting EQUAL."},
     {"id": "d_hank_e058_shock_unknown_dim", "codes": ["E058"], "kind": "fire", "package": "d_hank", "fixture": "tests/fixtures/d_hank/e058_shock_unknown_dim.mod", "source": "d_hank.rs::official_fire_table", "cluster": "d_hank/e058_shock_unknown_dim.mod", "notes": "Unknown shock name and unknown dimension: the binary prints Unknown symbol and does not also print the dimension sentence."},
+    {"id": "d_hank_w208_uneven", "codes": ["W208"], "kind": "fire", "package": "d_hank", "fixture": "tests/fixtures/d_hank/w208_uneven.mod", "source": "d_hank.rs::w208_counts_written_household_equations_against_written_names", "cluster": "d_hank/w208_uneven.mod", "notes": "Two household variables and one equation."},
     {"id": "writing_one_each", "codes": ["I208", "I209", "I210"], "kind": "fire", "package": "writing", "fixture": "tests/fixtures/writing/one_each.mod", "source": "writing_info.rs::singular_summaries_anchor_on_the_first_site", "cluster": "writing/one_each.mod", "notes": "One unnamed equation, three symbols without long_name, and one literal 2."}
   ]
 }

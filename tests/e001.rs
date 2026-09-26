@@ -357,6 +357,24 @@ fn e001_non_ascii_trailing_declaration() {
 }
 
 #[test]
+fn e001_non_ascii_equation() {
+    assert_fire(
+        "e001/non_ascii_equation.mod",
+        "character unrecognized by lexer",
+        "é",
+    );
+}
+
+#[test]
+fn e001_non_ascii_shock() {
+    assert_fire(
+        "e001/non_ascii_shock.mod",
+        "character unrecognized by lexer",
+        "é",
+    );
+}
+
+#[test]
 fn e001_non_ascii_identifier() {
     assert_fire(
         "e001/non_ascii_ident.mod",

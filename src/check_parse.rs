@@ -918,50 +918,68 @@ fn invalid_ident_diags(model: &Model, tokens: &[Token], index: &LineIndex) -> Ve
             t += 1;
         }
         flush_invalid_runs(src, tokens, &kept, &mut out);
-        push_unrecognized_decl_gaps(src, tokens, body_start_i, k, &mut out);
         i = k + 1;
     }
+    push_unrecognized_file_gaps(src, tokens, &mut out);
     out
 }
 
-/// Non-ASCII characters the lexer skips inside a declaration list. Dynare's
-/// `<*>.` rule refuses them with `character unrecognized by lexer` and does not
-/// return. Comments, parenthesized options, and `$…$` TeX are not part of the
-/// name. The character is not tokenized, so it is not a new identifier surface.
-fn push_unrecognized_decl_gaps(
-    src: &str,
-    tokens: &[Token],
-    body_start: usize,
-    semi: usize,
-    out: &mut Vec<Diagnostic>,
-) {
-    if body_start == 0 || semi >= tokens.len() {
-        return;
-    }
-    let mut prev_end = tokens[body_start - 1].span.end;
-    let mut t = body_start;
-    while t < semi {
-        if tokens[t].kind == TokenKind::Latex {
-            push_unrecognized_gap(src, prev_end, tokens[t].span.start, out);
-            prev_end = tokens[t].span.end;
-            t += 1;
-            continue;
+/// Non-ASCII characters the lexer skips. Dynare's `<*>.` rule refuses them
+/// with `character unrecognized by lexer` in any statement, including equations
+/// and shock lines. Comments, quoted text, `$…$` TeX, and the complementarity
+/// sign are tokens or trivia, so they are not flagged. `verbatim` bodies pass
+/// through raw.
+fn push_unrecognized_file_gaps(src: &str, tokens: &[Token], out: &mut Vec<Diagnostic>) {
+    let verbatim = verbatim_body_spans(src, tokens);
+    let mut prev = 0u32;
+    for tok in tokens {
+        if !span_contains(prev, &verbatim) {
+            push_unrecognized_gap(src, prev, tok.span.start, out);
         }
-        if tokens[t].kind == TokenKind::LParen {
-            push_unrecognized_gap(src, prev_end, tokens[t].span.start, out);
-            let next = skip_balanced(tokens, t, TokenKind::LParen, TokenKind::RParen);
-            if next == t {
-                break;
+        prev = tok.span.end;
+    }
+    if !span_contains(prev, &verbatim) {
+        push_unrecognized_gap(src, prev, src.len() as u32, out);
+    }
+}
+
+fn span_contains(pos: u32, spans: &[Span]) -> bool {
+    spans.iter().any(|span| pos >= span.start && pos < span.end)
+}
+
+fn verbatim_body_spans(src: &str, tokens: &[Token]) -> Vec<Span> {
+    let mut ranges = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        if tokens[i].kind == TokenKind::Ident
+            && tokens[i].text(src).eq_ignore_ascii_case("verbatim")
+            && tokens
+                .get(i + 1)
+                .is_some_and(|tok| tok.kind == TokenKind::Semi)
+        {
+            let start = tokens[i + 1].span.end;
+            i += 2;
+            while i < tokens.len() {
+                if tokens[i].kind == TokenKind::Ident
+                    && tokens[i].text(src).eq_ignore_ascii_case("end")
+                    && tokens
+                        .get(i + 1)
+                        .is_some_and(|tok| tok.kind == TokenKind::Semi)
+                {
+                    ranges.push(Span {
+                        start,
+                        end: tokens[i].span.start,
+                    });
+                    i += 2;
+                    break;
+                }
+                i += 1;
             }
-            prev_end = tokens[next - 1].span.end;
-            t = next;
             continue;
         }
-        push_unrecognized_gap(src, prev_end, tokens[t].span.start, out);
-        prev_end = tokens[t].span.end;
-        t += 1;
+        i += 1;
     }
-    push_unrecognized_gap(src, prev_end, tokens[semi].span.start, out);
+    ranges
 }
 
 fn push_unrecognized_gap(src: &str, from: u32, to: u32, out: &mut Vec<Diagnostic>) {

@@ -59,7 +59,6 @@ pub mod refs;
 pub mod server;
 mod shape_gate;
 pub mod span;
-mod suppress;
 pub mod workspace;
 
 pub use auto_fix::{apply_fix, auto_fix};

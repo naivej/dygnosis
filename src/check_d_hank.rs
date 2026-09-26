@@ -77,6 +77,92 @@ pub fn check_second_dimension(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
+/// Written equation count versus written endogenous names, per heterogeneity
+/// dimension. Same idea as aggregate `W013`: do not count helper variables
+/// Dynare inserts later for leads and lags. `#` locals and `[static]` rows
+/// are not counted equations.
+pub fn check_square(model: &Model) -> Vec<Diagnostic> {
+    struct Side {
+        count: usize,
+        span: Span,
+    }
+    let mut endogenous: Vec<(String, Side)> = Vec::new();
+    for decl in &model.endogenous {
+        let Some((dim, _)) = decl.heterogeneity else {
+            continue;
+        };
+        let name = model.name(dim).to_string();
+        if let Some((_, side)) = endogenous.iter_mut().find(|(key, _)| key == &name) {
+            side.count += 1;
+        } else {
+            endogenous.push((
+                name,
+                Side {
+                    count: 1,
+                    span: decl.span,
+                },
+            ));
+        }
+    }
+    let mut equations: Vec<(String, Side)> = Vec::new();
+    for block in &model.heterogeneous_models {
+        let name = model.name(block.dimension).to_string();
+        let n = block
+            .equations
+            .iter()
+            .filter(|eq| !eq.is_local && !eq.static_tag)
+            .count();
+        if let Some((_, side)) = equations.iter_mut().find(|(key, _)| key == &name) {
+            side.count += n;
+        } else {
+            equations.push((
+                name,
+                Side {
+                    count: n,
+                    span: block.span,
+                },
+            ));
+        }
+    }
+    let mut names: Vec<String> = endogenous.iter().map(|(name, _)| name.clone()).collect();
+    for (name, _) in &equations {
+        if !names.iter().any(|have| have == name) {
+            names.push(name.clone());
+        }
+    }
+    let mut out = Vec::new();
+    for name in names {
+        let n_endo = endogenous
+            .iter()
+            .find(|(key, _)| key == &name)
+            .map(|(_, side)| side.count)
+            .unwrap_or(0);
+        let eq_side = equations.iter().find(|(key, _)| key == &name);
+        let n_eq = eq_side.map(|(_, side)| side.count).unwrap_or(0);
+        if n_eq == n_endo {
+            continue;
+        }
+        let span = eq_side
+            .map(|(_, side)| side.span)
+            .or_else(|| {
+                endogenous
+                    .iter()
+                    .find(|(key, _)| key == &name)
+                    .map(|(_, side)| side.span)
+            })
+            .unwrap_or(Span::new(0, 0));
+        out.push(Diagnostic::new(
+            span,
+            Severity::Warning,
+            "W208",
+            format!(
+                "Equation count mismatch: {n_eq} equation(s) but {n_endo} endogenous variable(s) in heterogeneity dimension '{name}'."
+            ),
+        ));
+    }
+    out
+}
+
 pub fn check_check(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     if model.heterogeneity_dimensions.is_empty() {

@@ -139,6 +139,7 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
         });
     let mut out = Vec::new();
     out.extend(crate::e010::check_e010(model));
+    out.extend(crate::check_d_hank::check_square(model));
     out.extend(equation_parse);
     out.extend(declaration_parse);
     out.extend(occbin_diags);
@@ -244,7 +245,7 @@ pub(crate) fn check_in_workspace(ws: &mut Workspace, abs_path: &str) -> Vec<Diag
     try_workspace_check(ws, abs_path).unwrap_or_else(|| {
         let text = ws.get_source(abs_path).unwrap_or("").to_string();
         let model = parse(&text);
-        crate::suppress::apply_model(&model, analyze(&model))
+        analyze(&model)
     })
 }
 
@@ -254,7 +255,6 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<Vec<Diagnos
     diags.extend(crate::check_d_open::check_workspace_d_open(
         &model, abs_path,
     ));
-    diags = crate::suppress::apply_effective(ws, abs_path, diags);
     let records = ws.include_records(abs_path).cloned().unwrap_or_default();
     let expansion_blocked = !records.unresolved.is_empty() || !records.cycles.is_empty();
     if expansion_blocked {
@@ -284,11 +284,6 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<Vec<Diagnos
         .map(|r| r.to_vec())
         .unwrap_or_default();
     extra.extend(crate::check_w160::check_w160(&companions));
-    if let Some(root) = ws.get_model(abs_path) {
-        let source = root.source.clone();
-        let native = root.ms_unparsed_spans.clone();
-        extra = crate::suppress::apply_source(&source, &native, extra);
-    }
     diags.extend(extra);
     crate::check_w160::quiet_i050(&mut diags, &companions);
     Some(diags)

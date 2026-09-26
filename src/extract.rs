@@ -141,7 +141,7 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
     };
     let model = &unit.model;
     let aggregate = matching_indexes(&model.equations, request);
-    if heterogeneous_match(&model, request) {
+    if heterogeneous_match(model, request) {
         return Ok(unsupported(
             UnsupportedKind::Heterogeneous,
             "a matching equation is in a heterogeneous model block",

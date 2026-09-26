@@ -45,6 +45,26 @@ const HONESTY_FIRE: &[HonestyRow] = &[
     },
     HonestyRow {
         code: "E001",
+        fixture: "e001/non_ascii_equation.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "character unrecognized by lexer",
+        our_needle: "character unrecognized by lexer",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
+        fixture: "e001/non_ascii_shock.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "character unrecognized by lexer",
+        our_needle: "character unrecognized by lexer",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E001",
         fixture: "e001/non_ascii_ident.mod",
         kind: HonestyKind::Error {
             workspace_only: false,

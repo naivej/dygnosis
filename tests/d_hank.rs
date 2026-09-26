@@ -266,6 +266,46 @@ fn accepted_neighbours() {
 }
 
 #[test]
+fn w208_counts_written_household_equations_against_written_names() {
+    let uneven = "\
+heterogeneity_dimension h;
+var(heterogeneity=h) c n;
+model(heterogeneity=h);
+  c = n;
+end;
+";
+    let diags = analyze(&parse(uneven));
+    let warning = diags.iter().find(|diag| diag.code == "W208").unwrap();
+    assert!(
+        warning
+            .message
+            .contains("1 equation(s) but 2 endogenous variable(s) in heterogeneity dimension 'h'"),
+        "{warning:?}"
+    );
+
+    let lead = "\
+heterogeneity_dimension h;
+var(heterogeneity=h) c;
+model(heterogeneity=h);
+  c = c(+1);
+end;
+";
+    assert!(analyze(&parse(lead)).iter().all(|diag| diag.code != "W208"));
+
+    let local = "\
+heterogeneity_dimension h;
+var(heterogeneity=h) c;
+model(heterogeneity=h);
+  # rho = 0.9;
+  c = rho;
+end;
+";
+    assert!(analyze(&parse(local))
+        .iter()
+        .all(|diag| diag.code != "W208"));
+}
+
+#[test]
 fn older_sum_refusals_still_fire() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/p_hank");
     let epi = std::fs::read_to_string(root.join("fire_epilogue_sum.mod")).unwrap();

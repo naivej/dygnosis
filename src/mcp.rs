@@ -172,7 +172,7 @@ pub fn dynare_diagnose(
 ) -> Vec<McpDiagnostic> {
     let Some(files) = nonempty_map(files) else {
         let model = parse(file_content);
-        let diags = crate::suppress::apply_model(&model, analyze(&model));
+        let diags = analyze(&model);
         return diagnostics_to_json(file_content, &diags);
     };
     let Some(active) = active_file.filter(|a| files.contains_key(*a)) else {
