@@ -57,6 +57,7 @@ Limitations by design
 | `dynare_related_files` | Includes and companions for the active `.mod` |
 | `dynare_expand` | Effective text after `@#if` / `@#for` / `@{…}` and includes, plus origin for each counted equation |
 | `dynare_format` | Format a `.mod` file with the editor's rules. Returns the full text only when it changes. Empty or whitespace-only input is unchanged |
+| `dynare_extract` | Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model |
 
 ## Credits
 
