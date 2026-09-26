@@ -37,6 +37,7 @@ Limitations by design
 - Signature help for a command's options (`(`, `,`, and `=`)
 - Format document / range
 - Code actions and auto-fix where a fix is stored
+- Insert a commented shocks template for ordinary aggregate `varexo` names
 - Folding and links into `@#include` files and companions (e.g. `FILENAME_steadystate.m`)
 - Show the effective model (`dynare/showEffectiveModel`): text after `@#if` / `@#for` / `@{…}` and includes, with origin jump from each counted equation
 - Diagnostics while typing and on save.
