@@ -40,6 +40,7 @@ pub mod companion;
 mod diag_shape;
 pub mod diagnostic;
 pub mod e010;
+mod equation_names;
 pub mod equations;
 pub mod expand;
 pub mod explain;

@@ -27,6 +27,7 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 | `check_dir/` | a tree for `dygnosis check DIR` (recurse `*.mod`, skip `+` directories; explicit `.inc` still as FILE) |
 | `equations/` | counted equation object (library reader + MCP duplicate `[name=]` tag) |
 | `writing/` | I208–I210 writing summaries: equation name tags, declaration `long_name`, and literals in equations |
+| `equation_names/` | I208 bulk naming action. No `// inventory:` line. |
 | `w211/` | ordinary aggregate `varexo` used with a lead under `stoch_simul` or `estimation` |
 | `compare/` | aggregate and per-dimension heterogeneous equation compare pairs (names, tags, regimes) and symbol kind or metadata pairs. No `// inventory:` line. |
 | `lsp/` | document-symbol outline (timing-class groups; empty group omitted) |

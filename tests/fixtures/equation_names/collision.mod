@@ -1,0 +1,16 @@
+heterogeneity_dimension a, b;
+var y;
+var(heterogeneity=a) ca;
+var(heterogeneity=b) cb;
+model;
+y = y(-1);
+end;
+model(heterogeneity=b);
+cb = cb(-1);
+end;
+model(heterogeneity=a);
+ca = ca(-1);
+end;
+model(heterogeneity=a);
+ca = ca(-1);
+end;

@@ -14,6 +14,7 @@ use crate::catalog::{
     HETEROGENEITY_OPTION, HET_SHOCKS_OVERWRITE,
 };
 use crate::diagnostic::{check_file, check_in_workspace};
+use crate::equation_names::equation_name_plan;
 use crate::expand::{EquationOrigin, OriginFrame};
 use crate::explain;
 use crate::format::{format_range, format_text, parse_format_indent};
@@ -443,7 +444,8 @@ impl Backend {
     }
 
     fn quick_fixes(&self, params: &CodeActionParams) -> Option<CodeActionResponse> {
-        let inner = self.lock_inner();
+        let mut inner = self.lock_inner();
+        let naming = naming_code_action(&mut inner, params);
         let doc = inner.docs.get(&params.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
         let mut actions = Vec::new();
@@ -478,6 +480,9 @@ impl Backend {
                 disabled: None,
                 data: None,
             }));
+        }
+        if let Some(action) = naming {
+            actions.push(CodeActionOrCommand::CodeAction(action));
         }
         if actions.is_empty() {
             None
@@ -1534,6 +1539,59 @@ fn library_to_lsp(text: &str, diags: &[crate::Diagnostic]) -> Vec<Diagnostic> {
             }
         })
         .collect()
+}
+
+fn naming_code_action(inner: &mut Inner, params: &CodeActionParams) -> Option<CodeAction> {
+    let overlaps = {
+        let doc = inner.docs.get(&params.text_document.uri)?;
+        let index = LineIndex::new(&doc.text);
+        let note = doc.library.iter().find(|diag| diag.code == "I208")?;
+        ranges_overlap(span_range(&index, &doc.text, note.span), params.range)
+    };
+    if !overlaps {
+        return None;
+    }
+    let plan = equation_name_plan(&mut inner.workspace, params.text_document.uri.as_str())?;
+    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+    for edit in plan.edits {
+        let url = naming_edit_url(inner, &params.text_document.uri, &edit.file)?;
+        let text = inner.workspace.get_source(&edit.file)?;
+        let index = LineIndex::new(text);
+        changes.entry(url).or_default().push(TextEdit {
+            range: span_range(&index, text, edit.span),
+            new_text: edit.new_text,
+        });
+    }
+    if changes.is_empty() {
+        return None;
+    }
+    Some(CodeAction {
+        title: plan.title,
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: None,
+        edit: Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..WorkspaceEdit::default()
+        }),
+        command: None,
+        is_preferred: Some(true),
+        disabled: None,
+        data: None,
+    })
+}
+
+fn naming_edit_url(inner: &Inner, open: &Url, file_key: &str) -> Option<Url> {
+    if crate::include_resolver::normalize_uri(open.as_str()) == file_key {
+        return Some(open.clone());
+    }
+    if let Some(url) = inner
+        .docs
+        .keys()
+        .find(|url| crate::include_resolver::normalize_uri(url.as_str()) == file_key)
+    {
+        return Some(url.clone());
+    }
+    file_url_from_path_key(file_key)
 }
 
 fn span_pos(pos: Position) -> crate::span::Position {

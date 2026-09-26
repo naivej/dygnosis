@@ -162,7 +162,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("I208", ExplainEntry {
         title: "Counted equation has no name tag",
-        body: "At least one counted model equation has no nonempty `name` tag. This is a writing preference, not a Dynare refusal.\n\n`#` locals and `[static]` replacement rows are not counted. One note gives the count for the compilation unit.\n\nMalformed or required tags still report their Dynare errors.",
+        body: "At least one counted model equation has no nonempty `name` tag. This is a writing preference, not a Dynare refusal.\n\n`#` locals and `[static]` replacement rows are not counted. One note gives the count for the compilation unit.\n\nMalformed or required tags still report their Dynare errors.\n\nThe editor can add `eq_N` name tags to the counted equations it can edit safely.",
         kind: ExplainKind::Added,
     }),
     ("I209", ExplainEntry {
