@@ -1,6 +1,5 @@
-mod check_walk;
-
 use clap::{Parser, Subcommand};
+use dygnosis::check_walk;
 use dygnosis::{check_file, format_check_lines, Severity, VERSION};
 use std::path::Path;
 
@@ -155,7 +154,8 @@ fn process_target(path: &str) -> FileResult {
             return FileResult::Unreadable;
         }
     };
-    let abs_path = abs_path_for_workspace(path);
+    let abs_path = check_walk::absolute_path(path);
+    let abs_path = abs_path.to_string_lossy();
     let diags = check_file(&text, &abs_path);
     print!("{}", format_check_lines(path, &diags, &text));
     FileResult::Printed {
@@ -167,17 +167,6 @@ fn process_target(path: &str) -> FileResult {
             .iter()
             .filter(|d| d.severity == Severity::Warning)
             .count(),
-    }
-}
-
-fn abs_path_for_workspace(path: &str) -> String {
-    let p = std::path::Path::new(path);
-    if p.is_absolute() {
-        p.to_string_lossy().into_owned()
-    } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(p).to_string_lossy().into_owned())
-            .unwrap_or_else(|_| path.to_string())
     }
 }
 

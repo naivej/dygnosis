@@ -1,7 +1,21 @@
-//! Directory walk for `dygnosis check` (binary-only). Recurse `*.mod`, skip `+` dirs.
+//! Directory walk shared by `dygnosis check` and path-mode workspace diagnose.
+//! Recurse `*.mod`, skip directories whose names start with `+`.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Absolute path the CLI uses for one file: join a relative path to the
+/// current directory. Does not canonicalize.
+pub fn absolute_path(path: &str) -> PathBuf {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    }
+}
 
 pub fn starts_with_plus(path: &Path) -> bool {
     path.file_name()

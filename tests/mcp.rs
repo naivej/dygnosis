@@ -28,6 +28,7 @@ const RUST_TOOLS: &[&str] = &[
     "dynare_expand",
     "dynare_format",
     "dynare_extract",
+    "dynare_workspace_diagnose",
 ];
 
 const DROPPED_TOOLS: &[&str] = &[
@@ -502,16 +503,17 @@ fn rename_map(value: Value) -> HashMap<String, String> {
 fn registered_tools_include_format() {
     let names = registered_tool_names();
     assert_eq!(names, RUST_TOOLS);
-    assert_eq!(names.len(), 14);
+    assert_eq!(names.len(), 15);
     assert_eq!(names[9], "dynare_equations");
     assert_eq!(names[10], "dynare_related_files");
     assert_eq!(names[11], "dynare_expand");
     assert_eq!(names[12], "dynare_format");
     assert_eq!(names[13], "dynare_extract");
+    assert_eq!(names[14], "dynare_workspace_diagnose");
 
     let list = tools_list_json();
     let tools = list["tools"].as_array().expect("tools array");
-    assert_eq!(tools.len(), 14);
+    assert_eq!(tools.len(), 15);
     assert_eq!(
         tools[9]["description"],
         "List aggregate and dimension-labelled heterogeneous equations with text, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds."
@@ -527,6 +529,10 @@ fn registered_tools_include_format() {
     assert_eq!(
         tools[13]["description"],
         "Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model."
+    );
+    assert_eq!(
+        tools[14]["description"],
+        "Diagnose root .mod files from a files map and roots, or from file and directory paths. Each root is reported on its own, with a summary; one failed root does not drop the others."
     );
 
     let blob = serde_json::to_string(&tools_list_json()).expect("tools list json");
@@ -548,11 +554,7 @@ fn registered_tools_include_format() {
             "tools/list must not contain {phrase:?}: {blob}"
         );
     }
-    for name in [
-        "dynare_count_gap",
-        "dynare_explain_equation",
-        "dynare_workspace_diagnose",
-    ] {
+    for name in ["dynare_count_gap", "dynare_explain_equation"] {
         assert!(
             !blob.contains(name),
             "tools/list must not contain {name}: {blob}"

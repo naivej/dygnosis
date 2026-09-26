@@ -37,6 +37,10 @@ use crate::parser::{normalize_newlines, parse};
 use crate::refs::{is_legal_ident, occurrences, rename_in_text};
 use crate::span::{LineIndex, Span};
 use crate::workspace::Workspace;
+use crate::workspace_diagnose::{
+    diagnose_map, diagnose_paths, RootStatus, WorkspaceDiagnoseError, WorkspaceDiagnoseReport,
+    WorkspaceDiagnostic, WorkspaceRootReport,
+};
 
 const OUT_CODES: &[&str] = &[
     "E040", "W040", "W041", "I041", "W071", "I070", "I071", "W080", "W081", "DYNR",
@@ -98,6 +102,10 @@ const TOOLS: &[(&str, &str)] = &[
     (
         "dynare_extract",
         "Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model.",
+    ),
+    (
+        "dynare_workspace_diagnose",
+        "Diagnose root .mod files from a files map and roots, or from file and directory paths. Each root is reported on its own, with a summary; one failed root does not drop the others.",
     ),
 ];
 
@@ -1304,6 +1312,54 @@ pub fn dynare_extract(
     }
 }
 
+pub(crate) const WORKSPACE_DIAGNOSE_BOTH: &str =
+    "pass either a nonempty files map and roots, or a nonempty paths list, not both";
+pub(crate) const WORKSPACE_DIAGNOSE_NEITHER: &str =
+    "pass a nonempty files map and roots, or a nonempty paths list";
+pub(crate) const WORKSPACE_DIAGNOSE_NO_FILES: &str = "no .mod files found";
+
+/// Batch diagnostics.
+///
+/// Map mode is a nonempty `files` map and a nonempty `roots` list. Path mode is
+/// a nonempty `paths` list and no files or roots. Any other mix is an input error.
+pub fn dynare_workspace_diagnose(
+    files: Option<&HashMap<String, String>>,
+    roots: Option<&[String]>,
+    paths: Option<&[String]>,
+) -> Result<Value, &'static str> {
+    let files_on = files.is_some_and(|map| !map.is_empty());
+    let roots_on = roots.is_some_and(|list| !list.is_empty());
+    let paths_on = paths.is_some_and(|list| !list.is_empty());
+    if paths_on && (files_on || roots_on) {
+        return Err(WORKSPACE_DIAGNOSE_BOTH);
+    }
+    if let Some(paths) = paths.filter(|list| !list.is_empty()) {
+        return diagnose_paths(paths)
+            .map(|report| workspace_report_json(&report))
+            .map_err(workspace_diagnose_message);
+    }
+    if files_on && roots_on {
+        let files = files
+            .unwrap()
+            .iter()
+            .map(|(key, text)| (key.clone(), text.clone()))
+            .collect();
+        return diagnose_map(&files, roots.unwrap())
+            .map(|report| workspace_report_json(&report))
+            .map_err(workspace_diagnose_message);
+    }
+    Err(WORKSPACE_DIAGNOSE_NEITHER)
+}
+
+fn workspace_diagnose_message(err: WorkspaceDiagnoseError) -> &'static str {
+    match err {
+        WorkspaceDiagnoseError::NoFiles => WORKSPACE_DIAGNOSE_NO_FILES,
+        WorkspaceDiagnoseError::EmptyMap | WorkspaceDiagnoseError::EmptyRoots => {
+            WORKSPACE_DIAGNOSE_NEITHER
+        }
+    }
+}
+
 fn extract_json(
     result: &ExtractResult,
     file_content: &str,
@@ -1463,6 +1519,44 @@ fn role_name(role: EquationRole) -> &'static str {
     }
 }
 
+fn workspace_report_json(report: &WorkspaceDiagnoseReport) -> Value {
+    json!({
+        "summary": {
+            "checked": report.summary.checked,
+            "failed": report.summary.failed,
+            "errors": report.summary.errors,
+            "warnings": report.summary.warnings,
+            "information": report.summary.information,
+        },
+        "roots": report.roots.iter().map(workspace_root_json).collect::<Vec<_>>(),
+    })
+}
+
+fn workspace_root_json(root: &WorkspaceRootReport) -> Value {
+    json!({
+        "root": root.root,
+        "status": match root.status {
+            RootStatus::Ok => "ok",
+            RootStatus::Failed => "failed",
+        },
+        "diagnostics": root.diagnostics.iter().map(workspace_diag_json).collect::<Vec<_>>(),
+        "failure": root.failure,
+    })
+}
+
+fn workspace_diag_json(diag: &WorkspaceDiagnostic) -> Value {
+    json!({
+        "file": diag.file,
+        "line": diag.diagnostic.line,
+        "column": diag.diagnostic.column,
+        "end_line": diag.diagnostic.end_line,
+        "end_column": diag.diagnostic.end_column,
+        "severity": diag.diagnostic.severity,
+        "code": diag.diagnostic.code,
+        "message": diag.diagnostic.message,
+    })
+}
+
 fn tool_json(value: Value) -> CallToolResult {
     CallToolResult::structured(value)
 }
@@ -1510,6 +1604,16 @@ struct ExtractParams {
     tags: HashMap<String, String>,
     #[serde(default)]
     dimension: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct WorkspaceDiagnoseParams {
+    #[serde(default)]
+    files: Option<HashMap<String, String>>,
+    #[serde(default)]
+    roots: Option<Vec<String>>,
+    #[serde(default)]
+    paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1877,6 +1981,24 @@ impl DygnosisMcp {
             Err(message) => Err(rmcp::ErrorData::invalid_params(message, None)),
         }
     }
+
+    #[tool(
+        name = "dynare_workspace_diagnose",
+        description = "Diagnose root .mod files from a files map and roots, or from file and directory paths. Each root is reported on its own, with a summary; one failed root does not drop the others."
+    )]
+    fn workspace_diagnose_tool(
+        &self,
+        Parameters(params): Parameters<WorkspaceDiagnoseParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        match dynare_workspace_diagnose(
+            params.files.as_ref(),
+            params.roots.as_deref(),
+            params.paths.as_deref(),
+        ) {
+            Ok(value) => Ok(tool_json(value)),
+            Err(message) => Err(rmcp::ErrorData::invalid_params(message, None)),
+        }
+    }
 }
 
 #[tool_handler(name = "dygnosis")]
@@ -1904,6 +2026,7 @@ mod tests {
             "dynare_expand",
             "dynare_format",
             "dynare_extract",
+            "dynare_workspace_diagnose",
         ] {
             let expected = TOOLS.iter().find(|(tool, _)| *tool == name).unwrap().1;
             let actual = listed.iter().find(|tool| tool.name == name).unwrap();
@@ -1955,10 +2078,17 @@ mod tests {
                 "missing {field}: {extract_schema}"
             );
         }
-        assert!(
-            !blob.contains("dynare_workspace_diagnose"),
-            "stdio tools/list must not contain dynare_workspace_diagnose"
-        );
+        let batch = listed
+            .iter()
+            .find(|tool| tool.name == "dynare_workspace_diagnose")
+            .unwrap();
+        let batch_schema = serde_json::to_string(&batch.input_schema).expect("batch schema");
+        for field in ["files", "roots", "paths"] {
+            assert!(
+                batch_schema.contains(field),
+                "workspace diagnose schema missing {field}: {batch_schema}"
+            );
+        }
     }
 
     #[test]
@@ -2039,5 +2169,19 @@ mod tests {
             .expect_err("bad indent");
         assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
         assert!(err.message.contains("formatIndent"));
+    }
+
+    #[test]
+    fn workspace_diagnose_tool_rejects_empty() {
+        let server = DygnosisMcp;
+        let err = server
+            .workspace_diagnose_tool(Parameters(WorkspaceDiagnoseParams {
+                files: None,
+                roots: None,
+                paths: None,
+            }))
+            .expect_err("empty");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert_eq!(err.message, WORKSPACE_DIAGNOSE_NEITHER);
     }
 }
