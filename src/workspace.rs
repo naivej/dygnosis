@@ -4,7 +4,7 @@
 //! Overlay (editor/MCP in-memory text) beats disk. Include and companion
 //! records are stored here. This module does not emit diagnostic codes.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::companion::{self, CompanionKind, CompanionRecord};
@@ -70,11 +70,48 @@ pub struct Workspace {
     expand: HashMap<String, ExpandReport>,
     records: HashMap<String, IncludeRecords>,
     companions: HashMap<String, Vec<CompanionRecord>>,
+    /// When set, document text and `@#include` targets come only from overlays.
+    overlay_only: bool,
 }
 
 impl Workspace {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Overlay workspace. Include lookup does not read file bodies from disk.
+    ///
+    /// Keys are stored as given. This path does not canonicalize, lowercase,
+    /// or collapse `..`. Slice 14 is the first non-test caller of batch
+    /// diagnose, which is what constructs this workspace today.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn overlay_documents(files: &BTreeMap<String, String>) -> Self {
+        let mut ws = Self {
+            overlay_only: true,
+            ..Self::default()
+        };
+        for (name, content) in files {
+            ws.insert_overlay(name, content.clone());
+        }
+        ws
+    }
+
+    /// Store one overlay under `key` exactly. No disk and no path folding.
+    fn insert_overlay(&mut self, key: &str, source: String) {
+        let model = parse(&source);
+        self.docs.insert(
+            key.to_string(),
+            Doc {
+                source,
+                model,
+                overlay: true,
+                includepath_dirs: Vec::new(),
+            },
+        );
+        self.effective.clear();
+        self.expand.clear();
+        self.records.remove(key);
+        self.companions.remove(key);
     }
 
     pub fn with_search_paths(search_paths: Vec<PathBuf>) -> Self {
@@ -124,6 +161,9 @@ impl Workspace {
         let key = path_key(path);
         if self.docs.get(&key).is_some_and(|d| d.overlay) {
             return self.docs.get(&key).map(|d| &d.model);
+        }
+        if self.overlay_only {
+            return None;
         }
         let source = read_text(path)?;
         let model = parse(&source);
@@ -299,6 +339,9 @@ impl Workspace {
     }
 
     fn ensure_loaded(&mut self, uri: &str) -> Option<String> {
+        if self.overlay_only {
+            return self.docs.contains_key(uri).then(|| uri.to_string());
+        }
         let key = normalize_uri(uri);
         if self.docs.contains_key(&key) {
             return Some(key);
@@ -315,6 +358,9 @@ impl Workspace {
         if self.docs.contains_key(key) {
             return self.docs.get(key).map(|d| &d.model);
         }
+        if self.overlay_only {
+            return None;
+        }
         let path = PathBuf::from(key);
         if path.exists() {
             self.load_from_disk(&path)?;
@@ -325,6 +371,9 @@ impl Workspace {
     fn source_for_key(&mut self, key: &str) -> Option<String> {
         if let Some(doc) = self.docs.get(key) {
             return Some(doc.source.clone());
+        }
+        if self.overlay_only {
+            return None;
         }
         let path = PathBuf::from(key);
         if path.exists() {
@@ -348,12 +397,54 @@ impl Workspace {
         filename: &str,
         active_search: &[PathBuf],
     ) -> Option<PathBuf> {
+        if self.overlay_only {
+            return self
+                .overlay_include_key(including_key, filename)
+                .map(PathBuf::from);
+        }
         let mut paths = self.configured_search(active_search);
         if let Some(doc) = self.docs.get(including_key) {
             paths = append_unique(&paths, &doc.includepath_dirs);
         }
         let known = self.known_keys();
         resolve_include_path(filename, including_key, &paths, Some(&known))
+    }
+
+    /// Workspace key for a resolved include. Overlay keys stay as stored.
+    fn include_key(&self, path: &Path) -> String {
+        if self.overlay_only {
+            overlay_path_key(path)
+        } else {
+            path_key(path)
+        }
+    }
+
+    /// Match an `@#include` filename to an overlay key. No disk and no `..` fold.
+    fn overlay_include_key(&self, including_key: &str, filename: &str) -> Option<String> {
+        let name = overlay_key(filename);
+        if name.is_empty() {
+            return None;
+        }
+        let mut candidates = Vec::new();
+        if overlay_absolute(&name) {
+            candidates.push(name);
+        } else {
+            match overlay_parent(including_key) {
+                Some(parent) => candidates.push(overlay_join(parent, &name)),
+                None => candidates.push(name.clone()),
+            }
+            if !candidates.contains(&name) {
+                candidates.push(name.clone());
+            }
+            if let Some(only) = unique_overlay_suffix(&name, self.docs.keys()) {
+                if !candidates.contains(&only) {
+                    candidates.push(only);
+                }
+            }
+        }
+        candidates
+            .into_iter()
+            .find(|candidate| self.docs.contains_key(candidate))
     }
 
     fn resolve_companion_from_root(
@@ -460,7 +551,7 @@ impl Workspace {
                             });
                         }
                         Some(path) => {
-                            let resolved_key = path_key(&path);
+                            let resolved_key = self.include_key(&path);
                             if let Some(idx) = stack.iter().position(|k| k == &resolved_key) {
                                 let mut cycle: Vec<String> = stack[idx..].to_vec();
                                 cycle.push(resolved_key);
@@ -570,7 +661,7 @@ impl Workspace {
                     let (body, nested_map) = match resolved {
                         None => (String::new(), Vec::new()),
                         Some(path) => {
-                            let resolved_key = path_key(&path);
+                            let resolved_key = self.include_key(&path);
                             if stack.iter().any(|k| k == &resolved_key) {
                                 (String::new(), Vec::new())
                             } else {
@@ -706,6 +797,51 @@ fn push_root_piece(
         origin: Span::new(from, to),
     });
     out.push_str(&source[from..to]);
+}
+
+/// Overlay key: `\` becomes `/`, trailing slashes drop. No disk and no `..` fold.
+fn overlay_key(key: &str) -> String {
+    key.replace('\\', "/").trim_end_matches('/').to_string()
+}
+
+fn overlay_path_key(path: &Path) -> String {
+    overlay_key(&path.to_string_lossy())
+}
+
+fn overlay_absolute(key: &str) -> bool {
+    key.starts_with('/')
+        || (key.len() >= 3
+            && key.as_bytes()[0].is_ascii_alphabetic()
+            && key.as_bytes()[1] == b':'
+            && key.as_bytes()[2] == b'/')
+}
+
+fn overlay_parent(key: &str) -> Option<&str> {
+    let key = key.trim_end_matches('/');
+    key.rfind('/').map(|idx| &key[..idx])
+}
+
+fn overlay_join(parent: &str, name: &str) -> String {
+    if parent.is_empty() {
+        name.to_string()
+    } else {
+        format!("{parent}/{name}")
+    }
+}
+
+fn unique_overlay_suffix<'a>(name: &str, keys: impl Iterator<Item = &'a String>) -> Option<String> {
+    let mut found = None;
+    for key in keys {
+        let hit = key == name || key.ends_with(&format!("/{name}"));
+        if !hit {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(key.clone());
+    }
+    found
 }
 
 fn includepath_dirs_for(key: &str, model: &Model) -> Vec<PathBuf> {
