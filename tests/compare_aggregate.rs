@@ -1,4 +1,4 @@
-//! Aggregate equation pairing for compare. Heterogeneous equations and symbol metadata stay out.
+//! Aggregate equation pairing for compare. Heterogeneous rows stay out of the aggregate lists.
 
 use std::fs;
 use std::path::PathBuf;
@@ -64,7 +64,10 @@ fn assert_list_shape(row: &Value) {
 fn reorder_of_unique_names_is_unchanged() {
     let diff = diff("reorder_before.mod", "reorder_after.mod");
     assert!(eq_lists_empty(&diff), "{diff}");
-    assert!(diff.get("heterogeneous_equations").is_none(), "{diff}");
+    assert!(diff["heterogeneous_equations"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -162,7 +165,7 @@ fn repeated_regime_text_edit_stays_add_remove() {
     assert_eq!(groups[0]["name"], "policy");
     assert_eq!(groups[0]["removed"], json!([removed[0]]));
     assert_eq!(groups[0]["added"], json!([added[0]]));
-    assert!(groups[0].get("dimension").is_none(), "{groups:?}");
+    assert!(groups[0]["dimension"].is_null(), "{groups:?}");
     let md = diff["markdown"].as_str().unwrap();
     assert!(md.contains("## Unmatched same name"), "{md}");
     assert!(md.contains("`policy`"), "{md}");
@@ -331,7 +334,10 @@ fn parameter_and_shock_diffs_stay_when_equations_only_reorder() {
     assert_eq!(shocks.len(), 1, "{diff}");
     assert_eq!(shocks[0]["before"]["periods"][0], "2");
     assert_eq!(shocks[0]["after"]["periods"][0], "3");
-    assert!(diff.get("heterogeneous_equations").is_none());
+    assert!(diff["heterogeneous_equations"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     let md = diff["markdown"].as_str().unwrap();
     assert!(md.contains("beta"), "{md}");
     assert!(md.contains("Shock setup changes"), "{md}");
@@ -339,10 +345,18 @@ fn parameter_and_shock_diffs_stay_when_equations_only_reorder() {
 }
 
 #[test]
-fn heterogeneous_equation_edits_are_not_in_this_diff() {
+fn heterogeneous_edits_stay_out_of_aggregate_lists() {
     let diff = diff("het_before.mod", "het_after.mod");
     assert!(eq_lists_empty(&diff), "{diff}");
-    assert!(diff.get("heterogeneous_equations").is_none(), "{diff}");
+    let blocks = diff["heterogeneous_equations"].as_array().unwrap();
+    assert_eq!(blocks.len(), 1, "{diff}");
+    assert_eq!(blocks[0]["dimension"], "d");
+    assert!(
+        !blocks[0]["added"].as_array().unwrap().is_empty()
+            || !blocks[0]["removed"].as_array().unwrap().is_empty()
+            || !blocks[0]["changed"].as_array().unwrap().is_empty(),
+        "{diff}"
+    );
     assert!(diff.get("added_endogenous").is_some());
     assert!(diff.get("shock_setup_changes").is_some());
 }

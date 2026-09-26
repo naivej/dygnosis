@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::equations::{equations, EquationRow};
+use crate::equations::{equations, heterogeneous_equations, EquationRow};
 use crate::lexer::{tokenize, TokenKind};
 use crate::model::{
     Assignment, Decl, EndvalInstruction, Model, PathBlock, PathTarget, PeriodPoint, PeriodRange,
@@ -52,9 +52,9 @@ pub struct EquationChange {
     pub index_new: usize,
     pub text_old: String,
     pub text_new: String,
-    /// `aggregate` for rows this compare emits. Heterogeneous rows are a later slice.
+    /// `aggregate` or `heterogeneous`.
     pub domain: String,
-    /// Null for an aggregate equation.
+    /// Null for an aggregate equation. The dimension name for a heterogeneous equation.
     pub dimension: Option<String>,
     pub name_old: Option<String>,
     pub name_new: Option<String>,
@@ -67,9 +67,9 @@ pub struct EquationChange {
 pub struct IndexedEquation {
     pub index: usize,
     pub text: String,
-    /// `aggregate` for rows this compare emits. Heterogeneous rows are a later slice.
+    /// `aggregate` or `heterogeneous`.
     pub domain: String,
-    /// Null for an aggregate equation.
+    /// Null for an aggregate equation. The dimension name for a heterogeneous equation.
     pub dimension: Option<String>,
     /// Null when the equation has no nonempty `name` tag.
     pub name: Option<String>,
@@ -81,8 +81,31 @@ pub struct IndexedEquation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct UnmatchedSameName {
     pub name: String,
+    /// Null for an aggregate group. The dimension name for a heterogeneous group.
+    /// Always serialized, including JSON null.
+    pub dimension: Option<String>,
     pub removed: Vec<IndexedEquation>,
     pub added: Vec<IndexedEquation>,
+}
+
+/// One heterogeneity dimension, paired with the same rules as aggregate equations.
+/// `heterogeneous_equations` lists these sorted by `dimension`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct HeterogeneousEquationDiff {
+    pub dimension: String,
+    pub added: Vec<IndexedEquation>,
+    pub removed: Vec<IndexedEquation>,
+    pub changed: Vec<EquationChange>,
+    pub unmatched_same_name: Vec<UnmatchedSameName>,
+}
+
+impl HeterogeneousEquationDiff {
+    fn is_empty(&self) -> bool {
+        self.added.is_empty()
+            && self.removed.is_empty()
+            && self.changed.is_empty()
+            && self.unmatched_same_name.is_empty()
+    }
 }
 
 /// A verified location in the source file the caller supplied.
@@ -186,6 +209,9 @@ pub struct ModelDiff {
     pub changed_equations: Vec<EquationChange>,
     /// Aggregate leftovers only. Empty when every shared name was paired or absent.
     pub unmatched_same_name: Vec<UnmatchedSameName>,
+    /// One entry per heterogeneity dimension that has a model block on either side, sorted by name.
+    /// A dimension with no counted-equation diff still appears; its four lists are empty.
+    pub heterogeneous_equations: Vec<HeterogeneousEquationDiff>,
     pub shock_setup_changes: Vec<ShockSetupChange>,
 }
 
@@ -267,42 +293,31 @@ impl ModelDiff {
             }
         }
 
-        if !self.changed_equations.is_empty() {
-            lines.push(String::new());
-            lines.push("## Changed equations".into());
-            for e in &self.changed_equations {
-                lines.push(format_changed_equation(e));
+        push_equation_sections(
+            &mut lines,
+            "##",
+            &self.changed_equations,
+            &self.unmatched_same_name,
+            &self.added_equations,
+            &self.removed_equations,
+        );
+        for block in &self.heterogeneous_equations {
+            if block.is_empty() {
+                continue;
             }
-        }
-
-        if !self.unmatched_same_name.is_empty() {
             lines.push(String::new());
-            lines.push("## Unmatched same name".into());
-            for group in &self.unmatched_same_name {
-                lines.push(format!("- `{}`", markdown_escape(&group.name)));
-                for eq in &group.removed {
-                    lines.push(format!("  - removed {}", format_equation_row(eq)));
-                }
-                for eq in &group.added {
-                    lines.push(format!("  - added {}", format_equation_row(eq)));
-                }
-            }
-        }
-
-        if !self.added_equations.is_empty() {
-            lines.push(String::new());
-            lines.push("## Added equations".into());
-            for eq in &self.added_equations {
-                lines.push(format_listed_equation(eq));
-            }
-        }
-
-        if !self.removed_equations.is_empty() {
-            lines.push(String::new());
-            lines.push("## Removed equations".into());
-            for eq in &self.removed_equations {
-                lines.push(format_listed_equation(eq));
-            }
+            lines.push(format!(
+                "## Heterogeneous equations (`{}`)",
+                markdown_escape(&block.dimension)
+            ));
+            push_equation_sections(
+                &mut lines,
+                "###",
+                &block.changed,
+                &block.unmatched_same_name,
+                &block.added,
+                &block.removed,
+            );
         }
 
         if lines.len() == 1 {
@@ -338,7 +353,12 @@ pub fn compare_models_with_sources(
     let common_params: HashSet<String> = par_a.intersection(&par_b).cloned().collect();
     let changed_parameter_values = changed_params(model_a, model_b, &common_params);
 
-    let (added_eq, removed_eq, changed_eq, unmatched_same_name) = diff_equations(model_a, model_b);
+    let (added_eq, removed_eq, changed_eq, unmatched_same_name) = diff_equations(
+        &counted_equations(model_a),
+        &counted_equations(model_b),
+        AGGREGATE_DOMAIN,
+        None,
+    );
 
     ModelDiff {
         added_endogenous: sorted_diff(&end_b, &end_a),
@@ -356,6 +376,7 @@ pub fn compare_models_with_sources(
         removed_equations: removed_eq,
         changed_equations: changed_eq,
         unmatched_same_name,
+        heterogeneous_equations: diff_heterogeneous_equations(model_a, model_b),
         shock_setup_changes: diff_shock_setup(model_a, model_b, source_a, source_b),
     }
 }
@@ -2197,11 +2218,51 @@ fn normalize_equation(text: &str) -> String {
 }
 
 const AGGREGATE_DOMAIN: &str = "aggregate";
+const HETEROGENEOUS_DOMAIN: &str = "heterogeneous";
 
 fn counted_equations(model: &Model) -> Vec<EquationRow> {
     equations(model)
         .into_iter()
         .filter(|row| !normalize_equation(&row.text).is_empty())
+        .collect()
+}
+
+/// Counted rows of one dimension, concatenated in source order. Indexes already
+/// continue across blocks of that dimension.
+fn counted_heterogeneous(model: &Model) -> BTreeMap<String, Vec<EquationRow>> {
+    let mut by_dimension: BTreeMap<String, Vec<EquationRow>> = BTreeMap::new();
+    for block in heterogeneous_equations(model) {
+        let dimension = block.dimension;
+        let rows = block
+            .equations
+            .into_iter()
+            .filter(|row| !normalize_equation(&row.text).is_empty());
+        by_dimension.entry(dimension).or_default().extend(rows);
+    }
+    by_dimension
+}
+
+fn diff_heterogeneous_equations(before: &Model, after: &Model) -> Vec<HeterogeneousEquationDiff> {
+    let old = counted_heterogeneous(before);
+    let new = counted_heterogeneous(after);
+    let mut names = BTreeSet::new();
+    names.extend(old.keys().cloned());
+    names.extend(new.keys().cloned());
+    names
+        .into_iter()
+        .map(|dimension| {
+            let old_rows = old.get(&dimension).map(Vec::as_slice).unwrap_or(&[]);
+            let new_rows = new.get(&dimension).map(Vec::as_slice).unwrap_or(&[]);
+            let (added, removed, changed, unmatched_same_name) =
+                diff_equations(old_rows, new_rows, HETEROGENEOUS_DOMAIN, Some(&dimension));
+            HeterogeneousEquationDiff {
+                dimension,
+                added,
+                removed,
+                changed,
+                unmatched_same_name,
+            }
+        })
         .collect()
 }
 
@@ -2243,25 +2304,30 @@ fn names_compatible(left: &EquationRow, right: &EquationRow) -> bool {
     }
 }
 
-fn indexed_equation(row: &EquationRow) -> IndexedEquation {
+fn indexed_equation(row: &EquationRow, domain: &str, dimension: Option<&str>) -> IndexedEquation {
     IndexedEquation {
         index: row.index,
         text: row.text.clone(),
-        domain: AGGREGATE_DOMAIN.to_string(),
-        dimension: None,
+        domain: domain.to_string(),
+        dimension: dimension.map(str::to_string),
         name: equation_name(row).map(str::to_string),
         tags: row.tags.clone(),
     }
 }
 
-fn equation_change(old: &EquationRow, new: &EquationRow) -> EquationChange {
+fn equation_change(
+    old: &EquationRow,
+    new: &EquationRow,
+    domain: &str,
+    dimension: Option<&str>,
+) -> EquationChange {
     EquationChange {
         index_old: old.index,
         index_new: new.index,
         text_old: old.text.clone(),
         text_new: new.text.clone(),
-        domain: AGGREGATE_DOMAIN.to_string(),
-        dimension: None,
+        domain: domain.to_string(),
+        dimension: dimension.map(str::to_string),
         name_old: equation_name(old).map(str::to_string),
         name_new: equation_name(new).map(str::to_string),
         tags_old: old.tags.clone(),
@@ -2270,18 +2336,18 @@ fn equation_change(old: &EquationRow, new: &EquationRow) -> EquationChange {
 }
 
 fn diff_equations(
-    a: &Model,
-    b: &Model,
+    old_rows: &[EquationRow],
+    new_rows: &[EquationRow],
+    domain: &str,
+    dimension: Option<&str>,
 ) -> (
     Vec<IndexedEquation>,
     Vec<IndexedEquation>,
     Vec<EquationChange>,
     Vec<UnmatchedSameName>,
 ) {
-    let old_rows = counted_equations(a);
-    let new_rows = counted_equations(b);
-    let old_counts = name_counts(&old_rows);
-    let new_counts = name_counts(&new_rows);
+    let old_counts = name_counts(old_rows);
+    let new_counts = name_counts(new_rows);
     let mut names: Vec<&str> = old_counts
         .keys()
         .copied()
@@ -2300,16 +2366,21 @@ fn diff_equations(
         let old_n = old_counts.get(name).copied().unwrap_or(0);
         let new_n = new_counts.get(name).copied().unwrap_or(0);
         if old_n == 1 && new_n == 1 {
-            let i = indexes_named(&old_rows, name)[0];
-            let j = indexes_named(&new_rows, name)[0];
+            let i = indexes_named(old_rows, name)[0];
+            let j = indexes_named(new_rows, name)[0];
             used_old.insert(i);
             used_new.insert(j);
             if !same_body(&old_rows[i], &new_rows[j]) {
-                changes.push(equation_change(&old_rows[i], &new_rows[j]));
+                changes.push(equation_change(
+                    &old_rows[i],
+                    &new_rows[j],
+                    domain,
+                    dimension,
+                ));
             }
         } else if old_n > 1 || new_n > 1 {
-            let old_idx = indexes_named(&old_rows, name);
-            let new_idx = indexes_named(&new_rows, name);
+            let old_idx = indexes_named(old_rows, name);
+            let new_idx = indexes_named(new_rows, name);
             let mut taken_new = HashSet::new();
             for i in &old_idx {
                 if let Some(j) = new_idx
@@ -2374,7 +2445,12 @@ fn diff_equations(
                 used_old.insert(i);
                 used_new.insert(j);
                 if old_rows[i].tags != new_rows[j].tags {
-                    changes.push(equation_change(&old_rows[i], &new_rows[j]));
+                    changes.push(equation_change(
+                        &old_rows[i],
+                        &new_rows[j],
+                        domain,
+                        dimension,
+                    ));
                 }
             }
         }
@@ -2388,7 +2464,7 @@ fn diff_equations(
         .filter(|i| !used_new.contains(i) && !bypass_new.contains(i))
         .map(|i| new_rows[i].clone())
         .collect();
-    let (near, left_old, left_new) = pair_changed(left_old, left_new);
+    let (near, left_old, left_new) = pair_changed(left_old, left_new, domain, dimension);
     changes.extend(near);
     changes.sort_by_key(|change| (change.index_old, change.index_new));
 
@@ -2397,12 +2473,18 @@ fn diff_equations(
     let mut added_rows = left_new;
     added_rows.extend(bypass_new.iter().map(|i| new_rows[*i].clone()));
 
-    let mut removed: Vec<IndexedEquation> = removed_rows.iter().map(indexed_equation).collect();
+    let mut removed: Vec<IndexedEquation> = removed_rows
+        .iter()
+        .map(|row| indexed_equation(row, domain, dimension))
+        .collect();
     removed.sort_by_key(|row| row.index);
-    let mut added: Vec<IndexedEquation> = added_rows.iter().map(indexed_equation).collect();
+    let mut added: Vec<IndexedEquation> = added_rows
+        .iter()
+        .map(|row| indexed_equation(row, domain, dimension))
+        .collect();
     added.sort_by_key(|row| row.index);
 
-    let unmatched = unmatched_same_name(&old_rows, &new_rows, &removed, &added);
+    let unmatched = unmatched_same_name(old_rows, new_rows, &removed, &added, dimension);
     (added, removed, changes, unmatched)
 }
 
@@ -2411,6 +2493,7 @@ fn unmatched_same_name(
     new_rows: &[EquationRow],
     removed: &[IndexedEquation],
     added: &[IndexedEquation],
+    dimension: Option<&str>,
 ) -> Vec<UnmatchedSameName> {
     let old_counts = name_counts(old_rows);
     let new_counts = name_counts(new_rows);
@@ -2438,6 +2521,7 @@ fn unmatched_same_name(
             } else {
                 Some(UnmatchedSameName {
                     name: name.to_string(),
+                    dimension: dimension.map(str::to_string),
                     removed,
                     added,
                 })
@@ -2449,6 +2533,8 @@ fn unmatched_same_name(
 fn pair_changed(
     removed: Vec<EquationRow>,
     added: Vec<EquationRow>,
+    domain: &str,
+    dimension: Option<&str>,
 ) -> (Vec<EquationChange>, Vec<EquationRow>, Vec<EquationRow>) {
     if removed.is_empty() || added.is_empty() {
         return (Vec::new(), removed, added);
@@ -2482,7 +2568,7 @@ fn pair_changed(
         }
         used_r.insert(i);
         used_a.insert(j);
-        changes.push(equation_change(&removed[i], &added[j]));
+        changes.push(equation_change(&removed[i], &added[j], domain, dimension));
     }
     changes.sort_by_key(|c| (c.index_old, c.index_new));
     let leftover_removed: Vec<EquationRow> = removed
@@ -2500,14 +2586,68 @@ fn pair_changed(
     (changes, leftover_removed, leftover_added)
 }
 
+fn push_equation_sections(
+    lines: &mut Vec<String>,
+    heading: &str,
+    changed: &[EquationChange],
+    unmatched: &[UnmatchedSameName],
+    added: &[IndexedEquation],
+    removed: &[IndexedEquation],
+) {
+    if !changed.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("{heading} Changed equations"));
+        for equation in changed {
+            lines.push(format_changed_equation(equation));
+        }
+    }
+    if !unmatched.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("{heading} Unmatched same name"));
+        for group in unmatched {
+            lines.push(format!("- `{}`", markdown_escape(&group.name)));
+            for eq in &group.removed {
+                lines.push(format!("  - removed {}", format_equation_row(eq)));
+            }
+            for eq in &group.added {
+                lines.push(format!("  - added {}", format_equation_row(eq)));
+            }
+        }
+    }
+    if !added.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("{heading} Added equations"));
+        for eq in added {
+            lines.push(format_listed_equation(eq));
+        }
+    }
+    if !removed.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("{heading} Removed equations"));
+        for eq in removed {
+            lines.push(format_listed_equation(eq));
+        }
+    }
+}
+
+fn dimension_suffix(dimension: Option<&str>) -> String {
+    match dimension {
+        Some(name) => format!(" (dimension `{}`)", markdown_escape(name)),
+        None => String::new(),
+    }
+}
+
 fn format_changed_equation(change: &EquationChange) -> String {
     let old_label = equation_label(change.name_old.as_deref(), &change.tags_old);
     let new_label = equation_label(change.name_new.as_deref(), &change.tags_new);
-    let head = if old_label.is_empty() && new_label.is_empty() {
+    let suffix = dimension_suffix(change.dimension.as_deref());
+    let head = if old_label.is_empty() && new_label.is_empty() && suffix.is_empty() {
         format!("- [{} -> {}]", change.index_old, change.index_new)
+    } else if old_label.is_empty() && new_label.is_empty() {
+        format!("- [{} -> {}]{suffix}", change.index_old, change.index_new)
     } else {
         format!(
-            "- [{} -> {}] {} -> {}",
+            "- [{} -> {}] {} -> {}{suffix}",
             change.index_old,
             change.index_new,
             side_label(&old_label),
@@ -2519,19 +2659,29 @@ fn format_changed_equation(change: &EquationChange) -> String {
 
 fn format_listed_equation(row: &IndexedEquation) -> String {
     let label = equation_label(row.name.as_deref(), &row.tags);
-    if label.is_empty() {
+    let suffix = dimension_suffix(row.dimension.as_deref());
+    if label.is_empty() && suffix.is_empty() {
         format!("- [{}] `{}`", row.index, row.text)
+    } else if label.is_empty() {
+        format!("- [{}]{suffix}\n  `{}`", row.index, row.text)
     } else {
-        format!("- [{}] {}\n  `{}`", row.index, label, row.text)
+        format!("- [{}] {label}{suffix}\n  `{}`", row.index, row.text)
     }
 }
 
 fn format_equation_row(row: &IndexedEquation) -> String {
     let tags = distinguishing_tags(&row.tags);
-    if tags.is_empty() {
-        format!("[{}] `{}`", row.index, row.text)
+    let suffix = dimension_suffix(row.dimension.as_deref());
+    if suffix.is_empty() {
+        if tags.is_empty() {
+            format!("[{}] `{}`", row.index, row.text)
+        } else {
+            format!("[{}] {tags} `{}`", row.index, row.text)
+        }
+    } else if tags.is_empty() {
+        format!("[{}]{suffix} `{}`", row.index, row.text)
     } else {
-        format!("[{}] {tags} `{}`", row.index, row.text)
+        format!("[{}] {tags}{suffix} `{}`", row.index, row.text)
     }
 }
 
