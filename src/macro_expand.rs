@@ -8,7 +8,13 @@ use crate::span::Span;
 const RANGE_CAP: usize = 10_000;
 
 type MacroTypeError = (Span, &'static str, String);
-type ExpandTracedFull = (Vec<Token>, Vec<TokenTrace>, Vec<FrameRec>, Vec<MacroTypeError>);
+type ExpandTracedFull = (
+    Vec<Token>,
+    Vec<TokenTrace>,
+    Vec<FrameRec>,
+    Vec<MacroTypeError>,
+    Vec<Span>,
+);
 
 #[derive(Clone, Debug)]
 enum MacroVal {
@@ -38,8 +44,10 @@ impl MacroVal {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Dir {
     Define,
+    Ifdef,
     Ifndef,
     If,
+    Elseif,
     Else,
     Endif,
     For,
@@ -48,9 +56,14 @@ enum Dir {
 }
 
 struct IfFrame {
+    /// This branch of the chain is the one being emitted.
     active: bool,
+    /// An earlier branch in this chain was selected, so later clauses stay inactive.
+    taken: bool,
     frame_id: usize,
     body_start: u32,
+    /// First byte of this branch, just after the directive that opened it.
+    branch_start: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -62,6 +75,10 @@ pub(crate) struct TokenTrace {
 pub(crate) struct FrameRec {
     pub kind: &'static str,
     pub body_span: Span,
+    /// Loop index name. Set on a `@#for` iteration frame.
+    pub variable: Option<String>,
+    /// Loop index value for this iteration, as written after substitution.
+    pub value: Option<String>,
 }
 
 struct ExpandState<'a> {
@@ -70,6 +87,7 @@ struct ExpandState<'a> {
     origin_stack: Vec<usize>,
     arena: &'a mut Vec<FrameRec>,
     type_errors: &'a mut Vec<MacroTypeError>,
+    discarded: &'a mut Vec<Span>,
 }
 
 pub fn expand_macros(src: &str, tokens: Vec<Token>) -> Vec<Token> {
@@ -80,7 +98,7 @@ pub fn expand_macros_full(
     src: &str,
     tokens: Vec<Token>,
 ) -> (Vec<Token>, Vec<(Span, &'static str, String)>) {
-    let (out, _, _, errors) = expand_macros_traced_full(src, tokens);
+    let (out, _, _, errors, _) = expand_macros_traced_full(src, tokens);
     (out, errors)
 }
 
@@ -88,14 +106,22 @@ pub(crate) fn expand_macros_traced(
     src: &str,
     tokens: Vec<Token>,
 ) -> (Vec<Token>, Vec<TokenTrace>, Vec<FrameRec>) {
-    let (out, traces, arena, _) = expand_macros_traced_full(src, tokens);
+    let (out, traces, arena, _, _) = expand_macros_traced_full(src, tokens);
     (out, traces, arena)
+}
+
+/// Source ranges of `@#if` / `@#ifndef` branches that expansion discarded.
+pub(crate) fn inactive_macro_spans(src: &str) -> Vec<Span> {
+    let tokens = crate::lexer::tokenize(src);
+    let (_, _, _, _, discarded) = expand_macros_traced_full(src, tokens);
+    discarded
 }
 
 fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull {
     let mut defines = HashMap::new();
     let mut arena = Vec::new();
     let mut type_errors = Vec::new();
+    let mut discarded = Vec::new();
     let (out, traces) = {
         let mut state = ExpandState {
             src,
@@ -103,10 +129,11 @@ fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull 
             origin_stack: Vec::new(),
             arena: &mut arena,
             type_errors: &mut type_errors,
+            discarded: &mut discarded,
         };
         expand_seq(&mut state, &tokens)
     };
-    (out, traces, arena, type_errors)
+    (out, traces, arena, type_errors, discarded)
 }
 
 fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec<TokenTrace>) {
@@ -141,6 +168,11 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                     }
                     i += 1;
                 }
+                Dir::Ifdef => {
+                    let cond = name_is_defined(state, tok, "ifdef");
+                    i += 1;
+                    push_if_frame(state, &mut stack, tokens, i, tok.span, "ifdef", cond);
+                }
                 Dir::Ifndef => {
                     let cond = match dir_arg_ident(tok.text(state.src), "ifndef") {
                         Some(name) => !state.defines.contains_key(&name),
@@ -154,32 +186,34 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                     i += 1;
                     push_if_frame(state, &mut stack, tokens, i, tok.span, "if", cond);
                 }
-                Dir::Else => {
-                    let else_span = tok.span;
+                Dir::Elseif => {
+                    let boundary = tok.span;
+                    let active = match stack.last() {
+                        Some(frame) if !frame.taken => eval_condition(state, tok, "elseif"),
+                        _ => false,
+                    };
                     i += 1;
                     if let Some(frame) = stack.last_mut() {
-                        backpatch(
-                            state.arena,
-                            frame.frame_id,
-                            frame.body_start,
-                            else_span.start,
-                        );
-                        frame.active = !frame.active;
-                        let body_start = next_body_start(tokens, i, else_span.end);
-                        let frame_id = alloc_frame(state.arena, "else", body_start);
-                        frame.frame_id = frame_id;
-                        frame.body_start = body_start;
-                        if let Some(last) = state.origin_stack.last_mut() {
-                            *last = frame_id;
-                        } else {
-                            state.origin_stack.push(frame_id);
-                        }
+                        frame.taken = frame.taken || active;
+                        open_next_branch(state, frame, tokens, i, boundary, "elseif", active);
+                    }
+                }
+                Dir::Else => {
+                    let boundary = tok.span;
+                    i += 1;
+                    if let Some(frame) = stack.last_mut() {
+                        let active = !frame.taken;
+                        frame.taken = true;
+                        open_next_branch(state, frame, tokens, i, boundary, "else", active);
                     }
                 }
                 Dir::Endif => {
                     let end_span = tok.span;
                     i += 1;
                     if let Some(frame) = stack.pop() {
+                        if !frame.active {
+                            push_discarded(state, frame.branch_start, end_span.start);
+                        }
                         backpatch(
                             state.arena,
                             frame.frame_id,
@@ -193,15 +227,7 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                     let (body, next) = take_for_body(state.src, tokens, i);
                     if emitting(&stack) {
                         check_for_tuple(state, tok);
-                        let body_span = tokens_body_span(body);
-                        let frame_id = state.arena.len();
-                        state.arena.push(FrameRec {
-                            kind: "for",
-                            body_span,
-                        });
-                        state.origin_stack.push(frame_id);
                         unroll_for(state, tok, body, &mut out, &mut traces);
-                        state.origin_stack.pop();
                     }
                     i = next;
                 }
@@ -225,15 +251,74 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
         }
         i += 1;
     }
+    while let Some(frame) = stack.pop() {
+        if !frame.active {
+            let end = tokens
+                .last()
+                .map(|tok| tok.span.end)
+                .unwrap_or(frame.branch_start);
+            push_discarded(state, frame.branch_start, end);
+        }
+        state.origin_stack.pop();
+    }
     debug_assert_eq!(out.len(), traces.len());
     (out, traces)
 }
 
+fn push_discarded(state: &mut ExpandState<'_>, start: u32, end: u32) {
+    if end > start {
+        state.discarded.push(Span { start, end });
+    }
+}
+
 fn emit(state: &ExpandState<'_>, out: &mut Vec<Token>, traces: &mut Vec<TokenTrace>, tok: Token) {
+    if let Some(prev) = out.last() {
+        if let Some(merged) = merge_adjacent(state.src, prev, &tok) {
+            *out.last_mut().expect("token just read") = merged;
+            return;
+        }
+    }
     traces.push(TokenTrace {
         frames: state.origin_stack.clone(),
     });
     out.push(tok);
+}
+
+/// Glue `x@{i}` into one identifier when the pieces touch in the source.
+///
+/// Dynare substitutes `@{…}` as text before it lexes, so `x@{i}` with `i = 1`
+/// is the identifier `x1`. A space, or a join that is not an identifier, stays
+/// two tokens.
+fn merge_adjacent(src: &str, prev: &Token, next: &Token) -> Option<Token> {
+    if !matches!(prev.kind, TokenKind::Ident | TokenKind::Number)
+        || !matches!(next.kind, TokenKind::Ident | TokenKind::Number)
+    {
+        return None;
+    }
+    if prev.span.end != next.span.start {
+        return None;
+    }
+    let combined = format!("{}{}", prev.text(src), next.text(src));
+    if !is_dynare_ident(&combined) {
+        return None;
+    }
+    Some(Token::with_lexeme(
+        TokenKind::Ident,
+        Span {
+            start: prev.span.start,
+            end: next.span.end,
+        },
+        combined,
+    ))
+}
+
+fn is_dynare_ident(text: &str) -> bool {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn emitting(stack: &[IfFrame]) -> bool {
@@ -252,6 +337,8 @@ fn alloc_frame(arena: &mut Vec<FrameRec>, kind: &'static str, body_start: u32) -
             start: body_start,
             end: body_start,
         },
+        variable: None,
+        value: None,
     });
     id
 }
@@ -269,8 +356,10 @@ fn push_if_frame(
     let frame_id = alloc_frame(state.arena, kind, body_start);
     stack.push(IfFrame {
         active,
+        taken: active,
         frame_id,
         body_start,
+        branch_start: dir_span.end,
     });
     state.origin_stack.push(frame_id);
 }
@@ -323,15 +412,31 @@ fn unroll_for(
         return;
     };
     let previous = state.defines.get(&var).cloned();
+    let body_span = tokens_body_span(body);
     for n in values {
         state.defines.insert(var.clone(), MacroVal::Int(n));
+        let frame_id = state.arena.len();
+        state.arena.push(FrameRec {
+            kind: "for",
+            body_span,
+            variable: Some(var.clone()),
+            value: Some(n.to_string()),
+        });
+        state.origin_stack.push(frame_id);
         let (expanded, expanded_traces) = expand_seq(state, body);
         for (tok, trace) in expanded.into_iter().zip(expanded_traces) {
             if tok.kind != TokenKind::Eof {
+                if let Some(prev) = out.last() {
+                    if let Some(merged) = merge_adjacent(state.src, prev, &tok) {
+                        *out.last_mut().expect("token just read") = merged;
+                        continue;
+                    }
+                }
                 out.push(tok);
                 traces.push(trace);
             }
         }
+        state.origin_stack.pop();
     }
     match previous {
         Some(prev) => {
@@ -391,13 +496,50 @@ fn kind_for_interpolated(text: &str) -> TokenKind {
 fn dir_kind(src: &str, tok: &Token) -> Dir {
     match directive_name(tok.text(src)).to_ascii_lowercase().as_str() {
         "define" => Dir::Define,
+        "ifdef" => Dir::Ifdef,
         "ifndef" => Dir::Ifndef,
         "if" => Dir::If,
+        "elseif" => Dir::Elseif,
         "else" => Dir::Else,
         "endif" => Dir::Endif,
         "for" => Dir::For,
         "endfor" => Dir::Endfor,
         _ => Dir::Unknown,
+    }
+}
+
+fn name_is_defined(state: &ExpandState<'_>, tok: &Token, kw: &str) -> bool {
+    dir_arg_ident(tok.text(state.src), kw).is_some_and(|name| state.defines.contains_key(&name))
+}
+
+fn open_next_branch(
+    state: &mut ExpandState<'_>,
+    frame: &mut IfFrame,
+    tokens: &[Token],
+    next_i: usize,
+    boundary: Span,
+    kind: &'static str,
+    active: bool,
+) {
+    if !frame.active {
+        push_discarded(state, frame.branch_start, boundary.start);
+    }
+    backpatch(
+        state.arena,
+        frame.frame_id,
+        frame.body_start,
+        boundary.start,
+    );
+    frame.active = active;
+    let body_start = next_body_start(tokens, next_i, boundary.end);
+    let frame_id = alloc_frame(state.arena, kind, body_start);
+    frame.frame_id = frame_id;
+    frame.body_start = body_start;
+    frame.branch_start = boundary.end;
+    if let Some(last) = state.origin_stack.last_mut() {
+        *last = frame_id;
+    } else {
+        state.origin_stack.push(frame_id);
     }
 }
 
@@ -413,7 +555,11 @@ fn directive_name(text: &str) -> &str {
 }
 
 fn eval_if_condition(state: &mut ExpandState<'_>, tok: &Token) -> bool {
-    let Some(arg) = strip_kw(tok.text(state.src), "if") else {
+    eval_condition(state, tok, "if")
+}
+
+fn eval_condition(state: &mut ExpandState<'_>, tok: &Token, kw: &str) -> bool {
+    let Some(arg) = strip_kw(tok.text(state.src), kw) else {
         return false;
     };
     let arg = arg.trim();
@@ -516,9 +662,7 @@ fn parse_define_eval(
         let l = eval_macro_atom(left, defines);
         let r = eval_macro_atom(right, defines);
         return match (l, r) {
-            (Ok(MacroVal::Int(a)), Ok(MacroVal::Int(b))) => {
-                Ok(Some((name, MacroVal::Int(a + b))))
-            }
+            (Ok(MacroVal::Int(a)), Ok(MacroVal::Int(b))) => Ok(Some((name, MacroVal::Int(a + b)))),
             (Ok(_), Ok(_)) => Err(()),
             _ => Ok(None),
         };

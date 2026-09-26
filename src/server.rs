@@ -1541,6 +1541,12 @@ fn equation_origin_json(
 fn origin_frame_json(workspace: &Workspace, frame: &OriginFrame) -> Value {
     let mut obj = serde_json::Map::new();
     obj.insert("kind".into(), json!(frame.kind));
+    if let Some(variable) = &frame.variable {
+        obj.insert("variable".into(), json!(variable));
+    }
+    if let Some(value) = &frame.value {
+        obj.insert("value".into(), json!(value));
+    }
     if let Some(uri) = origin_uri_json(frame.origin_uri.as_deref()) {
         obj.insert("origin_uri".into(), json!(uri));
     }

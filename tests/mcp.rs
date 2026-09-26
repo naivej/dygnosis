@@ -520,7 +520,7 @@ fn registered_tools_include_format() {
     );
     assert_eq!(
         tools[12]["description"],
-        "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it."
+        "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it. Empty or whitespace-only input is unchanged."
     );
 
     let blob = serde_json::to_string(&tools_list_json()).expect("tools list json");
@@ -619,9 +619,9 @@ fn dynare_format_patch_workflow_and_settings() {
     for empty in ["", "   \n", " \n\t\n"] {
         let body = dynare_format(empty, None).expect("empty");
         assert_format_keys(&body);
-        assert_eq!(body["status"], "unsupported");
+        assert_eq!(body["status"], "unchanged");
         assert!(body["formatted_text"].is_null());
-        assert_eq!(body["reason"], "nothing to format");
+        assert!(body["reason"].is_null());
     }
 }
 
@@ -779,7 +779,7 @@ fn explain_e040_is_unknown() {
 #[test]
 fn list_diagnostic_codes_matches_known_codes() {
     let list = dynare_list_diagnostic_codes();
-    assert_eq!(list.len(), 380);
+    assert_eq!(list.len(), 381);
     assert_eq!(list.len(), known_codes().len());
     let codes: Vec<&str> = list.iter().map(|item| item.code.as_str()).collect();
     assert_eq!(codes, known_codes());
@@ -1945,7 +1945,11 @@ fn dynare_expand_whole_eq_for() {
     for (i, row) in origins.iter().enumerate() {
         assert_eq!(row["index"], i);
         assert_eq!(row["origin"], *first);
-        assert!(row.get("origin_frames").is_none(), "frames: {row}");
+        let frames = row["origin_frames"].as_array().expect("origin_frames");
+        assert_eq!(frames.len(), 1, "frames: {row}");
+        assert_eq!(frames[0]["kind"], "for");
+        assert_eq!(frames[0]["variable"], "i");
+        assert_eq!(frames[0]["value"], Value::String((i + 1).to_string()));
         assert!(row.get("origin_uri").is_none(), "uri: {row}");
     }
     let effective = payload["effective_text"].as_str().expect("effective_text");

@@ -41,6 +41,10 @@ pub struct OriginFrame {
     pub origin_span: Span,
     pub origin_uri: Option<String>,
     pub kind: String,
+    /// `@#for` index name. Empty for an `@#if` frame.
+    pub variable: Option<String>,
+    /// `@#for` index value for this expanded copy.
+    pub value: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -176,7 +180,12 @@ fn origin_for_row(
         None
     };
 
-    let origin_frames = if best.len() > 1 {
+    let has_shorter = traces.iter().any(|t| t.frames.len() < best.len());
+    // A one-level loop frame belongs to an equation the loop generated. A loop
+    // inside a larger equation does not make that equation one iteration.
+    let loop_instance = best.iter().any(|&id| arena[id].kind == "for") && !has_shorter;
+    let keep_frames = best.len() > 1 || loop_instance;
+    let origin_frames = if keep_frames {
         best.iter()
             .map(|&id| {
                 let rec = &arena[id];
@@ -185,6 +194,8 @@ fn origin_for_row(
                     origin_span: span,
                     origin_uri: uri,
                     kind: rec.kind.to_string(),
+                    variable: rec.variable.clone(),
+                    value: rec.value.clone(),
                 }
             })
             .collect()
@@ -196,7 +207,6 @@ fn origin_for_row(
         None => covering(&mapped, origin_uri.as_deref()),
         Some(&id) => {
             let innermost = &arena[id];
-            let has_shorter = traces.iter().any(|t| t.frames.len() < best.len());
             if innermost.kind == "for" && has_shorter {
                 covering(&mapped, origin_uri.as_deref())
             } else {

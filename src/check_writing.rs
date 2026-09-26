@@ -10,7 +10,7 @@ use crate::span::Span;
 use crate::diagnostic::{Diagnostic, Severity};
 
 pub(crate) fn writing_summaries(model: &Model) -> Vec<Diagnostic> {
-    if withheld(model) {
+    if model_structure_incomplete(model) {
         return Vec::new();
     }
     let mut out = Vec::new();
@@ -30,13 +30,40 @@ pub(crate) fn is_writing_code(code: &str) -> bool {
     matches!(code, "I208" | "I209" | "I210")
 }
 
-fn withheld(model: &Model) -> bool {
-    !model.parse_issues.is_empty()
-        || !model.macro_type_errors.is_empty()
-        || !model.includes.is_empty()
-        || !crate::check_e060::check_e062(model).is_empty()
-        || !crate::check_e060::check_e063(model).is_empty()
-        || !crate::check_e060::check_e064(model).is_empty()
+/// Facts about whether the parsed model is complete enough to count.
+///
+/// A missing or cyclic include that the workspace has already removed from the
+/// text is not one of these facts. That check stays on the include records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ModelStructure {
+    pub parse_issues: bool,
+    pub includes: bool,
+    pub macro_type_errors: bool,
+    pub e062: bool,
+    pub e063: bool,
+    pub e064: bool,
+}
+
+pub(crate) fn model_structure(model: &Model) -> ModelStructure {
+    ModelStructure {
+        parse_issues: !model.parse_issues.is_empty(),
+        includes: !model.includes.is_empty(),
+        macro_type_errors: !model.macro_type_errors.is_empty(),
+        e062: !crate::check_e060::check_e062(model).is_empty(),
+        e063: !crate::check_e060::check_e063(model).is_empty(),
+        e064: !crate::check_e060::check_e064(model).is_empty(),
+    }
+}
+
+/// Syntax problems and unfinished expansion. Callers decide what to withhold.
+pub(crate) fn model_structure_incomplete(model: &Model) -> bool {
+    let structure = model_structure(model);
+    structure.parse_issues
+        || structure.includes
+        || structure.macro_type_errors
+        || structure.e062
+        || structure.e063
+        || structure.e064
 }
 
 fn unnamed_equations(model: &Model) -> Option<Diagnostic> {
@@ -213,4 +240,30 @@ fn decl_row(decl: &Decl, kind: DeclKind) -> DeclRow {
 
 fn note(span: Span, code: &str, message: String) -> Diagnostic {
     Diagnostic::new(span, Severity::Information, code, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::model_structure_incomplete;
+    use crate::parser::parse;
+
+    #[test]
+    fn a_resolved_file_is_complete() {
+        let src = "var y;\nmodel;\ny = 0;\nend;\n";
+        assert!(!model_structure_incomplete(&parse(src)));
+    }
+
+    #[test]
+    fn syntax_and_unfinished_expansion_are_incomplete() {
+        let cases = [
+            "parameters betta;\nbetta = 0.99\nmodel;\nend;\n",
+            "@#include \"missing.inc\"\nvar y;\nmodel;\ny = 0;\nend;\n",
+            "var y;\nmodel;\ny = @{UNDEF};\nend;\n",
+            "@#if 1\nvar y;\nmodel;\ny = 0;\nend;\n",
+            "@#error \"stop\"\nvar y;\nmodel;\ny = 0;\nend;\n",
+        ];
+        for src in cases {
+            assert!(model_structure_incomplete(&parse(src)), "{src}");
+        }
+    }
 }

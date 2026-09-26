@@ -920,26 +920,80 @@ fn invalid_ident_diags(model: &Model, tokens: &[Token], index: &LineIndex) -> Ve
         flush_invalid_runs(src, tokens, &kept, &mut out);
         i = k + 1;
     }
-    push_unrecognized_file_gaps(src, tokens, &mut out);
+    push_unrecognized_file_gaps(src, tokens, &excluded_character_spans(model), &mut out);
     out
 }
 
+/// Byte ranges that are not active Dynare syntax. The lexer still skips
+/// non-ASCII there, and Dynare accepts it.
+fn excluded_character_spans(model: &Model) -> Vec<Span> {
+    let src = &model.source;
+    let mut spans = crate::macro_expand::inactive_macro_spans(src);
+    for span in model.ms_unparsed_spans.iter().copied() {
+        spans.push(native_line_span(src, span));
+    }
+    for assignment in &model.helper_assignments {
+        if !declared_statement_head(model, assignment.name, assignment.span.start) {
+            spans.push(native_line_span(src, assignment.span));
+        }
+    }
+    spans
+}
+
+/// A line that begins as native MATLAB stays native through the newline.
+/// A native statement later on a Dynare line does not claim the rest of that line.
+fn native_line_span(src: &str, span: Span) -> Span {
+    let before = &src[..span.start as usize];
+    let at_line_start = before
+        .rsplit_once('\n')
+        .map(|(_, tail)| tail.trim().is_empty())
+        .unwrap_or_else(|| before.trim().is_empty());
+    if !at_line_start {
+        return span;
+    }
+    let rest = &src[span.end as usize..];
+    let extra = rest.find('\n').unwrap_or(rest.len()) as u32;
+    Span {
+        start: span.start,
+        end: span.end + extra,
+    }
+}
+
+fn declared_statement_head(model: &Model, name: Name, at: u32) -> bool {
+    if model.mod_file_locals.contains(&name) || model.external_function_names.contains(&name) {
+        return false;
+    }
+    model
+        .endogenous
+        .iter()
+        .chain(&model.exogenous)
+        .chain(&model.deterministic_exogenous)
+        .chain(&model.parameters)
+        .chain(&model.predetermined)
+        .any(|decl| decl.name == name && decl.span.start < at)
+}
+
 /// Non-ASCII characters the lexer skips. Dynare's `<*>.` rule refuses them
-/// with `character unrecognized by lexer` in any statement, including equations
-/// and shock lines. Comments, quoted text, `$…$` TeX, and the complementarity
-/// sign are tokens or trivia, so they are not flagged. `verbatim` bodies pass
-/// through raw.
-fn push_unrecognized_file_gaps(src: &str, tokens: &[Token], out: &mut Vec<Diagnostic>) {
+/// with `character unrecognized by lexer` in active Dynare syntax, including
+/// declarations, equations, and shock lines. Comments, quoted text, `$…$`
+/// TeX, verbatim bodies, and the complementarity sign are tokens or trivia.
+/// Native MATLAB text and discarded macro branches are not active syntax.
+fn push_unrecognized_file_gaps(
+    src: &str,
+    tokens: &[Token],
+    excluded: &[Span],
+    out: &mut Vec<Diagnostic>,
+) {
     let verbatim = verbatim_body_spans(src, tokens);
     let mut prev = 0u32;
     for tok in tokens {
         if !span_contains(prev, &verbatim) {
-            push_unrecognized_gap(src, prev, tok.span.start, out);
+            push_unrecognized_gap(src, prev, tok.span.start, excluded, out);
         }
         prev = tok.span.end;
     }
     if !span_contains(prev, &verbatim) {
-        push_unrecognized_gap(src, prev, src.len() as u32, out);
+        push_unrecognized_gap(src, prev, src.len() as u32, excluded, out);
     }
 }
 
@@ -982,7 +1036,13 @@ fn verbatim_body_spans(src: &str, tokens: &[Token]) -> Vec<Span> {
     ranges
 }
 
-fn push_unrecognized_gap(src: &str, from: u32, to: u32, out: &mut Vec<Diagnostic>) {
+fn push_unrecognized_gap(
+    src: &str,
+    from: u32,
+    to: u32,
+    excluded: &[Span],
+    out: &mut Vec<Diagnostic>,
+) {
     let end = to as usize;
     let mut i = from as usize;
     if i > end || end > src.len() {
@@ -1011,7 +1071,7 @@ fn push_unrecognized_gap(src: &str, from: u32, to: u32, out: &mut Vec<Diagnostic
         if i + len > end {
             break;
         }
-        if ch.is_ascii() {
+        if ch.is_ascii() || span_contains(i as u32, excluded) {
             i += len;
             continue;
         }
@@ -1022,7 +1082,7 @@ fn push_unrecognized_gap(src: &str, from: u32, to: u32, out: &mut Vec<Diagnostic
                 break;
             };
             let n = c.len_utf8();
-            if i + n > end || c.is_ascii() {
+            if i + n > end || c.is_ascii() || span_contains(i as u32, excluded) {
                 break;
             }
             i += n;

@@ -89,7 +89,7 @@ const TOOLS: &[(&str, &str)] = &[
     ),
     (
         "dynare_format",
-        "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it.",
+        "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it. Empty or whitespace-only input is unchanged.",
     ),
 ];
 
@@ -535,7 +535,7 @@ fn attach_origin(target: &mut Value, origin: &EquationOrigin, unit: &McpUnit) {
     if let Some(uri) = unit.map_uri(origin.origin_uri.as_deref()) {
         target["origin_uri"] = json!(uri);
     }
-    if origin.origin_frames.len() <= 1 {
+    if !publish_origin_frames(&origin.origin_frames) {
         return;
     }
     let mut frames = Vec::new();
@@ -544,15 +544,32 @@ fn attach_origin(target: &mut Value, origin: &EquationOrigin, unit: &McpUnit) {
             frames.push(v);
         }
     }
-    if frames.len() > 1 {
+    if publish_origin_frames_json(&frames) {
         target["origin_frames"] = Value::Array(frames);
     }
+}
+
+fn publish_origin_frames(frames: &[crate::expand::OriginFrame]) -> bool {
+    frames.len() > 1 || frames.iter().any(|frame| frame.kind == "for")
+}
+
+fn publish_origin_frames_json(frames: &[Value]) -> bool {
+    frames.len() > 1
+        || frames
+            .iter()
+            .any(|frame| frame.get("kind").and_then(Value::as_str) == Some("for"))
 }
 
 fn origin_frame_json(frame: &OriginFrame, unit: &McpUnit) -> Option<Value> {
     let src = unit.source_for(frame.origin_uri.as_deref())?;
     let mut v = range_json(frame.origin_span, src);
     v["kind"] = json!(frame.kind);
+    if let Some(variable) = &frame.variable {
+        v["variable"] = json!(variable);
+    }
+    if let Some(value) = &frame.value {
+        v["value"] = json!(value);
+    }
     if let Some(uri) = unit.map_uri(frame.origin_uri.as_deref()) {
         v["origin_uri"] = json!(uri);
     }
@@ -1600,7 +1617,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_format",
-        description = "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it."
+        description = "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it. Empty or whitespace-only input is unchanged."
     )]
     fn format_tool(
         &self,

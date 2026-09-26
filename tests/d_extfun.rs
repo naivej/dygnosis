@@ -115,5 +115,5 @@ fn var_collision_fires_both_errors() {
 
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 380);
+    assert_eq!(known_codes().len(), 381);
 }

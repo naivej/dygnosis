@@ -225,6 +225,7 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     }
     if !out.iter().any(|d| d.code == "E001") {
         out.extend(crate::check_writing::writing_summaries(model));
+        out.extend(crate::check_w211::exogenous_leads(model));
     }
     out
 }
@@ -256,9 +257,16 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<Vec<Diagnos
         &model, abs_path,
     ));
     let records = ws.include_records(abs_path).cloned().unwrap_or_default();
+    // Missing and cyclic includes are workspace records. The spliced model no
+    // longer contains the directive, so `model_structure_incomplete` cannot see them.
     let expansion_blocked = !records.unresolved.is_empty() || !records.cycles.is_empty();
     if expansion_blocked {
-        diags.retain(|d| d.code != "W060" && !crate::check_writing::is_writing_code(&d.code));
+        diags.retain(|d| {
+            d.code != "W060"
+                && d.code != "W208"
+                && d.code != "W211"
+                && !crate::check_writing::is_writing_code(&d.code)
+        });
     } else if !records.resolved.is_empty() {
         diags.retain_mut(|d| {
             if d.code != "W060" {

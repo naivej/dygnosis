@@ -36,7 +36,7 @@ fn quiet(diags: &[Diagnostic], code: &str) {
 
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 380);
+    assert_eq!(known_codes().len(), 381);
 }
 
 #[test]
@@ -226,13 +226,16 @@ const E224_MSG: &str = "If dsge_prior_weight is in the estimated_params block, t
 
 const E225_MSG: &str = "The estimation statement requires a dsge_var option to be passed if the dsge_varlag option is passed.";
 const E226_MSG: &str = "An estimation statement cannot take more than one dsge_var option.";
-const E227_MSG: &str = "The estimation statement requires a data file to be supplied via the datafile option.";
+const E227_MSG: &str =
+    "The estimation statement requires a data file to be supplied via the datafile option.";
 const E228_MSG: &str = "The mode_file option of the estimation statement is incompatible with the use_calibration option of the estimated_params_init block.";
-const E229_MSG: &str = "The mh_tune_jscale and mh_jscale options of the estimation statement are incompatible.";
+const E229_MSG: &str =
+    "The mh_tune_jscale and mh_jscale options of the estimation statement are incompatible.";
 const E230_MSG: &str = "The option mh_tune_guess in estimation statement cannot be used without option mh_tune_jscale.";
 const E231_MSG: &str = "The filter_algorithm=gmf option is incompatible with proposal_approximation=montecarlo in the estimation statement.";
 const E232_MSG: &str = "The filter_algorithm=gmf option is incompatible with distribution_approximation=montecarlo in the estimation statement.";
-const E234_MSG: &str = "both the 'prior_function' and 'posterior_function' commands require the 'function' option";
+const E234_MSG: &str =
+    "both the 'prior_function' and 'posterior_function' commands require the 'function' option";
 
 #[test]
 fn uppercase_dsge_prior_weight_reaches_the_same_checks() {
@@ -291,48 +294,24 @@ fn fire(rel: &str, code: &str, msg: &str) {
 
 #[test]
 fn e222_through_e234_estimation_check() {
-    fire(
-        "d_walk/e222_dsge_var_missing_weight.mod",
-        "E222",
-        E222_MSG,
-    );
-    fire(
-        "d_walk/e223_weight_and_calibrated.mod",
-        "E223",
-        E223_MSG,
-    );
-    fire(
-        "d_walk/e224_weight_without_dsge_var.mod",
-        "E224",
-        E224_MSG,
-    );
+    fire("d_walk/e222_dsge_var_missing_weight.mod", "E222", E222_MSG);
+    fire("d_walk/e223_weight_and_calibrated.mod", "E223", E223_MSG);
+    fire("d_walk/e224_weight_without_dsge_var.mod", "E224", E224_MSG);
     fire(
         "d_walk/e225_dsge_varlag_without_dsge_var.mod",
         "E225",
         E225_MSG,
     );
-    fire(
-        "d_walk/e226_two_estimation_dsge_var.mod",
-        "E226",
-        E226_MSG,
-    );
+    fire("d_walk/e226_two_estimation_dsge_var.mod", "E226", E226_MSG);
     fire("d_walk/e227_estimation_no_data.mod", "E227", E227_MSG);
     fire(
         "d_walk/e228_mode_file_use_calibration.mod",
         "E228",
         E228_MSG,
     );
-    fire(
-        "d_walk/e229_mh_tune_jscale_mh_jscale.mod",
-        "E229",
-        E229_MSG,
-    );
+    fire("d_walk/e229_mh_tune_jscale_mh_jscale.mod", "E229", E229_MSG);
     fire("d_walk/e230_mh_tune_guess_alone.mod", "E230", E230_MSG);
-    fire(
-        "d_walk/e231_gmf_proposal_montecarlo.mod",
-        "E231",
-        E231_MSG,
-    );
+    fire("d_walk/e231_gmf_proposal_montecarlo.mod", "E231", E231_MSG);
     fire(
         "d_walk/e232_gmf_distribution_montecarlo.mod",
         "E232",
@@ -354,21 +333,20 @@ fn e222_through_e234_estimation_check() {
 
 #[test]
 fn e227_datafile_or_data_opener_quiet_database_does_not_silence() {
-    let preamble =
-        "var y; varexo e; parameters rho; rho = 0.5; model; y = rho * y(-1) + e; end; ";
+    let preamble = "var y; varexo e; parameters rho; rho = 0.5; model; y = rho * y(-1) + e; end; ";
     quiet(
         &analyze(&parse(&format!("{preamble}estimation(datafile='d.csv');"))),
         "E227",
     );
     quiet(
-        &analyze(&parse(&format!("{preamble}data(file='x.csv'); estimation;"))),
+        &analyze(&parse(&format!(
+            "{preamble}data(file='x.csv'); estimation;"
+        ))),
         "E227",
     );
     let db = analyze(&parse(&format!("{preamble}database foo; estimation;")));
     assert_eq!(find(&db, "E227").message, E227_MSG);
-    let series = analyze(&parse(&format!(
-        "{preamble}estimation(dataseries=foo);"
-    )));
+    let series = analyze(&parse(&format!("{preamble}estimation(dataseries=foo);")));
     assert_eq!(find(&series, "E227").message, E227_MSG);
 }
 
@@ -428,8 +406,7 @@ fn e239_e240_w202_symbol_lists() {
     quiet(&w202, "E239");
     quiet(&w202, "E240");
 
-    let preamble =
-        "var y; varexo e; parameters rho; rho = 0.5; model; y = rho * y(-1) + e; end; ";
+    let preamble = "var y; varexo e; parameters rho; rho = 0.5; model; y = rho * y(-1) + e; end; ";
     // Dynare runs removeDuplicates on one statement's list, so the same name on
     // two stoch_simul statements is not a duplicate.
     let two_stmts = analyze(&parse(&format!("{preamble}stoch_simul y; stoch_simul y;")));

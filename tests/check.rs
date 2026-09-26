@@ -334,9 +334,15 @@ fn p_core_check_file_no_preproc() {
         let path_str = path.to_str().expect("utf-8 path");
         let text = read_mod(name);
         let diags = check_file(&text, path_str);
-        assert!(!diags.is_empty(), "{name} library check should emit I050");
         assert!(
-            diags.iter().all(|d| d.code == "I050"),
+            diags.iter().any(|d| d.code == "I050"),
+            "{name} library check should emit I050, got {:?}",
+            diags.iter().map(|d| &d.code).collect::<Vec<_>>()
+        );
+        assert!(
+            diags
+                .iter()
+                .all(|d| matches!(d.code.as_str(), "I050" | "I208" | "I209" | "I210")),
             "{name} library check codes: {:?}",
             diags.iter().map(|d| &d.code).collect::<Vec<_>>()
         );

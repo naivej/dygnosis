@@ -108,6 +108,13 @@ fn codes(diags: &[Diagnostic]) -> Vec<&str> {
     diags.iter().map(|d| d.code.as_str()).collect()
 }
 
+fn without_writing(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
+    diags
+        .iter()
+        .filter(|diag| !matches!(diag.code.as_str(), "I208" | "I209" | "I210"))
+        .collect()
+}
+
 fn find<'a>(diags: &'a [Diagnostic], code: &str) -> &'a Diagnostic {
     diags
         .iter()
@@ -141,17 +148,19 @@ fn exogenous(model: &Model, name: &str) -> bool {
 fn legal_surgery_files_are_quiet() {
     for rel in QUIET {
         let diags = analyze(&parse(&fixture(rel)));
+        let rest = without_writing(&diags);
         assert!(
-            diags.is_empty(),
-            "{rel}: expected no diagnostics, got {:?}",
+            rest.is_empty(),
+            "{rel}: expected no diagnostics besides writing summaries, got {:?}",
             codes(&diags)
         );
     }
     let rel = "d_surgery/quiet_remove.mod";
     let diags = check_file(&fixture(rel), &fixture_path(rel));
+    let rest = without_writing(&diags);
     assert!(
-        diags.is_empty(),
-        "{rel} check_file: expected no diagnostics, got {:?}",
+        rest.is_empty(),
+        "{rel} check_file: expected no diagnostics besides writing summaries, got {:?}",
         codes(&diags)
     );
 }
@@ -204,10 +213,11 @@ fn double_quoted_string_is_lexer_junk() {
 #[test]
 fn verbatim_body_keeps_its_double_quotes() {
     let model = parse(&fixture("d_surgery/quiet_verbatim_quotes.mod"));
+    let diags = analyze(&model);
     assert!(
-        analyze(&model).is_empty(),
+        without_writing(&diags).is_empty(),
         "verbatim passes raw text through: {:?}",
-        codes(&analyze(&model))
+        codes(&diags)
     );
 }
 
@@ -347,5 +357,5 @@ fn refused_tag_list_does_not_remove_an_equation() {
 
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(dygnosis::explain::known_codes().len(), 380);
+    assert_eq!(dygnosis::explain::known_codes().len(), 381);
 }

@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, JsonStage, Severity};
+use dygnosis::{
+    analyze, check_file, find_preprocessor, parse, run_preprocessor, JsonStage, Severity,
+};
 
 fn fixture(name: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -266,7 +268,7 @@ fn accepted_neighbours() {
 }
 
 #[test]
-fn w208_counts_written_household_equations_against_written_names() {
+fn w208_counts_distinct_endogenous_names_in_a_heterogeneity_dimension() {
     let uneven = "\
 heterogeneity_dimension h;
 var(heterogeneity=h) c n;
@@ -303,6 +305,82 @@ end;
     assert!(analyze(&parse(local))
         .iter()
         .all(|diag| diag.code != "W208"));
+
+    let firms = "\
+heterogeneity_dimension firms;
+var(heterogeneity=firms) q p;
+model(heterogeneity=firms);
+  q = p;
+end;
+";
+    let warning = analyze(&parse(firms))
+        .into_iter()
+        .find(|diag| diag.code == "W208")
+        .unwrap();
+    assert!(
+        warning.message.contains("heterogeneity dimension 'firms'"),
+        "{warning:?}"
+    );
+
+    let square = "\
+heterogeneity_dimension firms;
+var(heterogeneity=firms) q p;
+model(heterogeneity=firms);
+  q = p;
+  p = 1;
+end;
+";
+    assert!(analyze(&parse(square))
+        .iter()
+        .all(|diag| diag.code != "W208"));
+
+    let repeated = "\
+heterogeneity_dimension firms;
+var(heterogeneity=firms) q q;
+model(heterogeneity=firms);
+  q = q(-1);
+end;
+";
+    let diags = analyze(&parse(repeated));
+    assert!(diags.iter().any(|diag| diag.code == "W031"), "{diags:?}");
+    assert!(diags.iter().all(|diag| diag.code != "W208"), "{diags:?}");
+
+    let missing = "\
+heterogeneity_dimension firms;
+@#include \"missing.inc\"
+var(heterogeneity=firms) q p;
+model(heterogeneity=firms);
+  q = p;
+end;
+";
+    let diags = check_file(missing, "C:/tmp/dygnosis-w208/root.mod");
+    assert!(diags.iter().any(|diag| diag.code == "E061"), "{diags:?}");
+    assert!(diags.iter().all(|diag| diag.code != "W208"), "{diags:?}");
+
+    let static_row = "\
+heterogeneity_dimension firms;
+var(heterogeneity=firms) q;
+model(heterogeneity=firms);
+  [static]
+  q = 1;
+  q = q(-1);
+end;
+";
+    assert!(analyze(&parse(static_row))
+        .iter()
+        .all(|diag| diag.code != "W208"));
+}
+
+#[test]
+fn w208_stays_quiet_when_expansion_is_unfinished() {
+    let src = "\
+heterogeneity_dimension firms;
+var(heterogeneity=firms) q p;
+model(heterogeneity=firms);
+  q = p + @{UNDEF};
+end;
+";
+    assert!(analyze(&parse(src)).iter().all(|diag| diag.code != "W208"));
 }
 
 #[test]

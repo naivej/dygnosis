@@ -36,7 +36,7 @@ pub enum FormatOutcome {
 /// Same decision as [`format_text`], with unchanged and unsupported kept apart.
 pub fn format_outcome(text: &str, indent_unit: &str) -> FormatOutcome {
     if text.trim().is_empty() {
-        return FormatOutcome::Unsupported("nothing to format");
+        return FormatOutcome::Unchanged;
     }
     let Some(formatted) = reformat(text, indent_unit) else {
         return FormatOutcome::Unsupported("formatter cannot reformat this file");
@@ -876,9 +876,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn empty_and_ws_decline() {
-        assert_eq!(format_text("", "\t"), None);
-        assert_eq!(format_text("   \n", "\t"), None);
+    fn empty_and_ws_is_unchanged() {
+        for text in ["", "   \n", " \n\t\n"] {
+            assert_eq!(format_text(text, "\t"), None);
+            assert!(matches!(
+                format_outcome(text, "\t"),
+                FormatOutcome::Unchanged
+            ));
+        }
     }
 
     #[test]

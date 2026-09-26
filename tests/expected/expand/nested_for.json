@@ -4,105 +4,85 @@
   "origins": [
     {
       "index": 0,
-      "origin_span": {
-        "start": 110,
-        "end": 119
-      },
+      "origin_span": { "start": 110, "end": 119 },
       "origin_uri": "expand/nested_for.mod",
       "origin_frames": [
         {
-          "origin_span": {
-            "start": 96,
-            "end": 128
-          },
+          "origin_span": { "start": 96, "end": 128 },
           "origin_uri": "expand/nested_for.mod",
-          "kind": "for"
+          "kind": "for",
+          "variable": "i",
+          "value": "1"
         },
         {
-          "origin_span": {
-            "start": 110,
-            "end": 119
-          },
+          "origin_span": { "start": 110, "end": 119 },
           "origin_uri": "expand/nested_for.mod",
-          "kind": "for"
+          "kind": "for",
+          "variable": "j",
+          "value": "1"
         }
       ]
     },
     {
       "index": 1,
-      "origin_span": {
-        "start": 110,
-        "end": 119
-      },
+      "origin_span": { "start": 110, "end": 119 },
       "origin_uri": "expand/nested_for.mod",
       "origin_frames": [
         {
-          "origin_span": {
-            "start": 96,
-            "end": 128
-          },
+          "origin_span": { "start": 96, "end": 128 },
           "origin_uri": "expand/nested_for.mod",
-          "kind": "for"
+          "kind": "for",
+          "variable": "i",
+          "value": "1"
         },
         {
-          "origin_span": {
-            "start": 110,
-            "end": 119
-          },
+          "origin_span": { "start": 110, "end": 119 },
           "origin_uri": "expand/nested_for.mod",
-          "kind": "for"
+          "kind": "for",
+          "variable": "j",
+          "value": "2"
         }
       ]
     },
     {
       "index": 2,
-      "origin_span": {
-        "start": 110,
-        "end": 119
-      },
+      "origin_span": { "start": 110, "end": 119 },
       "origin_uri": "expand/nested_for.mod",
       "origin_frames": [
         {
-          "origin_span": {
-            "start": 96,
-            "end": 128
-          },
+          "origin_span": { "start": 96, "end": 128 },
           "origin_uri": "expand/nested_for.mod",
-          "kind": "for"
+          "kind": "for",
+          "variable": "i",
+          "value": "2"
         },
         {
-          "origin_span": {
-            "start": 110,
-            "end": 119
-          },
+          "origin_span": { "start": 110, "end": 119 },
           "origin_uri": "expand/nested_for.mod",
-          "kind": "for"
+          "kind": "for",
+          "variable": "j",
+          "value": "1"
         }
       ]
     },
     {
       "index": 3,
-      "origin_span": {
-        "start": 110,
-        "end": 119
-      },
+      "origin_span": { "start": 110, "end": 119 },
       "origin_uri": "expand/nested_for.mod",
       "origin_frames": [
         {
-          "origin_span": {
-            "start": 96,
-            "end": 128
-          },
+          "origin_span": { "start": 96, "end": 128 },
           "origin_uri": "expand/nested_for.mod",
-          "kind": "for"
+          "kind": "for",
+          "variable": "i",
+          "value": "2"
         },
         {
-          "origin_span": {
-            "start": 110,
-            "end": 119
-          },
+          "origin_span": { "start": 110, "end": 119 },
           "origin_uri": "expand/nested_for.mod",
-          "kind": "for"
+          "kind": "for",
+          "variable": "j",
+          "value": "2"
         }
       ]
     }

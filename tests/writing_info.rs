@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use dygnosis::explain::{explain, ExplainKind};
-use dygnosis::{check_file, Diagnostic};
+use dygnosis::{analyze, check_file, parse, Diagnostic};
 
 fn fixture(name: &str) -> (String, String) {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -193,6 +193,60 @@ fn deterministic_exogenous_is_counted_once() {
     let symbols = one("det_once.mod", "I209");
     assert_eq!(symbols.message, "1 symbol has no long_name.");
     assert_eq!(slice_of("det_once.mod", &symbols), "tau");
+}
+
+#[test]
+fn concatenated_names_count_once_each_and_are_not_duplicates() {
+    let src = "\
+@#define is = 1:2
+@#for i in is
+var x@{i};
+@#endfor
+model;
+@#for i in is
+x@{i} = 0;
+@#endfor
+end;
+";
+    let model = parse(src);
+    let names: Vec<&str> = model
+        .endogenous
+        .iter()
+        .map(|decl| model.name(decl.name))
+        .collect();
+    assert_eq!(names, ["x1", "x2"]);
+    let diags = analyze(&model);
+    assert!(diags.iter().all(|diag| diag.code != "W031"), "{diags:?}");
+    let note = diags.iter().find(|diag| diag.code == "I209").unwrap();
+    assert_eq!(note.message, "2 symbols have no long_name.");
+}
+
+#[test]
+fn repeated_declaration_still_warns_and_counts_once() {
+    let src = "\
+var x;
+var x;
+model;
+x = 0;
+end;
+";
+    let diags = analyze(&parse(src));
+    assert!(diags.iter().any(|diag| diag.code == "W031"), "{diags:?}");
+    let note = diags.iter().find(|diag| diag.code == "I209").unwrap();
+    assert_eq!(note.message, "1 symbol has no long_name.");
+}
+
+#[test]
+fn unresolved_name_expansion_withholds_the_summary() {
+    let src = "\
+var x@{UNDEF};
+model;
+x = 0;
+end;
+";
+    let diags = analyze(&parse(src));
+    assert!(diags.iter().all(|diag| diag.code != "I209"), "{diags:?}");
+    assert!(diags.iter().any(|diag| diag.code == "E063"), "{diags:?}");
 }
 
 #[test]

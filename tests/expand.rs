@@ -110,6 +110,8 @@ fn dump_frame(frame: &OriginFrame) -> serde_json::Value {
         },
         "origin_uri": frame.origin_uri.as_deref().map(relative_to_fixtures),
         "kind": frame.kind,
+        "variable": frame.variable,
+        "value": frame.value,
     })
 }
 
@@ -157,8 +159,20 @@ fn whole_eq_for_shared_body_span() {
     assert!(!slice.contains("@#define"), "origin slice {slice:?}");
     assert!(!slice.contains("@#for"), "origin slice {slice:?}");
     assert!(!slice.contains("@#endfor"), "origin slice {slice:?}");
+    let values: Vec<&str> = report
+        .origins
+        .iter()
+        .map(|origin| {
+            assert_eq!(origin.origin_frames.len(), 1);
+            let frame = &origin.origin_frames[0];
+            assert_eq!(frame.kind, "for");
+            assert_eq!(frame.variable.as_deref(), Some("i"));
+            assert_eq!(frame.origin_span, span);
+            frame.value.as_deref().unwrap_or("")
+        })
+        .collect();
+    assert_eq!(values, ["1", "2", "3"]);
     for origin in &report.origins {
-        assert!(origin.origin_frames.is_empty());
         let uri = origin.origin_uri.as_deref().expect("workspace origin_uri");
         assert!(uri_ends_with(uri, "whole_eq_for.mod"), "origin_uri {uri}");
     }

@@ -56,7 +56,7 @@ Limitations by design
 | `dynare_equations` | Equations with text, timing, tags, complementarity, origin, and the equation-count gap |
 | `dynare_related_files` | Includes and companions for the active `.mod` |
 | `dynare_expand` | Effective text after `@#if` / `@#for` / `@{…}` and includes, plus origin for each counted equation |
-| `dynare_format` | Format a `.mod` file with the editor's rules. Returns the full text only when it changes |
+| `dynare_format` | Format a `.mod` file with the editor's rules. Returns the full text only when it changes. Empty or whitespace-only input is unchanged |
 
 ## Credits
 

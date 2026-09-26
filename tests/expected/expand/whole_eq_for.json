@@ -4,30 +4,45 @@
   "origins": [
     {
       "index": 0,
-      "origin_span": {
-        "start": 80,
-        "end": 89
-      },
+      "origin_span": { "start": 80, "end": 89 },
       "origin_uri": "expand/whole_eq_for.mod",
-      "origin_frames": []
+      "origin_frames": [
+        {
+          "kind": "for",
+          "origin_span": { "start": 80, "end": 89 },
+          "origin_uri": "expand/whole_eq_for.mod",
+          "variable": "i",
+          "value": "1"
+        }
+      ]
     },
     {
       "index": 1,
-      "origin_span": {
-        "start": 80,
-        "end": 89
-      },
+      "origin_span": { "start": 80, "end": 89 },
       "origin_uri": "expand/whole_eq_for.mod",
-      "origin_frames": []
+      "origin_frames": [
+        {
+          "kind": "for",
+          "origin_span": { "start": 80, "end": 89 },
+          "origin_uri": "expand/whole_eq_for.mod",
+          "variable": "i",
+          "value": "2"
+        }
+      ]
     },
     {
       "index": 2,
-      "origin_span": {
-        "start": 80,
-        "end": 89
-      },
+      "origin_span": { "start": 80, "end": 89 },
       "origin_uri": "expand/whole_eq_for.mod",
-      "origin_frames": []
+      "origin_frames": [
+        {
+          "kind": "for",
+          "origin_span": { "start": 80, "end": 89 },
+          "origin_uri": "expand/whole_eq_for.mod",
+          "variable": "i",
+          "value": "3"
+        }
+      ]
     }
   ]
 }

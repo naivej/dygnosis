@@ -383,6 +383,179 @@ fn e001_non_ascii_identifier() {
     );
 }
 
+fn lex_e001(text: &str) -> bool {
+    rust_e001(text)
+        .iter()
+        .any(|diag| diag.message.contains("character unrecognized by lexer"))
+}
+
+#[test]
+fn e001_conditional_chains_keep_only_the_selected_branch() {
+    let quiet = [
+        "\
+@#if 0
+var café;
+@#elseif 1
+var y;
+@#elseif 1
+var café;
+@#else
+var café;
+@#endif
+",
+        "\
+@#if 1
+var y;
+@#elseif 0
+var café;
+@#else
+var café;
+@#endif
+",
+        "\
+@#if 0
+var café;
+@#elseif 0
+var café;
+@#elseif 1
+var y;
+@#endif
+",
+        "\
+@#if 1
+@#if 0
+var café;
+@#else
+var y;
+@#endif
+@#else
+var café;
+@#endif
+",
+        "\
+@#define NAME = 1
+@#ifndef NAME
+var café;
+@#else
+var y;
+@#endif
+",
+        "\
+@#ifdef MISSING
+var café;
+@#else
+var y;
+@#endif
+",
+    ];
+    for text in quiet {
+        assert!(!lex_e001(text), "{text}");
+        let model = parse(text);
+        assert!(
+            model
+                .endogenous
+                .iter()
+                .any(|decl| model.name(decl.name) == "y"),
+            "{text}"
+        );
+        assert!(
+            model
+                .endogenous
+                .iter()
+                .all(|decl| !model.name(decl.name).contains('c')),
+            "{text}"
+        );
+    }
+
+    let selected = [
+        "\
+@#if 0
+var y;
+@#elseif 1
+var café;
+@#else
+var y;
+@#endif
+",
+        "\
+@#if 1
+@#if 1
+var café;
+@#endif
+@#endif
+",
+        "\
+@#define NAME = 1
+@#ifdef NAME
+var café;
+@#endif
+",
+        "\
+@#ifndef MISSING
+var café;
+@#endif
+",
+    ];
+    for text in selected {
+        assert!(lex_e001(text), "{text}");
+    }
+}
+
+#[test]
+fn e001_native_matlab_and_inactive_macro_stay_quiet() {
+    let native = check_mod("e001/native_matlab_quiet.mod");
+    let inactive = check_mod("e001/inactive_macro_quiet.mod");
+    for text in [native.as_str(), inactive.as_str()] {
+        let got = rust_e001(text);
+        assert!(
+            got.iter()
+                .all(|diag| !diag.message.contains("character unrecognized by lexer")),
+            "{text:?} -> {got:?}"
+        );
+    }
+    let same_line = "\
+var y;
+model;
+y=0;
+end;
+native_value = 1; café;
+";
+    let got = rust_e001(same_line);
+    assert!(
+        got.iter()
+            .all(|diag| !diag.message.contains("character unrecognized by lexer")),
+        "{got:?}"
+    );
+    let later = "\
+var y;
+model;
+y=0;
+end;
+stoch_simul; var café;
+";
+    let got = rust_e001(later);
+    assert!(
+        got.iter()
+            .any(|diag| diag.message.contains("character unrecognized by lexer")),
+        "{got:?}"
+    );
+    let active = "\
+@#if 1
+var café;
+@#endif
+var y;
+model;
+y = 0;
+end;
+";
+    let got = rust_e001(active);
+    assert!(
+        got.iter()
+            .any(|diag| diag.message.contains("character unrecognized by lexer")),
+        "{got:?}"
+    );
+}
+
 #[test]
 fn e001_unicode_display_and_complementarity_stay_quiet() {
     let text = check_mod("e001/unicode_display_quiet.mod");

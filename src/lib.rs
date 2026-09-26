@@ -32,6 +32,7 @@ pub mod check_w110;
 pub mod check_w120;
 pub mod check_w130;
 pub mod check_w160;
+mod check_w211;
 mod check_writing;
 mod command_skip;
 pub mod companion;

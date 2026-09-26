@@ -5431,6 +5431,30 @@ fn same_ground_warning_absent_on_quiet_archive() {
 }
 
 #[test]
+fn native_and_inactive_non_ascii_accepted_at_check() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    for rel in [
+        "e001/native_matlab_quiet.mod",
+        "e001/inactive_macro_quiet.mod",
+    ] {
+        let path = fixture(rel);
+        let path_str = path.to_str().expect("utf-8 path");
+        let text = read_path(&path);
+        let result = spawn(&text, &path, &pp, JsonStage::Check);
+        assert!(
+            result.success,
+            "{rel} should be accepted: {:?}",
+            result.diagnostics
+        );
+        assert_no_error(&check_file(&text, path_str), rel);
+        assert_no_error(&analyze(&parse(&text)), rel);
+    }
+}
+
+#[test]
 fn unicode_display_accepted_at_check() {
     let Some(pp) = find_preprocessor(None) else {
         eprintln!("skipping honesty: dynare-preprocessor not found");

@@ -131,6 +131,58 @@ fn for_unrolls_expectation_lags_one_through_sixteen() {
 }
 
 #[test]
+fn identifier_at_end_of_file_keeps_the_eof_token() {
+    let src = "var y";
+    let tokens = expanded(src);
+    assert!(
+        tokens.last().is_some_and(|tok| tok.kind == TokenKind::Eof),
+        "{:?}",
+        tokens.iter().map(|tok| tok.kind).collect::<Vec<_>>()
+    );
+    let model = parse(src);
+    assert!(model
+        .endogenous
+        .iter()
+        .any(|decl| model.name(decl.name) == "y"));
+
+    let glued = "\
+@#define i = 1
+var x@{i}";
+    let model = parse(glued);
+    assert!(model
+        .endogenous
+        .iter()
+        .any(|decl| model.name(decl.name) == "x1"));
+}
+
+#[test]
+fn adjacent_interpolation_becomes_one_identifier() {
+    let src = "\
+@#define is = 1:2
+@#for i in is
+var x@{i};
+@#endfor
+";
+    let tokens = expanded(src);
+    let names: Vec<&str> = tokens
+        .iter()
+        .filter(|tok| tok.kind == TokenKind::Ident && tok.text(src).starts_with('x'))
+        .map(|tok| tok.text(src))
+        .collect();
+    assert_eq!(names, ["x1", "x2"]);
+}
+
+#[test]
+fn whole_name_substitution_stays_one_identifier() {
+    let src = "\
+@#define a = beta
+var @{a};
+";
+    let tokens = expanded(src);
+    assert!(tokens.iter().any(|tok| tok.text(src) == "beta"));
+}
+
+#[test]
 fn empty_and_plain_source_are_identity() {
     let empty = "";
     assert_eq!(kinds(empty), expanded_kinds(empty));

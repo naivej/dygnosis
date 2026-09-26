@@ -3093,13 +3093,27 @@ async fn show_effective_model_whole_eq_for() {
         .map(|o| o.get("index").and_then(|i| i.as_u64()).expect("index"))
         .collect();
     assert_eq!(indexes, vec![0, 1, 2]);
+    let mut values = Vec::new();
     for origin in origins {
         let slice = slice_range(&text, json_range(origin));
         assert!(slice.contains("y = @{i}"), "origin slice {slice:?}");
         assert!(!slice.contains("@#define"), "origin slice {slice:?}");
-        assert!(
-            origin.get("origin_frames").is_none(),
-            "origin_frames present: {origin}"
+        let frames = origin
+            .get("origin_frames")
+            .and_then(|v| v.as_array())
+            .expect("origin_frames");
+        assert_eq!(frames.len(), 1, "origin_frames: {frames:?}");
+        assert_eq!(frames[0].get("kind").and_then(|k| k.as_str()), Some("for"));
+        assert_eq!(
+            frames[0].get("variable").and_then(|k| k.as_str()),
+            Some("i")
+        );
+        values.push(
+            frames[0]
+                .get("value")
+                .and_then(|k| k.as_str())
+                .unwrap_or("")
+                .to_string(),
         );
         let origin_uri = origin
             .get("origin_uri")
@@ -3110,6 +3124,7 @@ async fn show_effective_model_whole_eq_for() {
             "origin_uri {origin_uri}"
         );
     }
+    assert_eq!(values, ["1", "2", "3"]);
 }
 
 #[tokio::test]

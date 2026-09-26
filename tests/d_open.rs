@@ -516,7 +516,7 @@ fn some_shipped_codes_still_fire() {
 
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 380);
+    assert_eq!(known_codes().len(), 381);
 }
 
 #[test]

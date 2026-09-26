@@ -77,20 +77,29 @@ pub fn check_second_dimension(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
-/// Written equation count versus written endogenous names, per heterogeneity
-/// dimension. Same idea as aggregate `W013`: do not count helper variables
-/// Dynare inserts later for leads and lags. `#` locals and `[static]` rows
-/// are not counted equations.
+/// Written equation count versus distinct written endogenous names, per
+/// heterogeneity dimension. Same idea as aggregate `W013`: do not count helper
+/// variables Dynare inserts later for leads and lags. `#` locals and `[static]`
+/// rows are not counted equations. A name written twice counts once; **W031**
+/// reports the duplicate. An unresolved include or expansion withholds the
+/// count, because the missing text may change it.
 pub fn check_square(model: &Model) -> Vec<Diagnostic> {
+    if crate::check_writing::model_structure_incomplete(model) {
+        return Vec::new();
+    }
     struct Side {
         count: usize,
         span: Span,
     }
+    let mut seen = HashSet::new();
     let mut endogenous: Vec<(String, Side)> = Vec::new();
     for decl in &model.endogenous {
         let Some((dim, _)) = decl.heterogeneity else {
             continue;
         };
+        if !seen.insert((dim, decl.name)) {
+            continue;
+        }
         let name = model.name(dim).to_string();
         if let Some((_, side)) = endogenous.iter_mut().find(|(key, _)| key == &name) {
             side.count += 1;
