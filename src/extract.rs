@@ -1,8 +1,8 @@
 //! Private equation extraction. Later slices extend this engine.
 //!
-//! This slice closes an ordinary aggregate selection on the effective compilation
-//! unit: overlays, includes, macros, and equation surgery. It does not register
-//! an MCP tool.
+//! The engine selects aggregate equations from the effective compilation unit
+//! and retains the declarations, locals, static/dynamic partners, and OccBin
+//! regime companions those equations need. It does not register an MCP tool.
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -50,12 +50,11 @@ pub enum EquationDomain {
     Heterogeneous,
 }
 
-/// `Requested` is a selector hit. `Companion` is reserved for a later slice.
+/// `Requested` matched the selector. `Companion` was added because a retained
+/// row needs it. A row that is both stays `Requested`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EquationRole {
     Requested,
-    /// Filled when a later slice adds a required companion row.
-    #[allow(dead_code)]
     Companion,
 }
 
@@ -63,7 +62,8 @@ pub enum EquationRole {
 pub struct SelectedEquation {
     pub domain: EquationDomain,
     pub dimension: Option<String>,
-    pub index: usize,
+    /// Counted index. `None` for a `[static]` equation.
+    pub index: Option<usize>,
     pub name: Option<String>,
     pub role: EquationRole,
     pub tags: BTreeMap<String, String>,
@@ -74,7 +74,8 @@ pub struct SelectedEquation {
 pub struct ExtractOrigin {
     pub domain: EquationDomain,
     pub dimension: Option<String>,
-    pub index: usize,
+    /// Same index as the selected-equation entry. `None` for `[static]`.
+    pub index: Option<usize>,
     pub role: EquationRole,
     pub span: Span,
     pub file: Option<String>,
@@ -104,8 +105,6 @@ pub enum UnsupportedKind {
     CompilationUnit,
     Heterogeneous,
     Pac,
-    Occbin,
-    StaticDynamic,
     Include,
     Macro,
 }
@@ -167,26 +166,42 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
         });
     }
 
-    let closure = close(model, &aggregate);
-    if let Some(reason) = refuse(model, &aggregate, &closure, unit.missing_include) {
+    let kept = kept_equations(model, &aggregate);
+    let kept_indexes: Vec<usize> = kept.iter().map(|row| row.index).collect();
+    let closure = close(model, &kept_indexes);
+    if let Some(reason) = refuse(model, &kept_indexes, &closure, unit.missing_include) {
         return Ok(unsupported(reason.0, reason.1));
     }
+    let (occbin, occbin_omitted) = match occbin_setup(model, &kept_indexes) {
+        Ok(pair) => pair,
+        Err(detail) => return Ok(unsupported(UnsupportedKind::Macro, detail)),
+    };
 
-    let selected_equations = aggregate
+    let selected_equations = kept
         .iter()
-        .map(|&idx| selected_row(model, idx))
+        .map(|row| selected_row(model, row.index, row.role))
         .collect::<Vec<_>>();
-    let origins = aggregate
+    let origins = kept
         .iter()
-        .map(|&idx| origin_row(model, &unit.report, idx, request.active_file.as_deref()))
+        .map(|row| {
+            origin_row(
+                model,
+                &unit.report,
+                row.index,
+                row.role,
+                request.active_file.as_deref(),
+            )
+        })
         .collect();
+    let mut omitted_context = omitted(model);
+    omitted_context.extend(occbin_omitted);
 
     Ok(ExtractResult {
         status: ExtractStatus::Ok,
-        fragment: Some(render(model, &aggregate, &closure)),
+        fragment: Some(render(model, &kept_indexes, &closure, occbin.as_ref())),
         selected_equations,
         origins,
-        omitted_context: omitted(model),
+        omitted_context,
         explanation: String::new(),
         unsupported: None,
     })
@@ -236,11 +251,15 @@ fn origin_row(
     model: &Model,
     report: &ExpandReport,
     eq_index: usize,
+    role: EquationRole,
     active_file: Option<&str>,
 ) -> ExtractOrigin {
-    let counted = counted_index(model, eq_index);
-    let mapped = report.aggregate_origins.get(counted);
-    let row = selected_row(model, eq_index);
+    let row = selected_row(model, eq_index, role);
+    // Static equations are not in the expand map. Their span is the equation
+    // itself; a counted row uses the aggregate origin at that counted index.
+    let mapped = row
+        .index
+        .and_then(|counted| report.aggregate_origins.get(counted));
     let frames = mapped
         .map(|origin| {
             origin
@@ -572,12 +591,6 @@ fn refuse(
     if let Some(detail) = pac_block(model, selected, closure) {
         return Some((UnsupportedKind::Pac, detail));
     }
-    if let Some(detail) = occbin_block(model, selected) {
-        return Some((UnsupportedKind::Occbin, detail));
-    }
-    if let Some(detail) = static_block(model, selected) {
-        return Some((UnsupportedKind::StaticDynamic, detail));
-    }
     None
 }
 
@@ -766,51 +779,162 @@ fn expr_has_pac(model: &Model, id: Option<ExprId>) -> bool {
     calls.iter().any(|name| is_pac_name(model.name(*name)))
 }
 
-fn occbin_block(model: &Model, selected: &[usize]) -> Option<String> {
-    for &idx in selected {
-        let eq = &model.equations[idx];
-        if eq.tag_map.contains_key("bind") || eq.tag_map.contains_key("relax") {
-            return Some("a selected equation carries an OccBin bind or relax tag".to_string());
-        }
-        if !eq.name.is_empty()
-            && model.equations.iter().any(|other| {
-                other.name == eq.name
-                    && (other.tag_map.contains_key("bind") || other.tag_map.contains_key("relax"))
-            })
-        {
-            return Some(
-                "another equation with the same name carries an OccBin bind or relax tag"
-                    .to_string(),
-            );
-        }
-    }
-    None
+struct KeptEquation {
+    index: usize,
+    role: EquationRole,
 }
 
-fn static_block(model: &Model, selected: &[usize]) -> Option<String> {
-    for &idx in selected {
-        let eq = &model.equations[idx];
-        if eq.static_tag || eq.dynamic_tag {
-            return Some("a selected equation is tagged static or dynamic".to_string());
-        }
-        let lhs = lhs_symbol(model, eq);
-        if model
-            .equations
-            .iter()
-            .enumerate()
-            .any(|(other_idx, other)| {
-                other_idx != idx
-                    && (other.static_tag || other.dynamic_tag)
-                    && ((!eq.name.is_empty() && other.name == eq.name)
-                        || lhs_symbol(model, other).is_some_and(|name| lhs == Some(name)))
-            })
-        {
-            return Some(
-                "a static or dynamic equation is a partner of a selected equation".to_string(),
-            );
+/// Selector hits, plus the static/dynamic partners and OccBin same-name
+/// regimes of those hits, in source order. A row that matched the selector
+/// stays `Requested`. Companions are not walked again, so an equation that
+/// only shares a left-hand symbol with a partner is not kept.
+fn kept_equations(model: &Model, requested: &[usize]) -> Vec<KeptEquation> {
+    let mut role_of = vec![None; model.equations.len()];
+    for &idx in requested {
+        if role_of[idx].is_none() {
+            role_of[idx] = Some(EquationRole::Requested);
         }
     }
-    None
+    let hits: Vec<usize> = requested.to_vec();
+    for idx in hits {
+        for other in related_equations(model, idx) {
+            if role_of[other].is_none() {
+                role_of[other] = Some(EquationRole::Companion);
+            }
+        }
+    }
+    role_of
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, role)| role.map(|role| KeptEquation { index, role }))
+        .collect()
+}
+
+fn related_equations(model: &Model, idx: usize) -> Vec<usize> {
+    let eq = &model.equations[idx];
+    if eq.is_local {
+        return Vec::new();
+    }
+    model
+        .equations
+        .iter()
+        .enumerate()
+        .filter(|(other_idx, other)| {
+            *other_idx != idx
+                && !other.is_local
+                && (static_dynamic_partner(model, eq, other) || occbin_same_name(eq, other))
+        })
+        .map(|(other_idx, _)| other_idx)
+        .collect()
+}
+
+/// Another equation is a partner when either side is `[static]` or `[dynamic]`
+/// and they share a nonempty name or the same left-hand symbol.
+fn static_dynamic_partner(model: &Model, left: &Equation, right: &Equation) -> bool {
+    if !(left.static_tag || left.dynamic_tag || right.static_tag || right.dynamic_tag) {
+        return false;
+    }
+    let same_name = !left.name.is_empty() && left.name == right.name;
+    let same_lhs =
+        lhs_symbol(model, left).is_some_and(|name| lhs_symbol(model, right) == Some(name));
+    same_name || same_lhs
+}
+
+/// A bind/relax equation keeps every other aggregate equation with its name.
+fn occbin_same_name(left: &Equation, right: &Equation) -> bool {
+    !left.name.is_empty()
+        && left.name == right.name
+        && (left.tag_map.contains_key("bind") || left.tag_map.contains_key("relax"))
+}
+
+struct OccbinPiece {
+    text: String,
+    before_model: bool,
+}
+
+/// Named constraints cited by retained `bind` / `relax` tags, as one block.
+/// A name with no definition is omitted context. A definition whose span still
+/// contains `@#` or `@{` cannot be rendered.
+fn occbin_setup(
+    model: &Model,
+    kept: &[usize],
+) -> Result<(Option<OccbinPiece>, Vec<OmittedContext>), String> {
+    let mut needed = Vec::new();
+    let mut seen = HashSet::new();
+    for &idx in kept {
+        for name in tag_constraint_names(&model.equations[idx]) {
+            if seen.insert(name.clone()) {
+                needed.push(name);
+            }
+        }
+    }
+    let defined: Vec<&crate::model::OccbinConstraint> = model
+        .occbin_constraints
+        .iter()
+        .filter(|constraint| needed.iter().any(|name| name == &constraint.name))
+        .collect();
+    let defined_names: HashSet<&str> = defined
+        .iter()
+        .map(|constraint| constraint.name.as_str())
+        .collect();
+    let omitted = needed
+        .iter()
+        .filter(|name| !defined_names.contains(name.as_str()))
+        .map(|name| OmittedContext {
+            kind: "occbin_setup".to_string(),
+            detail: format!(
+                "constraint `{name}` is named by a bind or relax tag and has no occbin_constraints definition"
+            ),
+        })
+        .collect();
+    if defined.is_empty() {
+        return Ok((None, omitted));
+    }
+    let mut parts = Vec::new();
+    for constraint in &defined {
+        let text = slice_through_semi(&model.source, constraint.span);
+        if contains_macro(&text) {
+            return Err(
+                "an occbin_constraints entry still contains unexpanded macro text".to_string(),
+            );
+        }
+        parts.push(text);
+    }
+    let before_model = model.model_block.is_some_and(|block| {
+        defined
+            .iter()
+            .all(|constraint| constraint.span.start < block.start)
+    });
+    Ok((
+        Some(OccbinPiece {
+            text: format_occbin_block(&parts),
+            before_model,
+        }),
+        omitted,
+    ))
+}
+
+fn tag_constraint_names(eq: &Equation) -> Vec<String> {
+    let mut names = Vec::new();
+    for key in ["bind", "relax"] {
+        let Some(value) = eq.tag_map.get(key) else {
+            continue;
+        };
+        for piece in value.split(',') {
+            let name = piece.trim();
+            if !name.is_empty() {
+                names.push(name.to_string());
+            }
+        }
+    }
+    names
+}
+
+fn format_occbin_block(parts: &[String]) -> String {
+    let mut lines = vec!["occbin_constraints;".to_string()];
+    lines.extend(parts.iter().map(|part| part.trim().to_string()));
+    lines.push("end;".to_string());
+    lines.join("\n")
 }
 
 fn lhs_symbol(model: &Model, eq: &Equation) -> Option<Name> {
@@ -837,7 +961,7 @@ fn overlaps(left: Span, right: Span) -> bool {
     left.start < right.end && right.start < left.end
 }
 
-fn selected_row(model: &Model, eq_index: usize) -> SelectedEquation {
+fn selected_row(model: &Model, eq_index: usize, role: EquationRole) -> SelectedEquation {
     let eq = &model.equations[eq_index];
     let name = if eq.name.is_empty() {
         None
@@ -847,10 +971,20 @@ fn selected_row(model: &Model, eq_index: usize) -> SelectedEquation {
     SelectedEquation {
         domain: EquationDomain::Aggregate,
         dimension: None,
-        index: counted_index(model, eq_index),
+        index: equation_index(model, eq_index),
         name,
-        role: EquationRole::Requested,
+        role,
         tags: eq.tag_map.clone(),
+    }
+}
+
+/// `[static]` is not a counted equation. Every other non-local row keeps the
+/// counted index it already had.
+fn equation_index(model: &Model, eq_index: usize) -> Option<usize> {
+    if model.equations[eq_index].static_tag {
+        None
+    } else {
+        Some(counted_index(model, eq_index))
     }
 }
 
@@ -864,7 +998,12 @@ fn counted_index(model: &Model, eq_index: usize) -> usize {
         - 1
 }
 
-fn render(model: &Model, selected: &[usize], closure: &Closure) -> String {
+fn render(
+    model: &Model,
+    selected: &[usize],
+    closure: &Closure,
+    occbin: Option<&OccbinPiece>,
+) -> String {
     let mut lines = declaration_lines(model, closure);
     let opener = model
         .model_block
@@ -875,15 +1014,26 @@ fn render(model: &Model, selected: &[usize], closure: &Closure) -> String {
         body.push(equation_line(model, idx));
     }
     body.push("end;".to_string());
-    if !lines.is_empty() {
-        lines.push(String::new());
+    let model_text = body.join("\n");
+    if let Some(piece) = occbin.filter(|piece| piece.before_model) {
+        push_section(&mut lines, &piece.text);
     }
-    lines.push(body.join("\n"));
+    push_section(&mut lines, &model_text);
+    if let Some(piece) = occbin.filter(|piece| !piece.before_model) {
+        push_section(&mut lines, &piece.text);
+    }
     let mut text = lines.join("\n");
     if !text.ends_with('\n') {
         text.push('\n');
     }
     text
+}
+
+fn push_section(lines: &mut Vec<String>, section: &str) {
+    if !lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines.push(section.to_string());
 }
 
 fn declaration_lines(model: &Model, closure: &Closure) -> Vec<String> {
@@ -1424,7 +1574,7 @@ stoch_simul;
         let row = &result.selected_equations[0];
         assert_eq!(row.domain, EquationDomain::Aggregate);
         assert_eq!(row.dimension, None);
-        assert_eq!(row.index, 1);
+        assert_eq!(row.index, Some(1));
         assert_eq!(row.name.as_deref(), Some("cap"));
         assert_eq!(row.role, EquationRole::Requested);
         assert!(result.origins[0].frames.is_empty());
@@ -1464,7 +1614,7 @@ end;
         assert!(fragment.contains("model(linear);"), "{fragment}");
         assert!(!fragment.contains("delta"), "{fragment}");
         assert!(!fragment.contains("name='out'"), "{fragment}");
-        assert_eq!(result.selected_equations[0].index, 0);
+        assert_eq!(result.selected_equations[0].index, Some(0));
     }
 
     #[test]
@@ -1523,8 +1673,8 @@ end;
         );
         let tags = extract(&req(src, &[], &[("group", "g")])).unwrap();
         assert_eq!(tags.selected_equations.len(), 2);
-        assert_eq!(tags.selected_equations[0].index, 0);
-        assert_eq!(tags.selected_equations[1].index, 1);
+        assert_eq!(tags.selected_equations[0].index, Some(0));
+        assert_eq!(tags.selected_equations[1].index, Some(1));
     }
 
     #[test]
@@ -1610,42 +1760,264 @@ end;
     }
 
     #[test]
-    fn occbin_and_static_partners_are_unsupported() {
-        let occ = "\
-var y;
-model;
-  [name='r', bind='c']
-  y = 0;
-  [name='other']
-  y = 1;
-end;
-";
-        let bound = extract(&req(occ, &["r"], &[])).unwrap();
-        assert_eq!(bound.unsupported.unwrap().kind, UnsupportedKind::Occbin);
-        let other = extract(&req(occ, &["other"], &[])).unwrap();
-        assert_eq!(other.status, ExtractStatus::Ok);
-
-        let partner = "\
+    fn static_partner_is_retained_and_does_not_square_the_model() {
+        let src = "\
 var y, c;
 model;
   [name='eq']
   y = 0;
   [static]
   y = 1;
-  [name='ss', static]
-  c = 1;
+  [name='other']
+  c = 2;
 end;
 ";
-        let shared = extract(&req(partner, &["eq"], &[])).unwrap();
+        let mut request = req(src, &["eq"], &[]);
+        request.active_file = Some("partner.mod".to_string());
+        let result = extract(&request).unwrap();
+        assert_eq!(result.status, ExtractStatus::Ok);
+        let fragment = result.fragment.expect("fragment");
+        assert!(fragment.contains("[name='eq']"), "{fragment}");
+        assert!(fragment.contains("[static]"), "{fragment}");
+        assert!(fragment.contains("y = 0;"), "{fragment}");
+        assert!(fragment.contains("y = 1;"), "{fragment}");
+        assert!(!fragment.contains("name='other'"), "{fragment}");
+        assert!(!fragment.contains("c = 2"), "{fragment}");
+        assert!(!fragment.contains("var y, c"), "{fragment}");
+        assert_eq!(result.selected_equations.len(), 2);
+        assert_eq!(result.selected_equations[0].role, EquationRole::Requested);
+        assert_eq!(result.selected_equations[0].index, Some(0));
+        assert_eq!(result.selected_equations[0].name.as_deref(), Some("eq"));
+        assert_eq!(result.selected_equations[1].role, EquationRole::Companion);
+        assert_eq!(result.selected_equations[1].index, None);
         assert_eq!(
-            shared.unsupported.unwrap().kind,
-            UnsupportedKind::StaticDynamic
+            result.selected_equations[1]
+                .tags
+                .get("static")
+                .map(String::as_str),
+            Some("")
         );
-        let alone = extract(&req(partner, &["ss"], &[])).unwrap();
+        assert_eq!(result.origins.len(), 2);
+        assert_eq!(result.origins[1].role, EquationRole::Companion);
+        assert_eq!(result.origins[1].index, None);
+        assert_eq!(result.origins[1].file.as_deref(), Some("partner.mod"));
+        let static_src =
+            &src[result.origins[1].span.start as usize..result.origins[1].span.end as usize];
+        assert!(static_src.contains("y = 1"), "{static_src}");
+        assert!(result.origins[1].frames.is_empty());
+
+        let named = "\
+var y;
+model;
+  [name='eq']
+  y = 0;
+  [name='ss', static]
+  y = 1;
+end;
+";
+        let only_static = extract(&req(named, &["ss"], &[])).unwrap();
+        assert_eq!(only_static.status, ExtractStatus::Ok);
+        assert_eq!(only_static.selected_equations.len(), 2);
         assert_eq!(
-            alone.unsupported.unwrap().kind,
-            UnsupportedKind::StaticDynamic
+            only_static.selected_equations[0].role,
+            EquationRole::Companion
         );
+        assert_eq!(only_static.selected_equations[0].index, Some(0));
+        assert_eq!(
+            only_static.selected_equations[0].name.as_deref(),
+            Some("eq")
+        );
+        assert_eq!(
+            only_static.selected_equations[1].role,
+            EquationRole::Requested
+        );
+        assert_eq!(only_static.selected_equations[1].index, None);
+        assert_eq!(only_static.origins[1].index, None);
+        assert_eq!(only_static.origins[1].role, EquationRole::Requested);
+
+        let lone = "\
+var y;
+model;
+  [name='ss', static]
+  y = 1;
+  [name='dyn', dynamic]
+  y = 2;
+end;
+";
+        let dynamic_only = extract(&req(lone, &["dyn"], &[])).unwrap();
+        assert_eq!(dynamic_only.status, ExtractStatus::Ok);
+        assert_eq!(
+            dynamic_only.selected_equations[0].role,
+            EquationRole::Companion
+        );
+        assert_eq!(dynamic_only.selected_equations[0].index, None);
+        assert_eq!(
+            dynamic_only.selected_equations[1].role,
+            EquationRole::Requested
+        );
+        assert_eq!(dynamic_only.selected_equations[1].index, Some(0));
+        let dynamic_fragment = dynamic_only.fragment.unwrap();
+        assert!(
+            dynamic_fragment.contains("[name='dyn', dynamic]"),
+            "{dynamic_fragment}"
+        );
+        assert!(
+            dynamic_fragment.contains("[name='ss', static]"),
+            "{dynamic_fragment}"
+        );
+
+        let third = "\
+var y;
+model;
+  [name='eq']
+  y = 0;
+  [static]
+  y = 1;
+  [name='also']
+  y = 2;
+end;
+";
+        let extra = extract(&req(third, &["eq"], &[])).unwrap();
+        assert_eq!(extra.status, ExtractStatus::Ok);
+        assert_eq!(extra.selected_equations.len(), 2);
+        let extra_fragment = extra.fragment.expect("fragment");
+        assert!(extra_fragment.contains("y = 1;"), "{extra_fragment}");
+        assert!(!extra_fragment.contains("y = 2"), "{extra_fragment}");
+        assert!(!extra_fragment.contains("name='also'"), "{extra_fragment}");
+    }
+
+    #[test]
+    fn occbin_regime_keeps_the_same_name_and_the_named_constraint() {
+        let src = "\
+var y, i;
+model;
+  [name='policy', relax='ELB']
+  i = y;
+  [name='policy', bind='ELB']
+  i = 0;
+  [name='other']
+  y = 1;
+end;
+occbin_constraints;
+  name 'ELB';
+  bind i <= 0;
+  name 'idle';
+  bind y <= 2;
+end;
+";
+        let result = extract(&req(src, &["policy"], &[("bind", "ELB")])).unwrap();
+        assert_eq!(result.status, ExtractStatus::Ok);
+        let fragment = result.fragment.expect("fragment");
+        assert_eq!(result.selected_equations.len(), 2);
+        assert_eq!(result.selected_equations[0].role, EquationRole::Companion);
+        assert_eq!(result.selected_equations[0].name.as_deref(), Some("policy"));
+        assert_eq!(result.selected_equations[0].index, Some(0));
+        assert_eq!(
+            result.selected_equations[0]
+                .tags
+                .get("relax")
+                .map(String::as_str),
+            Some("ELB")
+        );
+        assert_eq!(result.selected_equations[1].role, EquationRole::Requested);
+        assert_eq!(result.selected_equations[1].index, Some(1));
+        assert_eq!(
+            result.selected_equations[1]
+                .tags
+                .get("bind")
+                .map(String::as_str),
+            Some("ELB")
+        );
+        assert_eq!(result.origins[0].role, EquationRole::Companion);
+        assert_eq!(result.origins[0].index, Some(0));
+        assert_eq!(result.origins[1].role, EquationRole::Requested);
+        assert_eq!(result.origins[1].index, Some(1));
+        assert!(fragment.contains("relax='ELB'"), "{fragment}");
+        assert!(fragment.contains("bind='ELB'"), "{fragment}");
+        assert!(fragment.contains("i = y;"), "{fragment}");
+        assert!(fragment.contains("i = 0;"), "{fragment}");
+        assert!(fragment.contains("var y, i;"), "{fragment}");
+        assert!(!fragment.contains("name='other'"), "{fragment}");
+        assert!(fragment.contains("occbin_constraints;"), "{fragment}");
+        assert!(fragment.contains("name 'ELB'"), "{fragment}");
+        assert!(fragment.contains("bind i <= 0;"), "{fragment}");
+        assert!(!fragment.contains("idle"), "{fragment}");
+        assert!(!fragment.contains("y <= 2"), "{fragment}");
+        let model_at = fragment.find("model;").unwrap();
+        let setup_at = fragment.find("occbin_constraints;").unwrap();
+        assert!(model_at < setup_at, "{fragment}");
+
+        let both = extract(&req(src, &["policy"], &[])).unwrap();
+        assert_eq!(both.selected_equations.len(), 2);
+        assert!(both
+            .selected_equations
+            .iter()
+            .all(|row| row.role == EquationRole::Requested));
+
+        let before = "\
+occbin_constraints;
+  name 'ELB';
+  bind i <= 0;
+end;
+var i;
+model;
+  [name='policy', bind='ELB']
+  i = 0;
+  [name='policy', relax='ELB']
+  i = 1;
+end;
+";
+        let leading = extract(&req(before, &["policy"], &[("bind", "ELB")])).unwrap();
+        let leading_fragment = leading.fragment.expect("fragment");
+        let setup_at = leading_fragment.find("occbin_constraints;").unwrap();
+        let model_at = leading_fragment.find("model;").unwrap();
+        assert!(setup_at < model_at, "{leading_fragment}");
+        assert!(leading_fragment.contains("i = 1;"), "{leading_fragment}");
+    }
+
+    #[test]
+    fn missing_occbin_constraint_is_omitted_and_the_fragment_stays() {
+        let src = "\
+var y;
+model;
+  [name='r', bind='c']
+  y = 0;
+  [name='r', relax='c']
+  y = 1;
+end;
+";
+        let result = extract(&req(src, &["r"], &[("bind", "c")])).unwrap();
+        assert_eq!(result.status, ExtractStatus::Ok);
+        let fragment = result.fragment.expect("fragment");
+        assert!(fragment.contains("bind='c'"), "{fragment}");
+        assert!(fragment.contains("relax='c'"), "{fragment}");
+        assert!(!fragment.contains("occbin_constraints"), "{fragment}");
+        assert_eq!(result.selected_equations[0].role, EquationRole::Requested);
+        assert_eq!(result.selected_equations[1].role, EquationRole::Companion);
+        assert!(result
+            .omitted_context
+            .iter()
+            .any(|item| { item.kind == "occbin_setup" && item.detail.contains("`c`") }));
+    }
+
+    #[test]
+    fn macro_in_an_occbin_constraint_has_no_fragment() {
+        let src = "\
+var y;
+occbin_constraints;
+  name 'c';
+  // @{kept}
+  bind y >= 0;
+end;
+model;
+  [name='r', bind='c']
+  y = 0;
+end;
+";
+        let result = extract(&req(src, &["r"], &[])).unwrap();
+        assert_eq!(result.status, ExtractStatus::UnsupportedContext);
+        assert!(result.fragment.is_none());
+        assert_eq!(result.unsupported.unwrap().kind, UnsupportedKind::Macro);
     }
 
     #[test]
