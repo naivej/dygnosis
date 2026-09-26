@@ -34,6 +34,7 @@ Limitations by design
 - Go to definition / type definition
 - Find references and rename (including across `@#include` files where the graph is known)
 - Completions
+- Signature help for a command's options (`(`, `,`, and `=`)
 - Format document / range
 - Code actions and auto-fix where a fix is stored
 - Folding and links into `@#include` files and companions (e.g. `FILENAME_steadystate.m`)

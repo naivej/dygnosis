@@ -59,6 +59,7 @@ pub mod preprocessor;
 pub mod refs;
 pub mod server;
 mod shape_gate;
+mod signature_help;
 pub mod span;
 pub mod workspace;
 pub(crate) mod workspace_diagnose;

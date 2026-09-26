@@ -375,6 +375,14 @@ impl Backend {
         Some(CompletionResponse::Array(default_completions(model)))
     }
 
+    fn signature_at(&self, pos: &TextDocumentPositionParams) -> Option<SignatureHelp> {
+        let inner = self.lock_inner();
+        let doc = inner.docs.get(&pos.text_document.uri)?;
+        let index = LineIndex::new(&doc.text);
+        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
+        crate::signature_help::signature_help(&doc.text, byte)
+    }
+
     fn prepare_rename_at(&self, pos: &TextDocumentPositionParams) -> Option<Range> {
         let inner = self.lock_inner();
         let doc = inner.docs.get(&pos.text_document.uri)?;
@@ -1263,6 +1271,10 @@ impl LanguageServer for Backend {
         Ok(self.complete(&params.text_document_position))
     }
 
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        Ok(self.signature_at(&params.text_document_position_params))
+    }
+
     async fn prepare_rename(
         &self,
         params: TextDocumentPositionParams,
@@ -1383,6 +1395,10 @@ pub fn initialize_result() -> InitializeResult {
             completion_provider: Some(CompletionOptions {
                 trigger_characters: Some(vec!["(".into(), ",".into()]),
                 ..CompletionOptions::default()
+            }),
+            signature_help_provider: Some(SignatureHelpOptions {
+                trigger_characters: Some(vec!["(".into(), ",".into(), "=".into()]),
+                ..SignatureHelpOptions::default()
             }),
             rename_provider: Some(OneOf::Right(RenameOptions {
                 prepare_provider: Some(true),

@@ -832,7 +832,7 @@ fn initialize_capabilities_wave_b() {
     assert!(result.capabilities.references_provider.is_some());
     assert!(result.capabilities.document_highlight_provider.is_some());
     assert!(result.capabilities.linked_editing_range_provider.is_some());
-    assert!(result.capabilities.signature_help_provider.is_none());
+    assert!(result.capabilities.signature_help_provider.is_some());
     assert_eq!(
         result.capabilities.text_document_sync,
         Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL))
@@ -2176,7 +2176,7 @@ fn initialize_capabilities_wave_c() {
         .capabilities
         .document_range_formatting_provider
         .is_some());
-    assert!(result.capabilities.signature_help_provider.is_none());
+    assert!(result.capabilities.signature_help_provider.is_some());
     assert_eq!(
         result.capabilities.text_document_sync,
         Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL))
@@ -3391,4 +3391,278 @@ async fn show_effective_model_us_re09() {
         "phillips origin {slice:?}"
     );
     assert!(slice.contains("@#endfor"), "phillips origin {slice:?}");
+}
+
+fn slice_signature_label(label: &str, start: u32, end: u32) -> String {
+    let units: Vec<u16> = label.encode_utf16().collect();
+    String::from_utf16(&units[start as usize..end as usize]).expect("parameter label")
+}
+
+fn signature_param_name(help: &SignatureHelp, index: usize) -> String {
+    let sig = help.signatures.first().expect("signature");
+    let params = sig.parameters.as_ref().expect("parameters");
+    match &params[index].label {
+        ParameterLabel::LabelOffsets([start, end]) => {
+            slice_signature_label(&sig.label, *start, *end)
+        }
+        ParameterLabel::Simple(text) => text.clone(),
+    }
+}
+
+fn signature_param_doc(help: &SignatureHelp, index: usize) -> String {
+    let sig = help.signatures.first().expect("signature");
+    let params = sig.parameters.as_ref().expect("parameters");
+    match &params[index].documentation {
+        Some(Documentation::String(text)) => text.clone(),
+        Some(Documentation::MarkupContent(markup)) => markup.value.clone(),
+        None => String::new(),
+    }
+}
+
+fn active_signature_option(help: &SignatureHelp) -> Option<String> {
+    let index = help.active_parameter? as usize;
+    Some(signature_param_name(help, index))
+}
+
+async fn signature_at_byte(text: &str, byte: usize) -> Option<SignatureHelp> {
+    let uri = Url::parse("file:///tmp/signature_help.mod").unwrap();
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.to_string(), 1))
+        .await;
+    service
+        .inner()
+        .signature_help(SignatureHelpParams {
+            context: None,
+            text_document_position_params: tdp(uri, text, byte),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("signature rpc")
+}
+
+#[test]
+fn signature_help_triggers_are_paren_comma_and_equal() {
+    let opts = initialize_result()
+        .capabilities
+        .signature_help_provider
+        .expect("signature help");
+    assert_eq!(
+        opts.trigger_characters,
+        Some(vec!["(".into(), ",".into(), "=".into()])
+    );
+}
+
+#[tokio::test]
+async fn signature_help_nested_commas_stay_on_the_outer_option() {
+    let paren = "stoch_simul(graph_format=(pdf, fig), order=1);";
+    let paren_byte = paren.find("(pdf,").unwrap() + "(pdf,".len();
+    let paren_help = signature_at_byte(paren, paren_byte)
+        .await
+        .expect("paren signature");
+    assert_eq!(
+        active_signature_option(&paren_help).as_deref(),
+        Some("graph_format")
+    );
+
+    let bracket = "stoch_simul(conditional_variance_decomposition=[1, 2], irf=1);";
+    let bracket_byte = bracket.find("[1,").unwrap() + "[1,".len();
+    let bracket_help = signature_at_byte(bracket, bracket_byte)
+        .await
+        .expect("bracket signature");
+    assert_eq!(
+        active_signature_option(&bracket_help).as_deref(),
+        Some("conditional_variance_decomposition")
+    );
+
+    let brace = "stoch_simul(order={1, 2}, irf=1);";
+    let brace_byte = brace.find("{1,").unwrap() + "{1,".len();
+    let brace_help = signature_at_byte(brace, brace_byte)
+        .await
+        .expect("brace signature");
+    assert_eq!(
+        active_signature_option(&brace_help).as_deref(),
+        Some("order")
+    );
+
+    let advanced = "stoch_simul(order=1, irf";
+    let advanced_byte = advanced.len();
+    let advanced_help = signature_at_byte(advanced, advanced_byte)
+        .await
+        .expect("comma advances");
+    assert_eq!(
+        active_signature_option(&advanced_help).as_deref(),
+        Some("irf")
+    );
+    assert_ne!(advanced_help.active_parameter, Some(1));
+}
+
+#[tokio::test]
+async fn signature_help_incomplete_option_stays_active() {
+    let open = "stoch_simul(";
+    let open_help = signature_at_byte(open, open.len())
+        .await
+        .expect("open signature");
+    let sig = open_help.signatures.first().expect("signature");
+    let params = sig.parameters.as_ref().expect("parameters");
+    assert_eq!(params.len(), dygnosis::command_options("stoch_simul").len());
+    assert_eq!(signature_param_name(&open_help, 0), "aim_solver");
+    assert!(sig.label.starts_with("stoch_simul("), "{}", sig.label);
+    assert!(open_help.active_parameter.is_none());
+
+    let partial = "stoch_simul(order";
+    let partial_help = signature_at_byte(partial, partial.len())
+        .await
+        .expect("partial signature");
+    assert_eq!(
+        active_signature_option(&partial_help).as_deref(),
+        Some("order")
+    );
+    let index = partial_help.active_parameter.expect("active order") as usize;
+    assert!(signature_param_doc(&partial_help, index).contains("Taylor"));
+
+    let equals = "stoch_simul(order=";
+    let equals_help = signature_at_byte(equals, equals.len())
+        .await
+        .expect("equals signature");
+    assert_eq!(
+        active_signature_option(&equals_help).as_deref(),
+        Some("order")
+    );
+
+    let prefix = "stoch_simul(ord";
+    let prefix_help = signature_at_byte(prefix, prefix.len())
+        .await
+        .expect("prefix signature");
+    assert_eq!(
+        active_signature_option(&prefix_help).as_deref(),
+        Some("order")
+    );
+
+    let ambiguous = "stoch_simul(ir";
+    let ambiguous_help = signature_at_byte(ambiguous, ambiguous.len())
+        .await
+        .expect("ambiguous prefix signature");
+    assert!(ambiguous_help.active_parameter.is_none());
+}
+
+#[tokio::test]
+async fn signature_help_ignores_commas_in_strings_and_comments() {
+    let string = "stoch_simul(order=\"1,2\");";
+    let string_byte = string.find("\"1,").unwrap() + "\"1,".len();
+    let string_help = signature_at_byte(string, string_byte)
+        .await
+        .expect("string signature");
+    assert_eq!(
+        active_signature_option(&string_help).as_deref(),
+        Some("order")
+    );
+
+    let comment = "stoch_simul(order=1 /* , */)";
+    let comment_byte = comment.find("*/").unwrap() + 2;
+    let comment_help = signature_at_byte(comment, comment_byte)
+        .await
+        .expect("comment signature");
+    assert_eq!(
+        active_signature_option(&comment_help).as_deref(),
+        Some("order")
+    );
+}
+
+#[tokio::test]
+async fn signature_help_heterogeneous_shocks_use_that_option_list() {
+    let ordinary = "shocks(overwrite)";
+    let ordinary_byte = ordinary.find("overwrite").unwrap() + "overwrite".len();
+    let ordinary_help = signature_at_byte(ordinary, ordinary_byte)
+        .await
+        .expect("ordinary shocks");
+    let ordinary_sig = ordinary_help.signatures.first().expect("signature");
+    assert_eq!(
+        ordinary_sig.label,
+        "shocks(heterogeneity, learnt_in, overwrite, surprise)"
+    );
+    let ordinary_index = ordinary_help.active_parameter.expect("overwrite") as usize;
+    let ordinary_doc = signature_param_doc(&ordinary_help, ordinary_index);
+    assert!(ordinary_doc.contains("Regular shocks"), "{ordinary_doc}");
+    assert!(
+        !ordinary_doc.contains("this heterogeneity dimension"),
+        "{ordinary_doc}"
+    );
+
+    let het = "shocks(heterogeneity=d, overwrite)";
+    let het_byte = het.find("overwrite").unwrap() + "overwrite".len();
+    let het_help = signature_at_byte(het, het_byte)
+        .await
+        .expect("heterogeneous shocks");
+    let het_sig = het_help.signatures.first().expect("signature");
+    assert_eq!(het_sig.label, "shocks(heterogeneity, overwrite)");
+    assert_eq!(
+        active_signature_option(&het_help).as_deref(),
+        Some("overwrite")
+    );
+    let het_doc = signature_param_doc(&het_help, het_help.active_parameter.unwrap() as usize);
+    assert!(
+        het_doc.contains("this heterogeneity dimension"),
+        "{het_doc}"
+    );
+    assert!(!het_doc.contains("Regular shocks"), "{het_doc}");
+
+    let later = "shocks(overwrite, heterogeneity=d)";
+    let later_byte = later.find("overwrite").unwrap() + "overwrite".len();
+    let later_help = signature_at_byte(later, later_byte)
+        .await
+        .expect("heterogeneity after overwrite");
+    assert_eq!(
+        later_help.signatures[0].label,
+        "shocks(heterogeneity, overwrite)"
+    );
+    assert_eq!(
+        active_signature_option(&later_help).as_deref(),
+        Some("overwrite")
+    );
+    let later_doc = signature_param_doc(&later_help, later_help.active_parameter.unwrap() as usize);
+    assert!(
+        later_doc.contains("this heterogeneity dimension"),
+        "{later_doc}"
+    );
+}
+
+#[tokio::test]
+async fn signature_help_is_absent_outside_an_option_list() {
+    let equation = "model;\ny = log(y(-1));\nend;\n";
+    let in_call = equation.find("log(").unwrap() + "log(".len();
+    assert!(signature_at_byte(equation, in_call).await.is_none());
+    let on_name = equation.find("y =").unwrap();
+    assert!(signature_at_byte(equation, on_name).await.is_none());
+
+    let bare = "stoch_simul;";
+    assert!(signature_at_byte(bare, 0).await.is_none());
+
+    let no_options = "set_time(2020Q1);";
+    let inside = no_options.find('(').unwrap() + 1;
+    assert!(signature_at_byte(no_options, inside).await.is_none());
+
+    let declaration = "var(heterogeneity=d) a;";
+    let option = declaration.find("heterogeneity").unwrap();
+    assert!(signature_at_byte(declaration, option).await.is_none());
+}
+
+#[tokio::test]
+async fn signature_help_emoji_on_the_line_does_not_shift_the_option() {
+    let text = "stoch_simul(order/*😀*/,irf);";
+    let comma = text.find(',').unwrap();
+    let index = dygnosis::span::LineIndex::new(text);
+    let utf16 = index.position_utf16(text, comma as u32);
+    let scalar = index.position(text, comma as u32);
+    assert!(
+        utf16.character > scalar.character,
+        "utf16 {} scalar {}",
+        utf16.character,
+        scalar.character
+    );
+    let help = signature_at_byte(text, comma)
+        .await
+        .expect("emoji signature");
+    assert_eq!(active_signature_option(&help).as_deref(), Some("order"));
 }
