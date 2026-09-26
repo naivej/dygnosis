@@ -61,6 +61,7 @@ pub mod server;
 mod shape_gate;
 pub mod span;
 pub mod workspace;
+pub(crate) mod workspace_diagnose;
 
 pub use auto_fix::{apply_fix, auto_fix};
 pub use catalog::{
