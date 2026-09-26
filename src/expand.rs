@@ -34,6 +34,13 @@ pub struct EquationOrigin {
     pub origin_span: Span,
     pub origin_uri: Option<String>,
     pub origin_frames: Vec<OriginFrame>,
+    /// The equation's own tokens in the origin file. Not the surrounding
+    /// `@#if` or `@#for` body.
+    pub written_span: Span,
+    /// Tokens of this equation come from more than one file.
+    pub ambiguous: bool,
+    /// This row is one expansion of an `@#for` body.
+    pub loop_copy: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,13 +160,17 @@ fn origin_for_row(
         tokens.iter().map(|t| map_span(map, t.span)).collect();
 
     let mut files: Vec<String> = Vec::new();
+    let mut saw_missing = false;
     for (file, _) in &mapped {
         if let Some(f) = file {
             if !files.iter().any(|e| e == f) {
                 files.push(f.clone());
             }
+        } else {
+            saw_missing = true;
         }
     }
+    let ambiguous = files.len() > 1 || (saw_missing && !files.is_empty());
 
     let mut best: &[usize] = &[];
     for tr in traces {
@@ -181,9 +192,13 @@ fn origin_for_row(
     };
 
     let has_shorter = traces.iter().any(|t| t.frames.len() < best.len());
-    // A one-level loop frame belongs to an equation the loop generated. A loop
-    // inside a larger equation does not make that equation one iteration.
-    let loop_instance = best.iter().any(|&id| arena[id].kind == "for") && !has_shorter;
+    // Every token sits in a loop, including a one-iteration loop and a loop
+    // that also contains an `@#if`. A loop around only part of the equation
+    // does not.
+    let loop_instance = !traces.is_empty()
+        && traces
+            .iter()
+            .all(|trace| trace.frames.iter().any(|&id| arena[id].kind == "for"));
     let keep_frames = best.len() > 1 || loop_instance;
     let origin_frames = if keep_frames {
         best.iter()
@@ -203,6 +218,7 @@ fn origin_for_row(
         Vec::new()
     };
 
+    let written_span = covering(&mapped, origin_uri.as_deref());
     let origin_span = match best.last() {
         None => covering(&mapped, origin_uri.as_deref()),
         Some(&id) => {
@@ -223,6 +239,9 @@ fn origin_for_row(
         origin_span,
         origin_uri,
         origin_frames,
+        written_span,
+        ambiguous,
+        loop_copy: loop_instance,
     }
 }
 
