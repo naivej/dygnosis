@@ -37,6 +37,14 @@ fn apply_edit(text: &str, edit: &TextEdit) -> String {
 }
 
 async fn template_for(text: &str, only: Option<Vec<CodeActionKind>>) -> Option<CodeAction> {
+    template_named(text, "Insert stochastic shocks template", only).await
+}
+
+async fn template_named(
+    text: &str,
+    title: &str,
+    only: Option<Vec<CodeActionKind>>,
+) -> Option<CodeAction> {
     let uri = Url::parse("file:///tmp/shock_template.mod").unwrap();
     let (service, _socket) = new_service();
     service
@@ -67,9 +75,7 @@ async fn template_for(text: &str, only: Option<Vec<CodeActionKind>>) -> Option<C
         .expect("code action");
     actions.and_then(|items| {
         items.into_iter().find_map(|item| match item {
-            CodeActionOrCommand::CodeAction(action) if action.title == "Insert shocks template" => {
-                Some(action)
-            }
+            CodeActionOrCommand::CodeAction(action) if action.title == title => Some(action),
             _ => None,
         })
     })
@@ -264,7 +270,9 @@ async fn include_supplies_names_and_an_ordinary_block_hides_the_action() {
     let action = offered
         .into_iter()
         .find_map(|item| match item {
-            CodeActionOrCommand::CodeAction(action) if action.title == "Insert shocks template" => {
+            CodeActionOrCommand::CodeAction(action)
+                if action.title == "Insert stochastic shocks template" =>
+            {
                 Some(action)
             }
             _ => None,
@@ -315,7 +323,9 @@ async fn include_supplies_names_and_an_ordinary_block_hides_the_action() {
         .expect("code action");
     let still = hidden.and_then(|items| {
         items.into_iter().find_map(|item| match item {
-            CodeActionOrCommand::CodeAction(action) if action.title == "Insert shocks template" => {
+            CodeActionOrCommand::CodeAction(action)
+                if action.title == "Insert stochastic shocks template" =>
+            {
                 Some(action)
             }
             _ => None,
@@ -326,4 +336,111 @@ async fn include_supplies_names_and_an_ordinary_block_hides_the_action() {
         "ordinary shocks in the include hide the action"
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn both_forms_follow_command_context_and_declared_names() {
+    let deterministic = "Insert deterministic shocks template";
+    let stochastic = "Insert stochastic shocks template";
+
+    let plain = "varexo e;\nvarexo_det x;\n";
+    let plain_det = template_named(plain, deterministic, None)
+        .await
+        .expect("deterministic form");
+    let edit = plain_det
+        .edit
+        .unwrap()
+        .changes
+        .unwrap()
+        .into_values()
+        .next()
+        .unwrap()
+        .remove(0);
+    assert!(edit
+        .new_text
+        .contains("// var e;\n// periods ;\n// values ;"));
+    assert!(edit
+        .new_text
+        .contains("// var x;\n// periods ;\n// values ;"));
+    assert!(template_named(plain, stochastic, None).await.is_some());
+
+    let stoch_only = "varexo e;\nstoch_simul;\n";
+    assert!(template_named(stoch_only, stochastic, None).await.is_some());
+    assert!(template_named(stoch_only, deterministic, None)
+        .await
+        .is_none());
+
+    let pf_only = "varexo e;\nperfect_foresight_setup(periods=5);\nperfect_foresight_solver;\n";
+    assert!(template_named(pf_only, stochastic, None).await.is_none());
+    let action = template_named(pf_only, deterministic, None)
+        .await
+        .expect("PF form");
+    let edit = action
+        .edit
+        .unwrap()
+        .changes
+        .unwrap()
+        .into_values()
+        .next()
+        .unwrap()
+        .remove(0);
+    assert!(edit.new_text.contains("// periods ;\n// values ;"));
+    assert!(e001_count(&apply_edit(pf_only, &edit)) <= e001_count(pf_only));
+
+    let mixed = "varexo e;\nvarexo_det x;\nstoch_simul;\nperfect_foresight_setup(periods=5);\n";
+    assert!(template_named(mixed, stochastic, None).await.is_some());
+    assert!(template_named(mixed, deterministic, None).await.is_some());
+
+    let det_name_only = "varexo_det x;\n";
+    assert!(template_named(det_name_only, stochastic, None)
+        .await
+        .is_none());
+    assert!(template_named(det_name_only, deterministic, None)
+        .await
+        .is_some());
+}
+
+#[tokio::test]
+async fn unfinished_blocks_receive_an_action_at_a_top_level_gap() {
+    for block in ["initval", "steady_state_model", "estimated_params"] {
+        let text = format!("varexo e;\n{block};\ne = 0;\n");
+        for title in [
+            "Insert stochastic shocks template",
+            "Insert deterministic shocks template",
+        ] {
+            let action = template_named(&text, title, None)
+                .await
+                .expect("safe action");
+            let edit = action
+                .edit
+                .unwrap()
+                .changes
+                .unwrap()
+                .into_values()
+                .next()
+                .unwrap()
+                .remove(0);
+            let edited = apply_edit(&text, &edit);
+            assert!(
+                edited.find("// shocks;").unwrap() < edited.find(block).unwrap(),
+                "{edited}"
+            );
+            assert!(e001_count(&edited) <= e001_count(&text), "{edited}");
+        }
+    }
+    let closed = "varexo e;\ninitval;\ne = 0;\nend;\n";
+    let action = template_named(closed, "Insert deterministic shocks template", None)
+        .await
+        .unwrap();
+    let edit = action
+        .edit
+        .unwrap()
+        .changes
+        .unwrap()
+        .into_values()
+        .next()
+        .unwrap()
+        .remove(0);
+    let edited = apply_edit(closed, &edit);
+    assert!(edited.find("// shocks;").unwrap() > edited.find("end;").unwrap());
 }

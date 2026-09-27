@@ -1,4 +1,4 @@
-//! Explicit code action: a commented shocks template for ordinary aggregate `varexo`.
+//! Explicit code actions: commented stochastic and deterministic shocks templates.
 
 use std::collections::HashSet;
 
@@ -8,15 +8,25 @@ use crate::model::{Model, ShockBlockKind, SurgeryKind};
 /// One name per ordinary aggregate `varexo`, in declaration order.
 /// `varexo_det` and `varexo(heterogeneity=…)` are left out. A repeated name is listed once.
 pub(crate) fn aggregate_varexo_names(model: &Model) -> Vec<String> {
+    aggregate_names(model, false)
+}
+
+/// Ordinary aggregate exogenous names for deterministic shocks, including `varexo_det`.
+pub(crate) fn aggregate_deterministic_names(model: &Model) -> Vec<String> {
+    aggregate_names(model, true)
+}
+
+fn aggregate_names(model: &Model, include_deterministic: bool) -> Vec<String> {
     let mut names = Vec::new();
     let mut seen = HashSet::new();
     for decl in &model.exogenous {
         if decl.heterogeneity.is_some() {
             continue;
         }
-        let removed_endogenous = model.surgery_exits.iter().any(|exit| {
-            exit.name == decl.name && exit.kind == SurgeryKind::Exogenous
-        });
+        let removed_endogenous = model
+            .surgery_exits
+            .iter()
+            .any(|exit| exit.name == decl.name && exit.kind == SurgeryKind::Exogenous);
         if removed_endogenous {
             continue;
         }
@@ -24,7 +34,7 @@ pub(crate) fn aggregate_varexo_names(model: &Model) -> Vec<String> {
             .deterministic_exogenous
             .iter()
             .any(|det| det.name == decl.name && det.span == decl.span);
-        if deterministic {
+        if deterministic && !include_deterministic {
             continue;
         }
         let name = model.name(decl.name).to_string();
@@ -34,6 +44,34 @@ pub(crate) fn aggregate_varexo_names(model: &Model) -> Vec<String> {
         names.push(name);
     }
     names
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TemplateKind {
+    Stochastic,
+    Deterministic,
+}
+
+impl TemplateKind {
+    pub(crate) fn title(self) -> &'static str {
+        match self {
+            Self::Stochastic => "Insert stochastic shocks template",
+            Self::Deterministic => "Insert deterministic shocks template",
+        }
+    }
+}
+
+/// Command context selects one form when clear, and both when mixed or unspecified.
+pub(crate) fn available_kinds(model: &Model) -> Vec<TemplateKind> {
+    let stochastic = model.is_stochastic_context();
+    let deterministic = model.is_pf_solver_context()
+        || model.perfect_foresight_setup_span.is_some()
+        || model.pfee_setup_span.is_some();
+    match (stochastic, deterministic) {
+        (true, false) => vec![TemplateKind::Stochastic],
+        (false, true) => vec![TemplateKind::Deterministic],
+        _ => vec![TemplateKind::Stochastic, TemplateKind::Deterministic],
+    }
 }
 
 /// A plain `shocks` block, including `shocks(overwrite)`.
@@ -51,7 +89,7 @@ pub(crate) struct Insertion {
 }
 
 /// Where to insert, and the commented template. `None` when no name is eligible or no byte is safe.
-pub(crate) fn insertion(text: &str, names: &[String]) -> Option<Insertion> {
+pub(crate) fn insertion(text: &str, names: &[String], kind: TemplateKind) -> Option<Insertion> {
     if names.is_empty() {
         return None;
     }
@@ -59,14 +97,14 @@ pub(crate) fn insertion(text: &str, names: &[String]) -> Option<Insertion> {
     let byte = choose_offset(text, &scan)?;
     Some(Insertion {
         byte,
-        new_text: insertion_text(text, byte, names),
+        new_text: insertion_text(text, byte, names, kind),
     })
 }
 
 struct Scan {
     last_decl_end: Option<u32>,
     first_command: Option<u32>,
-    model_spans: Vec<(u32, u32)>,
+    block_spans: Vec<(u32, u32)>,
 }
 
 fn scan(text: &str) -> Scan {
@@ -74,7 +112,7 @@ fn scan(text: &str) -> Scan {
     let mut i = 0;
     let mut last_decl_end = None;
     let mut first_command = None;
-    let mut model_spans = Vec::new();
+    let mut block_spans = Vec::new();
     while i < tokens.len() && tokens[i].kind != TokenKind::Eof {
         if tokens[i].kind != TokenKind::Ident {
             i = if matches!(
@@ -102,16 +140,12 @@ fn scan(text: &str) -> Scan {
         if is_block(&word) {
             let start = tokens[i].span.start;
             let (next, end_byte, closed) = skip_block(&tokens, text, i);
-            if word == "model" {
-                let end = if closed {
-                    end_byte
-                } else if end_byte >= text.len() as u32 {
-                    text.len() as u32 + 1
-                } else {
-                    end_byte
-                };
-                model_spans.push((start, end));
-            }
+            let end = if !closed && end_byte >= text.len() as u32 {
+                text.len() as u32 + 1
+            } else {
+                end_byte
+            };
+            block_spans.push((start, end));
             i = next;
             continue;
         }
@@ -130,14 +164,14 @@ fn scan(text: &str) -> Scan {
     Scan {
         last_decl_end,
         first_command,
-        model_spans,
+        block_spans,
     }
 }
 
 fn choose_offset(text: &str, scan: &Scan) -> Option<u32> {
     let decl_end = scan.last_decl_end.unwrap_or(0);
     let eof = text.len() as u32;
-    let safe = |at: u32| !point_is_unsafe(text, at, &scan.model_spans);
+    let safe = |at: u32| !point_is_unsafe(text, at, &scan.block_spans);
     if let Some(cmd) = scan.first_command {
         if decl_end <= cmd {
             if safe(cmd) {
@@ -172,7 +206,7 @@ fn before_horizontal_space(text: &str, at: u32) -> u32 {
     i as u32
 }
 
-fn insertion_text(text: &str, at: u32, names: &[String]) -> String {
+fn insertion_text(text: &str, at: u32, names: &[String], kind: TemplateKind) -> String {
     let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let mut body = String::new();
     body.push_str("// shocks;");
@@ -182,8 +216,18 @@ fn insertion_text(text: &str, at: u32, names: &[String]) -> String {
         body.push_str(name);
         body.push(';');
         body.push_str(nl);
-        body.push_str("// stderr ;");
-        body.push_str(nl);
+        match kind {
+            TemplateKind::Stochastic => {
+                body.push_str("// stderr ;");
+                body.push_str(nl);
+            }
+            TemplateKind::Deterministic => {
+                body.push_str("// periods ;");
+                body.push_str(nl);
+                body.push_str("// values ;");
+                body.push_str(nl);
+            }
+        }
     }
     body.push_str("// end;");
     body.push_str(nl);
@@ -335,13 +379,13 @@ fn statement_semi_after(tokens: &[Token], index: usize) -> bool {
 }
 
 fn ident_seen_before(tokens: &[Token], src: &str, before: usize, word: &str) -> bool {
-    tokens[..before].iter().any(|tok| {
-        tok.kind == TokenKind::Ident && tok.text(src).eq_ignore_ascii_case(word)
-    })
+    tokens[..before]
+        .iter()
+        .any(|tok| tok.kind == TokenKind::Ident && tok.text(src).eq_ignore_ascii_case(word))
 }
 
-fn point_is_unsafe(text: &str, at: u32, model_spans: &[(u32, u32)]) -> bool {
-    model_spans
+fn point_is_unsafe(text: &str, at: u32, block_spans: &[(u32, u32)]) -> bool {
+    block_spans
         .iter()
         .any(|(start, end)| *start <= at && at < *end)
         || in_comment_string_or_directive(text, at)
@@ -488,6 +532,10 @@ mod tests {
             aggregate_varexo_names(&model),
             vec!["u".to_string(), "e".to_string()]
         );
+        assert_eq!(
+            aggregate_deterministic_names(&model),
+            vec!["u".to_string(), "e".to_string(), "x".to_string()]
+        );
     }
 
     #[test]
@@ -510,7 +558,12 @@ mod tests {
     fn template_goes_before_the_first_command_and_adds_no_e001() {
         let text = "var y;\nvarexo e;\nparameters a;\na = 0.9;\nmodel;\ny = a * y(-1) + e;\nend;\nstoch_simul;\n";
         let model = parse(text);
-        let edit = insertion(text, &aggregate_varexo_names(&model)).unwrap();
+        let edit = insertion(
+            text,
+            &aggregate_varexo_names(&model),
+            TemplateKind::Stochastic,
+        )
+        .unwrap();
         let edited = apply_at(text, &edit);
         let template = edited.find("// shocks;").unwrap();
         let command = edited.find("stoch_simul").unwrap();
@@ -524,7 +577,7 @@ mod tests {
     #[test]
     fn no_command_uses_the_end_of_the_file() {
         let text = "varexo e;\n";
-        let edit = insertion(text, &["e".to_string()]).unwrap();
+        let edit = insertion(text, &["e".to_string()], TemplateKind::Stochastic).unwrap();
         assert_eq!(edit.byte, text.len() as u32);
         let edited = apply_at(text, &edit);
         assert!(edited.starts_with("varexo e;\n// shocks;\n"));
@@ -533,16 +586,21 @@ mod tests {
 
     #[test]
     fn unclosed_model_does_not_take_the_template() {
-        assert!(insertion("model;\ny = e;\n", &["e".to_string()]).is_none());
+        assert!(insertion(
+            "model;\ny = e;\n",
+            &["e".to_string()],
+            TemplateKind::Stochastic
+        )
+        .is_none());
         let text = "varexo e;\nmodel;\ny = e;\n";
-        let edit = insertion(text, &["e".to_string()]).unwrap();
+        let edit = insertion(text, &["e".to_string()], TemplateKind::Stochastic).unwrap();
         let edited = apply_at(text, &edit);
         let template = edited.find("// shocks;").unwrap();
         let model_at = edited.find("model;").unwrap();
         assert!(template < model_at);
 
         let missing_semi = "varexo e\nmodel;\ny = e;\n";
-        let edit = insertion(missing_semi, &["e".to_string()]).unwrap();
+        let edit = insertion(missing_semi, &["e".to_string()], TemplateKind::Stochastic).unwrap();
         let edited = apply_at(missing_semi, &edit);
         let template = edited.find("// shocks;").unwrap();
         let model_at = edited.find("model;").unwrap();
@@ -550,7 +608,7 @@ mod tests {
 
         for body in ["y = rho * y(-1) + shocks;", "y = shocks(-1);"] {
             let text = format!("varexo shocks;\nmodel;\n{body}\n");
-            let edit = insertion(&text, &["shocks".to_string()]).unwrap();
+            let edit = insertion(&text, &["shocks".to_string()], TemplateKind::Stochastic).unwrap();
             let edited = apply_at(&text, &edit);
             let template = edited.find("// shocks;").unwrap();
             let model_at = edited.find("model;").unwrap();
@@ -560,6 +618,53 @@ mod tests {
 
     #[test]
     fn unclosed_comment_with_nothing_to_anchor_offers_nothing() {
-        assert!(insertion("/*\n", &["e".to_string()]).is_none());
+        assert!(insertion("/*\n", &["e".to_string()], TemplateKind::Stochastic).is_none());
+    }
+
+    #[test]
+    fn unfinished_blocks_keep_both_templates_at_top_level() {
+        for opener in ["initval", "steady_state_model", "estimated_params"] {
+            let text = format!("varexo e;\n{opener};\ne = 0;\n");
+            for kind in [TemplateKind::Stochastic, TemplateKind::Deterministic] {
+                let edit = insertion(&text, &["e".to_string()], kind).unwrap();
+                let edited = apply_at(&text, &edit);
+                assert!(
+                    edited.find("// shocks;").unwrap() < edited.find(opener).unwrap(),
+                    "{edited}"
+                );
+                assert!(e001_count(&edited) <= e001_count(&text), "{edited}");
+            }
+        }
+        let closed = "varexo e;\ninitval;\ne = 0;\nend;\n";
+        let edit = insertion(closed, &["e".to_string()], TemplateKind::Deterministic).unwrap();
+        let edited = apply_at(closed, &edit);
+        assert!(edited.find("// shocks;").unwrap() > edited.find("end;").unwrap());
+        assert!(e001_count(&edited) <= e001_count(closed));
+    }
+
+    #[test]
+    fn deterministic_rows_have_blank_periods_and_values() {
+        let text = "varexo e;\nvarexo_det x;\n";
+        let model = parse(text);
+        let edit = insertion(
+            text,
+            &aggregate_deterministic_names(&model),
+            TemplateKind::Deterministic,
+        )
+        .unwrap();
+        assert_eq!(
+            edit.new_text.lines().collect::<Vec<_>>(),
+            vec![
+                "// shocks;",
+                "// var e;",
+                "// periods ;",
+                "// values ;",
+                "// var x;",
+                "// periods ;",
+                "// values ;",
+                "// end;"
+            ]
+        );
+        assert!(e001_count(&apply_at(text, &edit)) <= e001_count(text));
     }
 }

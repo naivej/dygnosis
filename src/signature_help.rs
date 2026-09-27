@@ -143,10 +143,21 @@ fn utf16_len(text: &str) -> u32 {
 fn open_frames(src: &str, end: usize) -> Vec<Frame> {
     let mut frames = Vec::new();
     let mut pending: Option<String> = None;
+    let mut statement: Option<String> = None;
+    let mut at_statement_head = true;
+    let mut in_block = false;
     let mut i = 0;
     while i < end {
         match next_atom(src, &mut i, end) {
-            Some(Atom::Ident(name)) => pending = Some(name.to_ascii_lowercase()),
+            Some(Atom::Ident(name)) => {
+                if at_statement_head {
+                    statement = Some(name.to_ascii_lowercase());
+                    pending = (!in_block).then(|| name.to_ascii_lowercase());
+                    at_statement_head = false;
+                } else {
+                    pending = None;
+                }
+            }
             Some(Atom::Open(Kind::Paren)) => {
                 let command = pending.take();
                 frames.push(Frame {
@@ -172,12 +183,32 @@ fn open_frames(src: &str, end: usize) -> Vec<Frame> {
             Some(Atom::Semi) => {
                 pending = None;
                 frames.clear();
+                if statement.as_deref() == Some("end") {
+                    in_block = false;
+                } else if !in_block && statement.as_deref().is_some_and(is_block_opener) {
+                    in_block = true;
+                }
+                statement = None;
+                at_statement_head = true;
             }
             Some(Atom::Comma | Atom::Other) => pending = None,
             None => break,
         }
     }
     frames
+}
+
+fn is_block_opener(word: &str) -> bool {
+    crate::parser::BLOCK_OPENERS.contains(&word)
+        || matches!(
+            word,
+            "mshocks"
+                | "estimated_params"
+                | "verbatim"
+                | "model_replace"
+                | "svar_identification"
+                | "conditional_forecast_paths"
+        )
 }
 
 /// End of the option list: the matching `)`, a `;` at list depth, or the end of the file.

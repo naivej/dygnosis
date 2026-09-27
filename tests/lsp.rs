@@ -3646,6 +3646,23 @@ async fn signature_help_is_absent_outside_an_option_list() {
     let declaration = "var(heterogeneity=d) a;";
     let option = declaration.find("heterogeneity").unwrap();
     assert!(signature_at_byte(declaration, option).await.is_none());
+
+    let after_model = "var y; model; y = 0; end; stoch_simul(order";
+    assert!(signature_at_byte(after_model, after_model.len())
+        .await
+        .is_some());
+
+    let shock_timing = "var shocks; model; shocks = shocks(-1); end;";
+    let timing = shock_timing.find("shocks(-1)").unwrap() + "shocks(".len();
+    assert!(signature_at_byte(shock_timing, timing).await.is_none());
+
+    let assignment = "parameters p; p = stoch_simul(order=2);";
+    let rhs = assignment.find("stoch_simul(").unwrap() + "stoch_simul(".len();
+    assert!(signature_at_byte(assignment, rhs).await.is_none());
+
+    let verbatim = "verbatim;\nstoch_simul(order=2);\nend;";
+    let native = verbatim.find("stoch_simul(").unwrap() + "stoch_simul(".len();
+    assert!(signature_at_byte(verbatim, native).await.is_none());
 }
 
 #[tokio::test]

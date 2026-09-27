@@ -491,50 +491,63 @@ impl Backend {
         }
     }
 
-    fn shock_template(&self, params: &CodeActionParams) -> Option<CodeAction> {
+    fn shock_templates(&self, params: &CodeActionParams) -> Vec<CodeAction> {
         let kind = CodeActionKind::REFACTOR;
         if !action_kind_requested(&params.context.only, &kind) {
-            return None;
+            return Vec::new();
         }
         let uri = &params.text_document.uri;
         let mut inner = self.lock_inner();
-        let text = inner.docs.get(uri)?.text.clone();
-        let names = {
-            let model = inner.workspace.get_effective_model(uri.as_str())?;
-            if crate::shock_template::has_ordinary_shocks(model) {
-                return None;
-            }
-            let names = crate::shock_template::aggregate_varexo_names(model);
-            if names.is_empty() {
-                return None;
-            }
-            names
+        let Some(text) = inner.docs.get(uri).map(|doc| doc.text.clone()) else {
+            return Vec::new();
         };
-        let edit = crate::shock_template::insertion(&text, &names)?;
+        let (kinds, stochastic_names, deterministic_names) = {
+            let Some(model) = inner.workspace.get_effective_model(uri.as_str()) else {
+                return Vec::new();
+            };
+            if crate::shock_template::has_ordinary_shocks(model) {
+                return Vec::new();
+            }
+            (
+                crate::shock_template::available_kinds(model),
+                crate::shock_template::aggregate_varexo_names(model),
+                crate::shock_template::aggregate_deterministic_names(model),
+            )
+        };
         let index = LineIndex::new(&text);
-        let pos = index.position_utf16(&text, edit.byte);
-        let position = Position::new(pos.line, pos.character);
-        let mut changes = HashMap::new();
-        changes.insert(
-            uri.clone(),
-            vec![TextEdit {
-                range: Range::new(position, position),
-                new_text: edit.new_text,
-            }],
-        );
-        Some(CodeAction {
-            title: "Insert shocks template".into(),
-            kind: Some(kind),
-            diagnostics: None,
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                ..WorkspaceEdit::default()
-            }),
-            command: None,
-            is_preferred: Some(false),
-            disabled: None,
-            data: None,
-        })
+        kinds
+            .into_iter()
+            .filter_map(|template_kind| {
+                let names = match template_kind {
+                    crate::shock_template::TemplateKind::Stochastic => &stochastic_names,
+                    crate::shock_template::TemplateKind::Deterministic => &deterministic_names,
+                };
+                let edit = crate::shock_template::insertion(&text, names, template_kind)?;
+                let pos = index.position_utf16(&text, edit.byte);
+                let position = Position::new(pos.line, pos.character);
+                let mut changes = HashMap::new();
+                changes.insert(
+                    uri.clone(),
+                    vec![TextEdit {
+                        range: Range::new(position, position),
+                        new_text: edit.new_text,
+                    }],
+                );
+                Some(CodeAction {
+                    title: template_kind.title().into(),
+                    kind: Some(kind.clone()),
+                    diagnostics: None,
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(changes),
+                        ..WorkspaceEdit::default()
+                    }),
+                    command: None,
+                    is_preferred: Some(false),
+                    disabled: None,
+                    data: None,
+                })
+            })
+            .collect()
     }
 
     fn linked_ranges(&self, pos: &TextDocumentPositionParams) -> Option<LinkedEditingRanges> {
@@ -1341,7 +1354,7 @@ impl LanguageServer for Backend {
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let mut actions = self.quick_fixes(&params).unwrap_or_default();
-        if let Some(action) = self.shock_template(&params) {
+        for action in self.shock_templates(&params) {
             actions.push(CodeActionOrCommand::CodeAction(action));
         }
         if actions.is_empty() {
