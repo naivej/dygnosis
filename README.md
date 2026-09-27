@@ -62,12 +62,6 @@ Limitations by design
 | `dynare_extract` | Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model |
 | `dynare_workspace_diagnose` | Check several root `.mod` files. Pass a files map and roots, or paths to files and directories. One failed root does not drop the others |
 
-Extraction retains required static/dynamic partners, OccBin constraint declarations, and macro iteration origins. Missing required setup returns `unsupported_context` with no fragment; omitted calibration and execution are listed separately. PAC/VAR expectation setup and heterogeneous static replacement or OccBin regime context are also unsupported. Equation references distinguish aggregate and heterogeneous scopes; static companions have no counted index.
-
-Workspace diagnosis with a files map resolves includes, include search paths and companion existence from that map only. Disk files outside the map cannot change its results. Path mode reads disk and deduplicates redundant `.` path spellings. Diagnostic coordinates are one-based Unicode scalar positions in the owning file; editor positions use UTF-16.
-
-Writing summaries I208–I210 point to their first affected source file, including an included file. The editor's equation-naming action is available at that summary and edits safe equations in its compilation unit.
-
 ## Credits
 
 1. dygnosis v0.1.0 is a fork and rewrite of [LLMacro-Dynare-LSP](https://github.com/pdwhoward/LLMacro-Dynare-LSP) by Anthony Diercks, Philip Howard, and Mehrdad Samadi. Diagnostic codes, check and explain surfaces, and the thin analysis design come from that work. The original repository accompanies the working paper *LLMacro: A Language Server for Dynare — Structured Context for AI-Assisted Macroeconomic Modeling*.
