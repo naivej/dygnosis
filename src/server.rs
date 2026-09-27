@@ -1,6 +1,6 @@
 //! LSP server (stdio). Wave a: document loop. Wave b: navigation / edit. Wave c: intel / format / commands.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -13,7 +13,9 @@ use crate::catalog::{
     command_options, family_help, option_doc, FAMILY_COMMAND_HELP, FAMILY_OPERATOR_HELP,
     HETEROGENEITY_OPTION, HET_SHOCKS_OVERWRITE,
 };
-use crate::diagnostic::{check_file, check_in_workspace};
+use crate::diagnostic::{
+    check_file, check_in_workspace_with_origins, DiagnosticSet, WritingOrigin,
+};
 use crate::equation_names::equation_name_plan;
 use crate::expand::{EquationOrigin, OriginFrame};
 use crate::explain;
@@ -113,10 +115,12 @@ struct OpenDoc {
     version: i32,
     diagnostics: Vec<Diagnostic>,
     library: Vec<crate::Diagnostic>,
+    writing_origins: HashMap<String, WritingOrigin>,
 }
 
 struct Inner {
     docs: HashMap<Url, OpenDoc>,
+    published: HashMap<Url, Vec<Diagnostic>>,
     workspace: Workspace,
     format_indent_unit: String,
     search_paths: Vec<PathBuf>,
@@ -126,10 +130,102 @@ impl Default for Inner {
     fn default() -> Self {
         Self {
             docs: HashMap::new(),
+            published: HashMap::new(),
             workspace: Workspace::new(),
             format_indent_unit: "\t".into(),
             search_paths: Vec::new(),
         }
+    }
+}
+
+impl Inner {
+    /// Recheck each open compilation unit, then route writing summaries to their source file.
+    /// Publishing the union with the previous routes clears notes whose owner changed.
+    fn refresh_diagnostics(
+        &mut self,
+        first: Option<&Url>,
+    ) -> Vec<(Url, Option<i32>, Vec<Diagnostic>)> {
+        let mut roots: Vec<Url> = self.docs.keys().cloned().collect();
+        roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        let mut checks: Vec<(Url, DiagnosticSet)> = Vec::new();
+        for uri in roots {
+            checks.push((
+                uri.clone(),
+                check_in_workspace_with_origins(&mut self.workspace, uri.as_str()),
+            ));
+        }
+        let mut routed: HashMap<Url, Vec<Diagnostic>> = self
+            .docs
+            .keys()
+            .cloned()
+            .map(|uri| (uri, Vec::new()))
+            .collect();
+        for (root, set) in &checks {
+            let root_text = self
+                .docs
+                .get(root)
+                .map(|doc| doc.text.as_str())
+                .unwrap_or("");
+            for diag in &set.diagnostics {
+                let owner = set
+                    .writing_origins
+                    .get(&diag.code)
+                    .filter(|origin| origin.file != set.root);
+                let (uri, text) = if let Some(owner) = owner {
+                    let uri = self
+                        .docs
+                        .keys()
+                        .find(|uri| {
+                            crate::include_resolver::normalize_uri(uri.as_str()) == owner.file
+                        })
+                        .cloned()
+                        .or_else(|| file_url_from_path_key(&owner.file));
+                    let Some(uri) = uri else { continue };
+                    (uri, owner.text.as_str())
+                } else {
+                    (root.clone(), root_text)
+                };
+                let mut items = library_to_lsp(text, std::slice::from_ref(diag));
+                if crate::check_writing::is_writing_code(&diag.code) {
+                    for item in &mut items {
+                        item.data = Some(json!({ "root": root.as_str() }));
+                    }
+                }
+                routed.entry(uri).or_default().extend(items);
+            }
+        }
+        for (root, set) in checks {
+            if let Some(doc) = self.docs.get_mut(&root) {
+                doc.library = set.diagnostics;
+                doc.writing_origins = set.writing_origins;
+            }
+        }
+        for (uri, doc) in &mut self.docs {
+            doc.diagnostics = routed.get(uri).cloned().unwrap_or_default();
+        }
+        let mut publish: Vec<Url> = self
+            .published
+            .keys()
+            .chain(routed.keys())
+            .cloned()
+            .collect();
+        publish.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        publish.dedup();
+        if let Some(first) = first {
+            if let Some(at) = publish.iter().position(|uri| uri == first) {
+                let first = publish.remove(at);
+                publish.insert(0, first);
+            }
+        }
+        self.published = routed;
+        publish
+            .into_iter()
+            .map(|uri| {
+                let version = self.docs.get(&uri).map(|doc| doc.version);
+                let diagnostics = self.published.get(&uri).cloned().unwrap_or_default();
+                (uri, version, diagnostics)
+            })
+            .collect()
     }
 }
 
@@ -157,30 +253,30 @@ impl Backend {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn upsert(&self, uri: Url, text: String, version: i32) -> (Url, i32, Vec<Diagnostic>) {
+    fn upsert(
+        &self,
+        uri: Url,
+        text: String,
+        version: i32,
+    ) -> Vec<(Url, Option<i32>, Vec<Diagnostic>)> {
         let mut inner = self.lock_inner();
         inner.workspace.update_document(uri.as_str(), &text);
-        let library = check_in_workspace(&mut inner.workspace, uri.as_str());
-        let diagnostics = library_to_lsp(&text, &library);
         inner.docs.insert(
             uri.clone(),
             OpenDoc {
                 text,
                 version,
-                diagnostics: diagnostics.clone(),
-                library,
+                diagnostics: Vec::new(),
+                library: Vec::new(),
+                writing_origins: HashMap::new(),
             },
         );
-        (uri, version, diagnostics)
+        inner.refresh_diagnostics(Some(&uri))
     }
 
     fn pull_items(&self, uri: &Url) -> Vec<Diagnostic> {
         let inner = self.lock_inner();
-        inner
-            .docs
-            .get(uri)
-            .map(|d| d.diagnostics.clone())
-            .unwrap_or_default()
+        inner.published.get(uri).cloned().unwrap_or_default()
     }
 
     fn hover_at(&self, pos: &TextDocumentPositionParams) -> Option<Hover> {
@@ -445,7 +541,7 @@ impl Backend {
 
     fn quick_fixes(&self, params: &CodeActionParams) -> Option<CodeActionResponse> {
         let mut inner = self.lock_inner();
-        let naming = naming_code_action(&mut inner, params);
+        let naming = naming_code_actions(&mut inner, params);
         let doc = inner.docs.get(&params.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
         let mut actions = Vec::new();
@@ -481,7 +577,7 @@ impl Backend {
                 data: None,
             }));
         }
-        if let Some(action) = naming {
+        for action in naming {
             actions.push(CodeActionOrCommand::CodeAction(action));
         }
         if actions.is_empty() {
@@ -1153,10 +1249,11 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let doc = params.text_document;
-        let (uri, version, diagnostics) = self.upsert(doc.uri, doc.text, doc.version);
-        self.client
-            .publish_diagnostics(uri, diagnostics, Some(version))
-            .await;
+        for (uri, version, diagnostics) in self.upsert(doc.uri, doc.text, doc.version) {
+            self.client
+                .publish_diagnostics(uri, diagnostics, version)
+                .await;
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -1166,14 +1263,16 @@ impl LanguageServer for Backend {
         if change.range.is_some() {
             return;
         }
-        let (uri, version, diagnostics) = self.upsert(
+        let to_publish = self.upsert(
             params.text_document.uri,
             change.text.clone(),
             params.text_document.version,
         );
-        self.client
-            .publish_diagnostics(uri, diagnostics, Some(version))
-            .await;
+        for (uri, version, diagnostics) in to_publish {
+            self.client
+                .publish_diagnostics(uri, diagnostics, version)
+                .await;
+        }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -1188,20 +1287,26 @@ impl LanguageServer for Backend {
             (None, Some((text, version))) => (text, version),
             (None, None) => return,
         };
-        let (uri, version, diagnostics) = self.upsert(uri, text, version);
-        self.client
-            .publish_diagnostics(uri, diagnostics, Some(version))
-            .await;
+        for (uri, version, diagnostics) in self.upsert(uri, text, version) {
+            self.client
+                .publish_diagnostics(uri, diagnostics, version)
+                .await;
+        }
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
-        {
+        let to_publish = {
             let mut inner = self.lock_inner();
             inner.docs.remove(&uri);
             inner.workspace.remove_document(uri.as_str());
+            inner.refresh_diagnostics(Some(&uri))
+        };
+        for (uri, version, diagnostics) in to_publish {
+            self.client
+                .publish_diagnostics(uri, diagnostics, version)
+                .await;
         }
-        self.client.publish_diagnostics(uri, Vec::new(), None).await;
     }
 
     async fn diagnostic(
@@ -1226,15 +1331,15 @@ impl LanguageServer for Backend {
     ) -> Result<WorkspaceDiagnosticReportResult> {
         let inner = self.lock_inner();
         let items = inner
-            .docs
+            .published
             .iter()
-            .map(|(uri, doc)| {
+            .map(|(uri, diagnostics)| {
                 WorkspaceDocumentDiagnosticReport::Full(WorkspaceFullDocumentDiagnosticReport {
                     uri: uri.clone(),
-                    version: Some(i64::from(doc.version)),
+                    version: inner.docs.get(uri).map(|doc| i64::from(doc.version)),
                     full_document_diagnostic_report: FullDocumentDiagnosticReport {
                         result_id: None,
-                        items: doc.diagnostics.clone(),
+                        items: diagnostics.clone(),
                     },
                 })
             })
@@ -1245,7 +1350,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        let to_publish: Vec<(Url, i32, Vec<Diagnostic>)> = {
+        let to_publish = {
             let mut inner = self.lock_inner();
             for event in &params.changes {
                 inner.workspace.remove_document(event.uri.as_str());
@@ -1255,22 +1360,17 @@ impl LanguageServer for Backend {
                 .iter()
                 .map(|(uri, doc)| (uri.clone(), doc.text.clone(), doc.version))
                 .collect();
-            let mut out = Vec::new();
             for (uri, text, version) in snapshots {
                 inner.workspace.update_document(uri.as_str(), &text);
-                let library = check_in_workspace(&mut inner.workspace, uri.as_str());
-                let diagnostics = library_to_lsp(&text, &library);
                 if let Some(doc) = inner.docs.get_mut(&uri) {
-                    doc.diagnostics = diagnostics.clone();
-                    doc.library = library;
+                    doc.version = version;
                 }
-                out.push((uri, version, diagnostics));
             }
-            out
+            inner.refresh_diagnostics(None)
         };
         for (uri, version, diagnostics) in to_publish {
             self.client
-                .publish_diagnostics(uri, diagnostics, Some(version))
+                .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
     }
@@ -1554,17 +1654,59 @@ fn library_to_lsp(text: &str, diags: &[crate::Diagnostic]) -> Vec<Diagnostic> {
         .collect()
 }
 
-fn naming_code_action(inner: &mut Inner, params: &CodeActionParams) -> Option<CodeAction> {
-    let overlaps = {
-        let doc = inner.docs.get(&params.text_document.uri)?;
-        let index = LineIndex::new(&doc.text);
-        let note = doc.library.iter().find(|diag| diag.code == "I208")?;
-        ranges_overlap(span_range(&index, &doc.text, note.span), params.range)
-    };
-    if !overlaps {
+fn naming_code_actions(inner: &mut Inner, params: &CodeActionParams) -> Vec<CodeAction> {
+    let requested = &params.text_document.uri;
+    if !inner.docs.contains_key(requested) {
+        return Vec::new();
+    }
+    let mut notes: Vec<(Url, Diagnostic)> = inner
+        .published
+        .get(requested)
+        .into_iter()
+        .flatten()
+        .filter(|diag| {
+            matches!(&diag.code, Some(NumberOrString::String(code)) if code == "I208")
+                && ranges_overlap(diag.range, params.range)
+        })
+        .filter_map(|diag| {
+            let root = writing_root(diag)?;
+            inner.docs.contains_key(&root).then(|| (root, diag.clone()))
+        })
+        .collect();
+    notes.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+    notes.dedup_by(|a, b| a.0 == b.0);
+    let shared_site = notes.len() > 1;
+    let requested_roots: HashSet<Url> = params
+        .context
+        .diagnostics
+        .iter()
+        .filter(|diag| ranges_overlap(diag.range, params.range))
+        .filter_map(writing_root)
+        .collect();
+    if !requested_roots.is_empty() {
+        notes.retain(|(root, _)| requested_roots.contains(root));
+    }
+    notes
+        .into_iter()
+        .filter_map(|(root, note)| naming_action_for_root(inner, params, &root, note, shared_site))
+        .collect()
+}
+
+fn writing_root(diag: &Diagnostic) -> Option<Url> {
+    if !matches!(&diag.code, Some(NumberOrString::String(code)) if code == "I208") {
         return None;
     }
-    let plan = equation_name_plan(&mut inner.workspace, params.text_document.uri.as_str())?;
+    Url::parse(diag.data.as_ref()?.get("root")?.as_str()?).ok()
+}
+
+fn naming_action_for_root(
+    inner: &mut Inner,
+    params: &CodeActionParams,
+    root: &Url,
+    note: Diagnostic,
+    shared_site: bool,
+) -> Option<CodeAction> {
+    let plan = equation_name_plan(&mut inner.workspace, root.as_str())?;
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
     for edit in plan.edits {
         let url = naming_edit_url(inner, &params.text_document.uri, &edit.file)?;
@@ -1578,10 +1720,20 @@ fn naming_code_action(inner: &mut Inner, params: &CodeActionParams) -> Option<Co
     if changes.is_empty() {
         return None;
     }
+    let title = if shared_site {
+        let path = root
+            .to_file_path()
+            .ok()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| root.to_string());
+        format!("{} in {path}", plan.title)
+    } else {
+        plan.title
+    };
     Some(CodeAction {
-        title: plan.title,
+        title,
         kind: Some(CodeActionKind::QUICKFIX),
-        diagnostics: None,
+        diagnostics: Some(vec![note]),
         edit: Some(WorkspaceEdit {
             changes: Some(changes),
             ..WorkspaceEdit::default()
@@ -1631,7 +1783,9 @@ fn span_range(index: &LineIndex, text: &str, span: Span) -> Range {
 }
 
 fn file_url_from_path_key(path_key: &str) -> Option<Url> {
-    Url::from_file_path(Path::new(path_key)).ok()
+    let path = Path::new(path_key);
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    Url::from_file_path(path).ok()
 }
 
 fn origin_lsp_range(workspace: &Workspace, origin_uri: Option<&str>, span: Span) -> Range {

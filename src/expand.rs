@@ -19,6 +19,16 @@ pub struct ExpandReport {
     pub aggregate_origins: Vec<EquationOrigin>,
     /// Counted equations in each heterogeneous model block, in block order.
     pub heterogeneous_origins: Vec<Vec<EquationOrigin>>,
+    /// Every parsed row, including locals and uncounted static rows, for extraction.
+    /// Entries follow the parsed aggregate/block vectors.
+    pub(crate) aggregate_row_origins: Vec<Option<RowOrigin>>,
+    pub(crate) heterogeneous_row_origins: Vec<Vec<Option<RowOrigin>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RowOrigin {
+    pub order: usize,
+    pub origin: EquationOrigin,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,9 +94,6 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
     let mut pending = Vec::new();
     let mut counted_i = 0usize;
     for (eq_index, eq) in model.equations.iter().enumerate() {
-        if eq.is_local || eq.static_tag {
-            continue;
-        }
         let range = &ranges.aggregate[eq_index];
         let origin = origin_for_row(
             counted_i,
@@ -95,8 +102,16 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
             &arena,
             map,
         );
-        pending.push((range.start, origin));
-        counted_i += 1;
+        pending.push((
+            range.start,
+            None,
+            eq_index,
+            !eq.static_tag && !eq.is_local,
+            origin,
+        ));
+        if !eq.static_tag && !eq.is_local {
+            counted_i += 1;
+        }
     }
     debug_assert_eq!(counted.len(), counted_i);
     let mut dimension_indices = HashMap::new();
@@ -108,10 +123,7 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
     {
         debug_assert_eq!(block.equations.len(), block_ranges.len());
         let scope_index = dimension_indices.entry(block.dimension).or_insert(0usize);
-        for (eq, range) in block.equations.iter().zip(block_ranges.iter()) {
-            if eq.is_local || eq.static_tag {
-                continue;
-            }
+        for (eq_index, (eq, range)) in block.equations.iter().zip(block_ranges.iter()).enumerate() {
             let mut origin = origin_for_row(
                 *scope_index,
                 &tokens[range.start..range.end],
@@ -121,22 +133,46 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
             );
             origin.dimension = Some(model.name(block.dimension).to_string());
             origin.block_index = Some(block_index);
-            pending.push((range.start, origin));
-            *scope_index += 1;
+            pending.push((
+                range.start,
+                Some(block_index),
+                eq_index,
+                !eq.static_tag && !eq.is_local,
+                origin,
+            ));
+            if !eq.static_tag && !eq.is_local {
+                *scope_index += 1;
+            }
         }
     }
-    pending.sort_by_key(|(token_start, _)| *token_start);
+    pending.sort_by_key(|(token_start, _, _, _, _)| *token_start);
     let mut origins = Vec::with_capacity(pending.len());
     let mut aggregate_origins = Vec::with_capacity(counted.len());
     let mut heterogeneous_origins = vec![Vec::new(); model.heterogeneous_models.len()];
-    for (_, mut origin) in pending {
-        origin.index = origins.len();
-        if let Some(block_index) = origin.block_index {
-            heterogeneous_origins[block_index].push(origin.clone());
-        } else {
-            aggregate_origins.push(origin.clone());
+    let mut aggregate_row_origins = vec![None; model.equations.len()];
+    let mut heterogeneous_row_origins = model
+        .heterogeneous_models
+        .iter()
+        .map(|block| vec![None; block.equations.len()])
+        .collect::<Vec<_>>();
+    for (order, (_, block_index, eq_index, is_counted, mut origin)) in
+        pending.into_iter().enumerate()
+    {
+        if is_counted {
+            origin.index = origins.len();
+            if let Some(block_index) = block_index {
+                heterogeneous_origins[block_index].push(origin.clone());
+            } else {
+                aggregate_origins.push(origin.clone());
+            }
+            origins.push(origin.clone());
         }
-        origins.push(origin);
+        let row = Some(RowOrigin { order, origin });
+        if let Some(block_index) = block_index {
+            heterogeneous_row_origins[block_index][eq_index] = row;
+        } else {
+            aggregate_row_origins[eq_index] = row;
+        }
     }
     debug_assert_eq!(counted.len(), aggregate_origins.len());
     ExpandReport {
@@ -145,6 +181,8 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
         origins,
         aggregate_origins,
         heterogeneous_origins,
+        aggregate_row_origins,
+        heterogeneous_row_origins,
     }
 }
 

@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use dygnosis::check_walk;
-use dygnosis::{check_file, format_check_lines, Severity, VERSION};
+use dygnosis::{check_file_with_origins, format_check_lines_with_origins, Severity, VERSION};
 use std::path::Path;
 
 #[derive(Parser)]
@@ -156,8 +156,9 @@ fn process_target(path: &str) -> FileResult {
     };
     let abs_path = check_walk::absolute_path(path);
     let abs_path = abs_path.to_string_lossy();
-    let diags = check_file(&text, &abs_path);
-    print!("{}", format_check_lines(path, &diags, &text));
+    let set = check_file_with_origins(&text, &abs_path);
+    let diags = &set.diagnostics;
+    print!("{}", format_check_lines_with_origins(path, &set, &text));
     FileResult::Printed {
         errors: diags
             .iter()

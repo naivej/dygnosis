@@ -97,13 +97,14 @@ impl Workspace {
     /// Store one overlay under `key` exactly. No disk and no path folding.
     fn insert_overlay(&mut self, key: &str, source: String) {
         let model = parse(&source);
+        let includepath_dirs = overlay_includepath_dirs_for(key, &model);
         self.docs.insert(
             key.to_string(),
             Doc {
                 source,
                 model,
                 overlay: true,
-                includepath_dirs: Vec::new(),
+                includepath_dirs,
             },
         );
         self.effective.clear();
@@ -212,9 +213,44 @@ impl Workspace {
     }
 
     pub fn get_source(&self, uri: &str) -> Option<&str> {
+        let key = if self.overlay_only {
+            uri.to_string()
+        } else {
+            normalize_uri(uri)
+        };
+        self.docs.get(&key).map(|d| d.source.as_str())
+    }
+
+    /// Whether this workspace represents only caller-supplied map entries.
+    pub(crate) fn is_overlay_only(&self) -> bool {
+        self.overlay_only
+    }
+
+    /// A virtual directory exists when a supplied file has that directory as
+    /// a key prefix. This never asks whether the host directory exists.
+    pub(crate) fn overlay_directory_exists(&self, including_key: &str, raw: &str) -> bool {
+        let directory = overlay_includepath_key(including_key, raw);
+        if directory.is_empty() {
+            return self.docs.contains_key(including_key);
+        }
+        let prefix = format!("{}/", directory.trim_end_matches('/'));
         self.docs
-            .get(&normalize_uri(uri))
-            .map(|d| d.source.as_str())
+            .keys()
+            .any(|key| overlay_key(key).starts_with(&prefix))
+    }
+
+    /// File content beside a map root, for commands that read a named file.
+    pub(crate) fn overlay_beside_source(&self, root_key: &str, name: &str) -> Option<&str> {
+        let name = overlay_key(name);
+        let key = if overlay_absolute(&name) {
+            name
+        } else if let Some(parent) = overlay_parent(root_key) {
+            overlay_join(&parent, &name)
+        } else {
+            name
+        };
+        let supplied = self.overlay_match_key(&key)?;
+        self.docs.get(&supplied).map(|doc| doc.source.as_str())
     }
 
     /// Loaded document keys (normalized paths), for W061 parent lookup.
@@ -227,7 +263,7 @@ impl Workspace {
     pub fn get_effective_model(&mut self, uri: &str) -> Option<&Model> {
         let key = self.ensure_loaded(uri)?;
         if !self.effective.contains_key(&key) {
-            let spliced = self.splice_key(&key, &mut Vec::new(), &[]);
+            let spliced = self.splice_key(&key, &mut Vec::new(), &mut Vec::new());
             let model = parse(&spliced);
             self.effective.insert(key.clone(), model);
         }
@@ -238,7 +274,7 @@ impl Workspace {
     /// Included-file spans have no location in the root and return `None`.
     pub(crate) fn map_effective_span_to_root(&mut self, uri: &str, span: Span) -> Option<Span> {
         let key = self.ensure_loaded(uri)?;
-        let (_, segments) = self.splice_with_map(&key, &mut Vec::new(), &[]);
+        let (_, segments) = self.splice_with_map(&key, &mut Vec::new(), &mut Vec::new());
         let segment = segments.iter().find(|segment| {
             segment.spliced.start <= span.start
                 && span.end <= segment.spliced.end
@@ -256,7 +292,7 @@ impl Workspace {
     /// no file. Callers must not treat that as the root file.
     pub(crate) fn map_effective_origin(&mut self, uri: &str, span: Span) -> Option<(String, Span)> {
         let key = self.ensure_loaded(uri)?;
-        let (_, segments) = self.splice_with_map(&key, &mut Vec::new(), &[]);
+        let (_, segments) = self.splice_with_map(&key, &mut Vec::new(), &mut Vec::new());
         let segment = segments
             .iter()
             .find(|s| span.start >= s.spliced.start && span.start < s.spliced.end)
@@ -280,7 +316,7 @@ impl Workspace {
     pub fn expand_report(&mut self, uri: &str) -> Option<&ExpandReport> {
         let key = self.ensure_loaded(uri)?;
         if !self.expand.contains_key(&key) {
-            let (spliced, map) = self.splice_with_map(&key, &mut Vec::new(), &[]);
+            let (spliced, map) = self.splice_with_map(&key, &mut Vec::new(), &mut Vec::new());
             let report = expand_report_from_spliced(&spliced, &map);
             self.expand.insert(key.clone(), report);
         }
@@ -293,7 +329,7 @@ impl Workspace {
         let mut out = HashMap::new();
         let mut seen = HashSet::new();
         for resolved in &records.resolved {
-            let key = path_key(&resolved.path);
+            let key = self.include_key(&resolved.path);
             if !seen.insert(key.clone()) {
                 continue;
             }
@@ -397,13 +433,10 @@ impl Workspace {
     ) -> Option<PathBuf> {
         if self.overlay_only {
             return self
-                .overlay_include_key(including_key, filename)
+                .overlay_include_key(including_key, filename, active_search)
                 .map(PathBuf::from);
         }
-        let mut paths = self.configured_search(active_search);
-        if let Some(doc) = self.docs.get(including_key) {
-            paths = append_unique(&paths, &doc.includepath_dirs);
-        }
+        let paths = self.configured_search(active_search);
         let known = self.known_keys();
         resolve_include_path(filename, including_key, &paths, Some(&known))
     }
@@ -411,14 +444,35 @@ impl Workspace {
     /// Workspace key for a resolved include. Overlay keys stay as stored.
     fn include_key(&self, path: &Path) -> String {
         if self.overlay_only {
-            overlay_path_key(path)
+            let candidate = overlay_path_key(path);
+            self.overlay_match_key(&candidate).unwrap_or(candidate)
         } else {
             path_key(path)
         }
     }
 
+    /// Resolve separator aliases to one supplied key. Ambiguous aliases do
+    /// not establish a file identity for a map-only compilation unit.
+    fn overlay_match_key(&self, candidate: &str) -> Option<String> {
+        let mut matched = None;
+        for key in self.docs.keys() {
+            if overlay_key(key) == candidate {
+                if matched.is_some() {
+                    return None;
+                }
+                matched = Some(key.clone());
+            }
+        }
+        matched
+    }
+
     /// Match an `@#include` filename to an overlay key. No disk and no `..` fold.
-    fn overlay_include_key(&self, including_key: &str, filename: &str) -> Option<String> {
+    fn overlay_include_key(
+        &self,
+        including_key: &str,
+        filename: &str,
+        active_search: &[PathBuf],
+    ) -> Option<String> {
         let name = overlay_key(filename);
         if name.is_empty() {
             return None;
@@ -428,8 +482,14 @@ impl Workspace {
             candidates.push(name);
         } else {
             match overlay_parent(including_key) {
-                Some(parent) => candidates.push(overlay_join(parent, &name)),
+                Some(parent) => candidates.push(overlay_join(&parent, &name)),
                 None => candidates.push(name.clone()),
+            }
+            for dir in active_search {
+                let candidate = overlay_join(&overlay_path_key(dir), &name);
+                if !candidates.contains(&candidate) {
+                    candidates.push(candidate);
+                }
             }
             if !candidates.contains(&name) {
                 candidates.push(name);
@@ -437,7 +497,7 @@ impl Workspace {
         }
         candidates
             .into_iter()
-            .find(|candidate| self.docs.contains_key(candidate))
+            .find_map(|candidate| self.overlay_match_key(&candidate))
     }
 
     fn resolve_companion_from_root(
@@ -446,6 +506,27 @@ impl Workspace {
         name: &str,
         extra_suffixes: &[&str],
     ) -> Option<PathBuf> {
+        if self.overlay_only {
+            let paths = self
+                .docs
+                .get(root_key)
+                .map(|doc| doc.includepath_dirs.as_slice())
+                .unwrap_or_default();
+            if let Some(key) = self.overlay_include_key(root_key, name, paths) {
+                return Some(PathBuf::from(key));
+            }
+            if Path::new(name).extension().is_some() {
+                return None;
+            }
+            for suffix in extra_suffixes {
+                if let Some(key) =
+                    self.overlay_include_key(root_key, &format!("{name}{suffix}"), paths)
+                {
+                    return Some(PathBuf::from(key));
+                }
+            }
+            return None;
+        }
         let mut paths = self.search_paths.clone();
         if let Some(doc) = self.docs.get(root_key) {
             paths = append_unique(&paths, &doc.includepath_dirs);
@@ -486,7 +567,7 @@ impl Workspace {
         self.dfs_graph(
             root_key,
             &mut vec![root_key.to_string()],
-            &[],
+            &mut Vec::new(),
             None,
             &mut records,
             &mut seen_cycles,
@@ -498,7 +579,7 @@ impl Workspace {
         &mut self,
         current_key: &str,
         stack: &mut Vec<String>,
-        inherited_search: &[PathBuf],
+        active_search: &mut Vec<PathBuf>,
         root_span: Option<Span>,
         records: &mut IncludeRecords,
         seen_cycles: &mut HashSet<Vec<String>>,
@@ -510,27 +591,22 @@ impl Workspace {
             let model = self.docs.get(current_key).unwrap();
             ordered_events(&model.model)
         };
-        let mut side_paths: Vec<PathBuf> = Vec::new();
-        if let Some(doc) = self.docs.get(current_key) {
-            side_paths = doc.includepath_dirs.clone();
-        }
         for event in events {
             match event {
                 IncludeEvent::IncludePath(dir) => {
-                    let added = includepath_paths(current_key, &dir);
-                    side_paths = append_unique(&side_paths, &added);
+                    // The first entry remains the root invocation directory.
+                    let added = self.directive_search_paths(&stack[0], &dir);
+                    *active_search = append_unique(active_search, &added);
                 }
                 IncludeEvent::Include(dir) => {
-                    let effective_paths = append_unique(inherited_search, &side_paths);
-                    let resolved =
-                        self.resolve_filename(current_key, &dir.filename, &effective_paths);
+                    let resolved = self.resolve_filename(current_key, &dir.filename, active_search);
                     match resolved {
                         None => {
                             let mut searched = Vec::new();
                             if let Some(parent) = Path::new(current_key).parent() {
                                 searched.push(parent.display().to_string());
                             }
-                            for p in &effective_paths {
+                            for p in active_search.iter() {
                                 let s = p.display().to_string();
                                 if !searched.iter().any(|d| d == &s) {
                                     searched.push(s);
@@ -576,16 +652,12 @@ impl Workspace {
                             self.dfs_graph(
                                 &resolved_key,
                                 stack,
-                                &effective_paths,
+                                active_search,
                                 nested_root,
                                 records,
                                 seen_cycles,
                             );
                             stack.pop();
-                            if let Some(nested_doc) = self.docs.get(&resolved_key) {
-                                side_paths =
-                                    append_unique(&side_paths, &nested_doc.includepath_dirs);
-                            }
                         }
                     }
                 }
@@ -597,16 +669,16 @@ impl Workspace {
         &mut self,
         key: &str,
         stack: &mut Vec<String>,
-        inherited_search: &[PathBuf],
+        active_search: &mut Vec<PathBuf>,
     ) -> String {
-        self.splice_with_map(key, stack, inherited_search).0
+        self.splice_with_map(key, stack, active_search).0
     }
 
     fn splice_with_map(
         &mut self,
         key: &str,
         stack: &mut Vec<String>,
-        inherited_search: &[PathBuf],
+        active_search: &mut Vec<PathBuf>,
     ) -> (String, Vec<SpliceSegment>) {
         if stack.iter().any(|k| k == key) {
             return (String::new(), Vec::new());
@@ -614,11 +686,7 @@ impl Workspace {
         let Some(source) = self.source_for_key(key) else {
             return (String::new(), Vec::new());
         };
-        let mut side_paths: Vec<PathBuf> = self
-            .docs
-            .get(key)
-            .map(|d| d.includepath_dirs.clone())
-            .unwrap_or_default();
+        let root_key = stack.first().map(String::as_str).unwrap_or(key).to_string();
         let mut all: Vec<SpliceEvent> = {
             let Some(doc) = self.docs.get(key) else {
                 return identity_splice(&source, Some(key.to_string()));
@@ -645,12 +713,11 @@ impl Workspace {
         for event in all {
             match event {
                 SpliceEvent::IncludePath(dir) => {
-                    let added = includepath_paths(key, &dir);
-                    side_paths = append_unique(&side_paths, &added);
+                    let added = self.directive_search_paths(&root_key, &dir);
+                    *active_search = append_unique(active_search, &added);
                 }
                 SpliceEvent::Include(dir) => {
-                    let effective_paths = append_unique(inherited_search, &side_paths);
-                    let resolved = self.resolve_filename(key, &dir.filename, &effective_paths);
+                    let resolved = self.resolve_filename(key, &dir.filename, active_search);
                     let (body, nested_map) = match resolved {
                         None => (String::new(), Vec::new()),
                         Some(path) => {
@@ -660,12 +727,8 @@ impl Workspace {
                             } else {
                                 stack.push(key.to_string());
                                 let nested =
-                                    self.splice_with_map(&resolved_key, stack, &effective_paths);
+                                    self.splice_with_map(&resolved_key, stack, active_search);
                                 stack.pop();
-                                if let Some(nested_doc) = self.docs.get(&resolved_key) {
-                                    side_paths =
-                                        append_unique(&side_paths, &nested_doc.includepath_dirs);
-                                }
                                 nested
                             }
                         }
@@ -675,6 +738,14 @@ impl Workspace {
             }
         }
         apply_replacements_mapped(&source, &replacements, Some(key.to_string()))
+    }
+
+    fn directive_search_paths(&self, key: &str, directive: &IncludePathDirective) -> Vec<PathBuf> {
+        if self.overlay_only {
+            overlay_includepath_paths(key, directive)
+        } else {
+            includepath_paths(key, directive)
+        }
     }
 }
 
@@ -809,9 +880,11 @@ fn overlay_absolute(key: &str) -> bool {
             && key.as_bytes()[2] == b'/')
 }
 
-fn overlay_parent(key: &str) -> Option<&str> {
-    let key = key.trim_end_matches('/');
-    key.rfind('/').map(|idx| &key[..idx])
+fn overlay_parent(key: &str) -> Option<String> {
+    let normalized = overlay_key(key);
+    normalized
+        .rfind('/')
+        .map(|idx| normalized[..idx].to_string())
 }
 
 fn overlay_join(parent: &str, name: &str) -> String {
@@ -838,18 +911,55 @@ fn includepath_dirs_for(key: &str, model: &Model) -> Vec<PathBuf> {
     paths
 }
 
-fn includepath_paths(key: &str, directive: &IncludePathDirective) -> Vec<PathBuf> {
+fn overlay_includepath_dirs_for(key: &str, model: &Model) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    for raw in split_includepath_argument(&directive.argument) {
-        let path = resolve_includepath(key, &raw);
-        if !paths.iter().any(|p| p == &path) {
-            paths.push(path);
-        }
+    for directive in &model.includepaths {
+        paths = append_unique(&paths, &overlay_includepath_paths(key, directive));
     }
     paths
 }
 
-/// Resolve one `@#includepath` argument against the directive file's parent.
+fn overlay_includepath_paths(key: &str, directive: &IncludePathDirective) -> Vec<PathBuf> {
+    includepath_literal(&directive.argument)
+        .into_iter()
+        .map(|raw| PathBuf::from(overlay_includepath_key(key, &raw)))
+        .collect()
+}
+
+fn overlay_includepath_key(key: &str, raw: &str) -> String {
+    let path = overlay_key(raw);
+    let joined = if overlay_absolute(&path) {
+        path
+    } else if let Some(parent) = overlay_parent(key) {
+        overlay_join(&parent, &path)
+    } else {
+        path
+    };
+    // Directory lookup may collapse `.` without changing supplied map keys or
+    // folding `..`, which remains a distinct map path.
+    let mut lookup = joined;
+    while lookup.starts_with("./") {
+        lookup.drain(..2);
+    }
+    while lookup.contains("/./") {
+        lookup = lookup.replace("/./", "/");
+    }
+    if lookup == "." {
+        lookup.clear();
+    } else if lookup.ends_with("/.") {
+        lookup.truncate(lookup.len() - 2);
+    }
+    lookup
+}
+
+fn includepath_paths(key: &str, directive: &IncludePathDirective) -> Vec<PathBuf> {
+    includepath_literal(&directive.argument)
+        .map(|raw| resolve_includepath(key, &raw))
+        .into_iter()
+        .collect()
+}
+
+/// Resolve one `@#includepath` argument against the invocation root's parent.
 pub fn resolve_includepath(key: &str, raw: &str) -> PathBuf {
     let path = PathBuf::from(normalize_separators(raw));
     let path = if path.is_absolute() {
@@ -864,8 +974,8 @@ pub fn resolve_includepath(key: &str, raw: &str) -> PathBuf {
         .unwrap_or(path)
 }
 
-/// Colon-split that does not split Windows `C:/` drive prefixes.
-pub fn split_includepath_argument(argument: &str) -> Vec<String> {
+/// The single path named by a literal `@#includepath` argument.
+pub fn includepath_literal(argument: &str) -> Option<String> {
     let mut raw = argument.trim();
     if (raw.starts_with('"') && raw.ends_with('"') && raw.len() >= 2)
         || (raw.starts_with('\'') && raw.ends_with('\'') && raw.len() >= 2)
@@ -873,27 +983,9 @@ pub fn split_includepath_argument(argument: &str) -> Vec<String> {
         raw = &raw[1..raw.len() - 1];
     }
     if raw.is_empty() {
-        return Vec::new();
+        return None;
     }
-    let bytes = raw.as_bytes();
-    let mut parts = Vec::new();
-    let mut start = 0;
-    for i in 0..bytes.len() {
-        if bytes[i] != b':' {
-            continue;
-        }
-        if i == start + 1
-            && bytes[start].is_ascii_alphabetic()
-            && i + 1 < bytes.len()
-            && (bytes[i + 1] == b'/' || bytes[i + 1] == b'\\')
-        {
-            continue;
-        }
-        parts.push(raw[start..i].trim().to_string());
-        start = i + 1;
-    }
-    parts.push(raw[start..].trim().to_string());
-    parts.into_iter().filter(|p| !p.is_empty()).collect()
+    Some(raw.to_string())
 }
 
 fn append_unique(base: &[PathBuf], extra: &[PathBuf]) -> Vec<PathBuf> {

@@ -254,7 +254,9 @@ fn cannot_read(key: &str, err: &io::Error) -> String {
 }
 
 fn path_result_key(path: &Path) -> String {
-    normalize_key(&path.to_string_lossy())
+    // `components` removes redundant `.` without folding `..`, case, or links.
+    let without_current_dir: PathBuf = path.components().collect();
+    normalize_key(&without_current_dir.to_string_lossy())
 }
 
 fn read_disk(path: &Path) -> io::Result<String> {
@@ -464,6 +466,7 @@ fn to_mcp(text: &str, diag: &Diagnostic) -> McpDiagnostic {
     let start = index.position(text, diag.span.start);
     let end = index.position(text, diag.span.end);
     McpDiagnostic {
+        file: None,
         line: start.line + 1,
         column: start.character + 1,
         end_line: end.line + 1,
@@ -802,6 +805,350 @@ end;
         assert!(mentions(by_root(&second, ROOT_A), "replaced_in_second"));
         assert!(!mentions(by_root(&second, ROOT_A), "only_in_shared"));
         assert!(mentions(by_root(&first, ROOT_A), "only_in_shared"));
+    }
+
+    #[test]
+    fn map_includepath_resolves_without_a_directory_and_is_inherited() {
+        let dir = scratch("map-virtual-includepath");
+        let root = slash_key(&dir.path.join("main.mod"));
+        let part = slash_key(&dir.path.join("parts/first.inc"));
+        let nested = slash_key(&dir.path.join("parts/second.inc"));
+        let files = map_of(&[
+            (
+                root.as_str(),
+                "@#includepath \"parts\"\n@#include \"first.inc\"\nvar y;\nmodel;\ny=0;\nend;\n",
+            ),
+            (part.as_str(), "@#include \"second.inc\"\n"),
+            (nested.as_str(), "parameters only_nested;\n"),
+        ]);
+        assert!(!dir.path.join("parts").exists());
+        let report = diagnose_map(&files, std::slice::from_ref(&root)).expect("map report");
+        let entry = by_root(&report, &root);
+        assert_eq!(entry.status, RootStatus::Ok, "{entry:?}");
+        assert_eq!(entry.failure, None);
+        assert!(!entry
+            .diagnostics
+            .iter()
+            .any(|d| d.diagnostic.code == "E304"));
+
+        std::fs::create_dir_all(dir.path.join("parts")).expect("disk directory");
+        let with_host_directory =
+            diagnose_map(&files, std::slice::from_ref(&root)).expect("same map");
+        assert_eq!(report, with_host_directory);
+    }
+
+    #[test]
+    fn map_nested_includepath_is_relative_to_root_invocation() {
+        let dir = scratch("map-nested-includepath");
+        let root = slash_key(&dir.path.join("main.mod"));
+        let first = slash_key(&dir.path.join("parts/first.inc"));
+        let second = slash_key(&dir.path.join("more/second.inc"));
+        let child_relative = slash_key(&dir.path.join("parts/more/second.inc"));
+        let files = map_of(&[
+            (
+                root.as_str(),
+                "@#include \"parts/first.inc\"\nvar y;\nmodel;\ny=0;\nend;\n",
+            ),
+            (
+                first.as_str(),
+                "@#includepath \"more\"\n@#include \"second.inc\"\n",
+            ),
+            (second.as_str(), "parameters root_hit;\n"),
+            (child_relative.as_str(), "parameters child_hit;\n"),
+        ]);
+        assert!(!dir.path.join("parts").exists());
+        let report = diagnose_map(&files, std::slice::from_ref(&root)).expect("nested map");
+        let entry = by_root(&report, &root);
+        assert_eq!(entry.status, RootStatus::Ok, "{entry:?}");
+        assert!(!entry
+            .diagnostics
+            .iter()
+            .any(|diag| diag.diagnostic.code == "E304"));
+        assert!(mentions(entry, "root_hit"), "{entry:?}");
+        assert!(!mentions(entry, "child_hit"), "{entry:?}");
+    }
+
+    #[test]
+    fn map_nested_includepath_does_not_use_child_directory_for_e304() {
+        let dir = scratch("map-nested-includepath-e304");
+        let root = slash_key(&dir.path.join("main.mod"));
+        let first = slash_key(&dir.path.join("parts/first.inc"));
+        let child_relative = slash_key(&dir.path.join("parts/more/unused.inc"));
+        let files = map_of(&[
+            (
+                root.as_str(),
+                "@#include \"parts/first.inc\"\nvar y;\nmodel;\ny=0;\nend;\n",
+            ),
+            (first.as_str(), "@#includepath \"more\"\n"),
+            (child_relative.as_str(), "parameters child_only;\n"),
+        ]);
+        let report = diagnose_map(&files, std::slice::from_ref(&root)).expect("nested map");
+        let entry = by_root(&report, &root);
+        assert_eq!(entry.status, RootStatus::Ok, "{entry:?}");
+        assert!(
+            entry
+                .diagnostics
+                .iter()
+                .any(|diag| diag.diagnostic.code == "E304"
+                    && diag.file == first
+                    && diag.diagnostic.line == 1
+                    && diag.diagnostic.column == 1),
+            "{entry:?}"
+        );
+    }
+
+    #[test]
+    fn map_includepath_colon_is_one_directory() {
+        let root = "batch13_colon/main.mod";
+        let files = map_of(&[
+            (root, "@#includepath \"a:b\"\nvar y;\nmodel;\ny=0;\nend;\n"),
+            ("batch13_colon/a/one.inc", ""),
+            ("batch13_colon/b/two.inc", ""),
+        ]);
+        let report = diagnose_map(&files, &[root.to_string()]).expect("colon map");
+        let entry = by_root(&report, root);
+        assert_eq!(entry.status, RootStatus::Ok, "{entry:?}");
+        assert!(
+            entry
+                .diagnostics
+                .iter()
+                .any(|diag| diag.diagnostic.code == "E304"),
+            "{entry:?}"
+        );
+    }
+
+    #[test]
+    fn map_includepath_colon_does_not_search_each_component() {
+        let root = "batch13_colon_search/main.mod";
+        let files = map_of(&[
+            (
+                root,
+                "@#includepath \"a:b\"\n@#include \"one.inc\"\nvar y;\nmodel;\ny=0;\nend;\n",
+            ),
+            ("batch13_colon_search/a/one.inc", "parameters wrong_hit;\n"),
+            ("batch13_colon_search/b/two.inc", ""),
+        ]);
+        let report = diagnose_map(&files, &[root.to_string()]).expect("colon map");
+        let entry = by_root(&report, root);
+        assert_eq!(entry.status, RootStatus::Failed, "{entry:?}");
+        assert_eq!(
+            entry.failure.as_deref(),
+            Some("unresolved @#include \"one.inc\"")
+        );
+    }
+
+    #[test]
+    fn map_includepath_dot_components_find_virtual_directory() {
+        let root = "batch13_dot_dir/main.mod";
+        let files = map_of(&[
+            (root, "@#includepath \".\"\n@#includepath \"parts/.\"\n@#include \"leaf.inc\"\nvar y;\nmodel;\ny=0;\nend;\n"),
+            ("batch13_dot_dir/parts/leaf.inc", "parameters hit;\n"),
+        ]);
+        let report = diagnose_map(&files, &[root.to_string()]).expect("dot map");
+        let entry = by_root(&report, root);
+        assert_eq!(entry.status, RootStatus::Ok, "{entry:?}");
+        assert!(
+            !entry
+                .diagnostics
+                .iter()
+                .any(|diag| diag.diagnostic.code == "E304"),
+            "{entry:?}"
+        );
+        assert!(mentions(entry, "hit"), "{entry:?}");
+    }
+
+    #[test]
+    fn map_includepath_dot_accepts_relative_root_directory() {
+        let root = "main.mod";
+        let files = map_of(&[
+            (
+                root,
+                "@#includepath \".\"\n@#include \"leaf.inc\"\nvar y;\nmodel;\ny=0;\nend;\n",
+            ),
+            ("leaf.inc", "parameters hit;\n"),
+        ]);
+        let report = diagnose_map(&files, &[root.to_string()]).expect("relative dot map");
+        let entry = by_root(&report, root);
+        assert_eq!(entry.status, RootStatus::Ok, "{entry:?}");
+        assert!(
+            !entry
+                .diagnostics
+                .iter()
+                .any(|diag| diag.diagnostic.code == "E304"),
+            "{entry:?}"
+        );
+    }
+
+    #[test]
+    fn map_includepath_leading_dot_accepts_relative_root_directory() {
+        let root = "main.mod";
+        let files = map_of(&[
+            (
+                root,
+                "@#includepath \"./parts\"\n@#include \"leaf.inc\"\nvar y;\nmodel;\ny=0;\nend;\n",
+            ),
+            ("parts/leaf.inc", "parameters hit;\n"),
+        ]);
+        let report = diagnose_map(&files, &[root.to_string()]).expect("leading dot map");
+        let entry = by_root(&report, root);
+        assert_eq!(entry.status, RootStatus::Ok, "{entry:?}");
+        assert!(
+            !entry
+                .diagnostics
+                .iter()
+                .any(|diag| diag.diagnostic.code == "E304"),
+            "{entry:?}"
+        );
+    }
+
+    #[test]
+    fn map_includepath_empty_string_is_not_a_directory() {
+        let root = "batch13_empty_dir/main.mod";
+        let files = map_of(&[
+            (root, "@#includepath \"\"\nvar y;\nmodel;\ny=0;\nend;\n"),
+            ("batch13_empty_dir/sibling.inc", ""),
+        ]);
+        let report = diagnose_map(&files, &[root.to_string()]).expect("empty path map");
+        let entry = by_root(&report, root);
+        assert_eq!(entry.status, RootStatus::Ok, "{entry:?}");
+        assert!(
+            entry
+                .diagnostics
+                .iter()
+                .any(|diag| diag.diagnostic.code == "E304"),
+            "{entry:?}"
+        );
+    }
+
+    #[test]
+    fn child_includepath_persists_for_later_root_include() {
+        let root = "batch13_child_effect/main.mod";
+        let files = map_of(&[
+            (
+                root,
+                "@#include \"child.inc\"\n@#include \"late.inc\"\nvar y;\nmodel;\ny=0;\nend;\n",
+            ),
+            ("batch13_child_effect/child.inc", "@#includepath \"more\"\n"),
+            (
+                "batch13_child_effect/more/late.inc",
+                "parameters later_hit;\n",
+            ),
+        ]);
+        let report = diagnose_map(&files, &[root.to_string()]).expect("child side effect");
+        let entry = by_root(&report, root);
+        assert_eq!(entry.status, RootStatus::Ok, "{entry:?}");
+        assert!(mentions(entry, "later_hit"), "{entry:?}");
+    }
+
+    #[test]
+    fn map_include_cannot_resolve_from_disk() {
+        let dir = scratch("map-include-disk");
+        let root = slash_key(&dir.path.join("main.mod"));
+        let source = "@#include \"part.inc\"\nvar y;\nmodel;\ny=0;\nend;\n";
+        let files = map_of(&[(root.as_str(), source)]);
+        let roots = [root.clone()];
+        let missing = diagnose_map(&files, &roots).expect("missing include");
+        assert_eq!(by_root(&missing, &root).status, RootStatus::Failed);
+
+        std::fs::write(dir.path.join("part.inc"), "parameters on_disk;\n").expect("disk include");
+        let still_missing = diagnose_map(&files, &roots).expect("same map");
+        assert_eq!(missing, still_missing);
+    }
+
+    #[test]
+    fn map_includepath_applies_after_its_directive() {
+        let root = "batch13_order/main.mod";
+        let files = map_of(&[
+            (
+                root,
+                "@#include \"part.inc\"\n@#includepath \"parts\"\nvar y;\nmodel;\ny=0;\nend;\n",
+            ),
+            ("batch13_order/parts/part.inc", "parameters too_late;\n"),
+        ]);
+        let report = diagnose_map(&files, &[root.to_string()]).expect("map report");
+        let entry = by_root(&report, root);
+        assert_eq!(entry.status, RootStatus::Failed);
+        assert_eq!(
+            entry.failure.as_deref(),
+            Some("unresolved @#include \"part.inc\"")
+        );
+    }
+
+    #[test]
+    fn map_companions_depend_only_on_supplied_keys() {
+        let dir = scratch("map-companion");
+        let root = slash_key(&dir.path.join("main.mod"));
+        let companion = dir.path.join("foo.mat");
+        let steady_file = dir.path.join("main_steadystate.m");
+        let source = "var y;\nmodel;\ny=0;\nend;\nsteady;\nestimation(datafile='foo.mat');\n";
+        let files = map_of(&[(root.as_str(), source)]);
+        let roots = [root.clone()];
+        let missing = diagnose_map(&files, &roots).expect("missing companion");
+        assert!(by_root(&missing, &root)
+            .diagnostics
+            .iter()
+            .any(|d| d.diagnostic.code == "W160"));
+        assert!(by_root(&missing, &root)
+            .diagnostics
+            .iter()
+            .any(|d| d.diagnostic.code == "I050"));
+
+        std::fs::write(&companion, "disk only").expect("disk companion");
+        std::fs::write(&steady_file, "disk only").expect("disk steady file");
+        let still_missing = diagnose_map(&files, &roots).expect("same map");
+        assert_eq!(missing, still_missing);
+
+        let mut supplied = files;
+        supplied.insert(slash_key(&companion), "supplied".to_string());
+        supplied.insert(slash_key(&steady_file), "supplied".to_string());
+        let resolved = diagnose_map(&supplied, &roots).expect("supplied companion");
+        assert!(!by_root(&resolved, &root)
+            .diagnostics
+            .iter()
+            .any(|d| d.diagnostic.code == "W160"));
+        assert!(!by_root(&resolved, &root)
+            .diagnostics
+            .iter()
+            .any(|d| d.diagnostic.code == "I050"));
+    }
+
+    #[test]
+    fn map_load_params_reads_only_supplied_text() {
+        let dir = scratch("map-load-params");
+        let root = slash_key(&dir.path.join("main.mod"));
+        let named = dir.path.join("params.txt");
+        let source = "var y;\nmodel;\ny=0;\nend;\nload_params_and_steady_state('params.txt');\n";
+        let files = map_of(&[(root.as_str(), source)]);
+        let roots = [root.clone()];
+        let missing = diagnose_map(&files, &roots).expect("missing file");
+        assert!(by_root(&missing, &root)
+            .diagnostics
+            .iter()
+            .any(|d| d.diagnostic.code == "E306"));
+
+        std::fs::write(&named, "host_name 1\n").expect("host file");
+        assert_eq!(missing, diagnose_map(&files, &roots).expect("same map"));
+
+        let mut supplied = files;
+        supplied.insert(slash_key(&named), "supplied_name 1\n".to_string());
+        let mapped = diagnose_map(&supplied, &roots).expect("mapped file");
+        let entry = by_root(&mapped, &root);
+        assert!(!entry
+            .diagnostics
+            .iter()
+            .any(|d| d.diagnostic.code == "E306"));
+        assert!(entry.diagnostics.iter().any(|d| {
+            d.diagnostic.code == "W204" && d.diagnostic.message.contains("supplied_name")
+        }));
+        assert!(!entry.diagnostics.iter().any(|d| {
+            d.diagnostic.code == "W204" && d.diagnostic.message.contains("host_name")
+        }));
+
+        std::fs::write(&named, "changed_host_name 1\n").expect("change host file");
+        assert_eq!(
+            mapped,
+            diagnose_map(&supplied, &roots).expect("same supplied text")
+        );
     }
 
     #[test]
@@ -1266,6 +1613,7 @@ end;
         let mut paths = vec![
             path_arg(&dir.path),
             path_arg(&a),
+            format!("{}/./a.mod", slash_key(&dir.path)),
             slash_key(&a),
             path_arg(&b),
         ];

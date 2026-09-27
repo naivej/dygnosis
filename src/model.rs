@@ -870,7 +870,7 @@ pub struct Model {
     /// Literal `@#include` directives (quoted or bare path). Identifier-only
     /// arguments (`@#include FOO`) are not recorded.
     pub includes: Vec<IncludeDirective>,
-    /// `@#includepath` directives (raw argument; workspace splits/resolves).
+    /// `@#includepath` directives (raw argument; workspace resolves one path).
     pub includepaths: Vec<IncludePathDirective>,
     /// Pre-expand `@#` directives other than `@#include` (file-text order).
     pub macro_directives: Vec<MacroDirective>,

@@ -987,7 +987,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E304", ExplainEntry {
         title: "@#includepath is not a directory",
-        body: "The ``@#includepath`` argument does not resolve to an existing directory (a relative path resolves against the file that contains the directive). Dynare refuses: `missing_dir does not evaluate to a valid directory`.\n\n**Warrant**\n\nDynare prints that line inside a `Macro-processing error: backtrace…` block that also repeats the directive and its location; the editor reports the single line.\n\n**Fix**\n\nPoint the directive at an existing directory, or create it.",
+        body: "The ``@#includepath`` argument does not resolve to an existing directory (a relative path resolves against the root model's invocation directory, including directives in included files). Dynare refuses: `missing_dir does not evaluate to a valid directory`.\n\n**Warrant**\n\nDynare prints that line inside a `Macro-processing error: backtrace…` block that also repeats the directive and its location; the editor reports the single line.\n\n**Fix**\n\nPoint the directive at an existing directory, or create it.",
         kind: ExplainKind::Shared,
     }),
     ("E305", ExplainEntry {

@@ -1,7 +1,46 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use dygnosis::explain::{explain, ExplainKind};
 use dygnosis::{analyze, check_file, parse, Diagnostic};
+
+#[test]
+fn included_writing_origins_use_child_scalar_positions_in_cli_and_mcp() {
+    let dir = std::env::temp_dir().join(format!(
+        "dygnosis-writing-wire-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let root = dir.join("root.mod");
+    let child = dir.join("child.inc");
+    let root_text = "// root 😀\r\n@#include \"child.inc\"\r\n";
+    let child_text = "/*😀*/var y;\r\nmodel;\r\ny = 2;\r\nend;\r\n";
+    std::fs::write(&root, root_text).unwrap();
+    std::fs::write(&child, child_text).unwrap();
+    let root_key = root.to_string_lossy().to_string();
+    let child_key = child.to_string_lossy().to_string();
+    let set = dygnosis::check_file_with_origins(root_text, &root_key);
+    let output = dygnosis::format_check_lines_with_origins(&root_key, &set, root_text);
+    assert!(output.contains("child.inc:1:10: INFO [I209]"), "{output}");
+    assert!(output.contains("child.inc:3:1: INFO [I208]"), "{output}");
+    assert!(output.contains("child.inc:3:5: INFO [I210]"), "{output}");
+    let files = HashMap::from([
+        (root_key.clone(), root_text.to_string()),
+        (child_key.clone(), child_text.to_string()),
+    ]);
+    let notes = dygnosis::dynare_diagnose(root_text, Some(&root_key), Some(&files));
+    for (code, line, column) in [("I209", 1, 10), ("I208", 3, 1), ("I210", 3, 5)] {
+        let note = notes.iter().find(|note| note.code == code).unwrap();
+        assert_eq!(note.file.as_deref(), Some(child_key.as_str()));
+        assert_eq!((note.line, note.column), (line, column));
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
 
 fn fixture(name: &str) -> (String, String) {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

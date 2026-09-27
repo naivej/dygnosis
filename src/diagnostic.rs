@@ -5,6 +5,7 @@ use crate::model::Model;
 use crate::parser::parse;
 use crate::span::{LineIndex, Span};
 use crate::workspace::Workspace;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Severity {
@@ -51,6 +52,21 @@ impl Diagnostic {
             tags: Vec::new(),
         }
     }
+}
+
+/// Source of a compilation-unit writing summary after include expansion.
+#[derive(Clone, Debug)]
+pub struct WritingOrigin {
+    pub file: String,
+    pub text: String,
+}
+
+/// Diagnostics for one root, with owner text for I208–I210.
+#[derive(Clone, Debug)]
+pub struct DiagnosticSet {
+    pub root: String,
+    pub diagnostics: Vec<Diagnostic>,
+    pub writing_origins: HashMap<String, WritingOrigin>,
 }
 
 /// Compose diagnostic families. Families share `Model` and run as peers.
@@ -236,25 +252,37 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
 /// directory). Falls back to `analyze(&parse(text))` if setup fails.
 /// Does not call `check_e060_family` (that would double-emit E062–E065).
 pub fn check_file(text: &str, abs_path: &str) -> Vec<Diagnostic> {
+    check_file_with_origins(text, abs_path).diagnostics
+}
+
+pub fn check_file_with_origins(text: &str, abs_path: &str) -> DiagnosticSet {
     let mut ws = Workspace::new();
     ws.update_document(abs_path, text);
-    check_in_workspace(&mut ws, abs_path)
+    check_in_workspace_with_origins(&mut ws, abs_path)
 }
 
 /// Same families as [`check_file`] on an existing workspace (open overlays).
 pub(crate) fn check_in_workspace(ws: &mut Workspace, abs_path: &str) -> Vec<Diagnostic> {
+    check_in_workspace_with_origins(ws, abs_path).diagnostics
+}
+
+pub(crate) fn check_in_workspace_with_origins(ws: &mut Workspace, abs_path: &str) -> DiagnosticSet {
     try_workspace_check(ws, abs_path).unwrap_or_else(|| {
         let text = ws.get_source(abs_path).unwrap_or("").to_string();
         let model = parse(&text);
-        analyze(&model)
+        DiagnosticSet {
+            root: root_key(ws, abs_path),
+            diagnostics: analyze(&model),
+            writing_origins: HashMap::new(),
+        }
     })
 }
 
-fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<Vec<Diagnostic>> {
+fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticSet> {
     let model = ws.get_effective_model(abs_path)?.clone();
     let mut diags = analyze(&model);
     diags.extend(crate::check_d_open::check_workspace_d_open(
-        &model, abs_path,
+        ws, &model, abs_path,
     ));
     let records = ws.include_records(abs_path).cloned().unwrap_or_default();
     // Missing and cyclic includes are workspace records. The spliced model no
@@ -280,9 +308,11 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<Vec<Diagnos
             }
         });
     }
-    if !expansion_blocked {
-        place_writing_anchors(ws, abs_path, &mut diags);
-    }
+    let writing_origins = if expansion_blocked {
+        HashMap::new()
+    } else {
+        place_writing_anchors(ws, abs_path, &mut diags)
+    };
     let mut extra = Vec::new();
     extra.extend(crate::check_e060::check_e060(&records));
     extra.extend(crate::check_e060::check_e061(&records));
@@ -294,25 +324,53 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<Vec<Diagnos
     extra.extend(crate::check_w160::check_w160(&companions));
     diags.extend(extra);
     crate::check_w160::quiet_i050(&mut diags, &companions);
-    Some(diags)
+    Some(DiagnosticSet {
+        root: root_key(ws, abs_path),
+        diagnostics: diags,
+        writing_origins,
+    })
+}
+
+fn root_key(ws: &Workspace, path: &str) -> String {
+    if ws.is_overlay_only() {
+        path.to_string()
+    } else {
+        crate::include_resolver::normalize_uri(path)
+    }
 }
 
 /// Rewrite I208–I210 onto the file that owns the first site.
 /// A span that crosses two files keeps only its first byte.
-fn place_writing_anchors(ws: &mut Workspace, root: &str, diags: &mut Vec<Diagnostic>) {
+fn place_writing_anchors(
+    ws: &mut Workspace,
+    root: &str,
+    diags: &mut Vec<Diagnostic>,
+) -> HashMap<String, WritingOrigin> {
+    let mut origins = HashMap::new();
     diags.retain_mut(|diag| {
         if !crate::check_writing::is_writing_code(&diag.code) {
             return true;
         }
-        let Some(span) = mapped_writing_span(ws, root, diag.span) else {
+        let Some((file, span)) = mapped_writing_span(ws, root, diag.span) else {
             return false;
         };
+        let Some(text) = ws.get_source(&file) else {
+            return false;
+        };
+        origins.insert(
+            diag.code.clone(),
+            WritingOrigin {
+                file,
+                text: text.to_string(),
+            },
+        );
         diag.span = span;
         true
     });
+    origins
 }
 
-fn mapped_writing_span(ws: &mut Workspace, root: &str, span: Span) -> Option<Span> {
+fn mapped_writing_span(ws: &mut Workspace, root: &str, span: Span) -> Option<(String, Span)> {
     let (file, origin) = ws.map_effective_origin(root, span)?;
     if span.end > span.start.saturating_add(1) {
         let tail = Span {
@@ -325,13 +383,11 @@ fn mapped_writing_span(ws: &mut Workspace, root: &str, span: Span) -> Option<Spa
                     start: span.start,
                     end: span.start.saturating_add(1).min(span.end),
                 };
-                return ws
-                    .map_effective_origin(root, short)
-                    .map(|(_, mapped)| mapped);
+                return ws.map_effective_origin(root, short);
             }
         }
     }
-    Some(origin)
+    Some((file, origin))
 }
 
 fn severity_label(severity: Severity) -> &'static str {
@@ -345,6 +401,19 @@ fn severity_label(severity: Severity) -> &'static str {
 
 /// CLI check line template. Line and column are 1-based.
 pub fn format_check_lines(path: &str, diags: &[Diagnostic], src: &str) -> String {
+    format_check_lines_with_origins(
+        path,
+        &DiagnosticSet {
+            root: String::new(),
+            diagnostics: diags.to_vec(),
+            writing_origins: HashMap::new(),
+        },
+        src,
+    )
+}
+
+pub fn format_check_lines_with_origins(path: &str, set: &DiagnosticSet, src: &str) -> String {
+    let diags = &set.diagnostics;
     if diags.is_empty() {
         return format!("No issues found in {path}\n");
     }
@@ -353,12 +422,24 @@ pub fn format_check_lines(path: &str, diags: &[Diagnostic], src: &str) -> String
     let mut warnings = 0usize;
     let mut out = String::new();
     for d in diags {
-        let pos = index.position(src, d.span.start);
+        let owner = set
+            .writing_origins
+            .get(&d.code)
+            .filter(|owner| owner.file != set.root);
+        let (display_path, pos) = if let Some(owner) = owner {
+            let owner_index = LineIndex::new(&owner.text);
+            (
+                owner.file.as_str(),
+                owner_index.position(&owner.text, d.span.start),
+            )
+        } else {
+            (path, index.position(src, d.span.start))
+        };
         let line = pos.line + 1;
         let col = pos.character + 1;
         let severity = severity_label(d.severity);
         out.push_str(&format!(
-            "{path}:{line}:{col}: {severity} [{}] {}\n",
+            "{display_path}:{line}:{col}: {severity} [{}] {}\n",
             d.code, d.message
         ));
         match d.severity {

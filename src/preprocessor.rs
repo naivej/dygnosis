@@ -15,7 +15,7 @@ use crate::diagnostic::{Diagnostic, Severity};
 use crate::include_resolver::{normalize_uri, uri_to_path};
 use crate::parser::parse;
 use crate::span::{LineIndex, Position, Span};
-use crate::workspace::{split_includepath_argument, Workspace};
+use crate::workspace::{includepath_literal, Workspace};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -662,8 +662,7 @@ fn requires_source_dir_file(mod_text: &str) -> bool {
         return true;
     }
     for dir in &model.includepaths {
-        let parts = split_includepath_argument(&dir.argument);
-        if parts.is_empty() || parts.iter().any(|p| !is_absolute_macro_path(p)) {
+        if includepath_literal(&dir.argument).is_none_or(|p| !is_absolute_macro_path(&p)) {
             return true;
         }
     }
@@ -1011,25 +1010,7 @@ fn map_macro_literal(
     if let Some(mapped) = map_absolute(raw, target_by_norm, dir_by_norm) {
         return Some(with_trailing_separator(raw, mapped));
     }
-    let parts = split_includepath_argument(raw);
-    if parts.len() < 2 {
-        return None;
-    }
-    let mut rewritten = Vec::new();
-    let mut changed = false;
-    for part in &parts {
-        if let Some(mapped) = map_absolute(part, target_by_norm, dir_by_norm) {
-            rewritten.push(with_trailing_separator(part, mapped));
-            changed = true;
-        } else {
-            rewritten.push(part.clone());
-        }
-    }
-    if changed {
-        Some(rewritten.join(":"))
-    } else {
-        None
-    }
+    None
 }
 
 fn is_synthetic_filename(

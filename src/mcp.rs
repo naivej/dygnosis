@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use crate::auto_fix::auto_fix;
 use crate::catalog::list_options;
-use crate::diagnostic::{analyze, check_in_workspace, Diagnostic, Severity};
+use crate::diagnostic::{analyze, Diagnostic, Severity};
 use crate::equations::{
     count_gap, equations, explain_equation, heterogeneous_equations, CountGap, EquationRow,
 };
@@ -112,6 +112,9 @@ const TOOLS: &[(&str, &str)] = &[
 /// One diagnostic as MCP JSON: 1-based line/column, severity `ERROR`/`WARNING`/`INFORMATION`/`HINT`.
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct McpDiagnostic {
+    /// Present for a writing summary anchored in an included file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
     pub line: u32,
     pub column: u32,
     pub end_line: u32,
@@ -206,8 +209,8 @@ fn diagnose_in_workspace(active_file: &str, files: &HashMap<String, String>) -> 
     for (name, content) in files {
         ws.update_document(name, content);
     }
-    let own = check_in_workspace(&mut ws, active_file);
-    diagnostics_to_json(text, &own)
+    let own = crate::diagnostic::check_in_workspace_with_origins(&mut ws, active_file);
+    diagnostics_to_json_with_origins(text, &own, files)
 }
 
 /// Aggregate timing lists and counts, per-dimension heterogeneous summaries,
@@ -493,6 +496,8 @@ impl McpUnit {
                 origins: Vec::new(),
                 aggregate_origins: Vec::new(),
                 heterogeneous_origins: Vec::new(),
+                aggregate_row_origins: Vec::new(),
+                heterogeneous_row_origins: Vec::new(),
             });
         let mut sources = HashMap::new();
         for uri in ws.document_uris() {
@@ -1215,6 +1220,7 @@ fn diagnostics_to_json(text: &str, diags: &[Diagnostic]) -> Vec<McpDiagnostic> {
             let start = index.position(text, d.span.start);
             let end = index.position(text, d.span.end);
             McpDiagnostic {
+                file: None,
                 line: start.line + 1,
                 column: start.character + 1,
                 end_line: end.line + 1,
@@ -1222,6 +1228,48 @@ fn diagnostics_to_json(text: &str, diags: &[Diagnostic]) -> Vec<McpDiagnostic> {
                 severity: mcp_severity(d.severity).to_string(),
                 code: d.code.clone(),
                 message: d.message.clone(),
+            }
+        })
+        .collect()
+}
+
+fn diagnostics_to_json_with_origins(
+    root_text: &str,
+    set: &crate::diagnostic::DiagnosticSet,
+    files: &HashMap<String, String>,
+) -> Vec<McpDiagnostic> {
+    set.diagnostics
+        .iter()
+        .filter(|diag| !is_dropped_code(&diag.code))
+        .map(|diag| {
+            let owner = set
+                .writing_origins
+                .get(&diag.code)
+                .filter(|owner| owner.file != set.root);
+            let (text, file) = match owner {
+                Some(owner) => {
+                    let key = files
+                        .keys()
+                        .find(|key| crate::include_resolver::normalize_uri(key) == owner.file);
+                    (
+                        owner.text.as_str(),
+                        key.cloned().or_else(|| Some(owner.file.clone())),
+                    )
+                }
+                None => (root_text, None),
+            };
+            let index = LineIndex::new(text);
+            let start = index.position(text, diag.span.start);
+            let end = index.position(text, diag.span.end);
+            McpDiagnostic {
+                file,
+                line: start.line + 1,
+                column: start.character + 1,
+                end_line: end.line + 1,
+                end_column: end.character + 1,
+                severity: mcp_severity(diag.severity).to_string(),
+                code: diag.code.clone(),
+                message: diag.message.clone(),
             }
         })
         .collect()

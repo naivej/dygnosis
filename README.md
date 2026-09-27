@@ -37,7 +37,7 @@ Limitations by design
 - Signature help for a command's options (`(`, `,`, and `=`)
 - Format document / range
 - Code actions and auto-fix where a fix is stored
-- Insert a commented shocks template for ordinary aggregate `varexo` names
+- Insert commented stochastic or deterministic shocks templates, with no guessed sizes or paths
 - Folding and links into `@#include` files and companions (e.g. `FILENAME_steadystate.m`)
 - Show the effective model (`dynare/showEffectiveModel`): text after `@#if` / `@#for` / `@{…}` and includes, with origin jump from each counted equation
 - Diagnostics while typing and on save.
@@ -61,6 +61,12 @@ Limitations by design
 | `dynare_format` | Format a `.mod` file with the editor's rules. Returns the full text only when it changes. Empty or whitespace-only input is unchanged |
 | `dynare_extract` | Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model |
 | `dynare_workspace_diagnose` | Check several root `.mod` files. Pass a files map and roots, or paths to files and directories. One failed root does not drop the others |
+
+Extraction retains required static/dynamic partners, OccBin constraint declarations, and macro iteration origins. Missing required setup returns `unsupported_context` with no fragment; omitted calibration and execution are listed separately. PAC/VAR expectation setup and heterogeneous static replacement or OccBin regime context are also unsupported. Equation references distinguish aggregate and heterogeneous scopes; static companions have no counted index.
+
+Workspace diagnosis with a files map resolves includes, include search paths and companion existence from that map only. Disk files outside the map cannot change its results. Path mode reads disk and deduplicates redundant `.` path spellings. Diagnostic coordinates are one-based Unicode scalar positions in the owning file; editor positions use UTF-16.
+
+Writing summaries I208–I210 point to their first affected source file, including an included file. The editor's equation-naming action is available at that summary and edits safe equations in its compilation unit.
 
 ## Credits
 

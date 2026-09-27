@@ -12,6 +12,7 @@ use crate::expr::{BinOp, ExprId, ExprKind};
 use crate::intern::Name;
 use crate::model::{DerivSpec, ExternalFunctionStmt, Model, PolicyCommand};
 use crate::span::Span;
+use crate::workspace::Workspace;
 
 pub fn check_d_open(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
@@ -112,13 +113,20 @@ fn prior_std_corr_rows(model: &Model) -> Vec<crate::check_d_ms::PriorHeadName> {
 }
 
 /// File-relative D-open checks: `@#includepath` directories, `load_params` files.
-pub fn check_workspace_d_open(model: &Model, abs_path: &str) -> Vec<Diagnostic> {
-    let key =
+pub fn check_workspace_d_open(
+    ws: &mut Workspace,
+    model: &Model,
+    abs_path: &str,
+) -> Vec<Diagnostic> {
+    let key = if ws.is_overlay_only() {
+        abs_path.to_string()
+    } else {
         crate::include_resolver::make_absolute(&crate::include_resolver::uri_to_path(abs_path))
             .to_string_lossy()
-            .into_owned();
-    let mut out = check_includepath_dirs(model, &key);
-    out.extend(check_load_params(model, &key));
+            .into_owned()
+    };
+    let mut out = check_includepath_dirs(ws, model, &key);
+    out.extend(check_load_params(ws, model, &key));
     out
 }
 
@@ -524,15 +532,24 @@ fn check_includepath_not_string(model: &Model) -> Vec<Diagnostic> {
 }
 
 /// E304: `@#includepath` argument that is not a directory (resolved against the
-/// directive file's parent).
-fn check_includepath_dirs(model: &Model, abs_path: &str) -> Vec<Diagnostic> {
+/// invocation root's parent, including directives written in child files).
+fn check_includepath_dirs(ws: &mut Workspace, model: &Model, abs_path: &str) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for directive in &model.includepaths {
         let Some(literal) = quoted_literal(&directive.argument) else {
             continue;
         };
-        let path = crate::workspace::resolve_includepath(abs_path, literal);
-        if path.is_dir() {
+        let Some((_owner, _)) = ws.map_effective_origin(abs_path, directive.span) else {
+            continue;
+        };
+        let is_directory = if literal.is_empty() {
+            false
+        } else if ws.is_overlay_only() {
+            ws.overlay_directory_exists(abs_path, literal)
+        } else {
+            crate::workspace::resolve_includepath(abs_path, literal).is_dir()
+        };
+        if is_directory {
             continue;
         }
         out.push(err(
@@ -580,12 +597,16 @@ fn quoted_literal(raw: &str) -> Option<&str> {
 /// balanced-growth-incompatible (probed). A compatible use is quiet at check,
 /// transform **and** compute, and the write run still prints the sentence, so
 /// there is no shadow to defer to.
-fn check_load_params(model: &Model, abs_path: &str) -> Vec<Diagnostic> {
+fn check_load_params(ws: &Workspace, model: &Model, abs_path: &str) -> Vec<Diagnostic> {
     let Some((file, span)) = &model.load_params_file else {
         return Vec::new();
     };
-    let path = resolve_beside(abs_path, file);
-    let Ok(text) = std::fs::read_to_string(&path) else {
+    let text = if ws.is_overlay_only() {
+        ws.overlay_beside_source(abs_path, file).map(str::to_string)
+    } else {
+        std::fs::read_to_string(resolve_beside(abs_path, file)).ok()
+    };
+    let Some(text) = text else {
         return vec![err(*span, "E306", format!("Can't open {file}"))];
     };
     let mut out = Vec::new();

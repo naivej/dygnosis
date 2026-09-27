@@ -134,7 +134,7 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
         ));
     };
     let model = &unit.model;
-    let hits = matching_places(model, request);
+    let hits = matching_places(model, &unit.report, request);
     if let Some((kind, detail)) = unresolved_selection(model, unit.missing_include) {
         return Ok(unsupported(kind, detail));
     }
@@ -156,15 +156,22 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
         });
     }
 
-    let kept = kept_equations(model, &hits);
+    let kept = kept_equations(model, &unit.report, &hits);
     let kept_places: Vec<EqRef> = kept.iter().map(|row| row.place).collect();
-    let closure = close(model, &kept_places);
+    if let Some(detail) = required_partner_problem(model, &kept_places) {
+        return Ok(unsupported(UnsupportedKind::CompilationUnit, detail));
+    }
+    let constraints = match required_constraints(model, &kept_places) {
+        Ok(constraints) => constraints,
+        Err(detail) => return Ok(unsupported(UnsupportedKind::CompilationUnit, detail)),
+    };
+    let closure = close(model, &kept_places, &constraints);
     if let Some(reason) = refuse(model, &kept_places, &closure, unit.missing_include) {
         return Ok(unsupported(reason.0, reason.1));
     }
     let retained = retained_places(model, &kept_places, &closure);
-    let (occbin, occbin_omitted) = match occbin_setup(model, &kept_places, &retained) {
-        Ok(pair) => pair,
+    let occbin = match occbin_setup(model, &constraints, &retained) {
+        Ok(piece) => piece,
         Err(detail) => return Ok(unsupported(UnsupportedKind::Macro, detail)),
     };
 
@@ -181,16 +188,20 @@ pub fn extract(request: &ExtractRequest) -> Result<ExtractResult, ExtractError> 
                 row.place,
                 row.role,
                 request.active_file.as_deref(),
-                &unit.static_origins,
             )
         })
         .collect();
-    let mut omitted_context = omitted(model);
-    omitted_context.extend(occbin_omitted);
+    let omitted_context = omitted(model);
 
     Ok(ExtractResult {
         status: ExtractStatus::Ok,
-        fragment: Some(render(model, &kept_places, &closure, occbin.as_ref())),
+        fragment: Some(render(
+            model,
+            &unit.report,
+            &kept_places,
+            &closure,
+            occbin.as_ref(),
+        )),
         selected_equations,
         origins,
         omitted_context,
@@ -210,16 +221,6 @@ struct Unit {
     model: Model,
     report: ExpandReport,
     missing_include: bool,
-    /// `[static]` rows are absent from the expand map. After an include splice
-    /// their equation span is in the spliced buffer, so this records the file
-    /// the span was read from.
-    static_origins: Vec<StaticOrigin>,
-}
-
-struct StaticOrigin {
-    place: EqRef,
-    file: Option<String>,
-    span: Span,
 }
 
 /// Map-free input parses `file_content` alone.
@@ -236,53 +237,23 @@ fn prepare(request: &ExtractRequest) -> Option<Unit> {
             model,
             report,
             missing_include: false,
-            static_origins: Vec::new(),
         });
     }
     let active = request.active_file.as_deref()?;
     let mut files = request.files.clone();
+    let active_path = active.replace('\\', "/");
+    files.retain(|key, _| key.replace('\\', "/") != active_path);
     files.insert(active.to_string(), request.file_content.clone());
-    let mut ws = Workspace::new();
-    for (name, content) in &files {
-        ws.update_document(name, content);
-    }
+    let mut ws = Workspace::overlay_documents(&files);
     let model = ws.get_effective_model(active).cloned()?;
     let report = ws.expand_report(active).cloned()?;
     let missing_include = !ws.find_unresolved_includes(active).is_empty()
         || !ws.find_circular_includes(active).is_empty();
-    let static_origins = static_origins(&mut ws, active, &model);
     Some(Unit {
         model,
         report,
         missing_include,
-        static_origins,
     })
-}
-
-fn static_origins(ws: &mut Workspace, active: &str, model: &Model) -> Vec<StaticOrigin> {
-    let mut out = Vec::new();
-    let mut record = |block, index, eq: &Equation| {
-        if !eq.static_tag {
-            return;
-        }
-        let Some((file, span)) = ws.map_effective_origin(active, eq.span) else {
-            return;
-        };
-        out.push(StaticOrigin {
-            place: EqRef { block, index },
-            file: Some(file),
-            span,
-        });
-    };
-    for (index, eq) in model.equations.iter().enumerate() {
-        record(None, index, eq);
-    }
-    for (block, het) in model.heterogeneous_models.iter().enumerate() {
-        for (index, eq) in het.equations.iter().enumerate() {
-            record(Some(block), index, eq);
-        }
-    }
-    out
 }
 
 fn origin_row(
@@ -291,14 +262,9 @@ fn origin_row(
     place: EqRef,
     role: EquationRole,
     active_file: Option<&str>,
-    static_origins: &[StaticOrigin],
 ) -> ExtractOrigin {
     let row = selected_row(model, place, role);
-    // Static equations are not in the expand map. A counted row uses the
-    // origin at that counted index. A static row uses the include map when
-    // the equation span sits in a spliced buffer.
-    let mapped = mapped_origin(model, report, place);
-    let located = static_origins.iter().find(|origin| origin.place == place);
+    let mapped = row_origin(report, place).map(|row| &row.origin);
     let frames = mapped
         .map(|origin| {
             origin
@@ -321,33 +287,27 @@ fn origin_row(
         role: row.role,
         span: mapped
             .map(|origin| origin.origin_span)
-            .or_else(|| located.map(|origin| origin.span))
             .unwrap_or(eq_at(model, place).span),
         file: mapped
             .and_then(|origin| origin.origin_uri.clone())
-            .or_else(|| located.and_then(|origin| origin.file.clone()))
             .or_else(|| active_file.map(str::to_string)),
         frames,
     }
 }
 
-fn mapped_origin<'a>(
-    model: &Model,
-    report: &'a ExpandReport,
-    place: EqRef,
-) -> Option<&'a crate::expand::EquationOrigin> {
-    let counted = public_index(model, place)?;
+fn row_origin(report: &ExpandReport, place: EqRef) -> Option<&crate::expand::RowOrigin> {
     match place.block {
-        None => report.aggregate_origins.get(counted),
-        Some(block) => {
-            let offset = counted_offset_in_block(model, block, place.index)?;
-            report
-                .heterogeneous_origins
-                .get(block)
-                .and_then(|origins| origins.get(offset))
-                .filter(|origin| origin.scope_index == counted)
-        }
+        None => report.aggregate_row_origins.get(place.index)?.as_ref(),
+        Some(block) => report
+            .heterogeneous_row_origins
+            .get(block)?
+            .get(place.index)?
+            .as_ref(),
     }
+}
+
+fn row_order(report: &ExpandReport, place: EqRef) -> usize {
+    row_origin(report, place).map_or(usize::MAX, |row| row.order)
 }
 
 fn unsupported(kind: UnsupportedKind, detail: impl Into<String>) -> ExtractResult {
@@ -366,7 +326,7 @@ fn unsupported(kind: UnsupportedKind, detail: impl Into<String>) -> ExtractResul
 /// Selector hits in source order. A set `dimension` searches only that
 /// heterogeneity dimension. An omitted dimension searches every scope.
 /// An aggregate row and a heterogeneous row are never the same hit.
-fn matching_places(model: &Model, request: &ExtractRequest) -> Vec<EqRef> {
+fn matching_places(model: &Model, report: &ExpandReport, request: &ExtractRequest) -> Vec<EqRef> {
     let mut hits = Vec::new();
     if request.dimension.is_none() {
         for (index, eq) in model.equations.iter().enumerate() {
@@ -393,14 +353,7 @@ fn matching_places(model: &Model, request: &ExtractRequest) -> Vec<EqRef> {
             }
         }
     }
-    hits.sort_by(|left, right| {
-        eq_at(model, *left)
-            .span
-            .start
-            .cmp(&eq_at(model, *right).span.start)
-            .then(left.block.cmp(&right.block))
-            .then(left.index.cmp(&right.index))
-    });
+    hits.sort_by_key(|place| row_order(report, *place));
     hits
 }
 
@@ -436,7 +389,11 @@ struct Closure {
     externals: BTreeSet<String>,
 }
 
-fn close(model: &Model, selected: &[EqRef]) -> Closure {
+fn close(
+    model: &Model,
+    selected: &[EqRef],
+    constraints: &[&crate::model::OccbinConstraint],
+) -> Closure {
     let mut closure = Closure {
         symbols: BTreeSet::new(),
         locals: BTreeSet::new(),
@@ -446,6 +403,21 @@ fn close(model: &Model, selected: &[EqRef]) -> Closure {
     let mut seen = HashSet::new();
     while let Some(place) = pending.pop() {
         absorb(model, place, &mut closure, &mut pending, &mut seen);
+    }
+    for constraint in constraints {
+        for expression in [
+            &constraint.bind,
+            &constraint.relax,
+            &constraint.error_bind,
+            &constraint.error_relax,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if let Some(id) = expression.expr {
+                push_expr_symbols(model, id, &mut closure);
+            }
+        }
     }
     loop {
         let locals_before = closure.locals.len();
@@ -794,10 +766,7 @@ fn declaration_has_macro(model: &Model, closure: &Closure) -> bool {
         if !contains_macro(text) {
             return false;
         }
-        match expanded_decl_line(model, decl, text) {
-            Some(line) if !contains_macro(&line) => false,
-            _ => true,
-        }
+        !matches!(expanded_decl_line(model, decl, text), Some(line) if !contains_macro(&line))
     })
 }
 
@@ -893,7 +862,7 @@ struct KeptEquation {
 /// regimes of those hits, in source order. Partners stay inside one scope:
 /// the aggregate model, or one heterogeneity dimension. A row that matched
 /// the selector stays `Requested`. Companions are not walked again.
-fn kept_equations(model: &Model, requested: &[EqRef]) -> Vec<KeptEquation> {
+fn kept_equations(model: &Model, report: &ExpandReport, requested: &[EqRef]) -> Vec<KeptEquation> {
     let mut roles = HashMap::new();
     for &place in requested {
         roles.entry(place).or_insert(EquationRole::Requested);
@@ -907,16 +876,7 @@ fn kept_equations(model: &Model, requested: &[EqRef]) -> Vec<KeptEquation> {
         .into_iter()
         .map(|(place, role)| KeptEquation { place, role })
         .collect();
-    kept.sort_by(|left, right| {
-        let left_eq = eq_at(model, left.place);
-        let right_eq = eq_at(model, right.place);
-        left_eq
-            .span
-            .start
-            .cmp(&right_eq.span.start)
-            .then(left.place.block.cmp(&right.place.block))
-            .then(left.place.index.cmp(&right.place.index))
-    });
+    kept.sort_by_key(|row| row_order(report, row.place));
     kept
 }
 
@@ -926,13 +886,14 @@ fn related_equations(model: &Model, place: EqRef) -> Vec<EqRef> {
         return Vec::new();
     }
     let scope = scope_key(model, place);
+    let partner = aggregate_partner(model, place);
     let mut others = Vec::new();
     if scope.is_none() {
         for (index, other) in model.equations.iter().enumerate() {
             let other_place = EqRef { block: None, index };
             if other_place != place
                 && !other.is_local
-                && (static_dynamic_partner(model, eq, other) || occbin_same_name(eq, other))
+                && (Some(other_place) == partner || occbin_same_name(eq, other))
             {
                 others.push(other_place);
             }
@@ -948,10 +909,7 @@ fn related_equations(model: &Model, place: EqRef) -> Vec<EqRef> {
                 block: Some(block),
                 index,
             };
-            if other_place != place
-                && !other.is_local
-                && (static_dynamic_partner(model, eq, other) || occbin_same_name(eq, other))
-            {
+            if other_place != place && !other.is_local && occbin_same_name(eq, other) {
                 others.push(other_place);
             }
         }
@@ -966,16 +924,80 @@ fn scope_key(model: &Model, place: EqRef) -> Option<crate::intern::Name> {
         .map(|block| model.heterogeneous_models[block].dimension)
 }
 
-/// Another equation is a partner when either side is `[static]` or `[dynamic]`
-/// and they share a nonempty name or the same left-hand symbol.
-fn static_dynamic_partner(model: &Model, left: &Equation, right: &Equation) -> bool {
-    if !(left.static_tag || left.dynamic_tag || right.static_tag || right.dynamic_tag) {
-        return false;
+/// Dynare's static model consumes the next static-only row for each
+/// dynamic-only row, independent of their names or left-hand expressions.
+fn aggregate_partner(model: &Model, place: EqRef) -> Option<EqRef> {
+    if place.block.is_some() {
+        return None;
     }
-    let same_name = !left.name.is_empty() && left.name == right.name;
-    let same_lhs =
-        lhs_symbol(model, left).is_some_and(|name| lhs_symbol(model, right) == Some(name));
-    same_name || same_lhs
+    let row = eq_at(model, place);
+    let own_static = row.static_tag && !row.dynamic_tag;
+    let own_dynamic = row.dynamic_tag && !row.static_tag;
+    if !own_static && !own_dynamic {
+        return None;
+    }
+    let ordinal = model
+        .equations
+        .iter()
+        .take(place.index + 1)
+        .filter(|eq| {
+            !eq.is_local
+                && if own_static {
+                    eq.static_tag && !eq.dynamic_tag
+                } else {
+                    eq.dynamic_tag && !eq.static_tag
+                }
+        })
+        .count()
+        - 1;
+    model
+        .equations
+        .iter()
+        .enumerate()
+        .filter(|(_, eq)| {
+            !eq.is_local
+                && if own_static {
+                    eq.dynamic_tag && !eq.static_tag
+                } else {
+                    eq.static_tag && !eq.dynamic_tag
+                }
+        })
+        .nth(ordinal)
+        .map(|(index, _)| EqRef { block: None, index })
+}
+
+fn required_partner_problem(model: &Model, kept: &[EqRef]) -> Option<String> {
+    for &place in kept {
+        let eq = eq_at(model, place);
+        if place.block.is_some()
+            && (eq.tag_map.contains_key("bind") || eq.tag_map.contains_key("relax"))
+        {
+            return Some(
+                "a heterogeneous bind/relax equation has no supported OccBin regime relation"
+                    .to_string(),
+            );
+        }
+        if !eq.static_tag && !eq.dynamic_tag {
+            continue;
+        }
+        if place.block.is_some() {
+            if eq.static_tag {
+                return Some(
+                    "a heterogeneous [static] equation has no supported replacement relation"
+                        .to_string(),
+                );
+            }
+            continue;
+        }
+        if aggregate_partner(model, place).is_none() {
+            return Some(format!(
+                "a [{}] equation has no corresponding [{}] equation",
+                if eq.static_tag { "static" } else { "dynamic" },
+                if eq.static_tag { "dynamic" } else { "static" }
+            ));
+        }
+    }
+    None
 }
 
 /// A bind/relax equation keeps every other equation in the same scope with its name.
@@ -990,47 +1012,41 @@ struct OccbinPiece {
     before_model: bool,
 }
 
-/// Named constraints cited by retained `bind` / `relax` tags, as one block.
-/// A name with no definition is omitted context. A definition whose span still
-/// contains `@#` or `@{` cannot be rendered.
-fn occbin_setup(
-    model: &Model,
+/// Named definitions are required context for retained OccBin regimes.
+fn required_constraints<'a>(
+    model: &'a Model,
     kept: &[EqRef],
-    retained: &[EqRef],
-) -> Result<(Option<OccbinPiece>, Vec<OmittedContext>), String> {
-    let mut needed = Vec::new();
-    let mut seen = HashSet::new();
+) -> Result<Vec<&'a crate::model::OccbinConstraint>, String> {
+    let mut names = HashSet::new();
     for &place in kept {
-        for name in tag_constraint_names(eq_at(model, place)) {
-            if seen.insert(name.clone()) {
-                needed.push(name);
-            }
+        names.extend(tag_constraint_names(eq_at(model, place)));
+    }
+    for name in &names {
+        if !model.occbin_constraints.iter().any(|row| row.name == *name) {
+            return Err(format!(
+                "constraint `{name}` has no occbin_constraints definition"
+            ));
         }
     }
-    let defined: Vec<&crate::model::OccbinConstraint> = model
+    Ok(model
         .occbin_constraints
         .iter()
-        .filter(|constraint| needed.iter().any(|name| name == &constraint.name))
-        .collect();
-    let defined_names: HashSet<&str> = defined
-        .iter()
-        .map(|constraint| constraint.name.as_str())
-        .collect();
-    let omitted = needed
-        .iter()
-        .filter(|name| !defined_names.contains(name.as_str()))
-        .map(|name| OmittedContext {
-            kind: "occbin_setup".to_string(),
-            detail: format!(
-                "constraint `{name}` is named by a bind or relax tag and has no occbin_constraints definition"
-            ),
-        })
-        .collect();
+        .filter(|row| names.contains(&row.name))
+        .collect())
+}
+
+/// Named constraints cited by retained `bind` / `relax` tags, as one block.
+/// A definition whose span still contains `@#` or `@{` cannot be rendered.
+fn occbin_setup(
+    model: &Model,
+    defined: &[&crate::model::OccbinConstraint],
+    retained: &[EqRef],
+) -> Result<Option<OccbinPiece>, String> {
     if defined.is_empty() {
-        return Ok((None, omitted));
+        return Ok(None);
     }
     let mut parts = Vec::new();
-    for constraint in &defined {
+    for constraint in defined {
         let text = slice_through_semi(&model.source, constraint.span);
         if contains_macro(&text) {
             return Err(
@@ -1044,13 +1060,10 @@ fn occbin_setup(
             .iter()
             .all(|constraint| constraint.span.start < start)
     });
-    Ok((
-        Some(OccbinPiece {
-            text: format_occbin_block(&parts),
-            before_model,
-        }),
-        omitted,
-    ))
+    Ok(Some(OccbinPiece {
+        text: format_occbin_block(&parts),
+        before_model,
+    }))
 }
 
 fn tag_constraint_names(eq: &Equation) -> Vec<String> {
@@ -1074,14 +1087,6 @@ fn format_occbin_block(parts: &[String]) -> String {
     lines.extend(parts.iter().map(|part| part.trim().to_string()));
     lines.push("end;".to_string());
     lines.join("\n")
-}
-
-fn lhs_symbol(model: &Model, eq: &Equation) -> Option<Name> {
-    let id = eq.lhs_expr?;
-    match &model.exprs.get(id).kind {
-        ExprKind::Ident { name, .. } => Some(*name),
-        _ => None,
-    }
 }
 
 fn retained_places(model: &Model, selected: &[EqRef], closure: &Closure) -> Vec<EqRef> {
@@ -1198,35 +1203,20 @@ fn heterogeneous_counted_index(model: &Model, block: usize, eq_index: usize) -> 
     count
 }
 
-/// Position among counted equations of one heterogeneous block. The expand
-/// map stores one origin per counted row of that block.
-fn counted_offset_in_block(model: &Model, block: usize, eq_index: usize) -> Option<usize> {
-    let equations = &model.heterogeneous_models[block].equations;
-    if equations[eq_index].is_local || equations[eq_index].static_tag {
-        return None;
-    }
-    Some(
-        equations
-            .iter()
-            .take(eq_index + 1)
-            .filter(|eq| !eq.is_local && !eq.static_tag)
-            .count()
-            - 1,
-    )
-}
-
 fn render(
     model: &Model,
+    report: &ExpandReport,
     selected: &[EqRef],
     closure: &Closure,
     occbin: Option<&OccbinPiece>,
 ) -> String {
-    let retained = retained_places(model, selected, closure);
+    let mut retained = retained_places(model, selected, closure);
+    retained.sort_by_key(|place| row_order(report, *place));
     let mut lines = declaration_lines(model, closure, &retained);
     if let Some(piece) = occbin.filter(|piece| piece.before_model) {
         push_section(&mut lines, &piece.text);
     }
-    for text in model_sections(model, &retained) {
+    for text in model_sections(model, report, &retained) {
         push_section(&mut lines, &text);
     }
     if let Some(piece) = occbin.filter(|piece| !piece.before_model) {
@@ -1239,10 +1229,15 @@ fn render(
     text
 }
 
-fn model_sections(model: &Model, retained: &[EqRef]) -> Vec<String> {
+fn model_sections(model: &Model, report: &ExpandReport, retained: &[EqRef]) -> Vec<String> {
     let mut sections = Vec::new();
     if retained.iter().any(|place| place.block.is_none()) {
-        let start = model.model_block.map(|span| span.start).unwrap_or(u32::MAX);
+        let start = retained
+            .iter()
+            .filter(|place| place.block.is_none())
+            .map(|place| row_order(report, *place))
+            .min()
+            .unwrap_or(usize::MAX);
         sections.push((start, model_section(model, None, retained)));
     }
     let mut seen_blocks = BTreeSet::new();
@@ -1254,7 +1249,12 @@ fn model_sections(model: &Model, retained: &[EqRef]) -> Vec<String> {
             continue;
         }
         sections.push((
-            model.heterogeneous_models[block].span.start,
+            retained
+                .iter()
+                .filter(|place| place.block == Some(block))
+                .map(|place| row_order(report, *place))
+                .min()
+                .unwrap_or(usize::MAX),
             model_section(model, Some(block), retained),
         ));
     }
@@ -1912,6 +1912,11 @@ stoch_simul;
         assert!(fragment.contains("# rho = 0.9;"), "{fragment}");
         assert!(fragment.contains("# phi = rho;"), "{fragment}");
         assert!(fragment.contains("[name='cap']"), "{fragment}");
+        assert!(
+            fragment.find("# rho = 0.9;").unwrap() < fragment.find("# phi = rho;").unwrap()
+                && fragment.find("# phi = rho;").unwrap() < fragment.find("[name='cap']").unwrap(),
+            "{fragment}"
+        );
         assert!(!fragment.contains("name='euler'"), "{fragment}");
         assert!(!fragment.contains("name='other'"), "{fragment}");
         assert!(!fragment.contains("var y"), "{fragment}");
@@ -2199,14 +2204,10 @@ var(heterogeneity=h) c;
 model;
   [name='agg']
   y = 0;
-  [static]
-  y = 1;
 end;
 model(heterogeneity=h);
-  [name='eq']
+  [name='eq', dynamic]
   c = 0;
-  [static]
-  c = 1;
   [name='also']
   c = 2;
 end;
@@ -2217,37 +2218,28 @@ end;
 ";
         let result = extract(&req(src, &["eq"], &[])).unwrap();
         assert_eq!(result.status, ExtractStatus::Ok);
-        assert_eq!(result.selected_equations.len(), 2);
+        assert_eq!(result.selected_equations.len(), 1);
         assert_eq!(result.selected_equations[0].role, EquationRole::Requested);
         assert_eq!(result.selected_equations[0].index, Some(0));
         assert_eq!(result.selected_equations[0].dimension.as_deref(), Some("h"));
-        assert_eq!(result.selected_equations[1].role, EquationRole::Companion);
-        assert_eq!(result.selected_equations[1].index, None);
-        assert_eq!(result.origins[1].role, EquationRole::Companion);
-        assert_eq!(result.origins[1].index, None);
         let fragment = result.fragment.expect("fragment");
         assert!(fragment.contains("c = 0;"), "{fragment}");
-        assert!(fragment.contains("c = 1;"), "{fragment}");
         assert!(!fragment.contains("c = 2"), "{fragment}");
         assert!(!fragment.contains("c = 3"), "{fragment}");
         assert!(!fragment.contains("name='also'"), "{fragment}");
         assert!(!fragment.contains("name='later'"), "{fragment}");
         assert!(!fragment.contains("y = 0"), "{fragment}");
-        assert!(!fragment.contains("y = 1"), "{fragment}");
 
         let later = extract(&req(src, &["later"], &[])).unwrap();
-        assert_eq!(later.selected_equations.len(), 2);
-        assert_eq!(later.selected_equations[0].role, EquationRole::Companion);
-        assert_eq!(later.selected_equations[0].index, None);
-        assert_eq!(later.selected_equations[1].role, EquationRole::Requested);
-        assert_eq!(later.selected_equations[1].index, Some(2));
+        assert_eq!(later.selected_equations.len(), 1);
+        assert_eq!(later.selected_equations[0].role, EquationRole::Requested);
+        assert_eq!(later.selected_equations[0].index, Some(2));
         assert_eq!(
-            later.selected_equations[1].domain,
+            later.selected_equations[0].domain,
             EquationDomain::Heterogeneous
         );
         let later_fragment = later.fragment.expect("fragment");
         assert!(later_fragment.contains("c = 3;"), "{later_fragment}");
-        assert!(later_fragment.contains("[static]"), "{later_fragment}");
         assert!(!later_fragment.contains("c = 0"), "{later_fragment}");
         assert!(!later_fragment.contains("c = 2"), "{later_fragment}");
         assert!(!later_fragment.contains("name='also'"), "{later_fragment}");
@@ -2274,41 +2266,21 @@ end;
             "{agg_fragment}"
         );
 
-        let occbin = "\
+        let static_result = extract(&req(cross, &[], &[("static", "")])).unwrap();
+        assert_eq!(static_result.status, ExtractStatus::UnsupportedContext);
+        assert!(static_result.fragment.is_none());
+
+        let regime = "\
 heterogeneity_dimension h;
-var y;
 var(heterogeneity=h) c;
-model;
-  [name='policy', relax='ELB']
-  y = 3;
-end;
 model(heterogeneity=h);
-  [name='policy', bind='ELB']
-  c = 2;
+  [name='policy', bind='C'] c=0;
 end;
 ";
-        let mut het_policy = req(occbin, &["policy"], &[]);
-        het_policy.dimension = Some("h".to_string());
-        let policy = extract(&het_policy).unwrap();
-        assert_eq!(policy.status, ExtractStatus::Ok);
-        assert_eq!(policy.selected_equations.len(), 1);
-        assert_eq!(policy.selected_equations[0].index, Some(0));
-        assert_eq!(policy.selected_equations[0].role, EquationRole::Requested);
-        let policy_fragment = policy.fragment.expect("fragment");
-        assert!(policy_fragment.contains("c = 2;"), "{policy_fragment}");
-        assert!(!policy_fragment.contains("y = 3"), "{policy_fragment}");
-        assert!(policy
-            .omitted_context
-            .iter()
-            .any(|item| item.kind == "occbin_setup" && item.detail.contains("`ELB`")));
-
-        let aggregate_policy = extract(&req(occbin, &["policy"], &[("relax", "ELB")])).unwrap();
-        assert_eq!(aggregate_policy.selected_equations.len(), 1);
-        assert_eq!(
-            aggregate_policy.selected_equations[0].domain,
-            EquationDomain::Aggregate
-        );
-        assert!(!aggregate_policy.fragment.unwrap().contains("c = 2"));
+        let regime_result = extract(&req(regime, &["policy"], &[])).unwrap();
+        assert_eq!(regime_result.status, ExtractStatus::UnsupportedContext);
+        assert!(regime_result.fragment.is_none());
+        assert!(regime_result.explanation.contains("heterogeneous"));
     }
 
     #[test]
@@ -2362,14 +2334,14 @@ end;
     }
 
     #[test]
-    fn static_partner_is_retained_and_does_not_square_the_model() {
+    fn static_partner_follows_replacement_order_and_does_not_square_the_model() {
         let src = "\
 var y, c;
 model;
-  [name='eq']
+  [name='eq', dynamic]
   y = 0;
-  [static]
-  y = 1;
+  [name='steady', static]
+  c = 1;
   [name='other']
   c = 2;
 end;
@@ -2379,13 +2351,13 @@ end;
         let result = extract(&request).unwrap();
         assert_eq!(result.status, ExtractStatus::Ok);
         let fragment = result.fragment.expect("fragment");
-        assert!(fragment.contains("[name='eq']"), "{fragment}");
-        assert!(fragment.contains("[static]"), "{fragment}");
+        assert!(fragment.contains("[name='eq', dynamic]"), "{fragment}");
+        assert!(fragment.contains("[name='steady', static]"), "{fragment}");
         assert!(fragment.contains("y = 0;"), "{fragment}");
-        assert!(fragment.contains("y = 1;"), "{fragment}");
+        assert!(fragment.contains("c = 1;"), "{fragment}");
         assert!(!fragment.contains("name='other'"), "{fragment}");
         assert!(!fragment.contains("c = 2"), "{fragment}");
-        assert!(!fragment.contains("var y, c"), "{fragment}");
+        assert!(fragment.contains("var y, c"), "{fragment}");
         assert_eq!(result.selected_equations.len(), 2);
         assert_eq!(result.selected_equations[0].role, EquationRole::Requested);
         assert_eq!(result.selected_equations[0].index, Some(0));
@@ -2405,13 +2377,13 @@ end;
         assert_eq!(result.origins[1].file.as_deref(), Some("partner.mod"));
         let static_src =
             &src[result.origins[1].span.start as usize..result.origins[1].span.end as usize];
-        assert!(static_src.contains("y = 1"), "{static_src}");
+        assert!(static_src.contains("c = 1"), "{static_src}");
         assert!(result.origins[1].frames.is_empty());
 
         let named = "\
 var y;
 model;
-  [name='eq']
+  [name='eq', dynamic]
   y = 0;
   [name='ss', static]
   y = 1;
@@ -2471,7 +2443,7 @@ end;
         let third = "\
 var y;
 model;
-  [name='eq']
+  [name='eq', dynamic]
   y = 0;
   [static]
   y = 1;
@@ -2486,6 +2458,234 @@ end;
         assert!(extra_fragment.contains("y = 1;"), "{extra_fragment}");
         assert!(!extra_fragment.contains("y = 2"), "{extra_fragment}");
         assert!(!extra_fragment.contains("name='also'"), "{extra_fragment}");
+    }
+
+    #[test]
+    fn static_partners_follow_tag_order_even_when_names_suggest_other_pairs() {
+        let src = "\
+var a, b, c;
+model;
+  [name='first', dynamic] a-a(-1)=0;
+  [name='second', dynamic] b-b(-1)=0;
+  [name='second', static] c=0;
+  [name='first', static] b=0;
+  [name='ordinary'] c=a;
+end;
+";
+        let first = extract(&req(src, &["first"], &[("dynamic", "")])).unwrap();
+        assert_eq!(first.status, ExtractStatus::Ok);
+        assert_eq!(first.selected_equations.len(), 2);
+        assert_eq!(first.selected_equations[0].name.as_deref(), Some("first"));
+        assert_eq!(first.selected_equations[1].name.as_deref(), Some("second"));
+        let fragment = first.fragment.unwrap();
+        assert!(fragment.contains("c=0;"), "{fragment}");
+        assert!(!fragment.contains("b=0;"), "{fragment}");
+        assert!(!fragment.contains("c=a;"), "{fragment}");
+
+        let second = extract(&req(src, &["second"], &[("static", "")])).unwrap();
+        assert_eq!(second.selected_equations.len(), 2);
+        assert_eq!(second.selected_equations[0].name.as_deref(), Some("first"));
+        assert_eq!(second.selected_equations[1].name.as_deref(), Some("second"));
+        assert_eq!(second.selected_equations[1].role, EquationRole::Requested);
+    }
+
+    #[test]
+    fn constraints_close_all_four_expressions_without_unrelated_equations() {
+        let src = "\
+var y, z;
+parameters bindp, relaxp, errorbp, errorrp;
+bindp=0; relaxp=0; errorbp=0; errorrp=0;
+model;
+  [name='policy', relax='C'] y=0;
+  [name='policy', bind='C'] y=1;
+  z=0;
+end;
+occbin_constraints;
+  name 'C'; bind z<bindp; relax z>=relaxp;
+  error_bind errorbp; error_relax errorrp;
+end;
+";
+        let result = extract(&req(src, &["policy"], &[])).unwrap();
+        assert_eq!(result.status, ExtractStatus::Ok);
+        let fragment = result.fragment.unwrap();
+        assert!(fragment.contains("var y, z;"), "{fragment}");
+        for name in ["bindp", "relaxp", "errorbp", "errorrp"] {
+            assert!(fragment.contains(name), "{fragment}");
+        }
+        assert!(!fragment.contains("z=0;"), "{fragment}");
+        assert!(!fragment.contains("bindp=0;"), "{fragment}");
+        assert!(result
+            .omitted_context
+            .iter()
+            .any(|item| item.kind == "calibration"));
+    }
+
+    #[test]
+    fn static_loop_rows_keep_effective_order_and_iteration_origins() {
+        let body = "\
+@#define is = 1:2
+@#for j in is
+[name='law', dynamic] y=y(-1);
+[name='ss', static] y=@{j};
+@#endfor
+";
+        let plain = format!("var y;\nmodel;\n{body}end;\n");
+        let mut included = req(
+            "var y;\nmodel;\n@#include \"body.inc\"\nend;\n",
+            &["law"],
+            &[],
+        );
+        included.active_file = Some("root.mod".to_string());
+        included
+            .files
+            .insert("body.inc".to_string(), body.to_string());
+        for (request, expected_file) in [
+            (req(&plain, &["law"], &[]), None),
+            (included, Some("body.inc")),
+        ] {
+            let result = extract(&request).unwrap();
+            assert_eq!(result.status, ExtractStatus::Ok);
+            assert_eq!(result.selected_equations.len(), 4);
+            assert_eq!(
+                result
+                    .selected_equations
+                    .iter()
+                    .map(|row| row.role)
+                    .collect::<Vec<_>>(),
+                [
+                    EquationRole::Requested,
+                    EquationRole::Companion,
+                    EquationRole::Requested,
+                    EquationRole::Companion
+                ]
+            );
+            assert_eq!(
+                result
+                    .origins
+                    .iter()
+                    .map(|row| row.frames[0].value.as_deref())
+                    .collect::<Vec<_>>(),
+                [Some("1"), Some("1"), Some("2"), Some("2")]
+            );
+            assert!(
+                result.origins.iter().all(|row| match expected_file {
+                    Some(file) => row.file.as_deref().is_some_and(|path| path.ends_with(file)),
+                    None => row.file.is_none(),
+                }),
+                "{:?}",
+                result.origins
+            );
+            assert_eq!(
+                result
+                    .origins
+                    .iter()
+                    .map(|row| row.index)
+                    .collect::<Vec<_>>(),
+                [Some(0), None, Some(1), None]
+            );
+            let fragment = result.fragment.unwrap();
+            let first = fragment
+                .find("y = y(-1);")
+                .unwrap_or_else(|| panic!("{fragment}"));
+            let static_one = fragment
+                .find("y = 1;")
+                .unwrap_or_else(|| panic!("{fragment}"));
+            let second = fragment[first + 1..]
+                .find("y = y(-1);")
+                .unwrap_or_else(|| panic!("{fragment}"))
+                + first
+                + 1;
+            let static_two = fragment
+                .find("y = 2;")
+                .unwrap_or_else(|| panic!("{fragment}"));
+            assert!(
+                first < static_one && static_one < second && second < static_two,
+                "{fragment}"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_loop_static_companions_keep_both_iteration_frames() {
+        let src = "\
+var y;
+@#define is = 1:2
+model;
+@#for i in is
+@#for j in is
+[name='law', dynamic] y=y(-1);
+[name='ss', static] y=@{i}+@{j};
+@#endfor
+@#endfor
+end;
+";
+        let result = extract(&req(src, &["law"], &[])).unwrap();
+        assert_eq!(result.status, ExtractStatus::Ok);
+        assert_eq!(result.selected_equations.len(), 8);
+        let frames = result
+            .origins
+            .iter()
+            .map(|row| {
+                row.frames
+                    .iter()
+                    .map(|frame| frame.value.as_deref())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            frames,
+            [
+                vec![Some("1"), Some("1")],
+                vec![Some("1"), Some("1")],
+                vec![Some("1"), Some("2")],
+                vec![Some("1"), Some("2")],
+                vec![Some("2"), Some("1")],
+                vec![Some("2"), Some("1")],
+                vec![Some("2"), Some("2")],
+                vec![Some("2"), Some("2")],
+            ]
+        );
+        assert_eq!(
+            result
+                .origins
+                .iter()
+                .map(|row| row.index)
+                .collect::<Vec<_>>(),
+            [Some(0), None, Some(1), None, Some(2), None, Some(3), None,]
+        );
+    }
+
+    #[test]
+    fn expanded_locals_stay_before_each_equation_that_uses_them() {
+        let src = "\
+var y;
+@#define is = 1:2
+model;
+@#for i in is
+# a@{i} = @{i};
+[name='eq'] y=a@{i};
+@#endfor
+end;
+";
+        let result = extract(&req(src, &["eq"], &[])).unwrap();
+        assert_eq!(result.status, ExtractStatus::Ok);
+        let fragment = result.fragment.unwrap();
+        let first_local = fragment
+            .find("#a1 = 1;")
+            .unwrap_or_else(|| panic!("{fragment}"));
+        let first_eq = fragment
+            .find("y = a1;")
+            .unwrap_or_else(|| panic!("{fragment}"));
+        let second_local = fragment
+            .find("#a2 = 2;")
+            .unwrap_or_else(|| panic!("{fragment}"));
+        let second_eq = fragment
+            .find("y = a2;")
+            .unwrap_or_else(|| panic!("{fragment}"));
+        assert!(
+            first_local < first_eq && first_eq < second_local && second_local < second_eq,
+            "{fragment}"
+        );
     }
 
     #[test]
@@ -2578,7 +2778,7 @@ end;
     }
 
     #[test]
-    fn missing_occbin_constraint_is_omitted_and_the_fragment_stays() {
+    fn missing_occbin_constraint_has_no_fragment() {
         let src = "\
 var y;
 model;
@@ -2589,17 +2789,26 @@ model;
 end;
 ";
         let result = extract(&req(src, &["r"], &[("bind", "c")])).unwrap();
-        assert_eq!(result.status, ExtractStatus::Ok);
-        let fragment = result.fragment.expect("fragment");
-        assert!(fragment.contains("bind='c'"), "{fragment}");
-        assert!(fragment.contains("relax='c'"), "{fragment}");
-        assert!(!fragment.contains("occbin_constraints"), "{fragment}");
-        assert_eq!(result.selected_equations[0].role, EquationRole::Requested);
-        assert_eq!(result.selected_equations[1].role, EquationRole::Companion);
-        assert!(result
-            .omitted_context
-            .iter()
-            .any(|item| { item.kind == "occbin_setup" && item.detail.contains("`c`") }));
+        assert_eq!(result.status, ExtractStatus::UnsupportedContext);
+        assert!(result.fragment.is_none());
+        assert!(result.explanation.contains("`c`"));
+
+        let unrelated = "\
+var y, z;
+model;
+  [name='policy', bind='c'] y=0;
+  [name='policy', relax='c'] y=1;
+  [name='other', bind='missing'] z=0;
+end;
+occbin_constraints;
+  name 'c'; bind y<0;
+end;
+";
+        let selected = extract(&req(unrelated, &["policy"], &[])).unwrap();
+        assert_eq!(selected.status, ExtractStatus::Ok);
+        let fragment = selected.fragment.unwrap();
+        assert!(fragment.contains("name 'c'"), "{fragment}");
+        assert!(!fragment.contains("missing"), "{fragment}");
     }
 
     #[test]
@@ -2828,6 +3037,76 @@ end;
         let missed = extract(&hidden).unwrap();
         assert_eq!(missed.status, ExtractStatus::Empty);
         assert_eq!(missed.fragment.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn files_map_never_reads_an_unprovided_disk_include() {
+        let unique = format!(
+            "dygnosis-extract-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let root_path = std::env::temp_dir().join(format!("{unique}.mod"));
+        let child_name = format!("{unique}.inc");
+        let child_path = std::env::temp_dir().join(&child_name);
+        let root_key = root_path.to_string_lossy().replace('\\', "/");
+        let child_key = child_path.to_string_lossy().replace('\\', "/");
+        let root = format!("var y;\nmodel;\n@#include \"{child_name}\"\nend;\n");
+        let child = "[name='eq'] y=1;\n";
+        let mut request = req(&root, &["eq"], &[]);
+        request.active_file = Some(root_key.clone());
+        request
+            .files
+            .insert(root_key, "var y; model; [name='old'] y=0; end;".to_string());
+
+        let before = extract(&request).unwrap();
+        assert_eq!(before.status, ExtractStatus::UnsupportedContext);
+        assert!(before.fragment.is_none());
+
+        std::fs::write(&child_path, child).unwrap();
+        let with_disk = extract(&request).unwrap();
+        std::fs::remove_file(&child_path).unwrap();
+        assert_eq!(with_disk.status, ExtractStatus::UnsupportedContext);
+        assert!(with_disk.fragment.is_none());
+
+        request.files.insert(child_key.clone(), child.to_string());
+        let supplied = extract(&request).unwrap();
+        assert_eq!(supplied.status, ExtractStatus::Ok);
+        assert_eq!(
+            supplied.origins[0].file.as_deref(),
+            Some(child_key.as_str())
+        );
+        let fragment = supplied.fragment.unwrap();
+        assert!(fragment.contains("y=1;"), "{fragment}");
+        assert!(!fragment.contains("name='old'"), "{fragment}");
+    }
+
+    #[test]
+    fn overlay_keeps_windows_supplied_keys_and_replaces_active_alias() {
+        let active = r"C:\models\root.mod";
+        let child = r"C:\models\body.inc";
+        let mut request = req(
+            "var y;\nmodel;\n@#include \"body.inc\"\nend;\n",
+            &["eq"],
+            &[],
+        );
+        request.active_file = Some(active.to_string());
+        request.files.insert(
+            "C:/models/root.mod".to_string(),
+            "var y; model; [name='old'] y=0; end;".to_string(),
+        );
+        request
+            .files
+            .insert(child.to_string(), "[name='eq'] y=1;\n".to_string());
+        let result = extract(&request).unwrap();
+        assert_eq!(result.status, ExtractStatus::Ok, "{}", result.explanation);
+        assert_eq!(result.origins[0].file.as_deref(), Some(child));
+        let fragment = result.fragment.unwrap();
+        assert!(fragment.contains("y=1;"), "{fragment}");
+        assert!(!fragment.contains("name='old'"), "{fragment}");
     }
 
     #[test]
@@ -3076,6 +3355,6 @@ end;
     fn tools_list_includes_dynare_extract() {
         let names = registered_tool_names();
         assert!(names.contains(&"dynare_extract"));
-        assert!(!names.contains(&"dynare_workspace_diagnose"));
+        assert!(names.contains(&"dynare_workspace_diagnose"));
     }
 }

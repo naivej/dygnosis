@@ -61,8 +61,8 @@ pub mod preprocessor;
 pub mod refs;
 pub mod server;
 mod shape_gate;
-mod signature_help;
 pub(crate) mod shock_template;
+mod signature_help;
 pub mod span;
 pub mod workspace;
 pub(crate) mod workspace_diagnose;
@@ -100,7 +100,10 @@ pub use check_w120::{check_w120, check_w120_family, check_w121, check_w122};
 pub use check_w130::check_w130;
 pub use check_w160::{check_w160, quiet_i050};
 pub use companion::{CompanionKind, CompanionRecord};
-pub use diagnostic::{analyze, check_file, format_check_lines, Diagnostic, Severity, TextEdit};
+pub use diagnostic::{
+    analyze, check_file, check_file_with_origins, format_check_lines,
+    format_check_lines_with_origins, Diagnostic, DiagnosticSet, Severity, TextEdit, WritingOrigin,
+};
 pub use e010::check_e010;
 pub use equations::{
     count_gap, equations, explain_equation, CountGap, EquationIdent, EquationRow, IdentClass,

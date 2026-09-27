@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use dygnosis::include_resolver::{normalize_uri, resolve_include_path};
-use dygnosis::workspace::split_includepath_argument;
+use dygnosis::workspace::includepath_literal;
 use dygnosis::{analyze, find_workspace_root, parse, Workspace};
 
 fn copilot_mod(archive_dir: &str) -> PathBuf {
@@ -203,9 +203,9 @@ fn find_workspace_root_walks_to_git() {
 }
 
 #[test]
-fn split_includepath_does_not_split_drive() {
-    let parts = split_includepath_argument(r#""C:/models:other""#);
-    assert_eq!(parts, ["C:/models", "other"]);
+fn includepath_keeps_the_whole_string() {
+    let path = includepath_literal(r#""C:/models:other""#);
+    assert_eq!(path.as_deref(), Some("C:/models:other"));
 }
 
 #[test]
@@ -341,6 +341,48 @@ fn includepath_resolves_non_sibling() {
         .map(|a| effective.name(a.name).to_string())
         .collect();
     assert_eq!(got, inc_assignment_names());
+}
+
+#[test]
+fn nested_includepath_resolves_from_root_directory() {
+    let dir = tmp_unique();
+    fs::create_dir_all(dir.join("parts/more")).unwrap();
+    fs::create_dir_all(dir.join("more")).unwrap();
+    let main = dir.join("main.mod");
+    fs::write(
+        &main,
+        "@#include \"parts/first.inc\"\nvar y; model; y=0; end;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("parts/first.inc"),
+        "@#includepath \"more\"\n@#include \"leaf.inc\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("more/leaf.inc"), "parameters root_hit;\n").unwrap();
+    fs::write(dir.join("parts/more/leaf.inc"), "parameters child_hit;\n").unwrap();
+
+    let mut ws = Workspace::new();
+    ws.load_from_disk(&main).unwrap();
+    let records = ws.include_records(main.to_str().unwrap()).unwrap();
+    assert!(records.unresolved.is_empty(), "{:?}", records.unresolved);
+    assert!(
+        records
+            .resolved
+            .iter()
+            .any(|r| r.path == dir.join("more/leaf.inc")),
+        "{:?}",
+        records.resolved
+    );
+    assert!(
+        !records
+            .resolved
+            .iter()
+            .any(|r| r.path == dir.join("parts/more/leaf.inc")),
+        "{:?}",
+        records.resolved
+    );
+    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
