@@ -3,7 +3,7 @@
 ![dygnosis](media/logo_s.png) is a second Dynare preprocessor living in your editor that
 
 - powers MCP for agents and LSP for humans, with code intelligence while typing;
-- catches many problems Dynare 7.2 would report before MATLAB runs and points to them in your `.mod` file;
+- catches most problems Dynare would report before MATLAB runs and points to them in your `.mod` file;
 - adds warnings for possible problems Dynare does not report.
 
 Limitations by design
