@@ -352,19 +352,24 @@ pub fn check_e060_family(ws: &mut Workspace, uri: &str) -> Vec<Diagnostic> {
 }
 
 pub fn check_e060_family_on_model(model: &Model) -> Vec<Diagnostic> {
-    let mut out = check_e062(model);
+    let syntax = check_e062(model);
+    if !syntax.is_empty() {
+        return syntax;
+    }
+    if !model.macro_type_errors.is_empty() {
+        return model
+            .macro_type_errors
+            .iter()
+            .map(|(span, code, message)| {
+                Diagnostic::new(*span, Severity::Error, *code, message.clone())
+            })
+            .collect();
+    }
+    let mut out = syntax;
     out.extend(check_e063(model));
     out.extend(check_e064(model));
     out.extend(check_e065(model));
     out.extend(check_e381(model));
-    for (span, code, message) in &model.macro_type_errors {
-        out.push(Diagnostic::new(
-            *span,
-            Severity::Error,
-            *code,
-            message.clone(),
-        ));
-    }
     out
 }
 

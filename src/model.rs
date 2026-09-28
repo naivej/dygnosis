@@ -1062,6 +1062,10 @@ pub struct Model {
     pub mod_file_locals: Vec<Name>,
     /// Macro type errors from expansion (`@#if` not bool, `@#for` tuple, `+` mismatch).
     pub macro_type_errors: Vec<(Span, &'static str, String)>,
+    /// Some valid macro text remains unexpanded; parsed rows are incomplete.
+    pub macro_incomplete: bool,
+    /// First unsupported macro directive/interpolation in the written file.
+    pub macro_incomplete_span: Option<Span>,
     /// `epilogue;` … `end;` (first block).
     pub epilogue_block: Option<Span>,
     /// `epilogue` assignments `name = expr;`, source order.

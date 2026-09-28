@@ -1177,16 +1177,19 @@ impl Backend {
             Ok(pair) => pair,
             Err(v) => return v,
         };
-        let inner = self.lock_inner();
-        let Some(model_a) = inner.workspace.get_model(uri_a.as_str()) else {
+        let mut inner = self.lock_inner();
+        let Some(model_a) = inner.workspace.get_effective_model(uri_a.as_str()).cloned() else {
             return json!({"error": format!("No parsed model for uri_a: {uri_a}"), "code": "URI_A_NOT_FOUND"});
         };
-        let Some(model_b) = inner.workspace.get_model(uri_b.as_str()) else {
+        let Some(model_b) = inner.workspace.get_effective_model(uri_b.as_str()).cloned() else {
             return json!({"error": format!("No parsed model for uri_b: {uri_b}"), "code": "URI_B_NOT_FOUND"});
         };
+        if model_a.macro_incomplete || model_b.macro_incomplete {
+            return json!({"status": "incomplete", "message": "Macro expansion is incomplete"});
+        }
         compare_models_with_sources(
-            model_a,
-            model_b,
+            &model_a,
+            &model_b,
             inner
                 .workspace
                 .get_source(uri_a.as_str())
@@ -1222,11 +1225,15 @@ impl Backend {
             .iter()
             .map(|origin| equation_origin_json(&inner.workspace, origin, has_heterogeneous))
             .collect();
-        json!({
+        let mut result = json!({
             "uri": uri.as_str(),
             "effective_text": report.effective_text,
             "origins": origins,
-        })
+        });
+        if !report.complete {
+            result["status"] = json!("incomplete");
+        }
+        result
     }
 
     fn prepare_hierarchy(

@@ -4,12 +4,14 @@ use std::collections::HashMap;
 
 use crate::equations::equations;
 use crate::lexer::{tokenize, Token};
-use crate::macro_expand::{expand_macros_traced, FrameRec, TokenTrace};
+use crate::macro_expand::{expand_macros_traced_with_status, FrameRec, TokenTrace};
 use crate::parser::{join_lexemes, normalize_newlines, parse_expanded};
 use crate::span::Span;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpandReport {
+    /// False when macro syntax remains because this expander cannot safely evaluate it.
+    pub complete: bool,
     pub effective_text: String,
     /// Counted equations across the aggregate and all heterogeneous trees.
     pub n_equations: usize,
@@ -84,12 +86,24 @@ pub fn expand_report(text: &str) -> ExpandReport {
 pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -> ExpandReport {
     let source = normalize_newlines(spliced);
     let raw = tokenize(&source);
-    let (tokens, traces, arena) = expand_macros_traced(&source, raw);
+    let (tokens, traces, arena, incomplete) = expand_macros_traced_with_status(&source, raw);
     debug_assert_eq!(tokens.len(), traces.len());
+    let effective_text = join_lexemes(&source, &tokens);
+    if incomplete {
+        return ExpandReport {
+            complete: false,
+            effective_text,
+            n_equations: 0,
+            origins: Vec::new(),
+            aggregate_origins: Vec::new(),
+            heterogeneous_origins: Vec::new(),
+            aggregate_row_origins: Vec::new(),
+            heterogeneous_row_origins: Vec::new(),
+        };
+    }
     let (model, ranges) = parse_expanded(&source, tokens.clone());
     debug_assert_eq!(model.equations.len(), ranges.aggregate.len());
     debug_assert_eq!(model.heterogeneous_models.len(), ranges.heterogeneous.len());
-    let effective_text = join_lexemes(&source, &tokens);
     let counted = equations(&model);
     let mut pending = Vec::new();
     let mut counted_i = 0usize;
@@ -176,6 +190,7 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
     }
     debug_assert_eq!(counted.len(), aggregate_origins.len());
     ExpandReport {
+        complete: true,
         effective_text,
         n_equations: origins.len(),
         origins,

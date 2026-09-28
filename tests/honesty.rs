@@ -184,6 +184,16 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         stage: JsonStage::Check,
     },
     HonestyRow {
+        code: "E020",
+        fixture: "macro_action/quoted_name.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Unknown symbol: zz",
+        our_needle: "Undeclared identifier 'zz'",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
         code: "E021",
         fixture: "w010/w021_exo.mod",
         kind: HonestyKind::Error {
@@ -274,6 +284,16 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         stage: JsonStage::Check,
     },
     HonestyRow {
+        code: "E062",
+        fixture: "macro_action/malformed_function.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "syntax error, unexpected EOL",
+        our_needle: "syntax error, unexpected EOL",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
         code: "E063",
         fixture: "e060/e063_undef.mod",
         kind: HonestyKind::Error {
@@ -281,6 +301,16 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         },
         their_needle: "Unknown variable",
         our_needle: "Unknown variable",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "E063",
+        fixture: "macro_action/unknown_value.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "Unknown variable zz",
+        our_needle: "Unknown variable zz",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -5335,6 +5365,41 @@ fn accepted_archives_emit_no_error() {
         assert_no_error(&check_file(&text, path_str), &format!("{name} check_file"));
         assert_no_p_digits(&analyze(&parse(&text)), &format!("{name} analyze()"));
         assert_no_p_digits(&check_file(&text, path_str), &format!("{name} check_file"));
+    }
+}
+
+#[test]
+fn macro_action_valid_forms_are_accepted_at_check() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    for name in [
+        "function",
+        "scalar_when",
+        "tuple",
+        "unsupported_builtin",
+        "real_math",
+        "defined",
+        "late_global",
+        "known_builtin_if",
+        "expression_fragment",
+        "expression_whitespace",
+        "expression_boundary",
+        "expression_right_boundary",
+        "identifier_whitespace",
+    ] {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/macro_action")
+            .join(format!("{name}.mod"));
+        let text = read_path(&path);
+        let result = spawn(&text, &path, &pp, JsonStage::Check);
+        assert!(
+            result.success,
+            "{name}: {:?} {}",
+            result.diagnostics, result.raw_stderr
+        );
+        assert_no_error(&analyze(&parse(&text)), name);
     }
 }
 

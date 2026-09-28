@@ -221,7 +221,11 @@ pub fn dynare_model_info(
     active_file: Option<&str>,
     files: Option<&HashMap<String, String>>,
 ) -> Value {
-    model_info_json(&mcp_parse_model(file_content, active_file, files, false))
+    let model = mcp_parse_model(file_content, active_file, files, false);
+    if model.macro_incomplete {
+        return json!({"status": "incomplete", "message": "Macro expansion is incomplete"});
+    }
+    model_info_json(&model)
 }
 
 /// Counted aggregate and heterogeneous equations, with the aggregate count
@@ -236,6 +240,14 @@ pub fn dynare_equations(
     index: Option<usize>,
 ) -> Value {
     let unit = mcp_unit(file_content, active_file, files);
+    if unit.model.macro_incomplete || !unit.report.complete {
+        return json!({
+            "status": "incomplete",
+            "message": "Macro expansion is incomplete",
+            "equations": [],
+            "count_gap": null,
+        });
+    }
     let rows = equations(&unit.model);
     let heterogeneous = heterogeneous_equations(&unit.model);
     let gap = count_gap(&unit.model);
@@ -359,6 +371,9 @@ pub fn dynare_expand(
         "n_equations": unit.report.n_equations,
         "origins": origins,
     });
+    if !unit.report.complete {
+        result["status"] = json!("incomplete");
+    }
     if has_heterogeneous {
         result["n_aggregate_equations"] = json!(unit.report.aggregate_origins.len());
         result["n_heterogeneous_equations"] =
@@ -491,6 +506,7 @@ impl McpUnit {
             .expand_report(active)
             .cloned()
             .unwrap_or_else(|| ExpandReport {
+                complete: false,
                 effective_text: String::new(),
                 n_equations: 0,
                 origins: Vec::new(),
@@ -631,6 +647,9 @@ pub fn dynare_compare_models(
         first_nonempty_files(files_b, files),
         true,
     );
+    if model_a.macro_incomplete || model_b.macro_incomplete {
+        return json!({"status": "incomplete", "message": "Macro expansion is incomplete"});
+    }
     compare_models_with_sources(
         &model_a,
         &model_b,

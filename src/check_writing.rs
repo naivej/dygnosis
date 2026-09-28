@@ -39,6 +39,7 @@ pub(crate) struct ModelStructure {
     pub parse_issues: bool,
     pub includes: bool,
     pub macro_type_errors: bool,
+    pub macro_incomplete: bool,
     pub e062: bool,
     pub e063: bool,
     pub e064: bool,
@@ -49,6 +50,7 @@ pub(crate) fn model_structure(model: &Model) -> ModelStructure {
         parse_issues: !model.parse_issues.is_empty(),
         includes: !model.includes.is_empty(),
         macro_type_errors: !model.macro_type_errors.is_empty(),
+        macro_incomplete: model.macro_incomplete,
         e062: !crate::check_e060::check_e062(model).is_empty(),
         e063: !crate::check_e060::check_e063(model).is_empty(),
         e064: !crate::check_e060::check_e064(model).is_empty(),
@@ -61,6 +63,7 @@ pub(crate) fn model_structure_incomplete(model: &Model) -> bool {
     structure.parse_issues
         || structure.includes
         || structure.macro_type_errors
+        || structure.macro_incomplete
         || structure.e062
         || structure.e063
         || structure.e064

@@ -2,8 +2,8 @@
 @#for i in is
 var z;
 @#endfor
-@#define a = x1
-@#define b = x2
+@#define a = "x1"
+@#define b = "x2"
 var @{a};
 var @{b};
 var y (long_name='output');

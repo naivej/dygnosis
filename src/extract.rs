@@ -644,7 +644,8 @@ fn unresolved_selection(model: &Model, missing_include: bool) -> Option<(Unsuppo
     }
     // `@#error` (E064) refuses a directive that did resolve. It does not hide
     // which equations were selected, so it is not an extraction failure.
-    if structure.macro_type_errors || structure.e062 || structure.e063 {
+    if structure.macro_type_errors || structure.macro_incomplete || structure.e062 || structure.e063
+    {
         return Some((
             UnsupportedKind::Macro,
             "macro expansion did not resolve, so the selected equations may be incomplete"

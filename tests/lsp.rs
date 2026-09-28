@@ -3179,6 +3179,83 @@ async fn show_effective_payload(
 }
 
 #[tokio::test]
+async fn compare_models_declines_incomplete_macro_in_root_and_include() {
+    let (service, _socket) = new_service();
+    let complete = Url::parse("file:///macro_compare_complete.mod").unwrap();
+    let incomplete = Url::parse("file:///macro_compare_incomplete.mod").unwrap();
+    let child = Url::parse("file:///macro_compare_child.inc").unwrap();
+    let included_root = Url::parse("file:///macro_compare_included.mod").unwrap();
+    service
+        .inner()
+        .did_open(open_params(
+            complete.clone(),
+            "var y; model; y=0; end;".into(),
+            1,
+        ))
+        .await;
+    service
+        .inner()
+        .did_open(open_params(
+            incomplete.clone(),
+            "@#define n=length([1,2])\nvar y; model; y=@{n}; end;".into(),
+            1,
+        ))
+        .await;
+    service
+        .inner()
+        .did_open(open_params(
+            child,
+            "@#define n=length([1,2])\nvar y; model; y=@{n}; end;".into(),
+            1,
+        ))
+        .await;
+    service
+        .inner()
+        .did_open(open_params(
+            included_root.clone(),
+            "@#include \"macro_compare_child.inc\"\n".into(),
+            1,
+        ))
+        .await;
+    for source in [incomplete, included_root] {
+        let result = service
+            .inner()
+            .execute_command(ExecuteCommandParams {
+                command: "dynare/compareModels".into(),
+                arguments: vec![serde_json::json!({
+                    "uri_a": source.as_str(),
+                    "uri_b": complete.as_str(),
+                })],
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("compare rpc")
+            .expect("compare result");
+        assert_eq!(result["status"], "incomplete", "{result}");
+        assert!(result.get("removed_equations").is_none(), "{result}");
+    }
+}
+
+#[tokio::test]
+async fn show_effective_model_marks_unsupported_macro_incomplete() {
+    let text = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/macro_action/unsupported_builtin.mod"),
+    )
+    .expect("macro fixture");
+    let uri = Url::parse("file:///macro_incomplete.mod").unwrap();
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text, 1))
+        .await;
+    let payload = show_effective_payload(&service, &uri).await;
+    assert_eq!(payload["status"], "incomplete");
+    assert!(payload["effective_text"].as_str().unwrap().contains("@{n}"));
+    assert_eq!(payload["origins"], serde_json::json!([]));
+}
+
+#[tokio::test]
 async fn show_effective_model_whole_eq_for() {
     let (uri, text) = expand_open("whole_eq_for.mod");
     let (service, _socket) = new_service();

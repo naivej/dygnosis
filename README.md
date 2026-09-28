@@ -62,6 +62,14 @@ Limitations by design
 | `dynare_extract` | Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model |
 | `dynare_workspace_diagnose` | Check several root `.mod` files. Pass a files map and roots, or paths to files and directories. One failed root does not drop the others |
 
+### Macro expansion limits
+
+Macro functions, scalar `for ... when ...` filters, and tuple loops are supported for expressions Dygnosis can evaluate. Unsupported expressions and expansion limits leave the original macro text visible. The effective-model view and affected MCP model-info, equation, and comparison results report `status: "incomplete"`; their counts and equations must not be treated as a complete model. Extraction returns its existing `unsupported_context` result when incomplete expansion prevents a reliable fragment.
+
+Diagnosis also shows `I211` Information at the first unsupported macro expression, so an incomplete analysis is visible even when no Dynare error is known.
+
+An undefined macro variable or function is a separate macro-processing Error (`E063`). Dygnosis does not run the official preprocessor to fill gaps in its own expansion.
+
 ## Credits
 
 1. dygnosis v0.1.0 is a fork and rewrite of [LLMacro-Dynare-LSP](https://github.com/pdwhoward/LLMacro-Dynare-LSP) by Anthony Diercks, Philip Howard, and Mehrdad Samadi. Diagnostic codes, check and explain surfaces, and the thin analysis design come from that work. The original repository accompanies the working paper *LLMacro: A Language Server for Dynare — Structured Context for AI-Assisted Macroeconomic Modeling*.

@@ -6,7 +6,7 @@ use std::ops::Range;
 use crate::expr::{BinOp, ExprId, ExprKind, UnOp};
 use crate::intern::{Interner, Name};
 use crate::lexer::{tokenize, Token, TokenKind};
-use crate::macro_expand::expand_macros_full;
+use crate::macro_expand::expand_macros_with_status;
 use crate::model::{
     Assignment, CalibrationRange, ConditionalForecastPath, ConditionalForecastPaths, DataStatement,
     Decl, DottedHead, DottedKind, DottedStatement, Equation, EstimationStatement, FamilyOption,
@@ -154,13 +154,16 @@ pub fn parse(text: &str) -> Model {
     let raw_tokens = tokenize(&source);
     let (includes, includepaths, macro_directives, macro_interps) =
         collect_include_dirs(&source, &raw_tokens);
-    let (tokens, macro_type_errors) = expand_macros_full(&source, raw_tokens);
+    let (tokens, macro_type_errors, macro_incomplete_span) =
+        expand_macros_with_status(&source, raw_tokens);
     let (mut model, _ranges) = parse_expanded(&source, tokens);
     model.includes = includes;
     model.includepaths = includepaths;
     model.macro_directives = macro_directives;
     model.macro_interps = macro_interps;
     model.macro_type_errors = macro_type_errors;
+    model.macro_incomplete = macro_incomplete_span.is_some();
+    model.macro_incomplete_span = macro_incomplete_span;
     model
 }
 

@@ -89,6 +89,40 @@ pub struct DiagnosticSet {
 /// OccBin, written clash, estimation, shape, W010, E062–E065, W070, W090, W100, W110 (includes W060), W120, W130, symbol lists, D-block.
 /// W062 / E061 / W061 / W160 and I050 quiet are workspace-only (`check_file`), not here.
 pub fn analyze(model: &Model) -> Vec<Diagnostic> {
+    let macro_syntax = crate::check_e060::check_e062(model);
+    if !macro_syntax.is_empty() {
+        return macro_syntax;
+    }
+    // Macro processing runs before the .mod parser. A failed definition may
+    // otherwise turn its later interpolation into a spurious equation error.
+    if !model.macro_type_errors.is_empty() {
+        return model
+            .macro_type_errors
+            .iter()
+            .map(|(span, code, message)| {
+                Diagnostic::new(*span, Severity::Error, *code, message.clone())
+            })
+            .collect();
+    }
+    if model.macro_incomplete {
+        // The remaining source still contains macro syntax, so any ordinary
+        // parse/name/count diagnostic could describe a tree Dynare never sees.
+        let explicit_error = crate::check_e060::check_e064(model);
+        if !explicit_error.is_empty() {
+            return explicit_error;
+        }
+        return model
+            .macro_incomplete_span
+            .map(|span| {
+                vec![Diagnostic::new(
+                    span,
+                    Severity::Information,
+                    "I211",
+                    "Macro expansion is incomplete; some model checks were withheld.",
+                )]
+            })
+            .unwrap_or_default();
+    }
     let parse_diags = crate::check_parse::check_parse(model);
     if !parse_diags.is_empty() {
         return parse_diags;

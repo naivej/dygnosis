@@ -43,7 +43,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 381 keys: 337 shared + 33 added + 11 skipped.
+// 382 keys: 337 shared + 34 added + 11 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -131,13 +131,13 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Shared,
     }),
     ("E062", ExplainEntry {
-        title: "Unmatched macro block",
-        body: "A Dynare macro `@#if` block has no matching `@#endif`, or a `@#for` block has no matching `@#endfor`. Dynare refuses with a generic bison syntax `ERROR`.\n\n**Warrant**\n\nThe editor names the unmatched opener or stray closer and points at that directive; Dynare's bison location does not.\n\n**Common causes**\n\n- A copy-paste deleted the closing directive\n- Mismatched closers — `@#endif` accidentally written for   a `@#for`, or vice versa\n- A nested block missing its inner closer\n\n**Fix**\n\nAdd the missing `@#endif` or `@#endfor` at the appropriate scope, or remove the stray closer. Each `@#if` needs its own `@#endif`; each `@#for` its own `@#endfor`.",
+        title: "Macro syntax error",
+        body: "A Dynare macro `@#if` block has no matching `@#endif`, a `@#for` block has no matching `@#endfor`, or a function definition ends while its expression still needs an operand. Dynare refuses during macro parsing; a trailing operator in `@#define f(x) = x+` prints `syntax error, unexpected EOL`.\n\n**Warrant**\n\nFor unmatched blocks, the editor names the opener or stray closer and points at that directive; Dynare's bison location does not.\n\n**Fix**\n\nClose the macro block with the matching directive, or complete the function expression before the end of the definition.",
         kind: ExplainKind::Shared,
     }),
     ("E063", ExplainEntry {
-        title: "Undefined macro interpolation",
-        body: "An active line still contains an unresolved `@{NAME}` macro interpolation. Dynare refuses: `Unknown variable N`.\n\n**Fix**\n\nDefine the macro with `@#define NAME = value` before the line that uses it, correct the macro name, or remove the interpolation.",
+        title: "Undefined macro name",
+        body: "An active macro expression or definition uses an undefined variable or function. Dynare refuses during macro processing: `Unknown variable NAME` or `Unknown function NAME`. The diagnostic points to the directive or interpolation that uses the name.\n\n**Fix**\n\nDefine the variable or function with `@#define` before it is used, or correct its name. A valid expression that Dygnosis cannot evaluate instead leaves expansion incomplete; it is not this Error.",
         kind: ExplainKind::Shared,
     }),
     ("E064", ExplainEntry {
@@ -173,6 +173,11 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("I210", ExplainEntry {
         title: "Number written in an equation",
         body: "A written model equation contains a numeric literal other than 0 or 1. This is a writing preference, not a Dynare refusal. The note does not evaluate parameter values or rewrite calibration.\n\n`[static]` equations are included. `#` definitions are not. Timing offsets, tags, options, comments, and strings are not counted. A unary minus uses the literal's magnitude, so `-1` is quiet.",
+        kind: ExplainKind::Added,
+    }),
+    ("I211", ExplainEntry {
+        title: "Macro expansion incomplete",
+        body: "Dygnosis could not finish expanding this macro directive or interpolation. The source may be valid Dynare syntax; this Information is not a Dynare refusal. Model checks that need the expanded text were withheld, and the effective-model view is marked incomplete.\n\n**Next step**\n\nInspect the macro expression or run the official Dynare preprocessor for its full expansion.",
         kind: ExplainKind::Added,
     }),
     ("W010", ExplainEntry {

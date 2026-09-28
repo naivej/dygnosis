@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use dygnosis::diagnostic::analyze;
+use dygnosis::expand::expand_report;
 use dygnosis::lexer::{tokenize, Token, TokenKind};
 use dygnosis::macro_expand::expand_macros;
 use dygnosis::parse;
@@ -41,6 +43,369 @@ fn read_mod(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| {
         panic!("fixture missing at {}: {e}", path.display());
     })
+}
+
+fn action_fixture(name: &str) -> String {
+    read_mod(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/macro_action")
+            .join(format!("{name}.mod")),
+    )
+}
+
+#[test]
+fn function_macro_expands_call_in_equation() {
+    let src = action_fixture("function");
+    let report = expand_report(&src);
+    assert_eq!(report.n_equations, 1);
+    assert!(
+        report.effective_text.contains("y = 2"),
+        "{}",
+        report.effective_text
+    );
+    assert_eq!(parse(&src).equations[0].rhs.trim(), "2");
+}
+
+#[test]
+fn scalar_when_filters_out_false_iteration() {
+    let src = action_fixture("scalar_when");
+    let report = expand_report(&src);
+    assert_eq!(report.n_equations, 2, "{}", report.effective_text);
+    assert!(
+        !report.effective_text.contains("y_2"),
+        "{}",
+        report.effective_text
+    );
+    assert_eq!(report.origins.len(), 2);
+    assert!(report.origins.iter().all(|origin| origin.loop_copy));
+    assert_eq!(
+        report
+            .origins
+            .iter()
+            .map(|origin| origin
+                .origin_frames
+                .last()
+                .unwrap()
+                .value
+                .as_deref()
+                .unwrap())
+            .collect::<Vec<_>>(),
+        ["1", "3"]
+    );
+    let diags = analyze(&parse(&src));
+    assert!(
+        !diags.iter().any(|d| d.code == "E020" || d.code == "W013"),
+        "{diags:?}"
+    );
+}
+
+#[test]
+fn tuple_loop_binds_each_element_and_keeps_origins() {
+    let src = action_fixture("tuple");
+    let report = expand_report(&src);
+    assert_eq!(report.n_equations, 2, "{}", report.effective_text);
+    assert!(
+        report.effective_text.contains("y_1 = 2"),
+        "{}",
+        report.effective_text
+    );
+    assert!(
+        report.effective_text.contains("y_3 = 4"),
+        "{}",
+        report.effective_text
+    );
+    assert_eq!(report.origins.len(), 2);
+    assert!(report.origins.iter().all(|origin| origin.loop_copy));
+    assert_eq!(
+        report
+            .origins
+            .iter()
+            .map(|origin| {
+                let frame = origin.origin_frames.last().unwrap();
+                (
+                    frame.variable.as_deref().unwrap(),
+                    frame.value.as_deref().unwrap(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        [("(i,j)", "(1,2)"), ("(i,j)", "(3,4)")]
+    );
+    let diags = analyze(&parse(&src));
+    assert!(
+        !diags.iter().any(|d| d.code == "E020" || d.code == "W013"),
+        "{diags:?}"
+    );
+}
+
+#[test]
+fn quoted_macro_identifier_reports_unquoted_name() {
+    let src = action_fixture("quoted_name");
+    let diags = analyze(&parse(&src));
+    let unknown = diags.iter().find(|d| d.code == "E020").expect("E020");
+    assert!(unknown.message.contains("zz"), "{unknown:?}");
+    assert!(!unknown.message.contains("\"zz\""), "{unknown:?}");
+}
+
+#[test]
+fn quoted_macro_expression_is_retokenized_before_model_parsing() {
+    for fixture in ["expression_fragment", "expression_whitespace"] {
+        let src = action_fixture(fixture);
+        let report = expand_report(&src);
+        assert!(report.complete, "{fixture}: {}", report.effective_text);
+        assert_eq!(report.n_equations, 1, "{fixture}");
+        assert!(
+            report.effective_text.contains("y = y+1"),
+            "{fixture}: {}",
+            report.effective_text
+        );
+        let written = &src[report.origins[0].written_span.start as usize
+            ..report.origins[0].written_span.end as usize];
+        assert!(written.contains("@{rhs}"), "{fixture}: {written:?}");
+        assert!(!analyze(&parse(&src)).iter().any(|diag| diag.code == "E020"));
+    }
+}
+
+#[test]
+fn interpolation_respects_operator_and_identifier_boundaries() {
+    let expression = action_fixture("expression_boundary");
+    let report = expand_report(&expression);
+    assert!(report.complete, "{}", report.effective_text);
+    assert!(
+        report.effective_text.contains("y = x1+z"),
+        "{}",
+        report.effective_text
+    );
+    assert!(!analyze(&parse(&expression))
+        .iter()
+        .any(|diag| diag.code == "E020"));
+
+    let right = action_fixture("expression_right_boundary");
+    let right_report = expand_report(&right);
+    assert!(right_report.complete);
+    assert!(
+        right_report.effective_text.contains("z = y+1"),
+        "{}",
+        right_report.effective_text
+    );
+    assert!(!analyze(&parse(&right))
+        .iter()
+        .any(|diag| diag.code == "E020"));
+
+    let names = action_fixture("identifier_whitespace");
+    let model = parse(&names);
+    assert_eq!(model.endogenous.len(), 4, "{:?}", model.endogenous);
+    for name in ["x", "y", "z"] {
+        assert!(model
+            .endogenous
+            .iter()
+            .any(|decl| model.name(decl.name) == name));
+    }
+    assert!(!model
+        .endogenous
+        .iter()
+        .any(|decl| matches!(model.name(decl.name), "xy" | "xz")));
+    assert!(!analyze(&model).iter().any(|diag| diag.code == "E020"));
+}
+
+#[test]
+fn context_sensitive_replacement_is_explicitly_incomplete() {
+    let source = "@#define rhs=\"y/*note*/+1\"\nvar y; model; y=@{rhs}; end;";
+    let report = expand_report(source);
+    assert!(!report.complete);
+    assert_eq!(report.n_equations, 0);
+    assert!(report.effective_text.contains("@{rhs}"));
+    let diagnostics = analyze(&parse(source));
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "I211");
+}
+
+#[test]
+fn undefined_bare_define_reports_macro_error_at_directive() {
+    let src = action_fixture("unknown_value");
+    let diags = analyze(&parse(&src));
+    let unknown = diags
+        .iter()
+        .find(|d| d.message == "Unknown variable zz")
+        .expect("macro error");
+    assert_eq!(unknown.code, "E063");
+    assert_eq!(unknown.span.start, src.find("@#define").unwrap() as u32);
+    assert!(!diags.iter().any(|d| d.code == "E020"), "{diags:?}");
+    assert!(!diags.iter().any(|d| d.code == "I211"), "{diags:?}");
+}
+
+#[test]
+fn valid_unsupported_macro_stays_explicitly_incomplete() {
+    let src = action_fixture("unsupported_builtin");
+    let report = expand_report(&src);
+    assert!(!report.complete);
+    assert_eq!(report.n_equations, 0);
+    assert!(
+        report.effective_text.contains("@{n}"),
+        "{}",
+        report.effective_text
+    );
+    assert_eq!(analyze(&parse(&src))[0].code, "I211");
+    let public = dygnosis::mcp::dynare_expand(&src, None, None);
+    assert_eq!(public["status"], "incomplete");
+    assert_eq!(public["n_equations"], 0);
+    assert_eq!(
+        dygnosis::mcp::dynare_model_info(&src, None, None)["status"],
+        "incomplete"
+    );
+    assert_eq!(
+        dygnosis::mcp::dynare_equations(&src, None, None, None, None)["status"],
+        "incomplete"
+    );
+    assert_eq!(
+        dygnosis::mcp::dynare_compare_models(
+            &src,
+            "var y; model; y=0; end;",
+            None,
+            None,
+            None,
+            None,
+            None
+        )["status"],
+        "incomplete"
+    );
+    let extraction = dygnosis::mcp::dynare_extract(
+        &src,
+        None,
+        None,
+        &["eq".to_string()],
+        &std::collections::HashMap::new(),
+        None,
+    )
+    .expect("extract result");
+    assert_eq!(extraction["status"], "unsupported_context");
+}
+
+#[test]
+fn incomplete_macro_analysis_is_visible_in_cli_and_mcp_diagnosis() {
+    let src = action_fixture("unsupported_builtin");
+    let path = "tests/fixtures/macro_action/unsupported_builtin.mod";
+    let set = dygnosis::check_file_with_origins(&src, path);
+    let note = set
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "I211")
+        .expect("incomplete-analysis Information");
+    assert_eq!(note.span.start, src.find("@#define").unwrap() as u32);
+    let cli = dygnosis::format_check_lines_with_origins(path, &set, &src);
+    assert!(cli.contains("INFO [I211]"), "{cli}");
+    assert!(!cli.contains("No issues found"), "{cli}");
+    let mcp = dygnosis::mcp::dynare_diagnose(&src, None, None);
+    let item = mcp
+        .iter()
+        .find(|diag| diag.code == "I211")
+        .expect("MCP I211");
+    assert_eq!((item.line, item.column), (2, 1));
+}
+
+#[test]
+fn recursive_macro_function_and_large_loop_do_not_claim_complete_views() {
+    for src in [
+        "@#define f(x)=f(x)\nvar y; model; y=@{f(1)}; end;",
+        "@#define nums=1:10001\nvar y; model; @#for i in nums\ny=0;\n@#endfor\nend;",
+    ] {
+        let report = expand_report(src);
+        assert!(!report.complete, "{}", report.effective_text);
+        assert_eq!(report.n_equations, 0);
+        assert_eq!(analyze(&parse(src))[0].code, "I211");
+    }
+}
+
+#[test]
+fn function_macro_can_choose_a_conditional_branch() {
+    let src = "@#define f(x)=x+1\nvar y; model;\n@#if f(1)==2\ny=1;\n@#else\ny=0;\n@#endif\nend;";
+    let report = expand_report(src);
+    assert!(report.complete);
+    assert_eq!(report.n_equations, 1);
+    assert!(report.effective_text.contains("y = 1"));
+    assert!(!report.effective_text.contains("y = 0"));
+}
+
+#[test]
+fn real_and_mixed_macro_numbers_keep_valid_arithmetic_and_comparisons() {
+    for (expression, expected) in [("0.5+0.5", "1"), ("0.5+1", "1.5"), ("2*0.5", "1")] {
+        let src = format!("@#define x={expression}\nvar y; model; y=@{{x}}; end;");
+        let report = expand_report(&src);
+        assert!(report.complete, "{expression}: {}", report.effective_text);
+        assert_eq!(parse(&src).equations[0].rhs.trim(), expected);
+        assert!(!analyze(&parse(&src)).iter().any(|d| d.code == "E285"));
+    }
+    let comparison = "var y; model;\n@#if 0.5 < 1\ny=1;\n@#else\ny=0;\n@#endif\nend;";
+    let report = expand_report(comparison);
+    assert!(report.complete);
+    assert!(report.effective_text.contains("y = 1"));
+    assert!(!report.effective_text.contains("y = 0"));
+}
+
+#[test]
+fn defined_is_a_macro_builtin_even_when_its_variable_is_absent() {
+    let absent = "var y; model;\n@#if defined(X)\ny=0;\n@#else\ny=1;\n@#endif\nend;";
+    let present = format!("@#define X\n{absent}");
+    for (source, expected) in [(absent, "y = 1"), (present.as_str(), "y = 0")] {
+        let report = expand_report(source);
+        assert!(report.complete, "{}", report.effective_text);
+        assert!(
+            report.effective_text.contains(expected),
+            "{}",
+            report.effective_text
+        );
+        assert!(!analyze(&parse(source)).iter().any(|d| d.code == "E063"));
+    }
+}
+
+#[test]
+fn recognized_unevaluated_builtins_and_casts_do_not_claim_unknown_function() {
+    for src in [
+        "var y; model;\n@#if isempty([1])\ny=0;\n@#else\ny=1;\n@#endif\nend;".to_string(),
+        "@#define x=(real) 1\nvar y; model; y=@{x}; end;".to_string(),
+    ] {
+        let report = expand_report(&src);
+        assert!(!report.complete, "{}", report.effective_text);
+        let diags = analyze(&parse(&src));
+        assert_eq!(diags[0].code, "I211", "{diags:?}");
+    }
+}
+
+#[test]
+fn valid_array_and_string_operators_stay_incomplete_without_type_errors() {
+    for expression in ["[1]+[2]", "\"a\"<\"b\""] {
+        let source = format!("@#define x={expression}\nvar y; model; y=1; end;");
+        let report = expand_report(&source);
+        assert!(!report.complete, "{expression}: {}", report.effective_text);
+        let diagnostics = analyze(&parse(&source));
+        assert_eq!(diagnostics.len(), 1, "{expression}: {diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "I211");
+    }
+}
+
+#[test]
+fn unused_malformed_function_refuses_before_model_analysis() {
+    let source = "@#define f(x)=x+\nvar y; model; y=1; end;";
+    let diags = analyze(&parse(source));
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0].code, "E062");
+    assert_eq!(diags[0].message, "syntax error, unexpected EOL");
+    assert_eq!(diags[0].span.start, 0);
+
+    let valid = "@#define f(x)=x+g\n@#define g=1\nvar y; model; y=@{f(1)}; end;";
+    assert_eq!(parse(valid).equations[0].rhs.trim(), "2");
+}
+
+#[test]
+fn valid_unsupported_conditional_retains_source_without_false_error() {
+    let src = "var y; model;\n@#if length([1])\ny=1;\n@#else\ny=0;\n@#endif\nend;";
+    let report = expand_report(src);
+    assert!(!report.complete);
+    assert_eq!(report.n_equations, 0);
+    assert!(report.effective_text.contains("@#if length([1])"));
+    let note = analyze(&parse(src));
+    assert_eq!(note.len(), 1, "{note:?}");
+    assert_eq!(note[0].code, "I211");
+    assert_eq!(note[0].span.start, src.find("@#if").unwrap() as u32);
 }
 
 #[test]
@@ -175,7 +540,7 @@ var x@{i};
 #[test]
 fn whole_name_substitution_stays_one_identifier() {
     let src = "\
-@#define a = beta
+@#define a = \"beta\"
 var @{a};
 ";
     let tokens = expanded(src);
@@ -197,6 +562,7 @@ fn empty_and_plain_source_are_identity() {
 #[test]
 fn parse_zlb_shaped_f17_drops_inactive_qe_rule() {
     let src = "\
+@#define QE = 0
 model;
 [name='F17 QE rule']
 @#if QE
