@@ -118,6 +118,38 @@ struct OpenDoc {
     writing_origins: HashMap<String, WritingOrigin>,
 }
 
+/// Source URI is the outer grouping key. An occurrence ordinal keeps repeated
+/// diagnostics from one compilation unit while merging identical other roots.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct DiagnosticPresentationKey {
+    start_line: u32,
+    start_character: u32,
+    end_line: u32,
+    end_character: u32,
+    code: String,
+    severity: String,
+    message: String,
+    writing_root: Option<String>,
+}
+
+fn diagnostic_presentation_key(item: &Diagnostic) -> DiagnosticPresentationKey {
+    DiagnosticPresentationKey {
+        start_line: item.range.start.line,
+        start_character: item.range.start.character,
+        end_line: item.range.end.line,
+        end_character: item.range.end.character,
+        code: format!("{:?}", item.code),
+        severity: format!("{:?}", item.severity),
+        message: item.message.clone(),
+        writing_root: item
+            .data
+            .as_ref()
+            .and_then(|data| data.get("root"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    }
+}
+
 struct Inner {
     docs: HashMap<Url, OpenDoc>,
     published: HashMap<Url, Vec<Diagnostic>>,
@@ -160,45 +192,85 @@ impl Inner {
             .cloned()
             .map(|uri| (uri, Vec::new()))
             .collect();
+        let mut routed_from: HashMap<Url, Vec<Url>> = HashMap::new();
+        let mut library_routed: HashMap<Url, Vec<crate::Diagnostic>> = HashMap::new();
         for (root, set) in &checks {
             let root_text = self
                 .docs
                 .get(root)
                 .map(|doc| doc.text.as_str())
                 .unwrap_or("");
-            for diag in &set.diagnostics {
-                let owner = set
-                    .writing_origins
-                    .get(&diag.code)
-                    .filter(|origin| origin.file != set.root);
-                let (uri, text) = if let Some(owner) = owner {
+            for (i, diag) in set.diagnostics.iter().enumerate() {
+                let origin = set.origins.get(i).and_then(Option::as_ref);
+                let (uri, text, span) = if let Some(origin) = origin {
                     let uri = self
                         .docs
                         .keys()
                         .find(|uri| {
-                            crate::include_resolver::normalize_uri(uri.as_str()) == owner.file
+                            crate::include_resolver::normalize_uri(uri.as_str()) == origin.file
                         })
                         .cloned()
-                        .or_else(|| file_url_from_path_key(&owner.file));
+                        .or_else(|| file_url_from_path_key(&origin.file));
                     let Some(uri) = uri else { continue };
-                    (uri, owner.text.as_str())
+                    (uri, origin.text.as_ref(), origin.span)
                 } else {
-                    (root.clone(), root_text)
+                    (root.clone(), root_text, diag.span)
                 };
-                let mut items = library_to_lsp(text, std::slice::from_ref(diag));
+                let mut mapped = diag.clone();
+                mapped.span = span;
+                let mut items = library_to_lsp(text, std::slice::from_ref(&mapped));
+                if self.docs.contains_key(&uri) {
+                    library_routed.entry(uri.clone()).or_default().push(mapped);
+                }
                 if crate::check_writing::is_writing_code(&diag.code) {
                     for item in &mut items {
                         item.data = Some(json!({ "root": root.as_str() }));
                     }
                 }
-                routed.entry(uri).or_default().extend(items);
+                for item in items {
+                    routed.entry(uri.clone()).or_default().push(item);
+                    routed_from
+                        .entry(uri.clone())
+                        .or_default()
+                        .push(root.clone());
+                }
             }
+        }
+        for (uri, items) in &mut routed {
+            let mut unique = Vec::new();
+            let mut per_root: HashMap<(Url, DiagnosticPresentationKey), usize> = HashMap::new();
+            let mut retained: HashSet<(DiagnosticPresentationKey, usize)> = HashSet::new();
+            let contexts = routed_from.remove(uri).unwrap_or_default();
+            for (source_root, item) in contexts.into_iter().zip(std::mem::take(items)) {
+                let key = diagnostic_presentation_key(&item);
+                let occurrence = per_root.entry((source_root, key.clone())).or_default();
+                let ordinal = *occurrence;
+                *occurrence += 1;
+                if retained.insert((key, ordinal)) {
+                    unique.push(item);
+                }
+            }
+            *items = unique;
         }
         for (root, set) in checks {
             if let Some(doc) = self.docs.get_mut(&root) {
-                doc.library = set.diagnostics;
                 doc.writing_origins = set.writing_origins;
             }
+        }
+        for (uri, doc) in &mut self.docs {
+            let mut unique: Vec<crate::Diagnostic> = Vec::new();
+            for diag in library_routed.remove(uri).unwrap_or_default() {
+                if !unique.iter().any(|prior| {
+                    prior.span == diag.span
+                        && prior.code == diag.code
+                        && prior.severity == diag.severity
+                        && prior.message == diag.message
+                        && prior.fix == diag.fix
+                }) {
+                    unique.push(diag);
+                }
+            }
+            doc.library = unique;
         }
         for (uri, doc) in &mut self.docs {
             doc.diagnostics = routed.get(uri).cloned().unwrap_or_default();
@@ -394,20 +466,57 @@ impl Backend {
     }
 
     fn ident_locations(&self, pos: &TextDocumentPositionParams) -> Option<Vec<Location>> {
-        let inner = self.lock_inner();
+        let mut inner = self.lock_inner();
         let doc = inner.docs.get(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
         let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, _) = ident_at(&doc.text, byte)?;
-        let locs = occurrences(&doc.text, &word)
-            .into_iter()
-            .map(|span| {
-                Location::new(
-                    pos.text_document.uri.clone(),
-                    span_range(&index, &doc.text, span),
-                )
-            })
-            .collect::<Vec<_>>();
+        let active_key = crate::include_resolver::normalize_uri(pos.text_document.uri.as_str());
+        let mut roots = vec![pos.text_document.uri.clone()];
+        let open: Vec<Url> = inner.docs.keys().cloned().collect();
+        for uri in open {
+            if uri == pos.text_document.uri {
+                continue;
+            }
+            if inner
+                .workspace
+                .resolve_all_includes(uri.as_str())
+                .contains_key(&active_key)
+            {
+                roots.push(uri);
+            }
+        }
+        let mut scope = HashSet::new();
+        for root in roots {
+            scope.insert(crate::include_resolver::normalize_uri(root.as_str()));
+            scope.extend(
+                inner
+                    .workspace
+                    .resolve_all_includes(root.as_str())
+                    .into_keys(),
+            );
+        }
+        let mut scope: Vec<String> = scope.into_iter().collect();
+        scope.sort();
+        let mut locs = Vec::new();
+        for file in scope {
+            let Some(text) = inner.workspace.get_source(&file) else {
+                continue;
+            };
+            let uri = inner
+                .docs
+                .keys()
+                .find(|uri| crate::include_resolver::normalize_uri(uri.as_str()) == file)
+                .cloned()
+                .or_else(|| file_url_from_path_key(&file));
+            let Some(uri) = uri else { continue };
+            let index = LineIndex::new(text);
+            locs.extend(
+                occurrences(text, &word)
+                    .into_iter()
+                    .map(|span| Location::new(uri.clone(), span_range(&index, text, span))),
+            );
+        }
         if locs.is_empty() {
             None
         } else {

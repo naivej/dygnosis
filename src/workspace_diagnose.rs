@@ -377,12 +377,6 @@ fn is_dropped(code: &str) -> bool {
     )
 }
 
-/// Spans that `check_in_workspace` already stores in the root text.
-/// Mapping them again would treat those offsets as spliced coordinates.
-fn is_root_text_code(code: &str) -> bool {
-    matches!(code, "W060" | "W061" | "W062" | "W160" | "E061")
-}
-
 fn writing_owners(
     ws: &mut Workspace,
     root: &str,
@@ -419,7 +413,7 @@ fn sourced(
         file: root.to_string(),
         diagnostic: to_mcp(root_text, diag),
     };
-    if is_root_text_code(&diag.code) {
+    if crate::diagnostic::is_root_text_code(&diag.code) {
         return as_root;
     }
     if crate::check_writing::is_writing_code(&diag.code) {

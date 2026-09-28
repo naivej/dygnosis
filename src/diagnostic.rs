@@ -6,6 +6,7 @@ use crate::parser::parse;
 use crate::span::{LineIndex, Span};
 use crate::workspace::Workspace;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Severity {
@@ -61,12 +62,23 @@ pub struct WritingOrigin {
     pub text: String,
 }
 
-/// Diagnostics for one root, with owner text for I208–I210.
+/// Written location of one diagnostic from an include-spliced model.
+#[derive(Clone, Debug)]
+pub struct DiagnosticOrigin {
+    pub file: String,
+    /// One shared text snapshot per owning file in this analysis.
+    pub text: Arc<str>,
+    pub span: Span,
+}
+
+/// Diagnostics for one root, with written-source locations for presentation.
 #[derive(Clone, Debug)]
 pub struct DiagnosticSet {
     pub root: String,
     pub diagnostics: Vec<Diagnostic>,
     pub writing_origins: HashMap<String, WritingOrigin>,
+    /// Parallel to `diagnostics`. `None` means the span is already in root text.
+    pub origins: Vec<Option<DiagnosticOrigin>>,
 }
 
 /// Compose diagnostic families. Families share `Model` and run as peers.
@@ -274,6 +286,7 @@ pub(crate) fn check_in_workspace_with_origins(ws: &mut Workspace, abs_path: &str
             root: root_key(ws, abs_path),
             diagnostics: analyze(&model),
             writing_origins: HashMap::new(),
+            origins: Vec::new(),
         }
     })
 }
@@ -324,10 +337,145 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
     extra.extend(crate::check_w160::check_w160(&companions));
     diags.extend(extra);
     crate::check_w160::quiet_i050(&mut diags, &companions);
+    let mut source_texts: HashMap<String, Arc<str>> = HashMap::new();
+    let origins: Vec<Option<DiagnosticOrigin>> = diags
+        .iter()
+        .map(|diag| diagnostic_origin(ws, abs_path, diag, &writing_origins, &mut source_texts))
+        .collect();
+    if !records.resolved.is_empty() {
+        for (diag, origin) in diags.iter_mut().zip(&origins) {
+            let Some(fix) = diag.fix.take() else { continue };
+            diag.fix = origin
+                .as_ref()
+                .and_then(|owner| remap_stored_fix(ws, abs_path, &model.source, &fix, owner));
+        }
+    }
     Some(DiagnosticSet {
         root: root_key(ws, abs_path),
         diagnostics: diags,
         writing_origins,
+        origins,
+    })
+}
+
+/// These workspace checks already use root-file coordinates.
+pub(crate) fn is_root_text_code(code: &str) -> bool {
+    matches!(code, "W060" | "W061" | "W062" | "W160" | "E061")
+}
+
+fn diagnostic_origin(
+    ws: &mut Workspace,
+    root: &str,
+    diag: &Diagnostic,
+    writing_origins: &HashMap<String, WritingOrigin>,
+    source_texts: &mut HashMap<String, Arc<str>>,
+) -> Option<DiagnosticOrigin> {
+    if crate::check_writing::is_writing_code(&diag.code) {
+        let writing = writing_origins.get(&diag.code)?;
+        let text = source_texts
+            .entry(writing.file.clone())
+            .or_insert_with(|| Arc::from(writing.text.as_str()))
+            .clone();
+        return Some(DiagnosticOrigin {
+            file: writing.file.clone(),
+            text,
+            span: diag.span,
+        });
+    }
+    if is_root_text_code(&diag.code) {
+        return None;
+    }
+    let (file, mut span) = ws.map_effective_origin(root, diag.span)?;
+    let text = if let Some(cached) = source_texts.get(&file) {
+        cached.clone()
+    } else {
+        let snapshot: Arc<str> = Arc::from(ws.get_source(&file)?);
+        source_texts.insert(file.clone(), snapshot.clone());
+        snapshot
+    };
+    // An anchor spanning two splice segments has no continuous source range.
+    // Keep the first source character so the diagnostic still points at its cause.
+    if diag.span.end > diag.span.start.saturating_add(1) {
+        let tail = Span {
+            start: diag.span.end - 1,
+            end: diag.span.end,
+        };
+        let contiguous =
+            ws.map_effective_origin(root, tail)
+                .is_some_and(|(tail_file, tail_span)| {
+                    tail_file == file
+                        && tail_span.start == span.start + (diag.span.end - diag.span.start - 1)
+                });
+        if !contiguous {
+            let size = text
+                .get(span.start as usize..)
+                .and_then(|remaining| remaining.chars().next())
+                .map(|ch| ch.len_utf8() as u32)
+                .unwrap_or(0);
+            span.end = span.start.saturating_add(size);
+        }
+    }
+    Some(DiagnosticOrigin { file, text, span })
+}
+
+/// Stored fixes use scalar line/column positions in the effective file. Keep
+/// one only when both ends are a contiguous range in the diagnostic's source.
+fn remap_stored_fix(
+    ws: &mut Workspace,
+    root: &str,
+    effective: &str,
+    fix: &TextEdit,
+    owner: &DiagnosticOrigin,
+) -> Option<TextEdit> {
+    let effective_index = LineIndex::new(effective);
+    let start = effective_index.offset(
+        effective,
+        crate::span::Position {
+            line: fix.start_line,
+            character: fix.start_char,
+        },
+    );
+    let end = effective_index.offset(
+        effective,
+        crate::span::Position {
+            line: fix.end_line,
+            character: fix.end_char,
+        },
+    );
+    if end < start {
+        return None;
+    }
+    let (start_file, start_span) = ws.map_effective_origin(root, Span { start, end: start })?;
+    if start_file != owner.file {
+        return None;
+    }
+    let end_pos = if end == start {
+        start_span.start
+    } else {
+        let (last_file, last_span) = ws.map_effective_origin(
+            root,
+            Span {
+                start: end - 1,
+                end,
+            },
+        )?;
+        if last_file != owner.file || last_span.start != start_span.start + end - start - 1 {
+            return None;
+        }
+        last_span.end
+    };
+    if end_pos as usize > owner.text.len() {
+        return None;
+    }
+    let owner_index = LineIndex::new(&owner.text);
+    let mapped_start = owner_index.position(&owner.text, start_span.start);
+    let mapped_end = owner_index.position(&owner.text, end_pos);
+    Some(TextEdit {
+        start_line: mapped_start.line,
+        start_char: mapped_start.character,
+        end_line: mapped_end.line,
+        end_char: mapped_end.character,
+        new_text: fix.new_text.clone(),
     })
 }
 
@@ -407,6 +555,7 @@ pub fn format_check_lines(path: &str, diags: &[Diagnostic], src: &str) -> String
             root: String::new(),
             diagnostics: diags.to_vec(),
             writing_origins: HashMap::new(),
+            origins: Vec::new(),
         },
         src,
     )
@@ -421,17 +570,15 @@ pub fn format_check_lines_with_origins(path: &str, set: &DiagnosticSet, src: &st
     let mut errors = 0usize;
     let mut warnings = 0usize;
     let mut out = String::new();
-    for d in diags {
-        let owner = set
-            .writing_origins
-            .get(&d.code)
-            .filter(|owner| owner.file != set.root);
-        let (display_path, pos) = if let Some(owner) = owner {
+    for (i, d) in diags.iter().enumerate() {
+        let (display_path, pos) = if let Some(owner) = set.origins.get(i).and_then(Option::as_ref) {
             let owner_index = LineIndex::new(&owner.text);
-            (
-                owner.file.as_str(),
-                owner_index.position(&owner.text, d.span.start),
-            )
+            let display = if owner.file == set.root {
+                path
+            } else {
+                &owner.file
+            };
+            (display, owner_index.position(&owner.text, owner.span.start))
         } else {
             (path, index.position(src, d.span.start))
         };

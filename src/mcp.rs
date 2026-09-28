@@ -1240,27 +1240,27 @@ fn diagnostics_to_json_with_origins(
 ) -> Vec<McpDiagnostic> {
     set.diagnostics
         .iter()
-        .filter(|diag| !is_dropped_code(&diag.code))
-        .map(|diag| {
-            let owner = set
-                .writing_origins
-                .get(&diag.code)
-                .filter(|owner| owner.file != set.root);
-            let (text, file) = match owner {
+        .enumerate()
+        .filter(|(_, diag)| !is_dropped_code(&diag.code))
+        .map(|(i, diag)| {
+            let owner = set.origins.get(i).and_then(Option::as_ref);
+            let (text, file, span) = match owner {
                 Some(owner) => {
                     let key = files
                         .keys()
                         .find(|key| crate::include_resolver::normalize_uri(key) == owner.file);
                     (
-                        owner.text.as_str(),
-                        key.cloned().or_else(|| Some(owner.file.clone())),
+                        owner.text.as_ref(),
+                        (owner.file != set.root)
+                            .then(|| key.cloned().unwrap_or_else(|| owner.file.clone())),
+                        owner.span,
                     )
                 }
-                None => (root_text, None),
+                None => (root_text, None, diag.span),
             };
             let index = LineIndex::new(text);
-            let start = index.position(text, diag.span.start);
-            let end = index.position(text, diag.span.end);
+            let start = index.position(text, span.start);
+            let end = index.position(text, span.end);
             McpDiagnostic {
                 file,
                 line: start.line + 1,
