@@ -260,6 +260,27 @@ pub struct SurgeryExit {
     pub kind: SurgeryKind,
 }
 
+/// An initval/endval assignment that model_remove pruned after excluding its name.
+#[derive(Clone, Copy, Debug)]
+pub struct PrunedInitialization {
+    pub name: Name,
+    pub span: Span,
+    pub block: &'static str,
+    pub removal_kind: &'static str,
+    /// Index of the type change in parser execution order. Source spans can
+    /// repeat when a macro loop expands one written line more than once.
+    pub removal_event: usize,
+}
+
+/// One declaration or type change in expanded parser execution order.
+#[derive(Clone, Copy, Debug)]
+pub struct SymbolTypeEvent {
+    pub name: Name,
+    pub span: Span,
+    pub kind: &'static str,
+    pub changed: bool,
+}
+
 /// Which way a `model_remove` moved an endogenous out of the model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SurgeryKind {
@@ -810,6 +831,10 @@ pub struct Model {
     /// a name's type reads it as of the statement it is looking at: 7.1 validated that
     /// statement while the name was still endogenous.
     pub surgery_exits: Vec<SurgeryExit>,
+    /// Source-order type history, including repeated macro-origin spans.
+    pub symbol_type_events: Vec<SymbolTypeEvent>,
+    /// Preserve the written assignment even though the live model drops it.
+    pub pruned_initializations: Vec<PrunedInitialization>,
     pub steady_state_equations: Vec<Equation>,
     pub initval: Vec<Assignment>,
     pub endval: Vec<Assignment>,
@@ -1810,6 +1835,19 @@ impl Model {
             .collect();
         spans.sort_by_key(|span| (span.start, span.end));
         spans
+    }
+
+    /// Last type recorded for `name`, in parser execution order.
+    ///
+    /// `var_remove` leaves the declaration on its original list and appends an
+    /// `excluded` event. A later `change_type` appends the restored type. Callers
+    /// that care about the symbol's final type read this, not the raw removal log.
+    pub fn final_symbol_kind(&self, name: Name) -> Option<&'static str> {
+        self.symbol_type_events
+            .iter()
+            .rev()
+            .find(|event| event.name == name)
+            .map(|event| event.kind)
     }
 
     /// True when a `model_remove` took `name` out of the model **after** byte `at`: the

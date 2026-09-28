@@ -36,7 +36,7 @@ fn quiet(diags: &[Diagnostic], code: &str) {
 
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 382);
+    assert_eq!(known_codes().len(), 383);
 }
 
 #[test]
@@ -453,5 +453,8 @@ fn e239_e240_w202_symbol_lists() {
 
     let aux = analyze(&parse(&format!("{preamble}stoch_simul AUX_ENDO_1;")));
     quiet(&aux, "E239");
-    quiet(&aux, "W186");
+    assert_eq!(
+        find(&aux, "W186").message,
+        "WARNING: symbol_list variable AUX_ENDO_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name."
+    );
 }

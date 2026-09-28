@@ -149,15 +149,20 @@ fn equation_row(
 
 pub fn count_gap(model: &Model) -> CountGap {
     let n_equations = collapsed_equation_count(model);
+    let referenced = equation_refs(model);
     // The official transform-stage count compares the aggregate tree with the
     // plain-endogenous symbol count (`endo_nbr()` collects `endogenous` only,
     // not `heterogeneousEndogenous`); the per-dimension counts are a separate
     // refusal. Heterogeneous declarations therefore stay out of both sides, so
-    // opposing tree gaps cannot cancel.
+    // opposing tree gaps cannot cancel. A `change_type` that leaves an unused
+    // name off `var` drops that name from this count. A name the equations
+    // still use stays, so the count does not open a gap the written file did
+    // not have.
     let n_endogenous = model
         .endogenous
         .iter()
         .filter(|d| d.heterogeneity.is_none())
+        .filter(|d| counts_as_endogenous(model, d.name, referenced.contains(&d.name)))
         .map(|d| d.name)
         .collect::<HashSet<_>>()
         .len();
@@ -165,7 +170,7 @@ pub fn count_gap(model: &Model) -> CountGap {
         n_endogenous,
         n_equations,
         delta: n_equations as i32 - n_endogenous as i32,
-        unreferenced_endogenous: unreferenced_endogenous(model),
+        unreferenced_endogenous: unreferenced_endogenous(model, &referenced),
         expected_delta: planner_expected_delta(model),
     }
 }
@@ -246,7 +251,7 @@ fn planner_expected_delta(model: &Model) -> Option<i32> {
     }
 }
 
-fn unreferenced_endogenous(model: &Model) -> Vec<String> {
+fn equation_refs(model: &Model) -> HashSet<crate::intern::Name> {
     let mut referenced = HashSet::new();
     for eq in model.equations.iter().chain(
         model
@@ -258,12 +263,29 @@ fn unreferenced_endogenous(model: &Model) -> Vec<String> {
             referenced.insert(r.name);
         }
     }
+    referenced
+}
+
+/// Unused names whose final type is no longer endogenous are not part of the
+/// written count. Names the equations use stay, including after `change_type`.
+fn counts_as_endogenous(model: &Model, name: crate::intern::Name, referenced: bool) -> bool {
+    match model.final_symbol_kind(name) {
+        Some("var") | None => true,
+        Some(_) => referenced,
+    }
+}
+
+fn unreferenced_endogenous(
+    model: &Model,
+    referenced: &HashSet<crate::intern::Name>,
+) -> Vec<String> {
     let mut seen = HashSet::new();
     model
         .endogenous
         .iter()
         .filter(|d| d.heterogeneity.is_none())
         .filter(|d| seen.insert(d.name))
+        .filter(|d| counts_as_endogenous(model, d.name, referenced.contains(&d.name)))
         .filter(|d| !referenced.contains(&d.name))
         .map(|d| model.name(d.name).to_string())
         .collect()

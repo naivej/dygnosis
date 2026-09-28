@@ -1,6 +1,6 @@
 // inventory: lists_quiet_aux_prefix
-// Undeclared `AUX_ENDO_1` is passed over by their regex, and the hit stops the
-// statement list, so the second name is never read.
+// Undeclared `AUX_ENDO_1` warns through W186 and stops each statement list,
+// so the second name is never read.
 var y c;
 varexo e;
 varexo_det ed;

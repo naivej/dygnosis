@@ -15,7 +15,7 @@ const ACCEPT_ARCHIVES: &[&str] = &[
 const NAMED_HOLES: &[&str] = &[];
 
 const SAME_GROUND_WARNINGS: &[&str] = &[
-    "W022", "W031", "W042", "W121", "W131", "W150", "W170", "W200",
+    "W022", "W031", "W042", "W121", "W131", "W150", "W170", "W186", "W200",
 ];
 
 enum HonestyKind {
@@ -637,6 +637,14 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         kind: HonestyKind::Warning,
         their_needle: "obsolete",
         our_needle: "obsolete",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
+        code: "W186",
+        fixture: "removal/w186_stoch.mod",
+        kind: HonestyKind::Warning,
+        their_needle: "WARNING: symbol_list variable AUX_EXPECT_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name.",
+        our_needle: "WARNING: symbol_list variable AUX_EXPECT_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name.",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -5500,6 +5508,33 @@ fn same_ground_warning_absent_on_quiet_archive() {
             own.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
         );
     }
+}
+
+#[test]
+fn auxiliary_symbol_warning_is_kept_even_when_osr_later_aborts() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    let path = fixture("lists/quiet_osr_aux_expect.mod");
+    let text = read_path(&path);
+    let result = spawn(&text, &path, &pp, JsonStage::Check);
+    let needle = "WARNING: symbol_list variable AUX_EXPECT_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name.";
+    assert!(
+        they_mention(&result, needle),
+        "{} {}",
+        result.raw_stdout,
+        result.raw_stderr
+    );
+    let own = analyze(&parse(&text));
+    assert!(own
+        .iter()
+        .any(|diag| diag.code == "W186" && diag.message == needle));
+    assert!(!own
+        .iter()
+        .any(|diag| matches!(diag.code.as_str(), "E239" | "E240")));
+    // The pinned Windows binary may abort after printing the Warning. Its
+    // abort is not an official E-code to mirror on the edited file.
 }
 
 #[test]

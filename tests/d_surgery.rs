@@ -145,10 +145,19 @@ fn exogenous(model: &Model, name: &str) -> bool {
 }
 
 #[test]
-fn legal_surgery_files_are_quiet() {
+fn legal_surgery_files_keep_only_expected_guidance() {
     for rel in QUIET {
         let diags = analyze(&parse(&fixture(rel)));
         let rest = without_writing(&diags);
+        if *rel == "d_surgery/quiet_dropped_symbol.mod" {
+            assert_eq!(rest.len(), 2, "{rel}: {:?}", codes(&diags));
+            assert!(
+                rest.iter().all(|diag| diag.code == "W212"),
+                "{rel}: {:?}",
+                codes(&diags)
+            );
+            continue;
+        }
         assert!(
             rest.is_empty(),
             "{rel}: expected no diagnostics besides writing summaries, got {:?}",
@@ -357,5 +366,5 @@ fn refused_tag_list_does_not_remove_an_equation() {
 
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(dygnosis::explain::known_codes().len(), 382);
+    assert_eq!(dygnosis::explain::known_codes().len(), 383);
 }

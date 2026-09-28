@@ -43,7 +43,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 382 keys: 337 shared + 34 added + 11 skipped.
+// 383 keys: 344 shared + 35 added + 4 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -1983,13 +1983,13 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E191", ExplainEntry {
         title: "Excluded name still assigned in initval or endval",
-        body: "Dynare refuses: `Variable … was excluded but found in an initval or endval statement`. Catching step: writer. Owner: skip-writer E. Their probe crashes with no message at this pin. This code is never emitted.",
+        body: "Dynare 7.2 contains an intended writer Error for an excluded name assigned earlier in `initval` or `endval`, but its symbol lookup throws before that Error branch. The observed Write run aborts with `NoTypeSpecificIDException`, without the intended ERROR sentence. This code is never emitted. Dygnosis's separate **W212** gives written-file guidance for the proven pattern.",
         kind: ExplainKind::Skipped,
     }),
     ("W186", ExplainEntry {
         title: "Possible auxiliary name in a symbol list",
-        body: "Dynare warns: `WARNING: symbol_list variable … possible auxiliary variable name`. Catching step: check. Owner: skip-rewrite W. This code is never emitted.",
-        kind: ExplainKind::Skipped,
+        body: "Dynare warns at Check: `WARNING: symbol_list variable NAME has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name.` The undeclared `AUX_EXPECT_` and `MULT_` prefixes qualify on every typed list; `AUX_ENDO_` and `LOG_` also qualify when endogenous names are allowed. Dynare stops checking the rest of that list after this Warning.\n\n**Fix**\n\nDeclare the intended symbol, or correct a spelling that only resembles a generated auxiliary name.",
+        kind: ExplainKind::Shared,
     }),
     ("W187", ExplainEntry {
         title: "Generated .m nests more than 32 parentheses",
@@ -2129,6 +2129,11 @@ Move the call out of the ``steady_state(…)`` operator.",
     ("W211", ExplainEntry {
         title: "Exogenous variable used with a lead",
         body: "An ordinary aggregate `varexo` is written with a positive time shift in an aggregate equation or in a model-local definition, and the file asks for `stoch_simul` or `estimation`. The warning is `Exogenous variable 'e' is used with a lead. Check the intended shock timing.`\n\nA lead is legal. This is a timing review, not a Dynare refusal, and there is no automatic edit. `varexo_det`, a heterogeneous variable or equation, a lag, `simul`, and any `perfect_foresight_*` command stay quiet. So does a file with no `stoch_simul` and no `estimation`.\n\n**Fix**\n\nCheck whether the shock should be dated today or with a lag. Leave the lead in place when the timing is intended.",
+        kind: ExplainKind::Added,
+    }),
+    ("W212", ExplainEntry {
+        title: "Initialization assigns a name later excluded",
+        body: "An `initval` or `endval` assignment names a variable that a later `model_remove` or `var_remove` still excludes when the file ends. `endval(learnt_in=1)` is included: those assignments are stored with the ordinary `endval` rows, and the pinned writer aborts on that form too. The writer aborts before it can print its intended Error sentence. This is Dygnosis-only guidance, not an official WARNING or a numerical verdict. A still-used variable that becomes exogenous, an equation replaced rather than removed, an assignment after removal, and a later `change_type` that restores the name do not trigger this warning.\n\n**Fix**\n\nRemove the assignment to the excluded name, or keep the name in the model if it is still needed.",
         kind: ExplainKind::Added,
     }),
 ];

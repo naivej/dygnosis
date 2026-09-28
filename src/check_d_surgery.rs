@@ -5,6 +5,8 @@
 //! `checkPass` — so honesty for every code here runs at `json=check`. One code per
 //! distinct official string; the option half (`exclude_eqs` / `include_eqs`) is Omit.
 
+use std::collections::HashSet;
+
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::model::{EquationSurgery, Model};
 use crate::span::Span;
@@ -27,6 +29,36 @@ pub fn check_d_surgery(model: &Model) -> Vec<Diagnostic> {
         }
     }
     out
+}
+
+/// Added W212: an initialization written before a name was genuinely excluded.
+/// Their intended E191 writer sentence is unreachable at the pinned binary;
+/// this editor warning describes the written cause of the observed abort.
+/// A later `change_type` that restores the name leaves the exclusion behind,
+/// so the warning stays quiet.
+pub fn check_w212(model: &Model) -> Vec<Diagnostic> {
+    let mut seen = HashSet::new();
+    model
+        .pruned_initializations
+        .iter()
+        .filter(|entry| {
+            seen.insert((entry.name, entry.span))
+                && model.final_symbol_kind(entry.name) == Some("excluded")
+        })
+        .map(|entry| {
+            Diagnostic::new(
+                entry.span,
+                Severity::Warning,
+                "W212",
+                format!(
+                    "Variable '{}' is assigned in {} but later excluded by {}.",
+                    model.name(entry.name),
+                    entry.block,
+                    entry.removal_kind
+                ),
+            )
+        })
+        .collect()
 }
 
 /// A key listed twice inside one bracketed set — **E256**'s official string.

@@ -1,6 +1,6 @@
 // inventory: lists_quiet_osr_aux_expect
 // 7.1 warns about `AUX_EXPECT_1` and then aborts (exit 0xC0000409). The
-// warning is skip-rewrite W186, so we stay silent.
+// warning is check-stage W186, even if the following writer aborts.
 var y c;
 varexo e;
 varexo_det ed;

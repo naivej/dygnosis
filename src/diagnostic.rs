@@ -285,6 +285,9 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
                 .any(|clash| clash.code == d.code && clash.span == d.span)
         });
     }
+    if !out.iter().any(|d| d.severity == Severity::Error) {
+        out.extend(crate::check_d_surgery::check_w212(model));
+    }
     if !out.iter().any(|d| d.code == "E001") {
         out.extend(crate::check_writing::writing_summaries(model));
         out.extend(crate::check_w211::exogenous_leads(model));

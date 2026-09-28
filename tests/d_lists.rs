@@ -340,11 +340,26 @@ fn the_aux_hit_stops_one_list() {
         for code in ["E239", "E240", "W202"] {
             quiet(&got, code);
         }
+        let expected = if rel.contains("quiet_aux_prefix") {
+            2
+        } else {
+            1
+        };
+        assert_eq!(
+            got.iter().filter(|d| d.code == "W186").count(),
+            expected,
+            "{got:?}"
+        );
     }
     let stops = format!("{}squeeze_shock_decomposition AUX_ENDO_1, z;\n", head());
     let got = analyze(&parse(&stops));
     quiet(&got, "E239");
     quiet(&got, "E240");
+    assert_eq!(
+        got.iter().filter(|d| d.code == "W186").count(),
+        1,
+        "{got:?}"
+    );
 
     // The refusal before the hit still fires, and the hit after a refusal is
     // never reached.
@@ -353,6 +368,7 @@ fn the_aux_hit_stops_one_list() {
         find(&after, "E239").message,
         "forecast: Variable z was not declared."
     );
+    quiet(&after, "W186");
 }
 
 /// **W202** stays `stoch_simul`'s: the other commands accept a repeated name.
@@ -416,6 +432,7 @@ fn the_aux_regex_follows_the_allowed_set() {
         let got = analyze(&parse(&format!("{}osr_params {name};\n", head())));
         quiet(&got, "E239");
         quiet(&got, "E240");
+        find(&got, "W186");
         // The same two arms are pass-overs when the set holds endogenous.
         for stmt in [
             format!("rplot {name};"),
@@ -611,8 +628,8 @@ fn a_declared_name_of_the_right_type_is_quiet() {
     }
 }
 
-/// No new code ships, so the registry does not move.
+/// W212 is the added removal guidance. The registry includes it.
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 382);
+    assert_eq!(known_codes().len(), 383);
 }

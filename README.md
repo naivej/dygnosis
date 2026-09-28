@@ -9,7 +9,7 @@
 Limitations by design
 
 - **Problems after equation rewriting.** Dynare changes equations and adds helper variables before some checks. Dygnosis can report a problem found at that stage when the `.mod` you wrote is enough to decide it. It stays quiet when the problem depends on equations Dynare creates and cannot be tied back to your file.
-- **Some Dynare messages cannot be shown.** A few concern MATLAB or Octave code Dynare writes rather than your `.mod` file; other cases crash without an error message. Dygnosis does not invent a diagnostic for those cases.
+- **Some Dynare messages cannot be shown.** A few concern MATLAB or Octave code Dynare writes rather than your `.mod` file; other cases crash without an error message. When the written cause of a crash is clear, Dygnosis may give its own warning, such as `W212` for an assignment to a name later excluded.
 - **Run-dependent checks.** Dygnosis does not infer checks that depend on Dynare command-line options or a compiler installed on your machine.
 - **Numerical results.** MATLAB or Octave computes steady states, stability, and whether the model solves. Dygnosis stops before those calculations. For editor and agent integration of MATLAB, see the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit).
 

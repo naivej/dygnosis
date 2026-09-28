@@ -35,6 +35,9 @@ impl Allowed {
 
 pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
+    // `removeDuplicates` runs at parse, before `SymbolList::checkPass`. A
+    // duplicate still warns after an auxiliary-name hit stops that list.
+    warn_stoch_duplicates(model, &mut out);
     let declared = declared_names(model);
     let removed: HashSet<Name> = model.var_removed.iter().map(|row| row.name).collect();
     let endogenous: HashSet<Name> = model
@@ -67,26 +70,13 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
         .filter(|d| !removed.contains(&d.name))
         .map(|d| d.name)
         .collect();
-    let mut seen_stoch = HashSet::new();
     // 7.1's aux hit returns from `checkPass` outright, so the rest of that
     // statement's list is never read. Remembering only that one statement keeps
-    // the later statements' lists in play.
+    // the later statements' lists in play. The duplicate warning above is not
+    // one of those class results.
     let mut stopped: Option<u32> = None;
 
     for sym in &model.command_symbols {
-        if sym.command == "stoch_simul" && !seen_stoch.insert((sym.list_id, sym.name)) {
-            let name = model.name(sym.name);
-            out.push(Diagnostic::new(
-                sym.span,
-                Severity::Warning,
-                "W202",
-                format!(
-                    "In stoch_simul: {name} found more than once in symbol list. Removing all but first occurrence."
-                ),
-            ));
-            continue;
-        }
-
         if stopped == Some(sym.list_id) {
             continue;
         }
@@ -95,6 +85,12 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
         let name = model.name(sym.name);
         if !declared.contains(&sym.name) {
             if aux_rewrite_prefix(name, allowed.allows_endogenous()) {
+                out.push(Diagnostic::new(
+                    sym.span,
+                    Severity::Warning,
+                    "W186",
+                    format!("WARNING: symbol_list variable {name} has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name."),
+                ));
                 stopped = Some(sym.list_id);
                 continue;
             }
@@ -104,6 +100,7 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
                 "E239",
                 format!("{prefix}: Variable {name} was not declared."),
             ));
+            stopped = Some(sym.list_id);
             continue;
         }
         let set = match allowed {
@@ -119,9 +116,28 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
                 "E240",
                 format!("{prefix}: Variable {name} is not one of {label}"),
             ));
+            stopped = Some(sym.list_id);
         }
     }
     out
+}
+
+fn warn_stoch_duplicates(model: &Model, out: &mut Vec<Diagnostic>) {
+    let mut seen = HashSet::new();
+    for sym in &model.command_symbols {
+        if sym.command != "stoch_simul" || seen.insert((sym.list_id, sym.name)) {
+            continue;
+        }
+        let name = model.name(sym.name);
+        out.push(Diagnostic::new(
+            sym.span,
+            Severity::Warning,
+            "W202",
+            format!(
+                "In stoch_simul: {name} found more than once in symbol list. Removing all but first occurrence."
+            ),
+        ));
+    }
 }
 
 /// One command's list row: the label their sentence prints for the allowed

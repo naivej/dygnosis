@@ -23,8 +23,9 @@ use crate::model::{
     HeterogeneityCommand, HeterogeneityCommandKind, HeterogeneityDimension, HeterogeneityOption,
     HeterogeneousModelBlock, HistvalEntry, HomotopyRow, IncludeDirective, IncludePathDirective,
     MacroDirective, MacroInterp, NonstationaryVar, ObservedVar, OccbinConstraint, OccbinExpr,
-    OsrBound, PolicyCommand, PolicyCommandStatement, RamseyConstraint, RemovedEquation, ShockKind,
-    ShockStmt, ShocksSemiFamily, SurgeryExit, SurgeryKind, TrendVar, VarRemovedName,
+    OsrBound, PolicyCommand, PolicyCommandStatement, PrunedInitialization, RamseyConstraint,
+    RemovedEquation, ShockKind, ShockStmt, ShocksSemiFamily, SurgeryExit, SurgeryKind,
+    SymbolTypeEvent, TrendVar, VarRemovedName,
 };
 use crate::span::Span;
 
@@ -270,6 +271,29 @@ fn change_type_kind(lex: &str) -> Option<ChangeTypeKind> {
         Some(ChangeTypeKind::Varexo)
     } else {
         None
+    }
+}
+
+fn change_type_event_kind(kind: ChangeTypeKind) -> &'static str {
+    match kind {
+        ChangeTypeKind::Parameters => "parameters",
+        ChangeTypeKind::Var => "var",
+        ChangeTypeKind::Varexo => "varexo",
+        ChangeTypeKind::VarexoDet => "varexo_det",
+    }
+}
+
+fn take_named_decl(list: &mut Vec<Decl>, name: Name, kept: &mut Option<Decl>) {
+    let mut i = 0;
+    while i < list.len() {
+        if list[i].name == name {
+            if kept.is_none() {
+                *kept = Some(list[i].clone());
+            }
+            list.remove(i);
+        } else {
+            i += 1;
+        }
     }
 }
 
@@ -954,6 +978,51 @@ struct Parser<'a> {
 }
 
 impl Parser<'_> {
+    fn record_symbol_declaration(&mut self, name: Name, span: Span, kind: &'static str) {
+        self.model.symbol_type_events.push(SymbolTypeEvent {
+            name,
+            span,
+            kind,
+            changed: false,
+        });
+    }
+
+    fn record_symbol_change(&mut self, name: Name, span: Span, kind: &'static str) -> usize {
+        let order = self.model.symbol_type_events.len();
+        self.model.symbol_type_events.push(SymbolTypeEvent {
+            name,
+            span,
+            kind,
+            changed: true,
+        });
+        order
+    }
+
+    fn record_initializations_before_removal(
+        &mut self,
+        name: Name,
+        removal_kind: &'static str,
+        removal_event: usize,
+    ) {
+        for (block, entries) in [
+            ("initval", &self.model.initval),
+            ("endval", &self.model.endval),
+        ] {
+            self.model.pruned_initializations.extend(
+                entries
+                    .iter()
+                    .filter(|entry| entry.name == name)
+                    .map(|entry| PrunedInitialization {
+                        name,
+                        span: entry.span,
+                        block,
+                        removal_kind,
+                        removal_event,
+                    }),
+            );
+        }
+    }
+
     fn parse_file(&mut self) {
         while !self.at(TokenKind::Eof) {
             // `model = 0.2;` and `steady = 0.9;` are not assignments and not
@@ -1250,6 +1319,17 @@ impl Parser<'_> {
                     continue;
                 }
                 let id = self.intern.intern(&name);
+                let kind = match keyword {
+                    "var" => Some("var"),
+                    "varexo" => Some("varexo"),
+                    "varexo_det" => Some("varexo_det"),
+                    "parameters" => Some("parameters"),
+                    "model_local_variable" => Some("model_local_variable"),
+                    _ => None,
+                };
+                if let Some(kind) = kind {
+                    self.record_symbol_declaration(id, tok.span, kind);
+                }
                 decls.push(Decl {
                     name: id,
                     span: tok.span,
@@ -1868,18 +1948,18 @@ impl Parser<'_> {
             self.current_start()
         };
         let statement = Span { start, end };
-        for (name, _) in &names {
-            if self.symbol_roles.contains_key(name) {
-                self.symbol_roles.insert(*name, EstimatedNameRole::Other);
+        for (name, name_span) in names {
+            if self.symbol_roles.contains_key(&name) {
+                self.symbol_roles.insert(name, EstimatedNameRole::Other);
             }
-        }
-        self.model
-            .var_removed
-            .extend(names.into_iter().map(|(name, name_span)| VarRemovedName {
+            let removal_event = self.record_symbol_change(name, statement, "excluded");
+            self.record_initializations_before_removal(name, "var_remove", removal_event);
+            self.model.var_removed.push(VarRemovedName {
                 name,
                 name_span,
                 statement,
-            }));
+            });
+        }
     }
 
     /// A surgery tag list: `'value'`, `key='value'`, or a bracketed pair list. Each
@@ -2103,8 +2183,11 @@ impl Parser<'_> {
             let name_id = decl.name;
             let exit = if used.iter().any(|seen| seen == &name) {
                 self.model.exogenous.push(decl);
+                self.record_symbol_change(name_id, span, "varexo");
                 SurgeryKind::Exogenous
             } else {
+                let removal_event = self.record_symbol_change(name_id, span, "excluded");
+                self.record_initializations_before_removal(name_id, "model_remove", removal_event);
                 self.prune_dropped_symbol(&decl);
                 self.model.excluded_endogenous.push(decl);
                 SurgeryKind::Dropped
@@ -2438,6 +2521,7 @@ impl Parser<'_> {
             }
             let before = self.i;
             if let Some(assignment) = self.parse_named_assignment() {
+                self.record_symbol_declaration(assignment.name, assignment.span, "epilogue");
                 self.model.epilogue.push(assignment);
             }
             if self.i <= before {
@@ -2486,6 +2570,15 @@ impl Parser<'_> {
                 let tok = self.bump();
                 let lex = self.lexeme(&tok).to_string();
                 let name = self.intern.intern(&lex);
+                self.record_symbol_declaration(
+                    name,
+                    tok.span,
+                    if log_trend {
+                        "log_trend_var"
+                    } else {
+                        "trend_var"
+                    },
+                );
                 self.model.trend_vars.push(TrendVar {
                     name,
                     span: tok.span,
@@ -2622,6 +2715,19 @@ impl Parser<'_> {
             self.current_start()
         };
         stmt.span = Span { start, end };
+        let mut declared = Vec::new();
+        if let Some((name, span)) = stmt.name {
+            declared.push((name, span));
+        }
+        for deriv in [stmt.first_deriv, stmt.second_deriv].into_iter().flatten() {
+            if let DerivSpec::Named(name, span) = deriv {
+                declared.push((name, span));
+            }
+        }
+        declared.sort_by_key(|(_, span)| (span.start, span.end));
+        for (name, span) in declared {
+            self.record_symbol_declaration(name, span, "external_function");
+        }
         self.model.external_functions.push(stmt);
     }
 
@@ -5808,16 +5914,118 @@ impl Parser<'_> {
                 ChangeTypeKind::Varexo => EstimatedNameRole::Exogenous,
                 ChangeTypeKind::VarexoDet => EstimatedNameRole::Other,
             };
-            for (name, _) in &names {
-                if self.symbol_roles.contains_key(name) {
-                    self.symbol_roles.insert(*name, role);
+            let statement = Span { start, end };
+            // Official `change_type` exits before `changeType` when the name is
+            // unknown or already used in an expression. Only a change that
+            // would stick updates the type history and the declaration lists.
+            let restored: Vec<Name> = names
+                .iter()
+                .filter(|(name, _)| self.change_type_succeeds(*name, start))
+                .map(|(name, _)| *name)
+                .collect();
+            let kind = change_type_event_kind(new_type);
+            for name in restored {
+                if self.symbol_roles.contains_key(&name) {
+                    self.symbol_roles.insert(name, role);
+                }
+                // `var_remove` leaves the declaration on its original list.
+                // Only that stale list has to move. A written `var` that
+                // `change_type` retypes without a removal stays where it was
+                // declared, so the equation-count warning still sees it.
+                let was_excluded = self.model.final_symbol_kind(name) == Some("excluded");
+                self.record_symbol_change(name, statement, kind);
+                if was_excluded {
+                    self.rehome_symbol(name, new_type);
                 }
             }
             self.model.change_type_statements.push(ChangeTypeStmt {
                 new_type,
                 names,
-                span: Span { start, end },
+                span: statement,
             });
+        }
+    }
+
+    /// `change_type` applies when the name is already declared and no earlier
+    /// expression has used it. An `initval` / `endval` left-hand name is an
+    /// assignment, not that use.
+    fn change_type_succeeds(&self, name: Name, pos: u32) -> bool {
+        self.symbol_declared_before(name, pos) && !self.symbol_used_in_expression_before(name, pos)
+    }
+
+    fn symbol_declared_before(&self, name: Name, pos: u32) -> bool {
+        self.model
+            .endogenous
+            .iter()
+            .chain(&self.model.exogenous)
+            .chain(&self.model.deterministic_exogenous)
+            .chain(&self.model.parameters)
+            .any(|decl| decl.name == name && decl.span.start < pos)
+    }
+
+    fn symbol_used_in_expression_before(&self, name: Name, pos: u32) -> bool {
+        let mut ids: Vec<ExprId> = Vec::new();
+        for eq in &self.model.equations {
+            ids.extend(eq.lhs_expr);
+            ids.extend(eq.rhs_expr);
+        }
+        for var in &self.model.nonstationary_vars {
+            ids.extend(var.deflator);
+        }
+        for row in &self.model.ramsey_constraints {
+            ids.extend(row.expr);
+        }
+        for assignment in self
+            .model
+            .param_assignments
+            .iter()
+            .chain(&self.model.helper_assignments)
+            .chain(&self.model.initval)
+            .chain(&self.model.endval)
+        {
+            ids.extend(assignment.expr);
+        }
+        ids.extend(self.model.planner_objective_expr);
+        for entry in self
+            .model
+            .histval
+            .iter()
+            .chain(&self.model.filter_initial_state)
+        {
+            ids.extend(entry.expr);
+        }
+        for stmt in &self.model.shock_stmts {
+            ids.extend(stmt.rhs_expr);
+        }
+        for row in &self.model.optim_weights {
+            ids.extend(row.expr);
+        }
+        ids.into_iter().any(|id| {
+            self.model
+                .exprs
+                .walk_idents(id)
+                .any(|ident| ident.name == name && ident.span.start < pos)
+        })
+    }
+
+    /// Move one declaration onto the list its new type belongs to.
+    ///
+    /// Called only after `var_remove` left the name on its old list. A
+    /// `change_type` that does not follow an exclusion does not call this.
+    fn rehome_symbol(&mut self, name: Name, new_type: ChangeTypeKind) {
+        let mut kept = None;
+        take_named_decl(&mut self.model.endogenous, name, &mut kept);
+        take_named_decl(&mut self.model.exogenous, name, &mut kept);
+        take_named_decl(&mut self.model.deterministic_exogenous, name, &mut kept);
+        take_named_decl(&mut self.model.parameters, name, &mut kept);
+        let Some(decl) = kept else {
+            return;
+        };
+        match new_type {
+            ChangeTypeKind::Var => self.model.endogenous.push(decl),
+            ChangeTypeKind::Varexo => self.model.exogenous.push(decl),
+            ChangeTypeKind::VarexoDet => self.model.deterministic_exogenous.push(decl),
+            ChangeTypeKind::Parameters => self.model.parameters.push(decl),
         }
     }
 

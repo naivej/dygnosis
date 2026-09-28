@@ -80,6 +80,7 @@ fn direct_unused_endogenous(model: &Model) -> Vec<Diagnostic> {
         .endogenous
         .iter()
         .filter(|decl| decl.heterogeneity.is_none() && seen.insert(decl.name))
+        .filter(|decl| still_endogenous(model, decl.name))
         .filter(|decl| !used.contains(&decl.name))
         .map(|decl| {
             Diagnostic::new(
@@ -304,6 +305,11 @@ fn direct_nonvariable_argument(model: &Model, id: ExprId) -> Option<(Name, Name)
     (*left != *right).then_some((*left, *right))
 }
 
+/// A `var` declaration retyped by `change_type` is no longer an endogenous name.
+fn still_endogenous(model: &Model, name: Name) -> bool {
+    matches!(model.final_symbol_kind(name), Some("var") | None)
+}
+
 fn plain_aggregate_count(model: &Model) -> Option<Diagnostic> {
     if model.model_block.is_none()
         || model.bvar_present
@@ -318,6 +324,7 @@ fn plain_aggregate_count(model: &Model) -> Option<Diagnostic> {
         .endogenous
         .iter()
         .filter(|decl| decl.heterogeneity.is_none())
+        .filter(|decl| still_endogenous(model, decl.name))
         .map(|decl| decl.name)
         .collect::<HashSet<_>>()
         .len();

@@ -136,7 +136,7 @@ pub fn check_w020(model: &Model) -> Vec<Diagnostic> {
         model
             .endogenous
             .iter()
-            .filter(|decl| decl.heterogeneity.is_none()),
+            .filter(|decl| decl.heterogeneity.is_none() && still_endogenous(model, decl.name)),
         &referenced,
         "W020",
         Severity::Warning,
@@ -163,28 +163,91 @@ pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
         .map(|d| d.name)
         .collect();
     let mut diagnostics = Vec::new();
+    let mut reported = HashSet::new();
     for d in model
         .exogenous
         .iter()
         .filter(|d| !exo_det.contains(&d.name))
     {
-        if d.heterogeneity.is_some() {
-            continue;
+        consider_unused_exogenous(model, d, &referenced, &mut reported, &mut diagnostics);
+    }
+    // `change_type(varexo)` leaves the written `var` declaration in place.
+    // The unused check still applies to that final plain exogenous.
+    for d in &model.endogenous {
+        if model.final_symbol_kind(d.name) == Some("varexo") {
+            consider_unused_exogenous(model, d, &referenced, &mut reported, &mut diagnostics);
         }
-        if referenced.contains(&d.name) {
-            continue;
-        }
-        let name = model.name(d.name);
-        diagnostics.push(Diagnostic::new(
-            d.span,
-            Severity::Error,
-            "E021",
-            format!(
-                "{name} not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior."
-            ),
-        ));
     }
     diagnostics
+}
+
+fn consider_unused_exogenous(
+    model: &Model,
+    decl: &Decl,
+    referenced: &HashSet<Name>,
+    reported: &mut HashSet<Name>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if !reported.insert(decl.name) || !final_type_is_plain_varexo(model, decl.name) {
+        return;
+    }
+    if decl.heterogeneity.is_some() || referenced.contains(&decl.name) {
+        return;
+    }
+    let name = model.name(decl.name);
+    diagnostics.push(Diagnostic::new(
+        decl.span,
+        Severity::Error,
+        "E021",
+        format!(
+            "{name} not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior."
+        ),
+    ));
+}
+
+/// Plain `varexo` for the unused check: the final type, not the list `var_remove`
+/// or `change_type` left behind. A later declaration of a different type is an
+/// E030 clash and does not restore an accepted exogenous.
+fn final_type_is_plain_varexo(model: &Model, name: Name) -> bool {
+    if exclusion_still_final(model, name) {
+        return false;
+    }
+    match model.final_symbol_kind(name) {
+        Some("varexo") => true,
+        Some(_) => false,
+        None => true,
+    }
+}
+
+/// A written `var` name whose final type is still endogenous.
+fn still_endogenous(model: &Model, name: Name) -> bool {
+    match model.final_symbol_kind(name) {
+        Some("var") | None => true,
+        Some(_) => false,
+    }
+}
+
+/// True while `name` is still excluded for the unused-exogenous check.
+///
+/// The last `excluded` event is final until a later `change_type` replaces it.
+/// A declaration whose type differs from the event before it is the E030 clash:
+/// official refuses that declaration and never reaches this check.
+fn exclusion_still_final(model: &Model, name: Name) -> bool {
+    let events: Vec<_> = model
+        .symbol_type_events
+        .iter()
+        .filter(|event| event.name == name)
+        .collect();
+    let Some(last) = events.last() else {
+        return false;
+    };
+    if last.kind == "excluded" {
+        return true;
+    }
+    if last.changed || events.len() < 2 {
+        return false;
+    }
+    events[events.len() - 2].kind != last.kind
 }
 
 pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
