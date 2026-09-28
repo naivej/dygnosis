@@ -712,10 +712,12 @@ fn mcp_parse_model(
 }
 
 fn model_info_json(model: &Model) -> Value {
+    let mut seen_endogenous = HashSet::new();
     let endogenous: Vec<String> = model
         .endogenous
         .iter()
         .filter(|decl| decl.heterogeneity.is_none())
+        .filter(|decl| seen_endogenous.insert(decl.name))
         .map(|d| model.name(d.name).to_string())
         .collect();
     let exogenous: Vec<String> = model
@@ -748,10 +750,12 @@ fn model_info_json(model: &Model) -> Value {
     let heterogeneous_dimensions: Vec<Value> = heterogeneous_dimension_names(model)
         .into_iter()
         .map(|dimension| {
+            let mut seen_endogenous = HashSet::new();
             let names: Vec<String> = model
                 .endogenous
                 .iter()
                 .filter(|decl| decl.heterogeneity.map(|(name, _)| name) == Some(dimension))
+                .filter(|decl| seen_endogenous.insert(decl.name))
                 .map(|decl| model.name(decl.name).to_string())
                 .collect();
             let shocks: Vec<String> = model

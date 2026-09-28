@@ -5418,7 +5418,7 @@ fn named_holes_are_absent_from_no_error_loop() {
 }
 
 #[test]
-fn equation_count_is_warning_they_accept() {
+fn equation_count_check_accepts_but_transform_refuses() {
     let Some(pp) = find_preprocessor(None) else {
         eprintln!("skipping honesty: dynare-preprocessor not found");
         return;
@@ -5432,12 +5432,19 @@ fn equation_count_is_warning_they_accept() {
         "e010_extra.mod should be accepted: {:?}",
         result.diagnostics
     );
+    let transformed = spawn(&text, &path, &pp, JsonStage::Transform);
+    assert!(!transformed.success);
+    assert!(they_mention(
+        &transformed,
+        "There are 2 equations but 1 endogenous variables!"
+    ));
     let own = check_file(&text, path_str);
-    let w013 = own
+    let e188 = own
         .iter()
-        .find(|d| d.code == "W013")
-        .expect("own W013 on e010_extra.mod");
-    assert_eq!(w013.severity, Severity::Warning);
+        .find(|d| d.code == "E188")
+        .expect("own E188 on e010_extra.mod");
+    assert_eq!(e188.severity, Severity::Error);
+    assert!(own.iter().all(|d| d.code != "W013"));
     assert_no_p_digits(&own, "e010_extra.mod check_file");
 }
 
@@ -5665,8 +5672,8 @@ fn honesty_fire_table() {
     );
 }
 
-/// `JC5`: a declared variable whose spelling is a block opener is a shape 7.1
-/// accepts, so we must emit no Error on any of them.
+/// `JC5`: a declared variable whose spelling is a block opener is a parse
+/// shape 7.1 accepts. Later transform refusals remain possible.
 ///
 /// The same names drive the 29-name lock in `tests/d_block.rs`; both are quiet only
 /// while `parser::at_block_opener` reads the symbol table.
@@ -5693,6 +5700,10 @@ fn opener_named_variable_files_emit_no_error() {
         let errors: Vec<&str> = own
             .iter()
             .filter(|d| d.severity == Severity::Error)
+            .filter(|d| {
+                !(rel == &"e001/opener_var_decl_only.mod" && d.code == "E186")
+                    && !(rel == &"e001/opener_var_declared_bare_row.mod" && d.code == "E188")
+            })
             .map(|d| d.code.as_str())
             .collect();
         if !errors.is_empty() {
@@ -5704,6 +5715,46 @@ fn opener_named_variable_files_emit_no_error() {
         "opener quiet rows failed:\n{}",
         failures.join("\n")
     );
+}
+
+#[test]
+fn opener_names_still_reach_later_transform_refusals() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    for (rel, code, needle) in [
+        (
+            "e001/opener_var_decl_only.mod",
+            "E186",
+            "shocks not used in the model block",
+        ),
+        (
+            "e001/opener_var_declared_bare_row.mod",
+            "E188",
+            "There are 3 equations but 2 endogenous variables!",
+        ),
+    ] {
+        let path = fixture(rel);
+        let text = read_path(&path);
+        let checked = spawn(&text, &path, &pp, JsonStage::Check);
+        assert!(
+            checked.success,
+            "{rel}: {}{}",
+            checked.raw_stdout, checked.raw_stderr
+        );
+        let transformed = spawn(&text, &path, &pp, JsonStage::Transform);
+        assert!(!transformed.success, "{rel} transformed");
+        assert!(
+            they_mention(&transformed, needle),
+            "{rel}: {}{}",
+            transformed.raw_stdout,
+            transformed.raw_stderr
+        );
+        assert!(check_file(&text, path.to_str().unwrap())
+            .iter()
+            .any(|d| d.code == code));
+    }
 }
 
 /// The 7.1 side of the same claim, name by name: every `BLOCK_OPENERS` entry except

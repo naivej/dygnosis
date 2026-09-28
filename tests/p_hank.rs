@@ -846,14 +846,16 @@ fn count_gap_compares_aggregate_tree_with_plain_endogenous() {
     let diagnostics = analyze(&parse(&source));
     let ours = diagnostics
         .iter()
-        .find(|diag| diag.code == "W013")
-        .unwrap_or_else(|| panic!("missing W013: {diagnostics:?}"));
+        .find(|diag| diag.code == "E186")
+        .unwrap_or_else(|| panic!("missing transform-first E186: {diagnostics:?}"));
     assert!(
-        ours.message
-            .contains("1 equation(s) but 2 endogenous variable(s)"),
+        ours.message.contains("z not used in the model block"),
         "{}",
         ours.message
     );
+    assert!(diagnostics.iter().all(|diag| diag.code != "W013"));
+    let gap = dygnosis::equations::count_gap(&parse(&source));
+    assert_eq!((gap.n_equations, gap.n_endogenous), (1, 2));
     if let Some(ref binary) = binary {
         // The refusal lives in transformPass, so it only runs at the transform
         // stage: with `onlyjson`, `json=check` exits before it.

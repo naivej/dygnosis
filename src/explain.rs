@@ -7,7 +7,7 @@
 //! rows add shared keys and drop the `S###` keys they replace. An
 //! `S###` key is a placeholder for a row a named version will later drop and
 //! replace with an emitted `E` / `W` code; a row no version owns keeps its real
-//! letter from the start (`E186`-`E191` / `W186`-`W187`).
+//! letter from the start (the E186-E194 and W186-W187 catalog families).
 //! `I050` and `W042` use the recorded surface rewrites in
 //! `dev_logs/0.1/0.1.0/22-c-explain.md` (do not advertise Compute Steady State).
 
@@ -1957,9 +1957,9 @@ Move the call out of the ``steady_state(…)`` operator.",
         kind: ExplainKind::Shared,
     }),
     ("E186", ExplainEntry {
-        title: "Unused endogenous after substitution",
-        body: "Dynare refuses: `Error: <name> not used in the model block`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
+        title: "Unused written endogenous variable",
+        body: "Dynare refuses before MATLAB: `Error: x not used in the model block`. Dygnosis emits E186 on the declaration when x has no written use in aggregate or heterogeneous equations and no local, surgery, planner, or BVAR exception can change that result. A use lost only after rewriting is outside this check. The severity prefix is omitted from our message because the transport already labels Errors.\n\n**Fix**\n\nUse x in a model equation or remove its declaration.",
+        kind: ExplainKind::Shared,
     }),
     ("E187", ExplainEntry {
         title: "Ramsey FOCs leave Lagrange unused",
@@ -1967,19 +1967,19 @@ Move the call out of the ``steady_state(…)`` operator.",
         kind: ExplainKind::Skipped,
     }),
     ("E188", ExplainEntry {
-        title: "Equation count after AUX, Ramsey, log, or leads",
-        body: "Dynare refuses: `There are <n> equations but <m> endogenous variables!`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
+        title: "Plain aggregate equation count mismatch",
+        body: "Dynare refuses before MATLAB: `There are 2 equations but 1 endogenous variables!`. Dygnosis emits E188 when the written aggregate count differs and the file has no helper-generating expression, model surgery, planner exemption, or incomplete expansion. Counts changed by Dynare's rewrite are outside this check; W013 remains guidance there. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nMatch counted model equations to distinct endogenous variables.",
+        kind: ExplainKind::Shared,
     }),
     ("E189", ExplainEntry {
-        title: "Division by zero substituting constants",
-        body: "Dynare refuses: `Division by zero when substituting constants…`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
+        title: "Division by zero after a direct constant equation",
+        body: "Dynare refuses before MATLAB when a direct finite constant equation `x=C` makes a whole left- or right-hand side `N/(x-C)` zero. N is a nonzero finite literal or a single name. Dygnosis emits E189 on the written denominator even when the constant equation comes later. The official line is shortened after the equation number because substitution lists and arithmetic detail depend on the rewrite; the transport already labels severity. A negative unary constant such as `x=-1`, zero numerator, nested division, and other substitution chains remain outside this check.\n\n**Fix**\n\nChange the constant or denominator so it cannot simplify to zero.",
+        kind: ExplainKind::Shared,
     }),
     ("E190", ExplainEntry {
-        title: "Partial information EXPECTATION(0) is not a single variable",
-        body: "Dynare refuses: `EXPECTATION(0)(X) can only be used when X is a single variable`. Catching step: transform (rewrite). Owner: skip-rewrite E. This code is never emitted.",
-        kind: ExplainKind::Skipped,
+        title: "Partial-information expectation needs one variable",
+        body: "Dynare refuses before MATLAB: `In Partial Information models, EXPECTATION(0)(X) can only be used when X is a single variable.` Dygnosis emits E190 for a direct sum of two distinct written variables with partial_information only when neither operand has another defining equation. Identity expressions and substitutions such as `y+0` or `z=0+0; EXPECTATION(0)(y+z)` may simplify to one variable and are not rejected by this check; model-local substitution remains outside it. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nWrite one variable inside EXPECTATION(0), or define the expression in a separate model equation.",
+        kind: ExplainKind::Shared,
     }),
     ("E191", ExplainEntry {
         title: "Excluded name still assigned in initval or endval",
@@ -1997,9 +1997,9 @@ Move the call out of the ``steady_state(…)`` operator.",
         kind: ExplainKind::Skipped,
     }),
     ("E192", ExplainEntry {
-        title: "Heterogeneous model equation count after AUX",
-        body: "Dynare refuses: `There are <n> equations but <m> endogenous variables in the model for heterogeneity dimension`. Catching step: transform (rewrite). Owner: unversioned skip-rewrite E. The count is known only after Dynare creates auxiliary equations and cannot be mapped to the edited file yet. This code is never emitted.",
-        kind: ExplainKind::Skipped,
+        title: "Plain heterogeneous equation count mismatch",
+        body: "Dynare refuses before MATLAB: `There are 1 equations but 2 endogenous variables in the model for heterogeneity dimension 'h'!`. Dygnosis emits E192 for a written mismatch in a dimension whose equations cannot generate helpers. It sums multiple blocks of the same dimension. Counts changed by Dynare's rewrite remain outside this check; W208 remains guidance there. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nMatch counted equations to distinct endogenous names in that dimension.",
+        kind: ExplainKind::Shared,
     }),
     ("E193", ExplainEntry {
         title: "TCM or PAC rewrite",

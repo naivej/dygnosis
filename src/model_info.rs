@@ -158,7 +158,9 @@ pub fn structure_summary(model: &Model) -> StructureSummary {
             .endogenous
             .iter()
             .filter(|decl| decl.heterogeneity.is_none())
-            .count(),
+            .map(|decl| decl.name)
+            .collect::<HashSet<_>>()
+            .len(),
         predetermined,
         forward_looking,
         static_vars,

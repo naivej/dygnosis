@@ -158,7 +158,9 @@ pub fn count_gap(model: &Model) -> CountGap {
         .endogenous
         .iter()
         .filter(|d| d.heterogeneity.is_none())
-        .count();
+        .map(|d| d.name)
+        .collect::<HashSet<_>>()
+        .len();
     CountGap {
         n_endogenous,
         n_equations,
@@ -256,10 +258,12 @@ fn unreferenced_endogenous(model: &Model) -> Vec<String> {
             referenced.insert(r.name);
         }
     }
+    let mut seen = HashSet::new();
     model
         .endogenous
         .iter()
         .filter(|d| d.heterogeneity.is_none())
+        .filter(|d| seen.insert(d.name))
         .filter(|d| !referenced.contains(&d.name))
         .map(|d| model.name(d.name).to_string())
         .collect()

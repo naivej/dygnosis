@@ -289,6 +289,44 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
         out.extend(crate::check_writing::writing_summaries(model));
         out.extend(crate::check_w211::exogenous_leads(model));
     }
+    // These written-file transform cases run only after every earlier refusal
+    // we currently model is quiet. Keep the official transform source order in
+    // `check_written_transform` and leave rewritten-only cases to W013/W208.
+    let has_earlier_error = out.iter().any(|diag| {
+        diag.severity == Severity::Error
+            && !clashes
+                .iter()
+                .any(|clash| clash.code == diag.code && clash.span == diag.span)
+    });
+    if !has_earlier_error {
+        let early = crate::check_written_transform::check_early(model);
+        // Constant simplification and unused-endogenous checks precede all
+        // current written clashes, including PAC target rewrites.
+        if !early.is_empty() {
+            out.retain(|diag| {
+                !clashes
+                    .iter()
+                    .any(|clash| clash.code == diag.code && clash.span == diag.span)
+            });
+        }
+        let written = if early.is_empty() && !out.iter().any(|d| d.severity == Severity::Error) {
+            crate::check_written_transform::check_late(model)
+        } else {
+            early
+        };
+        if let Some(first) = written.first() {
+            match first.code.as_str() {
+                "E186" => out.retain(|d| {
+                    d.code != "W013"
+                        && !(d.code == "W020" && written.iter().any(|e| e.span == d.span))
+                }),
+                "E188" => out.retain(|d| d.code != "W013"),
+                "E192" => out.retain(|d| d.code != "W208"),
+                _ => {}
+            }
+            out.extend(written);
+        }
+    }
     out
 }
 
@@ -354,6 +392,7 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
             d.code != "W060"
                 && d.code != "W208"
                 && d.code != "W211"
+                && !matches!(d.code.as_str(), "E186" | "E188" | "E189" | "E190" | "E192")
                 && !crate::check_writing::is_writing_code(&d.code)
         });
     } else if !records.resolved.is_empty() {

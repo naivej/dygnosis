@@ -35,6 +35,7 @@ pub mod check_w160;
 mod check_w211;
 pub mod check_walk;
 mod check_writing;
+mod check_written_transform;
 mod command_skip;
 pub mod companion;
 mod diag_shape;

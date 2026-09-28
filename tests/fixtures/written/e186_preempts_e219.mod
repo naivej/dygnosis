@@ -1,7 +1,6 @@
-// inventory: e219_dsge_prior_weight_declared
-var y;
+// inventory: written_e186_preempts_e219 — original later-refusal fixture
+var y dsge_prior_weight;
 varexo e;
-varexo_det dsge_prior_weight;
 parameters rho;
 rho = 0.5;
 model;

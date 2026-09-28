@@ -674,20 +674,19 @@ fn e001_opener_var_declared_bare_row_is_quiet() {
     }
 }
 
-/// A declared opener-named variable the model never uses draws warnings only.
+/// The opener-named declaration is legal syntax, but its unused endogenous
+/// name reaches the later transform refusal.
 #[test]
-fn e001_opener_var_decl_only_warns_without_e001() {
+fn e001_opener_var_decl_only_reaches_transform_without_e001() {
     let text = check_mod("e001/opener_var_decl_only.mod");
     let got = rust_e001(&text);
     assert!(got.is_empty(), "expected no E001, got {got:?}");
     let all = analyze(&parse(&text));
-    for code in ["W013", "W020"] {
-        assert!(
-            all.iter().any(|d| d.code == code),
-            "expected {code}, got {:?}",
-            all.iter().map(|d| &d.code).collect::<Vec<_>>()
-        );
-    }
+    assert!(all.iter().any(|d| d.code == "E186"), "{all:?}");
+    assert!(
+        all.iter().all(|d| d.code != "W013" && d.code != "W020"),
+        "{all:?}"
+    );
 }
 
 /// A bare opener word inside a real `shocks` body is a row 7.1 refuses, declared or
@@ -976,10 +975,10 @@ end;
     );
 }
 
-/// A declared opener name inside an expression block is that name. 7.1 accepts
-/// `matched_moments; shocks; end;` when `shocks` is declared.
+/// A declared opener name inside an expression block is that name. The parse
+/// shape accepts; the separate aggregate equation count refuses at transform.
 #[test]
-fn declared_opener_row_in_matched_moments_is_quiet() {
+fn declared_opener_row_in_matched_moments_is_parse_valid() {
     let src = "\
 var y shocks;
 varexo e;
@@ -999,12 +998,29 @@ stoch_simul(order=1, irf=0, nograph);
     let errors: Vec<_> = analyze(&parse(src))
         .into_iter()
         .filter(|d| d.severity == Severity::Error)
-        .map(|d| d.message)
+        .map(|d| d.code)
         .collect();
-    assert!(
-        errors.is_empty(),
-        "a declared name in matched_moments must not be a missing end: {errors:?}"
-    );
+    assert_eq!(errors, vec!["E188"], "{errors:?}");
+    if let Some(pp) = dygnosis::find_preprocessor(None) {
+        let check = dygnosis::run_preprocessor(
+            src,
+            &pp,
+            None,
+            std::time::Duration::from_secs(30),
+            dygnosis::JsonStage::Check,
+        );
+        assert!(check.success, "{}{}", check.raw_stdout, check.raw_stderr);
+        let transform = dygnosis::run_preprocessor(
+            src,
+            &pp,
+            None,
+            std::time::Duration::from_secs(30),
+            dygnosis::JsonStage::Transform,
+        );
+        assert!(!transform.success);
+        assert!(format!("{}{}", transform.raw_stdout, transform.raw_stderr)
+            .contains("There are 1 equations but 2 endogenous variables!"));
+    }
 }
 
 /// `name = value` at statement head, when `name` is an `<INITIAL>` keyword.

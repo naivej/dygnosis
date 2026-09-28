@@ -6457,6 +6457,11 @@ impl Parser<'_> {
                 if self.at(TokenKind::Ident) {
                     let tok = self.tokens[self.i].clone();
                     let lex = self.lexeme(&tok).to_string();
+                    if command != PolicyCommand::RamseyModel
+                        && lex.eq_ignore_ascii_case("partial_information")
+                    {
+                        self.model.partial_information = true;
+                    }
                     self.record_deprecated_option_ident(&lex, tok.span);
                 }
                 self.bump();
@@ -8813,6 +8818,13 @@ impl Parser<'_> {
         let mut stmt_estimated = None;
         let mut stmt_calibrated = None;
         for opt in &opts {
+            if (opener.eq_ignore_ascii_case("stoch_simul")
+                || opener.eq_ignore_ascii_case("estimation"))
+                && opt.ident.eq_ignore_ascii_case("partial_information")
+                && !opt.eq
+            {
+                self.model.partial_information = true;
+            }
             if opener.eq_ignore_ascii_case("external_function")
                 && opt.ident.eq_ignore_ascii_case("name")
                 && opt.eq

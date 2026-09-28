@@ -194,10 +194,26 @@ const E221_MSG: &str = "When estimating a DSGE-Var, the number of shocks must be
 
 #[test]
 fn e219_declared_dsge_prior_weight_with_dsge_var() {
-    let diags = analyze(&parse(&fixture(
-        "d_walk/e219_dsge_prior_weight_declared.mod",
-    )));
+    let text = fixture("d_walk/e219_dsge_prior_weight_declared.mod");
+    let diags = analyze(&parse(&text));
     assert_eq!(find(&diags, "E219").message, E219_MSG);
+    if let Some(pp) = find_preprocessor(None) {
+        let checked = run_preprocessor(&text, &pp, None, Duration::from_secs(30), JsonStage::Check);
+        assert!(
+            checked.success,
+            "{}{}",
+            checked.raw_stdout, checked.raw_stderr
+        );
+        let transformed = run_preprocessor(
+            &text,
+            &pp,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Transform,
+        );
+        assert!(!transformed.success);
+        assert!(format!("{}{}", transformed.raw_stdout, transformed.raw_stderr).contains(E219_MSG));
+    }
 }
 
 #[test]

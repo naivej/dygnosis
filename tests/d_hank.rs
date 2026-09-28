@@ -268,7 +268,7 @@ fn accepted_neighbours() {
 }
 
 #[test]
-fn w208_counts_distinct_endogenous_names_in_a_heterogeneity_dimension() {
+fn plain_count_refuses_and_warning_stays_quiet_on_square_dimensions() {
     let uneven = "\
 heterogeneity_dimension h;
 var(heterogeneity=h) c n;
@@ -277,11 +277,11 @@ model(heterogeneity=h);
 end;
 ";
     let diags = analyze(&parse(uneven));
-    let warning = diags.iter().find(|diag| diag.code == "W208").unwrap();
+    let warning = diags.iter().find(|diag| diag.code == "E192").unwrap();
     assert!(
-        warning
-            .message
-            .contains("1 equation(s) but 2 endogenous variable(s) in heterogeneity dimension 'h'"),
+        warning.message.contains(
+            "1 equations but 2 endogenous variables in the model for heterogeneity dimension 'h'"
+        ),
         "{warning:?}"
     );
 
@@ -315,7 +315,7 @@ end;
 ";
     let warning = analyze(&parse(firms))
         .into_iter()
-        .find(|diag| diag.code == "W208")
+        .find(|diag| diag.code == "E192")
         .unwrap();
     assert!(
         warning.message.contains("heterogeneity dimension 'firms'"),

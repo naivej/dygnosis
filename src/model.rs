@@ -838,6 +838,8 @@ pub struct Model {
     pub set_time: Vec<SetTimeStatement>,
     pub date_options: Vec<DateOption>,
     pub stoch_simul_requests: Vec<StochSimulRequest>,
+    /// A written partial_information option on a command that sets the model flag.
+    pub partial_information: bool,
     pub irf_shocks_options: Vec<IrfShocksOption>,
     /// `varobs` names in declaration order, including repeats.
     pub varobs: Vec<ObservedVar>,
