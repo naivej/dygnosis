@@ -9,7 +9,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::check_walk::{absolute_path, collect_mod_files, starts_with_plus};
-use crate::diagnostic::{check_in_workspace, Diagnostic, Severity};
+use crate::diagnostic::{check_in_workspace_with_origins, Diagnostic, DiagnosticSet, Severity};
 use crate::include_resolver::{normalize_uri, path_key};
 use crate::mcp::McpDiagnostic;
 use crate::span::LineIndex;
@@ -145,15 +145,8 @@ fn diagnose_disk_root(root: &str, text: &str) -> WorkspaceRootReport {
         }
     }
     let ws_to_map = disk_alias_keys(&loaded);
-    let owners = writing_owners(&mut ws, root, &ws_to_map);
-    let raw = check_in_workspace(&mut ws, root);
-    let mut diagnostics = Vec::new();
-    for diag in raw {
-        if is_dropped(&diag.code) {
-            continue;
-        }
-        diagnostics.push(sourced(&mut ws, root, &diag, &loaded, &ws_to_map, &owners));
-    }
+    let set = check_in_workspace_with_origins(&mut ws, root);
+    let diagnostics = present_diagnostics(root, &set, &loaded, &ws_to_map);
     WorkspaceRootReport {
         root: root.to_string(),
         status: RootStatus::Ok,
@@ -305,15 +298,8 @@ fn diagnose_root(
     if let Some(name) = missing_include(ws, root) {
         return failed(root, format!("unresolved @#include \"{name}\""));
     }
-    let owners = writing_owners(ws, root, ws_to_map);
-    let raw = check_in_workspace(ws, root);
-    let mut diagnostics = Vec::new();
-    for diag in raw {
-        if is_dropped(&diag.code) {
-            continue;
-        }
-        diagnostics.push(sourced(ws, root, &diag, files, ws_to_map, &owners));
-    }
+    let set = check_in_workspace_with_origins(ws, root);
+    let diagnostics = present_diagnostics(root, &set, files, ws_to_map);
     WorkspaceRootReport {
         root: root.to_string(),
         status: RootStatus::Ok,
@@ -377,82 +363,37 @@ fn is_dropped(code: &str) -> bool {
     )
 }
 
-fn writing_owners(
-    ws: &mut Workspace,
+fn present_diagnostics(
     root: &str,
-    ws_to_map: &HashMap<String, String>,
-) -> HashMap<String, String> {
-    let Some(model) = ws.get_effective_model(root).cloned() else {
-        return HashMap::new();
-    };
-    let mut owners = HashMap::new();
-    for diag in crate::diagnostic::analyze(&model) {
-        if !crate::check_writing::is_writing_code(&diag.code) {
-            continue;
-        }
-        let Some((ws_file, _)) = ws.map_effective_origin(root, diag.span) else {
-            continue;
-        };
-        if let Some(map_key) = ws_to_map.get(&ws_file) {
-            owners.insert(diag.code, map_key.clone());
-        }
-    }
-    owners
-}
-
-fn sourced(
-    ws: &mut Workspace,
-    root: &str,
-    diag: &Diagnostic,
+    set: &DiagnosticSet,
     files: &BTreeMap<String, String>,
     ws_to_map: &HashMap<String, String>,
-    writing_owners: &HashMap<String, String>,
-) -> WorkspaceDiagnostic {
+) -> Vec<WorkspaceDiagnostic> {
     let root_text = files.get(root).map(String::as_str).unwrap_or("");
-    let as_root = WorkspaceDiagnostic {
-        file: root.to_string(),
-        diagnostic: to_mcp(root_text, diag),
-    };
-    if crate::diagnostic::is_root_text_code(&diag.code) {
-        return as_root;
-    }
-    if crate::check_writing::is_writing_code(&diag.code) {
-        let file = writing_owners
-            .get(&diag.code)
-            .cloned()
-            .unwrap_or_else(|| root.to_string());
-        return mcp_in_file(file, diag, files, as_root);
-    }
-    let Some((ws_file, origin)) = ws.map_effective_origin(root, diag.span) else {
-        return as_root;
-    };
-    let Some(file) = ws_to_map.get(&ws_file).cloned() else {
-        return as_root;
-    };
-    if file == root {
-        return as_root;
-    }
-    let mut moved = diag.clone();
-    moved.span = origin;
-    mcp_in_file(file, &moved, files, as_root)
-}
-
-fn mcp_in_file(
-    file: String,
-    diag: &Diagnostic,
-    files: &BTreeMap<String, String>,
-    fallback: WorkspaceDiagnostic,
-) -> WorkspaceDiagnostic {
-    if file == fallback.file {
-        return fallback;
-    }
-    let Some(text) = files.get(&file) else {
-        return fallback;
-    };
-    WorkspaceDiagnostic {
-        file,
-        diagnostic: to_mcp(text, diag),
-    }
+    set.diagnostics
+        .iter()
+        .enumerate()
+        .filter(|(_, diag)| !is_dropped(&diag.code))
+        .map(|(index, diag)| {
+            if let Some(origin) = set.origins.get(index).and_then(Option::as_ref) {
+                let file = ws_to_map
+                    .get(&origin.file)
+                    .cloned()
+                    .unwrap_or_else(|| normalize_key(&origin.file));
+                let mut mapped = diag.clone();
+                mapped.span = origin.span;
+                WorkspaceDiagnostic {
+                    file,
+                    diagnostic: to_mcp(&origin.text, &mapped),
+                }
+            } else {
+                WorkspaceDiagnostic {
+                    file: root.to_string(),
+                    diagnostic: to_mcp(root_text, diag),
+                }
+            }
+        })
+        .collect()
 }
 
 fn to_mcp(text: &str, diag: &Diagnostic) -> McpDiagnostic {

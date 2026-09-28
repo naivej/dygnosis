@@ -307,11 +307,8 @@ pub fn check_file_with_origins(text: &str, abs_path: &str) -> DiagnosticSet {
     check_in_workspace_with_origins(&mut ws, abs_path)
 }
 
-/// Same families as [`check_file`] on an existing workspace (open overlays).
-pub(crate) fn check_in_workspace(ws: &mut Workspace, abs_path: &str) -> Vec<Diagnostic> {
-    check_in_workspace_with_origins(ws, abs_path).diagnostics
-}
-
+/// Same families as [`check_file`] on an existing workspace (open overlays),
+/// with the written source of each diagnostic retained for presentation.
 pub(crate) fn check_in_workspace_with_origins(ws: &mut Workspace, abs_path: &str) -> DiagnosticSet {
     try_workspace_check(ws, abs_path).unwrap_or_else(|| {
         let text = ws.get_source(abs_path).unwrap_or("").to_string();
