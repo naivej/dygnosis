@@ -2,7 +2,13 @@
 
 ## v0.10.1
 
-- `E193` now reports three PAC target-equation refusals visible in the written file: a nonlinear right side, a variable absent from `pac_target_info` components, or a listed component absent from the equation. Unary, diff, and other rewrite-dependent forms remain quiet.
+- `E193` reports three PAC target-equation refusals visible in the written file: a nonlinear right side, a variable absent from `pac_target_info` components, or a listed component absent from the equation. That check runs before the missing-operator refusal. Unary, diff, and other rewrite-dependent forms remain quiet, as does a competing assignment that might be simplified first.
+- A written constant division by zero is `E189` on the first proven left- or right-hand side. A direct unused endogenous is `E186`. A plain aggregate or heterogeneous equation count that cannot create helper variables is `E188` or `E192`. A direct two-variable `EXPECTATION(0)` sum under `partial_information` is `E190`. Counts and substitutions that depend on rewrite stay quiet.
+- `W186` reports Dynare's auxiliary-name warning on a symbol list and stops that list. A duplicate name in the same list still warns.
+- `W212` warns when an `initval` or `endval` assignment, including `endval(learnt_in=1)`, names a variable that a later `model_remove` or `var_remove` still excludes. `change_type` after `var_remove` restores the name, so the warning stays quiet and an unused restored exogenous is `E021`.
+- An incomplete macro expansion withholds later workspace file and companion checks. The incomplete notice stays; a complete file still reports a real missing include or unknown value-file name.
+- Command option lists follow the Dynare 7.2 grammar for membership, separators, and simple numeric values. `estimated_params_remove` parses its rows and checks each name when that row is read.
+- Diagnostics and references from an included file use the included source. Batch diagnosis uses that same ownership.
 
 ## v0.10.0
 
