@@ -8,7 +8,7 @@
 
 Limitations by design
 
-- **Macro functions, scalar `for ... when ...` filters, and tuple loops are supported for expressions Dygnosis can evaluate**. Unsupported expressions and expansion limits leave the original macro text visible.
+- **Macro expressions Dygnosis cannot evaluate.** Dygnosis expands `@#include`, `@#define`, `@#if`, `@#for` (with `when` filters and tuple loops), macro functions, and `@{…}`. When a valid expression is beyond its evaluator, or a loop runs over more than 10,000 values, it keeps the original macro text and shows `I211`. Checks that need the expanded model are withheld, and model info, equations, compare, and the effective-model view are marked incomplete.
 - **Problems after equation rewriting.** Dynare changes equations and adds helper variables before some checks. Dygnosis can report a problem found at that stage when the `.mod` you wrote is enough to decide it. It stays quiet when the problem depends on equations Dynare creates and cannot be tied back to your file.
 - **Some Dynare messages cannot be shown.** A few concern MATLAB or Octave code Dynare writes rather than your `.mod` file; other cases crash without an error message. When the written cause of a crash is clear, Dygnosis may give its own warning, such as `W212` for an assignment to a name later excluded.
 - **Run-dependent checks.** Dygnosis does not infer checks that depend on Dynare command-line options or a compiler installed on your machine.

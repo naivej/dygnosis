@@ -2,12 +2,15 @@
 
 ## v0.10.1
 
+- Macro functions, scalar `@#for ... when ...` filters, and tuple loops expand in diagnostics and model views, with loop origins kept. A filtered-out iteration no longer invents an unknown name or a count warning. A range bound can use arithmetic: `1:N-1` ends at `N-1`. An undefined macro variable or function is `E063` at the directive that uses it, and a quoted macro string used as a name is reported without its quotes. A valid expression Dygnosis cannot evaluate shows `I211` Information, withholds the checks that need the expanded model, and marks model info, equations, compare, and the effective-model view as incomplete.
+- Equation counts use each name's final type after `change_type`. A `var` retyped to a parameter or `varexo` no longer counts for `W013`, `E186`, or `E188`, and a parameter or `varexo` retyped to `var` does.
+- Parameter checks follow `change_type`. `z = 1;` or `z.prior(…)` after `change_type(parameters) z;` is no longer `E378`; before it, or after `change_type(var)`, it still is. `W010`, `W022`, and `W121` use the final type, so a parameter retyped to `var` no longer gets them and a `var` retyped to a parameter does.
 - `E193` reports three PAC target-equation refusals visible in the written file: a nonlinear right side, a variable absent from `pac_target_info` components, or a listed component absent from the equation. That check runs before the missing-operator refusal. Unary, diff, and other rewrite-dependent forms remain quiet, as does a competing assignment that might be simplified first.
 - A written constant division by zero is `E189` on the first proven left- or right-hand side. A direct unused endogenous is `E186`. A plain aggregate or heterogeneous equation count that cannot create helper variables is `E188` or `E192`. A direct two-variable `EXPECTATION(0)` sum under `partial_information` is `E190`. Counts and substitutions that depend on rewrite stay quiet.
 - `W186` reports Dynare's auxiliary-name warning on a symbol list and stops that list. A duplicate name in the same list still warns.
 - `W212` warns when an `initval` or `endval` assignment, including `endval(learnt_in=1)`, names a variable that a later `model_remove` or `var_remove` still excludes. `change_type` after `var_remove` restores the name, so the warning stays quiet and an unused restored exogenous is `E021`.
 - An incomplete macro expansion withholds later workspace file and companion checks. The incomplete notice stays; a complete file still reports a real missing include or unknown value-file name.
-- Command option lists follow the Dynare 7.2 grammar for membership, separators, and simple numeric values. `estimated_params_remove` parses its rows and checks each name when that row is read.
+- Command option lists follow the Dynare 7.2 grammar for membership, separators, and simple numeric values. A missing comma after an option value is reported on the next option, where Dynare reports it. `estimated_params_remove` parses its rows and checks each name when that row is read.
 - Diagnostics and references from an included file use the included source. Batch diagnosis uses that same ownership.
 
 ## v0.10.0

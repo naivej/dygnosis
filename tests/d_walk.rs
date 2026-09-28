@@ -455,6 +455,6 @@ fn e239_e240_w202_symbol_lists() {
     quiet(&aux, "E239");
     assert_eq!(
         find(&aux, "W186").message,
-        "WARNING: symbol_list variable AUX_ENDO_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name."
+        "symbol_list variable AUX_ENDO_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name."
     );
 }

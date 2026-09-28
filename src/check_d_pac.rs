@@ -1362,10 +1362,18 @@ fn direct_target_equation_refusal(model: &Model, block: &PacTargetInfoBlock) -> 
     // that rewrite, even if the target RHS itself is plainly wrong. Require
     // a positive nonconstant proof for every competing direct assignment.
     for other in model.equations.iter().filter(|other| !other.is_local) {
-        if std::ptr::eq(other, equation) || other.lhs_expr.and_then(|lhs| direct_endogenous(model, lhs)).is_none() {
+        if std::ptr::eq(other, equation)
+            || other
+                .lhs_expr
+                .and_then(|lhs| direct_endogenous(model, lhs))
+                .is_none()
+        {
             continue;
         }
-        if !other.rhs_expr.is_some_and(|rhs| certain_nonconstant_assignment(model, rhs)) {
+        if !other
+            .rhs_expr
+            .is_some_and(|rhs| certain_nonconstant_assignment(model, rhs))
+        {
             return None;
         }
     }
@@ -1422,8 +1430,11 @@ fn certain_nonconstant_assignment(model: &Model, id: ExprId) -> bool {
         match &model.exprs.get(id).kind {
             ExprKind::Ident { .. } | ExprKind::Number => true,
             ExprKind::Unary { arg, .. } => plain_tree(model, *arg),
-            ExprKind::Binary { op: BinOp::Add | BinOp::Sub | BinOp::Mul, lhs, rhs } =>
-                plain_tree(model, *lhs) && plain_tree(model, *rhs),
+            ExprKind::Binary {
+                op: BinOp::Add | BinOp::Sub | BinOp::Mul,
+                lhs,
+                rhs,
+            } => plain_tree(model, *lhs) && plain_tree(model, *rhs),
             _ => false,
         }
     }
@@ -1431,8 +1442,11 @@ fn certain_nonconstant_assignment(model: &Model, id: ExprId) -> bool {
         match &model.exprs.get(id).kind {
             ExprKind::Ident { name: found, .. } => usize::from(*found == name),
             ExprKind::Unary { arg, .. } => additive_occurrences(model, *arg, name),
-            ExprKind::Binary { op: BinOp::Add | BinOp::Sub, lhs, rhs } =>
-                additive_occurrences(model, *lhs, name) + additive_occurrences(model, *rhs, name),
+            ExprKind::Binary {
+                op: BinOp::Add | BinOp::Sub,
+                lhs,
+                rhs,
+            } => additive_occurrences(model, *lhs, name) + additive_occurrences(model, *rhs, name),
             _ => 0,
         }
     }
@@ -1442,7 +1456,11 @@ fn certain_nonconstant_assignment(model: &Model, id: ExprId) -> bool {
     let refs: Vec<_> = model.exprs.walk_idents(id).collect();
     refs.iter().any(|reference| {
         is_exogenous(model, reference.name)
-            && refs.iter().filter(|other| other.name == reference.name).count() == 1
+            && refs
+                .iter()
+                .filter(|other| other.name == reference.name)
+                .count()
+                == 1
             && additive_occurrences(model, id, reference.name) == 1
     })
 }

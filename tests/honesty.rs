@@ -644,7 +644,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         fixture: "removal/w186_stoch.mod",
         kind: HonestyKind::Warning,
         their_needle: "WARNING: symbol_list variable AUX_EXPECT_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name.",
-        our_needle: "WARNING: symbol_list variable AUX_EXPECT_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name.",
+        our_needle: "symbol_list variable AUX_EXPECT_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name.",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -5385,6 +5385,7 @@ fn macro_action_valid_forms_are_accepted_at_check() {
     for name in [
         "function",
         "scalar_when",
+        "range_arithmetic",
         "tuple",
         "unsupported_builtin",
         "real_math",
@@ -5519,9 +5520,9 @@ fn auxiliary_symbol_warning_is_kept_even_when_osr_later_aborts() {
     let path = fixture("lists/quiet_osr_aux_expect.mod");
     let text = read_path(&path);
     let result = spawn(&text, &path, &pp, JsonStage::Check);
-    let needle = "WARNING: symbol_list variable AUX_EXPECT_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name.";
+    let needle = "symbol_list variable AUX_EXPECT_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name.";
     assert!(
-        they_mention(&result, needle),
+        they_mention(&result, &format!("WARNING: {needle}")),
         "{} {}",
         result.raw_stdout,
         result.raw_stderr

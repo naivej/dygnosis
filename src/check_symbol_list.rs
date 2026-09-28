@@ -89,7 +89,7 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
                     sym.span,
                     Severity::Warning,
                     "W186",
-                    format!("WARNING: symbol_list variable {name} has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name."),
+                    format!("symbol_list variable {name} has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name."),
                 ));
                 stopped = Some(sym.list_id);
                 continue;

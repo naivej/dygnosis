@@ -1,7 +1,7 @@
 //! Parsed `.mod` model. This is the seam diagnostic families and transports share.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -1108,9 +1108,8 @@ pub struct Model {
     pub mod_file_locals: Vec<Name>,
     /// Macro type errors from expansion (`@#if` not bool, `@#for` tuple, `+` mismatch).
     pub macro_type_errors: Vec<(Span, &'static str, String)>,
-    /// Some valid macro text remains unexpanded; parsed rows are incomplete.
-    pub macro_incomplete: bool,
     /// First unsupported macro directive/interpolation in the written file.
+    /// Present when valid macro text remains unexpanded and parsed rows are incomplete.
     pub macro_incomplete_span: Option<Span>,
     /// `epilogue;` … `end;` (first block).
     pub epilogue_block: Option<Span>,
@@ -1837,6 +1836,10 @@ impl Model {
         spans
     }
 
+    pub fn macro_incomplete(&self) -> bool {
+        self.macro_incomplete_span.is_some()
+    }
+
     /// Last type recorded for `name`, in parser execution order.
     ///
     /// `var_remove` leaves the declaration on its original list and appends an
@@ -1848,6 +1851,76 @@ impl Model {
             .rev()
             .find(|event| event.name == name)
             .map(|event| event.kind)
+    }
+
+    /// Type `name` has at byte `at`: the last declaration or type change written
+    /// before it. Official checks such as `check_symbol_is_parameter` run while
+    /// parsing the statement, so a later `change_type` does not count.
+    pub fn symbol_kind_before(&self, name: Name, at: u32) -> Option<&'static str> {
+        self.symbol_type_events
+            .iter()
+            .rev()
+            .find(|event| event.name == name && event.span.start < at)
+            .map(|event| event.kind)
+    }
+
+    /// `name` is a parameter at byte `at`, falling back to the written list.
+    pub fn parameter_at(&self, name: Name, at: u32) -> bool {
+        match self.symbol_kind_before(name, at) {
+            Some(kind) => kind == "parameters",
+            None => self.parameters.iter().any(|decl| decl.name == name),
+        }
+    }
+
+    /// Aggregate endogenous declarations by final type, first declaration per
+    /// name. Declarations stay on their written list, so a `change_type(var)`
+    /// parameter or exogenous name is endogenous here and a retyped `var` is not.
+    pub fn final_endogenous(&self) -> Vec<&Decl> {
+        self.final_decls("var")
+            .into_iter()
+            .filter(|decl| decl.heterogeneity.is_none())
+            .collect()
+    }
+
+    /// Parameter declarations by final type, first declaration per name, the
+    /// same way `final_endogenous` reads endogenous ones.
+    pub fn final_parameters(&self) -> Vec<&Decl> {
+        self.final_decls("parameters")
+    }
+
+    fn final_decls(&self, kind: &str) -> Vec<&Decl> {
+        let mut final_kind = HashMap::new();
+        for event in &self.symbol_type_events {
+            final_kind.insert(event.name, event.kind);
+        }
+        let lists = [
+            (&self.endogenous, "var"),
+            (&self.exogenous, "varexo"),
+            (&self.deterministic_exogenous, "varexo_det"),
+            (&self.parameters, "parameters"),
+        ];
+        let (written, other): (Vec<_>, Vec<_>) = lists
+            .into_iter()
+            .partition(|(_, written_kind)| *written_kind == kind);
+        let mut seen = HashSet::new();
+        written
+            .into_iter()
+            .chain(other)
+            .flat_map(|(list, written_kind)| list.iter().map(move |decl| (decl, written_kind)))
+            .filter(|(decl, written_kind)| {
+                final_kind.get(&decl.name).copied().unwrap_or(written_kind) == kind
+            })
+            .map(|(decl, _)| decl)
+            .filter(|decl| seen.insert(decl.name))
+            .collect()
+    }
+
+    /// Final type is `varexo` or `varexo_det`, falling back to the written lists.
+    pub fn final_exogenous(&self, name: Name) -> bool {
+        match self.final_symbol_kind(name) {
+            Some(kind) => matches!(kind, "varexo" | "varexo_det"),
+            None => self.exogenous.iter().any(|decl| decl.name == name),
+        }
     }
 
     /// True when a `model_remove` took `name` out of the model **after** byte `at`: the

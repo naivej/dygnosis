@@ -104,24 +104,19 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
             })
             .collect();
     }
-    if model.macro_incomplete {
+    if let Some(span) = model.macro_incomplete_span {
         // The remaining source still contains macro syntax, so any ordinary
         // parse/name/count diagnostic could describe a tree Dynare never sees.
         let explicit_error = crate::check_e060::check_e064(model);
         if !explicit_error.is_empty() {
             return explicit_error;
         }
-        return model
-            .macro_incomplete_span
-            .map(|span| {
-                vec![Diagnostic::new(
-                    span,
-                    Severity::Information,
-                    "I211",
-                    "Macro expansion is incomplete; some model checks were withheld.",
-                )]
-            })
-            .unwrap_or_default();
+        return vec![Diagnostic::new(
+            span,
+            Severity::Information,
+            "I211",
+            "Macro expansion is incomplete; some model checks were withheld.",
+        )];
     }
     let parse_diags = crate::check_parse::check_parse(model);
     if !parse_diags.is_empty() {
@@ -366,7 +361,7 @@ pub(crate) fn check_in_workspace_with_origins(ws: &mut Workspace, abs_path: &str
 fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticSet> {
     let model = ws.get_effective_model(abs_path)?.clone();
     let mut diags = analyze(&model);
-    if model.macro_incomplete {
+    if model.macro_incomplete() {
         // An unevaluated macro can change declarations, command options, and
         // which includes exist. Keep only the macro result already established
         // by analyze; file and companion checks would use an unfinished tree.

@@ -101,6 +101,25 @@ fn scalar_when_filters_out_false_iteration() {
 }
 
 #[test]
+fn range_bound_arithmetic_binds_tighter_than_colon() {
+    let src = action_fixture("range_arithmetic");
+    let report = expand_report(&src);
+    assert_eq!(report.n_equations, 2, "{}", report.effective_text);
+    assert!(
+        !report.effective_text.contains("y_3"),
+        "{}",
+        report.effective_text
+    );
+    let diags = analyze(&parse(&src));
+    assert!(
+        !diags
+            .iter()
+            .any(|d| matches!(d.code.as_str(), "E285" | "I211" | "W013")),
+        "{diags:?}"
+    );
+}
+
+#[test]
 fn tuple_loop_binds_each_element_and_keeps_origins() {
     let src = action_fixture("tuple");
     let report = expand_report(&src);

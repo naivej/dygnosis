@@ -1184,8 +1184,8 @@ impl Backend {
         let Some(model_b) = inner.workspace.get_effective_model(uri_b.as_str()).cloned() else {
             return json!({"error": format!("No parsed model for uri_b: {uri_b}"), "code": "URI_B_NOT_FOUND"});
         };
-        if model_a.macro_incomplete || model_b.macro_incomplete {
-            return json!({"status": "incomplete", "message": "Macro expansion is incomplete"});
+        if model_a.macro_incomplete() || model_b.macro_incomplete() {
+            return crate::mcp::macro_incomplete_status();
         }
         compare_models_with_sources(
             &model_a,

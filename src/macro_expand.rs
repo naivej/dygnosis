@@ -1013,13 +1013,8 @@ fn eval_macro_expr(
     if source.is_empty() {
         return Err(MacroEvalError::Unsupported);
     }
-    for group in [
-        &['|'][..],
-        &['&'][..],
-        &['=', '!', '<', '>'][..],
-        &['+', '-'][..],
-        &['*', '/'][..],
-    ] {
+    // Pinned macro grammar: `:` binds looser than arithmetic, tighter than comparison.
+    for group in [&['|'][..], &['&'][..], &['=', '!', '<', '>'][..]] {
         if let Some((left, op, right)) = split_macro_binary(source, group) {
             let left = eval_macro_expr(left, defines, depth + 1)?;
             let right = eval_macro_expr(right, defines, depth + 1)?;
@@ -1033,6 +1028,13 @@ fn eval_macro_expr(
             return Ok(MacroVal::Range { start, end });
         }
         return Err(MacroEvalError::Unsupported);
+    }
+    for group in [&['+', '-'][..], &['*', '/'][..]] {
+        if let Some((left, op, right)) = split_macro_binary(source, group) {
+            let left = eval_macro_expr(left, defines, depth + 1)?;
+            let right = eval_macro_expr(right, defines, depth + 1)?;
+            return eval_binary(left, op, right);
+        }
     }
     if let Some(body) = source.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
         return Ok(MacroVal::Array(

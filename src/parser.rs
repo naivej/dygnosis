@@ -163,7 +163,6 @@ pub fn parse(text: &str) -> Model {
     model.macro_directives = macro_directives;
     model.macro_interps = macro_interps;
     model.macro_type_errors = macro_type_errors;
-    model.macro_incomplete = macro_incomplete_span.is_some();
     model.macro_incomplete_span = macro_incomplete_span;
     model
 }
@@ -7363,9 +7362,7 @@ impl Parser<'_> {
         };
         if self
             .model
-            .parameters
-            .iter()
-            .any(|d| d.name == assignment.name)
+            .parameter_at(assignment.name, assignment.span.start)
         {
             self.model.param_assignments.push(assignment);
         } else {
@@ -9333,7 +9330,14 @@ impl Parser<'_> {
     /// Lists, expressions, named words, and options with alternative productions
     /// remain with their dedicated parser or quiet until represented exactly.
     fn record_simple_option_values(&mut self, command: &str, from: usize, to: usize) {
-        for opt in top_options(&self.tokens, self.src, from, to) {
+        let options = top_options(&self.tokens, self.src, from, to);
+        let value_ends: Vec<usize> = options
+            .iter()
+            .skip(1)
+            .map(|next| next.token_index)
+            .chain([to])
+            .collect();
+        for (opt, value_end) in options.into_iter().zip(value_ends) {
             let name = opt.ident.to_ascii_lowercase();
             let shape = if command.eq_ignore_ascii_case("model") {
                 match name.as_str() {
@@ -9393,7 +9397,7 @@ impl Parser<'_> {
                 }
             };
             let value = if opt.eq {
-                self.complete_option_value(&opt, to)
+                self.complete_option_value(&opt, value_end)
             } else {
                 &[][..]
             };

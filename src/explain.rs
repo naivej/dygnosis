@@ -1988,7 +1988,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("W186", ExplainEntry {
         title: "Possible auxiliary name in a symbol list",
-        body: "Dynare warns at Check: `WARNING: symbol_list variable NAME has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name.` The undeclared `AUX_EXPECT_` and `MULT_` prefixes qualify on every typed list; `AUX_ENDO_` and `LOG_` also qualify when endogenous names are allowed. Dynare stops checking the rest of that list after this Warning.\n\n**Fix**\n\nDeclare the intended symbol, or correct a spelling that only resembles a generated auxiliary name.",
+        body: "Dynare warns at Check: `WARNING: symbol_list variable NAME has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name.` The undeclared `AUX_EXPECT_` and `MULT_` prefixes qualify on every typed list; `AUX_ENDO_` and `LOG_` also qualify when endogenous names are allowed. Dynare stops checking the rest of that list after this Warning. The `WARNING:` prefix is omitted because the transport already labels Warnings.\n\n**Fix**\n\nDeclare the intended symbol, or correct a spelling that only resembles a generated auxiliary name.",
         kind: ExplainKind::Shared,
     }),
     ("W187", ExplainEntry {

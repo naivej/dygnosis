@@ -50,7 +50,7 @@ pub(crate) fn model_structure(model: &Model) -> ModelStructure {
         parse_issues: !model.parse_issues.is_empty(),
         includes: !model.includes.is_empty(),
         macro_type_errors: !model.macro_type_errors.is_empty(),
-        macro_incomplete: model.macro_incomplete,
+        macro_incomplete: model.macro_incomplete(),
         e062: !crate::check_e060::check_e062(model).is_empty(),
         e063: !crate::check_e060::check_e063(model).is_empty(),
         e064: !crate::check_e060::check_e064(model).is_empty(),

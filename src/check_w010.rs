@@ -32,7 +32,7 @@ pub fn check_w010(model: &Model) -> Vec<Diagnostic> {
         }
     }
     let mut diagnostics = Vec::new();
-    for p in &model.parameters {
+    for p in model.final_parameters() {
         if assigned.contains(&p.name) {
             continue;
         }
@@ -53,7 +53,7 @@ pub fn check_w010(model: &Model) -> Vec<Diagnostic> {
 }
 
 pub fn check_w011(model: &Model) -> Vec<Diagnostic> {
-    let param_names: HashSet<Name> = model.parameters.iter().map(|d| d.name).collect();
+    let param_names: HashSet<Name> = model.final_parameters().iter().map(|d| d.name).collect();
     let subjects = unevaluable_subjects(model, &param_names);
     if subjects.is_empty() {
         return Vec::new();
@@ -133,10 +133,7 @@ pub fn check_w020(model: &Model) -> Vec<Diagnostic> {
     // heterogeneous endogenous that nothing uses is accepted.
     unused_decls(
         model,
-        model
-            .endogenous
-            .iter()
-            .filter(|decl| decl.heterogeneity.is_none() && still_endogenous(model, decl.name)),
+        model.final_endogenous(),
         &referenced,
         "W020",
         Severity::Warning,
@@ -219,14 +216,6 @@ fn final_type_is_plain_varexo(model: &Model, name: Name) -> bool {
     }
 }
 
-/// A written `var` name whose final type is still endogenous.
-fn still_endogenous(model: &Model, name: Name) -> bool {
-    match model.final_symbol_kind(name) {
-        Some("var") | None => true,
-        Some(_) => false,
-    }
-}
-
 /// True while `name` is still excluded for the unused-exogenous check.
 ///
 /// The last `excluded` event is final until a later `change_type` replaces it.
@@ -266,7 +255,7 @@ pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
     walk_assignment_idents(model, &model.initval, &mut referenced);
 
     let mut diagnostics = Vec::new();
-    for p in &model.parameters {
+    for p in model.final_parameters() {
         if referenced.contains(&p.name) {
             continue;
         }
@@ -480,6 +469,7 @@ fn extend_shocks_idents(model: &Model, referenced: &mut HashSet<Name>) {
     let Some(span) = model.shocks_block else {
         return;
     };
+    let parameters = model.final_parameters();
     for tok in tokenize(&model.source) {
         if tok.kind != TokenKind::Ident {
             continue;
@@ -488,7 +478,7 @@ fn extend_shocks_idents(model: &Model, referenced: &mut HashSet<Name>) {
             continue;
         }
         let text = tok.text(&model.source);
-        if let Some(d) = model.parameters.iter().find(|d| model.name(d.name) == text) {
+        if let Some(d) = parameters.iter().find(|d| model.name(d.name) == text) {
             referenced.insert(d.name);
         }
     }

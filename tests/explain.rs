@@ -241,9 +241,7 @@ fn explain_kinds_are_shared_skipped_added() {
     assert_eq!(explain("W013").unwrap().kind, ExplainKind::Added);
     assert_eq!(explain("W186").unwrap().kind, ExplainKind::Shared);
     assert_eq!(explain("e192").unwrap().kind, ExplainKind::Shared);
-    for code in ["e194"] {
-        assert_eq!(explain(code).unwrap().kind, ExplainKind::Skipped);
-    }
+    assert_eq!(explain("e194").unwrap().kind, ExplainKind::Skipped);
     assert_eq!(explain("e193").unwrap().kind, ExplainKind::Shared);
 }
 

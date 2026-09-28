@@ -22,7 +22,7 @@ fn auxiliary_name_warning_uses_official_text_and_stops_only_its_list() {
     assert_eq!(warning.len(), 1, "{rows:?}");
     assert_eq!(
         warning[0].message,
-        "WARNING: symbol_list variable AUX_EXPECT_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name."
+        "symbol_list variable AUX_EXPECT_1 has not yet been declared. This is being ignored because the variable name corresponds to a possible auxiliary variable name."
     );
     assert_eq!(
         warning[0].span.start,
@@ -186,10 +186,30 @@ fn change_type_to_endogenous_is_not_an_unused_exogenous_error() {
     let source = "var y; varexo x; model; y=y(-1); end; change_type(var) x;";
     let rows = diagnostics(source);
     assert!(hits(&rows, "E021").is_empty(), "{rows:?}");
-    assert!(
-        rows.iter().all(|row| row.severity != Severity::Error),
-        "{rows:?}"
-    );
+    let errors: Vec<_> = rows
+        .iter()
+        .filter(|row| row.severity == Severity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "{rows:?}");
+    assert_eq!(errors[0].code, "E186", "{rows:?}");
+    assert_eq!(errors[0].message, "x not used in the model block");
+    if let Some(pp) = find_preprocessor(None) {
+        let check = run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+        assert!(check.success, "{check:?}");
+        let transform = run_preprocessor(
+            source,
+            &pp,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Transform,
+        );
+        assert!(
+            transform
+                .raw_stdout
+                .contains("x not used in the model block"),
+            "{transform:?}"
+        );
+    }
 }
 
 #[test]
@@ -215,11 +235,165 @@ fn change_type_to_varexo_before_the_model_is_an_unused_exogenous_error() {
 }
 
 #[test]
-fn used_name_retyped_to_varexo_keeps_the_equation_count_quiet() {
-    let source = "var y x; change_type(varexo) x; model; y=y(-1); x=x(-1); end;";
-    let rows = diagnostics(source);
-    assert!(hits(&rows, "W013").is_empty(), "{rows:?}");
-    assert!(hits(&rows, "E021").is_empty(), "{rows:?}");
+fn equation_counts_follow_the_final_type_after_change_type() {
+    // (source, E186 message, W013 fires, Transform accepts)
+    for (source, unused, count_warning, accepted) in [
+        (
+            "var y z; change_type(parameters) z; model; y=z; end;",
+            None,
+            false,
+            true,
+        ),
+        (
+            "var y x; change_type(varexo) x; model; y=x; end;",
+            None,
+            false,
+            true,
+        ),
+        (
+            "var y; varexo e; change_type(var) e; model; y=e(-1); e=0.5*e(-1); end;",
+            None,
+            false,
+            true,
+        ),
+        (
+            "var y; parameters p; change_type(var) p; model; y=p; p=0.5*p(-1); end;",
+            None,
+            false,
+            true,
+        ),
+        (
+            "var y; parameters p; change_type(var) p; model; y=0.5*y(-1); end;",
+            Some("p not used in the model block"),
+            false,
+            false,
+        ),
+        // A lagged exogenous adds an auxiliary equation and variable, so the
+        // written count warns like a plain `varexo` and the count Error stays quiet.
+        (
+            "var y x; change_type(varexo) x; model; y=y(-1); x=x(-1); end;",
+            None,
+            true,
+            false,
+        ),
+    ] {
+        let rows = diagnostics(source);
+        let errors: Vec<_> = rows
+            .iter()
+            .filter(|row| row.severity == Severity::Error)
+            .collect();
+        match unused {
+            Some(message) => {
+                assert_eq!(errors.len(), 1, "{source}: {rows:?}");
+                assert_eq!(errors[0].code, "E186", "{source}: {rows:?}");
+                assert_eq!(errors[0].message, message, "{source}: {rows:?}");
+            }
+            None => assert!(errors.is_empty(), "{source}: {rows:?}"),
+        }
+        assert_eq!(
+            !hits(&rows, "W013").is_empty(),
+            count_warning,
+            "{source}: {rows:?}"
+        );
+        if let Some(pp) = find_preprocessor(None) {
+            let official = run_preprocessor(
+                source,
+                &pp,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Transform,
+            );
+            assert_eq!(official.success, accepted, "{source}: {official:?}");
+            if let Some(message) = unused {
+                assert!(official.raw_stdout.contains(message), "{official:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn parameter_checks_follow_change_type() {
+    // (source, E378 message, W010 fires, W121 fires). The type written before
+    // the statement decides E378; the final type decides W010 and W121.
+    for (source, not_parameter, unassigned, timed) in [
+        (
+            "var y z; varexo e; parameters a; change_type(parameters) z; z = 1; a = 0.5; model; y = a*y(-1) + z + e; end;",
+            None,
+            false,
+            false,
+        ),
+        (
+            "var y z; varexo e; parameters a; change_type(parameters) z; a = 0.5; z = 1; z.prior(shape=beta, mean=0.5, stdev=0.1); model; y = a*y(-1) + z + e; end;",
+            None,
+            false,
+            false,
+        ),
+        (
+            "var y z; varexo e; parameters a; change_type(parameters) z; a = 0.5; model; y = a*y(-1) + z(+1) + e; end;",
+            None,
+            true,
+            true,
+        ),
+        (
+            "var y; varexo e; parameters a p; change_type(var) p; a = 0.5; model; y = a*y(-1) + p(+1) + e; p = 0.9*p(-1); end;",
+            None,
+            false,
+            false,
+        ),
+        (
+            "var y z; varexo e; parameters a; z = 1; change_type(parameters) z; a = 0.5; model; y = a*y(-1) + z + e; end;",
+            Some("z is not a parameter"),
+            false,
+            false,
+        ),
+        (
+            "var y; varexo e; parameters a p; change_type(var) p; p = 1; a = 0.5; model; y = a*y(-1) + p + e; p = 0.9*p(-1); end;",
+            Some("p is not a parameter"),
+            false,
+            false,
+        ),
+        (
+            "var y; varexo e; parameters a p; change_type(var) p; a = 0.5; p.prior(shape=beta, mean=0.5, stdev=0.1); model; y = a*y(-1) + p + e; p = 0.9*p(-1); end;",
+            Some("p is not a parameter"),
+            false,
+            false,
+        ),
+    ] {
+        let rows = diagnostics(source);
+        let refusals = hits(&rows, "E378");
+        match not_parameter {
+            Some(message) => {
+                assert_eq!(refusals.len(), 1, "{source}: {rows:?}");
+                assert_eq!(refusals[0].message, message, "{source}: {rows:?}");
+            }
+            None => assert!(refusals.is_empty(), "{source}: {rows:?}"),
+        }
+        assert_eq!(
+            !hits(&rows, "W010").is_empty(),
+            unassigned,
+            "{source}: {rows:?}"
+        );
+        assert_eq!(
+            !hits(&rows, "W121").is_empty(),
+            timed,
+            "{source}: {rows:?}"
+        );
+        if let Some(pp) = find_preprocessor(None) {
+            let official =
+                run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+            assert_eq!(official.success, not_parameter.is_none(), "{official:?}");
+            if let Some(message) = not_parameter {
+                assert!(official.raw_stdout.contains(message), "{official:?}");
+            }
+            assert_eq!(
+                official
+                    .raw_stdout
+                    .contains("The following parameter(s) are used with a lead or a"),
+                timed,
+                "{source}: {official:?}"
+            );
+        }
+    }
 }
 
 #[test]

@@ -475,7 +475,7 @@ fn check_dotted_copy_source(
             );
             return true;
         }
-        if !model.parameters.iter().any(|decl| decl.name == *first) {
+        if !model.parameter_at(*first, stmt.span.start) {
             push(
                 out,
                 stmt.span,
@@ -549,7 +549,7 @@ fn check_dotted_head_and_subsample(
         return true;
     }
     if let DottedHead::Param { first, .. } = stmt.head {
-        if !model.parameters.iter().any(|decl| decl.name == first) {
+        if !model.parameter_at(first, stmt.span.start) {
             push(
                 out,
                 stmt.span,
@@ -561,7 +561,7 @@ fn check_dotted_head_and_subsample(
     }
     if let DottedHead::Vec { names } = &stmt.head {
         for (name, span) in names {
-            if !model.parameters.iter().any(|decl| decl.name == *name) {
+            if !model.parameter_at(*name, stmt.span.start) {
                 push(
                     out,
                     *span,
@@ -1890,7 +1890,7 @@ fn check_top_assignment(
     assignment: &crate::model::Assignment,
     out: &mut Vec<Diagnostic>,
 ) -> bool {
-    if parameter_names(model).contains(&assignment.name) {
+    if model.parameter_at(assignment.name, assignment.span.start) {
         return false;
     }
     push(

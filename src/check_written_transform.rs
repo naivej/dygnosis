@@ -18,11 +18,7 @@ pub(crate) fn check_early(model: &Model) -> Vec<Diagnostic> {
     if let Some(zero) = direct_constant_denominator(model) {
         return vec![zero];
     }
-    let unused = direct_unused_endogenous(model);
-    if !unused.is_empty() {
-        return unused;
-    }
-    Vec::new()
+    direct_unused_endogenous(model)
 }
 
 pub(crate) fn check_late(model: &Model) -> Vec<Diagnostic> {
@@ -75,12 +71,9 @@ fn direct_unused_endogenous(model: &Model) -> Vec<Diagnostic> {
         .flat_map(|eq| model.ident_refs(eq))
         .map(|reference| reference.name)
         .collect();
-    let mut seen = HashSet::new();
     model
-        .endogenous
-        .iter()
-        .filter(|decl| decl.heterogeneity.is_none() && seen.insert(decl.name))
-        .filter(|decl| still_endogenous(model, decl.name))
+        .final_endogenous()
+        .into_iter()
         .filter(|decl| !used.contains(&decl.name))
         .map(|decl| {
             Diagnostic::new(
@@ -305,11 +298,6 @@ fn direct_nonvariable_argument(model: &Model, id: ExprId) -> Option<(Name, Name)
     (*left != *right).then_some((*left, *right))
 }
 
-/// A `var` declaration retyped by `change_type` is no longer an endogenous name.
-fn still_endogenous(model: &Model, name: Name) -> bool {
-    matches!(model.final_symbol_kind(name), Some("var") | None)
-}
-
 fn plain_aggregate_count(model: &Model) -> Option<Diagnostic> {
     if model.model_block.is_none()
         || model.bvar_present
@@ -320,14 +308,7 @@ fn plain_aggregate_count(model: &Model) -> Option<Diagnostic> {
         return None;
     }
     let n_eq = model.equations.len();
-    let n_endo = model
-        .endogenous
-        .iter()
-        .filter(|decl| decl.heterogeneity.is_none())
-        .filter(|decl| still_endogenous(model, decl.name))
-        .map(|decl| decl.name)
-        .collect::<HashSet<_>>()
-        .len();
+    let n_endo = model.final_endogenous().len();
     (n_eq != n_endo).then(|| {
         Diagnostic::new(
             model.model_block.unwrap(),
@@ -424,7 +405,7 @@ fn plain_expr(model: &Model, id: ExprId) -> bool {
     match &model.exprs.get(id).kind {
         ExprKind::Number => true,
         ExprKind::Ident { name, timing, .. } => {
-            if model.exogenous.iter().any(|decl| decl.name == *name) {
+            if model.final_exogenous(*name) {
                 *timing == 0
             } else {
                 (-1..=1).contains(timing)

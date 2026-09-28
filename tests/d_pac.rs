@@ -390,22 +390,57 @@ fn direct_target_refusal_precedes_missing_pac_use() {
     for (rhs, expected) in [
         ("x*y", "is not of the right form"),
         ("x+y+z", "contains a variable (z)"),
-        ("x", "does not appear in the model equation defining the 'target'"),
-        ("x+y", "the model does not contain the 'pac_expectation(p)' operator"),
+        (
+            "x",
+            "does not appear in the model equation defining the 'target'",
+        ),
+        (
+            "x+y",
+            "the model does not contain the 'pac_expectation(p)' operator",
+        ),
     ] {
         let source = control
             .replace("[name='V'] v=x+y;", &format!("[name='V'] v={rhs};"))
             .replace("pac_expectation(p)+ez", "pac_expectation(q)+ez");
         let diagnostics = analyze(&parse(&source));
         let code = if rhs == "x+y" { "E449" } else { "E193" };
-        assert!(diagnostics.iter().any(|d| d.code == code && d.message.contains(expected)), "{rhs}: {diagnostics:?}");
-        assert!(diagnostics.iter().all(|d| d.code != if code == "E193" { "E449" } else { "E193" }), "{rhs}: {diagnostics:?}");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.code == code && d.message.contains(expected)),
+            "{rhs}: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d.code != if code == "E193" { "E449" } else { "E193" }),
+            "{rhs}: {diagnostics:?}"
+        );
         if let Some(binary) = pinned_binary() {
-            let check = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Check);
-            assert!(check.success, "{rhs}: {} {}", check.raw_stdout, check.raw_stderr);
-            let transform = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Transform);
+            let check = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Check,
+            );
+            assert!(
+                check.success,
+                "{rhs}: {} {}",
+                check.raw_stdout, check.raw_stderr
+            );
+            let transform = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Transform,
+            );
             assert!(!transform.success);
-            assert!(format!("{}{}", transform.raw_stdout, transform.raw_stderr).contains(expected), "{rhs}: {transform:?}");
+            assert!(
+                format!("{}{}", transform.raw_stdout, transform.raw_stderr).contains(expected),
+                "{rhs}: {transform:?}"
+            );
         }
     }
 }
@@ -418,13 +453,35 @@ fn unclassified_constant_assignments_withhold_target_verdict() {
         let last_end = source.rfind("end;").unwrap();
         source.insert_str(last_end, &format!("  x={rhs};\n"));
         let diagnostics = analyze(&parse(&source));
-        assert!(diagnostics.iter().all(|diag| diag.code != "E193"), "{rhs}: {diagnostics:?}");
+        assert!(
+            diagnostics.iter().all(|diag| diag.code != "E193"),
+            "{rhs}: {diagnostics:?}"
+        );
         if let Some(binary) = pinned_binary() {
-            let check = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Check);
-            assert!(check.success, "{rhs}: {} {}", check.raw_stdout, check.raw_stderr);
-            let transform = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Transform);
+            let check = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Check,
+            );
+            assert!(
+                check.success,
+                "{rhs}: {} {}",
+                check.raw_stdout, check.raw_stderr
+            );
+            let transform = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Transform,
+            );
             let output = format!("{}{}", transform.raw_stdout, transform.raw_stderr);
-            assert!(!output.contains("the model equation defining the 'target'"), "{rhs}: {output}");
+            assert!(
+                !output.contains("the model equation defining the 'target'"),
+                "{rhs}: {output}"
+            );
         }
     }
 }

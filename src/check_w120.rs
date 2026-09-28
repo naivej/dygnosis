@@ -52,7 +52,7 @@ pub fn check_w120(model: &Model) -> Vec<Diagnostic> {
 }
 
 pub fn check_w121(model: &Model) -> Vec<Diagnostic> {
-    let params: HashSet<Name> = model.parameters.iter().map(|d| d.name).collect();
+    let params: HashSet<Name> = model.final_parameters().iter().map(|d| d.name).collect();
     if params.is_empty() {
         return Vec::new();
     }
@@ -94,7 +94,7 @@ pub fn check_w122(model: &Model) -> Vec<Diagnostic> {
     if commands.is_empty() {
         return Vec::new();
     }
-    let param_names: HashSet<Name> = model.parameters.iter().map(|d| d.name).collect();
+    let param_names: HashSet<Name> = model.final_parameters().iter().map(|d| d.name).collect();
     let used = used_in_model(model);
     let rows = folded_param_assignments(model, &param_names);
     let mut diagnostics = Vec::new();

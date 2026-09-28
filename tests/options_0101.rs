@@ -286,6 +286,34 @@ fn command_values_and_separators_use_entire_production() {
 }
 
 #[test]
+fn missing_comma_after_a_value_blames_the_next_option() {
+    let source = "var y; model; y=1; end; stoch_simul(order=1 irf=10);";
+    let ours = errors(source);
+    assert_eq!(ours.len(), 1, "{ours:?}");
+    assert_eq!(
+        ours[0].message,
+        "syntax error, expected ',' before option 'irf' in 'stoch_simul'"
+    );
+    assert_eq!(
+        &source[ours[0].span.start as usize..ours[0].span.end as usize],
+        "irf",
+        "{ours:?}"
+    );
+    if let Some(pp) = find_preprocessor(None) {
+        let result = run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+        assert!(!result.success, "{result:?}");
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.span == ours[0].span
+                    && d.message.contains("unexpected IRF, expecting COMMA")),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
 fn policy_membership_names_the_written_option() {
     let base = "var y; parameters beta; beta=.9; model; y=beta; end; planner_objective y;";
     assert_option(

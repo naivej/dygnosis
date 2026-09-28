@@ -151,6 +151,13 @@ pub struct McpWorkspaceReference {
 }
 
 /// Registered tool names in registration order.
+const MACRO_INCOMPLETE_MESSAGE: &str = "Macro expansion is incomplete";
+
+/// Shared by MCP and the LSP commands so both transports report the same status.
+pub(crate) fn macro_incomplete_status() -> Value {
+    json!({"status": "incomplete", "message": MACRO_INCOMPLETE_MESSAGE})
+}
+
 pub fn registered_tool_names() -> Vec<&'static str> {
     TOOLS.iter().map(|(name, _)| *name).collect()
 }
@@ -222,8 +229,8 @@ pub fn dynare_model_info(
     files: Option<&HashMap<String, String>>,
 ) -> Value {
     let model = mcp_parse_model(file_content, active_file, files, false);
-    if model.macro_incomplete {
-        return json!({"status": "incomplete", "message": "Macro expansion is incomplete"});
+    if model.macro_incomplete() {
+        return macro_incomplete_status();
     }
     model_info_json(&model)
 }
@@ -240,10 +247,10 @@ pub fn dynare_equations(
     index: Option<usize>,
 ) -> Value {
     let unit = mcp_unit(file_content, active_file, files);
-    if unit.model.macro_incomplete || !unit.report.complete {
+    if unit.model.macro_incomplete() || !unit.report.complete {
         return json!({
             "status": "incomplete",
-            "message": "Macro expansion is incomplete",
+            "message": MACRO_INCOMPLETE_MESSAGE,
             "equations": [],
             "count_gap": null,
         });
@@ -647,8 +654,8 @@ pub fn dynare_compare_models(
         first_nonempty_files(files_b, files),
         true,
     );
-    if model_a.macro_incomplete || model_b.macro_incomplete {
-        return json!({"status": "incomplete", "message": "Macro expansion is incomplete"});
+    if model_a.macro_incomplete() || model_b.macro_incomplete() {
+        return macro_incomplete_status();
     }
     compare_models_with_sources(
         &model_a,
