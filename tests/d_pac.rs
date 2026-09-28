@@ -108,6 +108,9 @@ const FIRES: &[Fire] = &[
     Fire { file: "e456_cross_model.mod", code: "E456", message: "the variable/parameter 'y_part' conflicts with a variable that will be generated for a 'pac_expectation' expression. Please rename it.", stage: JsonStage::Transform, span: "y_part" },
     Fire { file: "e457_target_aux_clash.mod", code: "E457", message: "the variable/parameter 'v_ns' conflicts with a variable that will be generated for a 'pac_target_nonstationary' expression. Please rename it.", stage: JsonStage::Transform, span: "v_ns" },
     Fire { file: "e458_target_product.mod", code: "E458", message: "there is no equation whose LHS is equal to the 'target' of 'pac_target_info(p)'", stage: JsonStage::Transform, span: "v*v" },
+    Fire { file: "e193_pac_target_nonlinear_rhs.mod", code: "E193", message: "the model equation defining the 'target' of 'pac_target_info(p)' is not of the right form (should be a linear combination of endogenous variables)", stage: JsonStage::Transform, span: "x*y" },
+    Fire { file: "e193_pac_target_extra_component.mod", code: "E193", message: "the model equation defining the 'target' of 'pac_target_info(p)' contains a variable (z) that is not declared as a 'component'", stage: JsonStage::Transform, span: "x+y+z" },
+    Fire { file: "e193_pac_target_missing_component.mod", code: "E193", message: "a 'component' of 'pac_target_info(p)' does not appear in the model equation defining the 'target'", stage: JsonStage::Transform, span: "x" },
     Fire { file: "w206_deterministic_param.mod", code: "W206", message: "Warning: Non-variable symbol used in deterministic_trends: p", stage: JsonStage::Check, span: "p" },
     Fire { file: "e021_vem_expression.mod", code: "E021", message: "ghost not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior.", stage: JsonStage::Check, span: "ghost" },
     Fire { file: "e021_pac_target.mod", code: "E021", message: "ghost not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior.", stage: JsonStage::Check, span: "ghost" },
@@ -239,7 +242,9 @@ fn accepted_neighbours() {
         (
             "quiet_single_pac.mod",
             JsonStage::Transform,
-            &["E449", "E450", "E451", "E452", "E455", "E457", "E458"],
+            &[
+                "E193", "E449", "E450", "E451", "E452", "E455", "E457", "E458",
+            ],
         ),
         (
             "quiet_same_equation_twice.mod",
@@ -296,6 +301,132 @@ fn accepted_neighbours() {
     assert!(!analyze(&parse(&source))
         .iter()
         .any(|diag| diag.severity == Severity::Error));
+}
+
+#[test]
+fn target_rhs_rewrite_remainder_stays_quiet() {
+    let nonlinear = fixture("e193_pac_target_nonlinear_rhs.mod");
+    let with_diff = nonlinear.replace("[name='V'] v=x*y;", "[name='V'] v=x*y+diff(z);");
+    let mut with_constant_substitution = nonlinear.clone();
+    let last_end = with_constant_substitution.rfind("end;").unwrap();
+    with_constant_substitution.insert_str(last_end, "  x=1;\n");
+    for source in [with_diff, with_constant_substitution] {
+        let diagnostics = analyze(&parse(&source));
+        assert!(
+            diagnostics.iter().all(|diag| diag.code != "E193"),
+            "rewrite-dependent RHS must stay quiet: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn direct_linear_target_coefficients_stay_accepted() {
+    let control = fixture("quiet_single_pac.mod");
+    for rhs in ["2*x+y", "x+beta+y", "x+x+y"] {
+        let source = control.replace("[name='V'] v=x+y;", &format!("[name='V'] v={rhs};"));
+        let diagnostics = analyze(&parse(&source));
+        assert!(
+            diagnostics.iter().all(|diag| diag.code != "E193"),
+            "{rhs}: {diagnostics:?}"
+        );
+        if let Some(binary) = pinned_binary() {
+            let result = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Transform,
+            );
+            assert!(
+                result.success,
+                "{rhs}: {} {}",
+                result.raw_stdout, result.raw_stderr
+            );
+        }
+    }
+}
+
+#[test]
+fn direct_target_simplification_matches_pinned_transform() {
+    let control = fixture("quiet_single_pac.mod");
+    for (rhs, accepted, message) in [
+        ("x*y-x*y+x+y", true, None),
+        ("0*(x*y)+x+y", true, None),
+        (
+            "x-x+y",
+            false,
+            Some("does not appear in the model equation defining the 'target'"),
+        ),
+        ("x+y+z-z", true, None),
+        ("x+y+0*z", true, None),
+    ] {
+        let source = control.replace("[name='V'] v=x+y;", &format!("[name='V'] v={rhs};"));
+        let diagnostics = analyze(&parse(&source));
+        let e193 = diagnostics.iter().find(|diag| diag.code == "E193");
+        assert_eq!(e193.is_none(), accepted, "{rhs}: {diagnostics:?}");
+        if let Some(message) = message {
+            assert!(e193.unwrap().message.contains(message), "{rhs}: {e193:?}");
+        }
+        if let Some(binary) = pinned_binary() {
+            let result = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Transform,
+            );
+            assert_eq!(
+                result.success, accepted,
+                "{rhs}: {} {}",
+                result.raw_stdout, result.raw_stderr
+            );
+        }
+    }
+}
+
+#[test]
+fn direct_target_refusal_precedes_missing_pac_use() {
+    let control = fixture("quiet_single_pac.mod");
+    for (rhs, expected) in [
+        ("x*y", "is not of the right form"),
+        ("x+y+z", "contains a variable (z)"),
+        ("x", "does not appear in the model equation defining the 'target'"),
+        ("x+y", "the model does not contain the 'pac_expectation(p)' operator"),
+    ] {
+        let source = control
+            .replace("[name='V'] v=x+y;", &format!("[name='V'] v={rhs};"))
+            .replace("pac_expectation(p)+ez", "pac_expectation(q)+ez");
+        let diagnostics = analyze(&parse(&source));
+        let code = if rhs == "x+y" { "E449" } else { "E193" };
+        assert!(diagnostics.iter().any(|d| d.code == code && d.message.contains(expected)), "{rhs}: {diagnostics:?}");
+        assert!(diagnostics.iter().all(|d| d.code != if code == "E193" { "E449" } else { "E193" }), "{rhs}: {diagnostics:?}");
+        if let Some(binary) = pinned_binary() {
+            let check = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Check);
+            assert!(check.success, "{rhs}: {} {}", check.raw_stdout, check.raw_stderr);
+            let transform = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Transform);
+            assert!(!transform.success);
+            assert!(format!("{}{}", transform.raw_stdout, transform.raw_stderr).contains(expected), "{rhs}: {transform:?}");
+        }
+    }
+}
+
+#[test]
+fn unclassified_constant_assignments_withhold_target_verdict() {
+    let nonlinear = fixture("e193_pac_target_nonlinear_rhs.mod");
+    for rhs in ["exp(0)", "sin(0)", "1^0", "0/1", "y-y", "0*y"] {
+        let mut source = nonlinear.clone();
+        let last_end = source.rfind("end;").unwrap();
+        source.insert_str(last_end, &format!("  x={rhs};\n"));
+        let diagnostics = analyze(&parse(&source));
+        assert!(diagnostics.iter().all(|diag| diag.code != "E193"), "{rhs}: {diagnostics:?}");
+        if let Some(binary) = pinned_binary() {
+            let check = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Check);
+            assert!(check.success, "{rhs}: {} {}", check.raw_stdout, check.raw_stderr);
+            let transform = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Transform);
+            let output = format!("{}{}", transform.raw_stdout, transform.raw_stderr);
+            assert!(!output.contains("the model equation defining the 'target'"), "{rhs}: {output}");
+        }
+    }
 }
 
 #[test]

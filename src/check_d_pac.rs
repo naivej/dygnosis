@@ -6,8 +6,9 @@ use crate::diagnostic::{Diagnostic, Severity};
 use crate::expr::{BinOp, ExprId, ExprKind, UnOp};
 use crate::intern::Name;
 use crate::model::{
-    Model, NamedModelOperatorKind, PacTargetComponentRow, PacTargetInfoRow, SemiStructuralCommand,
-    SemiStructuralKind, SemiStructuralOption, SemiStructuralValue, WrittenExpression,
+    Model, NamedModelOperatorKind, PacTargetComponentRow, PacTargetInfoBlock, PacTargetInfoRow,
+    SemiStructuralCommand, SemiStructuralKind, SemiStructuralOption, SemiStructuralValue,
+    WrittenExpression,
 };
 use crate::span::Span;
 
@@ -977,6 +978,18 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
                 return out;
             }
         }
+        // Dynare matches the target equation before it checks PAC operator
+        // uses. A direct E193 therefore wins over a later missing-use E449.
+        if let Some(block) = model
+            .pac_target_info
+            .iter()
+            .find(|block| block.name == name)
+        {
+            if let Some(diag) = direct_target_equation_refusal(model, block) {
+                out.push(diag);
+                return out;
+            }
+        }
         let uses: Vec<_> = model
             .equations
             .iter()
@@ -1306,6 +1319,327 @@ fn written_target_product_without_lhs(model: &Model, target: &WrittenExpression)
                 (ExprKind::Ident { name: a, .. }, ExprKind::Ident { name: b, .. }) if a == left && b == right)
         })
     })
+}
+
+/// Three target-equation branches in `PacModelTable::transformPass` are decided
+/// by the written RHS when no rewrite can change the target or component terms.
+/// All other shapes stay in E193's rewrite-dependent remainder.
+fn direct_target_equation_refusal(model: &Model, block: &PacTargetInfoBlock) -> Option<Diagnostic> {
+    if !model.equation_surgery.is_empty() || model.endogenous.iter().any(|decl| decl.log_transform)
+    {
+        return None;
+    }
+    if model
+        .pac_target_info
+        .iter()
+        .filter(|other| other.name == block.name)
+        .count()
+        != 1
+    {
+        return None;
+    }
+    let target = block.rows.iter().find_map(|row| match row {
+        PacTargetInfoRow::Target(value) => Some(value),
+        _ => None,
+    })?;
+    let target_name = direct_endogenous(model, target.expr?)?;
+    let mut equations = model
+        .equations
+        .iter()
+        .filter(|equation| !equation.is_local)
+        .filter(|equation| {
+            equation
+                .lhs_expr
+                .and_then(|lhs| direct_endogenous(model, lhs))
+                == Some(target_name)
+        });
+    let equation = equations.next()?;
+    if equations.next().is_some() || equation.static_tag || equation.dynamic_tag {
+        return None;
+    }
+    // `simplifyEquations()` visits every equation before PAC matching. An
+    // unclassified direct assignment can become a constant or fail during
+    // that rewrite, even if the target RHS itself is plainly wrong. Require
+    // a positive nonconstant proof for every competing direct assignment.
+    for other in model.equations.iter().filter(|other| !other.is_local) {
+        if std::ptr::eq(other, equation) || other.lhs_expr.and_then(|lhs| direct_endogenous(model, lhs)).is_none() {
+            continue;
+        }
+        if !other.rhs_expr.is_some_and(|rhs| certain_nonconstant_assignment(model, rhs)) {
+            return None;
+        }
+    }
+    let mut components = Vec::new();
+    for row in &block.rows {
+        let PacTargetInfoRow::Component(component) = row else {
+            continue;
+        };
+        let name = direct_endogenous(model, component.component.expr?)?;
+        if components.contains(&name) {
+            return None;
+        }
+        for field in &component.rows {
+            if let PacTargetComponentRow::Growth(growth) = field {
+                if !direct_growth_is_safe(model, growth) {
+                    return None;
+                }
+            }
+        }
+        components.push(name);
+    }
+    if components.is_empty() {
+        return None;
+    }
+    let rhs = equation.rhs_expr?;
+    let model_name = model.name(block.name);
+    let sentence = if direct_nonlinear_rhs(model, rhs) {
+        format!(
+            "the model equation defining the 'target' of 'pac_target_info({model_name})' is not of the right form (should be a linear combination of endogenous variables)"
+        )
+    } else {
+        let terms = stable_direct_terms(direct_rhs_terms(model, rhs)?)?;
+        if let Some(extra) = terms.iter().find(|name| !components.contains(name)) {
+            format!(
+                    "the model equation defining the 'target' of 'pac_target_info({model_name})' contains a variable ({}) that is not declared as a 'component'",
+                    model.name(*extra)
+                )
+        } else if components.iter().any(|name| !terms.contains(name)) {
+            format!(
+                    "a 'component' of 'pac_target_info({model_name})' does not appear in the model equation defining the 'target'"
+                )
+        } else {
+            return None;
+        }
+    };
+    Some(error(model.exprs.get(rhs).span, "E193", sentence))
+}
+
+/// One direct exogenous additive term, unique in the whole RHS, survives
+/// constant-endogenous substitution. Calls, division, powers and unresolved
+/// nodes can fail earlier in simplification and cannot prove this branch.
+fn certain_nonconstant_assignment(model: &Model, id: ExprId) -> bool {
+    fn plain_tree(model: &Model, id: ExprId) -> bool {
+        match &model.exprs.get(id).kind {
+            ExprKind::Ident { .. } | ExprKind::Number => true,
+            ExprKind::Unary { arg, .. } => plain_tree(model, *arg),
+            ExprKind::Binary { op: BinOp::Add | BinOp::Sub | BinOp::Mul, lhs, rhs } =>
+                plain_tree(model, *lhs) && plain_tree(model, *rhs),
+            _ => false,
+        }
+    }
+    fn additive_occurrences(model: &Model, id: ExprId, name: Name) -> usize {
+        match &model.exprs.get(id).kind {
+            ExprKind::Ident { name: found, .. } => usize::from(*found == name),
+            ExprKind::Unary { arg, .. } => additive_occurrences(model, *arg, name),
+            ExprKind::Binary { op: BinOp::Add | BinOp::Sub, lhs, rhs } =>
+                additive_occurrences(model, *lhs, name) + additive_occurrences(model, *rhs, name),
+            _ => 0,
+        }
+    }
+    if !plain_tree(model, id) {
+        return false;
+    }
+    let refs: Vec<_> = model.exprs.walk_idents(id).collect();
+    refs.iter().any(|reference| {
+        is_exogenous(model, reference.name)
+            && refs.iter().filter(|other| other.name == reference.name).count() == 1
+            && additive_occurrences(model, id, reference.name) == 1
+    })
+}
+
+fn direct_endogenous(model: &Model, id: ExprId) -> Option<Name> {
+    match &model.exprs.get(id).kind {
+        ExprKind::Ident {
+            name, timing: 0, ..
+        } if is_endogenous(model, *name) => Some(*name),
+        _ => None,
+    }
+}
+
+fn direct_constant(model: &Model, id: ExprId) -> bool {
+    match &model.exprs.get(id).kind {
+        ExprKind::Number => true,
+        ExprKind::Ident {
+            name, timing: 0, ..
+        } => model.parameters.iter().any(|decl| decl.name == *name),
+        ExprKind::Unary { arg, .. } => direct_constant(model, *arg),
+        ExprKind::Binary {
+            op: BinOp::Add | BinOp::Sub | BinOp::Mul,
+            lhs,
+            rhs,
+        } => direct_constant(model, *lhs) && direct_constant(model, *rhs),
+        _ => false,
+    }
+}
+
+/// A whole written product survives additive simplification unless one of
+/// these variables was substituted from a constant equation (guarded above).
+/// A product nested inside a sum may cancel, so it is not proof of refusal.
+fn direct_nonlinear_rhs(model: &Model, id: ExprId) -> bool {
+    let ExprKind::Binary {
+        op: BinOp::Mul,
+        lhs,
+        rhs,
+    } = &model.exprs.get(id).kind
+    else {
+        return false;
+    };
+    direct_endogenous(model, *lhs).is_some() && direct_endogenous(model, *rhs).is_some()
+}
+
+/// Each term has either an exact written numeric coefficient or an unresolved
+/// parameter coefficient. A repeated unresolved coefficient is left quiet.
+fn direct_rhs_terms(model: &Model, id: ExprId) -> Option<Vec<(Name, Option<f64>)>> {
+    direct_rhs_terms_signed(model, id, 1.0)
+}
+
+fn direct_rhs_terms_signed(
+    model: &Model,
+    id: ExprId,
+    sign: f64,
+) -> Option<Vec<(Name, Option<f64>)>> {
+    if direct_constant(model, id) {
+        return Some(Vec::new());
+    }
+    if let Some(name) = direct_endogenous(model, id) {
+        return Some(vec![(name, Some(sign))]);
+    }
+    match &model.exprs.get(id).kind {
+        ExprKind::Unary { op, arg } => {
+            direct_rhs_terms_signed(model, *arg, if *op == UnOp::Neg { -sign } else { sign })
+        }
+        ExprKind::Binary { op, lhs, rhs } if matches!(op, BinOp::Add | BinOp::Sub) => {
+            let mut left = direct_rhs_terms_signed(model, *lhs, sign)?;
+            let right_sign = if *op == BinOp::Sub { -sign } else { sign };
+            left.extend(direct_rhs_terms_signed(model, *rhs, right_sign)?);
+            Some(left)
+        }
+        ExprKind::Binary {
+            op: BinOp::Mul,
+            lhs,
+            rhs,
+        } => match (
+            direct_endogenous(model, *lhs),
+            direct_endogenous(model, *rhs),
+        ) {
+            (Some(name), None) if direct_constant(model, *rhs) => Some(vec![(
+                name,
+                direct_numeric_constant(model, *rhs).map(|coefficient| sign * coefficient),
+            )]),
+            (None, Some(name)) if direct_constant(model, *lhs) => Some(vec![(
+                name,
+                direct_numeric_constant(model, *lhs).map(|coefficient| sign * coefficient),
+            )]),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn direct_numeric_constant(model: &Model, id: ExprId) -> Option<f64> {
+    match &model.exprs.get(id).kind {
+        ExprKind::Number => {
+            let span = model.exprs.get(id).span;
+            model
+                .source
+                .get(span.start as usize..span.end as usize)?
+                .parse()
+                .ok()
+        }
+        ExprKind::Unary { op, arg } => {
+            let value = direct_numeric_constant(model, *arg)?;
+            Some(if *op == UnOp::Neg { -value } else { value })
+        }
+        ExprKind::Binary { op, lhs, rhs } => {
+            let left = direct_numeric_constant(model, *lhs)?;
+            let right = direct_numeric_constant(model, *rhs)?;
+            match op {
+                BinOp::Add => Some(left + right),
+                BinOp::Sub => Some(left - right),
+                BinOp::Mul => Some(left * right),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Collapse only exact written numeric cancellation. A repeated nonzero term
+/// may be simplified by Dynare in ways this source checker does not model.
+fn stable_direct_terms(terms: Vec<(Name, Option<f64>)>) -> Option<Vec<Name>> {
+    let mut names = Vec::new();
+    for (name, _) in &terms {
+        if !names.contains(name) {
+            names.push(*name);
+        }
+    }
+    let mut present = Vec::new();
+    for name in names {
+        let coefficients: Vec<_> = terms
+            .iter()
+            .filter(|(term, _)| *term == name)
+            .map(|(_, weight)| *weight)
+            .collect();
+        if coefficients.len() == 1 {
+            if coefficients[0] != Some(0.0) {
+                present.push(name);
+            }
+            continue;
+        }
+        let sum: f64 = coefficients
+            .into_iter()
+            .collect::<Option<Vec<_>>>()?
+            .into_iter()
+            .sum();
+        if sum == 0.0 {
+            continue;
+        }
+        return None;
+    }
+    Some(present)
+}
+
+/// The accepted PAC audit model uses `growth diff(x(-1))`, already present in
+/// its ordinary model equation. Dynare reuses that diff auxiliary. A growth
+/// expression needing a new helper could refuse before the target RHS check.
+fn direct_growth_is_safe(model: &Model, growth: &WrittenExpression) -> bool {
+    let Some(id) = growth.expr else { return false };
+    if direct_rhs_terms(model, id).is_some() {
+        return true;
+    }
+    let ExprKind::Call { callee, args } = &model.exprs.get(id).kind else {
+        return false;
+    };
+    if !model.name(*callee).eq_ignore_ascii_case("diff") || args.len() != 1 {
+        return false;
+    }
+    let ExprKind::Ident {
+        name, timing: -1, ..
+    } = &model.exprs.get(args[0]).kind
+    else {
+        return false;
+    };
+    model
+        .equations
+        .iter()
+        .filter(|equation| !equation.is_local)
+        .any(|equation| {
+            model.exprs.iter().any(|(_, expression)| {
+                expression.span.start >= equation.span.start
+                    && expression.span.end <= equation.span.end
+                    && match &expression.kind {
+                        ExprKind::Call {
+                            callee: found,
+                            args: found_args,
+                        } if found == callee && found_args.len() == 1 => {
+                            matches!(&model.exprs.get(found_args[0]).kind,
+                                ExprKind::Ident { name: found_name, timing: -1, .. }
+                                    if found_name == name)
+                        }
+                        _ => false,
+                    }
+            })
+        })
 }
 
 fn is_endogenous(model: &Model, name: Name) -> bool {

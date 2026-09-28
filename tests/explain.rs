@@ -43,7 +43,7 @@ const THIN_CODES: &[&str] = &[
     "E001", "E020", "E021", "E023", "E024", "E025", "E026", "E027", "E028", "E030", "E058", "E059",
     "E061", "E062", "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E104",
     "E111", "E113", "E130", "E170", "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E178",
-    "E179", "E180", "E181", "E182", "E183", "E184", "E185", "E186", "E188", "E189", "E190", "E192",
+    "E179", "E180", "E181", "E182", "E183", "E184", "E185", "E186", "E188", "E189", "E190", "E192", "E193",
     "E200", "E201", "E202", "E203", "E204",
     "E205", "E206", "E207", "E208", "E209", "E210", "E211", "E212", "E213", "E214", "E215", "E216",
     "E217", "E218", "E219", "E220", "E221", "E222", "E223", "E224", "E225", "E226", "E227", "E228",
@@ -78,7 +78,7 @@ const SHARED: &[&str] = &[
     "E001", "E020", "E021", "E023", "E024", "E025", "E026", "E027", "E028", "E030", "E058", "E059",
     "E061", "E062", "E063", "E064", "E065", "E090", "E093", "E095", "E100", "E101", "E103", "E104",
     "E111", "E113", "E130", "E170", "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E178",
-    "E179", "E180", "E181", "E182", "E183", "E184", "E185", "E186", "E188", "E189", "E190", "E192",
+    "E179", "E180", "E181", "E182", "E183", "E184", "E185", "E186", "E188", "E189", "E190", "E192", "E193",
     "E200", "E201", "E202", "E203", "E204", "E205", "E206", "E207", "E208", "E209", "E210", "E211",
     "E212", "E213", "E214", "E215", "E216", "E217", "E218", "E219", "E220", "E221", "E222", "E223",
     "E224", "E225", "E226", "E227", "E228", "E229", "E230", "E231", "E232", "E233", "E234", "E235",
@@ -103,8 +103,7 @@ const SHARED: &[&str] = &[
     "E452", "E453", "E454", "E455", "E456", "E457", "E458", "E459", "E460", "E461", "E462", "E463",
     "E464", "E465", "E466", "E467", "E468", "E469", "E470", "E471", "E472", "E473", "E474", "E475",
     "E476", "E477", "E478", "E479", "W022", "W031", "W042", "W121", "W131", "W150", "W170", "W200",
-    "W201", "W202", "W203", "W204", "W205", "W206",
-];
+    "W201", "W202", "W203", "W204", "W205", "W206",];
 
 const ADDED: &[&str] = &[
     "E999", "I050", "I208", "I209", "I210", "I211", "W010", "W011", "W012", "W013", "W020", "W051",
@@ -112,7 +111,7 @@ const ADDED: &[&str] = &[
     "W102", "W110", "W112", "W120", "W122", "W140", "W160", "W207", "W208", "W211",
 ];
 
-const SKIP_KEYS: &[&str] = &["E187", "E191", "E193", "E194", "W186", "W187"];
+const SKIP_KEYS: &[&str] = &["E187", "E191", "E194", "W186", "W187"];
 
 const OUT: &[&str] = &[
     "E040", "W040", "W041", "I041", "W071", "I070", "I071", "W080", "W081", "DYNR",
@@ -124,7 +123,7 @@ const VACATED: &[&str] = &[
 ];
 
 const WARRANT_CODES: &[&str] = &[
-    "E001", "E020", "E023", "E058", "E062", "E090", "E093", "E101", "E304", "E337", "W170",
+    "E001", "E020", "E023", "E058", "E062", "E090", "E093", "E101", "E193", "E304", "E337", "W170",
 ];
 
 const FORBIDDEN: &[&str] = &[
@@ -179,10 +178,10 @@ fn read_mod(archive_dir: &str) -> String {
 
 #[test]
 fn known_codes_matches_the_rust_keys() {
-    assert_eq!(SHARED.len(), 342);
+    assert_eq!(SHARED.len(), 343);
     assert_eq!(ADDED.len(), 34);
-    assert_eq!(SKIP_KEYS.len(), 6);
-    assert_eq!(THIN_CODES.len(), 376);
+    assert_eq!(SKIP_KEYS.len(), 5);
+    assert_eq!(THIN_CODES.len(), 377);
     assert_eq!(RUST_CODES.len(), 382);
     assert_eq!(known_codes(), RUST_CODES);
     assert_eq!(known_codes().len(), 382);
@@ -246,9 +245,10 @@ fn explain_kinds_are_shared_skipped_added() {
     assert_eq!(explain("W013").unwrap().kind, ExplainKind::Added);
     assert_eq!(explain("W186").unwrap().kind, ExplainKind::Skipped);
     assert_eq!(explain("e192").unwrap().kind, ExplainKind::Shared);
-    for code in ["e193", "e194"] {
+    for code in ["e194"] {
         assert_eq!(explain(code).unwrap().kind, ExplainKind::Skipped);
     }
+    assert_eq!(explain("e193").unwrap().kind, ExplainKind::Shared);
 }
 
 #[test]

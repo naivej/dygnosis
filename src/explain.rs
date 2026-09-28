@@ -2002,9 +2002,9 @@ Move the call out of the ``steady_state(…)`` operator.",
         kind: ExplainKind::Shared,
     }),
     ("E193", ExplainEntry {
-        title: "TCM or PAC rewrite",
-        body: "Dynare refuses some trend-component and PAC forms only after unary, diff, auxiliary, or equation rewrites. Catching step: transform (rewrite). Owner: unversioned skip-rewrite E. Direct written growth, target, PAC-use, and fixed generated-name clashes have E448–E450 and E453–E458. This code is never emitted.",
-        kind: ExplainKind::Skipped,
+        title: "PAC target equation has the wrong component form",
+        body: "A direct written equation defining a `pac_target_info(NAME)` target must be a linear combination of endogenous variables. Each variable on its right side must be a declared `component`, and every declared component must appear. Dynare refuses: `the model equation defining the 'target' of 'pac_target_info(NAME)' is not of the right form (should be a linear combination of endogenous variables)`; `... contains a variable (X) that is not declared as a 'component'`; `a 'component' of 'pac_target_info(NAME)' does not appear in the model equation defining the 'target'`. These are transform-stage messages.\n\n**Warrant**\n\nThe editor highlights the written right side; Dynare's transform message has no source range.\n\n**Boundary**\n\nThis Error covers direct target and component names with a source-inspectable equation. Unary, diff, generated-helper, and transformed-equation cases remain silent until their rewritten form can be mapped to the file. TCM rewrite cases also remain silent.\n\n**Fix**\n\nWrite the target right side as an additive combination of its declared components, including each one.",
+        kind: ExplainKind::Shared,
     }),
     ("E194", ExplainEntry {
         title: "Remaining pac_expectation after substitution",

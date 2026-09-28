@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.1
+
+- `E193` now reports three PAC target-equation refusals visible in the written file: a nonlinear right side, a variable absent from `pac_target_info` components, or a listed component absent from the equation. Unary, diff, and other rewrite-dependent forms remain quiet.
+
 ## v0.10.0
 
 - A non-ASCII character in active Dynare syntax is `E001` with Dynare's `character unrecognized by lexer`. That includes a declaration (`var café;`), an equation (`y = café;`), and a shock name. Unicode comments, `long_name`, TeX names, equation-name strings, verbatim text, native MATLAB text, and a discarded `@#if` branch stay accepted, as does the complementarity operator.
