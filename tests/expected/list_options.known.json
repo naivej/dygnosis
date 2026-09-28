@@ -4054,20 +4054,20 @@
         "description": "The number of observations following first_obs <first_obs = [INTEGER1:INTEGER2]> to be used."
       },
       {
+        "name": "nograph",
+        "description": "Do not display shock decomposition graphs."
+      },
+      {
         "name": "parameter_set",
         "description": "Specify the parameter set to use for running the smoother."
       },
       {
+        "name": "presample",
+        "description": "Number of observations after first_obs to skip before analysis."
+      },
+      {
         "name": "save_realtime",
         "description": "Choose for which vintages to save the full realtime shock decomposition."
-      },
-      {
-        "name": "shock_decomposition_nograph",
-        "description": ""
-      },
-      {
-        "name": "shock_decomposition_presample",
-        "description": ""
       },
       {
         "name": "use_shock_groups",

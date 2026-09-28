@@ -70,6 +70,21 @@ Diagnosis also shows `I211` Information at the first unsupported macro expressio
 
 An undefined macro variable or function is a separate macro-processing Error (`E063`). Dygnosis does not run the official preprocessor to fill gaps in its own expansion.
 
+### Dynare 7.2 option spelling
+
+The Dynare 7.2 manual has eight option headings that its own preprocessor rejects. Dygnosis follows the preprocessor. The accepted spelling in the right column is a syntax example, not necessarily a replacement with the same effect.
+
+| Command | Rejected manual heading | Accepted syntax example |
+|---------|-------------------------|-------------------------|
+| `method_of_moments` | `use_pct` | `mom_method=GMM, datafile='data.csv', add_tiny_number_to_cholesky=0.1` |
+| `ms_compute_mdd` | `mdd_proposal_draws` | `proposal_draws=10` |
+| `ms_compute_mdd` | `mdd_use_mean_center` | `use_mean_center` |
+| `pac_model` | `auxiliary_model` | `auxiliary_model_name=aux` |
+| `var_expectation_model` | `auxiliary_model` | `auxiliary_model_name=aux` |
+| `plot_shock_decomposition` | `with_epilogue` | `nodisplay` |
+| `realtime_shock_decomposition` | `kalman_algo` | `nograph` |
+| `realtime_shock_decomposition` | `kalman_tol` | `nograph` |
+
 ## Credits
 
 1. dygnosis v0.1.0 is a fork and rewrite of [LLMacro-Dynare-LSP](https://github.com/pdwhoward/LLMacro-Dynare-LSP) by Anthony Diercks, Philip Howard, and Mehrdad Samadi. Diagnostic codes, check and explain surfaces, and the thin analysis design come from that work. The original repository accompanies the working paper *LLMacro: A Language Server for Dynare — Structured Context for AI-Assisted Macroeconomic Modeling*.

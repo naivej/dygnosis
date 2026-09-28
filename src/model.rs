@@ -316,6 +316,17 @@ pub enum EstimatedParamKind {
     Skew,
 }
 
+/// Symbol role seen when an estimated-parameter removal row is parsed.
+/// Source spans can repeat under macro expansion, so this is captured in parse order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EstimatedNameRole {
+    Unknown,
+    Endogenous,
+    Exogenous,
+    Parameter,
+    Other,
+}
+
 /// File-level optimal-policy command (`ramsey_model` / `ramsey_policy` /
 /// `discretionary_policy` / `osr`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -490,8 +501,12 @@ impl PolicyCommand {
 #[derive(Clone, Copy, Debug)]
 pub struct EstimatedParam {
     pub name: Name,
+    pub name_span: Span,
+    pub name_role_at_remove: EstimatedNameRole,
     pub kind: EstimatedParamKind,
     pub corr_with: Option<Name>,
+    pub corr_with_span: Option<Span>,
+    pub corr_role_at_remove: EstimatedNameRole,
     pub init: Option<f64>,
     pub lower: Option<f64>,
     pub upper: Option<f64>,
@@ -1030,6 +1045,10 @@ pub struct Model {
     pub estimated_params_bounds: Vec<EstimatedParam>,
     pub estimated_params_bounds_block_starts: Vec<usize>,
     pub estimated_params_bounds_span: Option<Span>,
+    /// Parsed `estimated_params_remove` rows, checked at the same parse surface.
+    pub estimated_params_remove: Vec<EstimatedParam>,
+    pub estimated_params_remove_block_starts: Vec<usize>,
+    pub estimated_params_remove_span: Option<Span>,
     pub osr_params_bounds: Vec<OsrBound>,
     /// Opener span of the first `osr_params_bounds` block.
     pub osr_params_bounds_span: Option<Span>,

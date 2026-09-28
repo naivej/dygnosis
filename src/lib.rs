@@ -57,6 +57,7 @@ pub mod model;
 pub mod model_diff;
 pub mod model_info;
 pub mod parser;
+mod pinned_options;
 pub mod preprocessor;
 pub mod refs;
 pub mod server;

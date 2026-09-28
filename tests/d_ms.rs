@@ -662,11 +662,14 @@ fn the_e227_gate_reads_file_order() {
         format!("{preamble}estimation(datafile='d.csv'); estimation;"),
         format!("{preamble}data(nobs=10); estimation;"),
         format!("{preamble}database foo; estimation;"),
-        format!("{preamble}estimation(dataseries=foo);"),
     ] {
         let diags = analyze(&parse(&src));
         assert_eq!(find(&diags, "E227").message, E227_MSG_TEXT, "{src}");
     }
+    // `dataseries` is not an estimation option at the 7.2 pin; parsing stops
+    // before the data-presence gate.
+    let invalid = analyze(&parse(&format!("{preamble}estimation(dataseries=foo);")));
+    assert!(invalid.iter().any(|d| d.code == "E001"));
     // The `data(nobs=10);` shape also earns its own sentence, and 7.1 stops
     // before it ever reaches the estimation.
     let both = analyze(&parse(&format!("{preamble}data(nobs=10); estimation;")));

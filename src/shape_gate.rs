@@ -429,14 +429,17 @@ pub fn handed_option_refusal(
     }
     let known = crate::catalog::command_options(command);
     for opt in options {
-        if !known
-            .iter()
-            .any(|(name, _)| name.eq_ignore_ascii_case(&opt.name))
-        {
-            let message = if opt.name.eq_ignore_ascii_case("with_epilogue") {
-                "syntax error, unexpected WITH_EPILOGUE"
-            } else {
-                "syntax error, unexpected IDENTIFIER"
+        let allowed = crate::pinned_options::allows(command, &opt.name).unwrap_or_else(|| {
+            known
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case(&opt.name))
+        });
+        if !allowed {
+            let message = match opt.name.to_ascii_lowercase().as_str() {
+                "with_epilogue" => "syntax error, unexpected WITH_EPILOGUE",
+                "kalman_algo" => "syntax error, unexpected KALMAN_ALGO",
+                "kalman_tol" => "syntax error, unexpected KALMAN_TOL",
+                _ => "syntax error, unexpected IDENTIFIER",
             };
             return Some(ShapeRefuse::official(opt.span, command, message));
         }

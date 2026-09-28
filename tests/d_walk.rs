@@ -347,7 +347,7 @@ fn e227_datafile_or_data_opener_quiet_database_does_not_silence() {
     let db = analyze(&parse(&format!("{preamble}database foo; estimation;")));
     assert_eq!(find(&db, "E227").message, E227_MSG);
     let series = analyze(&parse(&format!("{preamble}estimation(dataseries=foo);")));
-    assert_eq!(find(&series, "E227").message, E227_MSG);
+    assert!(series.iter().any(|d| d.code == "E001"));
 }
 
 #[test]

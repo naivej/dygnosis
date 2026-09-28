@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::expr::ExprId;
 use crate::intern::Name;
-use crate::model::{EstimatedParam, EstimatedParamKind, Model};
+use crate::model::{EstimatedNameRole, EstimatedParam, EstimatedParamKind, Model};
 use crate::span::Span;
 
 pub fn check_estimated_params(model: &Model) -> Vec<Diagnostic> {
@@ -31,6 +31,66 @@ pub fn check_estimated_params(model: &Model) -> Vec<Diagnostic> {
         &model.estimated_params_bounds_block_starts,
         false,
     ));
+    out.extend(check_remove_roles(model));
+    out
+}
+
+/// `add_estimated_params_element` checks every removal row before the statement
+/// is built. Its role rules are shared with the other estimated-parameter bodies.
+fn check_remove_roles(model: &Model) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    for entry in &model.estimated_params_remove {
+        let name = model.name(entry.name);
+        if name == "dsge_prior_weight" {
+            continue;
+        }
+        let role = entry.name_role_at_remove;
+        let is_endo = role == EstimatedNameRole::Endogenous;
+        let is_exo = role == EstimatedNameRole::Exogenous;
+        let is_parameter = role == EstimatedNameRole::Parameter;
+        if role == EstimatedNameRole::Unknown {
+            out.push(err(
+                entry.name_span,
+                "E058",
+                format!("Unknown symbol: {name}."),
+            ));
+            continue;
+        }
+        match entry.kind {
+            EstimatedParamKind::Param if !is_parameter => out.push(err(
+                entry.name_span,
+                "E059",
+                format!("{name} is not a parameter"),
+            )),
+            EstimatedParamKind::Stderr if !is_endo && !is_exo => out.push(err(
+                entry.name_span,
+                "E317",
+                format!("{name} must be an endogenous or an exogenous variable"),
+            )),
+            EstimatedParamKind::Corr => {
+                if let Some(other) = entry.corr_with {
+                    let other_name = model.name(other);
+                    let other_role = entry.corr_role_at_remove;
+                    let other_endo = other_role == EstimatedNameRole::Endogenous;
+                    let other_exo = other_role == EstimatedNameRole::Exogenous;
+                    if other_role == EstimatedNameRole::Unknown {
+                        out.push(err(
+                            entry.corr_with_span.unwrap_or(entry.name_span),
+                            "E058",
+                            format!("Unknown symbol: {other_name}."),
+                        ));
+                    } else if !(is_endo && other_endo || is_exo && other_exo) {
+                        out.push(err(
+                            entry.name_span,
+                            "E317",
+                            format!("{name} and {other_name} must either be both endogenous variables or both exogenous"),
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
     out
 }
 

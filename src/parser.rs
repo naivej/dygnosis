@@ -18,13 +18,13 @@ use crate::model::{
 };
 use crate::model::{
     ChangeTypeKind, ChangeTypeStmt, CommandSymbol, Complementarity, ComplementarityTriple,
-    DeprecatedOption, DerivSpec, EquationSurgery, EstimatedParam, EstimatedParamKind,
-    EstimationDsgeVarStmt, ExternalFunctionStmt, GenerateIrfsElement, HeterogeneityCommand,
-    HeterogeneityCommandKind, HeterogeneityDimension, HeterogeneityOption, HeterogeneousModelBlock,
-    HistvalEntry, HomotopyRow, IncludeDirective, IncludePathDirective, MacroDirective, MacroInterp,
-    NonstationaryVar, ObservedVar, OccbinConstraint, OccbinExpr, OsrBound, PolicyCommand,
-    PolicyCommandStatement, RamseyConstraint, RemovedEquation, ShockKind, ShockStmt,
-    ShocksSemiFamily, SurgeryExit, SurgeryKind, TrendVar, VarRemovedName,
+    DeprecatedOption, DerivSpec, EquationSurgery, EstimatedNameRole, EstimatedParam,
+    EstimatedParamKind, EstimationDsgeVarStmt, ExternalFunctionStmt, GenerateIrfsElement,
+    HeterogeneityCommand, HeterogeneityCommandKind, HeterogeneityDimension, HeterogeneityOption,
+    HeterogeneousModelBlock, HistvalEntry, HomotopyRow, IncludeDirective, IncludePathDirective,
+    MacroDirective, MacroInterp, NonstationaryVar, ObservedVar, OccbinConstraint, OccbinExpr,
+    OsrBound, PolicyCommand, PolicyCommandStatement, RamseyConstraint, RemovedEquation, ShockKind,
+    ShockStmt, ShocksSemiFamily, SurgeryExit, SurgeryKind, TrendVar, VarRemovedName,
 };
 use crate::span::Span;
 
@@ -179,6 +179,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         i: 0,
         intern: Interner::default(),
         model: Model::default(),
+        symbol_roles: HashMap::new(),
         eq_token_ranges: Vec::new(),
         hetero_eq_token_ranges: Vec::new(),
         verbatim_ranges: Vec::new(),
@@ -215,6 +216,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
 }
 
 struct TopOption {
+    token_index: usize,
     ident: String,
     span: Span,
     eq: bool,
@@ -412,18 +414,37 @@ fn top_options(tokens: &[Token], src: &str, from: usize, to: usize) -> Vec<TopOp
     let mut out = Vec::new();
     let mut i = from;
     let mut depth: i32 = 0;
+    let mut bracket_depth: i32 = 0;
+    let mut want_option = false;
     let end = to.min(tokens.len());
     while i < end {
         match tokens[i].kind {
             TokenKind::LParen => {
                 depth += 1;
+                if depth == 1 {
+                    want_option = true;
+                }
                 i += 1;
             }
             TokenKind::RParen => {
                 depth = depth.saturating_sub(1);
                 i += 1;
             }
-            TokenKind::Ident if depth == 1 => {
+            TokenKind::LBrack => {
+                bracket_depth += 1;
+                i += 1;
+            }
+            TokenKind::RBrack => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                i += 1;
+            }
+            TokenKind::Comma if depth == 1 && bracket_depth == 0 => {
+                want_option = true;
+                i += 1;
+            }
+            TokenKind::Ident if depth == 1 && bracket_depth == 0 && want_option => {
+                want_option = false;
+                let token_index = i;
                 let ident = tokens[i].text(src).to_string();
                 let span = tokens[i].span;
                 i += 1;
@@ -457,12 +478,27 @@ fn top_options(tokens: &[Token], src: &str, from: usize, to: usize) -> Vec<TopOp
                     }
                 }
                 out.push(TopOption {
+                    token_index,
                     ident,
                     span,
                     eq,
                     value_lex,
                     value_span,
                 });
+                // Some opener productions concatenate bare flags without commas
+                // (`mshocks(overwrite overwrite)` is a duplicate-option refuse).
+                if !eq {
+                    want_option = true;
+                } else if i + 1 < end
+                    && tokens[i].kind == TokenKind::Ident
+                    && tokens[i + 1].kind == TokenKind::Eq
+                    && tokens[i].span.start > value_span.end
+                {
+                    // Shock/path opener options can also be separated by space.
+                    // Require a fresh `name=` after a gap so a DATE suffix like
+                    // `2000Q1` is not mistaken for an option name.
+                    want_option = true;
+                }
             }
             _ => i += 1,
         }
@@ -662,6 +698,7 @@ enum EstimatedParamsTarget {
     Params,
     Init,
     Bounds,
+    Remove,
 }
 
 enum ExprStop {
@@ -902,6 +939,8 @@ struct Parser<'a> {
     i: usize,
     intern: Interner,
     model: Model,
+    /// Current symbol roles in effective token order (macro copies reuse source spans).
+    symbol_roles: HashMap<Name, EstimatedNameRole>,
     eq_token_ranges: Vec<Range<usize>>,
     hetero_eq_token_ranges: Vec<Vec<Range<usize>>>,
     /// Token ranges of `verbatim; ? end;` bodies, whose text 7.1 passes through raw.
@@ -933,18 +972,23 @@ impl Parser<'_> {
             }
             if self.at_ident_ci("var") {
                 let decls = self.parse_declaration("var");
+                self.record_decl_roles(&decls, EstimatedNameRole::Endogenous);
                 self.model.endogenous.extend(decls);
             } else if self.at_ident_ci("varexo_det") {
                 let decls = self.parse_declaration("varexo_det");
+                self.record_decl_roles(&decls, EstimatedNameRole::Other);
                 self.model.deterministic_exogenous.extend(decls);
             } else if self.at_ident_ci("varexo") {
                 let decls = self.parse_declaration("varexo");
+                self.record_decl_roles(&decls, EstimatedNameRole::Exogenous);
                 self.model.exogenous.extend(decls);
             } else if self.at_ident_ci("parameters") {
                 let decls = self.parse_declaration("parameters");
+                self.record_decl_roles(&decls, EstimatedNameRole::Parameter);
                 self.model.parameters.extend(decls);
             } else if self.at_ident_ci("model_local_variable") {
                 let decls = self.parse_declaration("model_local_variable");
+                self.record_decl_roles(&decls, EstimatedNameRole::Other);
                 self.model.model_local_variables.extend(decls);
             } else if self.at_ident_ci("predetermined_variables") {
                 let decls = self.parse_declaration("predetermined_variables");
@@ -989,6 +1033,8 @@ impl Parser<'_> {
                 self.parse_estimated_params_init_block();
             } else if self.at_ident_ci("estimated_params_bounds") {
                 self.parse_estimated_params_bounds_block();
+            } else if self.at_ident_ci("estimated_params_remove") {
+                self.parse_estimated_params_remove_block();
             } else if self.at_ident_ci("estimated_params") {
                 self.parse_estimated_params_block();
             } else if self.at_ident_ci("observation_trends") {
@@ -1091,6 +1137,31 @@ impl Parser<'_> {
                 self.skip_until_semi();
             }
         }
+    }
+
+    fn record_decl_roles(&mut self, decls: &[Decl], role: EstimatedNameRole) {
+        for decl in decls {
+            self.symbol_roles.insert(
+                decl.name,
+                if decl.heterogeneity.is_some() {
+                    EstimatedNameRole::Other
+                } else {
+                    role
+                },
+            );
+        }
+    }
+
+    fn removal_role(&self, name: Name) -> EstimatedNameRole {
+        self.symbol_roles.get(&name).copied().unwrap_or_else(|| {
+            if self.model.trend_vars.iter().any(|row| row.name == name)
+                || self.model.external_function_names.contains(&name)
+            {
+                EstimatedNameRole::Other
+            } else {
+                EstimatedNameRole::Unknown
+            }
+        })
     }
 
     fn parse_declaration(&mut self, keyword: &str) -> Vec<Decl> {
@@ -1371,6 +1442,9 @@ impl Parser<'_> {
             self.record_deprecated_options_in_range(from, self.i);
             self.record_model_option_flags(from, self.i);
             self.record_option_twice(from, self.i);
+            self.record_pinned_option_membership("model", from, self.i);
+            self.record_option_commas("model", from, self.i);
+            self.record_simple_option_values("model", from, self.i);
             linear = self.src[opt.start as usize..opt.end as usize]
                 .to_ascii_lowercase()
                 .contains("linear");
@@ -1794,6 +1868,11 @@ impl Parser<'_> {
             self.current_start()
         };
         let statement = Span { start, end };
+        for (name, _) in &names {
+            if self.symbol_roles.contains_key(name) {
+                self.symbol_roles.insert(*name, EstimatedNameRole::Other);
+            }
+        }
         self.model
             .var_removed
             .extend(names.into_iter().map(|(name, name_span)| VarRemovedName {
@@ -2551,6 +2630,7 @@ impl Parser<'_> {
             return None;
         }
         let ident = self.lexeme(&self.tokens[self.i]).to_string();
+        let token_index = self.i;
         let span = self.tokens[self.i].span;
         let mut eq = false;
         if self.peek_kind(1) == Some(TokenKind::Eq) {
@@ -2573,6 +2653,7 @@ impl Parser<'_> {
             }
         }
         Some(TopOption {
+            token_index,
             ident,
             span,
             eq,
@@ -2832,6 +2913,7 @@ impl Parser<'_> {
             self.record_deprecated_options_in_range(from, close_i);
             self.record_skip_command_options("method_of_moments", from, close_i);
             self.record_option_twice(from, close_i);
+            self.record_pinned_option_membership("method_of_moments", from, close_i);
             options = self.read_family_options(from, close_i);
         }
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
@@ -5720,6 +5802,17 @@ impl Parser<'_> {
             self.current_start()
         };
         if let Some(new_type) = new_type {
+            let role = match new_type {
+                ChangeTypeKind::Parameters => EstimatedNameRole::Parameter,
+                ChangeTypeKind::Var => EstimatedNameRole::Endogenous,
+                ChangeTypeKind::Varexo => EstimatedNameRole::Exogenous,
+                ChangeTypeKind::VarexoDet => EstimatedNameRole::Other,
+            };
+            for (name, _) in &names {
+                if self.symbol_roles.contains_key(name) {
+                    self.symbol_roles.insert(*name, role);
+                }
+            }
             self.model.change_type_statements.push(ChangeTypeStmt {
                 new_type,
                 names,
@@ -6175,6 +6268,78 @@ impl Parser<'_> {
         );
     }
 
+    fn parse_estimated_params_remove_block(&mut self) {
+        let start = self.bump().span.start;
+        let mut bad_opener = false;
+        if !self.at(TokenKind::Semi) {
+            bad_opener = true;
+            let token = if self.at(TokenKind::LParen) {
+                "'('"
+            } else {
+                "IDENTIFIER"
+            };
+            self.model.shape_refuses.push(ShapeRefuse::official(
+                self.tokens[self.i].span,
+                "estimated_params_remove",
+                format!("syntax error, unexpected {token}, expecting ';'"),
+            ));
+            while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
+                self.bump();
+            }
+        }
+        let end = if self.at(TokenKind::Semi) {
+            self.bump().span.end
+        } else {
+            self.current_start()
+        };
+        let opener_span = Span { start, end };
+        let body_i = self.i;
+        // A reserved opener spelling such as `model` can be a legal parameter
+        // name in this body. Only `end;` closes the removal list.
+        let body_end_i = self.consume_estimated_remove_until_end();
+        self.record_missing_end_if_unclosed(
+            "estimated_params_remove",
+            opener_span,
+            body_i,
+            body_end_i,
+        );
+        if body_i == body_end_i && !bad_opener {
+            self.model.shape_refuses.push(ShapeRefuse::new(
+                self.tokens[body_end_i].span,
+                "estimated_params_remove",
+                "at least one removal row",
+            ));
+        }
+        self.model.estimated_params_remove_span = Some(Span {
+            start: opener_span.start,
+            end: self.current_start(),
+        });
+        self.model
+            .estimated_params_remove_block_starts
+            .push(self.model.estimated_params_remove.len());
+        self.collect_estimated_params(
+            body_i,
+            body_end_i,
+            opener_span.end,
+            EstimatedParamsTarget::Remove,
+        );
+    }
+
+    fn consume_estimated_remove_until_end(&mut self) -> usize {
+        loop {
+            if self.at(TokenKind::Eof) {
+                return self.i;
+            }
+            if self.at_ident("end") && self.peek_kind(1) == Some(TokenKind::Semi) {
+                let at = self.i;
+                self.bump();
+                self.bump();
+                return at;
+            }
+            self.bump();
+        }
+    }
+
     fn parse_observation_trends_block(&mut self) {
         let opener_span = self.bump_plain_opener();
         let start = opener_span.start;
@@ -6300,6 +6465,8 @@ impl Parser<'_> {
         self.eat(TokenKind::RParen);
         self.record_policy_option_flags(command, from, self.i);
         self.record_option_twice(from, self.i);
+        self.record_pinned_option_membership(command.as_str(), from, self.i);
+        self.record_option_commas(command.as_str(), from, self.i);
         (saw_instruments, planner_discount)
     }
 
@@ -6475,6 +6642,13 @@ impl Parser<'_> {
         let mut entry_start = body_start;
         while i < end_i {
             if self.tokens[i].kind == TokenKind::Semi {
+                if matches!(target, EstimatedParamsTarget::Remove) {
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        self.tokens[i].span,
+                        "estimated_params_remove",
+                        "syntax error, unexpected ';'",
+                    ));
+                }
                 entry_start = self.tokens[i].span.end;
                 i += 1;
                 continue;
@@ -6485,18 +6659,45 @@ impl Parser<'_> {
             }
             let has_semi = i < end_i && self.tokens[i].kind == TokenKind::Semi;
             if !has_semi {
+                if matches!(target, EstimatedParamsTarget::Remove) {
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        self.tokens[end_i].span,
+                        "estimated_params_remove",
+                        "syntax error, unexpected END, expecting ';'",
+                    ));
+                }
                 break;
             }
             let entry_end = self.tokens[i].span.end;
+            if matches!(target, EstimatedParamsTarget::Remove)
+                && !self.estimated_remove_row_spelled(stmt_start, i)
+            {
+                self.model.shape_refuses.push(ShapeRefuse::new(
+                    self.tokens[stmt_start].span,
+                    "estimated_params_remove",
+                    "a parameter, stderr, skew, or corr row",
+                ));
+                entry_start = entry_end;
+                i += 1;
+                continue;
+            }
             if let Some(mut entry) = self.parse_estimated_param_entry(stmt_start, i) {
                 entry.span = Span {
                     start: entry_start,
                     end: entry_end,
                 };
+                if matches!(target, EstimatedParamsTarget::Remove) {
+                    entry.name_role_at_remove = self.removal_role(entry.name);
+                    entry.corr_role_at_remove = entry
+                        .corr_with
+                        .map(|name| self.removal_role(name))
+                        .unwrap_or(EstimatedNameRole::Unknown);
+                }
                 match target {
                     EstimatedParamsTarget::Params => self.model.estimated_params.push(entry),
                     EstimatedParamsTarget::Init => self.model.estimated_params_init.push(entry),
                     EstimatedParamsTarget::Bounds => self.model.estimated_params_bounds.push(entry),
+                    EstimatedParamsTarget::Remove => self.model.estimated_params_remove.push(entry),
                 }
             }
             entry_start = entry_end;
@@ -6517,27 +6718,39 @@ impl Parser<'_> {
             return None;
         }
         let first = self.tokens[i].text(self.src).to_string();
+        let first_span = self.tokens[i].span;
         i += 1;
-        let (kind, name, corr_with) = if first.eq_ignore_ascii_case("stderr") {
-            let (name, next) = next_ident(&self.tokens, self.src, i, end_i)?;
-            i = next;
-            (EstimatedParamKind::Stderr, name, None)
-        } else if first.eq_ignore_ascii_case("skew") {
-            let (name, next) = next_ident(&self.tokens, self.src, i, end_i)?;
-            i = next;
-            (EstimatedParamKind::Skew, name, None)
-        } else if first.eq_ignore_ascii_case("corr") {
-            let (name, next) = next_ident(&self.tokens, self.src, i, end_i)?;
-            i = next;
-            while i < end_i && self.tokens[i].kind == TokenKind::Comma {
-                i += 1;
-            }
-            let (other, next) = next_ident(&self.tokens, self.src, i, end_i)?;
-            i = next;
-            (EstimatedParamKind::Corr, name, Some(other))
-        } else {
-            (EstimatedParamKind::Param, first, None)
-        };
+        let (kind, name, corr_with, name_span, corr_with_span) =
+            if first.eq_ignore_ascii_case("stderr") {
+                let (name, next) = next_ident(&self.tokens, self.src, i, end_i)?;
+                let name_span = self.tokens[next - 1].span;
+                i = next;
+                (EstimatedParamKind::Stderr, name, None, name_span, None)
+            } else if first.eq_ignore_ascii_case("skew") {
+                let (name, next) = next_ident(&self.tokens, self.src, i, end_i)?;
+                let name_span = self.tokens[next - 1].span;
+                i = next;
+                (EstimatedParamKind::Skew, name, None, name_span, None)
+            } else if first.eq_ignore_ascii_case("corr") {
+                let (name, next) = next_ident(&self.tokens, self.src, i, end_i)?;
+                let name_span = self.tokens[next - 1].span;
+                i = next;
+                while i < end_i && self.tokens[i].kind == TokenKind::Comma {
+                    i += 1;
+                }
+                let (other, next) = next_ident(&self.tokens, self.src, i, end_i)?;
+                let other_span = self.tokens[next - 1].span;
+                i = next;
+                (
+                    EstimatedParamKind::Corr,
+                    name,
+                    Some(other),
+                    name_span,
+                    Some(other_span),
+                )
+            } else {
+                (EstimatedParamKind::Param, first, None, first_span, None)
+            };
         let name = self.intern.intern(&name);
         let corr_with = corr_with.map(|n| self.intern.intern(&n));
 
@@ -6589,8 +6802,12 @@ impl Parser<'_> {
         let upper_expr = value_exprs.get(2).copied();
         Some(EstimatedParam {
             name,
+            name_span,
+            name_role_at_remove: EstimatedNameRole::Unknown,
             kind,
             corr_with,
+            corr_with_span,
+            corr_role_at_remove: EstimatedNameRole::Unknown,
             init: fold(init_expr),
             lower: fold(lower_expr),
             upper: fold(upper_expr),
@@ -8439,6 +8656,13 @@ impl Parser<'_> {
                         );
                     }
                     self.record_option_twice(from, self.i);
+                    if !handed_option_command(cmd) {
+                        self.record_pinned_option_membership(cmd, from, self.i);
+                    }
+                    if cmd.eq_ignore_ascii_case("stoch_simul") {
+                        self.record_option_commas(cmd, from, self.i);
+                        self.record_simple_option_values(cmd, from, self.i);
+                    }
                     if cmd.eq_ignore_ascii_case("stoch_simul")
                         || cmd.eq_ignore_ascii_case("estimation")
                     {
@@ -8814,6 +9038,267 @@ impl Parser<'_> {
         }
     }
 
+    /// Membership comes from the pinned grammar, not the completion catalog.
+    /// Dedicated family parsers continue to own their stricter value checks.
+    fn record_pinned_option_membership(&mut self, command: &str, from: usize, to: usize) {
+        for opt in top_options(&self.tokens, self.src, from, to) {
+            if crate::pinned_options::allows(command, &opt.ident) != Some(false) {
+                continue;
+            }
+            self.model.shape_refuses.push(ShapeRefuse::official(
+                opt.span,
+                command,
+                format!(
+                    "syntax error, unexpected option '{}' in '{command}'",
+                    opt.ident
+                ),
+            ));
+        }
+    }
+
+    fn record_option_commas(&mut self, command: &str, from: usize, to: usize) {
+        let options = top_options(&self.tokens, self.src, from, to);
+        if options.len() < 2 {
+            return;
+        }
+        let mut depth = 0i32;
+        let mut brackets = 0i32;
+        let mut commas = Vec::new();
+        for (index, token) in self.tokens[from..to].iter().enumerate() {
+            match token.kind {
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen => depth -= 1,
+                TokenKind::LBrack => brackets += 1,
+                TokenKind::RBrack => brackets -= 1,
+                TokenKind::Comma if depth == 1 && brackets == 0 => commas.push(from + index),
+                _ => {}
+            }
+        }
+        for pair in options.windows(2) {
+            if commas
+                .iter()
+                .any(|comma| *comma > pair[0].token_index && *comma < pair[1].token_index)
+            {
+                continue;
+            }
+            self.model.shape_refuses.push(ShapeRefuse::official(
+                pair[1].span,
+                command,
+                format!(
+                    "syntax error, expected ',' before option '{}' in '{command}'",
+                    pair[1].ident
+                ),
+            ));
+        }
+    }
+
+    fn estimated_remove_row_spelled(&self, from: usize, to: usize) -> bool {
+        let row = &self.tokens[from..to];
+        if row.is_empty() || row[0].kind != TokenKind::Ident {
+            return false;
+        }
+        match row[0].text(self.src).to_ascii_lowercase().as_str() {
+            "stderr" | "skew" => row.len() == 2 && row[1].kind == TokenKind::Ident,
+            "corr" => {
+                row.len() == 4
+                    && row[1].kind == TokenKind::Ident
+                    && row[2].kind == TokenKind::Comma
+                    && row[3].kind == TokenKind::Ident
+            }
+            _ => row.len() == 1,
+        }
+    }
+
+    /// Primitive value productions that are unambiguous in the token scan.
+    /// Lists, expressions, named words, and options with alternative productions
+    /// remain with their dedicated parser or quiet until represented exactly.
+    fn record_simple_option_values(&mut self, command: &str, from: usize, to: usize) {
+        for opt in top_options(&self.tokens, self.src, from, to) {
+            let name = opt.ident.to_ascii_lowercase();
+            let shape = if command.eq_ignore_ascii_case("model") {
+                match name.as_str() {
+                    "block" | "bytecode" | "use_dll" | "no_static" | "linear" => Some("flag"),
+                    "mfs" | "static_mfs" => Some("integer"),
+                    "cutoff" | "balanced_growth_test_tol" => Some("nonnegative"),
+                    _ => None,
+                }
+            } else {
+                match name.as_str() {
+                    "aim_solver"
+                    | "analytical_girf"
+                    | "contemporaneous_correlation"
+                    | "diagonal_only"
+                    | "emas_girf"
+                    | "irf_in_percent"
+                    | "k_order_solver"
+                    | "loglinear"
+                    | "nocorr"
+                    | "nodecomposition"
+                    | "nodisplay"
+                    | "nofunctions"
+                    | "nograph"
+                    | "nomodelsummary"
+                    | "nomoments"
+                    | "noprint"
+                    | "partial_information"
+                    | "print"
+                    | "pruning"
+                    | "relative_irf"
+                    | "spectral_density"
+                    | "stderr_multiples"
+                    | "tex" => Some("flag"),
+                    "ar"
+                    | "dr_cycle_reduction_maxiter"
+                    | "dr_logarithmic_reduction_maxiter"
+                    | "drop"
+                    | "emas_drop"
+                    | "emas_max_iter"
+                    | "filtered_theoretical_moments_grid"
+                    | "irf"
+                    | "order"
+                    | "periods"
+                    | "replic"
+                    | "simul_replic"
+                    | "solve_algo" => Some("integer"),
+                    "dr_cycle_reduction_tol"
+                    | "dr_display_tol"
+                    | "dr_logarithmic_reduction_tol"
+                    | "emas_tolf"
+                    | "hp_filter"
+                    | "irf_plot_threshold"
+                    | "one_sided_hp_filter"
+                    | "qz_criterium"
+                    | "qz_zero_threshold" => Some("nonnegative"),
+                    _ => None,
+                }
+            };
+            let value = if opt.eq {
+                self.complete_option_value(&opt, to)
+            } else {
+                &[][..]
+            };
+            let fits = match shape {
+                Some("flag") => !opt.eq,
+                Some("integer") => {
+                    opt.eq
+                        && value.len() == 1
+                        && value[0].kind == TokenKind::Number
+                        && value[0].text(self.src).bytes().all(|b| b.is_ascii_digit())
+                }
+                Some("nonnegative") => opt.eq && self.pinned_nonnegative_value(value),
+                _ => true,
+            };
+            if !fits {
+                if matches!(shape, Some("integer"))
+                    && value
+                        .first()
+                        .is_some_and(|token| token.kind == TokenKind::Minus)
+                {
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        value[0].span,
+                        command,
+                        "syntax error, unexpected MINUS, expecting INT_NUMBER",
+                    ));
+                    continue;
+                }
+                self.model.shape_refuses.push(ShapeRefuse::official(
+                    opt.span,
+                    command,
+                    format!(
+                        "syntax error, invalid value for option '{}' in '{command}'",
+                        opt.ident
+                    ),
+                ));
+            }
+        }
+    }
+
+    /// A primitive production consumes one entire value token. Stop only at
+    /// the option-list comma or close, never after the first numeric token.
+    fn complete_option_value<'b>(&'b self, opt: &TopOption, to: usize) -> &'b [Token] {
+        let start = opt.token_index + 2;
+        if start >= to
+            || self.tokens.get(opt.token_index + 1).map(|t| t.kind) != Some(TokenKind::Eq)
+        {
+            return &[];
+        }
+        let mut parens = 0i32;
+        let mut brackets = 0i32;
+        let mut end = start;
+        while end < to {
+            match self.tokens[end].kind {
+                TokenKind::LParen => parens += 1,
+                TokenKind::LBrack => brackets += 1,
+                TokenKind::RBrack => brackets -= 1,
+                TokenKind::RParen if parens == 0 => break,
+                TokenKind::RParen => parens -= 1,
+                TokenKind::Comma if parens == 0 && brackets == 0 => break,
+                _ => {}
+            }
+            end += 1;
+        }
+        &self.tokens[start..end]
+    }
+
+    /// Dynare's `INT_NUMBER | FLOAT_NUMBER` lexer spelling. This is lexical:
+    /// `1e400` is accepted even when it exceeds a finite f64. The local lexer
+    /// can split `1.`, `1d3`, or `1.2D3`, so join only touching numeric pieces.
+    fn pinned_nonnegative_value(&self, tokens: &[Token]) -> bool {
+        if tokens.is_empty()
+            || tokens.iter().any(|token| {
+                !matches!(
+                    token.kind,
+                    TokenKind::Number
+                        | TokenKind::Ident
+                        | TokenKind::Dot
+                        | TokenKind::Plus
+                        | TokenKind::Minus
+                )
+            })
+            || tokens
+                .windows(2)
+                .any(|pair| pair[0].span.end != pair[1].span.start)
+        {
+            return false;
+        }
+        let text = tokens
+            .iter()
+            .map(|token| token.text(self.src))
+            .collect::<String>();
+        let bytes = text.as_bytes();
+        let mut i = 0usize;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        let before_dot = i;
+        if i < bytes.len() && bytes[i] == b'.' {
+            i += 1;
+            let after_start = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            if before_dot == 0 && i == after_start {
+                return false;
+            }
+        } else if before_dot == 0 {
+            return false;
+        }
+        if i < bytes.len() && matches!(bytes[i], b'e' | b'E' | b'd' | b'D') {
+            i += 1;
+            if i < bytes.len() && matches!(bytes[i], b'+' | b'-') {
+                i += 1;
+            }
+            let digits_start = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            if i == digits_start {
+                return false;
+            }
+        }
+        i == bytes.len()
+    }
+
     /// The same check on already-parsed rows. 7.1 counts one `name=value` per
     /// option, so a name inside a bracketed value (`parameters=[alpha, alpha]`) is
     /// not a repeat, while two options with the same name are.
@@ -8974,7 +9459,6 @@ impl Parser<'_> {
             "pac_target_info",
             "priors",
             "deterministic_trends",
-            "estimated_params_remove",
             "verbatim",
         ];
         BLOCKS.iter().any(|kw| self.at_ident_ci(kw))
