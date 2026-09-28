@@ -325,6 +325,23 @@ pub(crate) fn check_in_workspace_with_origins(ws: &mut Workspace, abs_path: &str
 fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticSet> {
     let model = ws.get_effective_model(abs_path)?.clone();
     let mut diags = analyze(&model);
+    if model.macro_incomplete {
+        // An unevaluated macro can change declarations, command options, and
+        // which includes exist. Keep only the macro result already established
+        // by analyze; file and companion checks would use an unfinished tree.
+        let writing_origins = HashMap::new();
+        let mut source_texts = HashMap::new();
+        let origins = diags
+            .iter()
+            .map(|diag| diagnostic_origin(ws, abs_path, diag, &writing_origins, &mut source_texts))
+            .collect();
+        return Some(DiagnosticSet {
+            root: root_key(ws, abs_path),
+            diagnostics: diags,
+            writing_origins,
+            origins,
+        });
+    }
     diags.extend(crate::check_d_open::check_workspace_d_open(
         ws, &model, abs_path,
     ));
