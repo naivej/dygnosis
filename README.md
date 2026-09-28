@@ -8,6 +8,7 @@
 
 Limitations by design
 
+- **Macro functions, scalar `for ... when ...` filters, and tuple loops are supported for expressions Dygnosis can evaluate**. Unsupported expressions and expansion limits leave the original macro text visible.
 - **Problems after equation rewriting.** Dynare changes equations and adds helper variables before some checks. Dygnosis can report a problem found at that stage when the `.mod` you wrote is enough to decide it. It stays quiet when the problem depends on equations Dynare creates and cannot be tied back to your file.
 - **Some Dynare messages cannot be shown.** A few concern MATLAB or Octave code Dynare writes rather than your `.mod` file; other cases crash without an error message. When the written cause of a crash is clear, Dygnosis may give its own warning, such as `W212` for an assignment to a name later excluded.
 - **Run-dependent checks.** Dygnosis does not infer checks that depend on Dynare command-line options or a compiler installed on your machine.
@@ -61,29 +62,6 @@ Limitations by design
 | `dynare_format` | Format a `.mod` file with the editor's rules. Returns the full text only when it changes. Empty or whitespace-only input is unchanged |
 | `dynare_extract` | Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model |
 | `dynare_workspace_diagnose` | Check several root `.mod` files. Pass a files map and roots, or paths to files and directories. One failed root does not drop the others |
-
-### Macro expansion limits
-
-Macro functions, scalar `for ... when ...` filters, and tuple loops are supported for expressions Dygnosis can evaluate. Unsupported expressions and expansion limits leave the original macro text visible. The effective-model view and affected MCP model-info, equation, and comparison results report `status: "incomplete"`; their counts and equations must not be treated as a complete model. Extraction returns its existing `unsupported_context` result when incomplete expansion prevents a reliable fragment.
-
-Diagnosis also shows `I211` Information at the first unsupported macro expression, so an incomplete analysis is visible even when no Dynare error is known.
-
-An undefined macro variable or function is a separate macro-processing Error (`E063`). Dygnosis does not run the official preprocessor to fill gaps in its own expansion.
-
-### Dynare 7.2 option spelling
-
-The Dynare 7.2 manual has eight option headings that its own preprocessor rejects. Dygnosis follows the preprocessor. The accepted spelling in the right column is a syntax example, not necessarily a replacement with the same effect.
-
-| Command | Rejected manual heading | Accepted syntax example |
-|---------|-------------------------|-------------------------|
-| `method_of_moments` | `use_pct` | `mom_method=GMM, datafile='data.csv', add_tiny_number_to_cholesky=0.1` |
-| `ms_compute_mdd` | `mdd_proposal_draws` | `proposal_draws=10` |
-| `ms_compute_mdd` | `mdd_use_mean_center` | `use_mean_center` |
-| `pac_model` | `auxiliary_model` | `auxiliary_model_name=aux` |
-| `var_expectation_model` | `auxiliary_model` | `auxiliary_model_name=aux` |
-| `plot_shock_decomposition` | `with_epilogue` | `nodisplay` |
-| `realtime_shock_decomposition` | `kalman_algo` | `nograph` |
-| `realtime_shock_decomposition` | `kalman_tol` | `nograph` |
 
 ## Credits
 
