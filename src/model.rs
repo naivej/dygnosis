@@ -839,6 +839,10 @@ pub struct Model {
     pub initval: Vec<Assignment>,
     pub endval: Vec<Assignment>,
     pub is_linear: bool,
+    /// `model(differentiate_forward_vars)` was written. A comment that mentions
+    /// the name is not this option. The count check withholds E188 when it is set,
+    /// because the rewrite may add helper variables.
+    pub differentiate_forward_vars: bool,
     /// Identifier span of `block` inside an aggregate `model(…)` option list.
     pub model_block_option: Option<Span>,
     pub model_block: Option<Span>,

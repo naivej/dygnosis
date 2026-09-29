@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.2
+
+- A comment that mentions `differentiate_forward_vars` no longer hides the equation-count error. The option still withholds `E188` when it is written on `model(…)` or `model_options(…)`, because that option can add helper variables.
+
 ## v0.10.1
 
 - Macro functions, scalar `@#for ... when ...` filters, and tuple loops expand in diagnostics and model views, with loop origins kept. A filtered-out iteration no longer invents an unknown name or a count warning. A range bound can use arithmetic: `1:N-1` ends at `N-1`. An undefined macro variable or function is `E063` at the directive that uses it, and a quoted macro string used as a name is reported without its quotes. A valid expression Dygnosis cannot evaluate shows `I211` Information, withholds the checks that need the expanded model, and marks model info, equations, compare, and the effective-model view as incomplete.

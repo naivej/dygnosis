@@ -530,3 +530,50 @@ fn nonzero_left_hand_denominator_stays_quiet() {
         );
     }
 }
+
+#[test]
+fn a_comment_is_not_the_differentiate_forward_vars_option() {
+    let commented = "var y z;\n// differentiate_forward_vars\nmodel;\ny = y(-1) + z;\nend;\n";
+    let in_equation = "var y z;\nmodel;\ny = y(-1) + z; // differentiate_forward_vars\nend;\n";
+    for source in [commented, in_equation] {
+        let ours = own(source);
+        assert!(ours.iter().any(|d| d.code == "E188"), "{source}: {ours:?}");
+        assert!(ours.iter().all(|d| d.code != "W013"), "{source}: {ours:?}");
+    }
+
+    let option = "var y z;\nmodel(differentiate_forward_vars);\ny = y(-1) + z;\nend;\n";
+    let model_options =
+        "var y z;\nmodel_options(differentiate_forward_vars);\nmodel;\ny = y(-1) + z;\nend;\n";
+    let withheld = own(option);
+    assert!(
+        own(model_options).iter().all(|d| d.code != "E188"),
+        "{model_options}"
+    );
+    assert!(
+        withheld.iter().all(|d| d.code != "E188"),
+        "{option}: {withheld:?}"
+    );
+
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: pinned Dynare preprocessor unavailable");
+        return;
+    };
+    let official = "There are 1 equations but 2 endogenous variables!";
+    for source in [commented, option, model_options] {
+        let check = run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+        assert!(
+            check.success,
+            "{source} check: {}{}",
+            check.raw_stdout, check.raw_stderr
+        );
+        let transform = run_preprocessor(
+            source,
+            &pp,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Transform,
+        );
+        let text = format!("{}{}", transform.raw_stdout, transform.raw_stderr);
+        assert!(text.contains(official), "{source}: {text}");
+    }
+}
