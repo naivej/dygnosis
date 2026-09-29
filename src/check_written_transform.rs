@@ -364,10 +364,7 @@ fn plain_count_inputs(model: &Model) -> bool {
         || !model.trend_vars.is_empty()
         || !model.nonstationary_vars.is_empty()
         || model.endogenous.iter().any(|decl| decl.log_transform)
-        || model
-            .source
-            .to_ascii_lowercase()
-            .contains("differentiate_forward_vars")
+        || model.differentiate_forward_vars
     {
         return false;
     }

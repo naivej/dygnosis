@@ -8942,6 +8942,11 @@ impl Parser<'_> {
     /// whether this statement listed `datafile=` (only `estimation` asks).
     fn record_skip_command_options(&mut self, opener: &str, from: usize, to: usize) -> bool {
         let mut saw_datafile = false;
+        if opener.eq_ignore_ascii_case("model_options")
+            && self.option_ident_in_range(from, to, "differentiate_forward_vars")
+        {
+            self.model.differentiate_forward_vars = true;
+        }
         self.collect_date_options(opener, from, to);
         if opener.eq_ignore_ascii_case("prior_function")
             || opener.eq_ignore_ascii_case("posterior_function")
@@ -9647,6 +9652,8 @@ impl Parser<'_> {
                 self.model.no_static_span = Some(span);
             } else if lex.eq_ignore_ascii_case("block") && self.model.model_block_option.is_none() {
                 self.model.model_block_option = Some(span);
+            } else if lex.eq_ignore_ascii_case("differentiate_forward_vars") {
+                self.model.differentiate_forward_vars = true;
             }
         }
     }

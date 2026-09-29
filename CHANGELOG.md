@@ -3,6 +3,7 @@
 ## v0.10.2
 
 - `E251`, `E182`, and `E255` use a name's type after `change_type`, not the list where it was declared. A `varexo` retyped to a parameter is no longer an exogenous in the planner objective or in `occbin_constraints`, and a parameter retyped to `varexo` is. A `var` retyped to a parameter can be used in `osr_params_bounds`; a parameter retyped to `var` cannot. A parameter retyped to `var` is a valid instrument, so that false `E101` is gone. A `var` retyped to a parameter stays quiet under `E101`, whose sentence is for a name that was never declared.
+- A comment that mentions `differentiate_forward_vars` no longer hides the equation-count error. The option still withholds `E188` when it is written on `model(…)` or `model_options(…)`, because that option can add helper variables.
 
 ## v0.10.1
 
