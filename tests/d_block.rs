@@ -1,9 +1,12 @@
 //! D-block family locks: completeness / duplicates / parse-time on trees we have.
 
+use std::time::Duration;
+
 use dygnosis::explain::known_codes;
 use dygnosis::expr::ExprKind;
 use dygnosis::model::{EstimatedParamKind, ShockKind};
-use dygnosis::{analyze, block_openers, parse, Diagnostic, Severity};
+use dygnosis::preprocessor::find_preprocessor;
+use dygnosis::{analyze, block_openers, parse, run_preprocessor, Diagnostic, JsonStage, Severity};
 
 fn fixture(rel: &str) -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -880,4 +883,53 @@ fn opener_name_reaches_e030_w031_and_e111() {
         find(&e111, "E111").message,
         "shocks: variance or stderr of shock on shocks declared twice"
     );
+}
+
+#[test]
+fn change_type_planner_instrument_and_osr_bounds_use_the_final_type() {
+    let e251_quiet = "var y; varexo e; parameters rho; change_type(parameters) e; rho = 0.9; model; y = rho * y(-1); end; ramsey_model; planner_objective e;";
+    quiet(&analyze(&parse(e251_quiet)), "E251");
+
+    let e251_fire = "var y; varexo e; parameters a; change_type(varexo) a; model; y = e * y(-1); end; ramsey_model; planner_objective a;";
+    assert!(find(&analyze(&parse(e251_fire)), "E251")
+        .message
+        .contains("You cannot include exogenous variables"));
+
+    let e101_quiet = "parameters i; var y; varexo e; change_type(var) i; parameters rho; rho = 0.9; model; y = rho*y(-1) + e + i; end; planner_objective y; ramsey_model(instruments=(i));";
+    quiet(&analyze(&parse(e101_quiet)), "E101");
+
+    // Still on the written `var` list, retyped to a parameter. E101's sentence is
+    // the undeclared case, so this miss stays quiet.
+    let e101_retyped_away = "var y i; varexo e; parameters rho; change_type(parameters) i; rho = 0.9; model; y = rho*y(-1) + e; end; planner_objective y; ramsey_model(instruments=(i));";
+    quiet(&analyze(&parse(e101_retyped_away)), "E101");
+
+    let e255_quiet = "var y z; varexo e; parameters rho; change_type(parameters) z; rho = 0.9; model; y = rho * y(-1) + e; end; planner_objective y; osr; osr_params rho; osr_params_bounds; z, 0, 1; end;";
+    quiet(&analyze(&parse(e255_quiet)), "E255");
+
+    let e255_fire = "var y; varexo e; parameters rho z; change_type(var) z; rho = 0.9; model; y = rho * y(-1) + e + z; end; planner_objective y; osr; osr_params rho; osr_params_bounds; z, 0, 1; end;";
+    assert_eq!(
+        find(&analyze(&parse(e255_fire)), "E255").message,
+        "z must be a parameter to be used in the osr_bounds block"
+    );
+
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: pinned Dynare preprocessor unavailable");
+        return;
+    };
+    for (source, needle, refuses) in [
+        (e251_quiet, "You cannot include exogenous variables", false),
+        (e251_fire, "You cannot include exogenous variables", true),
+        (e101_quiet, "is not a declared endogenous", false),
+        (e255_quiet, "must be a parameter", false),
+        (e255_fire, "must be a parameter", true),
+    ] {
+        let check = run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+        let text = format!("{}{}", check.raw_stdout, check.raw_stderr);
+        if refuses {
+            assert!(text.contains(needle), "{text}");
+        } else {
+            assert!(check.success, "{text}");
+            assert!(!text.contains(needle), "{text}");
+        }
+    }
 }

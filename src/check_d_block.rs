@@ -86,10 +86,9 @@ fn check_planner_lead_local(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_osr_bounds_type(model: &Model) -> Vec<Diagnostic> {
-    let params: HashSet<Name> = model.parameters.iter().map(|d| d.name).collect();
     let mut out = Vec::new();
     for bound in &model.osr_params_bounds {
-        if params.contains(&bound.name) {
+        if model.final_kind(bound.name) == Some("parameters") {
             continue;
         }
         let name = model.name(bound.name);

@@ -1,7 +1,9 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
+use dygnosis::preprocessor::find_preprocessor;
 use dygnosis::span::LineIndex;
-use dygnosis::{analyze, check_occbin, parse, Diagnostic, Severity};
+use dygnosis::{analyze, check_occbin, parse, run_preprocessor, Diagnostic, JsonStage, Severity};
 
 const OCCBIN_ERRORS: &[&str] = &[
     "E170", "E171", "E172", "E173", "E174", "E175", "E176", "E177", "E180", "E181", "E182", "E183",
@@ -412,4 +414,42 @@ fn e184_points_at_the_later_bind_keyword() {
         "E184 should be the later bind, start={} first={first}",
         d.span.start
     );
+}
+
+#[test]
+fn change_type_occbin_name_uses_the_final_type() {
+    let quiet_src = "var is i; varexo e; parameters rhos; change_type(parameters) e; rhos = 0.8; model; is = rhos * is(-1); [name='policy', relax='ELB'] i = is; [name='policy', bind='ELB'] i = 0; end; occbin_constraints; name 'ELB'; bind e <= 0; relax e > 0; end;";
+    let quiet_rows = analyze(&parse(quiet_src));
+    assert!(
+        quiet_rows.iter().all(|d| d.code != "E182"),
+        "{quiet_rows:?}"
+    );
+
+    let fire_src = "var is i; varexo e; parameters rhos; change_type(varexo) rhos; model; is = e * is(-1); [name='policy', relax='ELB'] i = is; [name='policy', bind='ELB'] i = 0; end; occbin_constraints; name 'ELB'; bind rhos <= 0; relax rhos > 0; end;";
+    let fire = analyze(&parse(fire_src));
+    let hit = fire
+        .iter()
+        .find(|d| d.code == "E182")
+        .unwrap_or_else(|| panic!("{fire:?}"));
+    assert!(
+        hit.message
+            .contains("Exogenous variable rhos cannot be used in 'occbin_constraints'"),
+        "{hit:?}"
+    );
+
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: pinned Dynare preprocessor unavailable");
+        return;
+    };
+    for (source, refuses) in [(quiet_src, false), (fire_src, true)] {
+        let check = run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+        let text = format!("{}{}", check.raw_stdout, check.raw_stderr);
+        let needle = "cannot be used in 'occbin_constraints'";
+        if refuses {
+            assert!(text.contains(needle), "{text}");
+        } else {
+            assert!(check.success, "{text}");
+            assert!(!text.contains(needle), "{text}");
+        }
+    }
 }

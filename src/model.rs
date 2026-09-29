@@ -1853,6 +1853,35 @@ impl Model {
             .map(|event| event.kind)
     }
 
+    /// Final type of `name` for a check that asks what the name is.
+    ///
+    /// This is [`Self::final_symbol_kind`], except an `excluded` name uses the
+    /// list it was written on. Removal checks already read that list.
+    pub fn final_kind(&self, name: Name) -> Option<&'static str> {
+        match self.final_symbol_kind(name) {
+            Some("excluded") | None => self.written_type(name),
+            Some(kind) => Some(kind),
+        }
+    }
+
+    fn written_type(&self, name: Name) -> Option<&'static str> {
+        if self.endogenous.iter().any(|decl| decl.name == name) {
+            Some("var")
+        } else if self
+            .deterministic_exogenous
+            .iter()
+            .any(|decl| decl.name == name)
+        {
+            Some("varexo_det")
+        } else if self.exogenous.iter().any(|decl| decl.name == name) {
+            Some("varexo")
+        } else if self.parameters.iter().any(|decl| decl.name == name) {
+            Some("parameters")
+        } else {
+            None
+        }
+    }
+
     /// Type `name` has at byte `at`: the last declaration or type change written
     /// before it. Official checks such as `check_symbol_is_parameter` run while
     /// parsing the statement, so a later `change_type` does not count.

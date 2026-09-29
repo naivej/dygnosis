@@ -443,16 +443,11 @@ enum DeclClass {
 }
 
 fn decl_class(model: &Model, name: Name, locals: &HashSet<Name>) -> Option<DeclClass> {
-    if model.endogenous.iter().any(|d| d.name == name) {
-        return Some(DeclClass::Endogenous);
-    }
-    if model.exogenous.iter().any(|d| d.name == name)
-        || model.deterministic_exogenous.iter().any(|d| d.name == name)
-    {
-        return Some(DeclClass::Exo);
-    }
-    if model.parameters.iter().any(|d| d.name == name) {
-        return Some(DeclClass::Parameter);
+    match model.final_kind(name) {
+        Some("var") => return Some(DeclClass::Endogenous),
+        Some("varexo" | "varexo_det") => return Some(DeclClass::Exo),
+        Some("parameters") => return Some(DeclClass::Parameter),
+        _ => {}
     }
     if locals.contains(&name) {
         return Some(DeclClass::Local);

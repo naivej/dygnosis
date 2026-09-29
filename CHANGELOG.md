@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.2
+
+- `E251`, `E182`, and `E255` use a name's type after `change_type`, not the list where it was declared. A `varexo` retyped to a parameter is no longer an exogenous in the planner objective or in `occbin_constraints`, and a parameter retyped to `varexo` is. A `var` retyped to a parameter can be used in `osr_params_bounds`; a parameter retyped to `var` cannot. A parameter retyped to `var` is a valid instrument, so that false `E101` is gone. A `var` retyped to a parameter stays quiet under `E101`, whose sentence is for a name that was never declared.
+
 ## v0.10.1
 
 - Macro functions, scalar `@#for ... when ...` filters, and tuple loops expand in diagnostics and model views, with loop origins kept. A filtered-out iteration no longer invents an unknown name or a count warning. A range bound can use arithmetic: `1:N-1` ends at `N-1`. An undefined macro variable or function is `E063` at the directive that uses it, and a quoted macro string used as a name is reported without its quotes. A valid expression Dygnosis cannot evaluate shows `I211` Information, withholds the checks that need the expanded model, and marks model info, equations, compare, and the effective-model view as incomplete.

@@ -108,8 +108,6 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
     }
 
     if let Some(id) = model.planner_objective_expr {
-        let endo: HashSet<Name> = model.endogenous.iter().map(|d| d.name).collect();
-        let params: HashSet<Name> = model.parameters.iter().map(|d| d.name).collect();
         let locals: HashSet<Name> = model
             .equations
             .iter()
@@ -124,9 +122,8 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
         let planner_span = model.planner_objective_span.unwrap_or(FALLBACK);
         let exo_in_planner = model.exprs.walk_idents(id).any(|r| {
             !model.dropped_by_surgery_after(r.name, planner_span.start)
-                && !endo.contains(&r.name)
-                && !params.contains(&r.name)
                 && !locals.contains(&r.name)
+                && !matches!(model.final_kind(r.name), Some("var" | "parameters"))
         });
         if exo_in_planner {
             diagnostics.push(Diagnostic::new(
@@ -157,15 +154,19 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
 
     let endogenous = names(&model.endogenous);
     for instrument in &model.instruments {
-        if !endogenous.contains(instrument) {
-            let name = model.name(*instrument);
-            diagnostics.push(Diagnostic::new(
-                anchor,
-                Severity::Error,
-                "E101",
-                format!("Policy instrument '{name}' is not a declared endogenous variable."),
-            ));
+        // A name retyped to `var` is endogenous even though it stays on its
+        // original list. A name that is still on that list but was retyped
+        // away keeps today's silence: E101's sentence is the undeclared case.
+        if endogenous.contains(instrument) || model.final_kind(*instrument) == Some("var") {
+            continue;
         }
+        let name = model.name(*instrument);
+        diagnostics.push(Diagnostic::new(
+            anchor,
+            Severity::Error,
+            "E101",
+            format!("Policy instrument '{name}' is not a declared endogenous variable."),
+        ));
     }
 
     if let Some(d) = model.planner_discount {
