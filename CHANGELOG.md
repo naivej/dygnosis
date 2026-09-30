@@ -2,6 +2,7 @@
 
 ## v0.10.2
 
+- Named external_function declarations reject unknown options with E001. Repeated valid options keep the first value, as Dynare does, without false E271.
 - An unused trend_var or log_trend_var name can change to an ordinary type without false E295. Final counts and symbol lists include it while retaining its written trend declaration.
 - Names excluded before optim_weights report E317; later excluded planner or Ramsey-constraint references report E426. Earlier accepted uses keep their removal warrants.
 - The policy-generated discount parameter is known to later command lists, assignments, and duplicate checks. Its implicit creation keeps written declarations and counts intact.

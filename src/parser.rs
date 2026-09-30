@@ -2753,7 +2753,13 @@ impl Parser<'_> {
                 }
             }
             self.eat(TokenKind::RParen);
-            self.record_option_twice(from, self.i);
+            // This grammar keeps the first repeated option. Nameless malformed
+            // forms retain the reviewed E322 missing-name substitution.
+            if stmt.name.is_some() {
+                self.record_pinned_option_membership("external_function", from, self.i);
+                self.record_simple_option_values("external_function", from, self.i);
+                self.record_option_commas("external_function", from, self.i);
+            }
         }
         let end = if self.at(TokenKind::Semi) {
             self.bump().span.end
@@ -9539,6 +9545,27 @@ impl Parser<'_> {
 
     fn record_option_commas(&mut self, command: &str, from: usize, to: usize) {
         let options = top_options(&self.tokens, self.src, from, to);
+        if command == "external_function" {
+            for index in from..to {
+                if self.tokens[index].kind != TokenKind::Comma {
+                    continue;
+                }
+                let previous = self.tokens[index.saturating_sub(1)].kind;
+                let next = self.tokens.get(index + 1);
+                let refused = if matches!(previous, TokenKind::LParen | TokenKind::Comma) {
+                    Some(&self.tokens[index])
+                } else {
+                    next.filter(|token| matches!(token.kind, TokenKind::Comma | TokenKind::RParen))
+                };
+                if let Some(token) = refused {
+                    self.model.shape_refuses.push(ShapeRefuse::official(
+                        token.span,
+                        command,
+                        "syntax error, empty option in 'external_function'",
+                    ));
+                }
+            }
+        }
         if options.len() < 2 {
             return;
         }
@@ -9603,7 +9630,14 @@ impl Parser<'_> {
             .collect();
         for (opt, value_end) in options.into_iter().zip(value_ends) {
             let name = opt.ident.to_ascii_lowercase();
-            let shape = if command.eq_ignore_ascii_case("model") {
+            let shape = if command.eq_ignore_ascii_case("external_function") {
+                match name.as_str() {
+                    "nargs" => Some("integer"),
+                    "name" => Some("filename"),
+                    "first_deriv_provided" | "second_deriv_provided" => Some("filename_or_flag"),
+                    _ => None,
+                }
+            } else if command.eq_ignore_ascii_case("model") {
                 match name.as_str() {
                     "block" | "bytecode" | "use_dll" | "no_static" | "linear" => Some("flag"),
                     "mfs" | "static_mfs" => Some("integer"),
@@ -9674,6 +9708,8 @@ impl Parser<'_> {
                         && value[0].text(self.src).bytes().all(|b| b.is_ascii_digit())
                 }
                 Some("nonnegative") => opt.eq && self.pinned_nonnegative_value(value),
+                Some("filename") => opt.eq && pinned_filename_value(value),
+                Some("filename_or_flag") => !opt.eq || pinned_filename_value(value),
                 _ => true,
             };
             if !fits {
@@ -10475,6 +10511,21 @@ fn looks_like_numeric_equation(text: &str) -> bool {
         })
     }
     numericish(lhs) && numericish(rhs)
+}
+
+/// Bison's quoted filename or dot-separated symbol spelling.
+fn pinned_filename_value(tokens: &[Token]) -> bool {
+    (tokens.len() == 1 && tokens[0].kind == TokenKind::String)
+        || (!tokens.is_empty()
+            && tokens.len() % 2 == 1
+            && tokens.iter().enumerate().all(|(index, token)| {
+                token.kind
+                    == if index % 2 == 0 {
+                        TokenKind::Ident
+                    } else {
+                        TokenKind::Dot
+                    }
+            }))
 }
 
 fn is_integer_lexeme(s: &str) -> bool {

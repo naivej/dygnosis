@@ -827,7 +827,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E271", ExplainEntry {
         title: "Option declared twice in one list",
-        body: "The same option identifier appears twice in one `(…)` list. Dynare refuses: `option {name} declared twice`. The adjacent option lists of `mshocks` and `shock_paths` use Dynare's other sentence: `The '{name}' option is declared multiple times`.\n\n**Fix**\n\nKeep one copy of that option in the list.",
+        body: "The same option identifier appears twice in one `(…)` list. Dynare refuses: `option {name} declared twice`. The `external_function` list accepts repeats and keeps the first value. The adjacent option lists of `mshocks` and `shock_paths` use Dynare's other sentence: `The '{name}' option is declared multiple times`.\n\n**Fix**\n\nKeep one copy of that option in the list.",
         kind: ExplainKind::Shared,
     }),
     ("E272", ExplainEntry {
