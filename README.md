@@ -69,6 +69,7 @@ Policy instruments must be endogenous when their policy command is read. Undecla
 `discretionary_policy` also requires an existing `optimal_policy_discount_factor` to be a parameter; otherwise it reports `E378` before checking instruments.
 
 Command symbol lists use `E240` for native locals introduced by expressions such as `p=helper;`. A native MATLAB assignment such as `helper=3;` does not declare that name to Dynare.
+These lists check final types after `change_type`; a successful restoration clears the excluded type. Heterogeneous symbols have their own type until `change_type` makes them ordinary.
 Declare symbols before expressions use them; a declaration that clashes with an expression-created local reports `E030`.
 
 ## Credits

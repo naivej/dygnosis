@@ -39,35 +39,27 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
     // duplicate still warns after an auxiliary-name hit stops that list.
     warn_stoch_duplicates(model, &mut out);
     let declared = declared_names(model);
-    let removed: HashSet<Name> = model.var_removed.iter().map(|row| row.name).collect();
     let endogenous: HashSet<Name> = model
-        .endogenous
-        .iter()
-        .filter(|d| !removed.contains(&d.name))
+        .final_endogenous()
+        .into_iter()
         .map(|d| d.name)
         .collect();
-    let exo_det: HashSet<Name> = model
-        .deterministic_exogenous
-        .iter()
-        .map(|d| d.name)
-        .collect();
-    // `Model::exogenous` holds every `varexo_det` name too, and 7.1's
-    // `exogenousDet` is a type of its own: `rplot ed;` is refused. Plain
-    // `varexo` is therefore the exogenous minus the deterministic ones.
+    // Symbol lists read the final type. Deterministic and heterogeneous
+    // exogenous names are separate types from ordinary `varexo`.
     let mut endogenous_exogenous = endogenous.clone();
     endogenous_exogenous.extend(
         model
-            .exogenous
-            .iter()
-            .filter(|d| !exo_det.contains(&d.name) && !removed.contains(&d.name))
+            .final_decls(&["varexo"])
+            .into_iter()
+            .filter(|d| model.final_heterogeneity(d).is_none())
             .map(|d| d.name),
     );
     let mut endogenous_epilogue = endogenous.clone();
     endogenous_epilogue.extend(model.epilogue.iter().map(|a| a.name));
     let parameters: HashSet<Name> = model
-        .parameters
-        .iter()
-        .filter(|d| !removed.contains(&d.name))
+        .final_parameters()
+        .into_iter()
+        .filter(|d| model.final_heterogeneity(d).is_none())
         .map(|d| d.name)
         .collect();
     // 7.1's aux hit returns from `checkPass` outright, so the rest of that
