@@ -806,6 +806,8 @@ pub struct Assignment {
     /// P-expr tree of the RHS. `None` when the statement was recovered
     /// from a joined string (endval) rather than `parse_expr`.
     pub expr: Option<ExprId>,
+    /// Retained native MATLAB text, whose RHS declares no Dynare symbols.
+    pub native: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -930,6 +932,8 @@ pub struct Model {
     pub parse_issues: Vec<ParseIssue>,
     /// Reserved-symbol expression uses captured while reading Dynare blocks.
     pub reserved_block_symbol_uses: Vec<Span>,
+    /// Unknown function calls read inside epilogue before later declarations.
+    pub epilogue_undeclared_calls: Vec<(Name, Span)>,
     /// Literal `@#include` directives (quoted or bare path). Identifier-only
     /// arguments (`@#include FOO`) are not recorded.
     pub includes: Vec<IncludeDirective>,
@@ -1322,7 +1326,7 @@ pub struct ShapeRefuse {
     /// What the grammar takes there for a generic hint. Empty when the whole
     /// statement has no form or `official_message` supplies the exact text.
     pub expected: &'static str,
-    /// Exact official syntax text for a known token-level refusal, when available.
+    /// Exact official parser text for a known refusal, when available.
     pub official_message: Option<Cow<'static, str>>,
 }
 

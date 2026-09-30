@@ -172,9 +172,13 @@ impl Parser<'_> {
                 .read_pac_symbol()
                 .map(|(name, span)| SemiStructuralValue::Symbol { name, span }),
             PacOptionType::Tags => self.read_pac_tag_list().map(SemiStructuralValue::Tags),
-            PacOptionType::Expression => self
-                .read_pac_expression()
-                .map(SemiStructuralValue::Expression),
+            PacOptionType::Expression => {
+                let previous_context = self.model_function_context;
+                self.model_function_context = word != "discount";
+                let expression = self.read_pac_expression();
+                self.model_function_context = previous_context;
+                expression.map(SemiStructuralValue::Expression)
+            }
             PacOptionType::Horizon => self.read_pac_horizon(),
             PacOptionType::SignedInteger => self.read_pac_integer(true),
             PacOptionType::Kind => self

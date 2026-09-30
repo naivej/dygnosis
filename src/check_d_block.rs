@@ -302,6 +302,7 @@ fn outside_ident_uses(model: &Model) -> Vec<(Name, Span)> {
         .param_assignments
         .iter()
         .chain(&model.helper_assignments)
+        .filter(|assignment| !assignment.native)
     {
         if let Some(id) = a.expr {
             push_expr(&mut out, id);

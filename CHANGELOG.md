@@ -2,6 +2,7 @@
 
 ## v0.10.2
 
+- Non-model expression calls register unknown functions and distinguish integer arguments from variable timing. A later declaration or command list uses their known function kind; valid calls no longer get E279/E280 as bare function-name uses.
 - `dsge_prior_weight` is reserved in Dynare blocks. Accepted parameter-assignment and policy-option expressions no longer get E001 for that name.
 - Command symbol lists use final types after `change_type`, including exclusion/restoration and a heterogeneous name made ordinary. E240 no longer rejects valid retyped names or accepts a heterogeneous name as an ordinary type.
 - A later declaration that clashes with an expression-created native local reports E030 with Dynare's declared-twice sentence.

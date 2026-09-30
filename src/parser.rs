@@ -189,6 +189,9 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         in_equation_body: false,
         in_native_assignment: false,
         in_dynare_block: false,
+        in_epilogue: false,
+        model_function_context: false,
+        implicit_function_names: Vec::new(),
     };
     p.parse_file();
     p.record_double_quoted_strings();
@@ -983,6 +986,10 @@ struct Parser<'a> {
     in_native_assignment: bool,
     /// Dynare's reserved block tokens also apply to the opener's options.
     in_dynare_block: bool,
+    in_epilogue: bool,
+    /// Function-call contexts using the pinned grammar's model_expression rule.
+    model_function_context: bool,
+    implicit_function_names: Vec<Name>,
 }
 
 impl Parser<'_> {
@@ -1033,6 +1040,23 @@ impl Parser<'_> {
 
     fn parse_file(&mut self) {
         while !self.at(TokenKind::Eof) {
+            self.model_function_context = [
+                "model",
+                "model_replace",
+                "epilogue",
+                "planner_objective",
+                "ramsey_constraints",
+                "occbin_constraints",
+                "matched_moments",
+                "pac_model",
+                "var_expectation_model",
+                "pac_target_info",
+                "trend_var",
+                "log_trend_var",
+                "var",
+            ]
+            .iter()
+            .any(|word| self.at_ident_ci(word));
             self.in_dynare_block = BLOCK_OPENERS.iter().any(|word| self.at_ident_ci(word))
                 || [
                     "mshocks",
@@ -1170,7 +1194,9 @@ impl Parser<'_> {
             } else if self.at_ident_ci("change_type") {
                 self.parse_change_type();
             } else if self.at_ident_ci("epilogue") {
+                self.in_epilogue = true;
                 self.parse_epilogue_block();
+                self.in_epilogue = false;
             } else if self.at_ident_ci("optim_weights") {
                 self.model.has_optim_weights = true;
                 self.parse_optim_weights_block();
@@ -7531,6 +7557,7 @@ impl Parser<'_> {
                 end: stmt_end,
             },
             expr,
+            native: self.in_native_assignment,
         })
     }
 
@@ -7604,6 +7631,7 @@ impl Parser<'_> {
             expression: rhs.to_string(),
             span,
             expr: None,
+            native: false,
         })
     }
 
@@ -8502,10 +8530,16 @@ impl Parser<'_> {
                 .push((format!("{lexeme}.{rhs_lex}"), span));
             return self.alloc(ExprKind::Error, span);
         }
-        let becoming_call = self.at(TokenKind::LParen) && !self.looks_like_timing();
+        let becoming_call = self.at(TokenKind::LParen)
+            && (!self.looks_like_timing()
+                || self.model.external_function_names.contains(&name)
+                || (!self.model_function_context
+                    && !self.in_native_assignment
+                    && !self.is_known_symbol(name)));
         if !self.in_model
             && !self.in_native_assignment
             && !becoming_call
+            && !self.in_epilogue
             && !is_builtin_function(&lexeme)
             && !self.is_known_symbol(name)
             && !self.model.mod_file_locals.contains(&name)
@@ -8533,7 +8567,7 @@ impl Parser<'_> {
         if let Some(kind) = pac_parser::named_operator_kind(&lexeme) {
             return self.parse_named_model_operator(tok, name, kind);
         }
-        if self.looks_like_timing() && !is_builtin_function(&lexeme) {
+        if !becoming_call && self.looks_like_timing() && !is_builtin_function(&lexeme) {
             return self.parse_timing(name, tok);
         }
         self.parse_call(name, tok)
@@ -8618,6 +8652,31 @@ impl Parser<'_> {
                 .map(|id| self.expr_span(*id).end)
                 .unwrap_or(kw.span.end)
         };
+        if self.in_epilogue
+            && !is_builtin_function(self.intern.get(callee))
+            && !self.is_known_symbol(callee)
+        {
+            self.model.epilogue_undeclared_calls.push((callee, kw.span));
+        }
+        if self.model_function_context
+            && self.implicit_function_names.contains(&callee)
+            && !self
+                .model
+                .external_functions
+                .iter()
+                .any(|stmt| stmt.name.is_some_and(|(name, _)| name == callee))
+        {
+            self.model.shape_refuses.push(ShapeRefuse::official(kw.span, "external_function", format!("Before using {}() in the model block, you must first declare it via the external_function() statement", self.intern.get(callee))));
+        }
+        if !self.model_function_context
+            && !self.in_native_assignment
+            && !is_builtin_function(self.intern.get(callee))
+            && !self.is_known_symbol(callee)
+        {
+            self.push_external_function_name(callee);
+            self.implicit_function_names.push(callee);
+            self.record_symbol_declaration(callee, kw.span, "external_function");
+        }
         self.alloc(
             ExprKind::Call { callee, args },
             Span {
@@ -8648,6 +8707,7 @@ impl Parser<'_> {
 
     fn is_known_symbol(&self, name: Name) -> bool {
         self.generated_policy_discount == Some(name)
+            || self.model.final_symbol_kind(name).is_some()
             || self
                 .model
                 .endogenous

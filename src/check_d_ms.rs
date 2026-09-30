@@ -164,7 +164,7 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
     // A top-level `symbol = …;` reaches the grammar only when the head is declared,
     // and the pin refuses it while parsing when the symbol is not a parameter.
     for assignment in &model.helper_assignments {
-        if declared_names(model).contains(&assignment.name) {
+        if !assignment.native && declared_names(model).contains(&assignment.name) {
             units.push((assignment.span.start, Unit::TopAssignment(assignment)));
         }
     }

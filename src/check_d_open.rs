@@ -248,6 +248,16 @@ fn used_in_expression_before(model: &Model, name: Name, pos: u32) -> bool {
 
 fn check_epilogue(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
+    for (name, span) in &model.epilogue_undeclared_calls {
+        out.push(err(
+            *span,
+            "E288",
+            format!(
+                "Variable {} used in the epilogue block but was not declared.",
+                model.name(*name)
+            ),
+        ));
+    }
     if model.epilogue_block.is_none() {
         if let Some(span) = model.with_epilogue_span {
             out.push(err(

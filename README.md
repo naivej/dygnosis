@@ -74,6 +74,8 @@ Declare symbols before expressions use them; a declaration that clashes with an 
 
 `dsge_prior_weight` is a reserved token inside Dynare blocks. Ordinary statement expressions, including parameter assignments and policy options, may use that name.
 
+Non-model expressions register unknown function calls with Dynare's function kind. A later declaration of the same function warns `W031`; a conflicting variable declaration reports `E030`.
+
 ## Credits
 
 1. dygnosis v0.1.0 is a fork and rewrite of [LLMacro-Dynare-LSP](https://github.com/pdwhoward/LLMacro-Dynare-LSP) by Anthony Diercks, Philip Howard, and Mehrdad Samadi. Diagnostic codes, check and explain surfaces, and the thin analysis design come from that work. The original repository accompanies the working paper *LLMacro: A Language Server for Dynare — Structured Context for AI-Assisted Macroeconomic Modeling*.
