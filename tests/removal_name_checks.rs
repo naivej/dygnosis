@@ -69,7 +69,7 @@ fn post_removal_names_use_their_actual_excluded_or_exogenous_kind() {
                         expected.is_none(),
                         "{site} {name} {before}: {official:?}"
                     );
-                    if let Some(_) = expected {
+                    if expected.is_some() {
                         assert!(
                             official.raw_stdout.contains(&errors[0].message),
                             "{official:?}"
