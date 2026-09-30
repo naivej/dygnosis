@@ -928,6 +928,8 @@ pub struct Model {
     /// Recovery notes from the parser (byte spans). Messages are formatted in
     /// `check_parse` via `LineIndex`.
     pub parse_issues: Vec<ParseIssue>,
+    /// Reserved-symbol expression uses captured while reading Dynare blocks.
+    pub reserved_block_symbol_uses: Vec<Span>,
     /// Literal `@#include` directives (quoted or bare path). Identifier-only
     /// arguments (`@#include FOO`) are not recorded.
     pub includes: Vec<IncludeDirective>,

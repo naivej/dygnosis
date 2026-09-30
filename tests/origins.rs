@@ -68,6 +68,7 @@ fn mcp_names_child_for_included_unknown_symbol() {
 #[test]
 fn mcp_maps_each_audited_check_error_to_its_child() {
     let cases = [
+        ("E001", "@#include \"child.inc\"\n", "var y; model; y=dsge_prior_weight; end;\n"),
         (
             "E020",
             "@#include \"child.inc\"\n",

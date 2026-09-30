@@ -1,7 +1,6 @@
 //! E001 parse diagnostics. Token/AST walks; Python supplies messages, not regex.
 
 use crate::diagnostic::{Diagnostic, Severity, TextEdit};
-use crate::expr::ExprKind;
 use crate::intern::Name;
 use crate::lexer::{tokenize, Token, TokenKind};
 use crate::model::{Decl, Model, ParseIssueKind, ShocksSemiFamily};
@@ -129,28 +128,17 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
-/// `dsge_prior_weight` is a reserved preprocessor symbol. 7.1's lexer turns it
-/// into a token wherever an expression is expected, and the grammar refuses the
-/// token there — while a declaration list and `estimated_params` may name it.
-/// The expression arena covers every expression; the name slots below are the
-/// blocks that name a symbol without building an expression for it.
+/// `dsge_prior_weight` is reserved inside Dynare blocks. The parser records
+/// those expression uses; ordinary statement expressions keep the identifier.
+/// A declaration list and `estimated_params` may name it. The slots below name
+/// a symbol inside a block without building an expression for it.
 /// `shocks` / `mshocks` var lists are the exception: their names carry no span
 /// of their own, and the shock type checks (E266–E270, their texts) refuse
 /// them instead.
 const RESERVED_SYMBOL: &str = "dsge_prior_weight";
 
 fn reserved_symbol_use_diags(model: &Model) -> Vec<Diagnostic> {
-    let mut spans: Vec<Span> = Vec::new();
-    for (_, expr) in model.exprs.iter() {
-        if let ExprKind::Ident {
-            name, ident_span, ..
-        } = &expr.kind
-        {
-            if model.name(*name) == RESERVED_SYMBOL {
-                spans.push(*ident_span);
-            }
-        }
-    }
+    let mut spans = model.reserved_block_symbol_uses.clone();
 
     let mut slots: Vec<(Name, Span)> = Vec::new();
     for entry in model.initval.iter().chain(&model.endval) {
@@ -197,8 +185,8 @@ fn reserved_symbol_use_diags(model: &Model) -> Vec<Diagnostic> {
             e001(
                 span,
                 format!(
-                    "Invalid use of '{RESERVED_SYMBOL}': reserved preprocessor symbol, \
-                     allowed only in a declaration. Choose a different name."
+                    "Invalid use of '{RESERVED_SYMBOL}' in a Dynare block: \
+                     reserved preprocessor symbol. Choose a different name."
                 ),
                 None,
             )

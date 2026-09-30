@@ -188,6 +188,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         in_model: false,
         in_equation_body: false,
         in_native_assignment: false,
+        in_dynare_block: false,
     };
     p.parse_file();
     p.record_double_quoted_strings();
@@ -980,6 +981,8 @@ struct Parser<'a> {
     in_equation_body: bool,
     /// Native MATLAB assignment text is retained for guidance, but declares no symbols.
     in_native_assignment: bool,
+    /// Dynare's reserved block tokens also apply to the opener's options.
+    in_dynare_block: bool,
 }
 
 impl Parser<'_> {
@@ -1030,6 +1033,16 @@ impl Parser<'_> {
 
     fn parse_file(&mut self) {
         while !self.at(TokenKind::Eof) {
+            self.in_dynare_block = BLOCK_OPENERS.iter().any(|word| self.at_ident_ci(word))
+                || [
+                    "mshocks",
+                    "estimated_params",
+                    "model_replace",
+                    "svar_identification",
+                    "conditional_forecast_paths",
+                ]
+                .iter()
+                .any(|word| self.at_ident_ci(word));
             // `model = 0.2;` and `steady = 0.9;` are not assignments and not
             // blocks. The `<INITIAL>` rule returns the keyword, and the grammar
             // wants `;` or `(`.
@@ -8473,6 +8486,9 @@ impl Parser<'_> {
             });
         }
         let name = self.intern.intern(&lexeme);
+        if self.in_dynare_block && lexeme == "dsge_prior_weight" {
+            self.model.reserved_block_symbol_uses.push(tok.span);
+        }
         if self.at(TokenKind::Dot) && self.peek_kind(1) == Some(TokenKind::Ident) {
             self.bump();
             let rhs = self.bump();

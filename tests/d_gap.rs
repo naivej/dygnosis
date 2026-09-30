@@ -6,13 +6,13 @@
 //! **E287** stay the paired Errors on their own surfaces.
 //!
 //! `dsge_prior_weight` is a reserved preprocessor symbol: a declaration list and
-//! `estimated_params` may name it, an expression may not — that use is a parse
+//! `estimated_params` may name it, a block expression may not — that use is a parse
 //! refuse (**E001**), the same family as `var sin;`.
 
 use dygnosis::explain::known_codes;
 use dygnosis::{analyze, check_file, parse, Diagnostic};
 
-const GATE_MSG: &str = "Invalid use of 'dsge_prior_weight': reserved preprocessor symbol, allowed only in a declaration. Choose a different name.";
+const GATE_MSG: &str = "Invalid use of 'dsge_prior_weight' in a Dynare block: reserved preprocessor symbol. Choose a different name.";
 
 fn fixture(rel: &str) -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

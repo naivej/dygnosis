@@ -94,6 +94,29 @@ async fn included_error_is_published_on_child_uri() {
 }
 
 #[tokio::test]
+async fn reserved_block_token_is_published_on_child_uri() {
+    let dir = scratch("reserved-block-token");
+    let root = dir.join("root.mod");
+    let child = dir.join("child.inc");
+    let root_text = "@#include \"child.inc\"\n";
+    let child_text = "var y; model; y=dsge_prior_weight; end;\n";
+    fs::write(&root, root_text).unwrap();
+    fs::write(&child, child_text).unwrap();
+    let (service, _socket) = new_service();
+    service.inner().did_open(open(uri(&root), root_text)).await;
+    let root_items = items(service.inner().diagnostic(pull(uri(&root))).await.unwrap());
+    let child_items = items(service.inner().diagnostic(pull(uri(&child))).await.unwrap());
+    assert!(!has_code(&root_items, "E001"), "{root_items:?}");
+    let error = child_items
+        .iter()
+        .find(|item| item.code == Some(NumberOrString::String("E001".into())))
+        .unwrap();
+    assert_eq!(error.range.start, Position::new(0, 16));
+    assert_eq!(error.range.end, Position::new(0, 33));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn references_follow_known_include_from_root() {
     let dir = scratch("references");
     let root = dir.join("root.mod");
