@@ -153,6 +153,7 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
         Subsample(&'a SubsampleInstruction),
         VarRemove(&'a VarRemovedName),
         RemovedUse(Name, Span),
+        ChangeType(&'a crate::model::ChangeTypeStmt),
         TopAssignment(&'a crate::model::Assignment),
     }
     let mut units: Vec<(u32, Unit)> = Vec::new();
@@ -194,8 +195,27 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
     for row in &model.var_removed {
         units.push((row.statement.start, Unit::VarRemove(row)));
     }
-    for (name, span) in &model.var_removed_model_uses {
-        units.push((span.start, Unit::RemovedUse(*name, *span)));
+    // These captures can compete across backward written macro spans.
+    let first_removed = model
+        .var_removed_model_uses
+        .iter()
+        .min_by_key(|(_, _, order)| *order);
+    let first_change = model
+        .change_type_statements
+        .iter()
+        .filter(|stmt| {
+            stmt.names
+                .iter()
+                .any(|(name, _)| !stmt.known_names.contains(name) || stmt.used_names.contains(name))
+        })
+        .min_by_key(|stmt| stmt.parse_order);
+    match (first_removed, first_change) {
+        (Some((name, span, order)), Some(stmt)) if *order <= stmt.parse_order => {
+            units.push((span.start, Unit::RemovedUse(*name, *span)))
+        }
+        (_, Some(stmt)) => units.push((stmt.span.start, Unit::ChangeType(stmt))),
+        (Some((name, span, _)), None) => units.push((span.start, Unit::RemovedUse(*name, *span))),
+        _ => {}
     }
     units.sort_by_key(|(at, _)| *at);
     let mut subsample_ranges: HashMap<(Name, Option<Name>), HashSet<Name>> = HashMap::new();
@@ -236,6 +256,21 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
             Unit::RemovedUse(name, span) => {
                 push(out, span, "E426", format!("Variable '{}' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement", model.name(name)));
                 true
+            }
+            Unit::ChangeType(statement) => {
+                let refusal = statement.names.iter().find_map(|(name, span)| {
+                    if !statement.known_names.contains(name) {
+                        Some((*span, "E295", format!("Unknown variable {}", model.name(*name))))
+                    } else if statement.used_names.contains(name) {
+                        Some((statement.span, "E296", format!("You cannot modify the type of symbol {} after having used it in an expression", model.name(*name))))
+                    } else { None }
+                });
+                if let Some((span, code, message)) = refusal {
+                    push(out, span, code, message);
+                    true
+                } else {
+                    false
+                }
             }
             Unit::TopAssignment(assignment) => check_top_assignment(model, assignment, out),
         };

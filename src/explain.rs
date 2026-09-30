@@ -1788,7 +1788,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E426", ExplainEntry {
         title: "Removed variable used in a model expression",
-        body: "A model expression uses a variable after `var_remove` changed its type to excluded. Dynare refuses: `Variable 'c' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement`. A use written before the removal is allowed.\n\n**Fix**\n\nRemove the `var_remove` statement or stop using that variable after it.",
+        body: "A model expression uses a variable after `model_remove` or `var_remove` changed its type to excluded. This includes planner objectives and Ramsey constraints. Dynare refuses: `Variable 'c' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement`. A use written before the removal is allowed.\n\n**Fix**\n\nKeep the variable in the model, or stop using it after its removal.",
         kind: ExplainKind::Shared,
     }),
     ("E427", ExplainEntry {

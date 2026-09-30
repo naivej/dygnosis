@@ -5921,6 +5921,7 @@ impl Parser<'_> {
 
     /// `change_type(type) name_list;`
     fn parse_change_type(&mut self) {
+        let parse_order = self.i;
         let start = self.current_start();
         self.bump();
         let mut new_type = None;
@@ -5968,6 +5969,11 @@ impl Parser<'_> {
                 .map(|(name, _)| *name)
                 .collect();
             let kind = change_type_event_kind(new_type);
+            let used_names = names
+                .iter()
+                .filter(|(name, _)| self.symbol_used_in_expression_before(*name, start))
+                .map(|(name, _)| *name)
+                .collect();
             let known_names = names
                 .iter()
                 .filter(|(name, _)| self.symbol_declared_before(*name, start))
@@ -5988,7 +5994,9 @@ impl Parser<'_> {
                 }
             }
             self.model.change_type_statements.push(ChangeTypeStmt {
+                parse_order,
                 known_names,
+                used_names,
                 new_type,
                 names,
                 span: statement,
@@ -6007,6 +6015,11 @@ impl Parser<'_> {
         self.generated_policy_discount == Some(name)
             || self
                 .model
+                .excluded_endogenous
+                .iter()
+                .any(|decl| decl.name == name)
+            || self
+                .model
                 .endogenous
                 .iter()
                 .chain(&self.model.exogenous)
@@ -6016,10 +6029,27 @@ impl Parser<'_> {
     }
 
     fn symbol_used_in_expression_before(&self, name: Name, pos: u32) -> bool {
+        if self
+            .model
+            .surgery_exits
+            .iter()
+            .any(|exit| exit.name == name)
+        {
+            return true;
+        }
         let mut ids: Vec<ExprId> = Vec::new();
         for eq in &self.model.equations {
             ids.extend(eq.lhs_expr);
             ids.extend(eq.rhs_expr);
+        }
+        for removed in self
+            .model
+            .equation_surgery
+            .iter()
+            .flat_map(|statement| &statement.removed)
+        {
+            ids.extend(removed.equation.lhs_expr);
+            ids.extend(removed.equation.rhs_expr);
         }
         for var in &self.model.nonstationary_vars {
             ids.extend(var.deflator);
@@ -6137,6 +6167,16 @@ impl Parser<'_> {
             first_span: first_tok.span,
             second: second.map(|(id, _)| id),
             second_span: second.map(|(_, span)| span),
+            first_kind: self
+                .intern
+                .lookup(&first_lex)
+                .filter(|name| self.is_known_symbol(*name))
+                .and_then(|name| self.policy_symbol_kind(name)),
+            second_kind: second.and_then(|(name, _)| {
+                self.is_known_symbol(name)
+                    .then(|| self.policy_symbol_kind(name))
+                    .flatten()
+            }),
             expr,
             span: Span {
                 start: first_tok.span.start,
@@ -8811,15 +8851,15 @@ impl Parser<'_> {
     }
 
     fn alloc(&mut self, kind: ExprKind, span: Span) -> ExprId {
-        if self.in_equation_body {
+        if self.model_function_context {
             if let ExprKind::Ident {
                 name, ident_span, ..
             } = &kind
             {
-                if self.model.var_removed.iter().any(|removed| {
-                    removed.name == *name && removed.statement.end <= ident_span.start
-                }) {
-                    self.model.var_removed_model_uses.push((*name, *ident_span));
+                if self.model.final_symbol_kind(*name) == Some("excluded") {
+                    self.model
+                        .var_removed_model_uses
+                        .push((*name, *ident_span, self.i));
                 }
             }
         }

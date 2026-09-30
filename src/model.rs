@@ -395,8 +395,11 @@ pub enum ChangeTypeKind {
 /// One `change_type(type) name_list;` statement.
 #[derive(Clone, Debug)]
 pub struct ChangeTypeStmt {
+    pub parse_order: usize,
     /// Names already declared in effective parser order, including generated names.
     pub known_names: Vec<Name>,
+    /// Names already used before this type-change statement.
+    pub used_names: Vec<Name>,
     pub new_type: ChangeTypeKind,
     /// Listed names with their identifier spans, source order.
     pub names: Vec<(Name, Span)>,
@@ -430,6 +433,9 @@ pub struct OptimWeight {
     pub first_span: Span,
     pub second: Option<Name>,
     pub second_span: Option<Span>,
+    /// Types captured after the row's expression, in effective parser order.
+    pub first_kind: Option<&'static str>,
+    pub second_kind: Option<&'static str>,
     pub expr: Option<ExprId>,
     /// Whole row through `;`.
     pub span: Span,
@@ -844,8 +850,8 @@ pub struct Model {
     pub var_removed: Vec<VarRemovedName>,
     /// Names declared with `model_local_variable`, separate from `#` rows.
     pub model_local_variables: Vec<Decl>,
-    /// Uses of a name after `var_remove` in a model expression.
-    pub var_removed_model_uses: Vec<(Name, Span)>,
+    /// Uses captured while the name is excluded in a model-expression context.
+    pub var_removed_model_uses: Vec<(Name, Span, usize)>,
     /// Every name a `model_remove` took out of the model, file order. A check that reads
     /// a name's type reads it as of the statement it is looking at: 7.1 validated that
     /// statement while the name was still endogenous.

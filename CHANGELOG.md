@@ -2,6 +2,7 @@
 
 ## v0.10.2
 
+- Names excluded before optim_weights report E317; later excluded planner or Ramsey-constraint references report E426. Earlier accepted uses keep their removal warrants.
 - The policy-generated discount parameter is known to later command lists, assignments, and duplicate checks. Its implicit creation keeps written declarations and counts intact.
 - Non-model expression calls register unknown functions and distinguish integer arguments from variable timing. A later declaration or command list uses their known function kind; valid calls no longer get E279/E280 as bare function-name uses.
 - `dsge_prior_weight` is reserved in Dynare blocks. Accepted parameter-assignment and policy-option expressions no longer get E001 for that name.

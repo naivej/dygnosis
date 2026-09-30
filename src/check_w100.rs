@@ -125,7 +125,13 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
                 && !locals.contains(&r.name)
                 && !matches!(model.final_kind(r.name), Some("var" | "parameters"))
         });
-        if exo_in_planner {
+        let excluded_in_planner = model.exprs.walk_idents(id).any(|r| {
+            model
+                .var_removed_model_uses
+                .iter()
+                .any(|(name, span, _)| *name == r.name && *span == r.span)
+        });
+        if exo_in_planner && !excluded_in_planner {
             diagnostics.push(Diagnostic::new(
                 planner_span,
                 Severity::Error,

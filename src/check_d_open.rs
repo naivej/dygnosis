@@ -17,7 +17,6 @@ use crate::workspace::Workspace;
 pub fn check_d_open(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     out.extend(check_epilogue(model));
-    out.extend(check_change_type(model));
     out.extend(check_ramsey_statements(model));
     out.extend(check_dsge_prior_weight(model));
     out.extend(check_includepath_not_string(model));
@@ -239,13 +238,6 @@ fn ident_uses(model: &Model, ids: &[ExprId]) -> Vec<(Name, Span)> {
     out
 }
 
-/// True when `name` appears in an expression parsed before `pos`.
-fn used_in_expression_before(model: &Model, name: Name, pos: u32) -> bool {
-    ident_uses(model, &outside_expr_ids(model))
-        .into_iter()
-        .any(|(candidate, span)| candidate == name && span.start < pos)
-}
-
 fn check_epilogue(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for (name, span) in &model.epilogue_undeclared_calls {
@@ -418,33 +410,6 @@ fn walk_nodes<'a>(model: &'a Model, id: ExprId, f: &mut impl FnMut(&'a crate::ex
         ExprKind::Expectation { arg, .. } => walk_nodes(model, *arg, f),
         ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String | ExprKind::Error => {}
     }
-}
-
-fn check_change_type(model: &Model) -> Vec<Diagnostic> {
-    let mut out = Vec::new();
-    for stmt in &model.change_type_statements {
-        for (name, span) in &stmt.names {
-            if !stmt.known_names.contains(name) {
-                out.push(err(
-                    *span,
-                    "E295",
-                    format!("Unknown variable {}", model.name(*name)),
-                ));
-                continue;
-            }
-            if used_in_expression_before(model, *name, stmt.span.start) {
-                out.push(err(
-                    stmt.span,
-                    "E296",
-                    format!(
-                        "You cannot modify the type of symbol {} after having used it in an expression",
-                        model.name(*name)
-                    ),
-                ));
-            }
-        }
-    }
-    out
 }
 
 fn check_ramsey_statements(model: &Model) -> Vec<Diagnostic> {
@@ -877,10 +842,6 @@ fn min_model_lag(model: &Model, name: Name) -> i32 {
 }
 
 fn check_optim_weights(model: &Model) -> Vec<Diagnostic> {
-    let endo = name_set(model.endogenous.iter());
-    let params = name_set(model.parameters.iter());
-    let exo = name_set(model.exogenous.iter());
-    let exo_det = name_set(model.deterministic_exogenous.iter());
     let mut singles: HashSet<Name> = HashSet::new();
     let mut pairs: HashSet<(Name, Name)> = HashSet::new();
     let mut out = Vec::new();
@@ -913,18 +874,24 @@ fn check_optim_weights(model: &Model) -> Vec<Diagnostic> {
                 ));
             }
         }
-        for (name, span) in [(row.first, row.first_span)]
+        for (name, span, kind) in [(row.first, row.first_span, row.first_kind)]
             .into_iter()
-            .chain(row.second.zip(row.second_span))
+            .chain(
+                row.second
+                    .zip(row.second_span)
+                    .map(|(name, span)| (name, span, row.second_kind)),
+            )
         {
-            if endo.contains(&name) {
+            if kind == Some("var") {
                 continue;
             }
-            // 7.1 read this row while the symbol was still endogenous (close call 1a).
-            if model.surgery_exit_after(name, span.start) {
-                continue;
-            }
-            if params.contains(&name) || exo.contains(&name) || exo_det.contains(&name) {
+            if kind.is_none() {
+                out.push(err(
+                    span,
+                    "E058",
+                    format!("Unknown symbol: {}.", model.name(name)),
+                ));
+            } else {
                 out.push(err(
                     span,
                     "E317",
@@ -1030,6 +997,14 @@ fn check_ramsey_constraints(model: &Model) -> Vec<Diagnostic> {
             continue;
         };
         // The matcher reads each name as of this row's position (close call 1a).
+        if model.exprs.walk_idents(id).any(|r| {
+            model
+                .var_removed_model_uses
+                .iter()
+                .any(|(name, span, _)| *name == r.name && *span == r.span)
+        }) {
+            continue;
+        }
         match match_ramsey_constraint(model, id, row.span.start) {
             RamseyMatch::Triple(name) => {
                 if !seen.insert(name) {
