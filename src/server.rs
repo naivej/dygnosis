@@ -2023,17 +2023,24 @@ fn markdown_hover(value: String, range: Option<Range>) -> Hover {
 }
 
 fn decl_hover_markdown(model: &Model, word: &str) -> Option<String> {
-    if find_named(&model.endogenous, model, word).is_some() {
+    let name = model.intern.lookup(word)?;
+    let kind = model
+        .final_symbol_kind(name)
+        .or_else(|| model.final_kind(name));
+    if kind == Some("var") {
         let mut parts = vec![format!("**Endogenous variable**: `{word}`")];
         if let Some(info) = classify_variable_timing(model).get(word) {
             parts.push(format_timing_line(info));
         }
         return Some(parts.join("\n\n"));
     }
-    if find_named(&model.exogenous, model, word).is_some() {
+    if kind == Some("varexo_det") {
+        return Some(format!("**Exogenous deterministic variable**: `{word}`"));
+    }
+    if kind == Some("varexo") {
         return Some(format!("**Exogenous variable**: `{word}`"));
     }
-    if find_named(&model.parameters, model, word).is_some() {
+    if kind == Some("parameters") {
         let mut parts = vec![format!("**Parameter**: `{word}`")];
         match assigned_number(model, word) {
             Some(n) => parts.push(format!("Value: `{n}`")),

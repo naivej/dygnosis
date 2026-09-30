@@ -40,7 +40,7 @@ pub struct EquationIdent {
     pub timing_class: Option<TimingClass>,
 }
 
-/// Declaration class, first hit in this order.
+/// Final symbol class after successful type changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IdentClass {
     Endogenous,
@@ -223,18 +223,15 @@ fn collapsed_equation_count(model: &Model) -> usize {
 }
 
 fn ident_class(model: &Model, name: crate::intern::Name) -> IdentClass {
-    if model.endogenous.iter().any(|d| d.name == name) {
-        IdentClass::Endogenous
-    } else if model.deterministic_exogenous.iter().any(|d| d.name == name) {
-        // `parse` clones varexo_det into `exogenous`; classify det first or
-        // every det name would look like varexo.
-        IdentClass::VarexoDet
-    } else if model.exogenous.iter().any(|d| d.name == name) {
-        IdentClass::Varexo
-    } else if model.parameters.iter().any(|d| d.name == name) {
-        IdentClass::Parameter
-    } else {
-        IdentClass::Undeclared
+    match model
+        .final_symbol_kind(name)
+        .or_else(|| model.final_kind(name))
+    {
+        Some("var") => IdentClass::Endogenous,
+        Some("varexo_det") => IdentClass::VarexoDet,
+        Some("varexo") => IdentClass::Varexo,
+        Some("parameters") => IdentClass::Parameter,
+        _ => IdentClass::Undeclared,
     }
 }
 

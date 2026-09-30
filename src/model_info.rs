@@ -57,9 +57,9 @@ fn classify_timing(model: &Model, include_heterogeneous: bool) -> HashMap<String
     }
     let mut out = HashMap::new();
     for decl in model
-        .endogenous
-        .iter()
-        .filter(|decl| include_heterogeneous || decl.heterogeneity.is_none())
+        .final_decls(&["var"])
+        .into_iter()
+        .filter(|decl| include_heterogeneous || model.final_heterogeneity(decl).is_none())
     {
         let name = model.name(decl.name).to_string();
         let mut offs: Vec<i32> = offsets
@@ -154,20 +154,14 @@ pub fn structure_summary(model: &Model) -> StructureSummary {
         }
     }
     StructureSummary {
-        endogenous: model
-            .endogenous
-            .iter()
-            .filter(|decl| decl.heterogeneity.is_none())
-            .map(|decl| decl.name)
-            .collect::<HashSet<_>>()
-            .len(),
+        endogenous: model.final_endogenous().len(),
         predetermined,
         forward_looking,
         static_vars,
         varexo: model
-            .exogenous
-            .iter()
-            .filter(|decl| decl.heterogeneity.is_none())
+            .final_decls(&["varexo", "varexo_det"])
+            .into_iter()
+            .filter(|decl| model.final_heterogeneity(decl).is_none())
             .count(),
         max_lead,
         max_lag,

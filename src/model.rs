@@ -1909,19 +1909,34 @@ impl Model {
     /// name. Declarations stay on their written list, so a `change_type(var)`
     /// parameter or exogenous name is endogenous here and a retyped `var` is not.
     pub fn final_endogenous(&self) -> Vec<&Decl> {
-        self.final_decls("var")
+        self.final_decls(&["var"])
             .into_iter()
-            .filter(|decl| decl.heterogeneity.is_none())
+            .filter(|decl| self.final_heterogeneity(decl).is_none())
             .collect()
+    }
+
+    /// A successful type change makes a heterogeneous declaration ordinary.
+    /// Keep the written dimension on `Decl` for source-oriented reads.
+    pub(crate) fn final_heterogeneity(&self, decl: &Decl) -> Option<Name> {
+        let changed = self
+            .symbol_type_events
+            .iter()
+            .any(|event| event.name == decl.name && event.changed);
+        if changed {
+            None
+        } else {
+            decl.heterogeneity.map(|(name, _)| name)
+        }
     }
 
     /// Parameter declarations by final type, first declaration per name, the
     /// same way `final_endogenous` reads endogenous ones.
     pub fn final_parameters(&self) -> Vec<&Decl> {
-        self.final_decls("parameters")
+        self.final_decls(&["parameters"])
     }
 
-    fn final_decls(&self, kind: &str) -> Vec<&Decl> {
+    /// First declaration per name whose final type is one of `kinds`.
+    pub(crate) fn final_decls(&self, kinds: &[&str]) -> Vec<&Decl> {
         let mut final_kind = HashMap::new();
         for event in &self.symbol_type_events {
             final_kind.insert(event.name, event.kind);
@@ -1934,14 +1949,14 @@ impl Model {
         ];
         let (written, other): (Vec<_>, Vec<_>) = lists
             .into_iter()
-            .partition(|(_, written_kind)| *written_kind == kind);
+            .partition(|(_, written_kind)| kinds.contains(written_kind));
         let mut seen = HashSet::new();
         written
             .into_iter()
             .chain(other)
             .flat_map(|(list, written_kind)| list.iter().map(move |decl| (decl, written_kind)))
             .filter(|(decl, written_kind)| {
-                final_kind.get(&decl.name).copied().unwrap_or(written_kind) == kind
+                kinds.contains(&final_kind.get(&decl.name).copied().unwrap_or(written_kind))
             })
             .map(|(decl, _)| decl)
             .filter(|decl| seen.insert(decl.name))

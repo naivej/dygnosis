@@ -719,24 +719,21 @@ fn mcp_parse_model(
 }
 
 fn model_info_json(model: &Model) -> Value {
-    let mut seen_endogenous = HashSet::new();
     let endogenous: Vec<String> = model
-        .endogenous
-        .iter()
-        .filter(|decl| decl.heterogeneity.is_none())
-        .filter(|decl| seen_endogenous.insert(decl.name))
+        .final_endogenous()
+        .into_iter()
         .map(|d| model.name(d.name).to_string())
         .collect();
     let exogenous: Vec<String> = model
-        .exogenous
-        .iter()
-        .filter(|decl| decl.heterogeneity.is_none())
+        .final_decls(&["varexo", "varexo_det"])
+        .into_iter()
+        .filter(|decl| model.final_heterogeneity(decl).is_none())
         .map(|d| model.name(d.name).to_string())
         .collect();
     let parameters: Vec<String> = model
-        .parameters
-        .iter()
-        .filter(|decl| decl.heterogeneity.is_none())
+        .final_parameters()
+        .into_iter()
+        .filter(|decl| model.final_heterogeneity(decl).is_none())
         .map(|d| model.name(d.name).to_string())
         .collect();
     let timing = classify_aggregate_variable_timing(model);
@@ -757,24 +754,22 @@ fn model_info_json(model: &Model) -> Value {
     let heterogeneous_dimensions: Vec<Value> = heterogeneous_dimension_names(model)
         .into_iter()
         .map(|dimension| {
-            let mut seen_endogenous = HashSet::new();
             let names: Vec<String> = model
-                .endogenous
-                .iter()
-                .filter(|decl| decl.heterogeneity.map(|(name, _)| name) == Some(dimension))
-                .filter(|decl| seen_endogenous.insert(decl.name))
+                .final_decls(&["var"])
+                .into_iter()
+                .filter(|decl| model.final_heterogeneity(decl) == Some(dimension))
                 .map(|decl| model.name(decl.name).to_string())
                 .collect();
             let shocks: Vec<String> = model
-                .exogenous
-                .iter()
-                .filter(|decl| decl.heterogeneity.map(|(name, _)| name) == Some(dimension))
+                .final_decls(&["varexo", "varexo_det"])
+                .into_iter()
+                .filter(|decl| model.final_heterogeneity(decl) == Some(dimension))
                 .map(|decl| model.name(decl.name).to_string())
                 .collect();
             let params: Vec<String> = model
-                .parameters
-                .iter()
-                .filter(|decl| decl.heterogeneity.map(|(name, _)| name) == Some(dimension))
+                .final_parameters()
+                .into_iter()
+                .filter(|decl| model.final_heterogeneity(decl) == Some(dimension))
                 .map(|decl| model.name(decl.name).to_string())
                 .collect();
             let mut static_vars = Vec::new();
