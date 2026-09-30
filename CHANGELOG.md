@@ -5,6 +5,7 @@
 - Equation symbol classes, timing, model counts, and hover follow each name's final type after `change_type`. Declaration locations still point at the written declaration. Hover distinguishes `varexo_det` from ordinary `varexo`.
 - `E251`, `E182`, and `E255` use a name's type after `change_type`, not the list where it was declared. A `varexo` retyped to a parameter is no longer an exogenous in the planner objective or in `occbin_constraints`, and a parameter retyped to `varexo` is. A `var` retyped to a parameter can be used in `osr_params_bounds`; a parameter retyped to `var` cannot.
 - Policy instruments use their type when the policy command is read. Undeclared names use `E101`; declared names of the wrong type use `E317` with `N is not endogenous.` A later declaration or type change cannot validate an earlier instrument. Repeated macro iterations retain their own type checks.
+- `discretionary_policy` reports `E378` when an existing `optimal_policy_discount_factor` is not a parameter at the command. That earlier refusal withholds instrument errors on the same command. Native locals introduced by preceding expressions or by the command's options use the declared wrong-type instrument sentence.
 - A comment that mentions `differentiate_forward_vars` no longer hides the equation-count error. The option still withholds `E188` when it is written on `model(…)` or `model_options(…)`, because that option can add helper variables.
 
 ## v0.10.1

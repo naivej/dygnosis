@@ -180,6 +180,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         intern: Interner::default(),
         model: Model::default(),
         symbol_roles: HashMap::new(),
+        generated_policy_discount: None,
         eq_token_ranges: Vec::new(),
         hetero_eq_token_ranges: Vec::new(),
         verbatim_ranges: Vec::new(),
@@ -964,6 +965,8 @@ struct Parser<'a> {
     model: Model,
     /// Current symbol roles in effective token order (macro copies reuse source spans).
     symbol_roles: HashMap<Name, EstimatedNameRole>,
+    /// A policy-created parameter is known to later expressions, without a written declaration.
+    generated_policy_discount: Option<Name>,
     eq_token_ranges: Vec<Range<usize>>,
     hetero_eq_token_ranges: Vec<Vec<Range<usize>>>,
     /// Token ranges of `verbatim; ? end;` bodies, whose text 7.1 passes through raw.
@@ -6574,6 +6577,7 @@ impl Parser<'_> {
 
     fn parse_policy_command(&mut self, command: PolicyCommand) {
         let tok = self.bump();
+        let first_instrument = self.model.instrument_uses.len();
         self.model.policy_commands.push(command);
         if self.model.policy_command_span.is_none() {
             self.model.policy_command_span = Some(tok.span);
@@ -6590,6 +6594,23 @@ impl Parser<'_> {
             self.parse_policy_options(command, tok.span)
         } else {
             (false, None)
+        };
+        let discount_name = self.intern.intern("optimal_policy_discount_factor");
+        if self.policy_symbol_kind(discount_name) == Some("parameters")
+            && !self.is_known_symbol(discount_name)
+        {
+            self.generated_policy_discount = Some(discount_name);
+        }
+        // Option expressions may introduce mod-file locals before official validation.
+        for i in first_instrument..self.model.instrument_uses.len() {
+            let name = self.model.instrument_uses[i].name;
+            self.model.instrument_uses[i].kind = self.policy_symbol_kind(name);
+        }
+        let discount_parameter_valid = if command == PolicyCommand::DiscretionaryPolicy {
+            let name = self.intern.intern("optimal_policy_discount_factor");
+            self.policy_symbol_kind(name) == Some("parameters")
+        } else {
+            true
         };
         if command == PolicyCommand::DiscretionaryPolicy {
             self.model.discretionary_has_instruments_option |= saw_instruments;
@@ -6609,6 +6630,7 @@ impl Parser<'_> {
             .policy_command_statements
             .push(PolicyCommandStatement {
                 command,
+                discount_parameter_valid,
                 span: Span {
                     start: tok.span.start,
                     end,
@@ -6722,7 +6744,8 @@ impl Parser<'_> {
                     matches!(self.model.exprs.get(expr).kind, ExprKind::Ident { name, .. } if name == id)
                 })
             });
-            if model_local || !matches!(self.removal_role(id), EstimatedNameRole::Unknown) {
+            if model_local || self.model.mod_file_locals.contains(&id)
+                || !matches!(self.removal_role(id), EstimatedNameRole::Unknown) {
                 Some("other")
             } else if self.intern.get(id) == "optimal_policy_discount_factor" {
                 // The official command creates this parameter before validating instruments.
@@ -6764,6 +6787,7 @@ impl Parser<'_> {
                 span: tok.span,
                 command_span,
                 kind,
+                command_index: self.model.policy_command_statements.len(),
             });
         }
     }
@@ -8596,14 +8620,16 @@ impl Parser<'_> {
     }
 
     fn is_known_symbol(&self, name: Name) -> bool {
-        self.model
-            .endogenous
-            .iter()
-            .chain(&self.model.exogenous)
-            .chain(&self.model.deterministic_exogenous)
-            .chain(&self.model.parameters)
-            .chain(&self.model.predetermined)
-            .any(|d| d.name == name)
+        self.generated_policy_discount == Some(name)
+            || self
+                .model
+                .endogenous
+                .iter()
+                .chain(&self.model.exogenous)
+                .chain(&self.model.deterministic_exogenous)
+                .chain(&self.model.parameters)
+                .chain(&self.model.predetermined)
+                .any(|d| d.name == name)
             || self.model.mod_file_locals.contains(&name)
             || self.model.trend_vars.iter().any(|trend| trend.name == name)
             || self.model.external_function_names.contains(&name)

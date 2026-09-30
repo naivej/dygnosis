@@ -1531,8 +1531,8 @@ Name two or more parameters, or use the single ``name.prior(…)`` form.",
         kind: ExplainKind::Shared,
     }),
     ("E378", ExplainEntry {
-        title: "assignment or prior/options head is not a parameter",
-        body: "A top-level `symbol = …;` assignment, or the head of a plain or bracketed ``prior`` or plain ``options`` statement, names a symbol that is not a parameter. Dynare refuses while parsing with `y is not a parameter`. Named subsample heads use the same test. The ``std(…)`` and ``corr(…)`` heads print their own sentence instead, and a line whose head the file never declares is native MATLAB text that 7.2 accepts.
+        title: "Name is not a parameter",
+        body: "A top-level `symbol = …;` assignment, or the head of a plain or bracketed ``prior`` or plain ``options`` statement, names a symbol that is not a parameter. Dynare refuses while parsing with `y is not a parameter`. Named subsample heads use the same test. `discretionary_policy` initializes `optimal_policy_discount_factor` before validating instruments and requires that name to be a parameter at the command. A later `change_type` does not validate an earlier initialization. The ``std(…)`` and ``corr(…)`` heads print their own sentence instead, and a line whose head the file never declares is native MATLAB text that 7.2 accepts.
 
 **Fix**
 

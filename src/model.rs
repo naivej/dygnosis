@@ -366,6 +366,8 @@ pub struct PolicyCommandStatement {
     pub span: Span,
     /// `planner_discount=` on this statement (`ramsey_model` / `ramsey_policy` only).
     pub planner_discount: Option<Span>,
+    /// The discretionary command can initialize its discount parameter.
+    pub discount_parameter_valid: bool,
 }
 
 /// An instrument occurrence with the type it had when its command was parsed.
@@ -375,6 +377,8 @@ pub struct PolicyInstrumentUse {
     pub span: Span,
     pub command_span: Span,
     pub kind: Option<&'static str>,
+    /// Statement identity in parser order; written spans may repeat in macros.
+    pub command_index: usize,
 }
 
 /// Target type of a `change_type(…)` statement.

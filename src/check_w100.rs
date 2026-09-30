@@ -152,27 +152,42 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
 
     let anchor = policy_anchor;
 
-    for instrument in &model.instrument_uses {
-        if instrument.kind == Some("var") {
-            continue;
+    'policy_checks: for (index, statement) in model.policy_command_statements.iter().enumerate() {
+        if !statement.discount_parameter_valid {
+            diagnostics.push(Diagnostic::new(
+                statement.span,
+                Severity::Error,
+                "E378",
+                "optimal_policy_discount_factor is not a parameter",
+            ));
+            break;
         }
-        let name = model.name(instrument.name);
-        let (span, code, message) = if instrument.kind.is_none() {
-            (
-                instrument.command_span,
-                "E101",
-                format!("Policy instrument '{name}' is not a declared endogenous variable."),
-            )
-        } else {
-            (
-                instrument.span,
-                "E317",
-                format!("{name} is not endogenous."),
-            )
-        };
-        diagnostics.push(Diagnostic::new(span, Severity::Error, code, message));
-        // The pinned parser stops at the first invalid instrument.
-        break;
+        for instrument in model
+            .instrument_uses
+            .iter()
+            .filter(|use_| use_.command_index == index)
+        {
+            if instrument.kind == Some("var") {
+                continue;
+            }
+            let name = model.name(instrument.name);
+            let (span, code, message) = if instrument.kind.is_none() {
+                (
+                    instrument.command_span,
+                    "E101",
+                    format!("Policy instrument '{name}' is not a declared endogenous variable."),
+                )
+            } else {
+                (
+                    instrument.span,
+                    "E317",
+                    format!("{name} is not endogenous."),
+                )
+            };
+            diagnostics.push(Diagnostic::new(span, Severity::Error, code, message));
+            // The pinned parser stops at the first invalid instrument.
+            break 'policy_checks;
+        }
     }
 
     if let Some(d) = model.planner_discount {
