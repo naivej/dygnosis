@@ -368,6 +368,8 @@ pub struct PolicyCommandStatement {
     pub planner_discount: Option<Span>,
     /// The discretionary command can initialize its discount parameter.
     pub discount_parameter_valid: bool,
+    /// Whether the discount symbol already existed after reading these options.
+    pub discount_symbol_existed: bool,
 }
 
 /// An instrument occurrence with the type it had when its command was parsed.
@@ -393,6 +395,8 @@ pub enum ChangeTypeKind {
 /// One `change_type(type) name_list;` statement.
 #[derive(Clone, Debug)]
 pub struct ChangeTypeStmt {
+    /// Names already declared in effective parser order, including generated names.
+    pub known_names: Vec<Name>,
     pub new_type: ChangeTypeKind,
     /// Listed names with their identifier spans, source order.
     pub names: Vec<(Name, Span)>,

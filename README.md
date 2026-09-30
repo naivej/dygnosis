@@ -67,6 +67,7 @@ Equation symbol classes, model counts, timing, and hover follow the final type a
 
 Policy instruments must be endogenous when their policy command is read. Undeclared instruments use `E101`; declared names of the wrong type use `E317`. Put declarations and any required `change_type(var)` before the command.
 `discretionary_policy` also requires an existing `optimal_policy_discount_factor` to be a parameter; otherwise it reports `E378` before checking instruments.
+The parameter created by an earlier policy command is known to later assignments, lists, and `change_type`. Ramsey's `planner_discount` option conflicts with that earlier name too.
 
 Command symbol lists use `E240` for native locals introduced by expressions such as `p=helper;`. A native MATLAB assignment such as `helper=3;` does not declare that name to Dynare.
 These lists check final types after `change_type`; a successful restoration clears the excluded type. Heterogeneous symbols have their own type until `change_type` makes them ordinary.

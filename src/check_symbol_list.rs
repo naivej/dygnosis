@@ -1,6 +1,6 @@
 //! Trailing / `osr_params` symbol lists: undeclared, wrong type, `stoch_simul` duplicates.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::expr::ExprKind;
@@ -39,7 +39,7 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
     // duplicate still warns after an auxiliary-name hit stops that list.
     warn_stoch_duplicates(model, &mut out);
     let declared = declared_names(model);
-    let endogenous: HashSet<Name> = model
+    let mut endogenous: HashSet<Name> = model
         .final_endogenous()
         .into_iter()
         .map(|d| d.name)
@@ -56,12 +56,46 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
     );
     let mut endogenous_epilogue = endogenous.clone();
     endogenous_epilogue.extend(model.epilogue.iter().map(|a| a.name));
-    let parameters: HashSet<Name> = model
+    let mut parameters: HashSet<Name> = model
         .final_parameters()
         .into_iter()
         .filter(|d| model.final_heterogeneity(d).is_none())
         .map(|d| d.name)
         .collect();
+    // Generated parameters have type events but no written declaration.
+    let heterogeneous: HashSet<Name> = model
+        .endogenous
+        .iter()
+        .chain(&model.exogenous)
+        .chain(&model.deterministic_exogenous)
+        .chain(&model.parameters)
+        .filter(|decl| model.final_heterogeneity(decl).is_some())
+        .map(|decl| decl.name)
+        .collect();
+    let final_types: HashMap<_, _> = model
+        .symbol_type_events
+        .iter()
+        .map(|event| (event.name, event.kind))
+        .collect();
+    for (name, kind) in final_types {
+        if heterogeneous.contains(&name) {
+            continue;
+        }
+        match kind {
+            "parameters" => {
+                parameters.insert(name);
+            }
+            "var" => {
+                endogenous.insert(name);
+                endogenous_exogenous.insert(name);
+                endogenous_epilogue.insert(name);
+            }
+            "varexo" => {
+                endogenous_exogenous.insert(name);
+            }
+            _ => {}
+        }
+    }
     // 7.1's aux hit returns from `checkPass` outright, so the rest of that
     // statement's list is never read. Remembering only that one statement keeps
     // the later statements' lists in play. The duplicate warning above is not
@@ -178,6 +212,7 @@ fn declared_names(model: &Model) -> HashSet<Name> {
         .chain(model.trend_vars.iter().map(|t| t.name))
         .chain(model.external_function_names.iter().copied())
         .chain(model.mod_file_locals.iter().copied())
+        .chain(model.symbol_type_events.iter().map(|event| event.name))
         .chain(
             model
                 .equations

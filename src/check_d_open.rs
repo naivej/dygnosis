@@ -424,7 +424,7 @@ fn check_change_type(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for stmt in &model.change_type_statements {
         for (name, span) in &stmt.names {
-            if !declared_before(model, *name, span.start) {
+            if !stmt.known_names.contains(name) {
                 out.push(err(
                     *span,
                     "E295",
@@ -492,10 +492,7 @@ fn check_ramsey_statements(model: &Model) -> Vec<Diagnostic> {
         let Some(option_span) = stmt.planner_discount else {
             continue;
         };
-        let declared = model.parameters.iter().any(|d| {
-            model.name(d.name) == "optimal_policy_discount_factor" && d.span.start < stmt.span.start
-        });
-        if !declared {
+        if !stmt.discount_symbol_existed {
             continue;
         }
         let (code, prefix) = match stmt.command {

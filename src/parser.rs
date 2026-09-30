@@ -5968,6 +5968,11 @@ impl Parser<'_> {
                 .map(|(name, _)| *name)
                 .collect();
             let kind = change_type_event_kind(new_type);
+            let known_names = names
+                .iter()
+                .filter(|(name, _)| self.symbol_declared_before(*name, start))
+                .map(|(name, _)| *name)
+                .collect();
             for name in restored {
                 if self.symbol_roles.contains_key(&name) {
                     self.symbol_roles.insert(name, role);
@@ -5983,6 +5988,7 @@ impl Parser<'_> {
                 }
             }
             self.model.change_type_statements.push(ChangeTypeStmt {
+                known_names,
                 new_type,
                 names,
                 span: statement,
@@ -5998,13 +6004,15 @@ impl Parser<'_> {
     }
 
     fn symbol_declared_before(&self, name: Name, pos: u32) -> bool {
-        self.model
-            .endogenous
-            .iter()
-            .chain(&self.model.exogenous)
-            .chain(&self.model.deterministic_exogenous)
-            .chain(&self.model.parameters)
-            .any(|decl| decl.name == name && decl.span.start < pos)
+        self.generated_policy_discount == Some(name)
+            || self
+                .model
+                .endogenous
+                .iter()
+                .chain(&self.model.exogenous)
+                .chain(&self.model.deterministic_exogenous)
+                .chain(&self.model.parameters)
+                .any(|decl| decl.name == name && decl.span.start < pos)
     }
 
     fn symbol_used_in_expression_before(&self, name: Name, pos: u32) -> bool {
@@ -6638,10 +6646,14 @@ impl Parser<'_> {
             (false, None)
         };
         let discount_name = self.intern.intern("optimal_policy_discount_factor");
+        let discount_symbol_existed = self.is_known_symbol(discount_name);
         if self.policy_symbol_kind(discount_name) == Some("parameters")
             && !self.is_known_symbol(discount_name)
         {
             self.generated_policy_discount = Some(discount_name);
+            self.record_symbol_declaration(discount_name, tok.span, "parameters");
+            self.symbol_roles
+                .insert(discount_name, EstimatedNameRole::Parameter);
         }
         // Option expressions may introduce mod-file locals before official validation.
         for i in first_instrument..self.model.instrument_uses.len() {
@@ -6673,6 +6685,7 @@ impl Parser<'_> {
             .push(PolicyCommandStatement {
                 command,
                 discount_parameter_valid,
+                discount_symbol_existed,
                 span: Span {
                     start: tok.span.start,
                     end,
@@ -7483,9 +7496,7 @@ impl Parser<'_> {
         let Some(assignment) = assignment else {
             return;
         };
-        if self
-            .model
-            .parameter_at(assignment.name, assignment.span.start)
+        if !assignment.native && self.removal_role(assignment.name) == EstimatedNameRole::Parameter
         {
             self.model.param_assignments.push(assignment);
         } else {
