@@ -8495,6 +8495,7 @@ impl Parser<'_> {
             && !self.model.mod_file_locals.contains(&name)
         {
             self.model.mod_file_locals.push(name);
+            self.record_symbol_declaration(name, tok.span, "mod_file_local");
         }
         if !self.at(TokenKind::LParen) {
             return self.alloc(
