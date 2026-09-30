@@ -150,7 +150,6 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
         Identification(&'a SvarIdentification),
         Paths(&'a crate::model::ConditionalForecastPaths),
         Prior(&'a DottedStatement),
-        Subsample(&'a SubsampleInstruction),
         VarRemove(&'a VarRemovedName),
         RemovedUse(Name, Span),
         ChangeType(&'a crate::model::ChangeTypeStmt),
@@ -185,13 +184,6 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
     for stmt in &model.dotted_statements {
         units.push((stmt.span.start, Unit::Prior(stmt)));
     }
-    for stmt in &model.subsamples {
-        let at = match stmt {
-            SubsampleInstruction::Declare { span, .. }
-            | SubsampleInstruction::Copy { span, .. } => span.start,
-        };
-        units.push((at, Unit::Subsample(stmt)));
-    }
     for row in &model.var_removed {
         units.push((row.statement.start, Unit::VarRemove(row)));
     }
@@ -218,6 +210,17 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
         _ => {}
     }
     units.sort_by_key(|(at, _)| *at);
+    // Dotted statements keep their parser execution order even when a macro
+    // copy has an earlier original span. Their subsample definitions are checked
+    // beside the owning header, so one range table follows that same order.
+    let mut dotted = model.dotted_statements.iter();
+    for (_, unit) in &mut units {
+        if matches!(unit, Unit::Prior(_)) {
+            *unit = Unit::Prior(dotted.next().expect("one slot per dotted statement"));
+        }
+    }
+    let mut subsamples = model.subsamples.iter().peekable();
+
     let mut subsample_ranges: HashMap<(Name, Option<Name>), HashSet<Name>> = HashMap::new();
     for (_, unit) in units {
         let fired = match unit {
@@ -237,9 +240,35 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
             }
             Unit::Paths(block) => check_conditional_forecast_paths(model, block, out),
             Unit::Prior(stmt) => {
-                check_dotted_head_and_subsample(model, stmt, &subsample_ranges, out)
+                if check_dotted_head_and_subsample(model, stmt, &subsample_ranges, out) {
+                    true
+                } else if stmt.kind == DottedKind::Subsamples {
+                    let matching = subsamples.peek().is_some_and(|instruction| {
+                        let (span, context) = match instruction {
+                            SubsampleInstruction::Declare {
+                                span,
+                                symbol_type_context,
+                                ..
+                            }
+                            | SubsampleInstruction::Copy {
+                                span,
+                                symbol_type_context,
+                                ..
+                            } => (*span, *symbol_type_context),
+                        };
+                        span == stmt.span && context == stmt.symbol_type_context
+                    });
+                    matching
+                        && check_subsample_parse(
+                            model,
+                            subsamples.next().unwrap(),
+                            &mut subsample_ranges,
+                            out,
+                        )
+                } else {
+                    false
+                }
             }
-            Unit::Subsample(stmt) => check_subsample_parse(model, stmt, &mut subsample_ranges, out),
             Unit::VarRemove(row) => {
                 if model
                     .symbol_kind_in_context(row.name, row.symbol_type_context)

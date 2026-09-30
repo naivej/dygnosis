@@ -67,7 +67,7 @@ Equation symbol classes, model counts, timing, hover, completion, semantic color
 
 An unused `trend_var` or `log_trend_var` name can also change to an ordinary type. Its later assignments and name slots use that type, while navigation retains the written trend declaration.
 
-Initial/history values, filter rows, shock/path targets, `init2shocks`, `homotopy_setup`, `shock_groups`, `varobs`, estimated-parameter roles, and `markov_switching(parameters=[…])` check the type when that row or option is read. A later type change cannot validate an earlier refused use; each macro iteration keeps its own parser context. Steady-state order, estimated skewness, parameters in shock values, and PAC/VAR matching use the final type.
+Initial/history values, filter rows, shock/path targets, `init2shocks`, `homotopy_setup`, `shock_groups`, `varobs`, estimated-parameter roles, and `markov_switching(parameters=[…])` check the type when that row or option is read. A later type change cannot validate an earlier refused use; each macro iteration keeps its own parser context. Subsample definitions, copies, and named uses also follow macro execution order. Steady-state order, estimated skewness, parameters in shock values, and PAC/VAR matching use the final type.
 
 Policy instruments must be endogenous when their policy command is read. Undeclared instruments use `E101`; declared names of the wrong type use `E317`. Put declarations and any required `change_type(var)` before the command.
 `discretionary_policy` also requires an existing `optimal_policy_discount_factor` to be a parameter; otherwise it reports `E378` before checking instruments.
