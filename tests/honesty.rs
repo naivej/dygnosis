@@ -916,6 +916,16 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         stage: JsonStage::Check,
     },
     HonestyRow {
+        code: "E219",
+        fixture: "d_walk/e219_dsge_prior_weight_declared.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "dsge_prior_weight should not be declared as a model variable / parameter",
+        our_needle: "dsge_prior_weight should not be declared as a model variable / parameter",
+        stage: JsonStage::Transform,
+    },
+    HonestyRow {
         code: "E220",
         fixture: "d_walk/e220_bayesian_irf_counts.mod",
         kind: HonestyKind::Error {

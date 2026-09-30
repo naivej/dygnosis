@@ -267,7 +267,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E093", ExplainEntry {
         title: "estimated_params references an undeclared symbol",
-        body: "An ``estimated_params`` entry names a symbol that is not declared with the expected role: a plain entry must name a parameter (apart from reserved `dsge_prior_weight`, which needs no declaration), an ``stderr`` or ``skew`` entry must name a shock or observed variable, and a ``corr`` entry must name two declared shocks or variables. Dynare refuses: `Unknown symbol: not_a_param` (unknown ``skew`` is `in `estimated_params' block, unknown symbol: {name}`).\n\n**Warrant**\n\nThe editor names the ``estimated_params`` role (parameter, stderr, corr, or skew); Dynare's string is the generic `Unknown symbol` or the estimated-params unknown-symbol line.\n\n**Fix**\n\nDeclare the symbol, or correct the name / entry type.",
+        body: "An ``estimated_params`` entry names a symbol that is not declared with the expected role: a plain entry must name a parameter (apart from reserved `dsge_prior_weight`, which needs no declaration), an ``stderr`` or ``skew`` entry must name a shock or observed variable, and a ``corr`` entry must name two declared shocks or variables. Dynare refuses: `Unknown symbol: not_a_param`. An unknown ``skew`` name is refused during parsing with `Unknown symbol: zzz.`, before the block's later checks.\n\n**Warrant**\n\nThe editor names the ``estimated_params`` role (parameter, stderr, corr, or skew); Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the symbol, or correct the name / entry type.",
         kind: ExplainKind::Shared,
     }),
     ("W094", ExplainEntry {
@@ -827,7 +827,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E271", ExplainEntry {
         title: "Option declared twice in one list",
-        body: "The same option identifier appears twice in one `(…)` list. Dynare refuses: `option {name} declared twice`. The `external_function` list accepts repeats and keeps the first value. The adjacent option lists of `mshocks` and `shock_paths` use Dynare's other sentence: `The '{name}' option is declared multiple times`.\n\n**Fix**\n\nKeep one copy of that option in the list.",
+        body: "The same option identifier appears twice in one `(…)` list. Dynare refuses: `option {name} declared twice`. The `external_function` list accepts repeats and keeps the first value. The adjacent option lists of `mshocks` and `shock_paths` use Dynare's other sentence: `The '{name}' option is declared multiple times`.\n\n**Warrant**\n\nWhen Dynare prints an internal prefix such as `initial_condition_decomp.type` or `plot_shock_decomp.fig_name`, the editor names the option as written: `type` or `fig_name`.\n\n**Fix**\n\nKeep one copy of that option in the list.",
         kind: ExplainKind::Shared,
     }),
     ("E272", ExplainEntry {
@@ -1067,7 +1067,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E319", ExplainEntry {
         title: "Ramsey constraint is not an inequality",
-        body: "A ``ramsey_constraints`` entry is not an inequality. Dynare refuses: `Ramsey constraint has an incorrect form: This expression is not an inequality`.\n\n**Fix**\n\nWrite ``y > bound``, ``y < bound``, or ``lower < y < upper``.",
+        body: "A ``ramsey_constraints`` entry is not an inequality. Dynare refuses: `Ramsey constraint has an incorrect form: This expression is not an inequality`.\n\n**Warrant**\n\nFor an equality such as `y=0`, Dynare instead stops at the generic `unexpected EQUAL` syntax error. The editor keeps the existing non-inequality sentence to identify the constraint form that needs repair.\n\n**Fix**\n\nWrite ``y > bound``, ``y < bound``, or ``lower < y < upper``.",
         kind: ExplainKind::Shared,
     }),
     ("E320", ExplainEntry {
@@ -1082,7 +1082,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E322", ExplainEntry {
         title: "external_function without a name option",
-        body: "An ``external_function`` statement has no ``name`` option. Dynare refuses: `The 'name' option must be passed to external_function().`\n\n**Fix**\n\nAdd ``name='myfunc'``.",
+        body: "An ``external_function`` statement has no ``name`` option. Dynare refuses: `The 'name' option must be passed to external_function().`\n\n**Warrant**\n\nFor an empty option list, an empty `name=` followed by `)`, or an unknown option word, Dynare stops at a generic syntax error. The editor keeps the existing missing-name sentence on these shapes to point at the required function name.\n\n**Fix**\n\nAdd ``name='myfunc'``.",
         kind: ExplainKind::Shared,
     }),
     ("E323", ExplainEntry {
@@ -1550,7 +1550,11 @@ Name two endogenous variables or two exogenous ones.",
     }),
     ("E380", ExplainEntry {
         title: "load_params_and_steady_state names an unsupported variable type",
-        body: "The data file of ``load_params_and_steady_state`` holds a name that is declared, but not as a parameter, an endogenous variable, a ``varexo``, or a ``varexo_det``: an ``epilogue`` helper, an ``external_function`` name, or a trend variable. Dynare accepts the file through its checks and refuses only when writing the MATLAB files: `Unsupported variable type for A in load_params_and_steady_state`.
+        body: "The data file of ``load_params_and_steady_state`` holds a name that is declared, but not as a parameter, an endogenous variable, a ``varexo``, or a ``varexo_det``: an ``epilogue`` helper, an ``external_function`` name, or a trend variable. The checks accept this unsupported-type entry. While writing the MATLAB files, Dynare refuses: `Unsupported variable type for A in load_params_and_steady_state`.
+
+**Warrant**
+
+For a used trend that breaks balanced growth, Dynare's earlier Compute test prints its cross-partial refusal and hides the writer sentence. The editor still reports this written-file loader error; checking balanced growth would require the Compute work it does not perform.
 
 **Fix**
 
