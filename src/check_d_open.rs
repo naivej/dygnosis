@@ -145,6 +145,7 @@ fn declared_names(model: &Model) -> Vec<(Name, Span)> {
         .chain(&model.exogenous)
         .chain(&model.deterministic_exogenous)
         .chain(&model.parameters)
+        .chain(&model.retyped_trend_decls)
         .map(|d| (d.name, d.span))
         .collect()
 }
@@ -681,23 +682,7 @@ fn check_trend_vars(model: &Model) -> Vec<Diagnostic> {
     }
     out.extend(check_nonstationary_vars(model));
 
-    let mut trend_decl: HashMap<Name, u32> = HashMap::new();
-    for trend in &model.trend_vars {
-        trend_decl
-            .entry(trend.name)
-            .and_modify(|start| *start = (*start).min(trend.span.start))
-            .or_insert(trend.span.start);
-    }
-    if trend_decl.is_empty() {
-        return out;
-    }
-    for (name, span) in ident_uses(model, &statement_expr_ids(model)) {
-        let Some(&decl_start) = trend_decl.get(&name) else {
-            continue;
-        };
-        if span.start < decl_start {
-            continue;
-        }
+    for &(name, span) in &model.trend_outside_uses {
         out.push(err(
             span,
             "E310",
@@ -778,11 +763,15 @@ fn check_filter_initial_state(model: &Model) -> Vec<Diagnostic> {
             ));
             continue;
         }
-        let is_exo = exo.contains(&entry.name) || exo_det.contains(&entry.name);
-        if !endo.contains(&entry.name)
-            && !is_exo
-            && (params.contains(&entry.name) || trends.contains(&entry.name))
-        {
+        let trend_kind = trends
+            .contains(&entry.name)
+            .then(|| model.symbol_kind_in_context(entry.name, entry.symbol_type_context))
+            .flatten();
+        let is_endo = endo.contains(&entry.name) || trend_kind == Some("var");
+        let is_exo = exo.contains(&entry.name)
+            || exo_det.contains(&entry.name)
+            || matches!(trend_kind, Some("varexo" | "varexo_det"));
+        if !is_endo && !is_exo && (params.contains(&entry.name) || trends.contains(&entry.name)) {
             out.push(err(
                 entry.span,
                 "E311",

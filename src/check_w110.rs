@@ -241,9 +241,16 @@ fn check_shock_types(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for stmt in &model.shock_stmts {
         let span = nonempty(stmt.span);
+        let is_exo = |name: &Name| {
+            if model.trend_vars.iter().any(|trend| trend.name == *name) {
+                model.symbol_kind_in_context(*name, stmt.symbol_type_context) == Some("varexo")
+            } else {
+                exo.contains(name)
+            }
+        };
         match &stmt.kind {
             ShockKind::Var(name) => {
-                if !exo.contains(name) && !obs.contains(name) {
+                if !is_exo(name) && !obs.contains(name) {
                     let n = model.name(*name);
                     out.push(Diagnostic::new(
                         span,
@@ -256,7 +263,7 @@ fn check_shock_types(model: &Model) -> Vec<Diagnostic> {
                 }
             }
             ShockKind::Stderr(name) => {
-                if !exo.contains(name) && !obs.contains(name) {
+                if !is_exo(name) && !obs.contains(name) {
                     let n = model.name(*name);
                     out.push(Diagnostic::new(
                         span,
@@ -271,7 +278,7 @@ fn check_shock_types(model: &Model) -> Vec<Diagnostic> {
             ShockKind::Cov(names) if names.len() >= 2 => {
                 let a = names[0];
                 let b = names[1];
-                let both_exo = exo.contains(&a) && exo.contains(&b);
+                let both_exo = is_exo(&a) && is_exo(&b);
                 let both_obs = obs.contains(&a) && obs.contains(&b);
                 if !both_exo && !both_obs {
                     out.push(Diagnostic::new(
@@ -287,7 +294,7 @@ fn check_shock_types(model: &Model) -> Vec<Diagnostic> {
                 }
             }
             ShockKind::Corr { a, b } => {
-                let both_exo = exo.contains(a) && exo.contains(b);
+                let both_exo = is_exo(a) && is_exo(b);
                 let both_obs = obs.contains(a) && obs.contains(b);
                 if !both_exo && !both_obs {
                     out.push(Diagnostic::new(
@@ -302,7 +309,7 @@ fn check_shock_types(model: &Model) -> Vec<Diagnostic> {
                     ));
                 }
             }
-            ShockKind::Skew(names) if names.iter().any(|n| !exo.contains(n)) => {
+            ShockKind::Skew(names) if names.iter().any(|n| !is_exo(n)) => {
                 let a = names.first().map(|n| model.name(*n)).unwrap_or("");
                 let b = names.get(1).map(|n| model.name(*n)).unwrap_or(a);
                 let c = names.get(2).map(|n| model.name(*n)).unwrap_or(a);

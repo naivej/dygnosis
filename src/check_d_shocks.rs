@@ -44,6 +44,9 @@ impl Roles {
                 .and_modify(|at: &mut u32| *at = (*at).min(decl.span.start))
                 .or_insert(decl.span.start);
         }
+        for trend in &model.trend_vars {
+            declared_at.entry(trend.name).or_insert(trend.span.start);
+        }
         Self {
             exo: model
                 .exogenous
@@ -58,14 +61,26 @@ impl Roles {
         }
     }
 
-    fn known(&self, name: Name, span: Span) -> bool {
+    fn known(&self, model: &Model, name: Name, span: Span, context: usize) -> bool {
+        if model.trend_vars.iter().any(|trend| trend.name == name) {
+            return model.symbol_kind_in_context(name, context).is_some();
+        }
         self.declared_at
             .get(&name)
             .is_some_and(|at| *at < span.start)
-            && (self.exo.contains(&name)
-                || self.det.contains(&name)
-                || self.endo.contains(&name)
-                || self.param.contains(&name))
+    }
+
+    fn has_kind(&self, model: &Model, name: Name, context: usize, kind: &str) -> bool {
+        if model.trend_vars.iter().any(|trend| trend.name == name) {
+            return model.symbol_kind_in_context(name, context) == Some(kind);
+        }
+        match kind {
+            "var" => self.endo.contains(&name),
+            "varexo" => self.exo.contains(&name),
+            "varexo_det" => self.det.contains(&name),
+            "parameters" => self.param.contains(&name),
+            _ => false,
+        }
     }
 
     fn exogenous(
@@ -73,18 +88,20 @@ impl Roles {
         model: &Model,
         out: &mut Vec<Diagnostic>,
         name: Name,
-        span: Span,
+        at: (Span, usize),
         allow_det: bool,
     ) -> bool {
-        if self.known(name, span)
-            && (self.exo.contains(&name) || (allow_det && self.det.contains(&name)))
+        let (span, context) = at;
+        if self.known(model, name, span, context)
+            && (self.has_kind(model, name, context, "varexo")
+                || (allow_det && self.has_kind(model, name, context, "varexo_det")))
         {
             return true;
         }
         let n = model.name(name);
-        if !self.known(name, span) {
+        if !self.known(model, name, span, context) {
             error(out, span, "E058", format!("Unknown symbol: {n}."));
-        } else if self.det.contains(&name) {
+        } else if self.has_kind(model, name, context, "varexo_det") {
             error(
                 out,
                 span,
@@ -97,12 +114,19 @@ impl Roles {
         false
     }
 
-    fn endogenous(&self, model: &Model, out: &mut Vec<Diagnostic>, name: Name, span: Span) -> bool {
-        if self.known(name, span) && self.endo.contains(&name) {
+    fn endogenous(
+        &self,
+        model: &Model,
+        out: &mut Vec<Diagnostic>,
+        name: Name,
+        at: (Span, usize),
+    ) -> bool {
+        let (span, context) = at;
+        if self.known(model, name, span, context) && self.has_kind(model, name, context, "var") {
             return true;
         }
         let n = model.name(name);
-        if !self.known(name, span) {
+        if !self.known(model, name, span, context) {
             error(out, span, "E058", format!("Unknown symbol: {n}."));
         } else {
             error(out, span, "E317", format!("{n} is not endogenous."));
@@ -167,7 +191,7 @@ fn check_stochastic_names(model: &Model, roles: &Roles, out: &mut Vec<Diagnostic
                     ShockKind::Corr { a, b } => vec![*a, *b],
                 };
                 for name in names {
-                    if !roles.known(name, stmt.span) {
+                    if !roles.known(model, name, stmt.span, stmt.symbol_type_context) {
                         error(
                             out,
                             stmt.span,
@@ -190,7 +214,7 @@ fn check_stochastic_names(model: &Model, roles: &Roles, out: &mut Vec<Diagnostic
                 ShockKind::Corr { a, b } => vec![*a, *b],
             };
             for name in names {
-                if !roles.known(name, stmt.span) {
+                if !roles.known(model, name, stmt.span, stmt.symbol_type_context) {
                     error(
                         out,
                         stmt.span,
@@ -207,14 +231,14 @@ fn check_stochastic_names(model: &Model, roles: &Roles, out: &mut Vec<Diagnostic
 fn check_irf_shocks_options(model: &Model, roles: &Roles, out: &mut Vec<Diagnostic>) {
     for option in &model.irf_shocks_options {
         for &(name, span) in &option.names {
-            if !roles.known(name, span) {
+            if !roles.known(model, name, span, option.symbol_type_context) {
                 error(
                     out,
                     span,
                     "E058",
                     format!("Unknown symbol: {}", model.name(name)),
                 );
-            } else if !roles.exo.contains(&name) {
+            } else if !roles.has_kind(model, name, option.symbol_type_context, "varexo") {
                 error(
                     out,
                     span,
@@ -270,7 +294,13 @@ fn check_scheduled(model: &Model, roles: &Roles, out: &mut Vec<Diagnostic>) {
         for row in &block.scheduled {
             let allow_det = block.kind != ShockBlockKind::Heteroskedastic
                 && row.operation == ShockOperation::Values;
-            roles.exogenous(model, out, row.name, row.name_span, allow_det);
+            roles.exogenous(
+                model,
+                out,
+                row.name,
+                (row.name_span, row.symbol_type_context),
+                allow_det,
+            );
             for range in &row.periods {
                 check_range(out, range);
             }
@@ -430,8 +460,13 @@ fn check_endval(model: &Model, roles: &Roles, out: &mut Vec<Diagnostic>) {
             || matches!(learnt, Some(PeriodPoint::Integer(n)) if *n > 1);
         for entry in &block.entries {
             if nondefault
-                && roles.known(entry.name, entry.name_span)
-                && !roles.exo.contains(&entry.name)
+                && roles.known(
+                    model,
+                    entry.name,
+                    entry.name_span,
+                    entry.symbol_type_context,
+                )
+                && !roles.has_kind(model, entry.name, entry.symbol_type_context, "varexo")
             {
                 error(
                     out,
@@ -499,7 +534,13 @@ fn check_paths(model: &Model, roles: &Roles, out: &mut Vec<Diagnostic>) {
         for stanza in &block.stanzas {
             match &stanza.target {
                 PathTarget::Exogenous { name, span } => {
-                    roles.exogenous(model, out, *name, *span, false);
+                    roles.exogenous(
+                        model,
+                        out,
+                        *name,
+                        (*span, stanza.symbol_type_context),
+                        false,
+                    );
                     if stanza.periods.len() != stanza.values.len() {
                         error(
                             out,
@@ -518,8 +559,19 @@ fn check_paths(model: &Model, roles: &Roles, out: &mut Vec<Diagnostic>) {
                     endogenize,
                     endogenize_span,
                 } => {
-                    roles.endogenous(model, out, *exogenize, *exogenize_span);
-                    roles.exogenous(model, out, *endogenize, *endogenize_span, false);
+                    roles.endogenous(
+                        model,
+                        out,
+                        *exogenize,
+                        (*exogenize_span, stanza.symbol_type_context),
+                    );
+                    roles.exogenous(
+                        model,
+                        out,
+                        *endogenize,
+                        (*endogenize_span, stanza.symbol_type_context),
+                        false,
+                    );
                     if stanza.periods.len() != stanza.values.len() {
                         error(
                             out,
@@ -597,8 +649,18 @@ fn check_path_reference(
 ) {
     let Some(namespace) = reference.namespace.as_deref() else {
         if !reference.call
-            && roles.known(reference.name, reference.span)
-            && !roles.param.contains(&reference.name)
+            && roles.known(
+                model,
+                reference.name,
+                reference.span,
+                reference.symbol_type_context,
+            )
+            && !roles.has_kind(
+                model,
+                reference.name,
+                reference.symbol_type_context,
+                "parameters",
+            )
         {
             error(
                 out,
@@ -647,22 +709,41 @@ fn check_path_reference(
             if reference.lag_call {
                 return;
             }
-            if !roles.known(reference.name, reference.span) {
+            if !roles.known(
+                model,
+                reference.name,
+                reference.span,
+                reference.symbol_type_context,
+            ) {
                 error(
                     out,
                     reference.span,
                     "E058",
                     format!("Unknown symbol: {name}."),
                 );
-            } else if roles.det.contains(&reference.name) {
+            } else if roles.has_kind(
+                model,
+                reference.name,
+                reference.symbol_type_context,
+                "varexo_det",
+            ) {
                 error(
                     out,
                     reference.span,
                     "E317",
                     format!("{name} is an exogenous deterministic."),
                 );
-            } else if !roles.exo.contains(&reference.name) && !roles.endo.contains(&reference.name)
-            {
+            } else if !roles.has_kind(
+                model,
+                reference.name,
+                reference.symbol_type_context,
+                "varexo",
+            ) && !roles.has_kind(
+                model,
+                reference.name,
+                reference.symbol_type_context,
+                "var",
+            ) {
                 error(
                     out,
                     reference.span,
@@ -673,7 +754,13 @@ fn check_path_reference(
             return;
         }
         "self" | "prev" | "learnt_in" => {
-            if !roles.exogenous(model, out, reference.name, reference.span, false) {
+            if !roles.exogenous(
+                model,
+                out,
+                reference.name,
+                (reference.span, reference.symbol_type_context),
+                false,
+            ) {
                 return;
             }
         }

@@ -175,6 +175,9 @@ pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
             consider_unused_exogenous(model, d, &referenced, &mut reported, &mut diagnostics);
         }
     }
+    for d in &model.retyped_trend_decls {
+        consider_unused_exogenous(model, d, &referenced, &mut reported, &mut diagnostics);
+    }
     diagnostics
 }
 

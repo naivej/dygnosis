@@ -1375,6 +1375,7 @@ impl Parser<'_> {
                     self.record_symbol_declaration(id, tok.span, kind);
                 }
                 decls.push(Decl {
+                    symbol_type_context: self.model.symbol_type_events.len(),
                     name: id,
                     span: tok.span,
                     long_name: None,
@@ -2410,6 +2411,7 @@ impl Parser<'_> {
         let expr = self.parse_expr();
         let end = self.finish_shock_stmt(end_i);
         Some(HistvalEntry {
+            symbol_type_context: self.model.symbol_type_events.len(),
             name,
             lag,
             span: Span {
@@ -5092,6 +5094,7 @@ impl Parser<'_> {
             .chain(&self.model.deterministic_exogenous)
             .chain(&self.model.parameters)
             .chain(&self.model.predetermined)
+            .chain(&self.model.retyped_trend_decls)
             .find(|d| d.name == name)
     }
 
@@ -5236,6 +5239,7 @@ impl Parser<'_> {
         }
         self.i = (self.i + k).min(self.tokens.len().saturating_sub(1));
         self.model.dotted_statements.push(DottedStatement {
+            symbol_type_context: self.model.symbol_type_events.len(),
             kind,
             head,
             span: Span { start, end },
@@ -5980,9 +5984,30 @@ impl Parser<'_> {
                 .map(|(name, _)| *name)
                 .collect();
             for name in restored {
-                if self.symbol_roles.contains_key(&name) {
-                    self.symbol_roles.insert(name, role);
+                if !self
+                    .model
+                    .retyped_trend_decls
+                    .iter()
+                    .any(|decl| decl.name == name)
+                {
+                    if let Some(trend) = self
+                        .model
+                        .trend_vars
+                        .iter()
+                        .find(|trend| trend.name == name)
+                    {
+                        self.model.retyped_trend_decls.push(Decl {
+                            symbol_type_context: self.model.symbol_type_events.len(),
+                            name,
+                            span: trend.span,
+                            long_name: None,
+                            tex_name: None,
+                            log_transform: false,
+                            heterogeneity: None,
+                        });
+                    }
                 }
+                self.symbol_roles.insert(name, role);
                 // `var_remove` leaves the declaration on its original list.
                 // Only that stale list has to move. A written `var` that
                 // `change_type` retypes without a removal stays where it was
@@ -6013,6 +6038,7 @@ impl Parser<'_> {
 
     fn symbol_declared_before(&self, name: Name, pos: u32) -> bool {
         self.generated_policy_discount == Some(name)
+            || self.model.trend_vars.iter().any(|trend| trend.name == name)
             || self
                 .model
                 .excluded_endogenous
@@ -7409,6 +7435,7 @@ impl Parser<'_> {
             ShockKind::Cov(names)
         };
         Some(ShockStmt {
+            symbol_type_context: self.model.symbol_type_events.len(),
             kind,
             rhs,
             rhs_expr,
@@ -7441,6 +7468,7 @@ impl Parser<'_> {
             return None;
         }
         Some(ShockStmt {
+            symbol_type_context: self.model.symbol_type_events.len(),
             kind: ShockKind::Corr {
                 a: names[0],
                 b: names[1],
@@ -7476,6 +7504,7 @@ impl Parser<'_> {
             return None;
         }
         Some(ShockStmt {
+            symbol_type_context: self.model.symbol_type_events.len(),
             kind: ShockKind::Skew(names),
             rhs,
             rhs_expr,
@@ -7601,6 +7630,7 @@ impl Parser<'_> {
         let expression = join_lexemes(self.src, &self.tokens[expr_i..expr_end_i]);
         let id = self.intern.intern(&name);
         Some(Assignment {
+            symbol_type_context: self.model.symbol_type_events.len(),
             name: id,
             expression,
             span: Span {
@@ -7678,6 +7708,7 @@ impl Parser<'_> {
         }
         let name = self.intern.intern(lhs);
         Some(Assignment {
+            symbol_type_context: self.model.symbol_type_events.len(),
             name,
             expression: rhs.to_string(),
             span,
@@ -8851,6 +8882,19 @@ impl Parser<'_> {
     }
 
     fn alloc(&mut self, kind: ExprKind, span: Span) -> ExprId {
+        if !self.model_function_context && !self.in_native_assignment {
+            if let ExprKind::Ident {
+                name, ident_span, ..
+            } = &kind
+            {
+                if matches!(
+                    self.model.final_symbol_kind(*name),
+                    Some("trend_var" | "log_trend_var")
+                ) {
+                    self.model.trend_outside_uses.push((*name, *ident_span));
+                }
+            }
+        }
         if self.model_function_context {
             if let ExprKind::Ident {
                 name, ident_span, ..

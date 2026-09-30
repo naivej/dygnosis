@@ -711,6 +711,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
         .iter()
         .chain(&model.exogenous)
         .chain(&model.parameters)
+        .chain(&model.retyped_trend_decls)
         .map(|d| d.name)
         .collect();
     let mut diagnostics = Vec::new();
@@ -721,7 +722,19 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
     ] {
         for entry in entries {
             let name = model.name(entry.name);
-            if params.contains(&entry.name) {
+            if params.contains(&entry.name)
+                || (model
+                    .trend_vars
+                    .iter()
+                    .any(|trend| trend.name == entry.name)
+                    && model
+                        .symbol_kind_in_context(entry.name, entry.symbol_type_context)
+                        .is_some()
+                    && !matches!(
+                        model.symbol_kind_in_context(entry.name, entry.symbol_type_context),
+                        Some("var" | "varexo" | "varexo_det")
+                    ))
+            {
                 diagnostics.push(Diagnostic {
                     span: entry.span,
                     severity: Severity::Error,
@@ -732,7 +745,15 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
                 });
                 continue;
             }
-            if !declared.contains(&entry.name) {
+            if !declared.contains(&entry.name)
+                || (model
+                    .trend_vars
+                    .iter()
+                    .any(|trend| trend.name == entry.name)
+                    && model
+                        .symbol_kind_in_context(entry.name, entry.symbol_type_context)
+                        .is_none())
+            {
                 diagnostics.push(Diagnostic {
                     span: entry.span,
                     severity: Severity::Error,
@@ -746,7 +767,19 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
     }
     for entry in &model.histval {
         let name = model.name(entry.name);
-        if params.contains(&entry.name) {
+        if params.contains(&entry.name)
+            || (model
+                .trend_vars
+                .iter()
+                .any(|trend| trend.name == entry.name)
+                && model
+                    .symbol_kind_in_context(entry.name, entry.symbol_type_context)
+                    .is_some()
+                && !matches!(
+                    model.symbol_kind_in_context(entry.name, entry.symbol_type_context),
+                    Some("var" | "varexo" | "varexo_det")
+                ))
+        {
             diagnostics.push(Diagnostic {
                 span: entry.span,
                 severity: Severity::Error,
@@ -757,7 +790,15 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
             });
             continue;
         }
-        if !declared.contains(&entry.name) {
+        if !declared.contains(&entry.name)
+            || (model
+                .trend_vars
+                .iter()
+                .any(|trend| trend.name == entry.name)
+                && model
+                    .symbol_kind_in_context(entry.name, entry.symbol_type_context)
+                    .is_none())
+        {
             diagnostics.push(Diagnostic {
                 span: entry.span,
                 severity: Severity::Error,

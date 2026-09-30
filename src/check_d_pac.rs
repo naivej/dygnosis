@@ -98,6 +98,9 @@ fn declared_before(model: &Model, name: Name, at: u32) -> bool {
 }
 
 fn is_parameter_before(model: &Model, name: Name, at: u32) -> bool {
+    if model.trend_vars.iter().any(|trend| trend.name == name) {
+        return model.symbol_kind_before(name, at) == Some("parameters");
+    }
     model
         .parameters
         .iter()
@@ -207,7 +210,11 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
                             "E058",
                             format!("Unknown symbol: {}.", model.name(discount)),
                         ));
-                    } else if !is_parameter_before(model, discount, command.span.start) {
+                    } else if !model.parameter_in_context(
+                        discount,
+                        command.symbol_type_context,
+                        command.span.start,
+                    ) {
                         out.push(error(
                             span,
                             "E444",
@@ -298,7 +305,7 @@ fn valid_var_discount(model: &Model, expression: &WrittenExpression) -> bool {
     if node.interned.is_some() || matches!(node.kind, ExprKind::Number) {
         return true;
     }
-    matches!(&node.kind, ExprKind::Ident { name, timing: 0, .. } if is_parameter_before(model, *name, expression.span.start))
+    matches!(&node.kind, ExprKind::Ident { name, timing: 0, .. } if model.parameter_in_context(*name, expression.symbol_type_context, expression.span.start))
 }
 
 /// PAC target fields and the independent deterministic-trend warning.

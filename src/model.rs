@@ -11,6 +11,9 @@ use crate::span::Span;
 
 #[derive(Clone, Debug)]
 pub struct Decl {
+    /// Length of type history when this name slot was parsed, before later
+    /// macro iterations or directives could change its type.
+    pub symbol_type_context: usize,
     pub name: Name,
     pub span: Span,
     pub long_name: Option<String>,
@@ -117,6 +120,7 @@ pub enum SemiStructuralKind {
 
 #[derive(Clone, Debug)]
 pub struct SemiStructuralCommand {
+    pub symbol_type_context: usize,
     pub kind: SemiStructuralKind,
     pub span: Span,
     pub options: Vec<SemiStructuralOption>,
@@ -157,6 +161,7 @@ pub enum SemiStructuralValue {
 
 #[derive(Clone, Debug)]
 pub struct WrittenExpression {
+    pub symbol_type_context: usize,
     pub text: String,
     pub span: Span,
     pub expr: Option<ExprId>,
@@ -566,6 +571,7 @@ pub struct EstimatedParam {
 /// One `var` / `corr` / `stderr` / `skew` statement inside a `shocks` block.
 #[derive(Clone, Debug)]
 pub struct ShockStmt {
+    pub symbol_type_context: usize,
     pub kind: ShockKind,
     /// Folded RHS (`var name = expr` / `corr a, b = expr`). `None` if missing or unevaluable.
     pub rhs: Option<f64>,
@@ -625,6 +631,7 @@ pub struct WrittenValue {
 
 #[derive(Clone, Debug)]
 pub struct PathReference {
+    pub symbol_type_context: usize,
     pub namespace: Option<String>,
     pub name: Name,
     pub span: Span,
@@ -668,6 +675,7 @@ pub struct ShockOptions {
 
 #[derive(Clone, Debug)]
 pub struct ScheduledShock {
+    pub symbol_type_context: usize,
     pub name: Name,
     pub name_span: Span,
     pub periods: Vec<PeriodRange>,
@@ -702,6 +710,7 @@ pub enum PathTarget {
 
 #[derive(Clone, Debug)]
 pub struct PathStanza {
+    pub symbol_type_context: usize,
     pub target: PathTarget,
     pub periods: Vec<PeriodRange>,
     pub values: Vec<WrittenValue>,
@@ -717,6 +726,7 @@ pub struct PathBlock {
 
 #[derive(Clone, Debug)]
 pub struct EndvalEntry {
+    pub symbol_type_context: usize,
     pub name: Name,
     pub name_span: Span,
     pub value: WrittenValue,
@@ -803,6 +813,7 @@ pub struct StochSimulRequest {
 /// `estimation`. Names retain their written spans and command order.
 #[derive(Clone, Debug)]
 pub struct IrfShocksOption {
+    pub symbol_type_context: usize,
     pub command: String,
     pub span: Span,
     pub names: Vec<(Name, Span)>,
@@ -810,6 +821,7 @@ pub struct IrfShocksOption {
 
 #[derive(Clone, Debug)]
 pub struct Assignment {
+    pub symbol_type_context: usize,
     pub name: Name,
     pub expression: String,
     pub span: Span,
@@ -942,6 +954,8 @@ pub struct Model {
     pub parse_issues: Vec<ParseIssue>,
     /// Reserved-symbol expression uses captured while reading Dynare blocks.
     pub reserved_block_symbol_uses: Vec<Span>,
+    /// Names that were still trend variables when an ordinary expression used them.
+    pub trend_outside_uses: Vec<(Name, Span)>,
     /// Unknown function calls read inside epilogue before later declarations.
     pub epilogue_undeclared_calls: Vec<(Name, Span)>,
     /// Literal `@#include` directives (quoted or bare path). Identifier-only
@@ -1164,6 +1178,9 @@ pub struct Model {
     pub load_params_file: Option<(String, Span)>,
     /// Every `trend_var` / `log_trend_var` entry, file order.
     pub trend_vars: Vec<TrendVar>,
+    /// Declaration locations for trend names successfully changed to an
+    /// ordinary type. Their written trend records remain in `trend_vars`.
+    pub retyped_trend_decls: Vec<Decl>,
     /// Every `var(deflator=…)` / `var(log_deflator=…)` name, file order.
     pub nonstationary_vars: Vec<NonstationaryVar>,
     /// `filter_initial_state;` … `end;` (first block).
@@ -1257,6 +1274,7 @@ pub(crate) fn dynare_date(text: &str) -> bool {
 /// `histval` assignment `name(lag) = expr`.
 #[derive(Clone, Debug)]
 pub struct HistvalEntry {
+    pub symbol_type_context: usize,
     pub name: Name,
     pub lag: i32,
     pub span: Span,
@@ -1391,6 +1409,7 @@ pub fn mod_file_local_in_model_message(name: &str) -> String {
 /// The dotted `….prior(…)` / `….options(…)` / `….subsamples(…)` statement family.
 #[derive(Clone, Debug)]
 pub struct DottedStatement {
+    pub symbol_type_context: usize,
     pub kind: DottedKind,
     /// The head the statement is keyed on.
     pub head: DottedHead,
@@ -1888,6 +1907,27 @@ impl Model {
             .map(|event| event.kind)
     }
 
+    /// Type at a captured parser position, independent of written source order.
+    pub(crate) fn symbol_kind_in_context(
+        &self,
+        name: Name,
+        context: usize,
+    ) -> Option<&'static str> {
+        self.symbol_type_events[..context]
+            .iter()
+            .rev()
+            .find(|event| event.name == name)
+            .map(|event| event.kind)
+    }
+
+    pub(crate) fn parameter_in_context(&self, name: Name, context: usize, at: u32) -> bool {
+        if self.trend_vars.iter().any(|trend| trend.name == name) {
+            self.symbol_kind_in_context(name, context) == Some("parameters")
+        } else {
+            self.parameter_at(name, at)
+        }
+    }
+
     /// Final type of `name` for a check that asks what the name is.
     ///
     /// This is [`Self::final_symbol_kind`], except an `excluded` name uses the
@@ -1986,6 +2026,11 @@ impl Model {
             .into_iter()
             .chain(other)
             .flat_map(|(list, written_kind)| list.iter().map(move |decl| (decl, written_kind)))
+            .chain(
+                self.retyped_trend_decls
+                    .iter()
+                    .map(|decl| (decl, "trend_var")),
+            )
             .filter(|(decl, written_kind)| {
                 kinds.contains(&final_kind.get(&decl.name).copied().unwrap_or(written_kind))
             })

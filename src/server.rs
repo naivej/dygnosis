@@ -2059,6 +2059,7 @@ fn find_decl<'a>(model: &'a Model, word: &str) -> Option<&'a Decl> {
     find_named(&model.endogenous, model, word)
         .or_else(|| find_named(&model.exogenous, model, word))
         .or_else(|| find_named(&model.parameters, model, word))
+        .or_else(|| find_named(&model.retyped_trend_decls, model, word))
 }
 
 fn is_declared_in_open(inner: &Inner, word: &str) -> bool {

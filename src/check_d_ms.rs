@@ -308,6 +308,7 @@ fn declared_at(model: &Model, name: Name, before: u32) -> bool {
         .chain(&model.parameters)
         .chain(&model.model_local_variables)
         .chain(&model.excluded_endogenous)
+        .chain(&model.retyped_trend_decls)
         .any(|decl| decl.name == name && decl.span.start < before)
         || model.steady_state_equations.iter().any(|eq| {
             eq.span.start < before
@@ -426,6 +427,7 @@ fn classify_std_corr_head_names(
     model: &Model,
     head: &DottedHead,
     before: u32,
+    context: usize,
 ) -> Vec<PriorHeadName> {
     let pairs = match head {
         DottedHead::Std {
@@ -447,12 +449,21 @@ fn classify_std_corr_head_names(
         .map(|(name, span)| PriorHeadName {
             name,
             span,
-            verdict: std_corr_verdict_at(model, name, before),
+            verdict: std_corr_verdict_at(model, name, before, context),
         })
         .collect()
 }
 
-fn std_corr_verdict_at(model: &Model, name: Name, before: u32) -> PriorHeadVerdict {
+fn std_corr_verdict_at(model: &Model, name: Name, before: u32, context: usize) -> PriorHeadVerdict {
+    if model.trend_vars.iter().any(|trend| trend.name == name) {
+        return match model.symbol_kind_in_context(name, context) {
+            Some("var") => PriorHeadVerdict::Endogenous,
+            Some("varexo") => PriorHeadVerdict::Exogenous,
+            Some("varexo_det") => PriorHeadVerdict::ExogenousDeterministic,
+            Some(_) => PriorHeadVerdict::NotEndogenousOrExogenous,
+            None => PriorHeadVerdict::Undeclared,
+        };
+    }
     if !declared_at(model, name, before) {
         return PriorHeadVerdict::Undeclared;
     }
@@ -510,7 +521,7 @@ fn check_dotted_copy_source(
             );
             return true;
         }
-        if !model.parameter_at(*first, stmt.span.start) {
+        if !model.parameter_in_context(*first, stmt.symbol_type_context, stmt.span.start) {
             push(
                 out,
                 stmt.span,
@@ -584,7 +595,7 @@ fn check_dotted_head_and_subsample(
         return true;
     }
     if let DottedHead::Param { first, .. } = stmt.head {
-        if !model.parameter_at(first, stmt.span.start) {
+        if !model.parameter_in_context(first, stmt.symbol_type_context, stmt.span.start) {
             push(
                 out,
                 stmt.span,
@@ -596,7 +607,7 @@ fn check_dotted_head_and_subsample(
     }
     if let DottedHead::Vec { names } = &stmt.head {
         for (name, span) in names {
-            if !model.parameter_at(*name, stmt.span.start) {
+            if !model.parameter_in_context(*name, stmt.symbol_type_context, stmt.span.start) {
                 push(
                     out,
                     *span,
@@ -608,7 +619,12 @@ fn check_dotted_head_and_subsample(
         }
     }
     if matches!(stmt.head, DottedHead::Std { .. } | DottedHead::Corr { .. }) {
-        let rows = classify_std_corr_head_names(model, &stmt.head, stmt.span.start);
+        let rows = classify_std_corr_head_names(
+            model,
+            &stmt.head,
+            stmt.span.start,
+            stmt.symbol_type_context,
+        );
         if let Some(row) = rows.iter().find(|row| {
             !matches!(
                 row.verdict,
@@ -856,16 +872,31 @@ pub(crate) fn declared_names(model: &Model) -> HashSet<Name> {
             .chain(&model.exogenous)
             .chain(&model.deterministic_exogenous)
             .chain(&model.parameters)
-            .chain(&model.predetermined),
+            .chain(&model.predetermined)
+            .chain(&model.retyped_trend_decls),
     )
 }
 
 pub(crate) fn endogenous_names(model: &Model) -> HashSet<Name> {
-    name_set(model.endogenous.iter())
+    name_set(
+        model.endogenous.iter().chain(
+            model
+                .retyped_trend_decls
+                .iter()
+                .filter(|decl| model.final_symbol_kind(decl.name) == Some("var")),
+        ),
+    )
 }
 
 pub(crate) fn parameter_names(model: &Model) -> HashSet<Name> {
-    name_set(model.parameters.iter())
+    name_set(
+        model.parameters.iter().chain(
+            model
+                .retyped_trend_decls
+                .iter()
+                .filter(|decl| model.final_symbol_kind(decl.name) == Some("parameters")),
+        ),
+    )
 }
 
 /// A value the grammar spells as a bare unsigned integer, or `None` when 7.1
@@ -1912,7 +1943,7 @@ pub(crate) fn prior_std_corr_head_names(
     if stmt.kind != DottedKind::Prior {
         return Vec::new();
     }
-    classify_std_corr_head_names(model, &stmt.head, stmt.span.start)
+    classify_std_corr_head_names(model, &stmt.head, stmt.span.start, stmt.symbol_type_context)
 }
 
 /// The same sentence on the top-level assignment. 7.1's `init_param` runs
@@ -1925,7 +1956,17 @@ fn check_top_assignment(
     assignment: &crate::model::Assignment,
     out: &mut Vec<Diagnostic>,
 ) -> bool {
-    if model.parameter_at(assignment.name, assignment.span.start) {
+    let is_parameter = if model
+        .trend_vars
+        .iter()
+        .any(|trend| trend.name == assignment.name)
+    {
+        model.symbol_kind_in_context(assignment.name, assignment.symbol_type_context)
+            == Some("parameters")
+    } else {
+        model.parameter_at(assignment.name, assignment.span.start)
+    };
+    if is_parameter {
         return false;
     }
     push(

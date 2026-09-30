@@ -2,6 +2,7 @@
 
 ## v0.10.2
 
+- An unused trend_var or log_trend_var name can change to an ordinary type without false E295. Final counts and symbol lists include it while retaining its written trend declaration.
 - Names excluded before optim_weights report E317; later excluded planner or Ramsey-constraint references report E426. Earlier accepted uses keep their removal warrants.
 - The policy-generated discount parameter is known to later command lists, assignments, and duplicate checks. Its implicit creation keeps written declarations and counts intact.
 - Non-model expression calls register unknown functions and distinguish integer arguments from variable timing. A later declaration or command list uses their known function kind; valid calls no longer get E279/E280 as bare function-name uses.

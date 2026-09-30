@@ -79,7 +79,10 @@ fn check_e023(model: &Model) -> Vec<Diagnostic> {
         if !seen.insert(decl.name) {
             continue;
         }
-        if endo.contains(&decl.name) {
+        if endo.contains(&decl.name)
+            || (model.trend_vars.iter().any(|trend| trend.name == decl.name)
+                && model.symbol_kind_in_context(decl.name, decl.symbol_type_context) == Some("var"))
+        {
             continue;
         }
         let name = model.name(decl.name);

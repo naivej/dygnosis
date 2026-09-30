@@ -1323,11 +1323,7 @@ fn outside_model_expression_with_locals(
                 ),
             ));
         }
-        if model
-            .trend_vars
-            .iter()
-            .any(|trend| trend.name == ident.name)
-        {
+        if model.trend_outside_uses.contains(&(ident.name, ident.span)) {
             return Some(err(
                 ident.span,
                 "E310",
