@@ -2,6 +2,7 @@
 
 ## v0.10.2
 
+- Command symbol lists report E240 for native locals introduced by expressions, including a list written before the expression. Native MATLAB assignment heads remain undeclared.
 - Equation symbol classes, timing, model counts, and hover follow each name's final type after `change_type`. Declaration locations still point at the written declaration. Hover distinguishes `varexo_det` from ordinary `varexo`.
 - `E251`, `E182`, and `E255` use a name's type after `change_type`, not the list where it was declared. A `varexo` retyped to a parameter is no longer an exogenous in the planner objective or in `occbin_constraints`, and a parameter retyped to `varexo` is. A `var` retyped to a parameter can be used in `osr_params_bounds`; a parameter retyped to `var` cannot.
 - Policy instruments use their type when the policy command is read. Undeclared names use `E101`; declared names of the wrong type use `E317` with `N is not endogenous.` A later declaration or type change cannot validate an earlier instrument. Repeated macro iterations retain their own type checks.

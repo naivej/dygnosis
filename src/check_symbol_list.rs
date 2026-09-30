@@ -163,13 +163,11 @@ fn row_for(command: &str) -> (&'static str, &str, Allowed) {
     (label, prefix, allowed)
 }
 
-/// Every name kind their symbol table holds that a list can name, minus the one
-/// kind a list cannot: a mod-file local.
+/// Every name kind their symbol table holds that a list can name.
 ///
-/// A top-level `# mloc = 3;` leaves 7.1's table without the name — `forecast
-/// mloc;` prints `was not declared.` on both sides — so `model.mod_file_locals`
-/// stays out. The kinds below are in their table, so a command reports their
-/// type sentence for them rather than the undeclared one. A `#` definition
+/// An expression such as `p=mloc` registers a native local. A native MATLAB
+/// assignment head or top-level `# mloc=3` does not register that name.
+/// A `#` definition
 /// **inside** the model block is one of those kinds: their `modelLocalVariable`
 /// is a type of its own, and `model.equations` carries it as a local row.
 fn declared_names(model: &Model) -> HashSet<Name> {
@@ -187,6 +185,7 @@ fn declared_names(model: &Model) -> HashSet<Name> {
         .chain(model.epilogue.iter().map(|a| a.name))
         .chain(model.trend_vars.iter().map(|t| t.name))
         .chain(model.external_function_names.iter().copied())
+        .chain(model.mod_file_locals.iter().copied())
         .chain(
             model
                 .equations

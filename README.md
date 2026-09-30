@@ -68,6 +68,8 @@ Equation symbol classes, model counts, timing, and hover follow the final type a
 Policy instruments must be endogenous when their policy command is read. Undeclared instruments use `E101`; declared names of the wrong type use `E317`. Put declarations and any required `change_type(var)` before the command.
 `discretionary_policy` also requires an existing `optimal_policy_discount_factor` to be a parameter; otherwise it reports `E378` before checking instruments.
 
+Command symbol lists use `E240` for native locals introduced by expressions such as `p=helper;`. A native MATLAB assignment such as `helper=3;` does not declare that name to Dynare.
+
 ## Credits
 
 1. dygnosis v0.1.0 is a fork and rewrite of [LLMacro-Dynare-LSP](https://github.com/pdwhoward/LLMacro-Dynare-LSP) by Anthony Diercks, Philip Howard, and Mehrdad Samadi. Diagnostic codes, check and explain surfaces, and the thin analysis design come from that work. The original repository accompanies the working paper *LLMacro: A Language Server for Dynare — Structured Context for AI-Assisted Macroeconomic Modeling*.

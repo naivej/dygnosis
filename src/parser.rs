@@ -187,6 +187,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         symbol_list_id: 1,
         in_model: false,
         in_equation_body: false,
+        in_native_assignment: false,
     };
     p.parse_file();
     p.record_double_quoted_strings();
@@ -977,6 +978,8 @@ struct Parser<'a> {
     in_model: bool,
     /// Inside a `model` / `model_replace` body, whose rows are expressions.
     in_equation_body: bool,
+    /// Native MATLAB assignment text is retained for guidance, but declares no symbols.
+    in_native_assignment: bool,
 }
 
 impl Parser<'_> {
@@ -7432,7 +7435,13 @@ impl Parser<'_> {
     }
 
     fn parse_top_assignment(&mut self) {
-        let Some(assignment) = self.parse_named_assignment() else {
+        let head = self.tokens[self.i].text(self.src).to_string();
+        let name = self.intern.intern(&head);
+        self.in_native_assignment =
+            !self.is_statement_head_symbol(name) && self.generated_policy_discount != Some(name);
+        let assignment = self.parse_named_assignment();
+        self.in_native_assignment = false;
+        let Some(assignment) = assignment else {
             return;
         };
         if self
@@ -8479,6 +8488,7 @@ impl Parser<'_> {
         }
         let becoming_call = self.at(TokenKind::LParen) && !self.looks_like_timing();
         if !self.in_model
+            && !self.in_native_assignment
             && !becoming_call
             && !is_builtin_function(&lexeme)
             && !self.is_known_symbol(name)
