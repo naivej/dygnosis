@@ -1,0 +1,1 @@
+var y a; change_type(parameters) a; model; y=y(-1)+a; end; steady_state_model; y=a; a=0; end;

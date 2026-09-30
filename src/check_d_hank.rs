@@ -93,8 +93,8 @@ pub fn check_square(model: &Model) -> Vec<Diagnostic> {
     }
     let mut seen = HashSet::new();
     let mut endogenous: Vec<(String, Side)> = Vec::new();
-    for decl in &model.endogenous {
-        let Some((dim, _)) = decl.heterogeneity else {
+    for decl in model.final_decls(&["var"]) {
+        let Some(dim) = model.final_heterogeneity(decl) else {
             continue;
         };
         if !seen.insert((dim, decl.name)) {
@@ -465,7 +465,12 @@ fn walk_aggregate_sum(model: &Model, id: ExprId, found: &mut Option<Diagnostic>)
                     "E477",
                     "The argument to the SUM() operator must not have a lead or lag",
                 )
-            } else if !is_het_endo(model, args[0]) {
+            } else if !model
+                .sum_argument_roles
+                .get(&id)
+                .copied()
+                .unwrap_or_else(|| is_het_endo(model, args[0]))
+            {
                 error(
                     expr.span,
                     "E478",
@@ -1029,10 +1034,7 @@ fn ident_timing(model: &Model, id: ExprId) -> i32 {
 
 fn is_het_endo(model: &Model, id: ExprId) -> bool {
     match &model.exprs.get(id).kind {
-        ExprKind::Ident { name, .. } => model
-            .endogenous
-            .iter()
-            .any(|decl| decl.name == *name && decl.heterogeneity.is_some()),
+        ExprKind::Ident { name, .. } => model.is_heterogeneous_endogenous(*name),
         _ => false,
     }
 }
@@ -1045,19 +1047,21 @@ fn is_het_exo_name(model: &Model, name: Name) -> bool {
     model
         .exogenous
         .iter()
-        .any(|decl| decl.name == name && decl.heterogeneity.is_some())
+        .any(|decl| decl.name == name && model.final_heterogeneity(decl).is_some())
 }
 
 fn het_endo_in(model: &Model, name: Name, dim: Name) -> bool {
-    model.endogenous.iter().any(|decl| {
-        decl.name == name && decl.heterogeneity.map(|(dimension, _)| dimension) == Some(dim)
-    })
+    model
+        .endogenous
+        .iter()
+        .any(|decl| decl.name == name && model.final_heterogeneity(decl) == Some(dim))
 }
 
 fn het_exo_in(model: &Model, name: Name, dim: Name) -> bool {
-    model.exogenous.iter().any(|decl| {
-        decl.name == name && decl.heterogeneity.map(|(dimension, _)| dimension) == Some(dim)
-    })
+    model
+        .exogenous
+        .iter()
+        .any(|decl| decl.name == name && model.final_heterogeneity(decl) == Some(dim))
 }
 
 fn decl_with_het(model: &Model, name: Name) -> Option<&Decl> {
@@ -1066,7 +1070,7 @@ fn decl_with_het(model: &Model, name: Name) -> Option<&Decl> {
         .iter()
         .chain(&model.exogenous)
         .chain(&model.parameters)
-        .find(|decl| decl.name == name && decl.heterogeneity.is_some())
+        .find(|decl| decl.name == name && model.final_heterogeneity(decl).is_some())
 }
 
 fn symbol_declared(model: &Model, name: &str) -> bool {

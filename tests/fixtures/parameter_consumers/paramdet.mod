@@ -1,0 +1,1 @@
+var y; parameters a; change_type(varexo_det) a; model; [name='Y'] y=.5*y(-1)+a; end; var_model(model_name=v,eqtags=['Y']); var_expectation_model(model_name=b,variable=a,auxiliary_model_name=v,horizon=1);

@@ -263,17 +263,17 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
         .map(|a| a.name)
         .collect();
     let exo_names: HashSet<String> = model
-        .exogenous
+        .final_decls(&["varexo", "varexo_det"])
         .iter()
         .map(|d| model.name(d.name).to_string())
         .collect();
     let endo_names: HashSet<String> = model
-        .endogenous
+        .final_decls(&["var"])
         .iter()
         .map(|d| model.name(d.name).to_string())
         .collect();
     let param_names: HashSet<String> = model
-        .parameters
+        .final_parameters()
         .iter()
         .map(|d| model.name(d.name).to_string())
         .collect();

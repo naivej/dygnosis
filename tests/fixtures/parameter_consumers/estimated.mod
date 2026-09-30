@@ -1,0 +1,1 @@
+var y rho; varexo e; change_type(parameters) rho; rho=.9; model; y=rho*y(-1)+e; end; estimated_params; rho,.8,0,1; end; shocks; var e; stderr rho; end;

@@ -1,0 +1,1 @@
+var y; parameters beta x; change_type(var) x; beta=.9; model; y=.5*y(-1); x=.5*x(-1); end; pac_model(model_name=p,discount=beta,growth=x*x);

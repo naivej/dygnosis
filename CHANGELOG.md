@@ -2,6 +2,9 @@
 
 ## v0.10.2
 
+- Finishes the written-parameter-list audit. Initial/history values, filter rows, shock/path targets, init2shocks, homotopy, shock groups, varobs, estimated-parameter roles, Markov parameter options, and prior copy sources use the type at the statement. Macro iterations keep their own parser context for ordinary names too.
+- Steady-state order, estimated skewness, parameters in shock values, deterministic-trend warnings, and PAC/VAR matching use final types. Completion, semantic colors, and compare names, kinds, and parameter values agree with the final-type views.
+
 - Named external_function declarations reject unknown options with E001. Repeated valid options keep the first value, as Dynare does, without false E271.
 - An unused trend_var or log_trend_var name can change to an ordinary type without false E295. Final counts and symbol lists include it while retaining its written trend declaration.
 - Names excluded before optim_weights report E317; later excluded planner or Ramsey-constraint references report E426. Earlier accepted uses keep their removal warrants.

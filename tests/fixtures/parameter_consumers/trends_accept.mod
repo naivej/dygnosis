@@ -1,0 +1,1 @@
+var y; parameters z; change_type(var) z; model; y=z; z=.5*y(-1); end; deterministic_trends; z(1); end;

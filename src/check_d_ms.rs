@@ -241,7 +241,10 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
             }
             Unit::Subsample(stmt) => check_subsample_parse(model, stmt, &mut subsample_ranges, out),
             Unit::VarRemove(row) => {
-                if declared_at(model, row.name, row.statement.start) {
+                if model
+                    .symbol_kind_in_context(row.name, row.symbol_type_context)
+                    .is_some()
+                {
                     false
                 } else {
                     push(
@@ -299,23 +302,6 @@ fn subsample_names(head: &SubsampleHead) -> Vec<(Name, Span)> {
     }
 }
 
-fn declared_at(model: &Model, name: Name, before: u32) -> bool {
-    model
-        .endogenous
-        .iter()
-        .chain(&model.exogenous)
-        .chain(&model.deterministic_exogenous)
-        .chain(&model.parameters)
-        .chain(&model.model_local_variables)
-        .chain(&model.excluded_endogenous)
-        .chain(&model.retyped_trend_decls)
-        .any(|decl| decl.name == name && decl.span.start < before)
-        || model.steady_state_equations.iter().any(|eq| {
-            eq.span.start < before
-                && matches!(eq.lhs_expr.map(|id| &model.exprs.get(id).kind), Some(crate::expr::ExprKind::Ident { name: lhs, .. }) if *lhs == name)
-        })
-}
-
 fn check_subsample_parse(
     model: &Model,
     stmt: &SubsampleInstruction,
@@ -326,7 +312,8 @@ fn check_subsample_parse(
         SubsampleInstruction::Declare {
             head,
             ranges: rows,
-            span,
+            symbol_type_context,
+            ..
         } => {
             let mut names = HashSet::new();
             for row in rows {
@@ -344,7 +331,10 @@ fn check_subsample_parse(
                 }
             }
             for (name, name_span) in subsample_names(head) {
-                if !declared_at(model, name, span.start) {
+                if model
+                    .symbol_kind_in_context(name, *symbol_type_context)
+                    .is_none()
+                {
                     push(
                         out,
                         name_span,
@@ -361,12 +351,16 @@ fn check_subsample_parse(
             target,
             source,
             span,
+            symbol_type_context,
         } => {
             for (name, name_span) in subsample_names(target)
                 .into_iter()
                 .chain(subsample_names(source))
             {
-                if !declared_at(model, name, span.start) {
+                if model
+                    .symbol_kind_in_context(name, *symbol_type_context)
+                    .is_none()
+                {
                     push(
                         out,
                         name_span,
@@ -426,7 +420,6 @@ fn dotted_named_key(head: &DottedHead) -> Option<((Name, Option<Name>), Name)> {
 fn classify_std_corr_head_names(
     model: &Model,
     head: &DottedHead,
-    before: u32,
     context: usize,
 ) -> Vec<PriorHeadName> {
     let pairs = match head {
@@ -449,57 +442,18 @@ fn classify_std_corr_head_names(
         .map(|(name, span)| PriorHeadName {
             name,
             span,
-            verdict: std_corr_verdict_at(model, name, before, context),
+            verdict: std_corr_verdict_at(model, name, context),
         })
         .collect()
 }
 
-fn std_corr_verdict_at(model: &Model, name: Name, before: u32, context: usize) -> PriorHeadVerdict {
-    if model.trend_vars.iter().any(|trend| trend.name == name) {
-        return match model.symbol_kind_in_context(name, context) {
-            Some("var") => PriorHeadVerdict::Endogenous,
-            Some("varexo") => PriorHeadVerdict::Exogenous,
-            Some("varexo_det") => PriorHeadVerdict::ExogenousDeterministic,
-            Some(_) => PriorHeadVerdict::NotEndogenousOrExogenous,
-            None => PriorHeadVerdict::Undeclared,
-        };
-    }
-    if !declared_at(model, name, before) {
-        return PriorHeadVerdict::Undeclared;
-    }
-    let changed = model
-        .change_type_statements
-        .iter()
-        .filter(|stmt| stmt.span.start < before && stmt.names.iter().any(|(n, _)| *n == name))
-        .max_by_key(|stmt| stmt.span.start);
-    let removed = model
-        .var_removed
-        .iter()
-        .filter(|row| row.name == name && row.statement.start < before)
-        .max_by_key(|row| row.statement.start);
-    if removed.is_some_and(|row| changed.is_none_or(|stmt| row.statement.start > stmt.span.start)) {
-        return PriorHeadVerdict::NotEndogenousOrExogenous;
-    }
-    if let Some(stmt) = changed {
-        return match stmt.new_type {
-            crate::model::ChangeTypeKind::Var => PriorHeadVerdict::Endogenous,
-            crate::model::ChangeTypeKind::Varexo => PriorHeadVerdict::Exogenous,
-            crate::model::ChangeTypeKind::VarexoDet => PriorHeadVerdict::ExogenousDeterministic,
-            crate::model::ChangeTypeKind::Parameters => PriorHeadVerdict::NotEndogenousOrExogenous,
-        };
-    }
-    if model
-        .deterministic_exogenous
-        .iter()
-        .any(|decl| decl.name == name)
-    {
-        PriorHeadVerdict::ExogenousDeterministic
-    } else if model.endogenous.iter().any(|decl| decl.name == name) {
-        PriorHeadVerdict::Endogenous
-    } else if model.exogenous.iter().any(|decl| decl.name == name) {
-        PriorHeadVerdict::Exogenous
-    } else {
-        PriorHeadVerdict::NotEndogenousOrExogenous
+fn std_corr_verdict_at(model: &Model, name: Name, context: usize) -> PriorHeadVerdict {
+    match model.symbol_kind_in_context(name, context) {
+        Some("var") => PriorHeadVerdict::Endogenous,
+        Some("varexo") => PriorHeadVerdict::Exogenous,
+        Some("varexo_det") => PriorHeadVerdict::ExogenousDeterministic,
+        Some(_) => PriorHeadVerdict::NotEndogenousOrExogenous,
+        None => PriorHeadVerdict::Undeclared,
     }
 }
 
@@ -512,7 +466,10 @@ fn check_dotted_copy_source(
         return false;
     };
     if let DottedHead::Param { first, .. } = source {
-        if !declared_at(model, *first, stmt.span.start) {
+        if model
+            .symbol_kind_in_context(*first, stmt.symbol_type_context)
+            .is_none()
+        {
             push(
                 out,
                 stmt.span,
@@ -521,7 +478,7 @@ fn check_dotted_copy_source(
             );
             return true;
         }
-        if !model.parameter_in_context(*first, stmt.symbol_type_context, stmt.span.start) {
+        if !model.parameter_in_context(*first, stmt.symbol_type_context) {
             push(
                 out,
                 stmt.span,
@@ -548,26 +505,19 @@ fn check_dotted_copy_source(
         _ => Vec::new(),
     };
     for (name, span) in names {
-        let refusal = if !declared_at(model, name, stmt.span.start) {
-            Some(("E058", format!("Unknown symbol: {}.", model.name(name))))
-        } else if model
-            .deterministic_exogenous
-            .iter()
-            .any(|decl| decl.name == name)
-        {
-            Some((
+        let refusal = match std_corr_verdict_at(model, name, stmt.symbol_type_context) {
+            PriorHeadVerdict::Undeclared => {
+                Some(("E058", format!("Unknown symbol: {}.", model.name(name))))
+            }
+            PriorHeadVerdict::ExogenousDeterministic => Some((
                 "E317",
                 format!("{} is an exogenous deterministic.", model.name(name)),
-            ))
-        } else if !model.endogenous.iter().any(|decl| decl.name == name)
-            && !model.exogenous.iter().any(|decl| decl.name == name)
-        {
-            Some((
+            )),
+            PriorHeadVerdict::NotEndogenousOrExogenous => Some((
                 "E059",
                 format!("{} is neither endogenous or exogenous.", model.name(name)),
-            ))
-        } else {
-            None
+            )),
+            _ => None,
         };
         if let Some((code, message)) = refusal {
             push(out, span, code, message);
@@ -595,7 +545,7 @@ fn check_dotted_head_and_subsample(
         return true;
     }
     if let DottedHead::Param { first, .. } = stmt.head {
-        if !model.parameter_in_context(first, stmt.symbol_type_context, stmt.span.start) {
+        if !model.parameter_in_context(first, stmt.symbol_type_context) {
             push(
                 out,
                 stmt.span,
@@ -607,7 +557,7 @@ fn check_dotted_head_and_subsample(
     }
     if let DottedHead::Vec { names } = &stmt.head {
         for (name, span) in names {
-            if !model.parameter_in_context(*name, stmt.symbol_type_context, stmt.span.start) {
+            if !model.parameter_in_context(*name, stmt.symbol_type_context) {
                 push(
                     out,
                     *span,
@@ -619,12 +569,7 @@ fn check_dotted_head_and_subsample(
         }
     }
     if matches!(stmt.head, DottedHead::Std { .. } | DottedHead::Corr { .. }) {
-        let rows = classify_std_corr_head_names(
-            model,
-            &stmt.head,
-            stmt.span.start,
-            stmt.symbol_type_context,
-        );
+        let rows = classify_std_corr_head_names(model, &stmt.head, stmt.symbol_type_context);
         if let Some(row) = rows.iter().find(|row| {
             !matches!(
                 row.verdict,
@@ -707,35 +652,10 @@ fn check_subsample_writer(model: &Model, out: &mut Vec<Diagnostic>) {
         let Some((name, span)) = subsample_names(head).first().copied() else {
             continue;
         };
-        let mut valid = model.parameters.iter().any(|decl| decl.name == name)
-            || model.endogenous.iter().any(|decl| decl.name == name)
-            || model.exogenous.iter().any(|decl| {
-                decl.name == name
-                    && !model
-                        .deterministic_exogenous
-                        .iter()
-                        .any(|det| det.name == name)
-            });
-        let last_change = model
-            .change_type_statements
-            .iter()
-            .filter(|change| change.names.iter().any(|(changed, _)| *changed == name))
-            .max_by_key(|change| change.span.start);
-        let last_remove = model
-            .var_removed
-            .iter()
-            .filter(|row| row.name == name)
-            .max_by_key(|row| row.statement.start);
-        if let Some(change) = last_change {
-            if last_remove.is_none_or(|remove| change.span.start > remove.statement.start) {
-                valid = change.new_type != crate::model::ChangeTypeKind::VarexoDet;
-            }
-        }
-        if last_remove.is_some_and(|remove| {
-            last_change.is_none_or(|change| remove.statement.start > change.span.start)
-        }) {
-            valid = false;
-        }
+        let valid = matches!(
+            model.final_symbol_kind(name),
+            Some("var" | "varexo" | "parameters")
+        );
         if !valid {
             push(
                 out,
@@ -878,25 +798,11 @@ pub(crate) fn declared_names(model: &Model) -> HashSet<Name> {
 }
 
 pub(crate) fn endogenous_names(model: &Model) -> HashSet<Name> {
-    name_set(
-        model.endogenous.iter().chain(
-            model
-                .retyped_trend_decls
-                .iter()
-                .filter(|decl| model.final_symbol_kind(decl.name) == Some("var")),
-        ),
-    )
-}
-
-pub(crate) fn parameter_names(model: &Model) -> HashSet<Name> {
-    name_set(
-        model.parameters.iter().chain(
-            model
-                .retyped_trend_decls
-                .iter()
-                .filter(|decl| model.final_symbol_kind(decl.name) == Some("parameters")),
-        ),
-    )
+    model
+        .final_decls(&["var"])
+        .iter()
+        .map(|decl| decl.name)
+        .collect()
 }
 
 /// A value the grammar spells as a bare unsigned integer, or `None` when 7.1
@@ -1292,13 +1198,12 @@ fn check_ms_parameters(model: &Model, stmt: &MsStatement, out: &mut Vec<Diagnost
     let Some(parameters) = option(stmt, "parameters") else {
         return false;
     };
-    let declared = declared_names(model);
-    let parameters_set = parameter_names(model);
     for (name, _span) in &parameters.names {
-        if !declared.contains(name) {
+        let kind = model.symbol_kind_in_context(*name, stmt.symbol_type_context);
+        if kind.is_none() {
             return false;
         }
-        if !parameters_set.contains(name) {
+        if kind != Some("parameters") {
             let span = Span {
                 start: parameters.span.start,
                 end: parameters.value_span.end.max(parameters.span.end),
@@ -1943,7 +1848,7 @@ pub(crate) fn prior_std_corr_head_names(
     if stmt.kind != DottedKind::Prior {
         return Vec::new();
     }
-    classify_std_corr_head_names(model, &stmt.head, stmt.span.start, stmt.symbol_type_context)
+    classify_std_corr_head_names(model, &stmt.head, stmt.symbol_type_context)
 }
 
 /// The same sentence on the top-level assignment. 7.1's `init_param` runs
@@ -1956,16 +1861,7 @@ fn check_top_assignment(
     assignment: &crate::model::Assignment,
     out: &mut Vec<Diagnostic>,
 ) -> bool {
-    let is_parameter = if model
-        .trend_vars
-        .iter()
-        .any(|trend| trend.name == assignment.name)
-    {
-        model.symbol_kind_in_context(assignment.name, assignment.symbol_type_context)
-            == Some("parameters")
-    } else {
-        model.parameter_at(assignment.name, assignment.span.start)
-    };
+    let is_parameter = model.parameter_in_context(assignment.name, assignment.symbol_type_context);
     if is_parameter {
         return false;
     }
@@ -2037,9 +1933,12 @@ fn check_prior_body(model: &Model, stmt: &DottedStatement, out: &mut Vec<Diagnos
 /// Every one of those head refuses is a sentence another code carries, so this
 /// only decides whether the body sentences may run.
 fn head_refused_while_parsing(model: &Model, stmt: &DottedStatement) -> bool {
-    let endogenous = endogenous_names(model);
-    let exogenous = name_set(model.exogenous.iter());
-    let refused = |name: &Name| !endogenous.contains(name) && !exogenous.contains(name);
+    let refused = |name: &Name| {
+        !matches!(
+            model.symbol_kind_in_context(*name, stmt.symbol_type_context),
+            Some("var" | "varexo")
+        )
+    };
     match &stmt.head {
         DottedHead::Std { first, .. } => refused(first),
         DottedHead::Corr { first, second, .. } => refused(first) || refused(second),

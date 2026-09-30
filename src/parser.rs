@@ -2000,6 +2000,7 @@ impl Parser<'_> {
             let removal_event = self.record_symbol_change(name, statement, "excluded");
             self.record_initializations_before_removal(name, "var_remove", removal_event);
             self.model.var_removed.push(VarRemovedName {
+                symbol_type_context: removal_event,
                 name,
                 name_span,
                 statement,
@@ -2897,6 +2898,7 @@ impl Parser<'_> {
         let second_lex = self.lexeme(&second).to_string();
         let end = self.finish_shock_stmt(end_i);
         Some(Init2ShocksRow {
+            symbol_type_context: self.model.symbol_type_events.len(),
             endo: self.intern.intern(&first_lex),
             endo_span: first.span,
             exo: self.intern.intern(&second_lex),
@@ -2960,6 +2962,7 @@ impl Parser<'_> {
         }
         let end = self.finish_shock_stmt(end_i);
         Some(HomotopyRow {
+            symbol_type_context: self.model.symbol_type_events.len(),
             name: self.intern.intern(&lex),
             span: Span {
                 start: name_tok.span.start,
@@ -3046,6 +3049,7 @@ impl Parser<'_> {
             self.current_start()
         };
         Some(ShockGroup {
+            symbol_type_context: self.model.symbol_type_events.len(),
             label,
             label_span,
             members,
@@ -4305,6 +4309,7 @@ impl Parser<'_> {
                 .push(ShapeRefuse::new(tok, &command, "an option list"));
         }
         self.model.ms_statements.push(MsStatement {
+            symbol_type_context: self.model.symbol_type_events.len(),
             command: command.clone(),
             span: Span {
                 start,
@@ -6471,6 +6476,7 @@ impl Parser<'_> {
                 let name = self.lexeme(&tok).to_string();
                 let id = self.intern.intern(&name);
                 self.model.varobs.push(ObservedVar {
+                    symbol_type_context: self.model.symbol_type_events.len(),
                     name: id,
                     span: tok.span,
                 });
@@ -6511,6 +6517,7 @@ impl Parser<'_> {
                 let name = self.lexeme(&tok).to_string();
                 let id = self.intern.intern(&name);
                 self.model.varexobs.push(ObservedVar {
+                    symbol_type_context: self.model.symbol_type_events.len(),
                     name: id,
                     span: tok.span,
                 });
@@ -7215,6 +7222,7 @@ impl Parser<'_> {
         let lower_expr = value_exprs.get(1).copied();
         let upper_expr = value_exprs.get(2).copied();
         Some(EstimatedParam {
+            symbol_type_context: self.model.symbol_type_events.len(),
             name,
             name_span,
             name_role_at_remove: EstimatedNameRole::Unknown,
@@ -8765,13 +8773,30 @@ impl Parser<'_> {
             self.implicit_function_names.push(callee);
             self.record_symbol_declaration(callee, kw.span, "external_function");
         }
-        self.alloc(
+        let sum_role = if self.intern.get(callee).eq_ignore_ascii_case("SUM") {
+            Some(
+                args.first()
+                    .is_some_and(|id| match &self.model.exprs.get(*id).kind {
+                        ExprKind::Ident { name, .. } => {
+                            self.model.is_heterogeneous_endogenous(*name)
+                        }
+                        _ => false,
+                    }),
+            )
+        } else {
+            None
+        };
+        let id = self.alloc(
             ExprKind::Call { callee, args },
             Span {
                 start: kw.span.start,
                 end,
             },
-        )
+        );
+        if let Some(role) = sum_role {
+            self.model.sum_argument_roles.insert(id, role);
+        }
+        id
     }
 
     fn parse_signed_int_in_parens(&mut self) -> (i32, Span) {

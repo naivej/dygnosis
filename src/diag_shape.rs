@@ -704,16 +704,16 @@ fn check_prior_head_not_endo_or_exo(model: &Model) -> Vec<Diagnostic> {
     diagnostics
 }
 
+/// Excluded initialization targets retain the established declaration/removal
+/// warrant. Other targets use the type captured at their own parser position.
+fn initialization_kind(model: &Model, name: Name, context: usize) -> Option<&'static str> {
+    match model.symbol_kind_in_context(name, context) {
+        Some("excluded") => model.final_kind(name),
+        kind => kind,
+    }
+}
+
 fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
-    let params: HashSet<Name> = model.parameters.iter().map(|d| d.name).collect();
-    let declared: HashSet<Name> = model
-        .endogenous
-        .iter()
-        .chain(&model.exogenous)
-        .chain(&model.parameters)
-        .chain(&model.retyped_trend_decls)
-        .map(|d| d.name)
-        .collect();
     let mut diagnostics = Vec::new();
     diagnostics.extend(check_prior_head_not_endo_or_exo(model));
     for (block_name, entries) in [
@@ -722,18 +722,9 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
     ] {
         for entry in entries {
             let name = model.name(entry.name);
-            if params.contains(&entry.name)
-                || (model
-                    .trend_vars
-                    .iter()
-                    .any(|trend| trend.name == entry.name)
-                    && model
-                        .symbol_kind_in_context(entry.name, entry.symbol_type_context)
-                        .is_some()
-                    && !matches!(
-                        model.symbol_kind_in_context(entry.name, entry.symbol_type_context),
-                        Some("var" | "varexo" | "varexo_det")
-                    ))
+            let kind = initialization_kind(model, entry.name, entry.symbol_type_context);
+            if kind
+                .is_some_and(|kind| !matches!(kind, "var" | "varexo" | "varexo_det" | "excluded"))
             {
                 diagnostics.push(Diagnostic {
                     span: entry.span,
@@ -745,15 +736,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
                 });
                 continue;
             }
-            if !declared.contains(&entry.name)
-                || (model
-                    .trend_vars
-                    .iter()
-                    .any(|trend| trend.name == entry.name)
-                    && model
-                        .symbol_kind_in_context(entry.name, entry.symbol_type_context)
-                        .is_none())
-            {
+            if kind.is_none() {
                 diagnostics.push(Diagnostic {
                     span: entry.span,
                     severity: Severity::Error,
@@ -767,19 +750,8 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
     }
     for entry in &model.histval {
         let name = model.name(entry.name);
-        if params.contains(&entry.name)
-            || (model
-                .trend_vars
-                .iter()
-                .any(|trend| trend.name == entry.name)
-                && model
-                    .symbol_kind_in_context(entry.name, entry.symbol_type_context)
-                    .is_some()
-                && !matches!(
-                    model.symbol_kind_in_context(entry.name, entry.symbol_type_context),
-                    Some("var" | "varexo" | "varexo_det")
-                ))
-        {
+        let kind = initialization_kind(model, entry.name, entry.symbol_type_context);
+        if kind.is_some_and(|kind| !matches!(kind, "var" | "varexo" | "varexo_det" | "excluded")) {
             diagnostics.push(Diagnostic {
                 span: entry.span,
                 severity: Severity::Error,
@@ -790,15 +762,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
             });
             continue;
         }
-        if !declared.contains(&entry.name)
-            || (model
-                .trend_vars
-                .iter()
-                .any(|trend| trend.name == entry.name)
-                && model
-                    .symbol_kind_in_context(entry.name, entry.symbol_type_context)
-                    .is_none())
-        {
+        if kind.is_none() {
             diagnostics.push(Diagnostic {
                 span: entry.span,
                 severity: Severity::Error,

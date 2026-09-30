@@ -1,0 +1,1 @@
+var y; parameters z; varexo e; change_type(varexo) z; model; y=z+e; end; std(z).prior(shape=inv_gamma,mean=.1,stdev=.2); std(e).prior=std(z).prior;

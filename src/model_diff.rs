@@ -343,12 +343,12 @@ pub fn compare_models_with_sources(
     source_a: Option<CompareSource<'_>>,
     source_b: Option<CompareSource<'_>>,
 ) -> ModelDiff {
-    let end_a = names(model_a, &model_a.endogenous);
-    let end_b = names(model_b, &model_b.endogenous);
-    let exo_a = names(model_a, &model_a.exogenous);
-    let exo_b = names(model_b, &model_b.exogenous);
-    let par_a = names(model_a, &model_a.parameters);
-    let par_b = names(model_b, &model_b.parameters);
+    let end_a = names(model_a, &model_a.final_decls(&["var"]));
+    let end_b = names(model_b, &model_b.final_decls(&["var"]));
+    let exo_a = names(model_a, &model_a.final_decls(&["varexo", "varexo_det"]));
+    let exo_b = names(model_b, &model_b.final_decls(&["varexo", "varexo_det"]));
+    let par_a = names(model_a, &model_a.final_decls(&["parameters"]));
+    let par_b = names(model_b, &model_b.final_decls(&["parameters"]));
 
     let common_params: HashSet<String> = par_a.intersection(&par_b).cloned().collect();
     let changed_parameter_values = changed_params(model_a, model_b, &common_params);
@@ -2034,79 +2034,26 @@ fn symbols_changed(before: &Model, after: &Model) -> Vec<SymbolChange> {
 }
 
 fn symbol_index(model: &Model) -> BTreeMap<String, SymbolSide> {
-    let det_spans: HashSet<(u32, u32)> = model
-        .deterministic_exogenous
-        .iter()
-        .map(|decl| (decl.span.start, decl.span.end))
-        .collect();
-    let mut ranked: Vec<(u32, String, SymbolSide)> = Vec::new();
-    push_symbols(
-        &mut ranked,
-        model,
-        &model.endogenous,
-        "var",
-        &det_spans,
-        false,
-    );
-    push_symbols(
-        &mut ranked,
-        model,
-        &model.deterministic_exogenous,
-        "varexo_det",
-        &det_spans,
-        false,
-    );
-    push_symbols(
-        &mut ranked,
-        model,
-        &model.exogenous,
-        "varexo",
-        &det_spans,
-        true,
-    );
-    push_symbols(
-        &mut ranked,
-        model,
-        &model.parameters,
-        "parameters",
-        &det_spans,
-        false,
-    );
-    ranked.sort_by(|left, right| left.1.cmp(&right.1).then(left.0.cmp(&right.0)));
+    let mut decls = model.final_decls(&["var", "varexo", "varexo_det", "parameters"]);
+    decls.sort_by_key(|decl| (decl.span.start, decl.span.end));
     let mut out = BTreeMap::new();
-    for (_span, name, side) in ranked {
-        out.entry(name).or_insert(side);
+    for decl in decls {
+        let kind = model
+            .final_kind(decl.name)
+            .expect("final declaration has a type");
+        out.entry(model.name(decl.name).to_string())
+            .or_insert_with(|| SymbolSide {
+                kind: symbol_kind(model, kind, decl),
+                long_name: decl.long_name.clone(),
+                tex_name: decl.tex_name.clone(),
+            });
     }
     out
 }
 
-fn push_symbols(
-    out: &mut Vec<(u32, String, SymbolSide)>,
-    model: &Model,
-    decls: &[Decl],
-    command: &str,
-    det_spans: &HashSet<(u32, u32)>,
-    skip_det_clone: bool,
-) {
-    for decl in decls {
-        if skip_det_clone && det_spans.contains(&(decl.span.start, decl.span.end)) {
-            continue;
-        }
-        out.push((
-            decl.span.start,
-            model.name(decl.name).to_string(),
-            SymbolSide {
-                kind: symbol_kind(model, command, decl),
-                long_name: decl.long_name.clone(),
-                tex_name: decl.tex_name.clone(),
-            },
-        ));
-    }
-}
-
 fn symbol_kind(model: &Model, command: &str, decl: &Decl) -> String {
-    match decl.heterogeneity {
-        Some((dimension, _)) => {
+    match model.final_heterogeneity(decl) {
+        Some(dimension) => {
             format!("{command}(heterogeneity={})", model.name(dimension))
         }
         None => command.to_string(),
@@ -2138,7 +2085,7 @@ fn format_metadata(value: Option<&str>) -> String {
     }
 }
 
-fn names(model: &Model, decls: &[Decl]) -> HashSet<String> {
+fn names(model: &Model, decls: &[&Decl]) -> HashSet<String> {
     decls
         .iter()
         .map(|d| model.name(d.name).to_string())

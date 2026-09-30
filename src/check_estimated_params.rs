@@ -103,15 +103,9 @@ fn check_one_block(
 ) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let exo: HashSet<Name> = model
-        .exogenous
+        .final_decls(&["varexo"])
         .iter()
         .map(|d| d.name)
-        .filter(|n| {
-            !model
-                .deterministic_exogenous
-                .iter()
-                .any(|det| det.name == *n)
-        })
         .collect();
     let declared: HashSet<Name> = model
         .endogenous

@@ -1,0 +1,20 @@
+// inventory: d_pac_e193_target_nonlinear_rhs
+var x z v phi;
+varexo ex ez;
+parameters psi k beta; change_type(parameters) phi;
+phi=.3; psi=.4; k=.5; beta=.9;
+var_model(model_name=aux,eqtags=['X']);
+pac_model(model_name=p,auxiliary_model_name=aux,discount=beta);
+pac_target_info(p);
+  target v;
+  auxname_target_nonstationary v_ns;
+  component x;
+  growth diff(x(-1));
+  auxname x_part;
+  kind dd;
+end;
+model;
+  [name='X'] diff(x)=psi*diff(x(-1))+ex;
+  [name='V'] v=phi*x;
+  [name='P'] diff(z)=k*(pac_target_nonstationary(p)-z(-1))+psi*diff(z(-1))+pac_expectation(p)+ez;
+end;

@@ -1,0 +1,1 @@
+filter_initial_state; z(0)=0; end; var y z; model; y=.5*y(-1); z=.5*z(-1); end;

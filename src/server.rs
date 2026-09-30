@@ -1028,17 +1028,17 @@ impl Backend {
         let model = inner.workspace.get_model(uri.as_str())?;
         let index = LineIndex::new(&doc.text);
         let endo: HashMap<String, ()> = model
-            .endogenous
+            .final_decls(&["var"])
             .iter()
             .map(|d| (model.name(d.name).to_string(), ()))
             .collect();
         let exo: HashMap<String, ()> = model
-            .exogenous
+            .final_decls(&["varexo", "varexo_det"])
             .iter()
             .map(|d| (model.name(d.name).to_string(), ()))
             .collect();
         let params: HashMap<String, ()> = model
-            .parameters
+            .final_parameters()
             .iter()
             .map(|d| (model.name(d.name).to_string(), ()))
             .collect();
@@ -2139,7 +2139,7 @@ fn default_completions(model: &Model) -> Vec<CompletionItem> {
             ..CompletionItem::default()
         });
     }
-    for d in &model.endogenous {
+    for d in model.final_decls(&["var"]) {
         let name = model.name(d.name);
         items.push(CompletionItem {
             label: name.into(),
@@ -2148,7 +2148,7 @@ fn default_completions(model: &Model) -> Vec<CompletionItem> {
             ..CompletionItem::default()
         });
     }
-    for d in &model.exogenous {
+    for d in model.final_decls(&["varexo", "varexo_det"]) {
         let name = model.name(d.name);
         items.push(CompletionItem {
             label: name.into(),
@@ -2157,7 +2157,7 @@ fn default_completions(model: &Model) -> Vec<CompletionItem> {
             ..CompletionItem::default()
         });
     }
-    for d in &model.parameters {
+    for d in model.final_parameters() {
         let name = model.name(d.name);
         items.push(CompletionItem {
             label: name.into(),

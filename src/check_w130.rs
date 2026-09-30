@@ -70,7 +70,7 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
         return Vec::new();
     }
 
-    let endogenous: HashSet<Name> = model.endogenous.iter().map(|d| d.name).collect();
+    let endogenous: HashSet<Name> = model.final_endogenous().iter().map(|d| d.name).collect();
     let mut assigned_anywhere = HashSet::new();
     for eq in &model.steady_state_equations {
         if let Some(name) = ss_lhs_ident(model, eq) {
@@ -79,10 +79,8 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
     }
 
     let mut assigned_so_far: HashSet<Name> = model
-        .parameters
+        .final_decls(&["parameters", "varexo", "varexo_det"])
         .iter()
-        .chain(&model.exogenous)
-        .chain(&model.deterministic_exogenous)
         .map(|d| d.name)
         .collect();
     let mut assigned_once: HashSet<Name> = HashSet::new();

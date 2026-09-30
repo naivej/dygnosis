@@ -63,9 +63,11 @@ Limitations by design
 | `dynare_extract` | Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model |
 | `dynare_workspace_diagnose` | Check several root `.mod` files. Pass a files map and roots, or paths to files and directories. One failed root does not drop the others |
 
-Equation symbol classes, model counts, timing, and hover follow the final type after `change_type`. Declaration locations still point at the written declaration. Hover distinguishes deterministic exogenous variables from ordinary exogenous variables.
+Equation symbol classes, model counts, timing, hover, completion, semantic colors, and model comparisons follow the final type after `change_type`. Declaration locations still point at the written declaration. Hover distinguishes deterministic exogenous variables from ordinary exogenous variables.
 
 An unused `trend_var` or `log_trend_var` name can also change to an ordinary type. Its later assignments and name slots use that type, while navigation retains the written trend declaration.
+
+Initial/history values, filter rows, shock/path targets, `init2shocks`, `homotopy_setup`, `shock_groups`, `varobs`, estimated-parameter roles, and `markov_switching(parameters=[…])` check the type when that row or option is read. A later type change cannot validate an earlier refused use; each macro iteration keeps its own parser context. Steady-state order, estimated skewness, parameters in shock values, and PAC/VAR matching use the final type.
 
 Policy instruments must be endogenous when their policy command is read. Undeclared instruments use `E101`; declared names of the wrong type use `E317`. Put declarations and any required `change_type(var)` before the command.
 `discretionary_policy` also requires an existing `optimal_policy_discount_factor` to be a parameter; otherwise it reports `E378` before checking instruments.

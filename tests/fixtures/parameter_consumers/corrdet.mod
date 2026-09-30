@@ -1,0 +1,1 @@
+var y; varexo e; parameters a; change_type(varexo_det) a; model; y=a+e; end; estimated_params; corr a,e,.5; end;

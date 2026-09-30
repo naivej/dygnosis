@@ -232,7 +232,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E059", ExplainEntry {
         title: "Wrong name role in an initval/endval, prior, or removal slot",
-        body: "An `initval` or `endval` entry, a `histval` entry, a `std(…)` / `corr(…)` prior or options head, or an `initval.x` reference in `shock_paths` names something other than endogenous or exogenous. Dynare refuses with `… is neither endogenous or exogenous.` A plain `estimated_params_remove` row must name a parameter; there Dynare refuses with `{name} is not a parameter`.\n\n**Fix**\n\nUse a name with the role required by that row.",
+        body: "An `initval` or `endval` entry, a `histval` entry, a `std(…)` / `corr(…)` prior or options head, or an `initval.x` reference in `shock_paths` names something other than endogenous or exogenous. Dynare refuses with `… is neither endogenous or exogenous.` A plain `estimated_params_remove` row must name a parameter; there Dynare refuses with `{name} is not a parameter`.\n\nThe name must have the required type when this row, head, or option is read. Earlier successful `change_type` statements count; later declarations or type changes do not. Repeated macro copies use their own parser context.\n\n**Fix**\n\nUse a name with the role required by that row.",
         kind: ExplainKind::Shared,
     }),
     ("W060", ExplainEntry {
@@ -252,7 +252,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E090", ExplainEntry {
         title: "Observed variable is not a declared endogenous variable",
-        body: "A name listed in ``varobs`` is not a declared endogenous variable. Dynare refuses: `e is not endogenous.`\n\n**Warrant**\n\nThe editor names the ``varobs`` role and, when the name is already declared as something else, says so; Dynare's string is only `N is not endogenous.`\n\n**Fix**\n\nDeclare the variable in ``var``, or remove it from ``varobs`` if it was a typo or an exogenous/parameter name.",
+        body: "A name listed in ``varobs`` is not a declared endogenous variable. Dynare refuses: `e is not endogenous.`\n\n**Warrant**\n\nThe editor names the ``varobs`` role and, when the name is already declared as something else, says so; Dynare's string is only `N is not endogenous.`\n\nThe name must have the required type when this row, head, or option is read. Earlier successful `change_type` statements count; later declarations or type changes do not. Repeated macro copies use their own parser context.\n\n**Fix**\n\nDeclare the variable in ``var``, or remove it from ``varobs`` if it was a typo or an exogenous/parameter name.",
         kind: ExplainKind::Shared,
     }),
     ("W091", ExplainEntry {
@@ -267,7 +267,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E093", ExplainEntry {
         title: "estimated_params references an undeclared symbol",
-        body: "An ``estimated_params`` entry names a symbol that is not declared with the expected role: a plain entry must name a parameter (apart from reserved `dsge_prior_weight`, which needs no declaration), an ``stderr`` or ``skew`` entry must name a shock or observed variable, and a ``corr`` entry must name two declared shocks or variables. Dynare refuses: `Unknown symbol: not_a_param`. An unknown ``skew`` name is refused during parsing with `Unknown symbol: zzz.`, before the block's later checks.\n\n**Warrant**\n\nThe editor names the ``estimated_params`` role (parameter, stderr, corr, or skew); Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the symbol, or correct the name / entry type.",
+        body: "An ``estimated_params`` entry names a symbol that is not declared with the expected role: a plain entry must name a parameter (apart from reserved `dsge_prior_weight`, which needs no declaration), an ``stderr`` or ``skew`` entry must name a shock or observed variable, and a ``corr`` entry must name two declared shocks or variables. Dynare refuses: `Unknown symbol: not_a_param`. An unknown ``skew`` name is refused during parsing with `Unknown symbol: zzz.`, before the block's later checks.\n\n**Warrant**\n\nThe editor names the ``estimated_params`` role (parameter, stderr, corr, or skew); Dynare's string is the generic `Unknown symbol`.\n\nThe name must have the required type when this row, head, or option is read. Earlier successful `change_type` statements count; later declarations or type changes do not. Repeated macro copies use their own parser context. Standard errors require an ordinary endogenous or exogenous name; correlation pairs must both be endogenous or both ordinary exogenous. Mixed pairs use Dynare's literal type-refusal sentence; the existing editor role wording remains for other entries.\n\n**Fix**\n\nDeclare the symbol, or correct the name / entry type.",
         kind: ExplainKind::Shared,
     }),
     ("W094", ExplainEntry {
@@ -342,7 +342,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E130", ExplainEntry {
         title: "Variable used before assignment in steady_state_model",
-        body: "The ``steady_state_model`` block is evaluated top to bottom as a sequence of assignments, so every variable on a right-hand side must already have been assigned above. Dynare refuses: `variable 'n' is undefined in the declaration of variable 'log_n'`.\n\n**Fix**\n\nReorder the assignments so each variable is computed before it is used.",
+        body: "The ``steady_state_model`` block is evaluated top to bottom as a sequence of assignments, so every variable on a right-hand side must already have been assigned above. Dynare refuses: `variable 'n' is undefined in the declaration of variable 'log_n'`.\n\nThis check uses the final symbol type after successful `change_type` statements, rather than the list where the name was declared.\n\n**Fix**\n\nReorder the assignments so each variable is computed before it is used.",
         kind: ExplainKind::Shared,
     }),
     ("E170", ExplainEntry {
@@ -517,7 +517,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E212", ExplainEntry {
         title: "Estimated parameter used in a shock expression",
-        body: "Dynare refuses: `some estimated parameters (…) also appear in the expressions defining the variance/covariance matrix of shocks; this is not allowed.`\n\n**Fix**\n\nUse a calibrated parameter in the shocks block, or drop that name from ``estimated_params``.",
+        body: "Dynare refuses: `some estimated parameters (…) also appear in the expressions defining the variance/covariance matrix of shocks; this is not allowed.`\n\nThis check uses the final symbol type after successful `change_type` statements, rather than the list where the name was declared.\n\n**Fix**\n\nUse a calibrated parameter in the shocks block, or drop that name from ``estimated_params``.",
         kind: ExplainKind::Shared,
     }),
     ("E213", ExplainEntry {
@@ -712,7 +712,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E249", ExplainEntry {
         title: "Skewness on a non-exogenous name",
-        body: "``estimated_params`` lists ``skew`` on a name that is not exogenous. Dynare refuses: `in `estimated_params' block, skewness can only be specified for exogenous variables, not for '{name}'.`\n\n**Fix**\n\nUse ``skew`` only on a ``varexo`` name.",
+        body: "``estimated_params`` lists ``skew`` on a name that is not exogenous. Dynare refuses: `in `estimated_params' block, skewness can only be specified for exogenous variables, not for '{name}'.`\n\nThis check uses the final symbol type after successful `change_type` statements, rather than the list where the name was declared.\n\n**Fix**\n\nUse ``skew`` only on a ``varexo`` name.",
         kind: ExplainKind::Shared,
     }),
     ("E250", ExplainEntry {
@@ -1027,12 +1027,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E311", ExplainEntry {
         title: "filter_initial_state name is not endogenous or exogenous",
-        body: "A ``filter_initial_state`` entry names a symbol that is neither endogenous nor exogenous (for example a parameter). Dynare refuses: `filter_initial_state: rho should be an endogenous or exogenous variable`.\n\n**Fix**\n\nList an endogenous or exogenous variable.",
+        body: "A ``filter_initial_state`` entry names a symbol that is neither endogenous nor exogenous (for example a parameter). Dynare refuses: `filter_initial_state: rho should be an endogenous or exogenous variable`.\n\nThe name must have the required type when this row, head, or option is read. Earlier successful `change_type` statements count; later declarations or type changes do not. Repeated macro copies use their own parser context.\n\n**Fix**\n\nList an endogenous or exogenous variable.",
         kind: ExplainKind::Shared,
     }),
     ("E312", ExplainEntry {
         title: "filter_initial_state exogenous variable without a lag",
-        body: "A ``filter_initial_state`` entry gives an exogenous variable the lag 0. Dynare refuses: `filter_initial_state: exogenous variable e must be provided with a lag`.\n\n**Fix**\n\nGive the exogenous variable a negative lag.",
+        body: "A ``filter_initial_state`` entry gives an exogenous variable the lag 0. Dynare refuses: `filter_initial_state: exogenous variable e must be provided with a lag`.\n\nThe name must have the required type when this row, head, or option is read. Earlier successful `change_type` statements count; later declarations or type changes do not. Repeated macro copies use their own parser context.\n\n**Fix**\n\nGive the exogenous variable a negative lag.",
         kind: ExplainKind::Shared,
     }),
     ("E313", ExplainEntry {
@@ -1122,22 +1122,22 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E330", ExplainEntry {
         title: "init2shocks first name is not endogenous",
-        body: "The first name of an ``init2shocks`` pair is not an endogenous variable. Dynare refuses: `init2shocks: rho should be an endogenous variable`.\n\n**Fix**\n\nPut an endogenous variable first.",
+        body: "The first name of an ``init2shocks`` pair is not an endogenous variable. Dynare refuses: `init2shocks: rho should be an endogenous variable`.\n\nThe name must have the required type when this row, head, or option is read. Earlier successful `change_type` statements count; later declarations or type changes do not. Repeated macro copies use their own parser context.\n\n**Fix**\n\nPut an endogenous variable first.",
         kind: ExplainKind::Shared,
     }),
     ("E331", ExplainEntry {
         title: "init2shocks second name is not exogenous",
-        body: "The second name of an ``init2shocks`` pair is not a ``varexo`` variable; ``varexo_det`` does not count here. Dynare refuses: `init2shocks: rho should be an exogenous variable`.\n\n**Fix**\n\nPut a ``varexo`` variable second.",
+        body: "The second name of an ``init2shocks`` pair is not a ``varexo`` variable; ``varexo_det`` does not count here. Dynare refuses: `init2shocks: rho should be an exogenous variable`.\n\nThe name must have the required type when this row, head, or option is read. Earlier successful `change_type` statements count; later declarations or type changes do not. Repeated macro copies use their own parser context.\n\n**Fix**\n\nPut a ``varexo`` variable second.",
         kind: ExplainKind::Shared,
     }),
     ("E332", ExplainEntry {
         title: "homotopy_setup name is not a parameter or exogenous variable",
-        body: "A ``homotopy_setup`` row names a symbol that is neither a parameter, a ``varexo``, nor a ``varexo_det`` variable. Dynare refuses: `homotopy_val: y should be a parameter or exogenous variable`.\n\n**Fix**\n\nUse a parameter or an exogenous variable.",
+        body: "A ``homotopy_setup`` row names a symbol that is neither a parameter, a ``varexo``, nor a ``varexo_det`` variable. Dynare refuses: `homotopy_val: y should be a parameter or exogenous variable`.\n\nThe name must have the required type when this row, head, or option is read. Earlier successful `change_type` statements count; later declarations or type changes do not. Repeated macro copies use their own parser context.\n\n**Fix**\n\nUse a parameter or an exogenous variable.",
         kind: ExplainKind::Shared,
     }),
     ("E333", ExplainEntry {
         title: "shock_groups member is not exogenous",
-        body: "A ``shock_groups`` member is not a ``varexo`` variable; ``varexo_det`` does not count here. Dynare refuses: `shock_groups: rho should be an exogenous variable`.\n\n**Fix**\n\nList ``varexo`` variables.",
+        body: "A ``shock_groups`` member is not a ``varexo`` variable; ``varexo_det`` does not count here. Dynare refuses: `shock_groups: rho should be an exogenous variable`.\n\nThe name must have the required type when this row, head, or option is read. Earlier successful `change_type` statements count; later declarations or type changes do not. Repeated macro copies use their own parser context.\n\n**Fix**\n\nList ``varexo`` variables.",
         kind: ExplainKind::Shared,
     }),
     ("E334", ExplainEntry {
@@ -1272,6 +1272,8 @@ Number the statements from 1 with no gaps, in the order they appear.",
     ("E349", ExplainEntry {
         title: "markov_switching parameters names are not parameters",
         body: "A name in the ``parameters=[…]`` option of ``markov_switching`` is not a declared parameter. Dynare refuses: `Variables passed to the parameters option of the markov_switching statement must be parameters. Caused by: Y`.
+
+The name must have the required type when this row, head, or option is read. Earlier successful `change_type` statements count; later declarations or type changes do not. Repeated macro copies use their own parser context.
 
 **Fix**
 
@@ -1832,7 +1834,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E434", ExplainEntry {
         title: "VAR or trend-component equation has the wrong shape",
-        body: "A selected equation violates Dynare's LHS or RHS variable and timing rules, repeats an LHS, or uses a binary expression on the LHS. Dynare refuses at transform with the matching VAR or trend-component equation sentence. A structural VAR permits contemporaneous endogenous variables on the RHS.\n\n**Fix**\n\nGive each equation one untimed endogenous LHS and use only the allowed RHS timing.",
+        body: "A selected equation violates Dynare's LHS or RHS variable and timing rules, repeats an LHS, or uses a binary expression on the LHS. Dynare refuses at transform with the matching VAR or trend-component equation sentence. A structural VAR permits contemporaneous endogenous variables on the RHS.\n\nThis check uses the final symbol type after successful `change_type` statements, rather than the list where the name was declared.\n\n**Fix**\n\nGive each equation one untimed endogenous LHS and use only the allowed RHS timing.",
         kind: ExplainKind::Shared,
     }),
     ("E435", ExplainEntry {
@@ -1842,7 +1844,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E436", ExplainEntry {
         title: "VAR expectation expression has the wrong linear form",
-        body: "The variable/expression in var_expectation_model is not a linear combination of current endogenous variables in a written case that needs no rewrite. Dynare refuses at transform: `expression in var_expectation_model NAME is not of the expected form: ...`.\n\n**Fix**\n\nUse current endogenous variables with numeric or single-parameter coefficients.",
+        body: "The variable/expression in var_expectation_model is not a linear combination of current endogenous variables in a written case that needs no rewrite. Dynare refuses at transform: `expression in var_expectation_model NAME is not of the expected form: ...`.\n\nThis check uses the final symbol type after successful `change_type` statements, rather than the list where the name was declared.\n\n**Fix**\n\nUse current endogenous variables with numeric or single-parameter coefficients.",
         kind: ExplainKind::Shared,
     }),
     ("E437", ExplainEntry {
@@ -1902,7 +1904,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E448", ExplainEntry {
         title: "PAC growth has a nonlinear written product",
-        body: "A PAC growth expression directly multiplies two variables, so Dynare refuses at transform: `PAC growth must be a linear combination of variables`. Other growth forms may need rewrite before this check.\n\n**Fix**\n\nUse a linear combination of variables and constants for growth.",
+        body: "A PAC growth expression directly multiplies two variables, so Dynare refuses at transform: `PAC growth must be a linear combination of variables`. Other growth forms may need rewrite before this check.\n\nThis check uses the final symbol type after successful `change_type` statements, rather than the list where the name was declared.\n\n**Fix**\n\nUse a linear combination of variables and constants for growth.",
         kind: ExplainKind::Shared,
     }),
     ("E449", ExplainEntry {
@@ -1957,7 +1959,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("W206", ExplainEntry {
         title: "Non-variable name in deterministic trends",
-        body: "A deterministic_trends row names a declared symbol other than an endogenous variable. Dynare warns at json=check: `Warning: Non-variable symbol used in deterministic_trends: NAME`. The warning's capital-W prefix is part of Dynare 7.2's text.\n\n**Fix**\n\nUse an endogenous row name, or remove the row.",
+        body: "A deterministic_trends row names a declared symbol other than an endogenous variable. Dynare warns at json=check: `Warning: Non-variable symbol used in deterministic_trends: NAME`. The warning's capital-W prefix is part of Dynare 7.2's text.\n\nThis check uses the final symbol type after successful `change_type` statements, rather than the list where the name was declared.\n\n**Fix**\n\nUse an endogenous row name, or remove the row.",
         kind: ExplainKind::Shared,
     }),
     ("E186", ExplainEntry {

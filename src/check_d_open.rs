@@ -157,25 +157,6 @@ fn declared_before(model: &Model, name: Name, pos: u32) -> bool {
         .any(|(candidate, span)| candidate == name && span.start < pos)
 }
 
-fn name_set<'a>(decls: impl Iterator<Item = &'a crate::model::Decl>) -> HashSet<Name> {
-    decls.map(|d| d.name).collect()
-}
-
-/// Every declared symbol, for the "is not declared" guards. Trend variables are
-/// not `Decl`s but are still symbols the opener name slots may name.
-fn declared_set(model: &Model) -> HashSet<Name> {
-    let mut set = name_set(
-        model
-            .endogenous
-            .iter()
-            .chain(&model.exogenous)
-            .chain(&model.deterministic_exogenous)
-            .chain(&model.parameters),
-    );
-    set.extend(model.trend_vars.iter().map(|t| t.name));
-    set
-}
-
 /// Expression ids parsed in model context: model equations, `var(deflator=…)`
 /// and `ramsey_constraints` bodies. Trend names are legal here.
 fn model_context_expr_ids(model: &Model) -> Vec<ExprId> {
@@ -735,13 +716,6 @@ fn check_nonstationary_vars(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_filter_initial_state(model: &Model) -> Vec<Diagnostic> {
-    let endo = name_set(model.endogenous.iter());
-    let exo = name_set(model.exogenous.iter());
-    let exo_det = name_set(model.deterministic_exogenous.iter());
-    let params = name_set(model.parameters.iter());
-    let trends: HashSet<Name> = model.trend_vars.iter().map(|t| t.name).collect();
-    let declared = declared_set(model);
-    let excluded: HashSet<Name> = model.excluded_endogenous.iter().map(|d| d.name).collect();
     let mut seen: HashSet<(Name, i32)> = HashSet::new();
     let mut out = Vec::new();
     for (index, entry) in model.filter_initial_state.iter().enumerate() {
@@ -755,7 +729,8 @@ fn check_filter_initial_state(model: &Model) -> Vec<Diagnostic> {
         let name = model.name(entry.name);
         // A symbol `model_remove` dropped was declared when this entry was written, and
         // 7.1 still refuses the entry — with the timing message, not the undeclared one.
-        if !declared.contains(&entry.name) && !excluded.contains(&entry.name) {
+        let kind = model.symbol_kind_in_context(entry.name, entry.symbol_type_context);
+        if kind.is_none() {
             out.push(err(
                 entry.span,
                 "E058",
@@ -763,15 +738,9 @@ fn check_filter_initial_state(model: &Model) -> Vec<Diagnostic> {
             ));
             continue;
         }
-        let trend_kind = trends
-            .contains(&entry.name)
-            .then(|| model.symbol_kind_in_context(entry.name, entry.symbol_type_context))
-            .flatten();
-        let is_endo = endo.contains(&entry.name) || trend_kind == Some("var");
-        let is_exo = exo.contains(&entry.name)
-            || exo_det.contains(&entry.name)
-            || matches!(trend_kind, Some("varexo" | "varexo_det"));
-        if !is_endo && !is_exo && (params.contains(&entry.name) || trends.contains(&entry.name)) {
+        let is_endo = matches!(kind, Some("var" | "excluded"));
+        let is_exo = matches!(kind, Some("varexo" | "varexo_det"));
+        if !is_endo && !is_exo && kind.is_some() {
             out.push(err(
                 entry.span,
                 "E311",
@@ -1141,23 +1110,15 @@ fn check_external_functions(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
-    let endo = name_set(model.endogenous.iter());
-    let exo_det = name_set(model.deterministic_exogenous.iter());
-    // `Model::exogenous` also holds `varexo_det`; these two slots want plain `varexo`.
-    let exo: HashSet<Name> = model
-        .exogenous
-        .iter()
-        .map(|d| d.name)
-        .filter(|name| !exo_det.contains(name))
-        .collect();
-    let params = name_set(model.parameters.iter());
-    let declared = declared_set(model);
     let mut out = Vec::new();
 
     for block in &model.init2shocks_blocks {
         let mut seen: HashSet<Name> = HashSet::new();
         for row in &block.rows {
-            if !declared.contains(&row.endo) {
+            if model
+                .symbol_kind_in_context(row.endo, row.symbol_type_context)
+                .is_none()
+            {
                 out.push(err(
                     row.endo_span,
                     "E058",
@@ -1166,10 +1127,7 @@ fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
                         model.name(row.endo)
                     ),
                 ));
-            } else if !endo.contains(&row.endo)
-                && (exo.contains(&row.endo)
-                    || exo_det.contains(&row.endo)
-                    || params.contains(&row.endo))
+            } else if model.symbol_kind_in_context(row.endo, row.symbol_type_context) != Some("var")
             {
                 out.push(err(
                     row.endo_span,
@@ -1180,7 +1138,10 @@ fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
                     ),
                 ));
             }
-            if !declared.contains(&row.exo) {
+            if model
+                .symbol_kind_in_context(row.exo, row.symbol_type_context)
+                .is_none()
+            {
                 out.push(err(
                     row.exo_span,
                     "E058",
@@ -1189,10 +1150,8 @@ fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
                         model.name(row.exo)
                     ),
                 ));
-            } else if !exo.contains(&row.exo)
-                && (exo_det.contains(&row.exo)
-                    || params.contains(&row.exo)
-                    || endo.contains(&row.exo))
+            } else if model.symbol_kind_in_context(row.exo, row.symbol_type_context)
+                != Some("varexo")
             {
                 out.push(err(
                     row.exo_span,
@@ -1218,7 +1177,10 @@ fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
     }
 
     for row in &model.homotopy_rows {
-        if !declared.contains(&row.name) {
+        if model
+            .symbol_kind_in_context(row.name, row.symbol_type_context)
+            .is_none()
+        {
             out.push(err(
                 row.span,
                 "E058",
@@ -1229,10 +1191,13 @@ fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
             ));
             continue;
         }
-        if params.contains(&row.name) || exo.contains(&row.name) || exo_det.contains(&row.name) {
+        if matches!(
+            model.symbol_kind_in_context(row.name, row.symbol_type_context),
+            Some("parameters" | "varexo" | "varexo_det")
+        ) {
             continue;
         }
-        if endo.contains(&row.name) {
+        if model.symbol_kind_in_context(row.name, row.symbol_type_context) == Some("var") {
             out.push(err(
                 row.span,
                 "E332",
@@ -1246,7 +1211,10 @@ fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
 
     for group in &model.shock_groups {
         for (name, span) in &group.members {
-            if !declared.contains(name) {
+            if model
+                .symbol_kind_in_context(*name, group.symbol_type_context)
+                .is_none()
+            {
                 out.push(err(
                     *span,
                     "E058",
@@ -1257,10 +1225,13 @@ fn check_pair_lists(model: &Model) -> Vec<Diagnostic> {
                 ));
                 continue;
             }
-            if exo.contains(name) {
+            if model.symbol_kind_in_context(*name, group.symbol_type_context) == Some("varexo") {
                 continue;
             }
-            if exo_det.contains(name) || params.contains(name) || endo.contains(name) {
+            if model
+                .symbol_kind_in_context(*name, group.symbol_type_context)
+                .is_some()
+            {
                 out.push(err(
                     *span,
                     "E333",

@@ -330,6 +330,8 @@ pub struct ComplementarityTriple {
 /// A name listed in `varobs`, with the identifier's span.
 #[derive(Clone, Copy, Debug)]
 pub struct ObservedVar {
+    /// Type history when this row was parsed, including previous macro iterations.
+    pub symbol_type_context: usize,
     pub name: Name,
     pub span: Span,
 }
@@ -478,6 +480,8 @@ pub struct ExternalFunctionStmt {
 /// One `symbol symbol;` row of an `init2shocks` block.
 #[derive(Clone, Debug)]
 pub struct Init2ShocksRow {
+    /// Type history when this row was parsed, including previous macro iterations.
+    pub symbol_type_context: usize,
     pub endo: Name,
     pub endo_span: Span,
     pub exo: Name,
@@ -497,6 +501,8 @@ pub struct Init2ShocksBlock {
 /// One `name, expr, expr;` row of a `homotopy_setup` block.
 #[derive(Clone, Debug)]
 pub struct HomotopyRow {
+    /// Type history when this row was parsed, including previous macro iterations.
+    pub symbol_type_context: usize,
     pub name: Name,
     pub span: Span,
 }
@@ -504,6 +510,8 @@ pub struct HomotopyRow {
 /// One `'group' = name_list;` row of a `shock_groups` block.
 #[derive(Clone, Debug)]
 pub struct ShockGroup {
+    /// Type history when this row was parsed, including previous macro iterations.
+    pub symbol_type_context: usize,
     /// The row's label, quotes stripped (`'g1'` and `g1` are the same label).
     pub label: String,
     /// The label token's span (inside the quotes for a quoted label).
@@ -549,6 +557,8 @@ impl PolicyCommand {
 
 #[derive(Clone, Copy, Debug)]
 pub struct EstimatedParam {
+    /// Type history when this row was parsed, including previous macro iterations.
+    pub symbol_type_context: usize,
     pub name: Name,
     pub name_span: Span,
     pub name_role_at_remove: EstimatedNameRole,
@@ -773,6 +783,7 @@ pub struct SubsampleRange {
 /// One name whose type `var_remove` changed while the file was parsed.
 #[derive(Clone, Debug)]
 pub struct VarRemovedName {
+    pub symbol_type_context: usize,
     pub name: Name,
     pub name_span: Span,
     pub statement: Span,
@@ -781,11 +792,13 @@ pub struct VarRemovedName {
 #[derive(Clone, Debug)]
 pub enum SubsampleInstruction {
     Declare {
+        symbol_type_context: usize,
         head: SubsampleHead,
         ranges: Vec<SubsampleRange>,
         span: Span,
     },
     Copy {
+        symbol_type_context: usize,
         target: SubsampleHead,
         source: SubsampleHead,
         span: Span,
@@ -839,11 +852,14 @@ pub struct Model {
     pub endogenous: Vec<Decl>,
     pub exogenous: Vec<Decl>,
     pub deterministic_exogenous: Vec<Decl>,
+    /// Written parameter declarations. For types use final_parameters or a captured parser context.
     pub parameters: Vec<Decl>,
     pub predetermined: Vec<Decl>,
     pub param_assignments: Vec<Assignment>,
     pub helper_assignments: Vec<Assignment>,
     pub equations: Vec<Equation>,
+    /// SUM argument role when the call was parsed; later removal cannot invalidate that earlier role check.
+    pub sum_argument_roles: HashMap<ExprId, bool>,
     pub semi_structural_commands: Vec<SemiStructuralCommand>,
     pub named_model_operators: Vec<NamedModelOperator>,
     pub pac_target_info: Vec<PacTargetInfoBlock>,
@@ -1314,6 +1330,8 @@ pub struct CommandSymbol {
 /// `conditional_forecast`, `svar_global_identification_check`).
 #[derive(Clone, Debug)]
 pub struct MsStatement {
+    /// Type history when this row was parsed, including previous macro iterations.
+    pub symbol_type_context: usize,
     /// Command name as written.
     pub command: String,
     /// Whole statement: opener through the terminating `;`.
@@ -1920,12 +1938,8 @@ impl Model {
             .map(|event| event.kind)
     }
 
-    pub(crate) fn parameter_in_context(&self, name: Name, context: usize, at: u32) -> bool {
-        if self.trend_vars.iter().any(|trend| trend.name == name) {
-            self.symbol_kind_in_context(name, context) == Some("parameters")
-        } else {
-            self.parameter_at(name, at)
-        }
+    pub(crate) fn parameter_in_context(&self, name: Name, context: usize) -> bool {
+        self.symbol_kind_in_context(name, context) == Some("parameters")
     }
 
     /// Final type of `name` for a check that asks what the name is.
@@ -1958,8 +1972,8 @@ impl Model {
     }
 
     /// Type `name` has at byte `at`: the last declaration or type change written
-    /// before it. Official checks such as `check_symbol_is_parameter` run while
-    /// parsing the statement, so a later `change_type` does not count.
+    /// before it. This source-position reader does not recover macro execution
+    /// order; internal parse-time checks use their captured parser context.
     pub fn symbol_kind_before(&self, name: Name, at: u32) -> Option<&'static str> {
         self.symbol_type_events
             .iter()
@@ -2004,6 +2018,16 @@ impl Model {
     /// same way `final_endogenous` reads endogenous ones.
     pub fn final_parameters(&self) -> Vec<&Decl> {
         self.final_decls(&["parameters"])
+    }
+
+    /// Heterogeneous endogenous among the types recorded so far. Parsing SUM
+    /// captures this answer before later directives can change the symbol.
+    pub(crate) fn is_heterogeneous_endogenous(&self, name: Name) -> bool {
+        self.final_kind(name) == Some("var")
+            && self
+                .endogenous
+                .iter()
+                .any(|decl| decl.name == name && self.final_heterogeneity(decl).is_some())
     }
 
     /// First declaration per name whose final type is one of `kinds`.

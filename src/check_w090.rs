@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::intern::Name;
-use crate::model::{Decl, EstimatedParamKind, Model};
+use crate::model::{EstimatedParamKind, Model};
 use crate::span::Span;
 
 const FALLBACK: Span = Span { start: 0, end: 1 };
@@ -20,19 +20,11 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
         return Vec::new();
     }
 
-    let endogenous = names(&model.endogenous);
-    let exogenous = names(&model.exogenous);
-    let parameters = names(&model.parameters);
-    let det: HashSet<Name> = model
-        .deterministic_exogenous
-        .iter()
-        .map(|d| d.name)
-        .collect();
+    let endogenous: HashSet<Name> = model.final_endogenous().iter().map(|d| d.name).collect();
     let stochastic_exo: HashSet<Name> = model
-        .exogenous
+        .final_decls(&["varexo"])
         .iter()
         .map(|d| d.name)
-        .filter(|n| !det.contains(n))
         .collect();
 
     let mut diagnostics = Vec::new();
@@ -48,10 +40,15 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
             ));
             continue;
         }
-        if !endogenous.contains(&v.name) {
-            let why = if exogenous.contains(&v.name) {
+        if model.symbol_kind_in_context(v.name, v.symbol_type_context) != Some("var") {
+            let why = if matches!(
+                model.symbol_kind_in_context(v.name, v.symbol_type_context),
+                Some("varexo" | "varexo_det")
+            ) {
                 " (it is an exogenous variable)"
-            } else if parameters.contains(&v.name) {
+            } else if model.symbol_kind_in_context(v.name, v.symbol_type_context)
+                == Some("parameters")
+            {
                 " (it is a parameter)"
             } else {
                 ""
@@ -131,12 +128,19 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
         let name = model.name(entry.name);
         match entry.kind {
             EstimatedParamKind::Param => {
-                if !parameters.contains(&entry.name)
+                if model.symbol_kind_in_context(entry.name, entry.symbol_type_context)
+                    != Some("parameters")
                     && !name.eq_ignore_ascii_case("dsge_prior_weight")
                 {
-                    let where_ = if endogenous.contains(&entry.name) {
+                    let where_ = if model
+                        .symbol_kind_in_context(entry.name, entry.symbol_type_context)
+                        == Some("var")
+                    {
                         " (it is an endogenous variable)"
-                    } else if exogenous.contains(&entry.name) {
+                    } else if matches!(
+                        model.symbol_kind_in_context(entry.name, entry.symbol_type_context),
+                        Some("varexo" | "varexo_det")
+                    ) {
                         " (it is an exogenous variable)"
                     } else {
                         ""
@@ -150,7 +154,10 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
                 }
             }
             EstimatedParamKind::Stderr => {
-                if !exogenous.contains(&entry.name) && !endogenous.contains(&entry.name) {
+                if !matches!(
+                    model.symbol_kind_in_context(entry.name, entry.symbol_type_context),
+                    Some("var" | "varexo")
+                ) {
                     diagnostics.push(Diagnostic::new(
                         span,
                         Severity::Error,
@@ -162,24 +169,31 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
                 }
             }
             EstimatedParamKind::Corr => {
-                for symbol in [Some(entry.name), entry.corr_with].into_iter().flatten() {
-                    if !exogenous.contains(&symbol) && !endogenous.contains(&symbol) {
-                        let symbol = model.name(symbol);
-                        diagnostics.push(Diagnostic::new(
-                            span,
-                            Severity::Error,
-                            "E093",
-                            format!(
-                                "estimated_params: corr references '{symbol}', which is not a declared shock or variable."
-                            ),
-                        ));
+                let first_kind =
+                    model.symbol_kind_in_context(entry.name, entry.symbol_type_context);
+                let second_kind = entry
+                    .corr_with
+                    .and_then(|name| model.symbol_kind_in_context(name, entry.symbol_type_context));
+                let mismatch = first_kind.is_some()
+                    && second_kind.is_some()
+                    && (!matches!(first_kind, Some("var" | "varexo")) || first_kind != second_kind);
+                if let Some(other) = entry.corr_with.filter(|_| mismatch) {
+                    diagnostics.push(Diagnostic::new(span, Severity::Error, "E093", format!("{name} and {} must either be both endogenous variables or both exogenous", model.name(other))));
+                } else {
+                    for symbol in [Some(entry.name), entry.corr_with].into_iter().flatten() {
+                        if !matches!(
+                            model.symbol_kind_in_context(symbol, entry.symbol_type_context),
+                            Some("var" | "varexo")
+                        ) {
+                            diagnostics.push(Diagnostic::new(span, Severity::Error, "E093", format!("estimated_params: corr references '{}', which is not a declared shock or variable.", model.name(symbol))));
+                        }
                     }
                 }
             }
             EstimatedParamKind::Skew => {
-                let declared = endogenous.contains(&entry.name)
-                    || exogenous.contains(&entry.name)
-                    || parameters.contains(&entry.name);
+                let declared = model
+                    .symbol_kind_in_context(entry.name, entry.symbol_type_context)
+                    .is_some();
                 if !declared {
                     diagnostics.push(Diagnostic::new(
                         span,
@@ -240,10 +254,6 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
     }
 
     diagnostics
-}
-
-fn names(decls: &[Decl]) -> HashSet<Name> {
-    decls.iter().map(|d| d.name).collect()
 }
 
 fn span_or_fallback(span: Option<Span>) -> Span {

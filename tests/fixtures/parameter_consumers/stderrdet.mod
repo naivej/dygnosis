@@ -1,0 +1,1 @@
+var y; parameters a; change_type(varexo_det) a; model; y=a; end; estimated_params; stderr a,.5; end;

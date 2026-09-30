@@ -1214,6 +1214,7 @@ impl Parser<'_> {
             i += 1;
             if let Some((source, _)) = self.subsample_head_at(i) {
                 self.model.subsamples.push(SubsampleInstruction::Copy {
+                    symbol_type_context: self.model.symbol_type_events.len(),
                     target: head,
                     source,
                     span,
@@ -1309,9 +1310,12 @@ impl Parser<'_> {
             });
             i = after_last;
         }
-        self.model
-            .subsamples
-            .push(SubsampleInstruction::Declare { head, ranges, span });
+        self.model.subsamples.push(SubsampleInstruction::Declare {
+            head,
+            ranges,
+            span,
+            symbol_type_context: self.model.symbol_type_events.len(),
+        });
     }
 
     fn shock_opener_refuse(&mut self, at: usize, command: &str, expected: &str) -> bool {

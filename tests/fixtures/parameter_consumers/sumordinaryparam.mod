@@ -1,0 +1,1 @@
+heterogeneity_dimension h; var y; var(heterogeneity=h) x; change_type(parameters) x; model; y=SUM(x); end;

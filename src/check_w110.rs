@@ -339,7 +339,6 @@ fn check_e212(model: &Model) -> Vec<Diagnostic> {
     if estimated.is_empty() {
         return Vec::new();
     }
-    let param_names: HashSet<Name> = model.parameters.iter().map(|d| d.name).collect();
     let mut hits: Vec<Name> = Vec::new();
     for stmt in &model.shock_stmts {
         let Some(id) = stmt.rhs_expr else {
@@ -347,7 +346,10 @@ fn check_e212(model: &Model) -> Vec<Diagnostic> {
         };
         for r in model.exprs.walk_idents(id) {
             if estimated.contains(&r.name)
-                && param_names.contains(&r.name)
+                && model
+                    .final_symbol_kind(r.name)
+                    .or_else(|| model.final_kind(r.name))
+                    == Some("parameters")
                 && !hits.contains(&r.name)
             {
                 hits.push(r.name);

@@ -72,41 +72,6 @@ fn required(command: &SemiStructuralCommand, name: &str) -> Diagnostic {
     )
 }
 
-fn declared_before(model: &Model, name: Name, at: u32) -> bool {
-    model
-        .endogenous
-        .iter()
-        .chain(&model.exogenous)
-        .chain(&model.deterministic_exogenous)
-        .chain(&model.parameters)
-        .chain(&model.model_local_variables)
-        .any(|declaration| declaration.name == name && declaration.span.start < at)
-        || model
-            .trend_vars
-            .iter()
-            .any(|trend| trend.name == name && trend.span.start < at)
-        || model.equations.iter().any(|equation| {
-            equation.is_local
-                && equation.span.start < at
-                && equation.lhs_expr.is_some_and(|id| {
-                    model
-                        .exprs
-                        .walk_idents(id)
-                        .any(|reference| reference.name == name)
-                })
-        })
-}
-
-fn is_parameter_before(model: &Model, name: Name, at: u32) -> bool {
-    if model.trend_vars.iter().any(|trend| trend.name == name) {
-        return model.symbol_kind_before(name, at) == Some("parameters");
-    }
-    model
-        .parameters
-        .iter()
-        .any(|declaration| declaration.name == name && declaration.span.start < at)
-}
-
 /// ParsingDriver and shared parse-level name/option checks. A parse refusal
 /// prevents Dynare from running checkPass or transformPass.
 pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
@@ -171,7 +136,10 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
                 // ParsingDriver calls SymbolTable::getID directly here. An
                 // unknown variable aborts the pin without a diagnostic line.
                 if let Some((name, _)) = variable {
-                    if !declared_before(model, name, command.span.start) {
+                    if model
+                        .symbol_kind_in_context(name, command.symbol_type_context)
+                        .is_none()
+                    {
                         continue;
                     }
                 }
@@ -204,17 +172,16 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
             }
             SemiStructuralKind::PacModel => {
                 if let Some((discount, span)) = symbol_option(command, "discount") {
-                    if !declared_before(model, discount, command.span.start) {
+                    if model
+                        .symbol_kind_in_context(discount, command.symbol_type_context)
+                        .is_none()
+                    {
                         out.push(error(
                             span,
                             "E058",
                             format!("Unknown symbol: {}.", model.name(discount)),
                         ));
-                    } else if !model.parameter_in_context(
-                        discount,
-                        command.symbol_type_context,
-                        command.span.start,
-                    ) {
+                    } else if !model.parameter_in_context(discount, command.symbol_type_context) {
                         out.push(error(
                             span,
                             "E444",
@@ -258,7 +225,10 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
                 out.push(refusal);
                 continue;
             }
-            if !declared_before(model, row.name, row.name_span.start) {
+            if model
+                .symbol_kind_in_context(row.name, row.expression.symbol_type_context)
+                .is_none()
+            {
                 out.push(error(
                     row.name_span,
                     "E058",
@@ -305,7 +275,7 @@ fn valid_var_discount(model: &Model, expression: &WrittenExpression) -> bool {
     if node.interned.is_some() || matches!(node.kind, ExprKind::Number) {
         return true;
     }
-    matches!(&node.kind, ExprKind::Ident { name, timing: 0, .. } if model.parameter_in_context(*name, expression.symbol_type_context, expression.span.start))
+    matches!(&node.kind, ExprKind::Ident { name, timing: 0, .. } if model.parameter_in_context(*name, expression.symbol_type_context))
 }
 
 /// PAC target fields and the independent deterministic-trend warning.
@@ -444,11 +414,7 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
     }
     for block in &model.deterministic_trends {
         for row in &block.rows {
-            if !model
-                .endogenous
-                .iter()
-                .any(|declaration| declaration.name == row.name)
-            {
+            if model.final_kind(row.name) != Some("var") {
                 out.push(warning(
                     row.name_span,
                     "W206",
@@ -1486,7 +1452,7 @@ fn direct_constant(model: &Model, id: ExprId) -> bool {
         ExprKind::Number => true,
         ExprKind::Ident {
             name, timing: 0, ..
-        } => model.parameters.iter().any(|decl| decl.name == *name),
+        } => model.final_kind(*name) == Some("parameters"),
         ExprKind::Unary { arg, .. } => direct_constant(model, *arg),
         ExprKind::Binary {
             op: BinOp::Add | BinOp::Sub | BinOp::Mul,
@@ -1668,11 +1634,11 @@ fn direct_growth_is_safe(model: &Model, growth: &WrittenExpression) -> bool {
 }
 
 fn is_endogenous(model: &Model, name: Name) -> bool {
-    model.endogenous.iter().any(|decl| decl.name == name)
+    model.final_kind(name) == Some("var")
 }
 
 fn is_exogenous(model: &Model, name: Name) -> bool {
-    model.exogenous.iter().any(|decl| decl.name == name)
+    matches!(model.final_kind(name), Some("varexo" | "varexo_det"))
 }
 
 fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Option<Diagnostic> {
@@ -1691,9 +1657,9 @@ fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Optio
             .filter(|r| is_endogenous(model, r.name))
             .map(|r| (r.name, r.timing))
             .collect();
-        let other = lhs_refs.iter().any(|r| {
-            is_exogenous(model, r.name) || is_parameter_before(model, r.name, equation.span.start)
-        });
+        let other = lhs_refs
+            .iter()
+            .any(|r| is_exogenous(model, r.name) || model.final_kind(r.name) == Some("parameters"));
         if endos.len() != 1 || other {
             let text = if var {
                 "A VAR may only have one endogenous variable on the LHS. "
@@ -1801,14 +1767,10 @@ fn var_expectation_expression_reason(
     command: &SemiStructuralCommand,
 ) -> Option<String> {
     if let Some((name, _)) = symbol_option(command, "variable") {
-        if is_parameter_before(model, name, command.span.start) {
+        if model.final_kind(name) == Some("parameters") {
             return Some("No variable in this expression".to_string());
         }
-        if model
-            .deterministic_exogenous
-            .iter()
-            .any(|declaration| declaration.name == name)
-        {
+        if model.final_kind(name) == Some("varexo_det") {
             return Some(format!("Symbol {} not allowed here", model.name(name)));
         }
         if is_exogenous(model, name) {
@@ -1821,11 +1783,7 @@ fn var_expectation_expression_reason(
     // A single deterministic exogenous is already the written expression.
     // Its matcher refusal does not depend on unary/diff substitution.
     if let ExprKind::Ident { name, .. } = &model.exprs.get(id).kind {
-        if model
-            .deterministic_exogenous
-            .iter()
-            .any(|declaration| declaration.name == *name)
-        {
+        if model.final_kind(*name) == Some("varexo_det") {
             return Some(format!("Symbol {} not allowed here", model.name(*name)));
         }
     }
@@ -1884,16 +1842,12 @@ fn collect_linear_factors(
             if denominator {
                 return Err(Some("A variable or parameter cannot appear at denominator"));
             }
-            if is_parameter_before(model, *name, model.exprs.get(id).span.start) {
+            if model.final_kind(*name) == Some("parameters") {
                 if factor.parameter {
                     return Err(Some("More than one parameter in this expression"));
                 }
                 factor.parameter = true;
-            } else if model
-                .deterministic_exogenous
-                .iter()
-                .any(|declaration| declaration.name == *name)
-            {
+            } else if model.final_kind(*name) == Some("varexo_det") {
                 return Err(None);
             } else if is_endogenous(model, *name) || is_exogenous(model, *name) {
                 if factor.variable.is_some() {
