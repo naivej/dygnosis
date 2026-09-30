@@ -734,6 +734,7 @@ fn for_bodies(model: &Model) -> Vec<Span> {
 }
 
 fn declaration_has_macro(model: &Model, closure: &Closure) -> bool {
+    let statements = declaration_statement_spans(&model.source);
     let lists = [
         &model.endogenous,
         &model.deterministic_exogenous,
@@ -747,7 +748,7 @@ fn declaration_has_macro(model: &Model, closure: &Closure) -> bool {
             if !closure.symbols.contains(name) {
                 continue;
             }
-            let stmt = statement_around(&model.source, decl.span);
+            let stmt = statement_in(&statements, decl.span);
             let text = &model.source[stmt.start as usize..stmt.end as usize];
             if !contains_macro(text) {
                 continue;
@@ -762,7 +763,7 @@ fn declaration_has_macro(model: &Model, closure: &Closure) -> bool {
         if !decl_matches_local(model, closure, decl) {
             return false;
         }
-        let stmt = statement_around(&model.source, decl.span);
+        let stmt = statement_in(&statements, decl.span);
         let text = &model.source[stmt.start as usize..stmt.end as usize];
         if !contains_macro(text) {
             return false;
@@ -772,6 +773,7 @@ fn declaration_has_macro(model: &Model, closure: &Closure) -> bool {
 }
 
 fn declaration_statement_overlaps(model: &Model, closure: &Closure, span: Span) -> bool {
+    let statements = declaration_statement_spans(&model.source);
     let lists = [
         &model.endogenous,
         &model.deterministic_exogenous,
@@ -785,14 +787,14 @@ fn declaration_statement_overlaps(model: &Model, closure: &Closure, span: Span) 
             if !closure.symbols.contains(name) {
                 return false;
             }
-            let stmt = statement_around(&model.source, decl.span);
+            let stmt = statement_in(&statements, decl.span);
             overlaps(span, stmt)
         })
     }) || model.model_local_variables.iter().any(|decl| {
         if !decl_matches_local(model, closure, decl) {
             return false;
         }
-        let stmt = statement_around(&model.source, decl.span);
+        let stmt = statement_in(&statements, decl.span);
         overlaps(span, stmt)
     })
 }
@@ -1289,20 +1291,58 @@ fn push_section(lines: &mut Vec<String>, section: &str) {
 }
 
 fn declaration_lines(model: &Model, closure: &Closure, retained: &[EqRef]) -> Vec<String> {
+    let statements = declaration_statement_spans(&model.source);
     let mut chunks: Vec<(u32, String)> = Vec::new();
     push_dimension_lines(&mut chunks, model, closure, retained);
-    push_decl_lines(&mut chunks, model, &model.endogenous, &closure.symbols);
     push_decl_lines(
         &mut chunks,
         model,
+        &statements,
+        &model.endogenous,
+        &closure.symbols,
+    );
+    push_decl_lines(
+        &mut chunks,
+        model,
+        &statements,
         &model.deterministic_exogenous,
         &closure.symbols,
     );
-    push_decl_lines(&mut chunks, model, &model.exogenous, &closure.symbols);
-    push_decl_lines(&mut chunks, model, &model.parameters, &closure.symbols);
-    push_local_decl_lines(&mut chunks, model, &model.model_local_variables, closure);
-    push_decl_lines(&mut chunks, model, &model.predetermined, &closure.symbols);
-    push_trend_lines(&mut chunks, model, &model.trend_vars, &closure.symbols);
+    push_decl_lines(
+        &mut chunks,
+        model,
+        &statements,
+        &model.exogenous,
+        &closure.symbols,
+    );
+    push_decl_lines(
+        &mut chunks,
+        model,
+        &statements,
+        &model.parameters,
+        &closure.symbols,
+    );
+    push_local_decl_lines(
+        &mut chunks,
+        model,
+        &statements,
+        &model.model_local_variables,
+        closure,
+    );
+    push_decl_lines(
+        &mut chunks,
+        model,
+        &statements,
+        &model.predetermined,
+        &closure.symbols,
+    );
+    push_trend_lines(
+        &mut chunks,
+        model,
+        &statements,
+        &model.trend_vars,
+        &closure.symbols,
+    );
     for stmt in &model.external_functions {
         let Some((name, _)) = stmt.name else {
             continue;
@@ -1314,13 +1354,111 @@ fn declaration_lines(model: &Model, closure: &Closure, retained: &[EqRef]) -> Ve
             ));
         }
     }
-    chunks.sort_by_key(|(start, _)| *start);
     let mut seen = HashSet::new();
-    chunks
+    let mut ordered: Vec<_> = chunks
         .into_iter()
         .filter(|(start, line)| seen.insert((*start, line.clone())))
-        .map(|(_, line)| line)
-        .collect()
+        .map(|(start, line)| {
+            (
+                declaration_order(model, &statements, start, &line),
+                start,
+                line,
+            )
+        })
+        .collect();
+    // Declarations retain their written metadata. Replay successful type changes
+    // among required declarations, in parser order rather than macro span order.
+    for change in &model.change_type_statements {
+        let names: Vec<&str> = change
+            .names
+            .iter()
+            .filter(|(name, _)| {
+                closure.symbols.contains(model.name(*name))
+                    && change.known_names.contains(name)
+                    && !change.used_names.contains(name)
+            })
+            .map(|(name, _)| model.name(*name))
+            .collect();
+        if names.is_empty() {
+            continue;
+        }
+        let kind = match change.new_type {
+            crate::model::ChangeTypeKind::Parameters => "parameters",
+            crate::model::ChangeTypeKind::Var => "var",
+            crate::model::ChangeTypeKind::Varexo => "varexo",
+            crate::model::ChangeTypeKind::VarexoDet => "varexo_det",
+        };
+        ordered.push((
+            (change.parse_order, 1, change.span.start),
+            change.span.start,
+            format!("change_type({kind}) {};", names.join(" ")),
+        ));
+    }
+    ordered.sort_by_key(|(order, _, _)| *order);
+    ordered.into_iter().map(|(_, _, line)| line).collect()
+}
+
+fn declaration_order(
+    model: &Model,
+    statements: &[Span],
+    start: u32,
+    line: &str,
+) -> (usize, u8, u32) {
+    let mut rest = skip_noise(line.trim().trim_end_matches(';'));
+    let keyword = take_ident(&mut rest).unwrap_or_default();
+    rest = skip_noise(rest);
+    if rest.starts_with('(') {
+        let _ = take_balanced(&mut rest, '(', ')');
+    }
+    let names: HashSet<_> = declaration_pieces(rest)
+        .into_iter()
+        .filter_map(first_decl_name)
+        .collect();
+    if keyword == "heterogeneity_dimension" {
+        return model
+            .heterogeneity_dimensions
+            .iter()
+            .filter(|row| row.span.start == start && names.contains(model.name(row.name)))
+            .map(|row| (row.parse_order, 0, start))
+            .min()
+            .unwrap_or((usize::MAX, 0, start));
+    }
+    if keyword == "external_function" {
+        return model
+            .external_functions
+            .iter()
+            .find(|row| row.span.start == start)
+            .map(|row| (row.parse_order, 0, start))
+            .unwrap_or((usize::MAX, 0, start));
+    }
+    if matches!(keyword.as_str(), "trend_var" | "log_trend_var") {
+        return model
+            .trend_vars
+            .iter()
+            .filter(|row| {
+                names.contains(model.name(row.name))
+                    && (row.span.start == start
+                        || statement_in(statements, row.span).start == start)
+            })
+            .map(|row| (row.parse_order, 1, start))
+            .min()
+            .unwrap_or((usize::MAX, 1, start));
+    }
+    model
+        .endogenous
+        .iter()
+        .chain(&model.exogenous)
+        .chain(&model.deterministic_exogenous)
+        .chain(&model.parameters)
+        .chain(&model.predetermined)
+        .chain(&model.model_local_variables)
+        .filter(|decl| {
+            names.contains(model.name(decl.name))
+                && (decl.span.start == start || statement_in(statements, decl.span).start == start)
+        })
+        .map(|decl| (decl.parse_order, 0, start))
+        .min()
+        .unwrap_or((usize::MAX, 1, start))
 }
 
 fn equation_line(model: &Model, place: EqRef) -> String {
@@ -1505,6 +1643,7 @@ fn push_dimension_lines(
 fn push_local_decl_lines(
     out: &mut Vec<(u32, String)>,
     model: &Model,
+    statements: &[Span],
     decls: &[Decl],
     closure: &Closure,
 ) {
@@ -1514,7 +1653,7 @@ fn push_local_decl_lines(
             continue;
         }
         let needed = BTreeSet::from([model.name(decl.name).to_string()]);
-        let stmt = statement_around(&model.source, decl.span);
+        let stmt = statement_in(statements, decl.span);
         let text = &model.source[stmt.start as usize..stmt.end as usize];
         if contains_macro(text) {
             if let Some(line) = expanded_decl_line(model, decl, text) {
@@ -1534,6 +1673,7 @@ fn push_local_decl_lines(
 fn push_decl_lines(
     out: &mut Vec<(u32, String)>,
     model: &Model,
+    statements: &[Span],
     decls: &[Decl],
     needed: &BTreeSet<String>,
 ) {
@@ -1542,7 +1682,7 @@ fn push_decl_lines(
         if !needed.contains(model.name(decl.name)) {
             continue;
         }
-        let stmt = statement_around(&model.source, decl.span);
+        let stmt = statement_in(statements, decl.span);
         let text = &model.source[stmt.start as usize..stmt.end as usize];
         if contains_macro(text) {
             if let Some(line) = expanded_decl_line(model, decl, text) {
@@ -1562,6 +1702,7 @@ fn push_decl_lines(
 fn push_trend_lines(
     out: &mut Vec<(u32, String)>,
     model: &Model,
+    statements: &[Span],
     rows: &[TrendVar],
     needed: &BTreeSet<String>,
 ) {
@@ -1570,7 +1711,7 @@ fn push_trend_lines(
         if !needed.contains(model.name(row.name)) {
             continue;
         }
-        let stmt = statement_around(&model.source, row.span);
+        let stmt = statement_in(statements, row.span);
         if !seen.insert(stmt.start) {
             continue;
         }
@@ -1581,25 +1722,6 @@ fn push_trend_lines(
             out.push((stmt.start, line));
         }
     }
-}
-
-fn statement_around(source: &str, name: Span) -> Span {
-    let bytes = source.as_bytes();
-    let mut start = name.start as usize;
-    while start > 0 && bytes[start - 1] != b';' {
-        start -= 1;
-    }
-    let mut end = (name.end as usize).min(bytes.len());
-    while end < bytes.len() && bytes[end] != b';' {
-        end += 1;
-    }
-    if end < bytes.len() {
-        end += 1;
-    }
-    if let Some(rel) = keyword_start(&source[start..name.start as usize]) {
-        start += rel;
-    }
-    Span::new(start, end)
 }
 
 const DECL_KEYWORDS: &[&str] = &[
@@ -1613,25 +1735,45 @@ const DECL_KEYWORDS: &[&str] = &[
     "var",
 ];
 
-fn keyword_start(region: &str) -> Option<usize> {
-    let bytes = region.as_bytes();
-    let mut best = None;
-    for (i, _) in region.char_indices() {
-        if i > 0 && is_ident_continue(bytes[i - 1]) {
+fn declaration_statement_spans(source: &str) -> Vec<Span> {
+    use crate::lexer::{tokenize, TokenKind};
+    let mut spans = Vec::new();
+    let mut start = None;
+    let mut depth = 0usize;
+    for token in tokenize(source) {
+        if token.kind == TokenKind::Semi || token.kind == TokenKind::Eof {
+            if let Some(start) = start.take() {
+                spans.push(Span {
+                    start,
+                    end: token.span.end,
+                });
+            }
+            depth = 0;
             continue;
         }
-        for keyword in DECL_KEYWORDS {
-            if region[i..].starts_with(keyword) {
-                let end = i + keyword.len();
-                if end < bytes.len() && is_ident_continue(bytes[end]) {
-                    continue;
-                }
-                best = Some(i);
-                break;
-            }
+        if start.is_none()
+            && depth == 0
+            && token.kind == TokenKind::Ident
+            && DECL_KEYWORDS.contains(&token.text(source))
+        {
+            start = Some(token.span.start);
+        }
+        match token.kind {
+            TokenKind::LParen | TokenKind::LBrack => depth += 1,
+            TokenKind::RParen | TokenKind::RBrack => depth = depth.saturating_sub(1),
+            _ => {}
         }
     }
-    best
+    spans
+}
+
+fn statement_in(spans: &[Span], name: Span) -> Span {
+    let at = spans.partition_point(|span| span.end <= name.start);
+    spans
+        .get(at)
+        .copied()
+        .filter(|span| span.start <= name.start && name.end <= span.end)
+        .unwrap_or(name)
 }
 
 fn filter_declaration(stmt: &str, needed: &BTreeSet<String>) -> Option<String> {
@@ -1645,7 +1787,7 @@ fn filter_declaration(stmt: &str, needed: &BTreeSet<String>) -> Option<String> {
     } else {
         None
     };
-    let pieces = split_commas_depth0(rest);
+    let pieces = declaration_pieces(rest);
     let mut kept = Vec::new();
     for piece in pieces {
         let trimmed = piece.trim();
@@ -1691,6 +1833,38 @@ fn skip_noise(input: &str) -> &str {
     }
 }
 
+/// Dynare declaration names may be separated by spaces, commas, or comments.
+/// TeX and per-name options belong to the preceding name; token boundaries keep
+/// commas/parentheses inside quoted metadata from becoming separators.
+fn declaration_pieces(input: &str) -> Vec<&str> {
+    use crate::lexer::{tokenize, TokenKind};
+    let mut pieces = Vec::new();
+    let mut depth = 0usize;
+    let mut start = None;
+    let mut end = 0;
+    for token in tokenize(input) {
+        if depth == 0 && token.kind == TokenKind::Ident {
+            if let Some(start) = start {
+                pieces.push(&input[start..end]);
+            }
+            start = Some(token.span.start as usize);
+        }
+        if token.kind == TokenKind::Eof || (depth == 0 && token.kind == TokenKind::Comma) {
+            continue;
+        }
+        match token.kind {
+            TokenKind::LParen => depth += 1,
+            TokenKind::RParen => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        end = token.span.end as usize;
+    }
+    if let Some(start) = start {
+        pieces.push(&input[start..end]);
+    }
+    pieces
+}
+
 fn take_ident(input: &mut &str) -> Option<String> {
     let bytes = input.as_bytes();
     if bytes.first().is_none_or(|c| !is_ident_start(*c)) {
@@ -1724,25 +1898,6 @@ fn take_balanced(input: &mut &str, open: char, close: char) -> Option<String> {
         }
     }
     None
-}
-
-fn split_commas_depth0(input: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut depth = 0i32;
-    let mut start = 0usize;
-    for (idx, ch) in input.char_indices() {
-        match ch {
-            '(' => depth += 1,
-            ')' => depth -= 1,
-            ',' if depth == 0 => {
-                parts.push(&input[start..idx]);
-                start = idx + ch.len_utf8();
-            }
-            _ => {}
-        }
-    }
-    parts.push(&input[start..]);
-    parts
 }
 
 fn first_decl_name(input: &str) -> Option<String> {

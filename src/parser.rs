@@ -1375,6 +1375,7 @@ impl Parser<'_> {
                     self.record_symbol_declaration(id, tok.span, kind);
                 }
                 decls.push(Decl {
+                    parse_order: self.i,
                     symbol_type_context: self.model.symbol_type_events.len(),
                     name: id,
                     span: tok.span,
@@ -1715,6 +1716,7 @@ impl Parser<'_> {
             self.model
                 .heterogeneity_dimensions
                 .push(HeterogeneityDimension {
+                    parse_order: self.i,
                     name,
                     name_span,
                     span,
@@ -2627,6 +2629,7 @@ impl Parser<'_> {
                     },
                 );
                 self.model.trend_vars.push(TrendVar {
+                    parse_order: self.i,
                     name,
                     span: tok.span,
                     log_trend,
@@ -2714,6 +2717,7 @@ impl Parser<'_> {
         let start = self.current_start();
         self.bump();
         let mut stmt = ExternalFunctionStmt {
+            parse_order: self.i,
             name: None,
             nargs: None,
             first_deriv: None,
@@ -6008,6 +6012,7 @@ impl Parser<'_> {
                         .find(|trend| trend.name == name)
                     {
                         self.model.retyped_trend_decls.push(Decl {
+                            parse_order: self.i,
                             symbol_type_context: self.model.symbol_type_events.len(),
                             name,
                             span: trend.span,

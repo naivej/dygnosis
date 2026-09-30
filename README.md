@@ -60,7 +60,7 @@ Limitations by design
 | `dynare_related_files` | Includes and companions for the active `.mod` |
 | `dynare_expand` | Effective text after `@#if` / `@#for` / `@{…}` and includes, plus origin for each counted equation |
 | `dynare_format` | Format a `.mod` file with the editor's rules. Returns the full text only when it changes. Empty or whitespace-only input is unchanged |
-| `dynare_extract` | Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model |
+| `dynare_extract` | Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The fragment keeps required successful `change_type` directives and selected declaration metadata. The text is a fragment, not a runnable model |
 | `dynare_workspace_diagnose` | Check several root `.mod` files. Pass a files map and roots, or paths to files and directories. One failed root does not drop the others |
 
 Equation symbol classes, model counts, timing, hover, completion, semantic colors, and model comparisons follow the final type after `change_type`. Declaration locations still point at the written declaration. Hover distinguishes deterministic exogenous variables from ordinary exogenous variables.

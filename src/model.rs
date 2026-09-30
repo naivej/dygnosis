@@ -11,6 +11,8 @@ use crate::span::Span;
 
 #[derive(Clone, Debug)]
 pub struct Decl {
+    /// Position in the expanded token stream; original source spans may repeat.
+    pub parse_order: usize,
     /// Length of type history when this name slot was parsed, before later
     /// macro iterations or directives could change its type.
     pub symbol_type_context: usize,
@@ -29,6 +31,7 @@ pub struct Decl {
 /// per name, each carrying the whole statement's span).
 #[derive(Clone, Debug)]
 pub struct HeterogeneityDimension {
+    pub parse_order: usize,
     pub name: Name,
     pub name_span: Span,
     /// Statement keyword through `;`.
@@ -417,6 +420,7 @@ pub struct ChangeTypeStmt {
 /// One `trend_var` / `log_trend_var` name.
 #[derive(Clone, Debug)]
 pub struct TrendVar {
+    pub parse_order: usize,
     pub name: Name,
     pub span: Span,
     pub log_trend: bool,
@@ -467,6 +471,7 @@ pub enum DerivSpec {
 /// One `external_function(…)` statement.
 #[derive(Clone, Debug)]
 pub struct ExternalFunctionStmt {
+    pub parse_order: usize,
     /// `name=` value and its span.
     pub name: Option<(Name, Span)>,
     /// `nargs=` value.

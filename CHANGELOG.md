@@ -2,6 +2,7 @@
 
 ## v0.10.2
 
+- Extract retains successful type changes for selected names in parser order. Space-separated declaration lists filter unselected names while preserving TeX and per-name options.
 - Finishes the written-parameter-list audit. Initial/history values, filter rows, shock/path targets, init2shocks, homotopy, shock groups, varobs, estimated-parameter roles, Markov parameter options, and prior copy sources use the type at the statement. Macro iterations keep their own parser context for ordinary names too.
 - Steady-state order, estimated skewness, parameters in shock values, deterministic-trend warnings, and PAC/VAR matching use final types. Completion, semantic colors, and compare names, kinds, and parameter values agree with the final-type views.
 
