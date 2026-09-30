@@ -898,10 +898,13 @@ fn change_type_planner_instrument_and_osr_bounds_use_the_final_type() {
     let e101_quiet = "parameters i; var y; varexo e; change_type(var) i; parameters rho; rho = 0.9; model; y = rho*y(-1) + e + i; end; planner_objective y; ramsey_model(instruments=(i));";
     quiet(&analyze(&parse(e101_quiet)), "E101");
 
-    // Still on the written `var` list, retyped to a parameter. E101's sentence is
-    // the undeclared case, so this miss stays quiet.
+    // A declared name retyped away before the policy command is the E317 case.
     let e101_retyped_away = "var y i; varexo e; parameters rho; change_type(parameters) i; rho = 0.9; model; y = rho*y(-1) + e; end; planner_objective y; ramsey_model(instruments=(i));";
     quiet(&analyze(&parse(e101_retyped_away)), "E101");
+    assert_eq!(
+        find(&analyze(&parse(e101_retyped_away)), "E317").message,
+        "i is not endogenous."
+    );
 
     let e255_quiet = "var y z; varexo e; parameters rho; change_type(parameters) z; rho = 0.9; model; y = rho * y(-1) + e; end; planner_objective y; osr; osr_params rho; osr_params_bounds; z, 0, 1; end;";
     quiet(&analyze(&parse(e255_quiet)), "E255");
@@ -920,6 +923,7 @@ fn change_type_planner_instrument_and_osr_bounds_use_the_final_type() {
         (e251_quiet, "You cannot include exogenous variables", false),
         (e251_fire, "You cannot include exogenous variables", true),
         (e101_quiet, "is not a declared endogenous", false),
+        (e101_retyped_away, "i is not endogenous.", true),
         (e255_quiet, "must be a parameter", false),
         (e255_fire, "must be a parameter", true),
     ] {

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::intern::Name;
-use crate::model::{Decl, Model, PolicyCommand};
+use crate::model::{Model, PolicyCommand};
 use crate::span::Span;
 
 const FALLBACK: Span = Span { start: 0, end: 1 };
@@ -152,21 +152,27 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
 
     let anchor = policy_anchor;
 
-    let endogenous = names(&model.endogenous);
-    for instrument in &model.instruments {
-        // A name retyped to `var` is endogenous even though it stays on its
-        // original list. A name that is still on that list but was retyped
-        // away keeps today's silence: E101's sentence is the undeclared case.
-        if endogenous.contains(instrument) || model.final_kind(*instrument) == Some("var") {
+    for instrument in &model.instrument_uses {
+        if instrument.kind == Some("var") {
             continue;
         }
-        let name = model.name(*instrument);
-        diagnostics.push(Diagnostic::new(
-            anchor,
-            Severity::Error,
-            "E101",
-            format!("Policy instrument '{name}' is not a declared endogenous variable."),
-        ));
+        let name = model.name(instrument.name);
+        let (span, code, message) = if instrument.kind.is_none() {
+            (
+                instrument.command_span,
+                "E101",
+                format!("Policy instrument '{name}' is not a declared endogenous variable."),
+            )
+        } else {
+            (
+                instrument.span,
+                "E317",
+                format!("{name} is not endogenous."),
+            )
+        };
+        diagnostics.push(Diagnostic::new(span, Severity::Error, code, message));
+        // The pinned parser stops at the first invalid instrument.
+        break;
     }
 
     if let Some(d) = model.planner_discount {
@@ -203,10 +209,6 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
     }
 
     diagnostics
-}
-
-fn names(decls: &[Decl]) -> HashSet<Name> {
-    decls.iter().map(|d| d.name).collect()
 }
 
 /// Python 3 default `{value:g}` (precision 6).

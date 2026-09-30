@@ -368,6 +368,15 @@ pub struct PolicyCommandStatement {
     pub planner_discount: Option<Span>,
 }
 
+/// An instrument occurrence with the type it had when its command was parsed.
+#[derive(Clone, Copy, Debug)]
+pub struct PolicyInstrumentUse {
+    pub name: Name,
+    pub span: Span,
+    pub command_span: Span,
+    pub kind: Option<&'static str>,
+}
+
 /// Target type of a `change_type(…)` statement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChangeTypeKind {
@@ -891,6 +900,8 @@ pub struct Model {
     pub planner_objective_spans: Vec<Span>,
     /// Unique, first-seen, from `instruments=(…)` on any policy command.
     pub instruments: Vec<Name>,
+    /// Every instrument occurrence in effective parser order, before later retypes.
+    pub instrument_uses: Vec<PolicyInstrumentUse>,
     /// First `planner_discount` option that folds; later options do not overwrite.
     pub planner_discount: Option<f64>,
     /// First `planner_discount` expression (first-wins; beside the folded float).

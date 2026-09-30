@@ -286,8 +286,8 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Shared,
     }),
     ("E101", ExplainEntry {
-        title: "Policy instrument is not a declared endogenous variable",
-        body: "An ``instruments=(...)`` entry names a symbol that is not a declared endogenous variable. Dynare refuses: `Unknown symbol: not_endo`.\n\n**Warrant**\n\nThe editor names the policy instrument; Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the instrument in ``var``, or correct the instrument name.",
+        title: "Policy instrument is not declared",
+        body: "An ``instruments=(...)`` entry names a symbol that was not declared before the policy command. Dynare refuses: `Unknown symbol: not_endo`. A declared name of the wrong type is E317. A later declaration or `change_type` does not validate an earlier instrument.\n\n**Warrant**\n\nThe editor names the policy instrument; Dynare's string is the generic `Unknown symbol`.\n\n**Fix**\n\nDeclare the instrument in ``var`` before the policy command, or correct the instrument name.",
         kind: ExplainKind::Shared,
     }),
     ("W102", ExplainEntry {
@@ -1057,7 +1057,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E317", ExplainEntry {
         title: "Name is not endogenous, or is an exogenous deterministic",
-        body: "A name has the wrong declared role in a slot that requires an endogenous variable, or a `varexo_det` name is used where only plain exogenous variables are allowed. Dynare refuses `N is not endogenous.` or `N is an exogenous deterministic.` This includes `std` / `corr` prior and options heads, controlled-path `exogenize`, scheduled shock/path rows, `self`/`prev`/`learnt_in` references, and the older calibration and moment slots. In `estimated_params_remove`, `stderr` needs an endogenous or plain exogenous name and `corr` needs two of the same role.\n\n**Fix**\n\nUse `var` for an endogenous slot and `varexo` for a plain exogenous slot.",
+        body: "A name has the wrong declared role in a slot that requires an endogenous variable, or a `varexo_det` name is used where only plain exogenous variables are allowed. Dynare refuses: `N is not endogenous.` or `N is an exogenous deterministic.` This includes policy `instruments` entries, `std` / `corr` prior and options heads, controlled-path `exogenize`, scheduled shock/path rows, `self`/`prev`/`learnt_in` references, and the older calibration and moment slots. In `estimated_params_remove`, `stderr` needs an endogenous or plain exogenous name and `corr` needs two of the same role. Policy instruments use the type when their command is parsed; a later `change_type` does not validate an earlier instrument. Undeclared instruments use E101.\n\n**Warrant**\n\nFor policy instruments, the editor highlights the instrument name; Dynare marks the enclosing command.\n\n**Fix**\n\nUse `var` for an endogenous slot and `varexo` for a plain exogenous slot. Declare or retype a policy instrument before its command.",
         kind: ExplainKind::Shared,
     }),
     ("E318", ExplainEntry {

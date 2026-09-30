@@ -23,9 +23,9 @@ use crate::model::{
     HeterogeneityCommand, HeterogeneityCommandKind, HeterogeneityDimension, HeterogeneityOption,
     HeterogeneousModelBlock, HistvalEntry, HomotopyRow, IncludeDirective, IncludePathDirective,
     MacroDirective, MacroInterp, NonstationaryVar, ObservedVar, OccbinConstraint, OccbinExpr,
-    OsrBound, PolicyCommand, PolicyCommandStatement, PrunedInitialization, RamseyConstraint,
-    RemovedEquation, ShockKind, ShockStmt, ShocksSemiFamily, SurgeryExit, SurgeryKind,
-    SymbolTypeEvent, TrendVar, VarRemovedName,
+    OsrBound, PolicyCommand, PolicyCommandStatement, PolicyInstrumentUse, PrunedInitialization,
+    RamseyConstraint, RemovedEquation, ShockKind, ShockStmt, ShocksSemiFamily, SurgeryExit,
+    SurgeryKind, SymbolTypeEvent, TrendVar, VarRemovedName,
 };
 use crate::span::Span;
 
@@ -6587,7 +6587,7 @@ impl Parser<'_> {
             self.model.discretionary_policy_span = Some(tok.span);
         }
         let (saw_instruments, planner_discount) = if self.at(TokenKind::LParen) {
-            self.parse_policy_options(command)
+            self.parse_policy_options(command, tok.span)
         } else {
             (false, None)
         };
@@ -6624,7 +6624,11 @@ impl Parser<'_> {
             });
     }
 
-    fn parse_policy_options(&mut self, command: PolicyCommand) -> (bool, Option<Span>) {
+    fn parse_policy_options(
+        &mut self,
+        command: PolicyCommand,
+        command_span: Span,
+    ) -> (bool, Option<Span>) {
         let from = self.i;
         self.bump();
         let mut saw_instruments = false;
@@ -6634,7 +6638,7 @@ impl Parser<'_> {
                 saw_instruments = true;
                 self.bump();
                 self.bump();
-                self.collect_instruments();
+                self.collect_instruments(command, command_span);
             } else if self.at_ident_ci("planner_discount")
                 && self.peek_kind(1) == Some(TokenKind::Eq)
             {
@@ -6682,12 +6686,12 @@ impl Parser<'_> {
         (saw_instruments, planner_discount)
     }
 
-    fn collect_instruments(&mut self) {
+    fn collect_instruments(&mut self, command: PolicyCommand, command_span: Span) {
         if self.at(TokenKind::LParen) {
             self.bump();
             while !self.at(TokenKind::Eof) && !self.at(TokenKind::RParen) {
                 if self.at(TokenKind::Ident) {
-                    self.push_instrument();
+                    self.push_instrument(command, command_span);
                 } else {
                     self.bump();
                 }
@@ -6701,19 +6705,66 @@ impl Parser<'_> {
             && !self.at(TokenKind::Semi)
         {
             if self.at(TokenKind::Ident) {
-                self.push_instrument();
+                self.push_instrument(command, command_span);
             } else {
                 self.bump();
             }
         }
     }
 
-    fn push_instrument(&mut self) {
+    /// Type visible to a policy command, including its implicit discount parameter.
+    fn policy_symbol_kind(&self, id: Name) -> Option<&'static str> {
+        let kind = self.model.final_symbol_kind(id).or_else(|| {
+            let model_local = self.model.equations.iter()
+                .chain(self.model.heterogeneous_models.iter().flat_map(|block| &block.equations))
+                .any(|eq| {
+                eq.is_local && eq.lhs_expr.is_some_and(|expr| {
+                    matches!(self.model.exprs.get(expr).kind, ExprKind::Ident { name, .. } if name == id)
+                })
+            });
+            if model_local || !matches!(self.removal_role(id), EstimatedNameRole::Unknown) {
+                Some("other")
+            } else if self.intern.get(id) == "optimal_policy_discount_factor" {
+                // The official command creates this parameter before validating instruments.
+                Some("parameters")
+            } else {
+                None
+            }
+        });
+        let heterogeneous = self
+            .model
+            .endogenous
+            .iter()
+            .chain(self.model.exogenous.iter())
+            .chain(self.model.parameters.iter())
+            .any(|decl| decl.name == id && self.model.final_heterogeneity(decl).is_some());
+        if heterogeneous {
+            kind.map(|_| "heterogeneous")
+        } else {
+            kind
+        }
+    }
+
+    fn push_instrument(&mut self, command: PolicyCommand, command_span: Span) {
         let tok = self.bump();
         let name = self.lexeme(&tok).to_string();
         let id = self.intern.intern(&name);
         if !self.model.instruments.contains(&id) {
             self.model.instruments.push(id);
+        }
+        if matches!(
+            command,
+            PolicyCommand::RamseyModel
+                | PolicyCommand::RamseyPolicy
+                | PolicyCommand::DiscretionaryPolicy
+        ) {
+            let kind = self.policy_symbol_kind(id);
+            self.model.instrument_uses.push(PolicyInstrumentUse {
+                name: id,
+                span: tok.span,
+                command_span,
+                kind,
+            });
         }
     }
 
