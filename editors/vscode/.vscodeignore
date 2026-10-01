@@ -1,0 +1,9 @@
+.npm-cache/**
+node_modules/**
+src/**
+out/**/*.map
+tsconfig.json
+eslint.config.mjs
+package-lock.json
+*.tsbuildinfo
+.gitignore

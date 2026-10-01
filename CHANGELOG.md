@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Adds the v0.11 VS Code extension scaffold under `editors/vscode/`, with TypeScript and ESLint setup. The client port and editor features remain planned.
+
 ## v0.10.2
 
 - Internal symbol history uses distinct types for symbol kinds and parser positions. Explicit removal-fallback queries preserve existing diagnostic and view behavior.

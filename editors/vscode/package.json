@@ -1,0 +1,37 @@
+{
+  "name": "dygnosis",
+  "displayName": "Dygnosis",
+  "description": "Dynare language tooling for VS Code",
+  "version": "0.11.0",
+  "publisher": "dygnosis",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/naivej/dygnosis.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.102.0",
+    "node": "^22.13.0 || >=24"
+  },
+  "categories": ["Programming Languages"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "check": "tsc -p . --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix --max-warnings 0",
+    "vscode:prepublish": "npm run check && npm run lint && npm run compile"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "1.102.0",
+    "eslint": "^10.0.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.0.0"
+  }
+}
