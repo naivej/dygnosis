@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::companion::{self, CompanionKind, CompanionRecord};
 use crate::expand::{expand_report_from_spliced, ExpandReport, SpliceSegment};
@@ -61,12 +62,20 @@ struct Doc {
     includepath_dirs: Vec<PathBuf>,
 }
 
+/// One joined include source and its written-file map. The model, expand view,
+/// and diagnostic locations all read this same snapshot until invalidation.
+struct SplicedSource {
+    text: String,
+    segments: Vec<SpliceSegment>,
+}
+
 /// URI/path-keyed document index plus include graph walks.
 #[derive(Default)]
 pub struct Workspace {
     docs: HashMap<String, Doc>,
     search_paths: Vec<PathBuf>,
     effective: HashMap<String, Model>,
+    spliced: HashMap<String, Arc<SplicedSource>>,
     expand: HashMap<String, ExpandReport>,
     records: HashMap<String, IncludeRecords>,
     companions: HashMap<String, Vec<CompanionRecord>>,
@@ -108,6 +117,7 @@ impl Workspace {
             },
         );
         self.effective.clear();
+        self.spliced.clear();
         self.expand.clear();
         self.records.remove(key);
         self.companions.remove(key);
@@ -137,6 +147,7 @@ impl Workspace {
         );
         // Other roots may have spliced this file.
         self.effective.clear();
+        self.spliced.clear();
         self.expand.clear();
         self.records.remove(&key);
         self.companions.remove(&key);
@@ -150,6 +161,7 @@ impl Workspace {
         let key = normalize_uri(uri);
         self.docs.remove(&key);
         self.effective.clear();
+        self.spliced.clear();
         self.expand.clear();
         self.records.clear();
         self.companions.clear();
@@ -178,6 +190,7 @@ impl Workspace {
         );
         // Other roots may have spliced this file.
         self.effective.clear();
+        self.spliced.clear();
         self.expand.clear();
         self.records.remove(&key);
         self.companions.remove(&key);
@@ -189,6 +202,7 @@ impl Workspace {
             self.search_paths.push(path);
         }
         self.effective.clear();
+        self.spliced.clear();
         self.expand.clear();
         self.records.clear();
         self.companions.clear();
@@ -203,6 +217,7 @@ impl Workspace {
         }
         self.search_paths = deduped;
         self.effective.clear();
+        self.spliced.clear();
         self.expand.clear();
         self.records.clear();
         self.companions.clear();
@@ -263,8 +278,8 @@ impl Workspace {
     pub fn get_effective_model(&mut self, uri: &str) -> Option<&Model> {
         let key = self.ensure_loaded(uri)?;
         if !self.effective.contains_key(&key) {
-            let spliced = self.splice_key(&key, &mut Vec::new(), &mut Vec::new());
-            let model = parse(&spliced);
+            let spliced = self.spliced_source(&key);
+            let model = parse(&spliced.text);
             self.effective.insert(key.clone(), model);
         }
         self.effective.get(&key)
@@ -274,7 +289,8 @@ impl Workspace {
     /// Included-file spans have no location in the root and return `None`.
     pub(crate) fn map_effective_span_to_root(&mut self, uri: &str, span: Span) -> Option<Span> {
         let key = self.ensure_loaded(uri)?;
-        let (_, segments) = self.splice_with_map(&key, &mut Vec::new(), &mut Vec::new());
+        let spliced = self.spliced_source(&key);
+        let segments = &spliced.segments;
         let segment = segments.iter().find(|segment| {
             segment.spliced.start <= span.start
                 && span.end <= segment.spliced.end
@@ -292,7 +308,8 @@ impl Workspace {
     /// no file. Callers must not treat that as the root file.
     pub(crate) fn map_effective_origin(&mut self, uri: &str, span: Span) -> Option<(String, Span)> {
         let key = self.ensure_loaded(uri)?;
-        let (_, segments) = self.splice_with_map(&key, &mut Vec::new(), &mut Vec::new());
+        let spliced = self.spliced_source(&key);
+        let segments = &spliced.segments;
         let segment = segments
             .iter()
             .find(|s| span.start >= s.spliced.start && span.start < s.spliced.end)
@@ -316,8 +333,8 @@ impl Workspace {
     pub fn expand_report(&mut self, uri: &str) -> Option<&ExpandReport> {
         let key = self.ensure_loaded(uri)?;
         if !self.expand.contains_key(&key) {
-            let (spliced, map) = self.splice_with_map(&key, &mut Vec::new(), &mut Vec::new());
-            let report = expand_report_from_spliced(&spliced, &map);
+            let spliced = self.spliced_source(&key);
+            let report = expand_report_from_spliced(&spliced.text, &spliced.segments);
             self.expand.insert(key.clone(), report);
         }
         self.expand.get(&key)
@@ -665,13 +682,16 @@ impl Workspace {
         }
     }
 
-    fn splice_key(
-        &mut self,
-        key: &str,
-        stack: &mut Vec<String>,
-        active_search: &mut Vec<PathBuf>,
-    ) -> String {
-        self.splice_with_map(key, stack, active_search).0
+    fn spliced_source(&mut self, key: &str) -> Arc<SplicedSource> {
+        if let Some(source) = self.spliced.get(key) {
+            return Arc::clone(source);
+        }
+        // Resolving includes may load documents and invalidate other cached
+        // roots. Insert only after the full walk has finished.
+        let (text, segments) = self.splice_with_map(key, &mut Vec::new(), &mut Vec::new());
+        let source = Arc::new(SplicedSource { text, segments });
+        self.spliced.insert(key.to_string(), Arc::clone(&source));
+        source
     }
 
     fn splice_with_map(
