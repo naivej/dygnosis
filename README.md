@@ -1,92 +1,84 @@
+![dygnosis](media/logo_s.png)
+
+Dygnosis helps you check and edit Dynare `.mod` files in an editor or with an AI agent. It catches most problems Dynare would report before MATLAB runs, points to them in your file, and adds guidance for possible problems Dynare does not report.
+
 *This project is under active development.*
 
-![dygnosis](media/logo_s.png) is a second Dynare preprocessor living in your editor that
+## Install
 
-- powers MCP for agents and LSP for humans, with code intelligence while typing;
-- catches most problems Dynare would report before MATLAB runs and points to them in your `.mod` file;
-- adds warnings for possible problems Dynare does not report.
+With Git, Rust and Cargo installed:
 
-Limitations by design
+```sh
+git clone https://github.com/naivej/dygnosis.git
+cd dygnosis
+cargo install --path . --locked
+```
 
-- **Macro expressions Dygnosis cannot evaluate.** Dygnosis expands `@#include`, `@#define`, `@#if`, `@#for` (with `when` filters and tuple loops), macro functions, and `@{…}`. When a valid expression is beyond its evaluator, or a loop runs over more than 10,000 values, it keeps the original macro text and shows `I211`. Checks that need the expanded model are withheld, and model info, equations, compare, and the effective-model view are marked incomplete.
-- **Problems after equation rewriting.** Dynare changes equations and adds helper variables before some checks. Dygnosis can report a problem found at that stage when the `.mod` you wrote is enough to decide it. It stays quiet when the problem depends on equations Dynare creates and cannot be tied back to your file.
-- **Some Dynare messages cannot be shown.** A few concern MATLAB or Octave code Dynare writes rather than your `.mod` file; other cases crash without an error message. When the written cause of a crash is clear, Dygnosis may give its own warning, such as `W212` for an assignment to a name later excluded.
-- **Run-dependent checks.** Dygnosis does not infer checks that depend on Dynare command-line options or a compiler installed on your machine.
-- **Numerical results.** MATLAB or Octave computes steady states, stability, and whether the model solves. Dygnosis stops before those calculations. For editor and agent integration of MATLAB, see the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit).
-
-## How to use
+## Use
 
 ### Command line
 
 | Command | Purpose |
 |---------|---------|
-| `dygnosis check <file.mod>` | Full diagnostics, then exit |
-| `dygnosis check <dir>` | Recurse `*.mod` (skip `+` folders); one summary line; exit 1 on errors, not warnings |
-| `dygnosis explain <CODE>` | Help for a diagnostic code |
-| `dygnosis explain --list` | List all diagnostic codes, classified as shared, skipped, or added relative to Dynare |
-| `dygnosis mcp` | Start the MCP server (stdio) |
-| `dygnosis` | Start the language server (stdio) |
-| `dygnosis --tcp` | Language server over TCP (debug only; default `127.0.0.1:2087`) |
+| `dygnosis check <file.mod>` | Check a model file |
+| `dygnosis check <directory>` | Check `.mod` files recursively |
+| `dygnosis explain <CODE>` | Get help for a diagnostic |
+| `dygnosis explain --list` | List diagnostic codes |
+| `dygnosis mcp` | Start the MCP server over stdio |
+| `dygnosis` | Start the language server over stdio |
+| `dygnosis --tcp` | Start the language server over TCP for debugging (default `127.0.0.1:2087`) |
+
+`check` accepts several file or directory paths. Errors or unreadable paths give exit status 1; warnings alone give status 0. Generated folders whose names start with `+` are skipped.
 
 ### Editor (LSP)
 
-- Hover (declarations, option names)
-- Outline (endogenous grouped by timing class) and workspace symbols
-- Go to definition / type definition
-- Find references and rename (including across `@#include` files where the graph is known)
-- Completions
-- Signature help for a command's options (`(`, `,`, and `=`)
-- Format document / range
-- Code actions and auto-fix where a fix is stored
-- Insert commented stochastic or deterministic shocks templates, with no guessed sizes or paths
-- Folding and links into `@#include` files and companions (e.g. `FILENAME_steadystate.m`)
-- Show the effective model (`dynare/showEffectiveModel`): text after `@#if` / `@#for` / `@{…}` and includes, with origin jump from each counted equation
-- Diagnostics while typing and on save.
+Configure an LSP client to launch `dygnosis` over stdio. Available features include:
 
-### MCP tools
+- Diagnostics while typing and on save
+- Hover, completions and command-option help
+- Go to definition, find references and rename, including across known include files
+- Outline, workspace symbols, syntax colors, folding and links to related files
+- Document/range formatting, available diagnostic fixes and commented shock templates
+- Expanded model text with jumps back to source equations
+
+### AI agents (MCP)
+
+Configure an MCP client to launch `dygnosis` with the argument `mcp` over stdio.
 
 | Tool | Purpose |
 |------|---------|
-| `dynare_diagnose` | Full diagnostics |
-| `dynare_model_info` | Names, counts, timing, block flags |
-| `dynare_compare_models` | Diff names, symbol kind and metadata, parameter values, aggregate and per-dimension heterogeneous equations (by name and tags), and written shock setup |
-| `dynare_find_references` | Uses of a name |
+| `dynare_diagnose` | Check a model file |
+| `dynare_workspace_diagnose` | Check several model files or directories |
+| `dynare_model_info` | Summarize names, counts and variable timing |
+| `dynare_compare_models` | Compare declarations, parameter values, equations and shock settings |
+| `dynare_find_references` | Find uses of a name |
 | `dynare_rename` | Rename a name |
-| `dynare_auto_fix` | Stored fixes, one file |
-| `dynare_explain` | Help for a diagnostic code |
-| `dynare_list_diagnostic_codes` | List all diagnostic codes, classified as shared, skipped, or added relative to Dynare |
-| `dynare_list_options` | Options for a command |
-| `dynare_equations` | Equations with text, timing, tags, complementarity, origin, and the equation-count gap |
-| `dynare_related_files` | Includes and companions for the active `.mod` |
-| `dynare_expand` | Effective text after `@#if` / `@#for` / `@{…}` and includes, plus origin for each counted equation |
-| `dynare_format` | Format a `.mod` file with the editor's rules. Returns the full text only when it changes. Empty or whitespace-only input is unchanged |
-| `dynare_extract` | Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The fragment keeps required successful `change_type` directives and selected declaration metadata. The text is a fragment, not a runnable model |
-| `dynare_workspace_diagnose` | Check several root `.mod` files. Pass a files map and roots, or paths to files and directories. One failed root does not drop the others |
+| `dynare_auto_fix` | Apply available diagnostic fixes |
+| `dynare_explain` | Get help for a diagnostic |
+| `dynare_list_diagnostic_codes` | List diagnostic codes |
+| `dynare_list_options` | List command options |
+| `dynare_equations` | List equations and their source locations |
+| `dynare_related_files` | List include files and companion files |
+| `dynare_expand` | Show expanded model text and source locations |
+| `dynare_format` | Format a model file |
+| `dynare_extract` | Extract selected equations and their supporting declarations |
 
-Equation symbol classes, model counts, timing, hover, completion, semantic colors, and model comparisons follow the final type after `change_type`. Declaration locations still point at the written declaration. Hover distinguishes deterministic exogenous variables from ordinary exogenous variables.
+Extracted text is a model fragment that must be completed before running it in Dynare. For release details, see the [changelog](CHANGELOG.md).
 
-An unused `trend_var` or `log_trend_var` name can also change to an ordinary type. Its later assignments and name slots use that type, while navigation retains the written trend declaration.
+## Limits
 
-Initial/history values, filter rows, shock/path targets, `init2shocks`, `homotopy_setup`, `shock_groups`, `varobs`, estimated-parameter roles, and `markov_switching(parameters=[…])` check the type when that row or option is read. A later type change cannot validate an earlier refused use; each macro iteration keeps its own parser context. Subsample definitions, copies, and named uses also follow macro execution order. Steady-state order, estimated skewness, parameters in shock values, and PAC/VAR matching use the final type.
+- Language support follows **Dynare 7.2**. Some pre-MATLAB checks are outside coverage; use Dynare for final validation.
+- Unsupported macro expressions are flagged as incomplete. Affected checks are withheld and model views are marked incomplete.
+- Dygnosis does not launch Dynare, MATLAB or Octave. Numerical results, including steady states, stability and model solutions, require running Dynare with MATLAB or Octave.
 
-Policy instruments must be endogenous when their policy command is read. Undeclared instruments use `E101`; declared names of the wrong type use `E317`. Put declarations and any required `change_type(var)` before the command.
-`discretionary_policy` also requires an existing `optimal_policy_discount_factor` to be a parameter; otherwise it reports `E378` before checking instruments.
-The parameter created by an earlier policy command is known to later assignments, lists, and `change_type`. Ramsey's `planner_discount` option conflicts with that earlier name too.
-
-Command symbol lists use `E240` for native locals introduced by expressions such as `p=helper;`. A native MATLAB assignment such as `helper=3;` does not declare that name to Dynare.
-These lists check final types after `change_type`; a successful restoration clears the excluded type. Heterogeneous symbols have their own type until `change_type` makes them ordinary.
-Declare symbols before expressions use them; a declaration that clashes with an expression-created local reports `E030`.
-
-`dsge_prior_weight` is a reserved token inside Dynare blocks. Ordinary statement expressions, including parameter assignments and policy options, may use that name.
-
-Non-model expressions register unknown function calls with Dynare's function kind. A later declaration of the same function warns `W031`; a conflicting variable declaration reports `E030`.
+For MATLAB integration, see the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit).
 
 ## Credits
 
-1. dygnosis v0.1.0 is a fork and rewrite of [LLMacro-Dynare-LSP](https://github.com/pdwhoward/LLMacro-Dynare-LSP) by Anthony Diercks, Philip Howard, and Mehrdad Samadi. Diagnostic codes, check and explain surfaces, and the thin analysis design come from that work. The original repository accompanies the working paper *LLMacro: A Language Server for Dynare — Structured Context for AI-Assisted Macroeconomic Modeling*.
-2. Equation-object, tag, extract, and related editor ideas are informed by [modBuilder](https://git.dynare.org/Dynare/modBuilder) (Dynare Team), a MATLAB API for building `.mod` files.
-3. The agent skill under `.agents/skills/dynare-copilot/` is adapted from [EconSolider/dynare-copilot](https://github.com/EconSolider/dynare-copilot).
+1. Dygnosis v0.1.0 is a fork and rewrite of [LLMacro-Dynare-LSP](https://github.com/pdwhoward/LLMacro-Dynare-LSP) by Anthony Diercks, Philip Howard and Mehrdad Samadi. That repository accompanies the working paper *LLMacro: A Language Server for Dynare — Structured Context for AI-Assisted Macroeconomic Modeling*.
+2. Equation, tag and extraction ideas are informed by the Dynare Team's [modBuilder](https://git.dynare.org/Dynare/modBuilder).
+3. The bundled agent skill is adapted from [EconSolider/dynare-copilot](https://github.com/EconSolider/dynare-copilot).
 
 ## License
 
-[GPL-3.0-or-later](LICENSE), matching Dynare and LLMacro-Dynare-LSP. The vendored dynare-copilot skill remains MIT, matching upstream.
+[GPL-3.0-or-later](LICENSE). The bundled dynare-copilot skill retains its upstream [MIT license](https://github.com/EconSolider/dynare-copilot/blob/main/LICENSE).
