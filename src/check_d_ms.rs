@@ -449,7 +449,7 @@ fn dotted_named_key(head: &DottedHead) -> Option<((Name, Option<Name>), Name)> {
 fn classify_std_corr_head_names(
     model: &Model,
     head: &DottedHead,
-    context: usize,
+    context: crate::model::SymbolContext,
 ) -> Vec<PriorHeadName> {
     let pairs = match head {
         DottedHead::Std {
@@ -476,7 +476,11 @@ fn classify_std_corr_head_names(
         .collect()
 }
 
-fn std_corr_verdict_at(model: &Model, name: Name, context: usize) -> PriorHeadVerdict {
+fn std_corr_verdict_at(
+    model: &Model,
+    name: Name,
+    context: crate::model::SymbolContext,
+) -> PriorHeadVerdict {
     match model.symbol_kind_in_context(name, context) {
         Some("var") => PriorHeadVerdict::Endogenous,
         Some("varexo") => PriorHeadVerdict::Exogenous,

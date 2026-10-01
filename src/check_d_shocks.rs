@@ -16,11 +16,11 @@ fn error(out: &mut Vec<Diagnostic>, span: Span, code: &str, message: impl Into<S
     out.push(Diagnostic::new(span, Severity::Error, code, message));
 }
 
-fn known(model: &Model, name: Name, _span: Span, context: usize) -> bool {
+fn known(model: &Model, name: Name, _span: Span, context: crate::model::SymbolContext) -> bool {
     model.symbol_kind_in_context(name, context).is_some()
 }
 
-fn has_kind(model: &Model, name: Name, context: usize, kind: &str) -> bool {
+fn has_kind(model: &Model, name: Name, context: crate::model::SymbolContext, kind: &str) -> bool {
     model.symbol_kind_in_context(name, context) == Some(kind)
 }
 
@@ -28,7 +28,7 @@ fn exogenous(
     model: &Model,
     out: &mut Vec<Diagnostic>,
     name: Name,
-    at: (Span, usize),
+    at: (Span, crate::model::SymbolContext),
     allow_det: bool,
 ) -> bool {
     let (span, context) = at;
@@ -54,7 +54,12 @@ fn exogenous(
     false
 }
 
-fn endogenous(model: &Model, out: &mut Vec<Diagnostic>, name: Name, at: (Span, usize)) -> bool {
+fn endogenous(
+    model: &Model,
+    out: &mut Vec<Diagnostic>,
+    name: Name,
+    at: (Span, crate::model::SymbolContext),
+) -> bool {
     let (span, context) = at;
     if known(model, name, span, context) && has_kind(model, name, context, "var") {
         return true;

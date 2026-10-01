@@ -233,7 +233,7 @@ fn exclusion_still_final(model: &Model, name: Name) -> bool {
     let Some(last) = events.last() else {
         return false;
     };
-    if last.kind == "excluded" {
+    if last.kind == crate::model::SymbolKind::Excluded {
         return true;
     }
     if last.changed || events.len() < 2 {

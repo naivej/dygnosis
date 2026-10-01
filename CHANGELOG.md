@@ -2,6 +2,8 @@
 
 ## v0.10.2
 
+- Internal symbol history uses distinct types for symbol kinds and parser positions. Explicit removal-fallback queries preserve existing diagnostic and view behavior.
+
 - Subsample definitions, copies, and named prior/options uses follow macro execution order. An earlier written line in a later iteration can use a definition already executed in the previous iteration without false E428/E429.
 
 - Extract retains successful type changes for selected names in parser order. Space-separated declaration lists filter unselected names while preserving TeX and per-name options.

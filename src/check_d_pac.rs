@@ -414,7 +414,7 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
     }
     for block in &model.deterministic_trends {
         for row in &block.rows {
-            if model.final_kind(row.name) != Some("var") {
+            if model.final_kind_or_written_if_excluded(row.name) != Some("var") {
                 out.push(warning(
                     row.name_span,
                     "W206",
@@ -1452,7 +1452,7 @@ fn direct_constant(model: &Model, id: ExprId) -> bool {
         ExprKind::Number => true,
         ExprKind::Ident {
             name, timing: 0, ..
-        } => model.final_kind(*name) == Some("parameters"),
+        } => model.final_kind_or_written_if_excluded(*name) == Some("parameters"),
         ExprKind::Unary { arg, .. } => direct_constant(model, *arg),
         ExprKind::Binary {
             op: BinOp::Add | BinOp::Sub | BinOp::Mul,
@@ -1634,11 +1634,14 @@ fn direct_growth_is_safe(model: &Model, growth: &WrittenExpression) -> bool {
 }
 
 fn is_endogenous(model: &Model, name: Name) -> bool {
-    model.final_kind(name) == Some("var")
+    model.final_kind_or_written_if_excluded(name) == Some("var")
 }
 
 fn is_exogenous(model: &Model, name: Name) -> bool {
-    matches!(model.final_kind(name), Some("varexo" | "varexo_det"))
+    matches!(
+        model.final_kind_or_written_if_excluded(name),
+        Some("varexo" | "varexo_det")
+    )
 }
 
 fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Option<Diagnostic> {
@@ -1657,9 +1660,10 @@ fn check_selected_shape(model: &Model, command: &SemiStructuralCommand) -> Optio
             .filter(|r| is_endogenous(model, r.name))
             .map(|r| (r.name, r.timing))
             .collect();
-        let other = lhs_refs
-            .iter()
-            .any(|r| is_exogenous(model, r.name) || model.final_kind(r.name) == Some("parameters"));
+        let other = lhs_refs.iter().any(|r| {
+            is_exogenous(model, r.name)
+                || model.final_kind_or_written_if_excluded(r.name) == Some("parameters")
+        });
         if endos.len() != 1 || other {
             let text = if var {
                 "A VAR may only have one endogenous variable on the LHS. "
@@ -1767,10 +1771,10 @@ fn var_expectation_expression_reason(
     command: &SemiStructuralCommand,
 ) -> Option<String> {
     if let Some((name, _)) = symbol_option(command, "variable") {
-        if model.final_kind(name) == Some("parameters") {
+        if model.final_kind_or_written_if_excluded(name) == Some("parameters") {
             return Some("No variable in this expression".to_string());
         }
-        if model.final_kind(name) == Some("varexo_det") {
+        if model.final_kind_or_written_if_excluded(name) == Some("varexo_det") {
             return Some(format!("Symbol {} not allowed here", model.name(name)));
         }
         if is_exogenous(model, name) {
@@ -1783,7 +1787,7 @@ fn var_expectation_expression_reason(
     // A single deterministic exogenous is already the written expression.
     // Its matcher refusal does not depend on unary/diff substitution.
     if let ExprKind::Ident { name, .. } = &model.exprs.get(id).kind {
-        if model.final_kind(*name) == Some("varexo_det") {
+        if model.final_kind_or_written_if_excluded(*name) == Some("varexo_det") {
             return Some(format!("Symbol {} not allowed here", model.name(*name)));
         }
     }
@@ -1842,12 +1846,12 @@ fn collect_linear_factors(
             if denominator {
                 return Err(Some("A variable or parameter cannot appear at denominator"));
             }
-            if model.final_kind(*name) == Some("parameters") {
+            if model.final_kind_or_written_if_excluded(*name) == Some("parameters") {
                 if factor.parameter {
                     return Err(Some("More than one parameter in this expression"));
                 }
                 factor.parameter = true;
-            } else if model.final_kind(*name) == Some("varexo_det") {
+            } else if model.final_kind_or_written_if_excluded(*name) == Some("varexo_det") {
                 return Err(None);
             } else if is_endogenous(model, *name) || is_exogenous(model, *name) {
                 if factor.variable.is_some() {

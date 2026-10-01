@@ -443,7 +443,7 @@ enum DeclClass {
 }
 
 fn decl_class(model: &Model, name: Name, locals: &HashSet<Name>) -> Option<DeclClass> {
-    match model.final_kind(name) {
+    match model.final_kind_or_written_if_excluded(name) {
         Some("var") => return Some(DeclClass::Endogenous),
         Some("varexo" | "varexo_det") => return Some(DeclClass::Exo),
         Some("parameters") => return Some(DeclClass::Parameter),

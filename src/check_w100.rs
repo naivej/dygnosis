@@ -123,7 +123,10 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
         let exo_in_planner = model.exprs.walk_idents(id).any(|r| {
             !model.dropped_by_surgery_after(r.name, planner_span.start)
                 && !locals.contains(&r.name)
-                && !matches!(model.final_kind(r.name), Some("var" | "parameters"))
+                && !matches!(
+                    model.final_kind_or_written_if_excluded(r.name),
+                    Some("var" | "parameters")
+                )
         });
         let excluded_in_planner = model.exprs.walk_idents(id).any(|r| {
             model

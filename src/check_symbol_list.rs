@@ -81,7 +81,7 @@ pub fn check_symbol_list(model: &Model) -> Vec<Diagnostic> {
         if heterogeneous.contains(&name) {
             continue;
         }
-        match kind {
+        match kind.as_str() {
             "parameters" => {
                 parameters.insert(name);
             }

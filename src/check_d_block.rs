@@ -88,7 +88,7 @@ fn check_planner_lead_local(model: &Model) -> Vec<Diagnostic> {
 fn check_osr_bounds_type(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for bound in &model.osr_params_bounds {
-        if model.final_kind(bound.name) == Some("parameters") {
+        if model.final_kind_or_written_if_excluded(bound.name) == Some("parameters") {
             continue;
         }
         let name = model.name(bound.name);

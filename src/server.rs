@@ -2026,7 +2026,7 @@ fn decl_hover_markdown(model: &Model, word: &str) -> Option<String> {
     let name = model.intern.lookup(word)?;
     let kind = model
         .final_symbol_kind(name)
-        .or_else(|| model.final_kind(name));
+        .or_else(|| model.final_kind_or_written_if_excluded(name));
     if kind == Some("var") {
         let mut parts = vec![format!("**Endogenous variable**: `{word}`")];
         if let Some(info) = classify_variable_timing(model).get(word) {

@@ -16,7 +16,7 @@ pub fn check_e030(model: &Model) -> Vec<Diagnostic> {
 fn check_duplicate_declarations(model: &Model) -> Vec<Diagnostic> {
     // Expanded tokens retain their written spans, so two macro iterations can
     // have the same span. Use the event order captured during parsing instead.
-    let mut seen: HashMap<Name, &'static str> = HashMap::new();
+    let mut seen: HashMap<Name, crate::model::SymbolKind> = HashMap::new();
     let mut diagnostics = Vec::new();
     for event in &model.symbol_type_events {
         if event.changed {

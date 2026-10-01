@@ -2039,7 +2039,7 @@ fn symbol_index(model: &Model) -> BTreeMap<String, SymbolSide> {
     let mut out = BTreeMap::new();
     for decl in decls {
         let kind = model
-            .final_kind(decl.name)
+            .final_kind_or_written_if_excluded(decl.name)
             .expect("final declaration has a type");
         out.entry(model.name(decl.name).to_string())
             .or_insert_with(|| SymbolSide {

@@ -225,7 +225,7 @@ fn collapsed_equation_count(model: &Model) -> usize {
 fn ident_class(model: &Model, name: crate::intern::Name) -> IdentClass {
     match model
         .final_symbol_kind(name)
-        .or_else(|| model.final_kind(name))
+        .or_else(|| model.final_kind_or_written_if_excluded(name))
     {
         Some("var") => IdentClass::Endogenous,
         Some("varexo_det") => IdentClass::VarexoDet,

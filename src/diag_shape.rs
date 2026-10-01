@@ -706,9 +706,13 @@ fn check_prior_head_not_endo_or_exo(model: &Model) -> Vec<Diagnostic> {
 
 /// Excluded initialization targets retain the established declaration/removal
 /// warrant. Other targets use the type captured at their own parser position.
-fn initialization_kind(model: &Model, name: Name, context: usize) -> Option<&'static str> {
+fn initialization_kind(
+    model: &Model,
+    name: Name,
+    context: crate::model::SymbolContext,
+) -> Option<&'static str> {
     match model.symbol_kind_in_context(name, context) {
-        Some("excluded") => model.final_kind(name),
+        Some("excluded") => model.final_kind_or_written_if_excluded(name),
         kind => kind,
     }
 }

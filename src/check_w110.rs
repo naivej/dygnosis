@@ -348,7 +348,7 @@ fn check_e212(model: &Model) -> Vec<Diagnostic> {
             if estimated.contains(&r.name)
                 && model
                     .final_symbol_kind(r.name)
-                    .or_else(|| model.final_kind(r.name))
+                    .or_else(|| model.final_kind_or_written_if_excluded(r.name))
                     == Some("parameters")
                 && !hits.contains(&r.name)
             {

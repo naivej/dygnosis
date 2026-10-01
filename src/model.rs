@@ -15,7 +15,7 @@ pub struct Decl {
     pub parse_order: usize,
     /// Length of type history when this name slot was parsed, before later
     /// macro iterations or directives could change its type.
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub name: Name,
     pub span: Span,
     pub long_name: Option<String>,
@@ -123,7 +123,7 @@ pub enum SemiStructuralKind {
 
 #[derive(Clone, Debug)]
 pub struct SemiStructuralCommand {
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub kind: SemiStructuralKind,
     pub span: Span,
     pub options: Vec<SemiStructuralOption>,
@@ -164,7 +164,7 @@ pub enum SemiStructuralValue {
 
 #[derive(Clone, Debug)]
 pub struct WrittenExpression {
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub text: String,
     pub span: Span,
     pub expr: Option<ExprId>,
@@ -280,12 +280,69 @@ pub struct PrunedInitialization {
     pub removal_event: usize,
 }
 
+/// A symbol's type in Dynare's parser history. Written keyword spellings are
+/// converted once on entry; compatibility queries keep their canonical spellings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SymbolKind {
+    Var,
+    Varexo,
+    VarexoDet,
+    Parameters,
+    Epilogue,
+    TrendVar,
+    LogTrendVar,
+    ExternalFunction,
+    ModFileLocal,
+    ModelLocalVariable,
+    Excluded,
+}
+
+impl SymbolKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Var => "var",
+            Self::Varexo => "varexo",
+            Self::VarexoDet => "varexo_det",
+            Self::Parameters => "parameters",
+            Self::Epilogue => "epilogue",
+            Self::TrendVar => "trend_var",
+            Self::LogTrendVar => "log_trend_var",
+            Self::ExternalFunction => "external_function",
+            Self::ModFileLocal => "mod_file_local",
+            Self::ModelLocalVariable => "model_local_variable",
+            Self::Excluded => "excluded",
+        }
+    }
+
+    pub(crate) fn declaration_keyword(keyword: &str) -> Self {
+        match keyword {
+            "var" => Self::Var,
+            "varexo" => Self::Varexo,
+            "varexo_det" => Self::VarexoDet,
+            "parameters" => Self::Parameters,
+            "model_local_variable" => Self::ModelLocalVariable,
+            _ => unreachable!("not a declaration keyword: {keyword}"),
+        }
+    }
+}
+
+/// A position in symbol history, captured during parser execution. This is
+/// distinct from a written byte offset, which macro copies can share.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SymbolContext(usize);
+
+impl SymbolContext {
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}
+
 /// One declaration or type change in expanded parser execution order.
 #[derive(Clone, Copy, Debug)]
 pub struct SymbolTypeEvent {
     pub name: Name,
     pub span: Span,
-    pub kind: &'static str,
+    pub kind: SymbolKind,
     pub changed: bool,
 }
 
@@ -334,7 +391,7 @@ pub struct ComplementarityTriple {
 #[derive(Clone, Copy, Debug)]
 pub struct ObservedVar {
     /// Type history when this row was parsed, including previous macro iterations.
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub name: Name,
     pub span: Span,
 }
@@ -486,7 +543,7 @@ pub struct ExternalFunctionStmt {
 #[derive(Clone, Debug)]
 pub struct Init2ShocksRow {
     /// Type history when this row was parsed, including previous macro iterations.
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub endo: Name,
     pub endo_span: Span,
     pub exo: Name,
@@ -507,7 +564,7 @@ pub struct Init2ShocksBlock {
 #[derive(Clone, Debug)]
 pub struct HomotopyRow {
     /// Type history when this row was parsed, including previous macro iterations.
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub name: Name,
     pub span: Span,
 }
@@ -516,7 +573,7 @@ pub struct HomotopyRow {
 #[derive(Clone, Debug)]
 pub struct ShockGroup {
     /// Type history when this row was parsed, including previous macro iterations.
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     /// The row's label, quotes stripped (`'g1'` and `g1` are the same label).
     pub label: String,
     /// The label token's span (inside the quotes for a quoted label).
@@ -563,7 +620,7 @@ impl PolicyCommand {
 #[derive(Clone, Copy, Debug)]
 pub struct EstimatedParam {
     /// Type history when this row was parsed, including previous macro iterations.
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub name: Name,
     pub name_span: Span,
     pub name_role_at_remove: EstimatedNameRole,
@@ -586,7 +643,7 @@ pub struct EstimatedParam {
 /// One `var` / `corr` / `stderr` / `skew` statement inside a `shocks` block.
 #[derive(Clone, Debug)]
 pub struct ShockStmt {
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub kind: ShockKind,
     /// Folded RHS (`var name = expr` / `corr a, b = expr`). `None` if missing or unevaluable.
     pub rhs: Option<f64>,
@@ -646,7 +703,7 @@ pub struct WrittenValue {
 
 #[derive(Clone, Debug)]
 pub struct PathReference {
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub namespace: Option<String>,
     pub name: Name,
     pub span: Span,
@@ -690,7 +747,7 @@ pub struct ShockOptions {
 
 #[derive(Clone, Debug)]
 pub struct ScheduledShock {
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub name: Name,
     pub name_span: Span,
     pub periods: Vec<PeriodRange>,
@@ -725,7 +782,7 @@ pub enum PathTarget {
 
 #[derive(Clone, Debug)]
 pub struct PathStanza {
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub target: PathTarget,
     pub periods: Vec<PeriodRange>,
     pub values: Vec<WrittenValue>,
@@ -741,7 +798,7 @@ pub struct PathBlock {
 
 #[derive(Clone, Debug)]
 pub struct EndvalEntry {
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub name: Name,
     pub name_span: Span,
     pub value: WrittenValue,
@@ -788,7 +845,7 @@ pub struct SubsampleRange {
 /// One name whose type `var_remove` changed while the file was parsed.
 #[derive(Clone, Debug)]
 pub struct VarRemovedName {
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub name: Name,
     pub name_span: Span,
     pub statement: Span,
@@ -797,13 +854,13 @@ pub struct VarRemovedName {
 #[derive(Clone, Debug)]
 pub enum SubsampleInstruction {
     Declare {
-        symbol_type_context: usize,
+        symbol_type_context: SymbolContext,
         head: SubsampleHead,
         ranges: Vec<SubsampleRange>,
         span: Span,
     },
     Copy {
-        symbol_type_context: usize,
+        symbol_type_context: SymbolContext,
         target: SubsampleHead,
         source: SubsampleHead,
         span: Span,
@@ -831,7 +888,7 @@ pub struct StochSimulRequest {
 /// `estimation`. Names retain their written spans and command order.
 #[derive(Clone, Debug)]
 pub struct IrfShocksOption {
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub command: String,
     pub span: Span,
     pub names: Vec<(Name, Span)>,
@@ -839,7 +896,7 @@ pub struct IrfShocksOption {
 
 #[derive(Clone, Debug)]
 pub struct Assignment {
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub name: Name,
     pub expression: String,
     pub span: Span,
@@ -1295,7 +1352,7 @@ pub(crate) fn dynare_date(text: &str) -> bool {
 /// `histval` assignment `name(lag) = expr`.
 #[derive(Clone, Debug)]
 pub struct HistvalEntry {
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub name: Name,
     pub lag: i32,
     pub span: Span,
@@ -1336,7 +1393,7 @@ pub struct CommandSymbol {
 #[derive(Clone, Debug)]
 pub struct MsStatement {
     /// Type history when this row was parsed, including previous macro iterations.
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     /// Command name as written.
     pub command: String,
     /// Whole statement: opener through the terminating `;`.
@@ -1432,7 +1489,7 @@ pub fn mod_file_local_in_model_message(name: &str) -> String {
 /// The dotted `….prior(…)` / `….options(…)` / `….subsamples(…)` statement family.
 #[derive(Clone, Debug)]
 pub struct DottedStatement {
-    pub symbol_type_context: usize,
+    pub symbol_type_context: SymbolContext,
     pub kind: DottedKind,
     /// The head the statement is keyed on.
     pub head: DottedHead,
@@ -1927,23 +1984,34 @@ impl Model {
             .iter()
             .rev()
             .find(|event| event.name == name)
-            .map(|event| event.kind)
+            .map(|event| event.kind.as_str())
+    }
+
+    /// Capture the current parser position; never derive this from a source span.
+    pub(crate) fn symbol_context(&self) -> SymbolContext {
+        SymbolContext(self.symbol_type_events.len())
+    }
+
+    /// Compatibility name for the excluded-name fallback. Internal readers use
+    /// the explicit name so that they cannot mistake it for the final table type.
+    pub fn final_kind(&self, name: Name) -> Option<&'static str> {
+        self.final_kind_or_written_if_excluded(name)
     }
 
     /// Type at a captured parser position, independent of written source order.
     pub(crate) fn symbol_kind_in_context(
         &self,
         name: Name,
-        context: usize,
+        context: SymbolContext,
     ) -> Option<&'static str> {
-        self.symbol_type_events[..context]
+        self.symbol_type_events[..context.index()]
             .iter()
             .rev()
             .find(|event| event.name == name)
-            .map(|event| event.kind)
+            .map(|event| event.kind.as_str())
     }
 
-    pub(crate) fn parameter_in_context(&self, name: Name, context: usize) -> bool {
+    pub(crate) fn parameter_in_context(&self, name: Name, context: SymbolContext) -> bool {
         self.symbol_kind_in_context(name, context) == Some("parameters")
     }
 
@@ -1951,7 +2019,7 @@ impl Model {
     ///
     /// This is [`Self::final_symbol_kind`], except an `excluded` name uses the
     /// list it was written on. Removal checks already read that list.
-    pub fn final_kind(&self, name: Name) -> Option<&'static str> {
+    pub fn final_kind_or_written_if_excluded(&self, name: Name) -> Option<&'static str> {
         match self.final_symbol_kind(name) {
             Some("excluded") | None => self.written_type(name),
             Some(kind) => Some(kind),
@@ -1984,7 +2052,7 @@ impl Model {
             .iter()
             .rev()
             .find(|event| event.name == name && event.span.start < at)
-            .map(|event| event.kind)
+            .map(|event| event.kind.as_str())
     }
 
     /// `name` is a parameter at byte `at`, falling back to the written list.
@@ -2028,7 +2096,7 @@ impl Model {
     /// Heterogeneous endogenous among the types recorded so far. Parsing SUM
     /// captures this answer before later directives can change the symbol.
     pub(crate) fn is_heterogeneous_endogenous(&self, name: Name) -> bool {
-        self.final_kind(name) == Some("var")
+        self.final_kind_or_written_if_excluded(name) == Some("var")
             && self
                 .endogenous
                 .iter()
@@ -2039,7 +2107,7 @@ impl Model {
     pub(crate) fn final_decls(&self, kinds: &[&str]) -> Vec<&Decl> {
         let mut final_kind = HashMap::new();
         for event in &self.symbol_type_events {
-            final_kind.insert(event.name, event.kind);
+            final_kind.insert(event.name, event.kind.as_str());
         }
         let lists = [
             (&self.endogenous, "var"),

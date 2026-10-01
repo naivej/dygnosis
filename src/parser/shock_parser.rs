@@ -237,7 +237,7 @@ impl Parser<'_> {
             self.current_start()
         };
         Some(ScheduledShock {
-            symbol_type_context: self.model.symbol_type_events.len(),
+            symbol_type_context: self.model.symbol_context(),
             name,
             name_span: name_tok.span,
             periods,
@@ -566,7 +566,7 @@ impl Parser<'_> {
             let call = namespace.is_none() && next > after_name;
             let name = self.intern.intern(name_tok.text(self.src));
             out.push(PathReference {
-                symbol_type_context: self.model.symbol_type_events.len(),
+                symbol_type_context: self.model.symbol_context(),
                 namespace,
                 name,
                 span: Span {
@@ -809,7 +809,7 @@ impl Parser<'_> {
         };
         let end = self.tokens[self.i.saturating_sub(1)].span.end;
         Some(PathStanza {
-            symbol_type_context: self.model.symbol_type_events.len(),
+            symbol_type_context: self.model.symbol_context(),
             target,
             periods,
             values,
@@ -868,7 +868,7 @@ impl Parser<'_> {
             };
             if let Some(value) = value {
                 entries.push(EndvalEntry {
-                    symbol_type_context: self.model.symbol_type_events.len(),
+                    symbol_type_context: self.model.symbol_context(),
                     name,
                     name_span: name_tok.span,
                     value,
@@ -1133,7 +1133,7 @@ impl Parser<'_> {
                 }
             }
             self.model.irf_shocks_options.push(IrfShocksOption {
-                symbol_type_context: self.model.symbol_type_events.len(),
+                symbol_type_context: self.model.symbol_context(),
                 command: command.to_ascii_lowercase(),
                 span: option_span,
                 names,
@@ -1214,7 +1214,7 @@ impl Parser<'_> {
             i += 1;
             if let Some((source, _)) = self.subsample_head_at(i) {
                 self.model.subsamples.push(SubsampleInstruction::Copy {
-                    symbol_type_context: self.model.symbol_type_events.len(),
+                    symbol_type_context: self.model.symbol_context(),
                     target: head,
                     source,
                     span,
@@ -1314,7 +1314,7 @@ impl Parser<'_> {
             head,
             ranges,
             span,
-            symbol_type_context: self.model.symbol_type_events.len(),
+            symbol_type_context: self.model.symbol_context(),
         });
     }
 

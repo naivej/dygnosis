@@ -98,7 +98,7 @@ impl Parser<'_> {
         self.model
             .semi_structural_commands
             .push(SemiStructuralCommand {
-                symbol_type_context: self.model.symbol_type_events.len(),
+                symbol_type_context: self.model.symbol_context(),
                 kind,
                 span: Span { start, end },
                 options,
@@ -333,7 +333,7 @@ impl Parser<'_> {
         let end = self.tokens[self.i.saturating_sub(1)].span.end;
         let span = Span { start, end };
         Some(WrittenExpression {
-            symbol_type_context: self.model.symbol_type_events.len(),
+            symbol_type_context: self.model.symbol_context(),
             text: self
                 .src
                 .get(start as usize..end as usize)
