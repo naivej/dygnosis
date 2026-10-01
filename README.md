@@ -1,6 +1,6 @@
 ![dygnosis](media/logo_s.png)
 
-Dygnosis helps you check and edit Dynare `.mod` files in an editor or with an AI agent. It catches most problems Dynare would report before MATLAB runs, points to them in your file, and adds guidance for possible problems Dynare does not report.
+Dygnosis is a second Dynare preprocessor that helps you check and edit Dynare `.mod` files in an editor or with an AI agent. It catches most problems Dynare would report before MATLAB runs, points to them in your file, and adds guidance for possible problems Dynare does not report.
 
 *This project is under active development.*
 
