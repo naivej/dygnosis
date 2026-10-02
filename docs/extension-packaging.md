@@ -53,6 +53,11 @@ records the product license hash and its exact package paths: VSCE writes
 `extension/LICENSE.txt`, while the standalone archive retains `LICENSE`. Later release
 versions reuse this pipeline and repeat installed checks.
 
+The shared Cargo/npm lock hashes identify the committed Git file bytes.
+Separate `*_lock_checkout_sha256` fields retain the actual build checkout bytes,
+which can use Windows CRLF line endings. The collector compares committed
+hashes across targets and still verifies each exact artifact checksum.
+
 Tags through v0.11.0 retain the legacy Rust notes-only route. Starting at
 v0.11.1, [Release](../.github/workflows/release.yml) verifies the full package
 matrix and leaves publication to the separate

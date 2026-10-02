@@ -1,30 +1,34 @@
 # Dygnosis packages
 
-The 0.11.1 extension includes the Dygnosis engine for its workspace host. It
+The 0.11 client preparation includes the Dygnosis engine for its workspace host. It
 does not download the engine when activated. Its analysis requires no separate
 Rust, Python, MATLAB or Dynare installation. Dygnosis reads models and stops
 before MATLAB computation; it does not run the official Dynare preprocessor.
 
-Packaging preparation is in progress. The following targets are candidates
-until their installed-package checks and release review pass. A successful
-compilation alone does not establish support.
+All six candidate targets passed installed VS Code 1.102.0/1.140.0 and unpacked
+standalone checks in [native CI](https://github.com/naivej/dygnosis/actions/runs/37065207944).
+Release review and publication remain pending. That run's final collector
+rejected platform checkout line endings in lockfile hashes; the provenance
+correction requires fresh matching artifacts before release.
 
 | Package target | Native verification host | Runtime evidence |
 |---|---|---|
-| `win32-x64` | Windows Server 2022 CI; Windows desktop manual check | Pending; release builds link the C runtime statically |
-| `win32-arm64` | Windows 11 ARM CI | Pending; native ARM64 process required |
-| `darwin-x64` | macOS 15 Intel CI | Pending; deployment target 13.0 is a build setting, not a tested minimum |
-| `darwin-arm64` | macOS 15 ARM CI | Pending; native ARM64 process required |
-| `linux-x64` | Ubuntu 22.04 x64 CI | Pending; archive records ELF version requirements and `ldd` output |
-| `linux-arm64` | Ubuntu 22.04 ARM CI | Pending; archive records ELF version requirements and `ldd` output |
+| `win32-x64` | Windows Server 2022, build 20348 | Native launch passed; C runtime linked statically. Windows desktop upgrade check remains pending. |
+| `win32-arm64` | Windows 11 ARM, build 26200 | Native ARM64 launch passed |
+| `darwin-x64` | macOS 15 Intel, Darwin 24.6 | Native launch passed; deployment target 13.0 is not a tested minimum |
+| `darwin-arm64` | macOS 15 ARM, Darwin 24.6 | Native ARM64 launch passed |
+| `linux-x64` | Ubuntu 22.04 x64 | Native launch passed; highest required glibc symbol version is 2.34 |
+| `linux-arm64` | Ubuntu 22.04 ARM | Native ARM64 launch passed; highest required glibc symbol version is 2.34 |
 
 The extension requires VS Code 1.102.0 or later. It runs in the workspace
 extension host: WSL, SSH and container workspaces need the package matching
 that host. A Windows desktop with a Linux remote workspace is a required
 release check. Browser-only, Alpine and 32-bit hosts are outside this matrix.
 VS Code has its own [OS and Linux library requirements](https://code.visualstudio.com/docs/supporting/requirements);
-the packaged engine's measured requirements can be higher. Record the tested
-OS versions and measured library floor here before advertising a target.
+the packaged engine's measured requirements can be higher. Linux packages
+also require their recorded system `libgcc_s`, `libm`, and loader. The table
+records tested candidate hosts and measured symbols rather than untested older
+OS support. Remote placement and final native MCP routing remain release gates.
 
 Each release offers target-specific VSIX files and standalone `.tar.gz` archives
 on its [GitHub Release](https://github.com/naivej/dygnosis/releases). The VSIX

@@ -4,6 +4,7 @@ const path = require("node:path");
 const { parseArgs } = require("node:util");
 const vsce = require("@vscode/vsce");
 const { collectLicenses } = require("./licenses.cjs");
+const { sourceFileHashes } = require("./source-hash.cjs");
 const { assertNative, execute, extensionRoot, productRoot, binaryName, hostFacts, sha256, writeJson } = require("./common.cjs");
 
 async function main() {
@@ -45,6 +46,8 @@ async function main() {
   for (const file of ["LICENSE", "CHANGELOG.md"]) await fs.copyFile(path.join(productRoot, file), path.join(extensionRoot, file));
   const runtimeFiles = await vsce.listFiles({ cwd: extensionRoot, packageManager: vsce.PackageManager.Npm });
   const notices = await collectLicenses(info.rust, runtimeFiles);
+  const cargoLock = await sourceFileHashes(productRoot, commit, "Cargo.lock");
+  const npmLock = await sourceFileHashes(productRoot, commit, "editors/vscode/package-lock.json");
   const provenance = {
     schema_version: 1, name: manifest.name, publisher: manifest.publisher, version, target, rust_target: info.rust,
     commit, tag: values.tag ?? null, release: !values.candidate, dirty,
@@ -52,9 +55,9 @@ async function main() {
     source_archive: `https://github.com/naivej/dygnosis/archive/${commit}.tar.gz`,
     binary_sha256: await sha256(binary), logo_sha256: await sha256(path.join(productRoot, "media/logo_s.png")),
     license: { spdx: "GPL-3.0-or-later", source_file: "LICENSE", source_sha256: await sha256(path.join(productRoot, "LICENSE")), vsix_path: "extension/LICENSE.txt", standalone_path: "LICENSE" },
-    rustc: execute("rustc", ["--version"]).trim(), cargo_lock_sha256: await sha256(path.join(productRoot, "Cargo.lock")),
+    rustc: execute("rustc", ["--version"]).trim(), cargo_lock_sha256: cargoLock.committed, cargo_lock_checkout_sha256: cargoLock.checkout,
     build: values.binary ? "provided candidate binary" : "native cargo --locked --release", rustflags: values.binary ? null : rustFlags,
-    npm_lock_sha256: await sha256(path.join(extensionRoot, "package-lock.json")), host: hostFacts(),
+    npm_lock_sha256: npmLock.committed, npm_lock_checkout_sha256: npmLock.checkout, host: hostFacts(),
     runtime_dependencies: notices.filter(notice => notice.kind === "npm").map(notice => notice.packagePath),
   };
   await writeJson(path.join(extensionRoot, "SOURCE.json"), provenance);
