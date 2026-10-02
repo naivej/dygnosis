@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::diagnostic::{Diagnostic, Severity};
+use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::expr::ExprId;
 use crate::intern::Name;
 use crate::model::{EstimatedNameRole, EstimatedParam, EstimatedParamKind, Model};
@@ -117,7 +117,7 @@ fn check_one_block(
     let mut seen_param: HashMap<Name, Span> = HashMap::new();
     let mut seen_stderr: HashMap<Name, Span> = HashMap::new();
     let mut seen_skew: HashMap<Name, Span> = HashMap::new();
-    let mut seen_corr: HashMap<(Name, Name), (String, String)> = HashMap::new();
+    let mut seen_corr: HashMap<(Name, Name), (String, String, Span)> = HashMap::new();
 
     for (index, entry) in entries.iter().enumerate() {
         if block_starts.binary_search(&index).is_ok() {
@@ -129,56 +129,74 @@ fn check_one_block(
         let name = model.name(entry.name);
         match entry.kind {
             EstimatedParamKind::Param => {
-                if let Some(_first) = seen_param.get(&entry.name) {
-                    out.push(err(
-                        entry.span,
-                        "E244",
-                        format!("in `{block}' block, the symbol {name} is declared twice."),
-                    ));
+                if let Some(&first) = seen_param.get(&entry.name) {
+                    out.push(
+                        err(
+                            entry.span,
+                            "E244",
+                            format!("in `{block}' block, the symbol {name} is declared twice."),
+                        )
+                        .with_related(RelatedDiagnostic::new(
+                            first,
+                            "Earlier estimated parameter entry",
+                        )),
+                    );
                 }
-                seen_param.insert(entry.name, entry.span);
+                seen_param.entry(entry.name).or_insert(entry.name_span);
             }
             EstimatedParamKind::Stderr => {
-                if seen_stderr.contains_key(&entry.name) {
-                    out.push(err(
-                        entry.span,
-                        "E245",
-                        format!("in `{block}' block, the stderr of {name} is declared twice."),
-                    ));
+                if let Some(&first) = seen_stderr.get(&entry.name) {
+                    out.push(
+                        err(
+                            entry.span,
+                            "E245",
+                            format!("in `{block}' block, the stderr of {name} is declared twice."),
+                        )
+                        .with_related(RelatedDiagnostic::new(
+                            first,
+                            "Earlier standard error entry",
+                        )),
+                    );
                 }
-                seen_stderr.insert(entry.name, entry.span);
+                seen_stderr.entry(entry.name).or_insert(entry.name_span);
             }
             EstimatedParamKind::Corr => {
                 if let Some(other) = entry.corr_with {
                     let key = sorted_pair(model, entry.name, other);
-                    if let Some((a, b)) = seen_corr.get(&key) {
+                    if let Some((a, b, first)) = seen_corr.get(&key) {
                         out.push(err(
                             entry.span,
                             "E246",
                             format!(
                                 "in `{block}' block, the correlation between {a} and {b} is declared twice."
                             ),
-                        ));
+                        ).with_related(RelatedDiagnostic::new(*first, "Earlier correlation entry")));
                     } else {
                         seen_corr.insert(
                             key,
                             (
                                 model.name(entry.name).to_string(),
                                 model.name(other).to_string(),
+                                entry.name_span,
                             ),
                         );
                     }
                 }
             }
             EstimatedParamKind::Skew => {
-                if seen_skew.contains_key(&entry.name) {
-                    out.push(err(
-                        entry.span,
-                        "E247",
-                        format!("in `{block}' block, the skewness of {name} is declared twice."),
-                    ));
+                if let Some(&first) = seen_skew.get(&entry.name) {
+                    out.push(
+                        err(
+                            entry.span,
+                            "E247",
+                            format!(
+                                "in `{block}' block, the skewness of {name} is declared twice."
+                            ),
+                        )
+                        .with_related(RelatedDiagnostic::new(first, "Earlier skewness entry")),
+                    );
                 }
-                seen_skew.insert(entry.name, entry.span);
+                seen_skew.entry(entry.name).or_insert(entry.name_span);
                 if main && declared.contains(&entry.name) && !exo.contains(&entry.name) {
                     out.push(err(
                         entry.span,

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use crate::diagnostic::{Diagnostic, Severity};
+use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::expr::{BinOp, ExprId, ExprKind};
 use crate::intern::Name;
 use crate::lexer::{tokenize, Token, TokenKind};
@@ -641,9 +641,15 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
             continue;
         }
         let tracker = trackers.entry(eq_name.clone()).or_default();
-        if let Err(RegimeError::AlreadyPresent { bind, relax }) =
-            tracker.add_regime(&bind_names, &relax_names)
-        {
+        if let Err(RegimeError::AlreadyPresent {
+            bind,
+            relax,
+            earlier,
+        }) = tracker.add_regime(
+            &bind_names,
+            &relax_names,
+            RelatedDiagnostic::equation(model, eq, eq.span),
+        ) {
             let rendering = render_bind_relax(&bind, &relax);
             out.push(error(
                 eq.span,
@@ -651,7 +657,7 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
                 format!(
                     "The regime corresponding to {rendering} has already been declared for this equation"
                 ),
-            ));
+            ).with_related(*earlier));
         }
     }
     // Heterogeneous bodies take the same `⟂` / `_|_` conditions, and 7.2 refuses
@@ -753,13 +759,14 @@ fn render_bind_relax(bind: &[String], relax: &[String]) -> String {
 #[derive(Default)]
 struct OccbinRegimeTracker {
     constraints: Vec<String>,
-    regimes_present: BTreeSet<Vec<bool>>,
+    regimes_present: BTreeMap<Vec<bool>, RelatedDiagnostic>,
 }
 
 enum RegimeError {
     AlreadyPresent {
         bind: Vec<String>,
         relax: Vec<String>,
+        earlier: Box<RelatedDiagnostic>,
     },
 }
 
@@ -768,6 +775,7 @@ impl OccbinRegimeTracker {
         &mut self,
         constraints_bind: &[&str],
         constraints_relax: &[&str],
+        owner: RelatedDiagnostic,
     ) -> Result<(), RegimeError> {
         let mut bind_sorted: Vec<&str> = constraints_bind.to_vec();
         bind_sorted.sort_unstable();
@@ -785,15 +793,19 @@ impl OccbinRegimeTracker {
         for c in &constraints_union {
             if !self.constraints.iter().any(|x| x == c) {
                 self.constraints.push((*c).to_string());
-                let regimes_copy: Vec<Vec<bool>> = self.regimes_present.iter().cloned().collect();
+                let regimes_copy: Vec<_> = self
+                    .regimes_present
+                    .iter()
+                    .map(|(bits, site)| (bits.clone(), site.clone()))
+                    .collect();
                 self.regimes_present.clear();
-                for r in regimes_copy {
+                for (r, site) in regimes_copy {
                     let mut r0 = r.clone();
                     let mut r1 = r;
                     r0.push(false);
                     r1.push(true);
-                    self.regimes_present.insert(r0);
-                    self.regimes_present.insert(r1);
+                    self.regimes_present.insert(r0, site.clone());
+                    self.regimes_present.insert(r1, site);
                 }
             }
         }
@@ -823,10 +835,15 @@ impl OccbinRegimeTracker {
             }
         }
         for r in new_regimes {
-            if !self.regimes_present.insert(r.clone()) {
+            if let Some(earlier) = self.regimes_present.get(&r) {
                 let (bind, relax) = self.convert_bit_vector(&r);
-                return Err(RegimeError::AlreadyPresent { bind, relax });
+                return Err(RegimeError::AlreadyPresent {
+                    bind,
+                    relax,
+                    earlier: Box::new(earlier.clone()),
+                });
             }
+            self.regimes_present.insert(r, owner.clone());
         }
         Ok(())
     }
@@ -850,7 +867,7 @@ impl OccbinRegimeTracker {
         }
         let mut r = vec![false; self.constraints.len()];
         loop {
-            if !self.regimes_present.contains(&r) {
+            if !self.regimes_present.contains_key(&r) {
                 return Some(self.convert_bit_vector(&r));
             }
             if let Some(idx) = r.iter().position(|b| !b) {

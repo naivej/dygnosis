@@ -1,8 +1,8 @@
 //! W060 / W110–W112 shocks: requested IRFs, duplicate specs, variance sign, corr range.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::diagnostic::{Diagnostic, Severity};
+use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::intern::Name;
 use crate::lexer::{tokenize, TokenKind};
 use crate::model::{Decl, EstimatedParamKind, Model, PeriodPoint, ShockBlockKind, ShockKind};
@@ -106,7 +106,7 @@ fn check_w060(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
-    let mut seen: HashSet<SeenKey> = HashSet::new();
+    let mut seen: HashMap<SeenKey, Span> = HashMap::new();
     let mut diagnostics = Vec::new();
     for (index, stmt) in model.shock_stmts.iter().enumerate() {
         if model.shock_stmt_block_starts.binary_search(&index).is_ok() {
@@ -116,16 +116,22 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
         match &stmt.kind {
             ShockKind::Var(name) | ShockKind::Stderr(name) => {
                 let key = SeenKey::Var(*name);
-                if seen.contains(&key) {
+                if let Some(&first_span) = seen.get(&key) {
                     let n = model.name(*name);
-                    diagnostics.push(Diagnostic::new(
-                        span,
-                        Severity::Error,
-                        "E111",
-                        format!("shocks: variance or stderr of shock on {n} declared twice"),
-                    ));
+                    diagnostics.push(
+                        Diagnostic::new(
+                            span,
+                            Severity::Error,
+                            "E111",
+                            format!("shocks: variance or stderr of shock on {n} declared twice"),
+                        )
+                        .with_related(RelatedDiagnostic::new(
+                            first_span,
+                            "Earlier variance or standard error entry",
+                        )),
+                    );
                 }
-                seen.insert(key);
+                seen.entry(key).or_insert(stmt.span);
                 if let (ShockKind::Var(_), Some(v)) = (&stmt.kind, stmt.rhs) {
                     if v < 0.0 {
                         let n = model.name(*name);
@@ -143,7 +149,7 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
             }
             ShockKind::Cov(names) => {
                 let key = SeenKey::Pair(sorted_names(model, names));
-                if seen.contains(&key) && names.len() >= 2 {
+                if let Some(&first_span) = seen.get(&key).filter(|_| names.len() >= 2) {
                     let first = model.name(names[0]);
                     let second = model.name(names[1]);
                     diagnostics.push(Diagnostic::new(
@@ -153,9 +159,9 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                         format!(
                             "shocks: covariance or correlation shock on variable pair ({first}, {second}) declared twice"
                         ),
-                    ));
+                    ).with_related(RelatedDiagnostic::new(first_span, "Earlier covariance or correlation entry")));
                 }
-                seen.insert(key);
+                seen.entry(key).or_insert(stmt.span);
             }
             ShockKind::Skew(names) => {
                 let key = if names.len() == 1 {
@@ -163,35 +169,49 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                 } else {
                     SeenKey::Skew(sorted_names(model, names))
                 };
-                if !seen.insert(key) {
+                if let Some(&first_span) = seen.get(&key) {
                     if names.len() == 1 {
-                        diagnostics.push(Diagnostic::new(
-                            span,
-                            Severity::Error,
-                            "E393",
-                            format!(
-                                "shocks: skewness of {} declared twice",
-                                model.name(names[0])
-                            ),
-                        ));
+                        diagnostics.push(
+                            Diagnostic::new(
+                                span,
+                                Severity::Error,
+                                "E393",
+                                format!(
+                                    "shocks: skewness of {} declared twice",
+                                    model.name(names[0])
+                                ),
+                            )
+                            .with_related(RelatedDiagnostic::new(
+                                first_span,
+                                "Earlier skewness entry",
+                            )),
+                        );
                     } else if names.len() == 3 {
-                        diagnostics.push(Diagnostic::new(
-                            span,
-                            Severity::Error,
-                            "E394",
-                            format!(
-                                "shocks: co-skewness of ({}, {}, {}) declared twice",
-                                model.name(names[0]),
-                                model.name(names[1]),
-                                model.name(names[2])
-                            ),
-                        ));
+                        diagnostics.push(
+                            Diagnostic::new(
+                                span,
+                                Severity::Error,
+                                "E394",
+                                format!(
+                                    "shocks: co-skewness of ({}, {}, {}) declared twice",
+                                    model.name(names[0]),
+                                    model.name(names[1]),
+                                    model.name(names[2])
+                                ),
+                            )
+                            .with_related(RelatedDiagnostic::new(
+                                first_span,
+                                "Earlier co-skewness entry",
+                            )),
+                        );
                     }
+                } else {
+                    seen.insert(key, stmt.span);
                 }
             }
             ShockKind::Corr { a, b } => {
                 let key = SeenKey::Pair(sorted_names(model, &[*a, *b]));
-                if seen.contains(&key) {
+                if let Some(&first_span) = seen.get(&key) {
                     let first = model.name(*a);
                     let second = model.name(*b);
                     diagnostics.push(Diagnostic::new(
@@ -201,9 +221,9 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                         format!(
                             "shocks: covariance or correlation shock on variable pair ({first}, {second}) declared twice"
                         ),
-                    ));
+                    ).with_related(RelatedDiagnostic::new(first_span, "Earlier covariance or correlation entry")));
                 }
-                seen.insert(key);
+                seen.entry(key).or_insert(stmt.span);
                 if let Some(v) = stmt.rhs {
                     if v.abs() > 1.0 {
                         let first = model.name(*a);

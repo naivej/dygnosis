@@ -29,7 +29,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::diagnostic::{Diagnostic, Severity};
+use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::intern::Name;
 use crate::model::{
     ConditionalForecastPath, DataStatement, DottedHead, DottedKind, DottedStatement, FamilyOption,
@@ -974,7 +974,7 @@ fn check_conditional_forecast_paths(
         return false;
     }
     let endogenous = endogenous_names(model);
-    let mut seen: HashSet<Name> = HashSet::new();
+    let mut seen: HashMap<Name, Span> = HashMap::new();
     for row in &block.rows {
         // A malformed row is the parser's own refuse; it comes first, because a
         // syntax error stops the run before the sentence on a later row.
@@ -989,18 +989,25 @@ fn check_conditional_forecast_paths(
         if !endogenous.contains(&row.name) {
             continue;
         }
-        if !seen.insert(row.name) {
-            push(
-                out,
-                row.span,
-                "E344",
-                format!(
-                    "shocks/conditional_forecast_paths: variable {} declared twice",
-                    model.name(row.name)
-                ),
+        if let Some(&first) = seen.get(&row.name) {
+            out.push(
+                Diagnostic::new(
+                    row.span,
+                    Severity::Error,
+                    "E344",
+                    format!(
+                        "shocks/conditional_forecast_paths: variable {} declared twice",
+                        model.name(row.name)
+                    ),
+                )
+                .with_related(RelatedDiagnostic::new(
+                    first,
+                    "Earlier conditional forecast path",
+                )),
             );
             return true;
         }
+        seen.insert(row.name, row.span);
         if row.periods.len() != row.values.len() {
             push(
                 out,

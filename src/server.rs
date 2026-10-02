@@ -124,6 +124,14 @@ struct OpenDoc {
     writing_origins: HashMap<String, WritingOrigin>,
 }
 
+#[derive(Clone)]
+struct RoutedDiagnostic {
+    diagnostic: crate::Diagnostic,
+    text: std::sync::Arc<str>,
+    root: Url,
+    revision: String,
+}
+
 /// Source URI is the outer grouping key. An occurrence ordinal keeps repeated
 /// diagnostics from one compilation unit while merging identical other roots.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -136,6 +144,7 @@ struct DiagnosticPresentationKey {
     severity: String,
     message: String,
     writing_root: Option<String>,
+    related: String,
 }
 
 fn diagnostic_presentation_key(item: &Diagnostic) -> DiagnosticPresentationKey {
@@ -150,15 +159,24 @@ fn diagnostic_presentation_key(item: &Diagnostic) -> DiagnosticPresentationKey {
         writing_root: item
             .data
             .as_ref()
+            .filter(|_| matches!(&item.code, Some(NumberOrString::String(code)) if crate::check_writing::is_writing_code(code)))
             .and_then(|data| data.get("root"))
             .and_then(Value::as_str)
             .map(str::to_string),
+        related: format!(
+            "{:?}|{:?}",
+            item.related_information,
+            item.data
+                .as_ref()
+                .and_then(|data| data.get("related_context"))
+        ),
     }
 }
 
 struct Inner {
     docs: HashMap<Url, OpenDoc>,
     published: HashMap<Url, Vec<Diagnostic>>,
+    routed_library: HashMap<Url, Vec<RoutedDiagnostic>>,
     workspace: Workspace,
     settings: SettingsStore,
     tracked_roots: HashMap<Url, String>,
@@ -172,6 +190,7 @@ impl Default for Inner {
         Self {
             docs: HashMap::new(),
             published: HashMap::new(),
+            routed_library: HashMap::new(),
             workspace: Workspace::new(),
             settings: SettingsStore::default(),
             tracked_roots: HashMap::new(),
@@ -246,17 +265,19 @@ impl Inner {
     ) -> Vec<(Url, Option<i32>, Vec<Diagnostic>)> {
         let mut roots: Vec<Url> = self.docs.keys().cloned().collect();
         roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-        let mut checks: Vec<(Url, DiagnosticSet)> = Vec::new();
+        let mut checks: Vec<(Url, DiagnosticSet, String)> = Vec::new();
         for uri in roots {
             if is_model_root(&uri) {
                 self.root_revision(&uri);
             } else {
                 self.prepare_root(&uri);
             }
-            checks.push((
-                uri.clone(),
-                check_in_workspace_with_origins(&mut self.workspace, uri.as_str()),
-            ));
+            let set = check_in_workspace_with_origins(&mut self.workspace, uri.as_str());
+            let revision = self
+                .workspace
+                .input_revision(uri.as_str())
+                .unwrap_or_default();
+            checks.push((uri, set, revision));
         }
         let mut routed: HashMap<Url, Vec<Diagnostic>> = self
             .docs
@@ -266,7 +287,8 @@ impl Inner {
             .collect();
         let mut routed_from: HashMap<Url, Vec<Url>> = HashMap::new();
         let mut library_routed: HashMap<Url, Vec<crate::Diagnostic>> = HashMap::new();
-        for (root, set) in &checks {
+        let mut routed_library: HashMap<Url, Vec<RoutedDiagnostic>> = HashMap::new();
+        for (root, set, revision) in &checks {
             let root_text = self
                 .docs
                 .get(root)
@@ -291,12 +313,27 @@ impl Inner {
                 let mut mapped = diag.clone();
                 mapped.span = span;
                 let mut items = library_to_lsp(text, std::slice::from_ref(&mapped));
+                routed_library
+                    .entry(uri.clone())
+                    .or_default()
+                    .push(RoutedDiagnostic {
+                        diagnostic: mapped.clone(),
+                        text: std::sync::Arc::from(text),
+                        root: root.clone(),
+                        revision: revision.clone(),
+                    });
                 if self.docs.contains_key(&uri) {
                     library_routed.entry(uri.clone()).or_default().push(mapped);
                 }
-                if crate::check_writing::is_writing_code(&diag.code) {
-                    for item in &mut items {
-                        item.data = Some(json!({ "root": root.as_str() }));
+                for item in &mut items {
+                    if crate::check_writing::is_writing_code(&diag.code) || diag.fix.is_some() {
+                        let data = item
+                            .data
+                            .get_or_insert_with(|| json!({}))
+                            .as_object_mut()
+                            .unwrap();
+                        data.insert("root".into(), json!(root));
+                        data.insert("input_revision".into(), json!(revision));
                     }
                 }
                 for item in items {
@@ -324,7 +361,8 @@ impl Inner {
             }
             *items = unique;
         }
-        for (root, set) in checks {
+        self.routed_library = routed_library;
+        for (root, set, _) in checks {
             if let Some(doc) = self.docs.get_mut(&root) {
                 doc.writing_origins = set.writing_origins;
             }
@@ -338,6 +376,7 @@ impl Inner {
                         && prior.severity == diag.severity
                         && prior.message == diag.message
                         && prior.fix == diag.fix
+                        && prior.related == diag.related
                 }) {
                     unique.push(diag);
                 }
@@ -798,52 +837,68 @@ impl Backend {
 
     fn quick_fixes(&self, params: &CodeActionParams) -> Option<CodeActionResponse> {
         let mut inner = self.lock_inner();
-        let naming = naming_code_actions(&mut inner, params);
-        let doc = inner.docs.get(&params.text_document.uri)?;
-        let index = LineIndex::new(&doc.text);
-        let mut actions = Vec::new();
-        for lib in &doc.library {
-            let Some(fix) = &lib.fix else {
+        let mut actions: Vec<_> = naming_code_actions(&mut inner, params)
+            .into_iter()
+            .map(CodeActionOrCommand::CodeAction)
+            .collect();
+        let uri = &params.text_document.uri;
+        let rows = inner.routed_library.get(uri).cloned().unwrap_or_default();
+        for row in rows {
+            let lib = &row.diagnostic;
+            let Some(fix) = &lib.fix else { continue };
+            inner.prepare_root(&row.root);
+            if inner.workspace.input_revision(row.root.as_str()).as_deref() != Some(&row.revision) {
                 continue;
-            };
-            let diag_range = span_range(&index, &doc.text, lib.span);
+            }
+            let current = inner
+                .docs
+                .get(uri)
+                .map(|doc| doc.text.as_str())
+                .or_else(|| inner.workspace.get_source(uri.as_str()));
+            if current != Some(row.text.as_ref()) {
+                continue;
+            }
+            let index = LineIndex::new(&row.text);
+            let diag_range = span_range(&index, &row.text, lib.span);
             if !ranges_overlap(diag_range, params.range) {
                 continue;
             }
-            let title = fix_title(lib);
+            let supplied = params.context.diagnostics.iter().filter(|diag| {
+                diag.code == Some(NumberOrString::String(lib.code.clone()))
+                    && ranges_overlap(diag.range, diag_range)
+            });
+            if supplied.into_iter().any(|diag| {
+                diag.data
+                    .as_ref()
+                    .and_then(|data| data.get("input_revision"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|revision| revision != row.revision)
+            }) {
+                continue;
+            }
             let edit = TextEdit {
                 range: Range::new(
-                    lsp_pos_from_scalar(&index, &doc.text, fix.start_line, fix.start_char),
-                    lsp_pos_from_scalar(&index, &doc.text, fix.end_line, fix.end_char),
+                    lsp_pos_from_scalar(&index, &row.text, fix.start_line, fix.start_char),
+                    lsp_pos_from_scalar(&index, &row.text, fix.end_line, fix.end_char),
                 ),
                 new_text: fix.new_text.clone(),
             };
-            let mut changes = HashMap::new();
-            changes.insert(params.text_document.uri.clone(), vec![edit]);
-            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title,
+            let action = CodeActionOrCommand::CodeAction(CodeAction {
+                title: fix_title(lib),
                 kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    ..WorkspaceEdit::default()
-                }),
-                command: None,
+                edit: Some(versioned_workspace_edit(
+                    &inner,
+                    HashMap::from([(uri.clone(), vec![edit])]),
+                )),
                 is_preferred: Some(true),
-                disabled: None,
-                data: None,
-            }));
+                ..CodeAction::default()
+            });
+            if !actions.contains(&action) {
+                actions.push(action);
+            }
         }
-        for action in naming {
-            actions.push(CodeActionOrCommand::CodeAction(action));
-        }
-        if actions.is_empty() {
-            None
-        } else {
-            Some(actions)
-        }
+        (!actions.is_empty()).then_some(actions)
     }
-
     fn shock_templates(&self, params: &CodeActionParams) -> Vec<CodeAction> {
         let kind = CodeActionKind::REFACTOR;
         if !action_kind_requested(&params.context.only, &kind) {
@@ -2054,17 +2109,61 @@ fn library_to_lsp(text: &str, diags: &[crate::Diagnostic]) -> Vec<Diagnostic> {
                 source: Some("dygnosis".into()),
                 message: d.message.clone(),
                 tags: lsp_tags(&d.tags),
+                related_information: diagnostic_related_information(d),
+                data: related_context(d),
                 ..Diagnostic::default()
             }
         })
         .collect()
 }
 
+fn related_location(site: &crate::diagnostic::DiagnosticOrigin) -> Option<Location> {
+    site.text
+        .get(site.span.start as usize..site.span.end as usize)?;
+    let uri = if crate::include_resolver::is_virtual_uri(&site.file) {
+        Url::parse(&site.file).ok()?
+    } else {
+        file_url_from_path_key(&site.file)?
+    };
+    let normalized = crate::parser::normalize_newlines(&site.text);
+    let index = LineIndex::new(&normalized);
+    Some(Location::new(
+        uri,
+        span_range(&index, &site.text, site.span),
+    ))
+}
+
+fn diagnostic_related_information(
+    diagnostic: &crate::Diagnostic,
+) -> Option<Vec<DiagnosticRelatedInformation>> {
+    let rows: Vec<_> = diagnostic
+        .related
+        .iter()
+        .flat_map(|related| {
+            related.locations.iter().filter_map(|site| {
+                Some(DiagnosticRelatedInformation {
+                    location: related_location(site)?,
+                    message: related.message.clone(),
+                })
+            })
+        })
+        .collect();
+    (!rows.is_empty()).then_some(rows)
+}
+
+fn related_context(diagnostic: &crate::Diagnostic) -> Option<Value> {
+    let rows: Vec<_> = diagnostic.related.iter().filter(|related| !related.origin_frames.is_empty()).map(|related| json!({
+        "message": related.message,
+        "origin_frames": related.origin_frames.iter().map(|frame| json!({
+            "kind": frame.kind, "variable": frame.variable, "value": frame.value,
+            "locations": frame.locations.iter().filter_map(related_location).collect::<Vec<_>>()
+        })).collect::<Vec<_>>()
+    })).collect();
+    (!rows.is_empty()).then(|| json!({"related_context": rows}))
+}
+
 fn naming_code_actions(inner: &mut Inner, params: &CodeActionParams) -> Vec<CodeAction> {
     let requested = &params.text_document.uri;
-    if !inner.docs.contains_key(requested) {
-        return Vec::new();
-    }
     let mut notes: Vec<(Url, Diagnostic)> = inner
         .published
         .get(requested)
@@ -2113,6 +2212,25 @@ fn naming_action_for_root(
     shared_site: bool,
 ) -> Option<CodeAction> {
     inner.prepare_root(root);
+    let revision = note.data.as_ref()?.get("input_revision")?.as_str()?;
+    if inner.workspace.input_revision(root.as_str()).as_deref() != Some(revision) {
+        return None;
+    }
+    if params
+        .context
+        .diagnostics
+        .iter()
+        .filter(|diag| writing_root(diag).as_ref() == Some(root))
+        .any(|diag| {
+            diag.data
+                .as_ref()
+                .and_then(|data| data.get("input_revision"))
+                .and_then(Value::as_str)
+                .is_some_and(|supplied| supplied != revision)
+        })
+    {
+        return None;
+    }
     let plan = equation_name_plan(&mut inner.workspace, root.as_str())?;
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
     for edit in plan.edits {
@@ -2141,15 +2259,32 @@ fn naming_action_for_root(
         title,
         kind: Some(CodeActionKind::QUICKFIX),
         diagnostics: Some(vec![note]),
-        edit: Some(WorkspaceEdit {
-            changes: Some(changes),
-            ..WorkspaceEdit::default()
-        }),
+        edit: Some(versioned_workspace_edit(inner, changes)),
         command: None,
         is_preferred: Some(true),
         disabled: None,
         data: None,
     })
+}
+
+fn versioned_workspace_edit(inner: &Inner, changes: HashMap<Url, Vec<TextEdit>>) -> WorkspaceEdit {
+    let mut changes: Vec<_> = changes.into_iter().collect();
+    changes.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
+    WorkspaceEdit {
+        document_changes: Some(DocumentChanges::Edits(
+            changes
+                .into_iter()
+                .map(|(uri, edits)| {
+                    let version = inner.docs.get(&uri).map(|doc| doc.version);
+                    TextDocumentEdit {
+                        text_document: OptionalVersionedTextDocumentIdentifier { uri, version },
+                        edits: edits.into_iter().map(OneOf::Left).collect(),
+                    }
+                })
+                .collect(),
+        )),
+        ..WorkspaceEdit::default()
+    }
 }
 
 fn naming_edit_url(inner: &Inner, open: &Url, file_key: &str) -> Option<Url> {
@@ -2513,11 +2648,14 @@ fn lsp_severity(severity: Severity) -> DiagnosticSeverity {
 }
 
 fn lsp_tags(tags: &[i32]) -> Option<Vec<DiagnosticTag>> {
-    if tags.contains(&2) {
-        Some(vec![DiagnosticTag::DEPRECATED])
-    } else {
-        None
-    }
+    let result: Vec<_> = [
+        (1, DiagnosticTag::UNNECESSARY),
+        (2, DiagnosticTag::DEPRECATED),
+    ]
+    .into_iter()
+    .filter_map(|(value, tag)| tags.contains(&value).then_some(tag))
+    .collect();
+    (!result.is_empty()).then_some(result)
 }
 
 fn is_dropped_code(code: &str) -> bool {

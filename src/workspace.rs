@@ -46,6 +46,20 @@ pub struct CycleRecord {
     pub chain: Vec<String>,
     /// Original-file directive span (root include that reaches the cycle).
     pub span: Span,
+    /// Verified written include edges, independent of the root warning anchor.
+    pub earlier: IncludeSite,
+    pub closing: IncludeSite,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IncludeSite {
+    pub file: String,
+    pub span: Span,
+}
+
+struct IncludeStack {
+    files: Vec<String>,
+    edges: Vec<IncludeSite>,
 }
 
 /// Include graph results for one root document. No diagnostic codes.
@@ -802,7 +816,10 @@ impl Workspace {
         let mut seen_cycles: HashSet<Vec<String>> = HashSet::new();
         self.dfs_graph(
             root_key,
-            &mut vec![root_key.to_string()],
+            &mut IncludeStack {
+                files: vec![root_key.to_string()],
+                edges: Vec::new(),
+            },
             &mut Vec::new(),
             None,
             &mut records,
@@ -820,7 +837,7 @@ impl Workspace {
     fn dfs_graph(
         &mut self,
         current_key: &str,
-        stack: &mut Vec<String>,
+        stack: &mut IncludeStack,
         active_search: &mut Vec<PathBuf>,
         root_span: Option<Span>,
         records: &mut IncludeRecords,
@@ -837,19 +854,23 @@ impl Workspace {
             match event {
                 IncludeEvent::IncludePath(dir) => {
                     // The first entry remains the root invocation directory.
-                    let added = self.directive_search_paths(&stack[0], &dir);
+                    let added = self.directive_search_paths(&stack.files[0], &dir);
                     *active_search = append_unique(active_search, &added);
                 }
                 IncludeEvent::Include(dir) => {
-                    let resolved =
-                        self.resolve_filename(&stack[0], current_key, &dir.filename, active_search);
+                    let resolved = self.resolve_filename(
+                        &stack.files[0],
+                        current_key,
+                        &dir.filename,
+                        active_search,
+                    );
                     match resolved {
                         None => {
                             let mut searched = Vec::new();
                             if let Some(parent) = Path::new(current_key).parent() {
                                 searched.push(parent.display().to_string());
                             }
-                            for p in self.configured_search(&stack[0], active_search) {
+                            for p in self.configured_search(&stack.files[0], active_search) {
                                 let s = p.display().to_string();
                                 if !searched.iter().any(|d| d == &s) {
                                     searched.push(s);
@@ -864,8 +885,8 @@ impl Workspace {
                         }
                         Some(path) => {
                             let resolved_key = self.include_key(&path);
-                            if let Some(idx) = stack.iter().position(|k| k == &resolved_key) {
-                                let mut cycle: Vec<String> = stack[idx..].to_vec();
+                            if let Some(idx) = stack.files.iter().position(|k| k == &resolved_key) {
+                                let mut cycle: Vec<String> = stack.files[idx..].to_vec();
                                 cycle.push(resolved_key);
                                 let rotation: Vec<String> = cycle[..cycle.len() - 1].to_vec();
                                 if let Some(min_idx) = rotation
@@ -880,6 +901,18 @@ impl Workspace {
                                         records.cycles.push(CycleRecord {
                                             chain: cycle,
                                             span: root_span.unwrap_or(dir.span),
+                                            earlier: stack
+                                                .edges
+                                                .get(idx.saturating_sub(1))
+                                                .cloned()
+                                                .unwrap_or_else(|| IncludeSite {
+                                                    file: current_key.to_string(),
+                                                    span: dir.span,
+                                                }),
+                                            closing: IncludeSite {
+                                                file: current_key.to_string(),
+                                                span: dir.span,
+                                            },
                                         });
                                     }
                                 }
@@ -891,7 +924,11 @@ impl Workspace {
                                 path: path.clone(),
                             });
                             let nested_root = root_span.or(Some(dir.span));
-                            stack.push(resolved_key.clone());
+                            stack.files.push(resolved_key.clone());
+                            stack.edges.push(IncludeSite {
+                                file: current_key.to_string(),
+                                span: dir.span,
+                            });
                             self.dfs_graph(
                                 &resolved_key,
                                 stack,
@@ -900,7 +937,8 @@ impl Workspace {
                                 records,
                                 seen_cycles,
                             );
-                            stack.pop();
+                            stack.files.pop();
+                            stack.edges.pop();
                         }
                     }
                 }

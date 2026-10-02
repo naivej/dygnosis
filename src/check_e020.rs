@@ -94,6 +94,7 @@ fn check_e023(model: &Model) -> Vec<Diagnostic> {
                 "Predetermined variable '{name}' is not declared as an endogenous variable."
             ),
             fix: None,
+            related: Vec::new(),
             tags: Vec::new(),
         });
     }
@@ -129,6 +130,7 @@ fn check_e024(model: &Model) -> Vec<Diagnostic> {
                     "Exogenous deterministic variable {name} cannot be given a lead or a lag"
                 ),
                 fix: None,
+                related: Vec::new(),
                 tags: Vec::new(),
             });
         }
@@ -197,6 +199,7 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
                         "{name} has wrong type or was already used on the right-hand side. You cannot use it on the left-hand side of a pound ('#') expression"
                     ),
                     fix: None,
+                    related: Vec::new(),
                     tags: Vec::new(),
                 });
             }
@@ -228,6 +231,7 @@ fn shadowing_diag(model: &Model, name: Name, span: Span) -> Diagnostic {
             "{name} has wrong type or was already used on the right-hand side. You cannot use it on the left-hand side of a pound ('#') expression"
         ),
         fix: None,
+        related: Vec::new(),
         tags: Vec::new(),
     }
 }
@@ -451,6 +455,7 @@ fn undeclared_diag(
         code: "E020".to_string(),
         message: msg,
         fix: None,
+        related: Vec::new(),
         tags: Vec::new(),
     }
 }

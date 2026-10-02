@@ -409,6 +409,7 @@ fn to_mcp(text: &str, diag: &Diagnostic) -> McpDiagnostic {
         severity: severity_label(diag.severity).to_string(),
         code: diag.code.clone(),
         message: diag.message.clone(),
+        related: crate::mcp::related_json(diag, text, |file| Some(normalize_key(file))),
     }
 }
 

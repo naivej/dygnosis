@@ -40,6 +40,7 @@ mod command_skip;
 pub mod companion;
 mod diag_shape;
 pub mod diagnostic;
+mod diagnostic_links;
 pub mod e010;
 mod equation_names;
 pub mod equations;

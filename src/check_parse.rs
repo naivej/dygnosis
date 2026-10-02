@@ -205,6 +205,7 @@ fn e001(span: Span, message: String, fix: Option<TextEdit>) -> Diagnostic {
         code: "E001".to_string(),
         message,
         fix,
+        related: Vec::new(),
         tags: Vec::new(),
     }
 }

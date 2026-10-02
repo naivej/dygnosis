@@ -1012,6 +1012,16 @@ impl Parser<'_> {
         });
     }
 
+    fn retain_last_symbol_occurrence(&mut self, token: usize) {
+        let index = self.model.symbol_type_events.len() - 1;
+        self.model
+            .type_event_occurrences
+            .retain(|(event, _)| *event != index);
+        self.model
+            .type_event_occurrences
+            .push((index, token..token + 1));
+    }
+
     fn record_symbol_change(
         &mut self,
         name: Name,
@@ -2822,6 +2832,7 @@ impl Parser<'_> {
                     assignment.span,
                     crate::model::SymbolKind::Epilogue,
                 );
+                self.retain_last_symbol_occurrence(before);
                 self.model.epilogue.push(assignment);
             }
             if self.i <= before {
@@ -7006,6 +7017,7 @@ impl Parser<'_> {
     }
 
     fn parse_policy_command(&mut self, command: PolicyCommand) {
+        let opener_token = self.i;
         let tok = self.bump();
         let first_instrument = self.model.instrument_uses.len();
         self.model.policy_commands.push(command);
@@ -7036,6 +7048,7 @@ impl Parser<'_> {
                 tok.span,
                 crate::model::SymbolKind::Parameters,
             );
+            self.retain_last_symbol_occurrence(opener_token);
             self.symbol_roles
                 .insert(discount_name, EstimatedNameRole::Parameter);
         }
@@ -9032,6 +9045,7 @@ impl Parser<'_> {
     }
 
     fn parse_call(&mut self, callee: Name, kw: Token) -> ExprId {
+        let callee_token = self.i - 1;
         self.eat(TokenKind::LParen);
         let mut args = Vec::new();
         if !self.at(TokenKind::RParen) && !self.at_expr_stop() {
@@ -9081,6 +9095,7 @@ impl Parser<'_> {
                 kw.span,
                 crate::model::SymbolKind::ExternalFunction,
             );
+            self.retain_last_symbol_occurrence(callee_token);
         }
         let sum_role = if self.intern.get(callee).eq_ignore_ascii_case("SUM") {
             Some(

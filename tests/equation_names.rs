@@ -434,15 +434,21 @@ async fn shared_included_i208_offers_one_action_per_root() {
     fs::remove_dir_all(&dir).unwrap();
 }
 
-fn edits_for<'a>(action: &'a CodeAction, uri: &Url) -> &'a [TextEdit] {
-    let changes = action
-        .edit
-        .as_ref()
-        .and_then(|edit| edit.changes.as_ref())
-        .expect("workspace edit");
-    changes.get(uri).map(Vec::as_slice).unwrap_or(&[])
+fn edits_for(action: &CodeAction, uri: &Url) -> Vec<TextEdit> {
+    let edit = action.edit.as_ref().expect("workspace edit");
+    let Some(DocumentChanges::Edits(changes)) = edit.document_changes.as_ref() else {
+        panic!("expected versioned document changes: {edit:?}");
+    };
+    changes
+        .iter()
+        .filter(|change| change.text_document.uri == *uri)
+        .flat_map(|change| change.edits.iter())
+        .map(|edit| match edit {
+            OneOf::Left(edit) => edit.clone(),
+            OneOf::Right(_) => panic!("unexpected annotation"),
+        })
+        .collect()
 }
-
 #[tokio::test]
 async fn tags_are_kept_and_a_second_apply_does_nothing() {
     let (uri, text) = read_fixture("tags.mod");
@@ -455,7 +461,7 @@ async fn tags_are_kept_and_a_second_apply_does_nothing() {
         .await;
     let action = naming_on_i208(&service, &uri).await.expect("naming action");
     assert_eq!(action.title, "Name counted equations");
-    let edited = apply_edits(&text, edits_for(&action, &uri));
+    let edited = apply_edits(&text, &edits_for(&action, &uri));
     assert_eq!(edited, expected("tags.named.mod"));
     assert_no_new_error(&text, &edited, &path);
     service
@@ -484,7 +490,7 @@ async fn cross_scope_eq_1_gets_a_suffix() {
         4,
         "one workspace edit covers every safe equation"
     );
-    let edited = apply_edits(&text, edits);
+    let edited = apply_edits(&text, &edits);
     assert_eq!(edited, expected("collision.named.mod"));
     assert_no_new_error(&text, &edited, &path.to_string_lossy());
 }
@@ -500,7 +506,7 @@ async fn a_for_copy_is_skipped_and_reported() {
         .await;
     let action = naming_on_i208(&service, &uri).await.expect("naming action");
     assert_eq!(action.title, "Name counted equations (2 skipped)");
-    let edited = apply_edits(&text, edits_for(&action, &uri));
+    let edited = apply_edits(&text, &edits_for(&action, &uri));
     assert_eq!(edited, expected("for_copy.named.mod"));
     assert_no_new_error(&text, &edited, &path.to_string_lossy());
     service
@@ -557,7 +563,7 @@ async fn a_name_on_a_skipped_copy_is_still_taken() {
         .await;
     let action = naming_on_i208(&service, &uri).await.expect("naming action");
     assert_eq!(action.title, "Name counted equations");
-    let edited = apply_edits(&text, edits_for(&action, &uri));
+    let edited = apply_edits(&text, &edits_for(&action, &uri));
     assert_eq!(edited, expected("taken.named.mod"));
     assert_no_new_error(&text, &edited, &path.to_string_lossy());
 }
@@ -584,13 +590,11 @@ async fn a_shared_include_is_skipped_and_reported() {
         .await
         .expect("naming action");
     assert_eq!(action.title, "Name counted equations (2 skipped)");
-    let changes = action
-        .edit
-        .as_ref()
-        .and_then(|edit| edit.changes.as_ref())
-        .expect("workspace edit");
-    assert!(changes.get(&inc_uri).is_none(), "the include is not edited");
-    let edited = apply_edits(&root_text, edits_for(&action, &root_uri));
+    assert!(
+        edits_for(&action, &inc_uri).is_empty(),
+        "the include is not edited"
+    );
+    let edited = apply_edits(&root_text, &edits_for(&action, &root_uri));
     assert_eq!(edited, expected("shared_root.named.mod"));
     assert_no_new_error(&root_text, &edited, &path.to_string_lossy());
 }
@@ -617,13 +621,11 @@ async fn a_unique_include_is_edited_in_that_file() {
         .await
         .expect("naming action");
     assert_eq!(action.title, "Name counted equations");
-    let changes = action
-        .edit
-        .as_ref()
-        .and_then(|edit| edit.changes.as_ref())
-        .expect("workspace edit");
-    assert!(changes.get(&root_uri).is_none(), "the root is not edited");
-    let edited = apply_edits(&inc_text, edits_for(&action, &inc_uri));
+    assert!(
+        edits_for(&action, &root_uri).is_empty(),
+        "the root is not edited"
+    );
+    let edited = apply_edits(&inc_text, &edits_for(&action, &inc_uri));
     assert_eq!(edited, expected("one_eq.named.inc"));
     service
         .inner()
@@ -671,7 +673,7 @@ async fn the_edit_uses_a_utf16_column() {
     assert_eq!(edit[0].range.start.line, utf16.line);
     assert_eq!(edit[0].range.start.character, utf16.character);
     assert_eq!(edit[0].range.start, edit[0].range.end);
-    let edited = apply_edits(&text, edit);
+    let edited = apply_edits(&text, &edit);
     assert!(edited.contains("/*😀*/[name='eq_1'] y = y(-1);"));
     assert_no_new_error(
         &text,

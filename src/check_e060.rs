@@ -71,12 +71,26 @@ pub fn check_e060(records: &IncludeRecords) -> Vec<Diagnostic> {
                 .map(|p| file_basename(p))
                 .collect::<Vec<_>>()
                 .join(" -> ");
-            Diagnostic::new(
+            let diagnostic = Diagnostic::new(
                 cycle.span,
                 Severity::Warning,
                 "W062",
                 format!("Circular @#include detected: {chain}."),
             )
+            .with_related(crate::diagnostic::RelatedDiagnostic::written(
+                cycle.earlier.file.clone(),
+                cycle.earlier.span,
+                "Earlier include in this cycle",
+            ));
+            if cycle.closing != cycle.earlier {
+                diagnostic.with_related(crate::diagnostic::RelatedDiagnostic::written(
+                    cycle.closing.file.clone(),
+                    cycle.closing.span,
+                    "Include that closes this cycle",
+                ))
+            } else {
+                diagnostic
+            }
         })
         .collect()
 }

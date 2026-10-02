@@ -343,8 +343,9 @@ async fn included_parse_fix_cannot_edit_include_directive() {
             assert!(
                 !action
                     .edit
-                    .and_then(|edit| edit.changes)
-                    .is_some_and(|changes| changes.contains_key(&root_uri)),
+                    .and_then(|edit| edit.document_changes)
+                    .is_some_and(|changes| matches!(changes, DocumentChanges::Edits(edits)
+                        if edits.iter().any(|edit| edit.text_document.uri == root_uri))),
                 "child fix must not edit the include directive"
             );
         }

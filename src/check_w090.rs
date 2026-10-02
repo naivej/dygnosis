@@ -1,8 +1,8 @@
 //! W090–W095 estimation: varobs, estimated_params, observation_trends.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::diagnostic::{Diagnostic, Severity};
+use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::intern::Name;
 use crate::model::{EstimatedParamKind, Model};
 use crate::span::Span;
@@ -28,18 +28,22 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
         .collect();
 
     let mut diagnostics = Vec::new();
-    let mut seen: HashSet<Name> = HashSet::new();
+    let mut seen: HashMap<Name, Span> = HashMap::new();
     for v in &model.varobs {
         let name = model.name(v.name);
-        if !seen.insert(v.name) {
-            diagnostics.push(Diagnostic::new(
-                nonempty_or(v.span, model.varobs_span),
-                Severity::Warning,
-                "W091",
-                format!("Observed variable '{name}' is listed more than once in varobs."),
-            ));
+        if let Some(&first) = seen.get(&v.name) {
+            diagnostics.push(
+                Diagnostic::new(
+                    nonempty_or(v.span, model.varobs_span),
+                    Severity::Warning,
+                    "W091",
+                    format!("Observed variable '{name}' is listed more than once in varobs."),
+                )
+                .with_related(RelatedDiagnostic::new(first, "Earlier observed variable")),
+            );
             continue;
         }
+        seen.insert(v.name, v.span);
         if model.symbol_kind_in_context(v.name, v.symbol_type_context) != Some("var") {
             let why = if matches!(
                 model.symbol_kind_in_context(v.name, v.symbol_type_context),
@@ -65,14 +69,20 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
     }
 
     if model.varobs_statement_count >= 2 {
-        diagnostics.push(Diagnostic::new(
-            model
-                .varobs_second_span
-                .unwrap_or(span_or_fallback(model.varobs_span)),
-            Severity::Error,
-            "E258",
-            "varobs: you cannot have several 'varobs' statements in the same MOD file",
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                model
+                    .varobs_second_span
+                    .unwrap_or(span_or_fallback(model.varobs_span)),
+                Severity::Error,
+                "E258",
+                "varobs: you cannot have several 'varobs' statements in the same MOD file",
+            )
+            .with_related(RelatedDiagnostic::new(
+                span_or_fallback(model.varobs_span),
+                "Earlier varobs statement",
+            )),
+        );
     }
 
     for (name, span) in model

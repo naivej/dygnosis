@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::diagnostic::{Diagnostic, Severity};
+use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::expr::ExprKind;
 use crate::intern::Name;
 use crate::lexer::{tokenize, Token, TokenKind};
@@ -36,15 +36,14 @@ fn check_e050(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
     if model.equations.is_empty() {
         return Vec::new();
     }
-    let mut seen: HashMap<(String, Vec<String>), (Span, u32)> = HashMap::new();
+    let mut seen: HashMap<(String, Vec<String>), (&Equation, Span, u32)> = HashMap::new();
     let mut diagnostics = Vec::new();
     for eq in &model.equations {
         if eq.text.trim().starts_with('#') {
             continue;
         }
         let key = (normalize_eq_text(&eq.text), tag_class(eq));
-        if let Some(&(first_span, first_line)) = seen.get(&key) {
-            let _ = first_span;
+        if let Some(&(first_equation, first_span, first_line)) = seen.get(&key) {
             diagnostics.push(Diagnostic {
                 span: eq.span,
                 severity: Severity::Warning,
@@ -53,11 +52,12 @@ fn check_e050(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
                     "Duplicate equation (same as line {first_line}). Fix: remove this duplicate equation."
                 ),
                 fix: None,
+                related: vec![RelatedDiagnostic::equation(model, first_equation, first_span)],
                 tags: Vec::new(),
             });
         } else {
             let line = index.position(&model.source, eq.span.start).line + 1;
-            seen.insert(key, (eq.span, line));
+            seen.insert(key, (eq, eq.span, line));
         }
     }
     diagnostics
@@ -124,6 +124,7 @@ fn check_e051(model: &Model) -> Vec<Diagnostic> {
                         "Contradictory equation '{text}' (always false). Fix: remove this equation."
                     ),
                     fix: None,
+                    related: Vec::new(),
                     tags: Vec::new(),
                 });
                 continue;
@@ -141,6 +142,7 @@ fn check_e051(model: &Model) -> Vec<Diagnostic> {
                         "Trivially true equation '{text}' (LHS = RHS). Fix: remove this equation."
                     ),
                     fix: None,
+                    related: Vec::new(),
                     tags: Vec::new(),
                 });
             }
@@ -212,6 +214,7 @@ fn check_e052(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
                             a.expression
                         ),
                         fix: None,
+                        related: Vec::new(),
                         tags: Vec::new(),
                     });
                 }
@@ -420,6 +423,7 @@ fn flush_e053_line(
             line + 1
         ),
         fix: None,
+        related: Vec::new(),
         tags: Vec::new(),
     });
 }
@@ -494,6 +498,7 @@ fn check_w042(model: &Model) -> Vec<Diagnostic> {
             code: "W042".to_string(),
             message: format!("variable '{name}' is not assigned a value"),
             fix: None,
+            related: Vec::new(),
             tags: Vec::new(),
         })
         .collect()
@@ -596,6 +601,7 @@ fn check_i050(model: &Model) -> Vec<Diagnostic> {
         code: "I050".to_string(),
         message: I050_MESSAGE.to_string(),
         fix: None,
+        related: Vec::new(),
         tags: Vec::new(),
     }]
 }
@@ -696,6 +702,7 @@ fn check_prior_head_not_endo_or_exo(model: &Model) -> Vec<Diagnostic> {
                     model.name(head.name)
                 ),
                 fix: None,
+                related: Vec::new(),
                 tags: Vec::new(),
             });
             break;
@@ -736,6 +743,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
                     code: "E059".to_string(),
                     message: format!("{name} is neither endogenous or exogenous."),
                     fix: None,
+                    related: Vec::new(),
                     tags: Vec::new(),
                 });
                 continue;
@@ -747,6 +755,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
                     code: "E058".to_string(),
                     message: format!("Variable '{name}' in {block_name} is not declared."),
                     fix: None,
+                    related: Vec::new(),
                     tags: Vec::new(),
                 });
             }
@@ -762,6 +771,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
                 code: "E059".to_string(),
                 message: format!("{name} is neither endogenous or exogenous."),
                 fix: None,
+                related: Vec::new(),
                 tags: Vec::new(),
             });
             continue;
@@ -773,6 +783,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
                 code: "E058".to_string(),
                 message: format!("Variable '{name}' in histval is not declared."),
                 fix: None,
+                related: Vec::new(),
                 tags: Vec::new(),
             });
         }
@@ -804,6 +815,7 @@ fn check_w051(model: &Model) -> Vec<Diagnostic> {
                     "Exogenous variable '{name}' is set in initval. This is unusual -- exogenous shocks are typically zero at steady state."
                 ),
                 fix: None,
+                related: Vec::new(),
                 tags: Vec::new(),
             });
         }
@@ -846,6 +858,7 @@ fn check_w052(model: &Model) -> Vec<Diagnostic> {
             "{n} endogenous variable(s) missing from initval (will default to 0): {listed}{suffix}"
         ),
         fix: None,
+        related: Vec::new(),
         tags: Vec::new(),
     }]
 }

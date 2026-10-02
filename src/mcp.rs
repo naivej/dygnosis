@@ -119,6 +119,8 @@ pub struct McpDiagnostic {
     pub severity: String,
     pub code: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<Value>,
 }
 
 /// One row from `dynare_list_diagnostic_codes`.
@@ -195,7 +197,8 @@ pub fn dynare_diagnose(
 ) -> Vec<McpDiagnostic> {
     let Some(files) = nonempty_map(files) else {
         let model = parse(file_content);
-        let diags = analyze(&model);
+        let mut diags = analyze(&model);
+        crate::diagnostic_links::map_free_text(file_content, &mut diags);
         return diagnostics_to_json(file_content, &diags);
     };
     let Some(active) = active_file.filter(|a| files.contains_key(*a)) else {
@@ -1089,6 +1092,7 @@ fn diagnostics_to_json(text: &str, diags: &[Diagnostic]) -> Vec<McpDiagnostic> {
                 severity: mcp_severity(d.severity).to_string(),
                 code: d.code.clone(),
                 message: d.message.clone(),
+                related: related_json(d, text, |_| None),
             }
         })
         .collect()
@@ -1131,7 +1135,65 @@ fn diagnostics_to_json_with_origins(
                 severity: mcp_severity(diag.severity).to_string(),
                 code: diag.code.clone(),
                 message: diag.message.clone(),
+                related: related_json(diag, root_text, |file| {
+                    Some(
+                        files
+                            .keys()
+                            .find(|key| normalize_uri(key) == file)
+                            .cloned()
+                            .unwrap_or_else(|| file.to_string()),
+                    )
+                }),
             }
+        })
+        .collect()
+}
+
+pub(crate) fn related_json(
+    diag: &Diagnostic,
+    text: &str,
+    alias: impl Fn(&str) -> Option<String>,
+) -> Vec<Value> {
+    let location = |site: &crate::diagnostic::DiagnosticOrigin| {
+        let normalized = normalize_newlines(&site.text);
+        let index = LineIndex::new(&normalized);
+        let start = index.position(&site.text, site.span.start);
+        let end = index.position(&site.text, site.span.end);
+        let mut row = json!({"line":start.line+1,"column":start.character+1,"end_line":end.line+1,"end_column":end.character+1});
+        if let Some(file) = alias(&site.file) {
+            row["file"] = json!(file);
+        }
+        row
+    };
+    diag.related
+        .iter()
+        .flat_map(|related| {
+            let sites = if related.mapped {
+                related.locations.clone()
+            } else if related.file.is_none() {
+                vec![crate::diagnostic::DiagnosticOrigin {
+                    file: String::new(),
+                    text: std::sync::Arc::from(text),
+                    span: related.span,
+                }]
+            } else {
+                Vec::new()
+            };
+            sites
+                .iter()
+                .map(|site| {
+                    let mut row = location(site);
+                    row["message"] = json!(related.message);
+                    if !related.origin_frames.is_empty() {
+                        row["origin_frames"] =
+                            json!(related.origin_frames.iter().map(|frame| json!({
+                    "kind": frame.kind, "variable": frame.variable, "value": frame.value,
+                    "locations": frame.locations.iter().map(&location).collect::<Vec<_>>()
+                })).collect::<Vec<_>>());
+                    }
+                    row
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
 }
@@ -1454,7 +1516,7 @@ fn workspace_root_json(root: &WorkspaceRootReport) -> Value {
 }
 
 fn workspace_diag_json(diag: &WorkspaceDiagnostic) -> Value {
-    json!({
+    let mut row = json!({
         "file": diag.file,
         "line": diag.diagnostic.line,
         "column": diag.diagnostic.column,
@@ -1463,7 +1525,11 @@ fn workspace_diag_json(diag: &WorkspaceDiagnostic) -> Value {
         "severity": diag.diagnostic.severity,
         "code": diag.diagnostic.code,
         "message": diag.diagnostic.message,
-    })
+    });
+    if !diag.diagnostic.related.is_empty() {
+        row["related"] = json!(diag.diagnostic.related);
+    }
+    row
 }
 
 fn tool_json(value: Value) -> CallToolResult {

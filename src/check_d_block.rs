@@ -1,8 +1,8 @@
 //! D-block parse-time Errors on trees we already have.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::diagnostic::{Diagnostic, Severity};
+use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::expr::{ExprId, ExprKind};
 use crate::intern::Name;
 use crate::model::{Equation, Model};
@@ -24,7 +24,7 @@ pub fn check_d_block(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_histval_lag_dup(model: &Model) -> Vec<Diagnostic> {
-    let mut seen: HashSet<(Name, i32)> = HashSet::new();
+    let mut seen: HashMap<(Name, i32), Span> = HashMap::new();
     let mut out = Vec::new();
     for (index, entry) in model.histval.iter().enumerate() {
         if model.histval_block_starts.binary_search(&index).is_ok() {
@@ -38,12 +38,17 @@ fn check_histval_lag_dup(model: &Model) -> Vec<Diagnostic> {
                 format!("histval: the lag on {name} should be less than or equal to 0"),
             ));
         }
-        if !seen.insert((entry.name, entry.lag)) {
-            out.push(err(
-                entry.span,
-                "E243",
-                format!("histval: {name}({}) declared twice", entry.lag),
-            ));
+        if let Some(&first) = seen.get(&(entry.name, entry.lag)) {
+            out.push(
+                err(
+                    entry.span,
+                    "E243",
+                    format!("histval: {name}({}) declared twice", entry.lag),
+                )
+                .with_related(RelatedDiagnostic::new(first, "Earlier history entry")),
+            );
+        } else {
+            seen.insert((entry.name, entry.lag), entry.span);
         }
     }
     out

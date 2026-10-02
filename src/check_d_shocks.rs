@@ -1,9 +1,9 @@
 //! Dynare 7.2 written shock and path refusals. The parser keeps these forms
 //! separate from stochastic `ShockStmt` checks.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::diagnostic::{Diagnostic, Severity};
+use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::intern::Name;
 use crate::lag_fold::{fold_lag, LagFold};
 use crate::model::{
@@ -210,8 +210,8 @@ fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
         if block.kind == ShockBlockKind::Heterogeneous {
             continue;
         }
-        let mut seen = HashSet::new();
-        let mut seen_hetero = HashSet::new();
+        let mut seen = HashMap::new();
+        let mut seen_hetero = HashMap::new();
         let learnt = block.options.learnt_in.as_ref();
         if let Some(PeriodPoint::Integer(n)) = learnt {
             if *n < 1 {
@@ -242,16 +242,24 @@ fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
                 check_range(out, range);
             }
             if block.kind == ShockBlockKind::Heteroskedastic {
-                if !seen_hetero.insert((row.name, row.operation as u8)) {
-                    error(
-                        out,
-                        row.span,
-                        "E402",
-                        format!(
-                            "heteroskedastic_shocks: variable {} declared twice",
-                            model.name(row.name)
-                        ),
+                if let Some(&first) = seen_hetero.get(&(row.name, row.operation as u8)) {
+                    out.push(
+                        Diagnostic::new(
+                            row.span,
+                            Severity::Error,
+                            "E402",
+                            format!(
+                                "heteroskedastic_shocks: variable {} declared twice",
+                                model.name(row.name)
+                            ),
+                        )
+                        .with_related(RelatedDiagnostic::new(
+                            first,
+                            "Earlier heteroskedastic shock entry",
+                        )),
                     );
+                } else {
+                    seen_hetero.insert((row.name, row.operation as u8), row.span);
                 }
                 if row.periods.len() != row.values.len() {
                     error(
@@ -266,16 +274,24 @@ fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
                 }
                 continue;
             }
-            if !seen.insert(row.name) {
-                error(
-                    out,
-                    row.span,
-                    "E344",
-                    format!(
-                        "shocks/conditional_forecast_paths: variable {} declared twice",
-                        model.name(row.name)
-                    ),
+            if let Some(&first) = seen.get(&row.name) {
+                out.push(
+                    Diagnostic::new(
+                        row.span,
+                        Severity::Error,
+                        "E344",
+                        format!(
+                            "shocks/conditional_forecast_paths: variable {} declared twice",
+                            model.name(row.name)
+                        ),
+                    )
+                    .with_related(RelatedDiagnostic::new(
+                        first,
+                        "Earlier scheduled shock entry",
+                    )),
                 );
+            } else {
+                seen.insert(row.name, row.span);
             }
             if row.periods.len() != row.values.len() {
                 error(

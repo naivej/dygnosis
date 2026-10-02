@@ -74,6 +74,7 @@ fn planner_e010(model: &Model, span: Span, n_eq: usize, n_endo: usize) -> Diagno
             "Equation count mismatch: {n_eq} equation(s) but {n_endo} endogenous variable(s). {cmd} with {n} instrument(s) expects delta = -{n}."
         ),
         fix: None,
+        related: Vec::new(),
         tags: Vec::new(),
     }
 }
@@ -100,6 +101,7 @@ fn generic_e010(span: Span, n_eq: usize, n_endo: usize) -> Diagnostic {
             "Equation count mismatch: {n_eq} equation(s) but {n_endo} endogenous variable(s). {fix_msg}"
         ),
         fix: None,
+        related: Vec::new(),
         tags: Vec::new(),
     }
 }
@@ -137,6 +139,7 @@ fn link_unused_endo(
         code: "W013".to_string(),
         message,
         fix: None,
+        related: Vec::new(),
         tags: Vec::new(),
     })
 }

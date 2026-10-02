@@ -8,6 +8,8 @@ use crate::workspace::Workspace;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub use crate::diagnostic_links::{RelatedDiagnostic, RelatedFrame, RelatedOccurrence};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Severity {
     Error = 1,
@@ -33,7 +35,9 @@ pub struct Diagnostic {
     pub code: String,
     pub message: String,
     pub fix: Option<TextEdit>,
-    /// LSP DiagnosticTag values (2 = Deprecated). Empty for most codes.
+    /// Independently mapped earlier occurrences; primary wording is unchanged.
+    pub related: Vec<RelatedDiagnostic>,
+    /// LSP DiagnosticTag values (1 = Unnecessary, 2 = Deprecated).
     pub tags: Vec<i32>,
 }
 
@@ -44,14 +48,26 @@ impl Diagnostic {
         code: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
+        let code = code.into();
+        let tags = if severity == Severity::Warning && matches!(code.as_str(), "W020" | "W022") {
+            vec![1]
+        } else {
+            Vec::new()
+        };
         Self {
             span,
             severity,
-            code: code.into(),
+            code,
             message: message.into(),
             fix: None,
-            tags: Vec::new(),
+            related: Vec::new(),
+            tags,
         }
+    }
+
+    pub fn with_related(mut self, related: RelatedDiagnostic) -> Self {
+        self.related.push(related);
+        self
     }
 }
 
@@ -63,7 +79,7 @@ pub struct WritingOrigin {
 }
 
 /// Written location of one diagnostic from an include-spliced model.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiagnosticOrigin {
     pub file: String,
     /// One shared text snapshot per owning file in this analysis.
@@ -425,6 +441,7 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
     diags.extend(extra);
     crate::check_w160::quiet_i050(&mut diags, &companions);
     let mut source_texts: HashMap<String, Arc<str>> = HashMap::new();
+    crate::diagnostic_links::map_related(ws, abs_path, &mut diags, &mut source_texts);
     let origins: Vec<Option<DiagnosticOrigin>> = diags
         .iter()
         .map(|diag| diagnostic_origin(ws, abs_path, diag, &writing_origins, &mut source_texts))
@@ -532,10 +549,33 @@ fn remap_stored_fix(
     if end < start {
         return None;
     }
-    let (start_file, start_span) = ws.map_effective_origin(root, Span { start, end: start })?;
-    if start_file != owner.file {
-        return None;
-    }
+    let mapped = ws.map_effective_origin(root, Span { start, end: start });
+    let (start_file, start_span) = match mapped {
+        Some((file, span)) if file == owner.file => (file, span),
+        _ if start == end && start > 0 => {
+            // An insertion at an include's written EOF is also the following
+            // splice segment's start. The preceding byte proves the left owner.
+            let (file, tail) = ws.map_effective_origin(
+                root,
+                Span {
+                    start: start - 1,
+                    end: start,
+                },
+            )?;
+            if file != owner.file {
+                return None;
+            }
+            (
+                file,
+                Span {
+                    start: tail.end,
+                    end: tail.end,
+                },
+            )
+        }
+        _ => return None,
+    };
+    debug_assert_eq!(start_file, owner.file);
     let end_pos = if end == start {
         start_span.start
     } else {
