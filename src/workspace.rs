@@ -322,9 +322,28 @@ impl Workspace {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         key.hash(&mut hash);
         self.root_paths(&key).hash(&mut hash);
-        snapshot.hash(&mut hash);
+        // Revisions describe analysis inputs, not whether identical text came
+        // from disk or an editor overlay. Keep that mode in snapshot equality
+        // so cache invalidation and source ownership still observe transitions.
+        for (path, state) in &snapshot {
+            path.hash(&mut hash);
+            state.bytes.hash(&mut hash);
+        }
         self.input_snapshots.insert(key, snapshot);
         Some(format!("{:016x}", hash.finish()))
+    }
+
+    /// Exact native candidates in the last input revision, including misses.
+    /// Clients watch these paths; they must not repeat include lookup rules.
+    pub(crate) fn input_candidate_paths(&self, uri: &str) -> Vec<PathBuf> {
+        self.input_snapshots
+            .get(&normalize_uri(uri))
+            .into_iter()
+            .flat_map(|snapshot| snapshot.keys())
+            .filter(|key| !is_virtual_uri(key))
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .collect()
     }
 
     fn input_file(&self, key: &str) -> InputFile {

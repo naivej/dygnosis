@@ -16,8 +16,29 @@
     "vscode": "^1.102.0",
     "node": "^22.13.0 || >=24"
   },
-  "categories": ["Programming Languages"],
-  "activationEvents": [],
+  "categories": [
+    "Programming Languages"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Read-only analysis is available. A workspace cannot choose the executable; project MCP setup requires trust.",
+      "restrictedConfigurations": [
+        "dynare.serverPath"
+      ]
+    },
+    "virtualWorkspaces": {
+      "supported": "limited",
+      "description": "Grammar only on virtual filesystems. Native analysis requires a file-backed workspace."
+    }
+  },
+  "activationEvents": [
+    "onLanguage:dynare",
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "scripts": {
     "compile": "tsc -p .",
@@ -25,14 +46,1227 @@
     "check": "tsc -p . --noEmit",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix --max-warnings 0",
-    "vscode:prepublish": "npm run check && npm run lint && npm run compile"
+    "test": "npm run compile && node --test tests/*.test.cjs",
+    "test:host": "npm run compile && node tests/run-host.cjs",
+    "vscode:prepublish": "npm run check && npm run lint && npm run compile",
+    "package:target": "node scripts/package.cjs",
+    "verify:package": "node scripts/verify-package.cjs"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "dynare",
+        "aliases": [
+          "Dynare",
+          "dynare"
+        ],
+        "extensions": [
+          ".mod",
+          ".dyn",
+          ".inc"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "dynare",
+        "scopeName": "source.dynare",
+        "path": "./syntaxes/dynare.tmLanguage.json"
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "dygnosis",
+        "label": "Dygnosis"
+      }
+    ],
+    "commands": [
+      {
+        "command": "dygnosis.restartServer",
+        "title": "Restart language server",
+        "category": "Dygnosis"
+      },
+      {
+        "command": "dygnosis.showOutput",
+        "title": "Show Output",
+        "category": "Dygnosis"
+      },
+      {
+        "command": "dygnosis.openSettings",
+        "title": "Open Settings",
+        "category": "Dygnosis"
+      },
+      {
+        "command": "dygnosis.editSettingsJson",
+        "title": "Edit in settings.json",
+        "category": "Dygnosis"
+      },
+      {
+        "command": "dygnosis.showEffectiveModel",
+        "title": "Show effective model",
+        "category": "Dygnosis",
+        "enablement": "dygnosis.modelContext",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "dygnosis.treatAsRoot",
+        "title": "Treat this file as a model root",
+        "category": "Dygnosis",
+        "enablement": "dygnosis.analysisDocument && resourceExtname =~ /\\.(mod|dyn)$/"
+      },
+      {
+        "command": "dygnosis.goToEquation",
+        "title": "Go to equation N",
+        "category": "Dygnosis",
+        "enablement": "dygnosis.analysisDocument",
+        "icon": "$(list-ordered)"
+      },
+      {
+        "command": "dygnosis.jumpToNamedEquation",
+        "title": "Jump to named equation",
+        "category": "Dygnosis",
+        "enablement": "dygnosis.analysisDocument",
+        "icon": "$(search)"
+      },
+      {
+        "command": "dygnosis.chooseModelOwner",
+        "title": "Choose model owner",
+        "category": "Dygnosis",
+        "enablement": "dygnosis.analysisDocument",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "dygnosis.refreshModelView",
+        "title": "Refresh model view",
+        "category": "Dygnosis",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dygnosis.explainDiagnostic",
+        "title": "Explain a check",
+        "category": "Dygnosis"
+      },
+      {
+        "command": "dygnosis.showDiagnostic",
+        "title": "Show a hidden check",
+        "category": "Dygnosis"
+      },
+      {
+        "command": "dygnosis.showAllDiagnostics",
+        "title": "Show all hidden checks",
+        "category": "Dygnosis"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "dygnosis.showEffectiveModel",
+          "when": "dygnosis.modelContext && dygnosis.toolbarActions",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "dygnosis.showEffectiveModel",
+          "when": "dygnosis.modelContext && dygnosis.contextActions",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "dygnosis.showEffectiveModel",
+          "when": "dygnosis.modelContext"
+        },
+        {
+          "command": "dygnosis.treatAsRoot",
+          "when": "dygnosis.analysisDocument && resourceExtname =~ /\\.(mod|dyn)$/"
+        },
+        {
+          "command": "dygnosis.goToEquation",
+          "when": "dygnosis.analysisDocument"
+        },
+        {
+          "command": "dygnosis.jumpToNamedEquation",
+          "when": "dygnosis.analysisDocument"
+        },
+        {
+          "command": "dygnosis.chooseModelOwner",
+          "when": "dygnosis.analysisDocument"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "dygnosis.goToEquation",
+          "when": "view == dygnosis.model && dygnosis.equationNavigation",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dygnosis.jumpToNamedEquation",
+          "when": "view == dygnosis.model && dygnosis.equationNavigation",
+          "group": "navigation@2"
+        },
+        {
+          "command": "dygnosis.chooseModelOwner",
+          "when": "view == dygnosis.model && dygnosis.includeOwners",
+          "group": "navigation@3"
+        },
+        {
+          "command": "dygnosis.refreshModelView",
+          "when": "view == dygnosis.model",
+          "group": "navigation@4"
+        }
+      ]
+    },
+    "configuration": [
+      {
+        "title": "Dygnosis: Engine",
+        "properties": {
+          "dynare.serverPath": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "description": "Absolute path to a Dygnosis executable. Empty uses the binary included with the extension. Set only in user/machine settings."
+          },
+          "dynare.searchPaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "resource",
+            "description": "Additional include directories, resolved against the model's workspace folder or loose-file directory."
+          },
+          "dynare.formatIndent": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "tab"
+                ]
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8
+              }
+            ],
+            "default": "tab",
+            "scope": "resource",
+            "description": "Use a tab or 1–8 spaces for indentation."
+          }
+        }
+      },
+      {
+        "title": "Dygnosis: Model overview",
+        "properties": {
+          "dynare.outline.sections": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "declarations",
+                "blocks",
+                "commands",
+                "dimensions",
+                "equations"
+              ]
+            },
+            "uniqueItems": true,
+            "default": [
+              "declarations",
+              "blocks",
+              "commands",
+              "dimensions",
+              "equations"
+            ],
+            "scope": "resource",
+            "description": "Sections shown in Outline, breadcrumbs and quick outline. Empty hides all sections."
+          },
+          "dynare.outline.equationNumbers": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Show Dygnosis equation numbers before transformation in Outline."
+          },
+          "dynare.statusBar.enabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Show aggregate model counts in the status bar for the active .mod or .dyn."
+          },
+          "dynare.statusBar.counts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "endogenous",
+                "exogenous",
+                "equations"
+              ]
+            },
+            "uniqueItems": true,
+            "default": [
+              "endogenous",
+              "exogenous",
+              "equations"
+            ],
+            "scope": "resource",
+            "description": "Aggregate counts shown in the status bar, in this order. Empty hides the bar."
+          },
+          "dynare.modelView.sections": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "counts",
+                "timing",
+                "dimensions",
+                "relatedFiles"
+              ]
+            },
+            "uniqueItems": true,
+            "default": [
+              "counts",
+              "timing",
+              "dimensions",
+              "relatedFiles"
+            ],
+            "scope": "resource",
+            "description": "Sections shown in the Dynare model view. List order sets section order; empty hides its content."
+          }
+        }
+      },
+      {
+        "title": "Dygnosis: Name details",
+        "properties": {
+          "dynare.nameDetails.longName": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Show written long_name in hover, completion and Outline."
+          },
+          "dynare.nameDetails.tex": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Show written TeX as literal text in hover, completion and Outline."
+          }
+        }
+      },
+      {
+        "title": "Dygnosis: Value hints",
+        "properties": {
+          "dynare.parameterValueHints": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Show proven expression values at top-level assignments. Also respects native editor inlay-hint visibility."
+          }
+        }
+      },
+      {
+        "title": "Dygnosis: Actions",
+        "properties": {
+          "dynare.editorActions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "toolbar",
+                "contextMenu"
+              ]
+            },
+            "uniqueItems": true,
+            "default": [
+              "toolbar",
+              "contextMenu"
+            ],
+            "scope": "window",
+            "description": "Locations for model actions. Commands remain in the Command Palette."
+          },
+          "dynare.codeLens.modelEquations": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Browse surviving equations at each safely mapped model opener. Numbers are before transformation. Also respects editor.codeLens."
+          },
+          "dynare.codeLens.declarationReferences": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "description": "Offer native Find All References at declaration lines. Several names open a symbol picker; no usage count is shown."
+          },
+          "dynare.codeLens.effectiveModel": {
+            "type": "boolean",
+            "default": false,
+            "scope": "resource",
+            "description": "Offer Show effective model at the first safely mapped model opener. Also respects editor.codeLens."
+          }
+        }
+      },
+      {
+        "title": "Dygnosis: Appearance",
+        "properties": {
+          "dynare.blockTint.enabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Tint recognized Dynare blocks using the current theme's background colors."
+          },
+          "dynare.blockTint.model.aggregate": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "model",
+            "scope": "resource",
+            "description": "Background style for Dynare model.aggregate blocks."
+          },
+          "dynare.blockTint.model.heterogeneous": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "model",
+            "scope": "resource",
+            "description": "Background style for Dynare model.heterogeneous blocks."
+          },
+          "dynare.blockTint.model_replace": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare model_replace blocks."
+          },
+          "dynare.blockTint.steady_state_model": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare steady_state_model blocks."
+          },
+          "dynare.blockTint.initval": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare initval blocks."
+          },
+          "dynare.blockTint.endval.standard": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare endval.standard blocks."
+          },
+          "dynare.blockTint.endval.learnt_in": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare endval.learnt_in blocks."
+          },
+          "dynare.blockTint.histval": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare histval blocks."
+          },
+          "dynare.blockTint.filter_initial_state": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare filter_initial_state blocks."
+          },
+          "dynare.blockTint.shocks.standard": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare shocks.standard blocks."
+          },
+          "dynare.blockTint.shocks.surprise": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare shocks.surprise blocks."
+          },
+          "dynare.blockTint.shocks.learnt_in": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare shocks.learnt_in blocks."
+          },
+          "dynare.blockTint.shocks.heterogeneous": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare shocks.heterogeneous blocks."
+          },
+          "dynare.blockTint.mshocks.standard": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare mshocks.standard blocks."
+          },
+          "dynare.blockTint.mshocks.learnt_in": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare mshocks.learnt_in blocks."
+          },
+          "dynare.blockTint.heteroskedastic_shocks": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare heteroskedastic_shocks blocks."
+          },
+          "dynare.blockTint.shock_paths.standard": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare shock_paths.standard blocks."
+          },
+          "dynare.blockTint.shock_paths.learnt_in": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare shock_paths.learnt_in blocks."
+          },
+          "dynare.blockTint.perfect_foresight_controlled_paths.standard": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare perfect_foresight_controlled_paths.standard blocks."
+          },
+          "dynare.blockTint.perfect_foresight_controlled_paths.learnt_in": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare perfect_foresight_controlled_paths.learnt_in blocks."
+          },
+          "dynare.blockTint.conditional_forecast_paths": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare conditional_forecast_paths blocks."
+          },
+          "dynare.blockTint.estimated_params": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare estimated_params blocks."
+          },
+          "dynare.blockTint.estimated_params_init": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare estimated_params_init blocks."
+          },
+          "dynare.blockTint.estimated_params_bounds": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare estimated_params_bounds blocks."
+          },
+          "dynare.blockTint.estimated_params_remove": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare estimated_params_remove blocks."
+          },
+          "dynare.blockTint.observation_trends": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare observation_trends blocks."
+          },
+          "dynare.blockTint.deterministic_trends": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare deterministic_trends blocks."
+          },
+          "dynare.blockTint.matched_moments": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare matched_moments blocks."
+          },
+          "dynare.blockTint.matched_irfs": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare matched_irfs blocks."
+          },
+          "dynare.blockTint.matched_irfs_weights": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare matched_irfs_weights blocks."
+          },
+          "dynare.blockTint.generate_irfs": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare generate_irfs blocks."
+          },
+          "dynare.blockTint.irf_calibration": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare irf_calibration blocks."
+          },
+          "dynare.blockTint.moment_calibration": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare moment_calibration blocks."
+          },
+          "dynare.blockTint.optim_weights": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare optim_weights blocks."
+          },
+          "dynare.blockTint.osr_params_bounds": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare osr_params_bounds blocks."
+          },
+          "dynare.blockTint.ramsey_constraints": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare ramsey_constraints blocks."
+          },
+          "dynare.blockTint.homotopy_setup": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare homotopy_setup blocks."
+          },
+          "dynare.blockTint.occbin_constraints": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare occbin_constraints blocks."
+          },
+          "dynare.blockTint.svar_identification": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare svar_identification blocks."
+          },
+          "dynare.blockTint.shock_groups": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare shock_groups blocks."
+          },
+          "dynare.blockTint.init2shocks": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare init2shocks blocks."
+          },
+          "dynare.blockTint.pac_target_info": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare pac_target_info blocks."
+          },
+          "dynare.blockTint.epilogue": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare epilogue blocks."
+          },
+          "dynare.blockTint.verbatim": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare verbatim blocks."
+          },
+          "dynare.blockTint.priors": {
+            "type": "string",
+            "enum": [
+              "off",
+              "subtle",
+              "model"
+            ],
+            "enumItemLabels": [
+              "Off",
+              "Subtle",
+              "Model-strength"
+            ],
+            "default": "subtle",
+            "scope": "resource",
+            "description": "Background style for Dynare priors blocks."
+          },
+          "dynare.blockTint.heterogeneousModels": {
+            "type": "object",
+            "default": {},
+            "scope": "resource",
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "off",
+                "subtle",
+                "model"
+              ]
+            },
+            "propertyNames": {
+              "minLength": 1
+            },
+            "markdownDescription": "Override the heterogeneous model tint by written dimension name, for example `{\"households\": \"off\"}`. Takes priority over the heterogeneous model style. [Edit in settings.json](command:dygnosis.editSettingsJson)."
+          }
+        }
+      },
+      {
+        "title": "Dygnosis: Diagnostics",
+        "properties": {
+          "dynare.diagnosticActions.ignore": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Offer Ignore this check in diagnostic quick fixes. Hidden checks can still be restored with Show or Show all."
+          },
+          "dynare.diagnosticActions.explain": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Offer Explain this check in diagnostic quick fixes. The Command Palette command remains available."
+          }
+        }
+      }
+    ],
+    "semanticTokenTypes": [
+      {
+        "id": "dynareEndogenous",
+        "superType": "variable",
+        "description": "A Dynare endogenous variable."
+      },
+      {
+        "id": "dynareExogenous",
+        "superType": "variable",
+        "description": "A Dynare exogenous or deterministic exogenous variable."
+      },
+      {
+        "id": "dynareParameter",
+        "superType": "variable",
+        "description": "A Dynare model parameter."
+      },
+      {
+        "id": "dynareModelLocal",
+        "superType": "variable",
+        "description": "A Dynare model-local variable."
+      }
+    ],
+    "semanticTokenModifiers": [
+      {
+        "id": "forwardLooking",
+        "description": "Forward-looking timing of a Dynare endogenous variable."
+      },
+      {
+        "id": "predetermined",
+        "description": "Predetermined timing of a Dynare endogenous variable."
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "dynare",
+        "scopes": {
+          "dynareEndogenous": [
+            "variable.other.readwrite.dynare.endogenous"
+          ],
+          "dynareExogenous": [
+            "variable.other.readwrite.dynare.exogenous"
+          ],
+          "dynareParameter": [
+            "variable.other.readwrite.dynare.parameter"
+          ],
+          "dynareModelLocal": [
+            "variable.other.readwrite.dynare.modelLocal"
+          ]
+        }
+      }
+    ],
+    "colors": [
+      {
+        "id": "dynare.blockTint.modelBackground",
+        "description": "Whole-line background for Model-strength Dynare block tinting. Supports transparency.",
+        "defaults": {
+          "dark": "#569CD61A",
+          "light": "#007ACC12",
+          "highContrast": "#00000000",
+          "highContrastLight": "#00000000"
+        }
+      },
+      {
+        "id": "dynare.blockTint.subtleBackground",
+        "description": "Whole-line background for Subtle Dynare block tinting. Supports transparency.",
+        "defaults": {
+          "dark": "#569CD608",
+          "light": "#007ACC06",
+          "highContrast": "#00000000",
+          "highContrastLight": "#00000000"
+        }
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "dygnosis.model",
+          "name": "Dynare model"
+        }
+      ]
+    }
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
     "@types/node": "^22.0.0",
     "@types/vscode": "1.102.0",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0",
     "eslint": "^10.0.0",
     "typescript": "^5.9.0",
-    "typescript-eslint": "^8.0.0"
+    "typescript-eslint": "^8.0.0",
+    "yauzl": "3.4.0"
+  },
+  "dependencies": {
+    "entities": "8.1.0",
+    "marked": "18.0.14",
+    "vscode-languageclient": "^9.0.1"
   }
 }

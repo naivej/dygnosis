@@ -1,0 +1,92 @@
+name: Extension publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tested product version tag, for example v0.11.1'
+        type: string
+        required: true
+      verified_run_id:
+        description: 'Successful Extension artifacts or Release run for that exact tag commit'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    environment: marketplace
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Read reviewed release gates from the dispatch commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: release-approval
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-packages
+          path: verified-packages
+          run-id: ${{ inputs.verified_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate reviewed gates, source run and exact tested files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          VERIFIED_RUN_ID: ${{ inputs.verified_run_id }}
+          ARTIFACT_DIRECTORY: verified-packages
+        run: |
+          export RELEASE_GATES_FILE="$GITHUB_WORKSPACE/release-approval/release-gates/$RELEASE_TAG.json"
+          node editors/vscode/scripts/prepare-release.cjs
+      - name: Install publication tooling without rebuilding packages
+        working-directory: editors/vscode
+        run: npm ci --ignore-scripts
+      - name: Check configured Marketplace credential
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo '::error::Configure the reviewed publisher credential in the marketplace environment before publication.'
+            exit 1
+          fi
+      - name: Create draft release with the exact verified artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --notes-file verified-packages/release-notes.md
+          # Each target's provenance/evidence uses the same basename. Attach the
+          # exact VSIX/archive bytes; collect other evidence in one tar archive.
+          mapfile -t packages < <(find verified-packages -type f \( -name '*.vsix' -o -name '*.tar.gz' \) | sort)
+          gh release upload "$RELEASE_TAG" "${packages[@]}"
+          gh release upload "$RELEASE_TAG" verified-packages/SHA256SUMS.txt verified-packages/publication-source.json
+          tar -czf verified-evidence.tar.gz --exclude='*.vsix' --exclude='*.tar.gz' -C verified-packages .
+          gh release upload "$RELEASE_TAG" verified-evidence.tar.gz
+      - name: Publish exact tested VSIX files to Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' package; do
+            node editors/vscode/node_modules/@vscode/vsce/vsce publish --packagePath "$package"
+          done < <(find verified-packages -type f -name '*.vsix' -print0 | sort -z)
+      - name: Publish the verified GitHub draft after Marketplace uploads
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: gh release edit "$RELEASE_TAG" --draft=false

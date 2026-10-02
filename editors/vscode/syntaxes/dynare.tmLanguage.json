@@ -1,0 +1,24 @@
+{
+  "name": "Dynare",
+  "scopeName": "source.dynare",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "name": "keyword.control.macro.dynare", "match": "@#\\s*[A-Za-z_]+" },
+    { "name": "meta.interpolation.dynare", "begin": "@\\{", "end": "\\}", "patterns": [{ "include": "$self" }] },
+    { "name": "keyword.control.dynare", "match": "\\b(?:var|varexo|varexo_det|parameters|model|end|steady_state_model|initval|endval|histval|shocks|mshocks|estimated_params|estimated_params_init|estimated_params_bounds|estimated_params_remove|varobs|predetermined_variables|change_type|stoch_simul|steady|check|resid|estimation|perfect_foresight_setup|perfect_foresight_solver|occbin_constraints|occbin_setup|occbin_solver|ramsey_model|discretionary_policy|model_remove|model_replace|heterogeneity)\\b" },
+    { "name": "constant.numeric.dynare", "match": "(?<![A-Za-z_])(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?" },
+    { "name": "keyword.operator.dynare", "match": "[+*/^=<>-]|#" },
+    { "name": "string.other.math.dynare", "begin": "\\$", "end": "\\$" }
+  ],
+  "repository": {
+    "comments": { "patterns": [
+      { "name": "comment.line.double-slash.dynare", "begin": "//|%", "end": "$" },
+      { "name": "comment.block.dynare", "begin": "/\\*", "end": "\\*/" }
+    ] },
+    "strings": { "patterns": [
+      { "name": "string.quoted.single.dynare", "begin": "'", "end": "'", "patterns": [{ "match": "''" }] },
+      { "name": "string.quoted.double.dynare", "begin": "\"", "end": "\"", "patterns": [{ "match": "\\\\." }] }
+    ] }
+  }
+}

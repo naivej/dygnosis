@@ -269,6 +269,131 @@ async fn folder_snapshot_uses_deepest_folder_and_loose_defaults() {
     );
 }
 
+#[test]
+fn revisions_keep_equal_disk_overlay_text_but_observe_bytes_and_root_paths() {
+    let files = Files::new();
+    let source = "@#include \"values.inc\"\n";
+    let root_path = files.write("model/root.mod", source);
+    let include_path = files.write("model/values.inc", "var initial_y;\n");
+    let root = file_uri(&root_path);
+    let include = file_uri(&include_path);
+    let mut workspace = Workspace::new();
+    workspace.load_from_disk(&root_path).unwrap();
+    let disk = workspace.input_revision(root.as_str()).unwrap();
+
+    workspace.update_document(root.as_str(), source);
+    workspace.update_document(include.as_str(), "var initial_y;\n");
+    assert_eq!(workspace.input_revision(root.as_str()).unwrap(), disk);
+    workspace.remove_document(include.as_str());
+    workspace.remove_document(root.as_str());
+    assert_eq!(workspace.input_revision(root.as_str()).unwrap(), disk);
+
+    workspace.update_document(include.as_str(), "var edited_overlay_y;\n");
+    let edited = workspace.input_revision(root.as_str()).unwrap();
+    assert_ne!(edited, disk);
+    fs::write(&include_path, "var changed_disk_y;\n").unwrap();
+    assert_eq!(workspace.input_revision(root.as_str()).unwrap(), edited);
+    assert_eq!(variables(&mut workspace, &root), ["edited_overlay_y"]);
+    workspace.remove_document(include.as_str());
+    let closed = workspace.input_revision(root.as_str()).unwrap();
+    assert_ne!(closed, edited);
+    assert_ne!(closed, disk);
+    assert_eq!(variables(&mut workspace, &root), ["changed_disk_y"]);
+
+    workspace.update_document(include.as_str(), "var changed_disk_y;\n");
+    assert_eq!(workspace.input_revision(root.as_str()).unwrap(), closed);
+    workspace.set_root_search_paths(root.as_str(), vec![files.0.join("extra")]);
+    assert_ne!(workspace.input_revision(root.as_str()).unwrap(), closed);
+    assert_eq!(variables(&mut workspace, &root), ["changed_disk_y"]);
+}
+
+#[tokio::test]
+async fn model_info_revision_stays_current_when_opening_unchanged_included_text() {
+    async fn facts(backend: &Backend, root: &Url) -> Value {
+        backend
+            .execute_command(ExecuteCommandParams {
+                command: "dynare/modelInfo".to_owned(),
+                arguments: vec![json!({"root_uri":root})],
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap()
+    }
+    let files = Files::new();
+    let source = "var output_y;\nmodel;\n@#include \"row.inc\"\nend;\n";
+    files.write("root.mod", source);
+    let include_path = files.write("row.inc", "output_y=1;\n");
+    let root = files.uri("root.mod");
+    let include = files.uri("row.inc");
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(backend, root.clone(), source).await;
+    let disk = facts(backend, &root).await;
+    assert_eq!(disk["complete"], true);
+    open(backend, include.clone(), "output_y=1;\n").await;
+    let opened = facts(backend, &root).await;
+    assert_eq!(opened["revision"], disk["revision"]);
+    // Opening a file preserves its client URI spelling; Windows disk paths may
+    // have been normalized to lower case before an editor URI was available.
+    let normalize_locations = |value: &Value| {
+        fn normalize(value: &mut Value) {
+            match value {
+                Value::Object(fields) => {
+                    if let Some(Value::String(uri)) = fields.get_mut("uri") {
+                        *uri = dygnosis::include_resolver::normalize_uri(uri);
+                    }
+                    for field in fields.values_mut() {
+                        normalize(field);
+                    }
+                }
+                Value::Array(rows) => rows.iter_mut().for_each(normalize),
+                _ => {}
+            }
+        }
+        let mut value = value.clone();
+        normalize(&mut value);
+        value
+    };
+    assert_eq!(
+        normalize_locations(&opened["equations"]),
+        normalize_locations(&disk["equations"])
+    );
+
+    backend
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: include.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: "output_y=2;\n".to_owned(),
+            }],
+        })
+        .await;
+    let edited = facts(backend, &root).await;
+    assert_ne!(edited["revision"], opened["revision"]);
+    fs::write(include_path, "output_y=3;\n").unwrap();
+    assert_eq!(facts(backend, &root).await["revision"], edited["revision"]);
+    backend
+        .did_close(DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: include },
+        })
+        .await;
+    let closed = facts(backend, &root).await;
+    assert_ne!(closed["revision"], edited["revision"]);
+    assert_ne!(closed["revision"], disk["revision"]);
+
+    backend
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: json!({"dynare":{"nameDetails":{"tex":false}}}),
+        })
+        .await;
+    assert_ne!(facts(backend, &root).await["revision"], closed["revision"]);
+}
+
 #[tokio::test]
 async fn snapshots_clear_removed_values_and_folder_events_reselect_settings() {
     let files = Files::new();
@@ -792,19 +917,14 @@ async fn include_invalidation_keeps_owner_provenance_and_clears_deleted_closed_r
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0]["params"]["root_uri"], root.as_str());
     wire.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":root}}})).await;
-    loop {
-        let message = wire.read().await;
-        if let Some(id) = message
-            .get("id")
-            .filter(|_| message.get("method").is_some())
-        {
-            wire.send(json!({"jsonrpc":"2.0","id":id,"result":null}))
-                .await;
-        }
-        if message["method"] == "workspace/inlayHint/refresh" {
-            break;
-        }
-    }
+    // Closing equal disk/overlay text changes source ownership, not analysis
+    // inputs. An ordinary request provides a wire barrier without waiting for
+    // a model invalidation which the equal content deliberately does not emit.
+    wire.send(json!({"jsonrpc":"2.0","id":3,"method":"textDocument/diagnostic","params":{"textDocument":{"uri":root}}})).await;
+    let closed = wire.until_response(3).await;
+    assert!(!closed
+        .iter()
+        .any(|message| message["method"] == "dynare/modelInfoChanged"));
     fs::remove_file(root_path).unwrap();
     wire.send(
         json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{

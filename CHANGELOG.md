@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — 0.11 client preparation
+
+- Adds a native VS Code client with bundled/explicit executable selection, per-folder settings, include ownership, negotiated semantic roles, and an effective-model preview.
+- Adds model counts, a native model view and equation navigation, configurable block tinting, and equation/reference/preview CodeLens actions.
+- Adds in-memory Ignore/Show diagnostic controls and safe read-only diagnostic explanations. Existing fixes retain their diagnostic and source context.
+- Prepares native VSIX and standalone packaging, exact source/license/checksum records, installed-host checks, and gated publication. Candidate checks do not establish a published release; native MCP, target, theme, upgrade, and remote gates remain tracked in the development plan.
+
 ## v0.11.0
 
 - Workspace-folder and loose-file settings isolate include paths and cached inputs across roots. Complete configuration snapshots and opt-in `dynare/modelInfoChanged` notifications support live refresh.

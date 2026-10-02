@@ -1,5 +1,14 @@
 /node_modules/
 /out/
 /.npm-cache/
+/.test-data/
+/.vscode-test/
+/dist/
+/bin/
+/licenses/
+/THIRD-PARTY-NOTICES.json
+/SOURCE.json
+/LICENSE
+/CHANGELOG.md
 /*.vsix
 /*.tsbuildinfo

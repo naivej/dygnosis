@@ -42,7 +42,9 @@ Configure an LSP client to launch `dygnosis` over stdio. Available features incl
 - Linked duplicate locations and proven expression-value inlay hints
 - Expanded model text with jumps back to source equations
 
-Workspace folders have separate settings and include paths. The `dynare/modelInfo` command supplies shared counts, written source locations, and input revisions for client model views. Equation labels are Dygnosis numbers before transformation. See the [editor settings guide](docs/editor-settings.md) for configuration, root ownership, and semantic token migration. The VS Code extension remains an unpublished scaffold in this release.
+Workspace folders have separate settings and include paths. The `dynare/modelInfo` command supplies shared counts, written source locations, and input revisions for client model views. Equation labels are Dygnosis numbers before transformation. See the [editor settings guide](docs/editor-settings.md) for configuration, root ownership, and semantic token migration.
+
+The unpublished VS Code client preparation adds a [count bar](docs/vscode-status.md), [model view and equation jumps](docs/vscode-model-view.md), [colors and block tinting](docs/vscode-colors.md), [CodeLens actions](docs/vscode-lenses.md), and [diagnostic controls](docs/vscode-diagnostics.md). Native packages and their remaining verification requirements are described in the [distribution guide](docs/distribution.md).
 
 ### AI agents (MCP)
 

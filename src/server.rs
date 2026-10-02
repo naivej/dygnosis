@@ -128,6 +128,7 @@ struct OpenDoc {
 #[derive(Clone)]
 struct RoutedDiagnostic {
     diagnostic: crate::Diagnostic,
+    lsp_diagnostic: Diagnostic,
     text: std::sync::Arc<str>,
     root: Url,
     revision: String,
@@ -350,18 +351,6 @@ impl Inner {
                 let mut mapped = diag.clone();
                 mapped.span = span;
                 let mut items = library_to_lsp(text, std::slice::from_ref(&mapped));
-                routed_library
-                    .entry(uri.clone())
-                    .or_default()
-                    .push(RoutedDiagnostic {
-                        diagnostic: mapped.clone(),
-                        text: std::sync::Arc::from(text),
-                        root: root.clone(),
-                        revision: revision.clone(),
-                    });
-                if self.docs.contains_key(&uri) {
-                    library_routed.entry(uri.clone()).or_default().push(mapped);
-                }
                 for item in &mut items {
                     if crate::check_writing::is_writing_code(&diag.code) || diag.fix.is_some() {
                         let data = item
@@ -374,11 +363,24 @@ impl Inner {
                     }
                 }
                 for item in items {
+                    routed_library
+                        .entry(uri.clone())
+                        .or_default()
+                        .push(RoutedDiagnostic {
+                            diagnostic: mapped.clone(),
+                            lsp_diagnostic: item.clone(),
+                            text: std::sync::Arc::from(text),
+                            root: root.clone(),
+                            revision: revision.clone(),
+                        });
                     routed.entry(uri.clone()).or_default().push(item);
                     routed_from
                         .entry(uri.clone())
                         .or_default()
                         .push(root.clone());
+                }
+                if self.docs.contains_key(&uri) {
+                    library_routed.entry(uri.clone()).or_default().push(mapped);
                 }
             }
         }
@@ -1018,6 +1020,12 @@ impl Backend {
             let supplied = params.context.diagnostics.iter().filter(|diag| {
                 diag.code == Some(NumberOrString::String(lib.code.clone()))
                     && ranges_overlap(diag.range, diag_range)
+                    && diag
+                        .data
+                        .as_ref()
+                        .and_then(|data| data.get("root"))
+                        .and_then(Value::as_str)
+                        .is_none_or(|root| root == row.root.as_str())
             });
             if supplied.into_iter().any(|diag| {
                 diag.data
@@ -1045,8 +1053,24 @@ impl Backend {
                 is_preferred: Some(true),
                 ..CodeAction::default()
             });
-            if !actions.contains(&action) {
-                actions.push(action);
+            let existing = actions.iter_mut().find(|existing| {
+                let mut comparable = (**existing).clone();
+                if let CodeActionOrCommand::CodeAction(action) = &mut comparable {
+                    action.diagnostics = None;
+                }
+                comparable == action
+            });
+            if let Some(CodeActionOrCommand::CodeAction(existing)) = existing {
+                let diagnostics = existing.diagnostics.get_or_insert_with(Vec::new);
+                if !diagnostics.contains(&row.lsp_diagnostic) {
+                    diagnostics.push(row.lsp_diagnostic);
+                }
+            } else {
+                let CodeActionOrCommand::CodeAction(mut action) = action else {
+                    unreachable!("library fixes are code actions")
+                };
+                action.diagnostics = Some(vec![row.lsp_diagnostic]);
+                actions.push(CodeActionOrCommand::CodeAction(action));
             }
         }
         (!actions.is_empty()).then_some(actions)
@@ -1543,6 +1567,12 @@ impl Backend {
         result["revision"] = json!(revision);
         result["complete"] = json!(complete);
         result["owner_roots"] = json!(inner.known_owner_roots(&document));
+        result["dependency_candidates"] = json!(inner
+            .workspace
+            .input_candidate_paths(root.as_str())
+            .iter()
+            .filter_map(|path| Url::from_file_path(path).ok())
+            .collect::<Vec<_>>());
         result["block_categories"] = json!(crate::model_map::BLOCK_CATEGORIES
             .iter()
             .map(|(category, default)| json!({"category":category,"default":default}))
@@ -2222,7 +2252,7 @@ pub fn initialize_result() -> InitializeResult {
                 ..WorkspaceServerCapabilities::default()
             }),
             experimental: Some(json!({"dygnosis": {
-                "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION},
+                "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true},
                 "modelInfoChanged": true,
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
             }})),

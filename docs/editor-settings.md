@@ -1,6 +1,6 @@
 # Editor settings and LSP contracts
 
-Dygnosis 0.11.0 supplies these features through the language server. Configure an LSP client to launch `dygnosis` over stdio. The VS Code extension in `editors/vscode` is still an unpublished scaffold; its Settings UI, custom color registration, model view, and packaging belong to a later release.
+Dygnosis 0.11.0 supplies these contracts through the language server. Configure an LSP client to launch `dygnosis` over stdio. The unpublished VS Code client preparation in `editors/vscode` adds native Settings, a [count bar](vscode-status.md), [model view](vscode-model-view.md), [colors](vscode-colors.md), [CodeLens](vscode-lenses.md), and [diagnostic controls](vscode-diagnostics.md). See [distribution](distribution.md) for candidate packages and release verification.
 
 ## Settings
 
@@ -102,7 +102,7 @@ Call `workspace/executeCommand` with:
 
 Omit `document_uri` to use the root itself. Choose an available `.mod` or `.dyn` root with a `file` or `untitled` URI; an included document must belong to that root. Invalid choices return an `error` and `code`, with known `owner_roots` when a root choice is needed. This read-only request does not select an owner globally for other LSP requests.
 
-The response contains the shared MCP model counts and timing fields, plus `schema_version`, `root_uri`, `document_uri`, `document_version`, `revision`, `complete`, and `owner_roots`. `document_version` is null for a document that is not open. The opaque revision covers the root's settings and current input files, including unsaved overlays and disk dependencies. Treat revisions as equality tokens within the current server instance.
+The response contains the shared MCP model counts and timing fields, plus `schema_version`, `root_uri`, `document_uri`, `document_version`, `revision`, `complete`, and `owner_roots`. `document_version` is null for a document that is not open. The opaque revision covers the root's settings and current input paths and contents, including unsaved overlays, disk dependencies, and missing candidates. Opening or closing an editor overlay with identical text keeps the revision; changed text, dependency availability, or settings invalidate it. Treat revisions as equality tokens within the current server instance.
 
 Additive `statements`, `declarations`, and `equations` describe the whole chosen root. Source records carry verified `location`, `segments`, `anchor`, and macro context where available. A span split across files has separate segments rather than an invented continuous range. Statements also provide safe `lens_anchor` values for client actions. `related_files` lists includes and companion files; `block_categories` supplies the recognized category registry and defaults.
 

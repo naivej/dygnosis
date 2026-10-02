@@ -1,4 +1,5 @@
-# Create a GitHub Release when a version tag is pushed.
+# Legacy Rust notes releases through v0.11.0. Later tags build and verify packages;
+# publication uses the separate, manually dispatched Extension publication job.
 #
 # Usage:
 #   git tag v0.1.0
@@ -12,11 +13,26 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  route:
+    runs-on: ubuntu-22.04
+    outputs:
+      legacy: ${{ steps.version.outputs.legacy }}
+    steps:
+      - id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          node -e 'const fs=require("node:fs"); const m=/^v(\d+)\.(\d+)\.(\d+)$/.exec(process.env.TAG); if(!m) throw new Error("Expected a vMAJOR.MINOR.PATCH tag"); const [major,minor,patch]=m.slice(1).map(Number); const legacy=major===0 && (minor<11 || (minor===11 && patch===0)); fs.appendFileSync(process.env.GITHUB_OUTPUT,`legacy=${legacy}\n`);'
+
   release:
-    runs-on: ubuntu-latest
+    needs: route
+    if: needs.route.outputs.legacy == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -44,3 +60,10 @@ jobs:
           gh release create "$TAG" \
             --title "$TAG" \
             --notes-file "$NOTES"
+
+  extension-artifacts:
+    needs: route
+    if: needs.route.outputs.legacy == 'false'
+    uses: ./.github/workflows/extension-build.yml
+    with:
+      release_tag: ${{ github.ref_name }}

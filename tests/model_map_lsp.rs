@@ -487,3 +487,41 @@ async fn crlf_mixed_newlines_unicode_and_macro_copies_keep_exact_written_ranges(
         .iter()
         .any(|row| row.start_line == 3 && row.end_line == 5));
 }
+
+#[tokio::test]
+async fn model_info_supplies_resolved_and_missing_native_dependency_candidates() {
+    let root = url("watch-root.mod");
+    let child = url("arbitrary-extension.data");
+    let missing = url("not-created.settings");
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &child, "parameters calib_p; calib_p=1;").await;
+    open(
+        server,
+        &root,
+        "@#include \"arbitrary-extension.data\"\n@#include \"not-created.settings\"\nvar output_y; model; output_y=calib_p; end;",
+    )
+    .await;
+    let result = info(server, &root, None).await;
+    assert_eq!(result["complete"], false);
+    let candidates = result["dependency_candidates"].as_array().unwrap();
+    for expected in [&root, &child, &missing] {
+        assert!(
+            candidates.iter().any(|candidate| {
+                let uri = Url::parse(candidate.as_str().unwrap()).unwrap();
+                crate_path_key(&uri) == crate_path_key(expected)
+            }),
+            "missing candidate {expected}: {candidates:?}"
+        );
+    }
+    let untitled = Url::parse("untitled:watch-untitled.mod").unwrap();
+    open(server, &untitled, "var output_y; model; output_y=0; end;").await;
+    assert!(info(server, &untitled, None).await["dependency_candidates"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+fn crate_path_key(uri: &Url) -> String {
+    dygnosis::include_resolver::normalize_uri(uri.as_str())
+}

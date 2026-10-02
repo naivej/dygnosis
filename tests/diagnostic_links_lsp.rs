@@ -183,12 +183,47 @@ async fn unopened_include_fix_uses_checked_source_and_rejects_disk_changes() {
         .clone();
     let fixes = actions(server, &child, note.range, vec![note.clone()]).await;
     let fix = fixes.first().unwrap_or_else(|| panic!("{fixes:?}"));
+    assert_eq!(fix.diagnostics.as_ref(), Some(&vec![note.clone()]));
     assert_eq!(edits(fix)[0].text_document.uri, child);
     assert_eq!(edits(fix)[0].text_document.version, None);
     fs::write(child.to_file_path().unwrap(), "var other;\n").unwrap();
     assert!(actions(server, &child, note.range, vec![note])
         .await
         .is_empty());
+}
+
+#[tokio::test]
+async fn shared_include_fix_retains_each_root_context_without_duplicate_edits() {
+    let temp = Scratch::new();
+    let child = temp.file("declarations.inc", "var y");
+    let text = "@#include \"declarations.inc\"\n";
+    let a = temp.file("a.mod", text);
+    let b = temp.file("b.mod", text);
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &a, text, 7).await;
+    open(server, &b, text, 8).await;
+    let note = pull(server, &child)
+        .await
+        .into_iter()
+        .find(|row| is_code(row, "E001"))
+        .unwrap();
+    let fixes = actions(server, &child, note.range, vec![note]).await;
+    assert_eq!(fixes.len(), 1, "{fixes:?}");
+    let diagnostics = fixes[0].diagnostics.as_ref().unwrap();
+    assert_eq!(diagnostics.len(), 2);
+    for root in [&a, &b] {
+        let diagnostic = diagnostics
+            .iter()
+            .find(|row| row.data.as_ref().unwrap()["root"] == root.as_str())
+            .unwrap();
+        assert!(is_code(diagnostic, "E001"));
+        assert!(diagnostic.data.as_ref().unwrap()["input_revision"]
+            .as_str()
+            .is_some());
+    }
+    assert_eq!(edits(&fixes[0]).len(), 1);
+    assert_eq!(edits(&fixes[0])[0].text_document.uri, child);
 }
 
 #[tokio::test]

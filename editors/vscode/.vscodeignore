@@ -1,9 +1,21 @@
-.npm-cache/**
-node_modules/**
+# Keep the compiled client, production dependencies, grammar, logo and licenses.
 src/**
-out/**/*.map
-tsconfig.json
-eslint.config.mjs
+tests/**
+scripts/**
+.test-data/**
+.vscode-test/**
+.npm-cache/**
+dist/**
+node_modules/.cache/**
+**/*.ts
+**/*.map
+**/*.tsbuildinfo
+**/tsconfig.json
+**/.github/**
+**/.git/**
+**/.DS_Store
 package-lock.json
-*.tsbuildinfo
+eslint.config.mjs
+.vscodeignore
 .gitignore
+DEVELOPMENT.md

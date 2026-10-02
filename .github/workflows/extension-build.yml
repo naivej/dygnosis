@@ -1,0 +1,151 @@
+name: Extension artifacts
+
+on:
+  pull_request:
+    paths: ['src/**', 'tests/**', 'Cargo.*', 'media/logo_s.png', 'editors/vscode/**', '.github/workflows/extension-build.yml', 'LICENSE', 'CHANGELOG.md']
+  push:
+    branches: [main, 'codex/**']
+    paths: ['src/**', 'tests/**', 'Cargo.*', 'media/logo_s.png', 'editors/vscode/**', '.github/workflows/extension-build.yml', 'LICENSE', 'CHANGELOG.md']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing matching version tag. Empty builds candidates without publication.'
+        type: string
+        required: false
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: '${{ matrix.target }} native package and launch'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: win32-x64, runner: windows-2022, rust: x86_64-pc-windows-msvc, arch: x64 }
+          - { target: win32-arm64, runner: windows-11-arm, rust: aarch64-pc-windows-msvc, arch: arm64 }
+          - { target: darwin-x64, runner: macos-15-intel, rust: x86_64-apple-darwin, arch: x64 }
+          - { target: darwin-arm64, runner: macos-15, rust: aarch64-apple-darwin, arch: arm64 }
+          - { target: linux-x64, runner: ubuntu-22.04, rust: x86_64-unknown-linux-gnu, arch: x64 }
+          - { target: linux-arm64, runner: ubuntu-22.04-arm, rust: aarch64-unknown-linux-gnu, arch: arm64 }
+    env:
+      CARGO_TERM_COLOR: always
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    defaults:
+      run:
+        working-directory: editors/vscode
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          architecture: ${{ matrix.arch }}
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.98.0'
+          targets: ${{ matrix.rust }}
+      - name: Dependencies and client checks
+        run: |
+          npm ci --ignore-scripts
+          npm run check
+          npm run lint
+          npm test
+      - name: Linux display dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libasound2 libgbm1 libgtk-3-0 libnss3
+      - name: Build matching native engine and packages
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [ -n "$RELEASE_TAG" ]; then
+            npm run package:target -- --target "$TARGET" --tag "$RELEASE_TAG"
+          else
+            npm run package:target -- --target "$TARGET" --candidate
+          fi
+      - name: Record native dynamic-library requirements
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            ldd "bin/dygnosis" > "dist/$TARGET/runtime-libraries.txt"
+            readelf --version-info "bin/dygnosis" >> "dist/$TARGET/runtime-libraries.txt"
+            ldd --version >> "dist/$TARGET/runtime-libraries.txt"
+          elif [ "$RUNNER_OS" = macOS ]; then
+            otool -L "bin/dygnosis" > "dist/$TARGET/runtime-libraries.txt"
+            otool -l "bin/dygnosis" >> "dist/$TARGET/runtime-libraries.txt"
+          else
+            powershell -NoProfile -Command 'Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,OSArchitecture | Format-List' > "dist/$TARGET/runtime-libraries.txt"
+          fi
+      - name: Installed minimum/current VS Code and unpacked standalone launches
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a npm run verify:package -- --target "$TARGET" --vscode 1.102.0
+            xvfb-run -a npm run verify:package -- --target "$TARGET" --vscode stable
+          else
+            npm run verify:package -- --target "$TARGET" --vscode 1.102.0
+            npm run verify:package -- --target "$TARGET" --vscode stable
+          fi
+      - name: Upload exact tested packages and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            editors/vscode/dist/${{ matrix.target }}/*.vsix
+            editors/vscode/dist/${{ matrix.target }}/*.tar.gz
+            editors/vscode/dist/${{ matrix.target }}/*.json
+            editors/vscode/dist/${{ matrix.target }}/*.txt
+      - name: Upload logs after a failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-${{ matrix.target }}
+          retention-days: 7
+          path: editors/vscode/.test-data/**/installed-host.json
+
+  verified:
+    needs: native
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-x64'
+          path: verified-packages
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-arm64'
+          path: verified-packages
+      - name: Verify complete matrix and immutable package checksums
+        run: node editors/vscode/scripts/collect-artifacts.cjs --directory verified-packages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-packages
+          retention-days: 30
+          if-no-files-found: error
+          path: verified-packages
