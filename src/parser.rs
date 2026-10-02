@@ -999,6 +999,11 @@ impl Parser<'_> {
         span: Span,
         kind: crate::model::SymbolKind,
     ) {
+        if self.i > 0 && self.tokens[self.i - 1].span == span {
+            self.model
+                .type_event_occurrences
+                .push((self.model.symbol_type_events.len(), self.i - 1..self.i));
+        }
         self.model.symbol_type_events.push(SymbolTypeEvent {
             name,
             span,
@@ -1050,6 +1055,11 @@ impl Parser<'_> {
 
     fn parse_file(&mut self) {
         while !self.at(TokenKind::Eof) {
+            let from = self.i;
+            let mut recognized = true;
+            let parameters_before = self.model.param_assignments.len();
+            let helpers_before = self.model.helper_assignments.len();
+            let dotted_before = self.model.dotted_statements.len();
             self.model_function_context = [
                 "model",
                 "model_replace",
@@ -1089,6 +1099,7 @@ impl Parser<'_> {
                     self.bump();
                 }
                 self.eat(TokenKind::Semi);
+                self.record_statement(from, None, None);
                 continue;
             }
             if self.at_ident_ci("var") {
@@ -1246,6 +1257,7 @@ impl Parser<'_> {
                 self.parse_handed_over_statement();
             } else if let Some(end) = self.native_statement_end() {
                 self.skip_native_statement(end);
+                recognized = false;
             } else if let Some(command) = self.at_policy_command() {
                 self.parse_policy_command(command);
             } else if self.at_skipped_block() {
@@ -1254,12 +1266,184 @@ impl Parser<'_> {
             } else if self.at_ident("end") {
                 self.bump();
                 self.eat(TokenKind::Semi);
+                recognized = false;
             } else if self.at(TokenKind::Ident) && self.peek_kind(1) == Some(TokenKind::Eq) {
                 self.parse_top_assignment();
             } else {
+                recognized = self.at(TokenKind::Ident)
+                    && crate::command_skip::is_pin_statement_keyword(
+                        self.lexeme(&self.tokens[from]),
+                    )
+                    && self.at_statement_boundary();
                 self.skip_until_semi();
             }
+            let assignment = if self.model.param_assignments.len() > parameters_before {
+                Some(crate::model::AssignmentIndex::Parameter(parameters_before))
+            } else if self.model.helper_assignments.len() > helpers_before {
+                recognized = true;
+                Some(crate::model::AssignmentIndex::Helper(helpers_before))
+            } else {
+                None
+            };
+            if recognized {
+                let dotted_index =
+                    (self.model.dotted_statements.len() > dotted_before).then_some(dotted_before);
+                self.record_statement(from, assignment, dotted_index);
+            } else if from < self.i {
+                let span = self.covering_tokens(from..self.i);
+                self.model
+                    .execution_steps
+                    .push(crate::model::ExecutionStep::Opaque(span));
+            }
         }
+    }
+
+    fn covering_tokens(&self, range: Range<usize>) -> Span {
+        let tokens = &self.tokens[range];
+        Span {
+            start: tokens
+                .iter()
+                .map(|token| token.span.start)
+                .min()
+                .unwrap_or(0),
+            end: tokens.iter().map(|token| token.span.end).max().unwrap_or(0),
+        }
+    }
+
+    /// Capture a consumed branch without changing what that branch parses.
+    fn record_statement(
+        &mut self,
+        from: usize,
+        assignment: Option<crate::model::AssignmentIndex>,
+        dotted_index: Option<usize>,
+    ) {
+        use crate::model::{ExecutionStep, Statement, StatementKind};
+        if from == self.i {
+            return;
+        }
+        let mut name = if assignment.is_some() {
+            self.lexeme(&self.tokens[from]).to_string()
+        } else {
+            self.lexeme(&self.tokens[from]).to_ascii_lowercase()
+        };
+        if let Some(index) = dotted_index {
+            if let Some(statement) = self.model.dotted_statements.get(index) {
+                let command = match statement.kind {
+                    DottedKind::Prior => "prior",
+                    DottedKind::Options => "options",
+                    DottedKind::Subsamples => "subsamples",
+                };
+                if let Some(word) = (from + 1..self.i).find(|&i| {
+                    self.tokens[i - 1].kind == TokenKind::Dot
+                        && self.tokens[i].text(self.src).eq_ignore_ascii_case(command)
+                }) {
+                    name = self.tokens[from..word + 1]
+                        .iter()
+                        .map(|token| token.text(self.src))
+                        .collect();
+                }
+            }
+        }
+        let block = crate::model_map::is_supported_block(&name);
+        let kind = if block {
+            StatementKind::Block
+        } else if assignment.is_some() {
+            StatementKind::Assignment
+        } else if name == "heterogeneity_dimension" {
+            StatementKind::Dimension
+        } else if [
+            "var",
+            "varexo",
+            "varexo_det",
+            "parameters",
+            "predetermined_variables",
+            "model_local_variable",
+            "trend_var",
+            "log_trend_var",
+            "external_function",
+        ]
+        .contains(&name.as_str())
+        {
+            StatementKind::Declaration
+        } else {
+            StatementKind::Command
+        };
+        let opener_end = if block {
+            let mut depth = 0;
+            (from..self.i)
+                .find(|&i| {
+                    match self.tokens[i].kind {
+                        TokenKind::LParen => depth += 1,
+                        TokenKind::RParen => depth -= 1,
+                        _ => {}
+                    }
+                    self.tokens[i].kind == TokenKind::Semi && depth == 0
+                })
+                .map_or((from + 1).min(self.i), |i| i + 1)
+        } else {
+            from + 1
+        };
+        let options = if block {
+            top_options(&self.tokens, self.src, from + 1, opener_end)
+        } else {
+            Vec::new()
+        };
+        let option = |key: &str| {
+            options
+                .iter()
+                .find(|row| row.ident.eq_ignore_ascii_case(key))
+        };
+        let dimension = option("heterogeneity").map(|row| row.value_lex.clone());
+        let subtype = if block {
+            if dimension.is_some() {
+                Some("heterogeneous".to_string())
+            } else if option("learnt_in").is_some() {
+                Some("learnt_in".to_string())
+            } else if option("surprise").is_some() {
+                Some("surprise".to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let category = if block {
+            crate::model_map::block_category(&name, subtype.as_deref()).map(str::to_owned)
+        } else {
+            None
+        };
+        let subtype = category
+            .as_ref()
+            .and_then(|key| key.split_once('.').map(|(_, subtype)| subtype.to_string()))
+            .or(subtype);
+        let complete = self.tokens[self.i - 1].kind == TokenKind::Semi
+            && (!block
+                || (self.i >= from + 2
+                    && self.tokens[self.i - 2]
+                        .text(self.src)
+                        .eq_ignore_ascii_case("end")));
+        let id = self.model.statements.len();
+        let native = assignment.is_some_and(|index| match index {
+            crate::model::AssignmentIndex::Parameter(i) => self.model.param_assignments[i].native,
+            crate::model::AssignmentIndex::Helper(i) => self.model.helper_assignments[i].native,
+        });
+        self.model.statements.push(Statement {
+            id,
+            kind,
+            name,
+            token_range: from..self.i,
+            opener_range: from..opener_end,
+            span: self.covering_tokens(from..self.i),
+            complete,
+            category,
+            subtype,
+            dimension,
+            assignment,
+            native,
+        });
+        self.model
+            .execution_steps
+            .push(ExecutionStep::Statement(id));
     }
 
     fn record_decl_roles(&mut self, decls: &[Decl], role: EstimatedNameRole) {
@@ -1436,6 +1620,16 @@ impl Parser<'_> {
                 });
             }
         }
+        for decl in &decls {
+            self.model
+                .written_declarations
+                .push(crate::model::WrittenDeclaration {
+                    statement_id: self.model.statements.len(),
+                    written_kind: keyword.to_string(),
+                    token_range: decl.parse_order - 1..decl.parse_order,
+                    declaration: decl.clone(),
+                });
+        }
         decls
     }
 
@@ -1605,6 +1799,7 @@ impl Parser<'_> {
         self.in_equation_body = true;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
             if let Some((eq, range)) = self.parse_equation_statement() {
+                self.record_written_equation(&eq, &range, None);
                 self.eq_token_ranges.push(range);
                 self.model.equations.push(eq);
             }
@@ -1680,6 +1875,7 @@ impl Parser<'_> {
         let mut ranges = Vec::new();
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
             if let Some((eq, range)) = self.parse_equation_statement() {
+                self.record_written_equation(&eq, &range, Some(dimension));
                 ranges.push(range);
                 equations.push(eq);
             }
@@ -1711,7 +1907,25 @@ impl Parser<'_> {
             if self.at(TokenKind::Ident) {
                 let tok = self.bump();
                 let name = self.lexeme(&tok).to_string();
-                names.push((self.intern.intern(&name), tok.span));
+                let name = self.intern.intern(&name);
+                names.push((name, tok.span));
+                self.model
+                    .written_declarations
+                    .push(crate::model::WrittenDeclaration {
+                        statement_id: self.model.statements.len(),
+                        written_kind: "heterogeneity_dimension".to_string(),
+                        token_range: self.i - 1..self.i,
+                        declaration: Decl {
+                            parse_order: self.i,
+                            symbol_type_context: self.model.symbol_context(),
+                            name,
+                            span: tok.span,
+                            long_name: None,
+                            tex_name: None,
+                            log_transform: false,
+                            heterogeneity: None,
+                        },
+                    });
             } else if self.at(TokenKind::Number) {
                 self.hetero_bison_refuse(self.i, None);
                 self.bump();
@@ -1963,6 +2177,7 @@ impl Parser<'_> {
         self.in_equation_body = true;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
             if let Some((eq, range)) = self.parse_equation_statement() {
+                self.record_written_equation(&eq, &range, None);
                 self.eq_token_ranges.push(range);
                 self.model.equations.push(eq);
                 n_equations += 1;
@@ -1980,6 +2195,22 @@ impl Parser<'_> {
             self.record_missing_final("model_replace", body_i, self.i);
         }
         self.finish_block_named("model_replace", span, body_i);
+    }
+
+    fn record_written_equation(
+        &mut self,
+        equation: &Equation,
+        range: &Range<usize>,
+        dimension: Option<Name>,
+    ) {
+        self.model
+            .written_equations
+            .push(crate::model::WrittenEquation {
+                statement_id: self.model.statements.len(),
+                equation: equation.clone(),
+                token_range: range.clone(),
+                dimension,
+            });
     }
 
     fn parse_var_remove_statement(&mut self) {
@@ -2655,6 +2886,28 @@ impl Parser<'_> {
                     log_trend,
                     growth,
                 });
+                self.model
+                    .written_declarations
+                    .push(crate::model::WrittenDeclaration {
+                        statement_id: self.model.statements.len(),
+                        written_kind: if log_trend {
+                            "log_trend_var"
+                        } else {
+                            "trend_var"
+                        }
+                        .to_string(),
+                        token_range: self.i - 1..self.i,
+                        declaration: Decl {
+                            parse_order: self.i,
+                            symbol_type_context: self.model.symbol_context(),
+                            name,
+                            span: tok.span,
+                            long_name: None,
+                            tex_name: None,
+                            log_transform: false,
+                            heterogeneity: None,
+                        },
+                    });
                 continue;
             }
             self.bump();
@@ -2734,6 +2987,7 @@ impl Parser<'_> {
 
     /// `external_function(name=?, nargs=?, first_deriv_provided[, =?], ?);`
     fn parse_external_function(&mut self) {
+        let statement_from = self.i;
         let start = self.current_start();
         self.bump();
         let mut stmt = ExternalFunctionStmt {
@@ -2804,6 +3058,28 @@ impl Parser<'_> {
         declared.sort_by_key(|(_, span)| (span.start, span.end));
         for (name, span) in declared {
             self.record_symbol_declaration(name, span, crate::model::SymbolKind::ExternalFunction);
+            if let Some(at) = (statement_from..self.i).find(|&at| self.tokens[at].span == span) {
+                self.model
+                    .type_event_occurrences
+                    .push((self.model.symbol_type_events.len() - 1, at..at + 1));
+                self.model
+                    .written_declarations
+                    .push(crate::model::WrittenDeclaration {
+                        statement_id: self.model.statements.len(),
+                        written_kind: "external_function".to_string(),
+                        token_range: at..at + 1,
+                        declaration: Decl {
+                            parse_order: at + 1,
+                            symbol_type_context: self.model.symbol_context(),
+                            name,
+                            span,
+                            long_name: None,
+                            tex_name: None,
+                            log_transform: false,
+                            heterogeneity: None,
+                        },
+                    });
+            }
         }
         self.model.external_functions.push(stmt);
     }

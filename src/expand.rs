@@ -5,11 +5,15 @@ use std::collections::HashMap;
 use crate::equations::equations;
 use crate::lexer::{tokenize, Token};
 use crate::macro_expand::{expand_macros_traced_with_status, FrameRec, TokenTrace};
+use crate::model_map::{
+    EquationOccurrence, SourceFrame, SourceOccurrence, WrittenModelMap, WrittenSegment,
+};
 use crate::parser::{join_lexemes, normalize_newlines, parse_expanded};
 use crate::span::Span;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExpandReport {
+    pub model_map: WrittenModelMap,
     /// False when macro syntax remains because this expander cannot safely evaluate it.
     pub complete: bool,
     pub effective_text: String,
@@ -89,8 +93,12 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
     let (tokens, traces, arena, incomplete) = expand_macros_traced_with_status(&source, raw);
     debug_assert_eq!(tokens.len(), traces.len());
     let effective_text = join_lexemes(&source, &tokens);
+    let (model, ranges) = parse_expanded(&source, tokens.clone());
+    let map_complete = !incomplete && crate::model_map::parser_complete(&model);
+    let model_map = build_model_map(&model, &ranges, &tokens, &traces, &arena, map, map_complete);
     if incomplete {
         return ExpandReport {
+            model_map,
             complete: false,
             effective_text,
             n_equations: 0,
@@ -101,7 +109,6 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
             heterogeneous_row_origins: Vec::new(),
         };
     }
-    let (model, ranges) = parse_expanded(&source, tokens.clone());
     debug_assert_eq!(model.equations.len(), ranges.aggregate.len());
     debug_assert_eq!(model.heterogeneous_models.len(), ranges.heterogeneous.len());
     let counted = equations(&model);
@@ -190,6 +197,7 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
     }
     debug_assert_eq!(counted.len(), aggregate_origins.len());
     ExpandReport {
+        model_map,
         complete: true,
         effective_text,
         n_equations: origins.len(),
@@ -199,6 +207,153 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
         aggregate_row_origins,
         heterogeneous_row_origins,
     }
+}
+
+fn build_model_map(
+    model: &crate::model::Model,
+    ranges: &crate::parser::EquationTokenRanges,
+    tokens: &[Token],
+    traces: &[TokenTrace],
+    arena: &[FrameRec],
+    map: &[SpliceSegment],
+    complete: bool,
+) -> WrittenModelMap {
+    let source = |range: &std::ops::Range<usize>, anchor: &std::ops::Range<usize>| {
+        let frames = traces[anchor.clone()]
+            .iter()
+            .max_by_key(|trace| trace.frames.len())
+            .map(|trace| trace.frames.as_slice())
+            .unwrap_or_default();
+        let anchors = map_token_segments(map, &tokens[anchor.clone()]);
+        SourceOccurrence {
+            segments: map_token_segments(map, &tokens[range.clone()]),
+            anchor: if anchors.len() == 1 {
+                anchors.into_iter().next()
+            } else {
+                None
+            },
+            origin_frames: frames
+                .iter()
+                .map(|&id| {
+                    let frame = &arena[id];
+                    SourceFrame {
+                        kind: frame.kind.to_string(),
+                        variable: frame.variable.clone(),
+                        value: frame.value.clone(),
+                        segments: map_written_segments(map, frame.body_span),
+                    }
+                })
+                .collect(),
+        }
+    };
+    let mut numbered = HashMap::new();
+    let mut active = std::collections::HashSet::new();
+    let mut number = 0;
+    for (equation, range) in model.equations.iter().zip(&ranges.aggregate) {
+        active.insert(range.start);
+        if !equation.is_local && !equation.static_tag {
+            number += 1;
+            numbered.insert(range.start, number);
+        }
+    }
+    let mut dimension_numbers = HashMap::new();
+    for (block, block_ranges) in model.heterogeneous_models.iter().zip(&ranges.heterogeneous) {
+        let number = dimension_numbers.entry(block.dimension).or_insert(0);
+        for (equation, range) in block.equations.iter().zip(block_ranges) {
+            active.insert(range.start);
+            if !equation.is_local && !equation.static_tag {
+                *number += 1;
+                numbered.insert(range.start, *number);
+            }
+        }
+    }
+    WrittenModelMap {
+        complete,
+        statements: model
+            .statements
+            .iter()
+            .map(|statement| source(&statement.token_range, &statement.opener_range))
+            .collect(),
+        declarations: model
+            .written_declarations
+            .iter()
+            .map(|decl| source(&decl.token_range, &decl.token_range))
+            .collect(),
+        equations: model
+            .written_equations
+            .iter()
+            .map(|row| EquationOccurrence {
+                id: row.token_range.start,
+                statement_id: row.statement_id,
+                name: row.equation.name.clone(),
+                dimension: row.dimension.map(|name| model.name(name).to_string()),
+                number: complete
+                    .then(|| numbered.get(&row.token_range.start).copied())
+                    .flatten(),
+                active: active.contains(&row.token_range.start),
+                local: row.equation.is_local,
+                static_only: row.equation.static_tag,
+                source: source(
+                    &row.token_range,
+                    &(row.token_range.start..row.token_range.start + 1),
+                ),
+            })
+            .collect(),
+        type_events: model
+            .type_event_occurrences
+            .iter()
+            .map(|(index, range)| (*index, source(range, range)))
+            .collect(),
+    }
+}
+
+/// Group tokens by the include segment they actually came from. Clipping makes
+/// cross-file rows safe; one file's range cannot run into another file's bytes.
+fn map_token_segments(map: &[SpliceSegment], tokens: &[Token]) -> Vec<WrittenSegment> {
+    let mut grouped: Vec<(usize, WrittenSegment)> = Vec::new();
+    for token in tokens {
+        for (index, segment) in map.iter().enumerate() {
+            let start = token.span.start.max(segment.spliced.start);
+            let end = token.span.end.min(segment.spliced.end);
+            if start >= end {
+                continue;
+            }
+            let span = Span {
+                start: segment.origin.start + start - segment.spliced.start,
+                end: segment.origin.start + end - segment.spliced.start,
+            };
+            if let Some((_, existing)) = grouped.iter_mut().find(|(id, _)| *id == index) {
+                existing.span.start = existing.span.start.min(span.start);
+                existing.span.end = existing.span.end.max(span.end);
+            } else {
+                grouped.push((
+                    index,
+                    WrittenSegment {
+                        file: segment.file.clone(),
+                        span,
+                    },
+                ));
+            }
+        }
+    }
+    grouped.sort_by_key(|(index, _)| *index);
+    grouped.into_iter().map(|(_, segment)| segment).collect()
+}
+
+pub(crate) fn map_written_segments(map: &[SpliceSegment], span: Span) -> Vec<WrittenSegment> {
+    map.iter()
+        .filter_map(|segment| {
+            let start = span.start.max(segment.spliced.start);
+            let end = span.end.min(segment.spliced.end);
+            (start < end).then(|| WrittenSegment {
+                file: segment.file.clone(),
+                span: Span {
+                    start: segment.origin.start + start - segment.spliced.start,
+                    end: segment.origin.start + end - segment.spliced.start,
+                },
+            })
+        })
+        .collect()
 }
 
 fn origin_for_row(

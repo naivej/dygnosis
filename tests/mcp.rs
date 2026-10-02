@@ -1423,17 +1423,14 @@ fn model_info_workspace_swff_splices_inc() {
 }
 
 #[test]
-fn model_info_files_without_active_does_not_splice() {
+fn model_info_files_without_active_withholds_unexpanded_include_counts() {
     let mut files = swff_relative_files();
     let extra = format!("parameters mcp_only;\n{}", files["swff_params.inc"]);
     files.insert("swff_params.inc".to_string(), extra);
     let info = dynare_model_info(&files["swff.mod"], None, Some(&files));
-    let params = info["parameters"].as_array().expect("parameters");
-    let names: Vec<&str> = params.iter().filter_map(|v| v.as_str()).collect();
-    assert!(
-        !names.contains(&"mcp_only"),
-        "model_info without active_file must not splice includes: {names:?}"
-    );
+    assert_eq!(info["status"], "incomplete");
+    assert!(info.get("parameters").is_none());
+    assert!(info.get("n_equations").is_none());
 }
 
 #[test]
@@ -2292,10 +2289,9 @@ fn dynare_equations_swff_map_matches_model_info() {
 
     let no_active = dynare_equations(&files["swff.mod"], None, Some(&files), None, None);
     let info_no_active = dynare_model_info(&files["swff.mod"], None, Some(&files));
-    assert_eq!(
-        no_active["count_gap"]["n_equations"],
-        info_no_active["n_equations"]
-    );
+    assert_eq!(no_active["count_gap"]["n_equations"], 40);
+    assert_eq!(info_no_active["status"], "incomplete");
+    assert!(info_no_active.get("n_equations").is_none());
 }
 
 #[test]

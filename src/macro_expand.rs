@@ -16,6 +16,7 @@ type ExpandTracedFull = (
     Vec<MacroTypeError>,
     Vec<Span>,
     Option<Span>,
+    bool,
 );
 
 #[derive(Clone, Debug)]
@@ -170,7 +171,7 @@ pub fn expand_macros_full(
     src: &str,
     tokens: Vec<Token>,
 ) -> (Vec<Token>, Vec<(Span, &'static str, String)>) {
-    let (out, _, _, errors, _, _) = expand_macros_traced_full(src, tokens);
+    let (out, _, _, errors, _, _, _) = expand_macros_traced_full(src, tokens);
     (out, errors)
 }
 
@@ -178,7 +179,7 @@ pub(crate) fn expand_macros_with_status(
     src: &str,
     tokens: Vec<Token>,
 ) -> (Vec<Token>, Vec<MacroTypeError>, Option<Span>) {
-    let (out, _, _, errors, _, incomplete) = expand_macros_traced_full(src, tokens);
+    let (out, _, _, errors, _, incomplete, _) = expand_macros_traced_full(src, tokens);
     (out, errors, incomplete)
 }
 
@@ -186,15 +187,35 @@ pub(crate) fn expand_macros_traced_with_status(
     src: &str,
     tokens: Vec<Token>,
 ) -> (Vec<Token>, Vec<TokenTrace>, Vec<FrameRec>, bool) {
-    let (out, traces, arena, _, _, incomplete) = expand_macros_traced_full(src, tokens);
+    let (out, traces, arena, _, _, incomplete, _) = expand_macros_traced_full(src, tokens);
     (out, traces, arena, incomplete.is_some())
 }
 
 /// Source ranges of `@#if` / `@#ifndef` branches that expansion discarded.
 pub(crate) fn inactive_macro_spans(src: &str) -> Vec<Span> {
     let tokens = crate::lexer::tokenize(src);
-    let (_, _, _, _, discarded, _) = expand_macros_traced_full(src, tokens);
+    let (_, _, _, _, discarded, _, _) = expand_macros_traced_full(src, tokens);
     discarded
+}
+
+pub(crate) fn has_include_directives(src: &str) -> bool {
+    let source = crate::parser::normalize_newlines(src);
+    crate::lexer::tokenize(&source).iter().any(|token| {
+        token.kind == TokenKind::MacroDir
+            && directive_name(token.text(&source)).eq_ignore_ascii_case("include")
+    })
+}
+
+/// Proof for a metadata splice whose unresolved/cyclic directives remain in
+/// place. The visitor already observes executed includes; normal output is unchanged.
+pub(crate) fn required_includes_complete(src: &str) -> bool {
+    let source = crate::parser::normalize_newlines(src);
+    if !has_include_directives(&source) {
+        return true;
+    }
+    let (_, _, _, _, _, incomplete, include_seen) =
+        expand_macros_traced_full(&source, crate::lexer::tokenize(&source));
+    !include_seen && incomplete.is_none()
 }
 
 fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull {
@@ -203,7 +224,7 @@ fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull 
     let mut type_errors = Vec::new();
     let mut discarded = Vec::new();
     let mut incomplete = None;
-    let (out, traces) = {
+    let (out, traces, include_seen) = {
         let mut state = ExpandState {
             src,
             defines: &mut defines,
@@ -214,9 +235,18 @@ fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull 
             incomplete: &mut incomplete,
             include_seen: false,
         };
-        expand_seq(&mut state, &tokens)
+        let (out, traces) = expand_seq(&mut state, &tokens);
+        (out, traces, state.include_seen)
     };
-    (out, traces, arena, type_errors, discarded, incomplete)
+    (
+        out,
+        traces,
+        arena,
+        type_errors,
+        discarded,
+        incomplete,
+        include_seen,
+    )
 }
 
 fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec<TokenTrace>) {

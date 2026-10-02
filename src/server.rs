@@ -31,6 +31,7 @@ use crate::refs::{
     enclosing_paren_has_ident, ident_at, is_legal_ident, occurrences, option_command_at,
     option_owner_at,
 };
+use crate::server_model_map::{common_leaves, WrittenView};
 use crate::server_settings::{
     PresentationSettings, ResourceSettings, SettingsStore, CONFIGURATION_SCHEMA_VERSION,
     MODEL_INFO_SCHEMA_VERSION,
@@ -497,22 +498,59 @@ impl Backend {
     }
 
     fn doc_symbols(&self, uri: &Url) -> Option<Vec<DocumentSymbol>> {
-        let inner = self.lock_inner();
-        let doc = inner.docs.get(uri)?;
+        let mut inner = self.lock_inner();
+        let text = inner.docs.get(uri)?.text.clone();
+        let preferences = inner.presentation_for(uri);
+        let owners = inner.known_owner_roots(uri);
+        let roots = if owners.is_empty() && is_model_root(uri) {
+            vec![uri.clone()]
+        } else {
+            owners
+        };
+        let mut views = Vec::new();
+        for root in &roots {
+            inner.root_revision(root);
+            let model = inner.workspace.get_effective_model(root.as_str())?.clone();
+            let report = inner.workspace.expand_report(root.as_str())?.clone();
+            let authoritative = roots.len() == 1
+                && report.complete
+                && report.model_map.complete
+                && inner.workspace.includes_complete(root.as_str());
+            let view = WrittenView::new(
+                uri,
+                &text,
+                &model,
+                &report.model_map,
+                Some(&inner.workspace),
+                authoritative,
+                roots.len() == 1,
+            )
+            .with_known_uris(inner.docs.keys().chain(std::iter::once(root)));
+            views.push(view.symbols(&preferences));
+        }
+        if roots.len() > 1 {
+            return Some(common_leaves(views));
+        }
+        if let Some(view) = views.pop().filter(|view| !view.is_empty()) {
+            return Some(view);
+        }
         let model = inner.workspace.get_model(uri.as_str())?;
-        Some(document_symbols_for(&doc.text, model))
+        let report = crate::expand::expand_report(&text);
+        Some(
+            WrittenView::new(uri, &text, model, &report.model_map, None, false, false)
+                .symbols(&preferences),
+        )
     }
 
     fn workspace_symbols(&self, query: &str) -> Vec<SymbolInformation> {
-        let inner = self.lock_inner();
         let q = query.to_ascii_lowercase();
         let mut out = Vec::new();
-        for (uri, doc) in &inner.docs {
-            let Some(model) = inner.workspace.get_model(uri.as_str()) else {
+        let uris: Vec<_> = self.lock_inner().docs.keys().cloned().collect();
+        for uri in uris {
+            let Some(nested) = self.doc_symbols(&uri) else {
                 continue;
             };
-            let nested = document_symbols_for(&doc.text, model);
-            flatten_workspace_symbols(uri, &nested, None, &q, &mut out);
+            flatten_workspace_symbols(&uri, &nested, None, &q, &mut out);
         }
         out
     }
@@ -895,32 +933,11 @@ impl Backend {
         let inner = self.lock_inner();
         let doc = inner.docs.get(uri)?;
         let model = inner.workspace.get_model(uri.as_str())?;
-        let index = LineIndex::new(&doc.text);
-        let mut ranges = Vec::new();
-        let blocks = [
-            (model.model_block, "model"),
-            (model.ss_block, "steady_state_model"),
-            (model.initval_block, "initval"),
-            (model.endval_block, "endval"),
-            (model.shocks_block, "shocks"),
-        ];
-        for (span, keyword) in blocks {
-            let Some(span) = span else {
-                continue;
-            };
-            let start = index.position_utf16(&doc.text, span.start);
-            let end = index.position_utf16(&doc.text, span.end);
-            if start.line < end.line {
-                ranges.push(FoldingRange {
-                    start_line: start.line,
-                    start_character: None,
-                    end_line: end.line,
-                    end_character: None,
-                    kind: Some(FoldingRangeKind::Region),
-                    collapsed_text: Some(format!("{keyword} ... end;")),
-                });
-            }
-        }
+        let normalized = crate::parser::normalize_newlines(&doc.text);
+        let index = LineIndex::new(&normalized);
+        let report = crate::expand::expand_report(&doc.text);
+        let mut ranges =
+            WrittenView::new(uri, &doc.text, model, &report.model_map, None, false, false).folds();
         let mut stack: Vec<&crate::model::MacroDirective> = Vec::new();
         const COND: &[&str] = &["if", "ifdef", "ifndef"];
         for directive in &model.macro_directives {
@@ -1250,8 +1267,108 @@ impl Backend {
             "dynare/explainDiagnostic" => explain_command(arguments),
             "dynare/compareModels" => self.compare_command(arguments),
             "dynare/showEffectiveModel" => self.show_effective_model_command(arguments),
+            "dynare/modelInfo" => self.model_info_command(arguments),
             _ => json!({"error": format!("unknown command {command}"), "code": "UNKNOWN_COMMAND"}),
         }
+    }
+
+    fn model_info_command(&self, arguments: &[Value]) -> Value {
+        let Some(argument) = arguments.first().and_then(Value::as_object) else {
+            return json!({"error":"dynare/modelInfo requires a root_uri argument", "code":"INVALID_ARGUMENTS"});
+        };
+        let Some(root) = argument
+            .get("root_uri")
+            .and_then(Value::as_str)
+            .and_then(|uri| Url::parse(uri).ok())
+        else {
+            return json!({"error":"dynare/modelInfo requires a valid root_uri", "code":"INVALID_ARGUMENTS"});
+        };
+        let document = match argument.get("document_uri") {
+            None => root.clone(),
+            Some(value) => match value.as_str().and_then(|uri| Url::parse(uri).ok()) {
+                Some(uri) => uri,
+                None => {
+                    return json!({"error":"dynare/modelInfo requires a valid document_uri", "code":"INVALID_ARGUMENTS"})
+                }
+            },
+        };
+        let mut inner = self.lock_inner();
+        if !is_model_root(&root) {
+            return json!({"error":"Choose a .mod or .dyn owner root for model information", "code":"ROOT_REQUIRED", "owner_roots":inner.known_owner_roots(&root)});
+        }
+        if !["file", "untitled"].contains(&root.scheme()) {
+            return json!({"error":"Model information requires a file or untitled root URI", "code":"UNSUPPORTED_URI"});
+        }
+        let Some(revision) = inner.root_revision(&root) else {
+            return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
+        };
+        if crate::include_resolver::normalize_uri(document.as_str())
+            != crate::include_resolver::normalize_uri(root.as_str())
+            && !inner
+                .workspace
+                .owner_roots(document.as_str())
+                .contains(&crate::include_resolver::normalize_uri(root.as_str()))
+        {
+            return json!({"error":"The displayed document does not belong to the chosen model root", "code":"DOCUMENT_NOT_OWNED"});
+        }
+        let Some(model) = inner.workspace.get_effective_model(root.as_str()).cloned() else {
+            return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
+        };
+        let Some(report) = inner.workspace.expand_report(root.as_str()).cloned() else {
+            return json!({"error":"The model root is unavailable", "code":"ROOT_NOT_FOUND"});
+        };
+        let complete = report.complete
+            && report.model_map.complete
+            && inner.workspace.includes_complete(root.as_str());
+        let Some(text) = inner.workspace.get_source(document.as_str()) else {
+            return json!({"error":"The displayed source is unavailable", "code":"DOCUMENT_NOT_FOUND"});
+        };
+        let view = WrittenView::new(
+            &document,
+            text,
+            &model,
+            &report.model_map,
+            Some(&inner.workspace),
+            complete,
+            true,
+        )
+        .with_known_uris(inner.docs.keys().chain(std::iter::once(&root)));
+        let facts = view.facts_json();
+        let mut result = if complete {
+            crate::model_info::model_info_json(&model)
+        } else {
+            crate::model_info::model_incomplete_status()
+        };
+        result
+            .as_object_mut()
+            .unwrap()
+            .extend(facts.as_object().unwrap().clone());
+        result["schema_version"] = json!(MODEL_INFO_SCHEMA_VERSION);
+        result["root_uri"] = json!(root);
+        result["document_uri"] = json!(document);
+        result["document_version"] = json!(inner.docs.get(&document).map(|doc| doc.version));
+        result["revision"] = json!(revision);
+        result["complete"] = json!(complete);
+        result["owner_roots"] = json!(inner.known_owner_roots(&document));
+        result["block_categories"] = json!(crate::model_map::BLOCK_CATEGORIES
+            .iter()
+            .map(|(category, default)| json!({"category":category,"default":default}))
+            .collect::<Vec<_>>());
+        let includes = inner
+            .workspace
+            .include_records(root.as_str())
+            .cloned()
+            .unwrap_or_default();
+        let companions = inner
+            .workspace
+            .companion_records(root.as_str())
+            .map(<[_]>::to_vec)
+            .unwrap_or_default();
+        result["related_files"] =
+            crate::model_info::related_files_json(&includes, &companions, |path| {
+                path.to_string_lossy().into_owned()
+            });
+        result
     }
 
     fn compare_command(&self, arguments: &[Value]) -> Value {
@@ -1887,6 +2004,7 @@ pub fn initialize_result() -> InitializeResult {
                     "dynare/explainDiagnostic".into(),
                     "dynare/compareModels".into(),
                     "dynare/showEffectiveModel".into(),
+                    "dynare/modelInfo".into(),
                 ],
                 work_done_progress_options: WorkDoneProgressOptions::default(),
             }),
@@ -2357,154 +2475,6 @@ fn default_completions(model: &Model) -> Vec<CompletionItem> {
         ..CompletionItem::default()
     });
     items
-}
-
-#[allow(deprecated)]
-fn document_symbols_for(text: &str, model: &Model) -> Vec<DocumentSymbol> {
-    let index = LineIndex::new(text);
-    let mut symbols = Vec::new();
-    if !model.endogenous.is_empty() {
-        let timing = classify_variable_timing(model);
-        let mut predetermined = Vec::new();
-        let mut forward_looking = Vec::new();
-        let mut mixed = Vec::new();
-        let mut static_vars = Vec::new();
-        for d in &model.endogenous {
-            let name = model.name(d.name);
-            let class = timing
-                .get(name)
-                .map(|t| t.class)
-                .unwrap_or(TimingClass::Static);
-            match class {
-                TimingClass::Predetermined => predetermined.push(d.clone()),
-                TimingClass::ForwardLooking => forward_looking.push(d.clone()),
-                TimingClass::Mixed => mixed.push(d.clone()),
-                TimingClass::Static => static_vars.push(d.clone()),
-            }
-        }
-        for (class, bucket) in [
-            (TimingClass::Predetermined, &predetermined),
-            (TimingClass::ForwardLooking, &forward_looking),
-            (TimingClass::Mixed, &mixed),
-            (TimingClass::Static, &static_vars),
-        ] {
-            if bucket.is_empty() {
-                continue;
-            }
-            symbols.push(group_symbol(
-                class.label(),
-                bucket,
-                model,
-                &index,
-                text,
-                SymbolKind::VARIABLE,
-            ));
-        }
-    }
-    if !model.exogenous.is_empty() {
-        symbols.push(group_symbol(
-            "varexo (exogenous)",
-            &model.exogenous,
-            model,
-            &index,
-            text,
-            SymbolKind::VARIABLE,
-        ));
-    }
-    if !model.parameters.is_empty() {
-        symbols.push(group_symbol(
-            "parameters",
-            &model.parameters,
-            model,
-            &index,
-            text,
-            SymbolKind::NUMBER,
-        ));
-    }
-    if !model.equations.is_empty() {
-        let children: Vec<DocumentSymbol> = model
-            .equations
-            .iter()
-            .map(|eq| {
-                let label = if !eq.name.is_empty() {
-                    eq.name.clone()
-                } else if !eq.lhs.is_empty() {
-                    eq.lhs.clone()
-                } else {
-                    eq.text.chars().take(60).collect()
-                };
-                leaf_symbol(
-                    &label,
-                    SymbolKind::FUNCTION,
-                    span_range(&index, text, eq.span),
-                )
-            })
-            .collect();
-        let first = children.first().map(|c| c.range).unwrap_or_default();
-        let last = children.last().map(|c| c.range.end).unwrap_or(first.end);
-        symbols.push(DocumentSymbol {
-            name: "model".into(),
-            detail: Some(format!("{} equations", model.equations.len())),
-            kind: SymbolKind::MODULE,
-            tags: None,
-            deprecated: None,
-            range: Range::new(first.start, last),
-            selection_range: first,
-            children: Some(children),
-        });
-    }
-    symbols
-}
-
-#[allow(deprecated)]
-fn group_symbol(
-    name: &str,
-    decls: &[Decl],
-    model: &Model,
-    index: &LineIndex,
-    text: &str,
-    child_kind: SymbolKind,
-) -> DocumentSymbol {
-    let children: Vec<DocumentSymbol> = decls
-        .iter()
-        .map(|d| {
-            leaf_symbol(
-                model.name(d.name),
-                child_kind,
-                span_range(index, text, d.span),
-            )
-        })
-        .collect();
-    let first = span_range(index, text, decls[0].span);
-    let last = span_range(index, text, decls[decls.len() - 1].span);
-    DocumentSymbol {
-        name: name.into(),
-        detail: Some(if name == "parameters" {
-            format!("{} parameters", decls.len())
-        } else {
-            format!("{} variables", decls.len())
-        }),
-        kind: SymbolKind::NAMESPACE,
-        tags: None,
-        deprecated: None,
-        range: Range::new(first.start, last.end),
-        selection_range: first,
-        children: Some(children),
-    }
-}
-
-#[allow(deprecated)]
-fn leaf_symbol(name: &str, kind: SymbolKind, range: Range) -> DocumentSymbol {
-    DocumentSymbol {
-        name: name.into(),
-        detail: None,
-        kind,
-        tags: None,
-        deprecated: None,
-        range,
-        selection_range: range,
-        children: None,
-    }
 }
 
 #[allow(deprecated)]

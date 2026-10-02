@@ -27,12 +27,9 @@ use crate::extract::{
 };
 use crate::format::{format_outcome, parse_format_indent, FormatOutcome};
 use crate::include_resolver::{normalize_uri, path_key};
-use crate::intern::Name;
 use crate::model::Model;
 use crate::model_diff::{compare_models_with_sources, CompareSource};
-use crate::model_info::{
-    classify_aggregate_variable_timing, classify_variable_timing, TimingClass,
-};
+use crate::model_info::{heterogeneous_dimension_names, model_info_json, related_files_json};
 use crate::parser::{normalize_newlines, parse};
 use crate::refs::{is_legal_ident, occurrences, rename_in_text};
 use crate::span::{LineIndex, Span};
@@ -228,9 +225,30 @@ pub fn dynare_model_info(
     active_file: Option<&str>,
     files: Option<&HashMap<String, String>>,
 ) -> Value {
-    let model = mcp_parse_model(file_content, active_file, files, false);
+    let (model, includes_complete) =
+        if let (Some(files), Some(active)) = (nonempty_map(files), active_file) {
+            let mut workspace = Workspace::new();
+            for (name, content) in files {
+                workspace.update_document(name, content);
+            }
+            workspace.update_document(active, file_content);
+            let complete = workspace.includes_complete(active);
+            let model = workspace
+                .get_effective_model(active)
+                .cloned()
+                .unwrap_or_else(|| parse(file_content));
+            (model, complete)
+        } else {
+            (
+                parse(file_content),
+                crate::macro_expand::required_includes_complete(file_content),
+            )
+        };
     if model.macro_incomplete() {
         return macro_incomplete_status();
+    }
+    if !includes_complete || !crate::model_map::parser_complete(&model) {
+        return crate::model_info::model_incomplete_status();
     }
     model_info_json(&model)
 }
@@ -513,6 +531,7 @@ impl McpUnit {
             .expand_report(active)
             .cloned()
             .unwrap_or_else(|| ExpandReport {
+                model_map: Default::default(),
                 complete: false,
                 effective_text: String::new(),
                 n_equations: 0,
@@ -716,154 +735,6 @@ fn mcp_parse_model(
     ws.get_effective_model(&active)
         .cloned()
         .unwrap_or_else(|| parse(file_content))
-}
-
-fn model_info_json(model: &Model) -> Value {
-    let endogenous: Vec<String> = model
-        .final_endogenous()
-        .into_iter()
-        .map(|d| model.name(d.name).to_string())
-        .collect();
-    let exogenous: Vec<String> = model
-        .final_decls(&["varexo", "varexo_det"])
-        .into_iter()
-        .filter(|decl| model.final_heterogeneity(decl).is_none())
-        .map(|d| model.name(d.name).to_string())
-        .collect();
-    let parameters: Vec<String> = model
-        .final_parameters()
-        .into_iter()
-        .filter(|decl| model.final_heterogeneity(decl).is_none())
-        .map(|d| model.name(d.name).to_string())
-        .collect();
-    let timing = classify_aggregate_variable_timing(model);
-    let mut static_vars = Vec::new();
-    let mut predetermined = Vec::new();
-    let mut forward_looking = Vec::new();
-    let mut mixed = Vec::new();
-    for name in &endogenous {
-        match timing.get(name).map(|t| t.class) {
-            Some(TimingClass::Mixed) => mixed.push(name.clone()),
-            Some(TimingClass::ForwardLooking) => forward_looking.push(name.clone()),
-            Some(TimingClass::Predetermined) => predetermined.push(name.clone()),
-            _ => static_vars.push(name.clone()),
-        }
-    }
-    let summary = model.summary();
-    let heterogeneous_timing = classify_variable_timing(model);
-    let heterogeneous_dimensions: Vec<Value> = heterogeneous_dimension_names(model)
-        .into_iter()
-        .map(|dimension| {
-            let names: Vec<String> = model
-                .final_decls(&["var"])
-                .into_iter()
-                .filter(|decl| model.final_heterogeneity(decl) == Some(dimension))
-                .map(|decl| model.name(decl.name).to_string())
-                .collect();
-            let shocks: Vec<String> = model
-                .final_decls(&["varexo", "varexo_det"])
-                .into_iter()
-                .filter(|decl| model.final_heterogeneity(decl) == Some(dimension))
-                .map(|decl| model.name(decl.name).to_string())
-                .collect();
-            let params: Vec<String> = model
-                .final_parameters()
-                .into_iter()
-                .filter(|decl| model.final_heterogeneity(decl) == Some(dimension))
-                .map(|decl| model.name(decl.name).to_string())
-                .collect();
-            let mut static_vars = Vec::new();
-            let mut predetermined = Vec::new();
-            let mut forward_looking = Vec::new();
-            let mut mixed = Vec::new();
-            for name in &names {
-                match heterogeneous_timing.get(name).map(|info| info.class) {
-                    Some(TimingClass::Mixed) => mixed.push(name.clone()),
-                    Some(TimingClass::ForwardLooking) => forward_looking.push(name.clone()),
-                    Some(TimingClass::Predetermined) => predetermined.push(name.clone()),
-                    _ => static_vars.push(name.clone()),
-                }
-            }
-            let n_equations = model
-                .heterogeneous_models
-                .iter()
-                .filter(|block| block.dimension == dimension)
-                .flat_map(|block| block.equations.iter())
-                .filter(|eq| !eq.is_local && !eq.static_tag)
-                .count();
-            json!({
-                "dimension": model.name(dimension),
-                "n_endogenous": names.len(),
-                "endogenous": names,
-                "n_exogenous": shocks.len(),
-                "exogenous": shocks,
-                "n_parameters": params.len(),
-                "parameters": params,
-                "n_equations": n_equations,
-                "static": static_vars,
-                "predetermined": predetermined,
-                "forward_looking": forward_looking,
-                "mixed": mixed,
-            })
-        })
-        .collect();
-    json!({
-        "n_endogenous": endogenous.len(),
-        "endogenous": endogenous,
-        "n_exogenous": exogenous.len(),
-        "exogenous": exogenous,
-        "n_parameters": parameters.len(),
-        "parameters": parameters,
-        "n_equations": count_gap(model).n_equations,
-        "static": static_vars,
-        "predetermined": predetermined,
-        "forward_looking": forward_looking,
-        "mixed": mixed,
-        "n_static": static_vars.len(),
-        "n_predetermined": predetermined.len(),
-        "n_forward_looking": forward_looking.len(),
-        "n_mixed": mixed.len(),
-        "n_state_variables": predetermined.len() + mixed.len(),
-        "n_jumpers": forward_looking.len() + mixed.len(),
-        "n_model_equations": summary.n_model_equations,
-        "n_steady_state_equations": summary.n_steady_state_equations,
-        "n_initval_entries": summary.n_initval_entries,
-        "is_linear": summary.is_linear,
-        "has_model_block": summary.has_model_block,
-        "has_steady_state_model_block": summary.has_steady_state_model_block,
-        "has_initval_block": summary.has_initval_block,
-        "has_shocks_block": summary.has_shocks_block,
-        "heterogeneity_dimensions": heterogeneous_dimensions,
-    })
-}
-
-fn heterogeneous_dimension_names(model: &Model) -> Vec<Name> {
-    let mut seen = HashSet::new();
-    let mut names = Vec::new();
-    for name in model
-        .heterogeneity_dimensions
-        .iter()
-        .map(|dimension| dimension.name)
-        .chain(
-            model
-                .endogenous
-                .iter()
-                .chain(model.exogenous.iter())
-                .chain(model.parameters.iter())
-                .filter_map(|decl| decl.heterogeneity.map(|(name, _)| name)),
-        )
-        .chain(
-            model
-                .heterogeneous_models
-                .iter()
-                .map(|block| block.dimension),
-        )
-    {
-        if seen.insert(name) {
-            names.push(name);
-        }
-    }
-    names
 }
 
 /// `explain::render_markdown`, or the unknown-code string using Rust `known_codes()`.
@@ -1073,44 +944,9 @@ fn related_files_in_workspace(active_file: &str, files: &HashMap<String, String>
         .map(|c| c.to_vec())
         .unwrap_or_default();
 
-    let mut rows = Vec::new();
-    for inc in &includes.resolved {
-        rows.push(related_file_row(
-            "include",
-            &inc.filename,
-            Some(inc.path.as_path()),
-            files,
-        ));
-    }
-    for inc in &includes.unresolved {
-        rows.push(related_file_row("include", &inc.filename, None, files));
-    }
-    for rec in &companions {
-        rows.push(related_file_row(
-            rec.kind.as_str(),
-            &rec.name,
-            rec.path.as_deref(),
-            files,
-        ));
-    }
-    Value::Array(rows)
-}
-
-fn related_file_row(
-    kind: &str,
-    filename: &str,
-    resolved_path: Option<&Path>,
-    files: &HashMap<String, String>,
-) -> Value {
-    let mut row = json!({
-        "kind": kind,
-        "filename": filename,
-        "resolved": resolved_path.is_some(),
-    });
-    if let Some(path) = resolved_path {
-        row["path"] = json!(related_file_path(path, files));
-    }
-    row
+    related_files_json(&includes, &companions, |path| {
+        related_file_path(path, files)
+    })
 }
 
 fn related_file_path(resolved: &Path, files: &HashMap<String, String>) -> String {

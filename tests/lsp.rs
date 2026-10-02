@@ -1158,7 +1158,7 @@ async fn hover_stoch_simul_option() {
 }
 
 #[tokio::test]
-async fn document_symbols_timing_class_groups() {
+async fn document_symbols_keep_written_declarations_with_timing_details() {
     let text = read_mod("trend_rbc_gov_inv");
     let uri = archive_url("trend_rbc_gov_inv");
     let (service, _socket) = new_service();
@@ -1178,34 +1178,38 @@ async fn document_symbols_timing_class_groups() {
         .expect("symbols");
     let nested = nested_symbols(resp);
     assert_eq!(
-        top_level_names(&nested),
+        child_names(&nested, "var"),
         [
-            "predetermined",
-            "forward-looking",
-            "static",
-            "varexo (exogenous)",
-            "parameters",
-            "model",
+            "y", "c", "k", "n", "invest", "ig", "kg", "z", "w", "rk", "log_y", "log_c", "log_k",
+            "log_kg", "log_ig", "log_n"
         ]
     );
+    let declarations = nested
+        .iter()
+        .find(|row| row.name == "var")
+        .unwrap()
+        .children
+        .as_ref()
+        .unwrap();
+    for (name, class) in [
+        ("k", "predetermined"),
+        ("ig", "predetermined"),
+        ("kg", "predetermined"),
+        ("z", "predetermined"),
+        ("c", "forward-looking"),
+        ("rk", "forward-looking"),
+        ("y", "static"),
+    ] {
+        let row = declarations.iter().find(|row| row.name == name).unwrap();
+        assert!(row.detail.as_deref().unwrap().contains(class), "{row:?}");
+    }
+    assert!(nested.iter().any(|row| row.name == "steady_state_model"));
+    assert!(nested.iter().any(|row| row.name == "stoch_simul"));
     assert_no_symbol_named(&nested, "var (endogenous)");
-    assert_eq!(
-        child_names(&nested, "predetermined"),
-        ["k", "ig", "kg", "z"]
-    );
-    assert_eq!(child_names(&nested, "forward-looking"), ["c", "rk"]);
-    assert_eq!(
-        child_names(&nested, "static"),
-        ["y", "n", "invest", "w", "log_y", "log_c", "log_k", "log_kg", "log_ig", "log_n"]
-    );
-    assert!(
-        nested.iter().all(|s| s.name != "mixed"),
-        "empty mixed group must be omitted"
-    );
 }
 
 #[tokio::test]
-async fn document_symbols_omit_empty_timing_groups() {
+async fn document_symbols_show_blocks_commands_and_uncounted_rows() {
     let text = read_fixture_mod("lsp/outline_timing.mod");
     let path = fixture_mod("lsp/outline_timing.mod");
     let uri = file_url(&path);
@@ -1227,23 +1231,27 @@ async fn document_symbols_omit_empty_timing_groups() {
     let nested = nested_symbols(resp);
     assert_eq!(
         top_level_names(&nested),
-        [
-            "predetermined",
-            "mixed",
-            "static",
-            "varexo (exogenous)",
-            "parameters",
-            "model",
-        ]
+        ["var", "varexo", "parameters", "rho", "model", "initval"]
     );
-    assert_no_symbol_named(&nested, "var (endogenous)");
-    assert!(
-        nested.iter().all(|s| s.name != "forward-looking"),
-        "empty forward-looking group must be omitted"
-    );
-    assert_eq!(child_names(&nested, "predetermined"), ["y"]);
-    assert_eq!(child_names(&nested, "mixed"), ["k"]);
-    assert_eq!(child_names(&nested, "static"), ["w", "a", "u"]);
+    assert_eq!(child_names(&nested, "var"), ["y", "k", "w", "a", "u"]);
+    let declarations = nested
+        .iter()
+        .find(|row| row.name == "var")
+        .unwrap()
+        .children
+        .as_ref()
+        .unwrap();
+    for (name, class) in [
+        ("y", "predetermined"),
+        ("k", "mixed"),
+        ("w", "static"),
+        ("a", "static"),
+        ("u", "static"),
+    ] {
+        let row = declarations.iter().find(|row| row.name == name).unwrap();
+        assert!(row.detail.as_deref().unwrap().contains(class), "{row:?}");
+    }
+    assert!(nested.iter().all(|row| row.name != "forward-looking"));
     let model = dygnosis::parse(&text);
     let model_children = nested
         .iter()
@@ -2188,10 +2196,11 @@ fn initialize_capabilities_wave_c() {
         .expect("executeCommand")
         .commands
         .clone();
-    assert_eq!(commands.len(), 3, "commands: {commands:?}");
+    assert_eq!(commands.len(), 4, "commands: {commands:?}");
     assert!(commands.contains(&"dynare/explainDiagnostic".into()));
     assert!(commands.contains(&"dynare/compareModels".into()));
     assert!(commands.contains(&"dynare/showEffectiveModel".into()));
+    assert!(commands.contains(&"dynare/modelInfo".into()));
     assert!(!commands.contains(&"dynare/runPreprocessor".into()));
     assert!(!commands.iter().any(|c| c.contains("computeSteadyState")));
     assert!(!commands.iter().any(|c| c.contains("runDynare")));

@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +26,76 @@ pub struct Decl {
     /// `heterogeneity=<symbol>` on the declaration: the dimension name and the
     /// value identifier's span.
     pub heterogeneity: Option<(Name, Span)>,
+}
+
+/// Presentation records of existing parser surfaces. Order is execution order,
+/// never a sort by written spans (which macro copies can share).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatementKind {
+    Declaration,
+    Dimension,
+    Assignment,
+    Command,
+    Block,
+}
+
+impl StatementKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Declaration => "declaration",
+            Self::Dimension => "dimension",
+            Self::Assignment => "assignment",
+            Self::Command => "command",
+            Self::Block => "block",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AssignmentIndex {
+    Parameter(usize),
+    Helper(usize),
+}
+
+#[derive(Clone, Debug)]
+pub struct Statement {
+    pub id: usize,
+    pub kind: StatementKind,
+    pub name: String,
+    pub token_range: Range<usize>,
+    pub opener_range: Range<usize>,
+    pub span: Span,
+    pub complete: bool,
+    pub category: Option<String>,
+    pub subtype: Option<String>,
+    pub dimension: Option<String>,
+    pub assignment: Option<AssignmentIndex>,
+    /// A retained scalar MATLAB helper assignment, not a Dynare command.
+    pub native: bool,
+}
+
+/// Opaque native text is an execution barrier, not a Dynare command.
+#[derive(Clone, Debug)]
+pub enum ExecutionStep {
+    Statement(usize),
+    Opaque(Span),
+}
+
+#[derive(Clone, Debug)]
+pub struct WrittenDeclaration {
+    pub statement_id: usize,
+    pub written_kind: String,
+    pub declaration: Decl,
+    pub token_range: Range<usize>,
+}
+
+/// Includes rows later removed/replaced, for file-local written structure.
+#[derive(Clone, Debug)]
+pub struct WrittenEquation {
+    pub statement_id: usize,
+    pub equation: Equation,
+    pub token_range: Range<usize>,
+    pub dimension: Option<Name>,
 }
 
 /// One name of a `heterogeneity_dimension` statement, file order (one record
@@ -911,6 +982,11 @@ pub struct Assignment {
 pub struct Model {
     pub source: String,
     pub intern: Interner,
+    pub statements: Vec<Statement>,
+    pub execution_steps: Vec<ExecutionStep>,
+    pub written_declarations: Vec<WrittenDeclaration>,
+    pub written_equations: Vec<WrittenEquation>,
+    pub type_event_occurrences: Vec<(usize, Range<usize>)>,
     pub endogenous: Vec<Decl>,
     pub exogenous: Vec<Decl>,
     pub deterministic_exogenous: Vec<Decl>,

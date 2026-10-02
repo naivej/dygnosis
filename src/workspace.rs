@@ -68,6 +68,7 @@ struct Doc {
 struct SplicedSource {
     text: String,
     segments: Vec<SpliceSegment>,
+    includes_complete: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -383,6 +384,11 @@ impl Workspace {
         self.docs.get(&key).map(|d| d.source.as_str())
     }
 
+    /// Source-map keys are already normalized; no repeat path lookup is needed.
+    pub(crate) fn source_for_normalized_key(&self, key: &str) -> Option<&str> {
+        self.docs.get(key).map(|document| document.source.as_str())
+    }
+
     /// Whether this workspace represents only caller-supplied map entries.
     pub(crate) fn is_overlay_only(&self) -> bool {
         self.overlay_only
@@ -491,6 +497,19 @@ impl Workspace {
         self.expand.get(&key)
     }
 
+    /// Independently verified written portions of any include-spliced span.
+    pub fn map_effective_segments(
+        &mut self,
+        uri: &str,
+        span: Span,
+    ) -> Vec<crate::model_map::WrittenSegment> {
+        let Some(key) = self.ensure_loaded(uri) else {
+            return Vec::new();
+        };
+        let spliced = self.spliced_source(&key);
+        crate::expand::map_written_segments(&spliced.segments, span)
+    }
+
     /// Transitively included files (root excluded).
     pub fn resolve_all_includes(&mut self, uri: &str) -> HashMap<String, Model> {
         let records = self.include_records(uri).cloned().unwrap_or_default();
@@ -530,11 +549,13 @@ impl Workspace {
         self.records.get(&key)
     }
 
-    /// Whether every include resolved without a cycle. Macro completion is a
-    /// separate condition; consumers need both before claiming a full model.
+    /// Whether the required include expansion is proven complete. Raw graph
+    /// diagnostics remain unchanged, including inactive written include sites.
     pub fn includes_complete(&mut self, uri: &str) -> bool {
-        self.include_records(uri)
-            .is_some_and(|records| records.unresolved.is_empty() && records.cycles.is_empty())
+        let Some(key) = self.ensure_loaded(uri) else {
+            return false;
+        };
+        self.spliced_source(&key).includes_complete
     }
 
     /// Companion records for the root `.mod` (convention + named mentions).
@@ -893,8 +914,25 @@ impl Workspace {
         }
         // Resolving includes may load documents and invalidate other cached
         // roots. Insert only after the full walk has finished.
-        let (text, segments) = self.splice_with_map(key, &mut Vec::new(), &mut Vec::new());
-        let source = Arc::new(SplicedSource { text, segments });
+        let raw_complete = self
+            .include_records(key)
+            .is_some_and(|records| records.unresolved.is_empty() && records.cycles.is_empty());
+        let (text, segments) = self.splice_with_map(key, &mut Vec::new(), &mut Vec::new(), false);
+        let includes_complete = if raw_complete
+            && !crate::macro_expand::has_include_directives(&text)
+        {
+            true
+        } else {
+            // Only this metadata pass retains failed directives, so the macro
+            // visitor can distinguish required sites from known false branches.
+            let (activity, _) = self.splice_with_map(key, &mut Vec::new(), &mut Vec::new(), true);
+            crate::macro_expand::required_includes_complete(&activity)
+        };
+        let source = Arc::new(SplicedSource {
+            text,
+            segments,
+            includes_complete,
+        });
         self.spliced.insert(key.to_string(), Arc::clone(&source));
         source
     }
@@ -904,6 +942,7 @@ impl Workspace {
         key: &str,
         stack: &mut Vec<String>,
         active_search: &mut Vec<PathBuf>,
+        keep_unresolved: bool,
     ) -> (String, Vec<SpliceSegment>) {
         if stack.iter().any(|k| k == key) {
             return (String::new(), Vec::new());
@@ -945,15 +984,30 @@ impl Workspace {
                     let resolved =
                         self.resolve_filename(&root_key, key, &dir.filename, active_search);
                     let (body, nested_map) = match resolved {
+                        None if keep_unresolved => identity_splice(
+                            &source[dir.span.start as usize..dir.span.end as usize],
+                            None,
+                        ),
                         None => (String::new(), Vec::new()),
                         Some(path) => {
                             let resolved_key = self.include_key(&path);
-                            if stack.iter().any(|k| k == &resolved_key) {
-                                (String::new(), Vec::new())
+                            if stack.iter().any(|k| k == &resolved_key) || resolved_key == key {
+                                if keep_unresolved {
+                                    identity_splice(
+                                        &source[dir.span.start as usize..dir.span.end as usize],
+                                        None,
+                                    )
+                                } else {
+                                    (String::new(), Vec::new())
+                                }
                             } else {
                                 stack.push(key.to_string());
-                                let nested =
-                                    self.splice_with_map(&resolved_key, stack, active_search);
+                                let nested = self.splice_with_map(
+                                    &resolved_key,
+                                    stack,
+                                    active_search,
+                                    keep_unresolved,
+                                );
                                 stack.pop();
                                 nested
                             }
