@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Adds the v0.11 VS Code extension scaffold under `editors/vscode/`, with TypeScript and ESLint setup. The client port and editor features remain planned.
+- Adds the v0.11 VS Code extension scaffold under `editors/vscode/`, with TypeScript and ESLint setup. The client implementation and editor features remain planned.
 
 ## v0.10.2
 
