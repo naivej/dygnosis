@@ -44,7 +44,12 @@ async function main() {
   const root = path.join(extensionRoot, ".test-data", `installed package with spaces ${runId}`);
   const unpacked = path.join(root, "standalone with spaces");
   const workspace = path.join(root, "workspace with spaces");
-  const profile = path.join(root, "profile with spaces");
+  // Recent VS Code uses a Unix socket under the profile. A deep checkout plus
+  // our evidence UUID exceeds macOS's 103-byte limit; keep only that profile
+  // short. Packages, executables, extensions and workspace still test spaces.
+  const profile = process.platform === "darwin"
+    ? await fs.mkdtemp(path.join("/tmp", "dyg profile "))
+    : path.join(root, "profile with spaces");
   const extensions = path.join(root, "extensions with spaces");
   const harness = path.join(root, "extension harness");
   for (const directory of [unpacked, workspace, profile, extensions, harness]) await fs.mkdir(directory, { recursive: true });

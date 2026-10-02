@@ -29,6 +29,10 @@ function assertNative(target) {
   return info;
 }
 function execute(file, args, options = {}) {
+  if (file === "tar" && process.platform === "win32") {
+    assert.ok(process.env.SystemRoot, "Windows archive checks require SystemRoot");
+    file = path.join(process.env.SystemRoot, "System32", "tar.exe");
+  }
   return execFileSync(file, args, { encoding: "utf8", windowsHide: true, timeout: 120000, maxBuffer: 32 * 1024 * 1024, ...options });
 }
 async function sha256(file) { return crypto.createHash("sha256").update(await fs.readFile(file)).digest("hex"); }

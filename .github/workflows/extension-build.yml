@@ -121,6 +121,7 @@ jobs:
         with:
           name: failure-${{ matrix.target }}
           retention-days: 7
+          include-hidden-files: true
           path: editors/vscode/.test-data/**/installed-host.json
 
   verified:
