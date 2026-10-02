@@ -1,6 +1,6 @@
 //! Native `@#define` / `@#if` / `@#for` / `@{NAME}` expansion over the token stream.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::lexer::{Token, TokenKind};
 use crate::span::Span;
@@ -145,6 +145,7 @@ pub(crate) struct TokenTrace {
 #[derive(Clone, Debug)]
 pub(crate) struct FrameRec {
     pub kind: &'static str,
+    pub directive_span: Span,
     pub body_span: Span,
     /// Loop index name. Set on a `@#for` iteration frame.
     pub variable: Option<String>,
@@ -161,6 +162,90 @@ struct ExpandState<'a> {
     discarded: &'a mut Vec<Span>,
     incomplete: &'a mut Option<Span>,
     include_seen: bool,
+    navigation_includes: Option<&'a mut dyn NavigationIncludeVisitor>,
+}
+
+trait NavigationIncludeVisitor {
+    fn visit(&mut self, span: Span, defines: &mut HashMap<String, MacroVal>) -> bool;
+}
+
+type NavigationIncludeLoader<'a> = dyn FnMut(&str, Span) -> Option<(String, String)> + 'a;
+
+struct NavigationIncludes<'a> {
+    load: &'a mut NavigationIncludeLoader<'a>,
+    files: Vec<String>,
+    sites: HashSet<(String, Span)>,
+}
+
+pub(crate) struct NavigationMacroProof {
+    pub complete: bool,
+    pub sites: HashSet<(String, Span)>,
+}
+
+impl NavigationIncludeVisitor for NavigationIncludes<'_> {
+    fn visit(&mut self, span: Span, defines: &mut HashMap<String, MacroVal>) -> bool {
+        let file = self.files.last().expect("navigation root").clone();
+        self.sites.insert((file.clone(), span));
+        let Some((file, source)) = (self.load)(&file, span) else {
+            return false;
+        };
+        if self.files.contains(&file) {
+            return false;
+        }
+        self.files.push(file);
+        let complete = navigation_file_complete(&source, defines, self);
+        self.files.pop();
+        complete
+    }
+}
+
+/// Validate original files reached by executed includes, sharing the existing
+/// macro evaluator's definitions and branch/loop execution. This metadata run
+/// never supplies emitted model text or diagnostics to the product.
+pub(crate) fn navigation_macros_complete(
+    root: &str,
+    source: &str,
+    mut load: impl FnMut(&str, Span) -> Option<(String, String)>,
+) -> NavigationMacroProof {
+    let mut includes = NavigationIncludes {
+        load: &mut load,
+        files: vec![root.to_string()],
+        sites: HashSet::new(),
+    };
+    let complete = navigation_file_complete(source, &mut HashMap::new(), &mut includes);
+    NavigationMacroProof {
+        complete,
+        sites: includes.sites,
+    }
+}
+
+fn navigation_file_complete(
+    text: &str,
+    defines: &mut HashMap<String, MacroVal>,
+    includes: &mut dyn NavigationIncludeVisitor,
+) -> bool {
+    let source = crate::parser::normalize_newlines(text);
+    let tokens = crate::lexer::tokenize(&source);
+    if !macro_blocks_complete(&source, &tokens) {
+        return false;
+    }
+    let mut arena = Vec::new();
+    let mut errors = Vec::new();
+    let mut discarded = Vec::new();
+    let mut incomplete = None;
+    let mut state = ExpandState {
+        src: &source,
+        defines,
+        origin_stack: Vec::new(),
+        arena: &mut arena,
+        type_errors: &mut errors,
+        discarded: &mut discarded,
+        incomplete: &mut incomplete,
+        include_seen: false,
+        navigation_includes: Some(includes),
+    };
+    expand_seq(&mut state, &tokens);
+    incomplete.is_none() && errors.is_empty()
 }
 
 pub fn expand_macros(src: &str, tokens: Vec<Token>) -> Vec<Token> {
@@ -186,9 +271,52 @@ pub(crate) fn expand_macros_with_status(
 pub(crate) fn expand_macros_traced_with_status(
     src: &str,
     tokens: Vec<Token>,
-) -> (Vec<Token>, Vec<TokenTrace>, Vec<FrameRec>, bool) {
-    let (out, traces, arena, _, _, incomplete, _) = expand_macros_traced_full(src, tokens);
-    (out, traces, arena, incomplete.is_some())
+) -> (Vec<Token>, Vec<TokenTrace>, Vec<FrameRec>, bool, bool) {
+    // Check the original stream, including bodies skipped by inactive branches
+    // or empty loops. This metadata proof does not change expansion or errors.
+    let blocks_complete = macro_blocks_complete(src, &tokens);
+    let (out, traces, arena, errors, _, incomplete, _) = expand_macros_traced_full(src, tokens);
+    // Some existing macro checks record an error while still unrolling. Keep
+    // legacy incomplete unchanged, but consume that same error proof for jumps.
+    (
+        out,
+        traces,
+        arena,
+        incomplete.is_some(),
+        blocks_complete && errors.is_empty(),
+    )
+}
+
+fn macro_blocks_complete(src: &str, tokens: &[Token]) -> bool {
+    let mut stack = Vec::new();
+    for token in tokens {
+        if token.kind != TokenKind::MacroDir {
+            continue;
+        }
+        match dir_kind(src, token) {
+            Dir::If | Dir::Ifdef | Dir::Ifndef => stack.push((Dir::If, false)),
+            Dir::For => stack.push((Dir::For, false)),
+            Dir::Endif => {
+                if stack.pop().map(|(kind, _)| kind) != Some(Dir::If) {
+                    return false;
+                }
+            }
+            Dir::Endfor if stack.pop().map(|(kind, _)| kind) != Some(Dir::For) => {
+                return false;
+            }
+            kind @ (Dir::Elseif | Dir::Else) => {
+                let Some((Dir::If, seen_else)) = stack.last_mut() else {
+                    return false;
+                };
+                if *seen_else {
+                    return false;
+                }
+                *seen_else = kind == Dir::Else;
+            }
+            _ => {}
+        }
+    }
+    stack.is_empty()
 }
 
 /// Source ranges of `@#if` / `@#ifndef` branches that expansion discarded.
@@ -234,6 +362,7 @@ fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull 
             discarded: &mut discarded,
             incomplete: &mut incomplete,
             include_seen: false,
+            navigation_includes: None,
         };
         let (out, traces) = expand_seq(&mut state, &tokens);
         (out, traces, state.include_seen)
@@ -389,7 +518,13 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                     if directive_name(tok.text(state.src)).eq_ignore_ascii_case("include")
                         && emitting(&stack)
                     {
-                        state.include_seen = true;
+                        if let Some(visitor) = state.navigation_includes.as_deref_mut() {
+                            if !visitor.visit(tok.span, state.defines) {
+                                state.incomplete.get_or_insert(tok.span);
+                            }
+                        } else {
+                            state.include_seen = true;
+                        }
                     }
                     i += 1;
                 }
@@ -511,10 +646,16 @@ fn next_body_start(tokens: &[Token], i: usize, fallback: u32) -> u32 {
     tokens.get(i).map(|t| t.span.start).unwrap_or(fallback)
 }
 
-fn alloc_frame(arena: &mut Vec<FrameRec>, kind: &'static str, body_start: u32) -> usize {
+fn alloc_frame(
+    arena: &mut Vec<FrameRec>,
+    kind: &'static str,
+    body_start: u32,
+    directive_span: Span,
+) -> usize {
     let id = arena.len();
     arena.push(FrameRec {
         kind,
+        directive_span,
         body_span: Span {
             start: body_start,
             end: body_start,
@@ -535,7 +676,7 @@ fn push_if_frame(
     active: bool,
 ) {
     let body_start = next_body_start(tokens, next_i, dir_span.end);
-    let frame_id = alloc_frame(state.arena, kind, body_start);
+    let frame_id = alloc_frame(state.arena, kind, body_start, dir_span);
     stack.push(IfFrame {
         active,
         taken: active,
@@ -640,6 +781,7 @@ fn unroll_for(
         let frame_id = state.arena.len();
         state.arena.push(FrameRec {
             kind: "for",
+            directive_span: for_tok.span,
             body_span,
             variable: Some(if vars.len() == 1 {
                 vars[0].clone()
@@ -808,7 +950,7 @@ fn open_next_branch(
     );
     frame.active = active;
     let body_start = next_body_start(tokens, next_i, boundary.end);
-    let frame_id = alloc_frame(state.arena, kind, body_start);
+    let frame_id = alloc_frame(state.arena, kind, body_start, boundary);
     frame.frame_id = frame_id;
     frame.body_start = body_start;
     frame.branch_start = boundary.end;

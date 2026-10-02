@@ -1656,7 +1656,9 @@ fn dynare_compare_models_indexed_equations_and_markdown() {
     );
     let expected: Value =
         serde_json::from_str(&expected_mcp("dynare_compare_models.a_vs_b.json")).unwrap();
-    assert_eq!(diff, expected);
+    let mut legacy = diff.clone();
+    legacy.as_object_mut().unwrap().remove("navigation");
+    assert_eq!(legacy, expected);
 }
 
 #[test]
@@ -2071,7 +2073,23 @@ fn dynare_expand_whole_eq_for() {
     assert_no_byte_span_keys(&payload);
     let expected: Value =
         serde_json::from_str(&expected_mcp("dynare_expand.whole_eq_for.json")).unwrap();
-    assert_eq!(payload, expected);
+    assert_eq!(legacy_expand_payload(&payload), expected);
+}
+
+/// Keep the original snapshots as evidence that the legacy contract is stable.
+fn legacy_expand_payload(payload: &Value) -> Value {
+    let mut legacy = payload.clone();
+    let object = legacy.as_object_mut().unwrap();
+    for field in [
+        "navigation_schema_version",
+        "navigation",
+        "root_file",
+        "revision",
+        "complete",
+    ] {
+        object.remove(field);
+    }
+    legacy
 }
 
 #[test]
@@ -2095,7 +2113,7 @@ fn dynare_expand_nested_for() {
     }
     let expected: Value =
         serde_json::from_str(&expected_mcp("dynare_expand.nested_for.json")).unwrap();
-    assert_eq!(payload, expected);
+    assert_eq!(legacy_expand_payload(&payload), expected);
 }
 
 #[test]
@@ -2115,7 +2133,7 @@ fn dynare_expand_include_eq_map() {
     assert!(effective.contains("z = 0"), "{effective}");
     let expected: Value =
         serde_json::from_str(&expected_mcp("dynare_expand.include_eq.json")).unwrap();
-    assert_eq!(payload, expected);
+    assert_eq!(legacy_expand_payload(&payload), expected);
 }
 
 #[test]

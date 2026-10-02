@@ -1,0 +1,15 @@
+# Comparison navigation
+
+The development engine adds a `navigation` object to LSP `dynare/compareModels` and MCP `dynare_compare_models`. Existing comparison fields, values, ordering, equation pairing, shock locations, and Markdown retain their meanings. The LSP initialize response advertises `experimental.dygnosis.compareModels.navigation_schema_version: 1`.
+
+`navigation.schema_version` is `1`. `before` and `after` each contain `root_uri`, an opaque `revision`, and `complete`. MCP uses the supplied active file as `root_uri`, or null when none was supplied. Each revision covers that side's root, included files, resolved search candidates, and analysis settings; LSP uses the same revision as `dynare/modelInfo`. A revision is for equality checks within the running engine, not a persistent hash.
+
+`navigation.rows` contains source facts for every existing symbol list item, changed parameter, changed symbol, equation add/remove/change and unmatched row, and shock change. Each row's `id` is an exact JSON pointer into the existing result, for example `/changed_equations/0`, `/heterogeneous_equations/0/changed/1`, or `/unmatched_same_name/0/removed/0`. Consumers use that pointer to associate the row; they must not pair rows by their display name or text. An equation can appear in both an add/remove list and an unmatched group, with a separate pointer for each appearance.
+
+Rows carry `kind` (`symbol`, `parameter`, `equation`, or `shock`) and the relevant name or shock form/role. Equation rows also carry `domain`, `dimension` (null for aggregate), and side-specific counted `index_old`/`index_new` (null when absent).
+
+Each row's `before` and `after` are either null or `{occurrence_id, domain, dimension, written_locations}`. Null means that side has no row or its written target could not be verified. `occurrence_id` distinguishes expanded occurrences within that input revision. Repeated macro copies can have different identities and the same written ranges. Each side's scope is explicit, including for a symbol whose dimension changes. Changed parameters point at the last assignment used by the existing comparison; changed symbol metadata points at the declaration supplying that metadata. Several contributing files produce separate verified locations. Incomplete inputs withhold source targets.
+
+LSP locations are `{uri, range}` using zero-based UTF-16 positions. MCP locations are `{file, line, column, end_line, end_column}` with one-based Unicode-scalar columns and the caller's file key when available; `file` is null for the unnamed supplied root. The ranges are exclusive at their ends. Navigation does not change the legacy shock `location` coordinate convention.
+
+Both sides use live overlays and their own root settings. Compare observes disk dependencies even without a watched-file event. If files change while the engine is reading them, it returns `INPUT_CHANGED` and asks the client to refresh. A client must disable source actions once either revision is stale, then compare again before jumping. Older engines can still supply the original comparison without navigation.

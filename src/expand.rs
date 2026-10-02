@@ -1,6 +1,6 @@
 //! Expand view plus origin map (`expand_report`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::equations::equations;
 use crate::lexer::{tokenize, Token};
@@ -8,7 +8,7 @@ use crate::macro_expand::{expand_macros_traced_with_status, FrameRec, TokenTrace
 use crate::model_map::{
     EquationOccurrence, SourceFrame, SourceOccurrence, WrittenModelMap, WrittenSegment,
 };
-use crate::parser::{join_lexemes, normalize_newlines, parse_expanded};
+use crate::parser::{join_lexemes_recorded, normalize_newlines, parse_expanded};
 use crate::span::Span;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,7 +16,12 @@ pub struct ExpandReport {
     pub model_map: WrittenModelMap,
     /// False when macro syntax remains because this expander cannot safely evaluate it.
     pub complete: bool,
+    /// Separate proof for preview navigation, including macro block termination.
+    /// The legacy expansion/count completeness keeps its existing meaning.
+    pub navigation_complete: bool,
     pub effective_text: String,
+    /// Exact emitted model-row ranges and independently mapped written targets.
+    pub navigation: Vec<PreviewRow>,
     /// Counted equations across the aggregate and all heterogeneous trees.
     pub n_equations: usize,
     /// Equation origins in expanded file order.
@@ -29,6 +34,22 @@ pub struct ExpandReport {
     /// Entries follow the parsed aggregate/block vectors.
     pub(crate) aggregate_row_origins: Vec<Option<RowOrigin>>,
     pub(crate) heterogeneous_row_origins: Vec<Vec<Option<RowOrigin>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewRow {
+    pub equation: EquationOccurrence,
+    pub effective_span: Span,
+    pub macro_frames: Vec<PreviewMacroFrame>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewMacroFrame {
+    pub kind: String,
+    pub variable: Option<String>,
+    pub value: Option<String>,
+    pub directive_segments: Vec<WrittenSegment>,
+    pub body_segments: Vec<WrittenSegment>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,23 +105,133 @@ pub fn expand_report(text: &str) -> ExpandReport {
         file: None,
         origin: Span::new(0, source.len()),
     }];
-    expand_report_from_spliced(&source, &map)
+    expand_report_from_spliced(&source, &map, None)
 }
 
-pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -> ExpandReport {
+pub(crate) enum NavigationSource {
+    Unavailable,
+    Mapped {
+        text: String,
+        segments: Vec<SpliceSegment>,
+    },
+}
+
+pub(crate) fn expand_report_from_spliced(
+    spliced: &str,
+    map: &[SpliceSegment],
+    written_navigation: Option<&NavigationSource>,
+) -> ExpandReport {
     let source = normalize_newlines(spliced);
     let raw = tokenize(&source);
-    let (tokens, traces, arena, incomplete) = expand_macros_traced_with_status(&source, raw);
+    let (tokens, traces, arena, incomplete, macro_navigation_complete) =
+        expand_macros_traced_with_status(&source, raw);
     debug_assert_eq!(tokens.len(), traces.len());
-    let effective_text = join_lexemes(&source, &tokens);
+    let mut emitted = vec![None; tokens.len()];
+    let effective_text = join_lexemes_recorded(&source, &tokens, |index, span| {
+        emitted[index] = Some(span);
+    });
     let (model, ranges) = parse_expanded(&source, tokens.clone());
     let map_complete = !incomplete && crate::model_map::parser_complete(&model);
     let model_map = build_model_map(&model, &ranges, &tokens, &traces, &arena, map, map_complete);
+    // Compare with an independently proven active-include projection. Matching
+    // lexemes alone is insufficient: kinds and order must agree too. It uses
+    // the same expander, without another parser or any diagnostic changes.
+    let verified = if let Some(NavigationSource::Mapped { text, segments }) = written_navigation {
+        let text = normalize_newlines(text);
+        let (actual, actual_traces, actual_arena, incomplete, macro_navigation_complete) =
+            expand_macros_traced_with_status(&text, tokenize(&text));
+        let matches = !incomplete
+            && macro_navigation_complete
+            && actual.len() == tokens.len()
+            && actual.iter().zip(&tokens).all(|(actual, legacy)| {
+                actual.kind == legacy.kind && actual.text(&text) == legacy.text(&source)
+            });
+        matches.then_some((actual, actual_traces, actual_arena, segments.as_slice()))
+    } else {
+        None
+    };
+    let navigation_complete = map_complete
+        && if written_navigation.is_some() {
+            verified.is_some()
+        } else {
+            macro_navigation_complete
+        };
+    let (navigation_tokens, navigation_traces, navigation_arena, navigation_map) = verified
+        .as_ref()
+        .map(|(tokens, traces, arena, map)| {
+            (tokens.as_slice(), traces.as_slice(), arena.as_slice(), *map)
+        })
+        .unwrap_or((&tokens, &traces, &arena, map));
+    let navigation = if navigation_complete {
+        model
+            .written_equations
+            .iter()
+            .zip(&model_map.equations)
+            .filter_map(|(written, equation)| {
+                let spans = &emitted[written.token_range.clone()];
+                let start = spans.iter().flatten().next()?.start;
+                let end = spans.iter().flatten().next_back()?.end;
+                let mut frame_ids = Vec::new();
+                let mut seen_frames = HashSet::new();
+                for trace in &navigation_traces[written.token_range.clone()] {
+                    for &id in &trace.frames {
+                        if seen_frames.insert(id) {
+                            frame_ids.push(id);
+                        }
+                    }
+                }
+                let mut equation = equation.clone();
+                let anchors = map_token_segments(
+                    navigation_map,
+                    &navigation_tokens[written.token_range.start..written.token_range.start + 1],
+                );
+                equation.source = SourceOccurrence {
+                    segments: map_token_segments(
+                        navigation_map,
+                        &navigation_tokens[written.token_range.clone()],
+                    ),
+                    anchor: if anchors.len() == 1 {
+                        anchors.into_iter().next()
+                    } else {
+                        None
+                    },
+                    origin_frames: Vec::new(),
+                };
+                Some(PreviewRow {
+                    equation,
+                    effective_span: Span { start, end },
+                    macro_frames: frame_ids
+                        .into_iter()
+                        .map(|id| {
+                            let frame = &navigation_arena[id];
+                            PreviewMacroFrame {
+                                kind: frame.kind.to_string(),
+                                variable: frame.variable.clone(),
+                                value: frame.value.clone(),
+                                directive_segments: map_written_segments(
+                                    navigation_map,
+                                    frame.directive_span,
+                                ),
+                                body_segments: map_written_segments(
+                                    navigation_map,
+                                    frame.body_span,
+                                ),
+                            }
+                        })
+                        .collect(),
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     if incomplete {
         return ExpandReport {
             model_map,
             complete: false,
+            navigation_complete,
             effective_text,
+            navigation,
             n_equations: 0,
             origins: Vec::new(),
             aggregate_origins: Vec::new(),
@@ -199,7 +330,9 @@ pub(crate) fn expand_report_from_spliced(spliced: &str, map: &[SpliceSegment]) -
     ExpandReport {
         model_map,
         complete: true,
+        navigation_complete,
         effective_text,
+        navigation,
         n_equations: origins.len(),
         origins,
         aggregate_origins,

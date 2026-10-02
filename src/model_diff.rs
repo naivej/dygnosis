@@ -126,6 +126,11 @@ pub struct WrittenPeriod {
 /// One side of a written shock instruction. Absent fields do not apply to that form.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ShockSetting {
+    /// Provenance retained through pairing; never part of the public setting.
+    #[serde(skip)]
+    pub(crate) source_span: Option<Span>,
+    #[serde(skip)]
+    pub(crate) occurrence_id: usize,
     pub block: String,
     /// Heterogeneity dimension for a `shocks(heterogeneity=…)` row. Absent on ordinary shocks.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -791,6 +796,8 @@ fn base_shock_setting(
     let learnt_in =
         learnt_in.map(|(point, written_span)| written_period(model, point, written_span));
     ShockSetting {
+        source_span: Some(span),
+        occurrence_id: 0,
         block: block.into(),
         heterogeneity: None,
         domain: None,
@@ -865,6 +872,9 @@ fn shock_instructions(
     append_context_instructions(&mut out, model, source, relevance);
     append_analysis_instructions(&mut out, model, source);
     out.sort_by_key(|item| item.span.start);
+    for (index, item) in out.iter_mut().enumerate() {
+        item.setting.occurrence_id = index;
+    }
     out
 }
 

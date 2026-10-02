@@ -10803,9 +10803,18 @@ fn line_of(src: &str, byte: u32) -> (u32, &str) {
 }
 
 pub(crate) fn join_lexemes(src: &str, tokens: &[Token]) -> String {
+    join_lexemes_recorded(src, tokens, |_, _| {})
+}
+
+/// Record ranges as text is emitted; source spans cannot locate macro copies.
+pub(crate) fn join_lexemes_recorded(
+    src: &str,
+    tokens: &[Token],
+    mut record: impl FnMut(usize, Span),
+) -> String {
     let mut out = String::new();
     let mut prev: Option<TokenKind> = None;
-    for tok in tokens {
+    for (index, tok) in tokens.iter().enumerate() {
         if tok.kind == TokenKind::Eof {
             continue;
         }
@@ -10818,7 +10827,9 @@ pub(crate) fn join_lexemes(src: &str, tokens: &[Token]) -> String {
                 out.push(' ');
             }
         }
+        let start = out.len();
         out.push_str(piece);
+        record(index, Span::new(start, out.len()));
         prev = Some(tok.kind);
     }
     out

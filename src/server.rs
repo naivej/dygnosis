@@ -1600,12 +1600,12 @@ impl Backend {
             Err(v) => return v,
         };
         let mut inner = self.lock_inner();
-        if let Ok(uri) = Url::parse(&uri_a) {
-            inner.prepare_root(&uri);
-        }
-        if let Ok(uri) = Url::parse(&uri_b) {
-            inner.prepare_root(&uri);
-        }
+        let revision_a = Url::parse(&uri_a)
+            .ok()
+            .and_then(|uri| inner.root_revision(&uri));
+        let revision_b = Url::parse(&uri_b)
+            .ok()
+            .and_then(|uri| inner.root_revision(&uri));
         let Some(model_a) = inner.workspace.get_effective_model(uri_a.as_str()).cloned() else {
             return json!({"error": format!("No parsed model for uri_a: {uri_a}"), "code": "URI_A_NOT_FOUND"});
         };
@@ -1615,7 +1615,7 @@ impl Backend {
         if model_a.macro_incomplete() || model_b.macro_incomplete() {
             return crate::mcp::macro_incomplete_status();
         }
-        compare_models_with_sources(
+        let diff = compare_models_with_sources(
             &model_a,
             &model_b,
             inner
@@ -1632,23 +1632,64 @@ impl Backend {
                     text,
                     origin_uri: Some(uri_b.as_str()),
                 }),
-        )
-        .to_json()
+        );
+        let before = crate::compare_navigation::ComparisonInput::capture(
+            &mut inner.workspace,
+            &uri_a,
+            Some(&uri_a),
+            revision_a,
+            &model_a,
+            diff.shock_setup_changes
+                .iter()
+                .map(|change| change.before.as_ref()),
+        );
+        let after = crate::compare_navigation::ComparisonInput::capture(
+            &mut inner.workspace,
+            &uri_b,
+            Some(&uri_b),
+            revision_b,
+            &model_b,
+            diff.shock_setup_changes
+                .iter()
+                .map(|change| change.after.as_ref()),
+        );
+        if !inner.workspace.input_snapshot_is_current(&uri_a)
+            || !inner.workspace.input_snapshot_is_current(&uri_b)
+        {
+            return json!({"error": "Comparison inputs changed while reading them; refresh the comparison", "code": "INPUT_CHANGED"});
+        }
+        let mut result = diff.to_json();
+        result["navigation"] = crate::compare_navigation::navigation_json(
+            &diff,
+            &before,
+            &after,
+            crate::compare_navigation::Coordinates::Lsp,
+        );
+        result
     }
 
     fn show_effective_model_command(&self, arguments: &[Value]) -> Value {
-        let Some(uri) = extract_command_uri(arguments) else {
+        let Some(uri) = arguments
+            .first()
+            .and_then(|arg| arg.get("root_uri"))
+            .and_then(Value::as_str)
+            .and_then(|uri| Url::parse(uri).ok())
+            .or_else(|| extract_command_uri(arguments))
+        else {
             return json!({"success": false, "message": "Missing or invalid URI argument"});
         };
         let mut inner = self.lock_inner();
-        inner.prepare_root(&uri);
-        if !inner.docs.contains_key(&uri) {
-            return json!({"success": false, "message": "Document not available"});
+        if !is_model_root(&uri) {
+            return json!({"success": false, "code":"ROOT_REQUIRED", "message":"Choose a .mod or .dyn owner root for the effective model", "owner_roots":inner.known_owner_roots(&uri)});
         }
+        let Some(revision) = inner.root_revision(&uri) else {
+            return json!({"success": false, "message": "Document not available"});
+        };
         let Some(report) = inner.workspace.expand_report(uri.as_str()).cloned() else {
             return json!({"success": false, "message": "Document not available"});
         };
-        let complete = report.complete && inner.workspace.includes_complete(uri.as_str());
+        let complete =
+            report.navigation_complete && inner.workspace.includes_complete(uri.as_str());
         let has_heterogeneous = !report.heterogeneous_origins.is_empty();
         let origins: Vec<Value> = report
             .origins
@@ -1657,11 +1698,31 @@ impl Backend {
             .collect();
         let mut result = json!({
             "uri": uri.as_str(),
+            "root_uri": uri,
+            "revision": revision,
+            "document_version": inner.docs.get(&uri).map(|doc| doc.version),
+            "complete": complete,
+            "navigation_schema_version": crate::preview_navigation::NAVIGATION_SCHEMA_VERSION,
+            "dependency_candidates": inner.workspace.input_candidate_paths(uri.as_str())
+                .iter().filter_map(|path| Url::from_file_path(path).ok()).collect::<Vec<_>>(),
             "effective_text": report.effective_text,
             "origins": origins,
         });
+        result["navigation"] = if complete {
+            let index = LineIndex::new(&report.effective_text);
+            crate::preview_navigation::navigation_json(
+                &report,
+                |span| json!(span_range(&index, &report.effective_text, span)),
+                |segment| preview_written_location(&inner, &uri, segment),
+            )
+        } else {
+            json!([])
+        };
         if !complete {
             result["status"] = json!("incomplete");
+        }
+        if !inner.workspace.input_snapshot_is_current(uri.as_str()) {
+            return json!({"success":false,"code":"INPUT_CHANGED","message":"The model inputs changed; refresh the effective model"});
         }
         result
     }
@@ -2254,6 +2315,8 @@ pub fn initialize_result() -> InitializeResult {
             experimental: Some(json!({"dygnosis": {
                 "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true},
                 "modelInfoChanged": true,
+                "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1},
+                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
             }})),
             ..ServerCapabilities::default()
@@ -2515,6 +2578,32 @@ fn origin_lsp_range(workspace: &Workspace, origin_uri: Option<&str>, span: Span)
         .unwrap_or("");
     let index = LineIndex::new(text);
     span_range(&index, text, span)
+}
+
+fn preview_written_location(
+    inner: &Inner,
+    root: &Url,
+    segment: &crate::model_map::WrittenSegment,
+) -> Option<Value> {
+    let key = segment.file.as_deref()?;
+    let text = inner.workspace.get_source(key)?;
+    if segment.span.is_empty() {
+        return None;
+    }
+    let range = crate::server_model_map::written_range(text, segment.span)?;
+    let uri = inner
+        .docs
+        .keys()
+        .chain(std::iter::once(root))
+        .find(|uri| crate::include_resolver::normalize_uri(uri.as_str()) == key)
+        .cloned()
+        .or_else(|| file_url_from_path_key(key))?;
+    if !["file", "untitled"].contains(&uri.scheme()) {
+        return None;
+    }
+    Some(
+        json!({"uri":uri,"range":range,"document_version":inner.docs.get(&uri).map(|doc|doc.version)}),
+    )
 }
 
 fn origin_uri_json(path_key: Option<&str>) -> Option<String> {

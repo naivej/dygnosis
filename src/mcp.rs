@@ -398,8 +398,35 @@ pub fn dynare_expand(
         "effective_text": unit.report.effective_text,
         "n_equations": unit.report.n_equations,
         "origins": origins,
+        "navigation_schema_version": crate::preview_navigation::NAVIGATION_SCHEMA_VERSION,
+        "root_file": unit.root_file,
+        "revision": unit.revision,
+        "complete": unit.complete,
     });
-    if !unit.report.complete {
+    result["navigation"] = if unit.complete {
+        crate::preview_navigation::navigation_json(
+            &unit.report,
+            |span| range_json(span, &unit.report.effective_text),
+            |segment| {
+                let text = unit.source_for(segment.file.as_deref())?;
+                if segment.span.is_empty() {
+                    return None;
+                }
+                text.get(segment.span.start as usize..segment.span.end as usize)?;
+                let normalized = normalize_newlines(text);
+                let mut location = json!({"range":range_json(segment.span, &normalized)});
+                if let Some(file) = unit.map_uri(segment.file.as_deref()) {
+                    location["file"] = json!(file);
+                } else if segment.file.is_some() {
+                    return None;
+                }
+                Some(location)
+            },
+        )
+    } else {
+        json!([])
+    };
+    if !unit.complete {
         result["status"] = json!("incomplete");
     }
     if has_heterogeneous {
@@ -493,6 +520,9 @@ struct McpUnit {
     raw: String,
     files: Option<HashMap<String, String>>,
     sources: HashMap<String, String>,
+    root_file: Option<String>,
+    revision: String,
+    complete: bool,
 }
 
 fn mcp_unit(
@@ -511,12 +541,21 @@ fn mcp_unit(
 
 impl McpUnit {
     fn free(file_content: &str) -> Self {
+        use std::hash::{Hash, Hasher};
+        let report = expand_report(file_content);
+        let complete = report.navigation_complete
+            && crate::macro_expand::required_includes_complete(file_content);
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        file_content.hash(&mut hash);
         Self {
             model: parse(file_content),
-            report: expand_report(file_content),
+            report,
             raw: normalize_newlines(file_content),
             files: None,
             sources: HashMap::new(),
+            root_file: None,
+            revision: format!("{:016x}", hash.finish()),
+            complete,
         }
     }
 
@@ -526,6 +565,7 @@ impl McpUnit {
         for (name, content) in &workspace_files {
             ws.update_document(name, content);
         }
+        let revision = ws.input_revision(active).unwrap_or_default();
         let model = ws
             .get_effective_model(active)
             .cloned()
@@ -536,7 +576,9 @@ impl McpUnit {
             .unwrap_or_else(|| ExpandReport {
                 model_map: Default::default(),
                 complete: false,
+                navigation_complete: false,
                 effective_text: String::new(),
+                navigation: Vec::new(),
                 n_equations: 0,
                 origins: Vec::new(),
                 aggregate_origins: Vec::new(),
@@ -545,6 +587,9 @@ impl McpUnit {
                 heterogeneous_row_origins: Vec::new(),
             });
         let mut sources = HashMap::new();
+        let complete = report.navigation_complete
+            && ws.includes_complete(active)
+            && ws.input_snapshot_is_current(active);
         for uri in ws.document_uris() {
             if let Some(src) = ws.get_source(&uri) {
                 sources.insert(uri, src.to_string());
@@ -556,6 +601,9 @@ impl McpUnit {
             raw: normalize_newlines(file_content),
             files: Some(workspace_files),
             sources,
+            root_file: Some(active.to_string()),
+            revision,
+            complete,
         }
     }
 
@@ -664,22 +712,20 @@ pub fn dynare_compare_models(
     files_b: Option<&HashMap<String, String>>,
     files: Option<&HashMap<String, String>>,
 ) -> Value {
-    let model_a = mcp_parse_model(
+    let (model_a, mut workspace_a, root_a, revision_a) = mcp_compare_input(
         file_content_a,
         active_file_a,
         first_nonempty_files(files_a, files),
-        true,
     );
-    let model_b = mcp_parse_model(
+    let (model_b, mut workspace_b, root_b, revision_b) = mcp_compare_input(
         file_content_b,
         active_file_b,
         first_nonempty_files(files_b, files),
-        true,
     );
     if model_a.macro_incomplete() || model_b.macro_incomplete() {
         return macro_incomplete_status();
     }
-    compare_models_with_sources(
+    let diff = compare_models_with_sources(
         &model_a,
         &model_b,
         Some(CompareSource {
@@ -690,8 +736,50 @@ pub fn dynare_compare_models(
             text: file_content_b,
             origin_uri: active_file_b,
         }),
+    );
+    let before = crate::compare_navigation::ComparisonInput::capture(
+        &mut workspace_a,
+        &root_a,
+        active_file_a,
+        revision_a,
+        &model_a,
+        diff.shock_setup_changes
+            .iter()
+            .map(|change| change.before.as_ref()),
     )
-    .to_json()
+    .with_file_names(
+        first_nonempty_files(files_a, files)
+            .into_iter()
+            .flat_map(|map| map.keys()),
+    );
+    let after = crate::compare_navigation::ComparisonInput::capture(
+        &mut workspace_b,
+        &root_b,
+        active_file_b,
+        revision_b,
+        &model_b,
+        diff.shock_setup_changes
+            .iter()
+            .map(|change| change.after.as_ref()),
+    )
+    .with_file_names(
+        first_nonempty_files(files_b, files)
+            .into_iter()
+            .flat_map(|map| map.keys()),
+    );
+    if !workspace_a.input_snapshot_is_current(&root_a)
+        || !workspace_b.input_snapshot_is_current(&root_b)
+    {
+        return json!({"error": "Comparison inputs changed while reading them; refresh the comparison", "code": "INPUT_CHANGED"});
+    }
+    let mut result = diff.to_json();
+    result["navigation"] = crate::compare_navigation::navigation_json(
+        &diff,
+        &before,
+        &after,
+        crate::compare_navigation::Coordinates::Mcp,
+    );
+    result
 }
 
 /// Python `files_a or files`: an empty map is missing and the fallback is used.
@@ -705,18 +793,23 @@ fn first_nonempty_files<'a>(
         .find(|m| !m.is_empty())
 }
 
-fn mcp_parse_model(
+fn mcp_compare_input(
     file_content: &str,
     active_file: Option<&str>,
     files: Option<&HashMap<String, String>>,
-    synthesize_missing_active: bool,
-) -> Model {
+) -> (Model, Workspace, String, Option<String>) {
     let Some(files) = files.filter(|m| !m.is_empty()) else {
-        return parse(file_content);
+        // Preserve the historical no-map parse, with no host include lookup.
+        let root = "mcp-compare:root".to_string();
+        let mut ws = Workspace::new();
+        ws.set_root_search_paths(&root, Vec::new());
+        ws.update_document(&root, file_content);
+        let revision = ws.input_revision(&root);
+        return (parse(file_content), ws, root, revision);
     };
     let (active, owned) = match active_file {
         Some(active) => (active.to_string(), None),
-        None if synthesize_missing_active => {
+        None => {
             let mut map = files.clone();
             let mut key = "__mcp_compare__.mod".to_string();
             let mut n = 1u32;
@@ -727,7 +820,6 @@ fn mcp_parse_model(
             map.insert(key.clone(), file_content.to_string());
             (key, Some(map))
         }
-        None => return parse(file_content),
     };
     let files = owned.as_ref().unwrap_or(files);
     let mut ws = Workspace::new();
@@ -735,9 +827,12 @@ fn mcp_parse_model(
         ws.update_document(name, content);
     }
     ws.update_document(&active, file_content);
-    ws.get_effective_model(&active)
+    let revision = ws.input_revision(&active);
+    let model = ws
+        .get_effective_model(&active)
         .cloned()
-        .unwrap_or_else(|| parse(file_content))
+        .unwrap_or_else(|| parse(file_content));
+    (model, ws, active, revision)
 }
 
 /// `explain::render_markdown`, or the unknown-code string using Rust `known_codes()`.

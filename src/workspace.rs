@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::companion::{self, CompanionKind, CompanionRecord};
-use crate::expand::{expand_report_from_spliced, ExpandReport, SpliceSegment};
+use crate::expand::{expand_report_from_spliced, ExpandReport, NavigationSource, SpliceSegment};
 use crate::include_resolver::{
     is_virtual_uri, normalize_separators, normalize_uri, path_key, resolve_companion_path,
     resolve_include_path, resolve_scoped_include_path, uri_to_path,
@@ -83,7 +83,10 @@ struct SplicedSource {
     text: String,
     segments: Vec<SpliceSegment>,
     includes_complete: bool,
+    navigation: NavigationSource,
 }
+
+type NavigationTargets = HashMap<(String, Span), Option<String>>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct InputFile {
@@ -364,6 +367,28 @@ impl Workspace {
         }
     }
 
+    /// Validate a result against the exact files observed by input_revision.
+    /// Also catch a disk write between loading a parsed source and hashing it.
+    pub(crate) fn input_snapshot_is_current(&self, uri: &str) -> bool {
+        let Some(snapshot) = self.input_snapshots.get(&normalize_uri(uri)) else {
+            return false;
+        };
+        snapshot.iter().all(|(key, state)| {
+            if self.input_file(key) != *state {
+                return false;
+            }
+            let Some(document) = self.docs.get(key) else {
+                return true;
+            };
+            let Some(bytes) = state.bytes.as_ref() else {
+                return false;
+            };
+            let decoded = String::from_utf8(bytes.clone())
+                .unwrap_or_else(|_| bytes.iter().map(|&byte| byte as char).collect());
+            document.source == decoded
+        })
+    }
+
     /// Known compilation-unit owners from resolved include edges. Retained
     /// across cache invalidation so an editor edit does not lose root context.
     pub fn owner_roots(&self, uri: &str) -> Vec<String> {
@@ -524,7 +549,11 @@ impl Workspace {
         let key = self.ensure_loaded(uri)?;
         if !self.expand.contains_key(&key) {
             let spliced = self.spliced_source(&key);
-            let report = expand_report_from_spliced(&spliced.text, &spliced.segments);
+            let report = expand_report_from_spliced(
+                &spliced.text,
+                &spliced.segments,
+                Some(&spliced.navigation),
+            );
             self.expand.insert(key.clone(), report);
         }
         self.expand.get(&key)
@@ -974,21 +1003,50 @@ impl Workspace {
         let raw_complete = self
             .include_records(key)
             .is_some_and(|records| records.unresolved.is_empty() && records.cycles.is_empty());
-        let (text, segments) = self.splice_with_map(key, &mut Vec::new(), &mut Vec::new(), false);
-        let includes_complete = if raw_complete
-            && !crate::macro_expand::has_include_directives(&text)
-        {
-            true
-        } else {
-            // Only this metadata pass retains failed directives, so the macro
-            // visitor can distinguish required sites from known false branches.
-            let (activity, _) = self.splice_with_map(key, &mut Vec::new(), &mut Vec::new(), true);
-            crate::macro_expand::required_includes_complete(&activity)
-        };
+        let mut include_targets = HashMap::new();
+        let (text, segments) = self.splice_with_map(
+            key,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            false,
+            &mut include_targets,
+        );
+        // Reuse the exact targets already resolved by the legacy splice. Only
+        // executed includes load a raw file in this separate navigation proof.
+        let navigation_proof = self.docs.get(key).map(|document| {
+            crate::macro_expand::navigation_macros_complete(key, &document.source, |file, span| {
+                let target = include_targets.get(&(file.to_string(), span))?.as_ref()?;
+                let source = self.docs.get(target)?.source.clone();
+                Some((target.clone(), source))
+            })
+        });
+        let navigation = navigation_proof
+            .filter(|proof| proof.complete)
+            .and_then(|proof| {
+                self.navigation_splice(key, &proof.sites, &include_targets, &mut Vec::new())
+            })
+            .map(|(text, segments)| NavigationSource::Mapped { text, segments })
+            .unwrap_or(NavigationSource::Unavailable);
+        let includes_complete =
+            if raw_complete && !crate::macro_expand::has_include_directives(&text) {
+                true
+            } else {
+                // Only this metadata pass retains failed directives, so the macro
+                // visitor can distinguish required sites from known false branches.
+                let (activity, _) = self.splice_with_map(
+                    key,
+                    &mut Vec::new(),
+                    &mut Vec::new(),
+                    true,
+                    &mut HashMap::new(),
+                );
+                crate::macro_expand::required_includes_complete(&activity)
+            };
         let source = Arc::new(SplicedSource {
             text,
             segments,
             includes_complete,
+            navigation,
         });
         self.spliced.insert(key.to_string(), Arc::clone(&source));
         source
@@ -1000,6 +1058,7 @@ impl Workspace {
         stack: &mut Vec<String>,
         active_search: &mut Vec<PathBuf>,
         keep_unresolved: bool,
+        include_targets: &mut NavigationTargets,
     ) -> (String, Vec<SpliceSegment>) {
         if stack.iter().any(|k| k == key) {
             return (String::new(), Vec::new());
@@ -1048,6 +1107,14 @@ impl Workspace {
                         None => (String::new(), Vec::new()),
                         Some(path) => {
                             let resolved_key = self.include_key(&path);
+                            include_targets
+                                .entry((key.to_string(), dir.span))
+                                .and_modify(|target| {
+                                    if target.as_deref() != Some(resolved_key.as_str()) {
+                                        *target = None;
+                                    }
+                                })
+                                .or_insert_with(|| Some(resolved_key.clone()));
                             if stack.iter().any(|k| k == &resolved_key) || resolved_key == key {
                                 if keep_unresolved {
                                     identity_splice(
@@ -1064,6 +1131,7 @@ impl Workspace {
                                     stack,
                                     active_search,
                                     keep_unresolved,
+                                    include_targets,
                                 );
                                 stack.pop();
                                 nested
@@ -1075,6 +1143,37 @@ impl Workspace {
             }
         }
         apply_replacements_mapped(&source, &replacements, Some(key.to_string()))
+    }
+
+    /// Metadata projection over already resolved targets. Dormant directives
+    /// stay in their caller's source; their file bodies cannot affect the proof.
+    fn navigation_splice(
+        &self,
+        key: &str,
+        sites: &HashSet<(String, Span)>,
+        targets: &NavigationTargets,
+        stack: &mut Vec<String>,
+    ) -> Option<(String, Vec<SpliceSegment>)> {
+        if stack.iter().any(|file| file == key) {
+            return None;
+        }
+        let document = self.docs.get(key)?;
+        stack.push(key.to_string());
+        let mut replacements = Vec::new();
+        for directive in &document.model.includes {
+            let site = (key.to_string(), directive.span);
+            if sites.contains(&site) {
+                let target = targets.get(&site)?.as_deref()?;
+                let (body, segments) = self.navigation_splice(target, sites, targets, stack)?;
+                replacements.push((directive.span, body, segments));
+            }
+        }
+        stack.pop();
+        Some(apply_replacements_mapped(
+            &document.source,
+            &replacements,
+            Some(key.to_string()),
+        ))
     }
 
     fn directive_search_paths(&self, key: &str, directive: &IncludePathDirective) -> Vec<PathBuf> {
@@ -1357,4 +1456,40 @@ fn file_basename(path: &str) -> String {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string())
+}
+
+#[cfg(test)]
+mod compare_snapshot_tests {
+    use super::Workspace;
+
+    #[test]
+    fn snapshot_rejects_disk_changes_before_hash_and_after_hash() {
+        let path = std::env::temp_dir().join(format!(
+            "dygnosis-compare-snapshot-{}-{}.mod",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, "var old_name;").unwrap();
+        let uri = path.to_str().unwrap();
+        let mut workspace = Workspace::new();
+        workspace.load_from_disk(&path).unwrap();
+        std::fs::write(&path, "var new_name;").unwrap();
+        workspace.input_revision(uri).unwrap();
+        assert!(
+            !workspace.input_snapshot_is_current(uri),
+            "parsed source predates hashed bytes"
+        );
+        workspace.load_from_disk(&path).unwrap();
+        workspace.input_revision(uri).unwrap();
+        assert!(workspace.input_snapshot_is_current(uri));
+        std::fs::write(&path, "var newest_name;").unwrap();
+        assert!(
+            !workspace.input_snapshot_is_current(uri),
+            "disk write after captured revision"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 }
