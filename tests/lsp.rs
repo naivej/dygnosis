@@ -2196,11 +2196,14 @@ fn initialize_capabilities_wave_c() {
         .expect("executeCommand")
         .commands
         .clone();
-    assert_eq!(commands.len(), 4, "commands: {commands:?}");
+    assert_eq!(commands.len(), 7, "commands: {commands:?}");
     assert!(commands.contains(&"dynare/explainDiagnostic".into()));
     assert!(commands.contains(&"dynare/compareModels".into()));
     assert!(commands.contains(&"dynare/showEffectiveModel".into()));
     assert!(commands.contains(&"dynare/modelInfo".into()));
+    assert!(commands.contains(&"dynare/projectStatus".into()));
+    assert!(commands.contains(&"dynare/recheckProject".into()));
+    assert!(commands.contains(&"dynare/cancelProject".into()));
     assert!(!commands.contains(&"dynare/runPreprocessor".into()));
     assert!(!commands.iter().any(|c| c.contains("computeSteadyState")));
     assert!(!commands.iter().any(|c| c.contains("runDynare")));

@@ -3,7 +3,10 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+#[path = "server_project.rs"]
+mod project;
 
 use serde_json::{json, Value};
 use tower_lsp::jsonrpc::Result;
@@ -14,9 +17,7 @@ use crate::catalog::{
     command_options, family_help, option_doc, FAMILY_COMMAND_HELP, FAMILY_OPERATOR_HELP,
     HETEROGENEITY_OPTION, HET_SHOCKS_OVERWRITE,
 };
-use crate::diagnostic::{
-    check_file, check_in_workspace_with_origins, DiagnosticSet, WritingOrigin,
-};
+use crate::diagnostic::{check_file, check_in_workspace_with_origins, DiagnosticSet};
 use crate::equation_names::equation_name_plan;
 use crate::expand::{EquationOrigin, OriginFrame};
 use crate::explain;
@@ -122,7 +123,14 @@ struct OpenDoc {
     version: i32,
     diagnostics: Vec<Diagnostic>,
     library: Vec<crate::Diagnostic>,
-    writing_origins: HashMap<String, WritingOrigin>,
+}
+
+struct RootReport {
+    root: Url,
+    routes: HashMap<Url, Vec<RoutedDiagnostic>>,
+    revision: String,
+    errors: usize,
+    warnings: usize,
 }
 
 #[derive(Clone)]
@@ -195,6 +203,9 @@ struct Inner {
     semantic_mapping: SemanticMapping,
     completion_label_details: bool,
     completion_snippets: bool,
+    publication_versions: HashMap<Url, Option<i32>>,
+    reports: HashMap<Url, Arc<RootReport>>,
+    project: project::ProjectState,
 }
 
 impl Default for Inner {
@@ -212,11 +223,25 @@ impl Default for Inner {
             semantic_mapping: SemanticMapping::default(),
             completion_label_details: false,
             completion_snippets: false,
+            publication_versions: HashMap::new(),
+            reports: HashMap::new(),
+            project: project::ProjectState::default(),
         }
     }
 }
 
 impl Inner {
+    fn document(&self, uri: &Url) -> Option<&OpenDoc> {
+        self.docs.get(uri).or_else(|| {
+            let key = crate::include_resolver::normalize_uri(uri.as_str());
+            self.docs
+                .iter()
+                .find(|(candidate, _)| {
+                    crate::include_resolver::normalize_uri(candidate.as_str()) == key
+                })
+                .map(|(_, doc)| doc)
+        })
+    }
     fn name_views(&mut self, uri: &Url) -> Option<Vec<(Model, crate::model_map::WrittenModelMap)>> {
         let mut roots = self.known_owner_roots(uri);
         if roots.is_empty() && is_model_root(uri) {
@@ -260,10 +285,15 @@ impl Inner {
             .cloned()
             .collect();
         roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        roots.extend(self.project.owners(uri));
+        roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        let mut seen = HashSet::new();
+        roots.retain(|root| seen.insert(crate::include_resolver::normalize_uri(root.as_str())));
         roots
     }
 
     fn root_revision(&mut self, uri: &Url) -> Option<String> {
+        self.remember_request_root(uri);
         let settings = self.prepare_root(uri);
         let inputs = self.workspace.input_revision(uri.as_str())?;
         let mut hash = std::collections::hash_map::DefaultHasher::new();
@@ -303,8 +333,11 @@ impl Inner {
     ) -> Vec<(Url, Option<i32>, Vec<Diagnostic>)> {
         let mut roots: Vec<Url> = self.docs.keys().cloned().collect();
         roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-        let mut checks: Vec<(Url, DiagnosticSet, String)> = Vec::new();
         for uri in roots {
+            if !is_model_root(&uri) && !self.known_owner_roots(&uri).is_empty() {
+                self.reports.remove(&uri);
+                continue;
+            }
             if is_model_root(&uri) {
                 self.root_revision(&uri);
             } else {
@@ -315,72 +348,81 @@ impl Inner {
                 .workspace
                 .input_revision(uri.as_str())
                 .unwrap_or_default();
-            checks.push((uri, set, revision));
+            let text = self
+                .document(&uri)
+                .map(|doc| Arc::from(doc.text.as_str()))
+                .unwrap_or_default();
+            let report = prepare_root_report(&uri, set, text, revision);
+            self.reports.insert(uri, Arc::new(report));
         }
+        self.reports
+            .retain(|root, _| self.docs.contains_key(root) || self.project.is_selected(root));
+        self.merge_diagnostics(first)
+    }
+
+    /// Route the one report per compilation unit. This never computes a model.
+    fn merge_diagnostics(
+        &mut self,
+        first: Option<&Url>,
+    ) -> Vec<(Url, Option<i32>, Vec<Diagnostic>)> {
+        let mut checks: Vec<_> = self
+            .reports
+            .iter()
+            .map(|(root, report)| (root.clone(), Arc::clone(report)))
+            .collect();
+        checks.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
         let mut routed: HashMap<Url, Vec<Diagnostic>> = self
             .docs
             .keys()
+            .chain(self.reports.keys())
             .cloned()
             .map(|uri| (uri, Vec::new()))
             .collect();
         let mut routed_from: HashMap<Url, Vec<Url>> = HashMap::new();
         let mut library_routed: HashMap<Url, Vec<crate::Diagnostic>> = HashMap::new();
         let mut routed_library: HashMap<Url, Vec<RoutedDiagnostic>> = HashMap::new();
-        for (root, set, revision) in &checks {
-            let root_text = self
-                .docs
-                .get(root)
-                .map(|doc| doc.text.as_str())
-                .unwrap_or("");
-            for (i, diag) in set.diagnostics.iter().enumerate() {
-                let origin = set.origins.get(i).and_then(Option::as_ref);
-                let (uri, text, span) = if let Some(origin) = origin {
-                    let uri = self
-                        .docs
-                        .keys()
-                        .find(|uri| {
-                            crate::include_resolver::normalize_uri(uri.as_str()) == origin.file
-                        })
-                        .cloned()
-                        .or_else(|| file_url_from_path_key(&origin.file));
-                    let Some(uri) = uri else { continue };
-                    (uri, origin.text.as_ref(), origin.span)
-                } else {
-                    (root.clone(), root_text, diag.span)
-                };
-                let mut mapped = diag.clone();
-                mapped.span = span;
-                let mut items = library_to_lsp(text, std::slice::from_ref(&mapped));
-                for item in &mut items {
-                    if crate::check_writing::is_writing_code(&diag.code) || diag.fix.is_some() {
-                        let data = item
-                            .data
-                            .get_or_insert_with(|| json!({}))
-                            .as_object_mut()
-                            .unwrap();
-                        data.insert("root".into(), json!(root));
-                        data.insert("input_revision".into(), json!(revision));
-                    }
-                }
-                for item in items {
+        let mut source_identities: HashMap<_, _> = self
+            .reports
+            .keys()
+            .map(|uri| {
+                (
+                    crate::include_resolver::normalize_uri(uri.as_str()),
+                    uri.clone(),
+                )
+            })
+            .collect();
+        source_identities.extend(self.docs.keys().map(|uri| {
+            (
+                crate::include_resolver::normalize_uri(uri.as_str()),
+                uri.clone(),
+            )
+        }));
+        for (root, report) in &checks {
+            for (source, rows) in &report.routes {
+                let key = crate::include_resolver::normalize_uri(source.as_str());
+                let uri = source_identities
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_else(|| source.clone());
+                for row in rows {
                     routed_library
                         .entry(uri.clone())
                         .or_default()
-                        .push(RoutedDiagnostic {
-                            diagnostic: mapped.clone(),
-                            lsp_diagnostic: item.clone(),
-                            text: std::sync::Arc::from(text),
-                            root: root.clone(),
-                            revision: revision.clone(),
-                        });
-                    routed.entry(uri.clone()).or_default().push(item);
+                        .push(row.clone());
+                    routed
+                        .entry(uri.clone())
+                        .or_default()
+                        .push(row.lsp_diagnostic.clone());
                     routed_from
                         .entry(uri.clone())
                         .or_default()
                         .push(root.clone());
-                }
-                if self.docs.contains_key(&uri) {
-                    library_routed.entry(uri.clone()).or_default().push(mapped);
+                    if self.docs.contains_key(&uri) {
+                        library_routed
+                            .entry(uri.clone())
+                            .or_default()
+                            .push(row.diagnostic.clone());
+                    }
                 }
             }
         }
@@ -401,11 +443,6 @@ impl Inner {
             *items = unique;
         }
         self.routed_library = routed_library;
-        for (root, set, _) in checks {
-            if let Some(doc) = self.docs.get_mut(&root) {
-                doc.writing_origins = set.writing_origins;
-            }
-        }
         for (uri, doc) in &mut self.docs {
             let mut unique: Vec<crate::Diagnostic> = Vec::new();
             for diag in library_routed.remove(uri).unwrap_or_default() {
@@ -436,25 +473,55 @@ impl Inner {
         if let Some(first) = first {
             if let Some(at) = publish.iter().position(|uri| uri == first) {
                 let first = publish.remove(at);
-                publish.insert(0, first);
+                let key = crate::include_resolver::normalize_uri(first.as_str());
+                let mut aliases: Vec<_> = publish
+                    .iter()
+                    .filter(|uri| {
+                        !routed.contains_key(*uri)
+                            && crate::include_resolver::normalize_uri(uri.as_str()) == key
+                    })
+                    .cloned()
+                    .collect();
+                publish.retain(|uri| !aliases.contains(uri));
+                // Clear a superseded URI before its native-equivalent current
+                // report, including clients whose collections ignore case.
+                aliases.push(first);
+                aliases.append(&mut publish);
+                publish = aliases;
             }
         }
-        self.published = routed;
-        publish
+        let output = publish
             .into_iter()
+            .filter(|uri| {
+                Some(uri) == first
+                    || self.published.get(uri) != routed.get(uri)
+                    || self.publication_versions.get(uri).copied()
+                        != Some(self.document(uri).map(|doc| doc.version))
+            })
             .map(|uri| {
-                let version = self.docs.get(&uri).map(|doc| doc.version);
-                let diagnostics = self.published.get(&uri).cloned().unwrap_or_default();
+                let version = routed
+                    .contains_key(&uri)
+                    .then(|| self.document(&uri).map(|doc| doc.version))
+                    .flatten();
+                let diagnostics = routed.get(&uri).cloned().unwrap_or_default();
                 (uri, version, diagnostics)
             })
-            .collect()
+            .collect();
+        self.publication_versions = routed
+            .keys()
+            .map(|uri| (uri.clone(), self.document(uri).map(|doc| doc.version)))
+            .collect();
+        self.published = routed;
+        output
     }
 }
 
 /// Language server backend (document overlay + diagnostics).
 pub struct Backend {
     client: Client,
-    inner: Mutex<Inner>,
+    inner: Arc<Mutex<Inner>>,
+    project_wake: Arc<tokio::sync::Notify>,
+    output_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl std::fmt::Debug for Backend {
@@ -467,7 +534,9 @@ impl Backend {
     pub fn new(client: Client) -> Self {
         Self {
             client,
-            inner: Mutex::new(Inner::default()),
+            inner: Arc::new(Mutex::new(Inner::default())),
+            project_wake: Arc::new(tokio::sync::Notify::new()),
+            output_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -521,6 +590,15 @@ impl Backend {
         version: i32,
     ) -> Vec<(Url, Option<i32>, Vec<Diagnostic>)> {
         let mut inner = self.lock_inner();
+        let key = crate::include_resolver::normalize_uri(uri.as_str());
+        inner.docs.retain(|candidate, _| {
+            candidate == &uri || crate::include_resolver::normalize_uri(candidate.as_str()) != key
+        });
+        inner.align_project_root(&uri);
+        inner.project_changed(&uri, false);
+        if is_model_root(&uri) {
+            inner.project.active = Some(uri.clone());
+        }
         inner.workspace.update_document(uri.as_str(), &text);
         inner.docs.insert(
             uri.clone(),
@@ -529,7 +607,6 @@ impl Backend {
                 version,
                 diagnostics: Vec::new(),
                 library: Vec::new(),
-                writing_origins: HashMap::new(),
             },
         );
         inner.refresh_diagnostics(Some(&uri))
@@ -537,12 +614,29 @@ impl Backend {
 
     fn pull_items(&self, uri: &Url) -> Vec<Diagnostic> {
         let inner = self.lock_inner();
-        inner.published.get(uri).cloned().unwrap_or_default()
+        inner
+            .published
+            .get(uri)
+            .or_else(|| {
+                let key = crate::include_resolver::normalize_uri(uri.as_str());
+                inner
+                    .published
+                    .iter()
+                    .find(|(candidate, _)| {
+                        crate::include_resolver::normalize_uri(candidate.as_str()) == key
+                    })
+                    .map(|(_, items)| items)
+            })
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn hover_at(&self, pos: &TextDocumentPositionParams) -> Option<Hover> {
         let mut inner = self.lock_inner();
-        let text = inner.docs.get(&pos.text_document.uri)?.text.clone();
+        if is_model_root(&pos.text_document.uri) {
+            inner.project.active = Some(pos.text_document.uri.clone());
+        }
+        let text = inner.document(&pos.text_document.uri)?.text.clone();
         let normalized = crate::parser::normalize_newlines(&text);
         let index = LineIndex::new(&normalized);
         let byte = index.offset_utf16(&text, span_pos(pos.position));
@@ -585,7 +679,7 @@ impl Backend {
 
     fn doc_symbols(&self, uri: &Url) -> Option<Vec<DocumentSymbol>> {
         let mut inner = self.lock_inner();
-        let text = inner.docs.get(uri)?.text.clone();
+        let text = inner.document(uri)?.text.clone();
         let preferences = inner.presentation_for(uri);
         let owners = inner.known_owner_roots(uri);
         let roots = if owners.is_empty() && is_model_root(uri) {
@@ -726,7 +820,7 @@ impl Backend {
 
     fn decl_location(&self, pos: &TextDocumentPositionParams) -> Option<Location> {
         let inner = self.lock_inner();
-        let doc = inner.docs.get(&pos.text_document.uri)?;
+        let doc = inner.document(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
         let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, _) = ident_at(&doc.text, byte)?;
@@ -741,7 +835,7 @@ impl Backend {
     fn definition_at(&self, pos: &TextDocumentPositionParams) -> Option<GotoDefinitionResponse> {
         let mut inner = self.lock_inner();
         let uri = &pos.text_document.uri;
-        let doc = inner.docs.get(uri)?;
+        let doc = inner.document(uri)?;
         let text = doc.text.clone();
         let index = LineIndex::new(&text);
         let byte = index.offset_utf16(&text, span_pos(pos.position));
@@ -784,7 +878,7 @@ impl Backend {
 
     fn ident_locations(&self, pos: &TextDocumentPositionParams) -> Option<Vec<Location>> {
         let mut inner = self.lock_inner();
-        let doc = inner.docs.get(&pos.text_document.uri)?;
+        let doc = inner.document(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
         let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, _) = ident_at(&doc.text, byte)?;
@@ -843,7 +937,7 @@ impl Backend {
 
     fn ident_highlights(&self, pos: &TextDocumentPositionParams) -> Option<Vec<DocumentHighlight>> {
         let mut inner = self.lock_inner();
-        let text = inner.docs.get(&pos.text_document.uri)?.text.clone();
+        let text = inner.document(&pos.text_document.uri)?.text.clone();
         let normalized = crate::parser::normalize_newlines(&text);
         let index = LineIndex::new(&normalized);
         let byte = index.offset_utf16(&text, span_pos(pos.position));
@@ -873,7 +967,7 @@ impl Backend {
 
     fn complete(&self, pos: &TextDocumentPositionParams) -> Option<CompletionResponse> {
         let mut inner = self.lock_inner();
-        let text = inner.docs.get(&pos.text_document.uri)?.text.clone();
+        let text = inner.document(&pos.text_document.uri)?.text.clone();
         let normalized = crate::parser::normalize_newlines(&text);
         let index = LineIndex::new(&normalized);
         let byte = index.offset_utf16(&text, span_pos(pos.position));
@@ -924,7 +1018,7 @@ impl Backend {
 
     fn signature_at(&self, pos: &TextDocumentPositionParams) -> Option<SignatureHelp> {
         let inner = self.lock_inner();
-        let doc = inner.docs.get(&pos.text_document.uri)?;
+        let doc = inner.document(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
         let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         crate::signature_help::signature_help(&doc.text, byte)
@@ -932,7 +1026,7 @@ impl Backend {
 
     fn prepare_rename_at(&self, pos: &TextDocumentPositionParams) -> Option<Range> {
         let inner = self.lock_inner();
-        let doc = inner.docs.get(&pos.text_document.uri)?;
+        let doc = inner.document(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
         let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, span) = ident_at(&doc.text, byte)?;
@@ -950,7 +1044,7 @@ impl Backend {
             return None;
         }
         let inner = self.lock_inner();
-        let doc = inner.docs.get(&pos.text_document.uri)?;
+        let doc = inner.document(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
         let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, _) = ident_at(&doc.text, byte)?;
@@ -1005,8 +1099,7 @@ impl Backend {
                 continue;
             }
             let current = inner
-                .docs
-                .get(uri)
+                .document(uri)
                 .map(|doc| doc.text.as_str())
                 .or_else(|| inner.workspace.get_source(uri.as_str()));
             if current != Some(row.text.as_ref()) {
@@ -1082,7 +1175,7 @@ impl Backend {
         }
         let uri = &params.text_document.uri;
         let mut inner = self.lock_inner();
-        let Some(text) = inner.docs.get(uri).map(|doc| doc.text.clone()) else {
+        let Some(text) = inner.document(uri).map(|doc| doc.text.clone()) else {
             return Vec::new();
         };
         let (kinds, stochastic_names, deterministic_names) = {
@@ -1136,7 +1229,7 @@ impl Backend {
 
     fn linked_ranges(&self, pos: &TextDocumentPositionParams) -> Option<LinkedEditingRanges> {
         let inner = self.lock_inner();
-        let doc = inner.docs.get(&pos.text_document.uri)?;
+        let doc = inner.document(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
         let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let (word, _) = ident_at(&doc.text, byte)?;
@@ -1157,12 +1250,15 @@ impl Backend {
     }
 
     fn apply_settings(&self, settings: &Value) -> Vec<String> {
-        self.lock_inner().settings.apply(settings)
+        let mut inner = self.lock_inner();
+        let explanations = inner.settings.apply(settings);
+        inner.project_reconfigure(true);
+        explanations
     }
 
     fn folding_ranges(&self, uri: &Url) -> Option<Vec<FoldingRange>> {
         let inner = self.lock_inner();
-        let doc = inner.docs.get(uri)?;
+        let doc = inner.document(uri)?;
         let model = inner.workspace.get_model(uri.as_str())?;
         let normalized = crate::parser::normalize_newlines(&doc.text);
         let index = LineIndex::new(&normalized);
@@ -1228,7 +1324,7 @@ impl Backend {
 
     fn selection_ranges(&self, uri: &Url, positions: &[Position]) -> Option<Vec<SelectionRange>> {
         let inner = self.lock_inner();
-        let doc = inner.docs.get(uri)?;
+        let doc = inner.document(uri)?;
         let model = inner.workspace.get_model(uri.as_str())?;
         let index = LineIndex::new(&doc.text);
         let file_range = full_document_range(&doc.text);
@@ -1289,7 +1385,7 @@ impl Backend {
 
     fn document_links(&self, uri: &Url) -> Option<Vec<DocumentLink>> {
         let mut inner = self.lock_inner();
-        let text = inner.docs.get(uri)?.text.clone();
+        let text = inner.document(uri)?.text.clone();
         let includes = inner
             .workspace
             .get_model(uri.as_str())
@@ -1352,7 +1448,7 @@ impl Backend {
 
     fn semantic_tokens(&self, uri: &Url, range: Option<Range>) -> Option<SemanticTokens> {
         let mut inner = self.lock_inner();
-        let text = inner.docs.get(uri)?.text.clone();
+        let text = inner.document(uri)?.text.clone();
         let views = inner.name_views(uri)?;
         let sites: Vec<_> = views
             .iter()
@@ -1451,7 +1547,7 @@ impl Backend {
 
     fn format_document(&self, uri: &Url) -> Option<Vec<TextEdit>> {
         let inner = self.lock_inner();
-        let doc = inner.docs.get(uri)?;
+        let doc = inner.document(uri)?;
         let settings = inner.settings.resolve(uri);
         let formatted = format_text(&doc.text, &settings.format_indent_unit)?;
         Some(vec![full_document_edit(&doc.text, formatted)])
@@ -1459,7 +1555,7 @@ impl Backend {
 
     fn format_line_range(&self, uri: &Url, range: Range) -> Option<Vec<TextEdit>> {
         let inner = self.lock_inner();
-        let doc = inner.docs.get(uri)?;
+        let doc = inner.document(uri)?;
         let mut end_line = range.end.line;
         if range.end.character == 0 && end_line > range.start.line {
             end_line -= 1;
@@ -1480,13 +1576,25 @@ impl Backend {
     }
 
     fn execute(&self, command: &str, arguments: &[Value]) -> Value {
-        match command {
+        if let Some(root) = arguments
+            .first()
+            .and_then(|value| value.get("root_uri"))
+            .and_then(Value::as_str)
+            .and_then(|uri| Url::parse(uri).ok())
+            .filter(is_model_root)
+        {
+            self.lock_inner().project.active = Some(root);
+            self.project_wake.notify_one();
+        }
+        let result = match command {
             "dynare/explainDiagnostic" => explain_command(arguments),
             "dynare/compareModels" => self.compare_command(arguments),
             "dynare/showEffectiveModel" => self.show_effective_model_command(arguments),
             "dynare/modelInfo" => self.model_info_command(arguments),
             _ => json!({"error": format!("unknown command {command}"), "code": "UNKNOWN_COMMAND"}),
-        }
+        };
+        self.lock_inner().bound_workspace_cache();
+        result
     }
 
     fn model_info_command(&self, arguments: &[Value]) -> Value {
@@ -1563,7 +1671,7 @@ impl Backend {
         result["schema_version"] = json!(MODEL_INFO_SCHEMA_VERSION);
         result["root_uri"] = json!(root);
         result["document_uri"] = json!(document);
-        result["document_version"] = json!(inner.docs.get(&document).map(|doc| doc.version));
+        result["document_version"] = json!(inner.document(&document).map(|doc| doc.version));
         result["revision"] = json!(revision);
         result["complete"] = json!(complete);
         result["owner_roots"] = json!(inner.known_owner_roots(&document));
@@ -1700,7 +1808,7 @@ impl Backend {
             "uri": uri.as_str(),
             "root_uri": uri,
             "revision": revision,
-            "document_version": inner.docs.get(&uri).map(|doc| doc.version),
+            "document_version": inner.document(&uri).map(|doc| doc.version),
             "complete": complete,
             "navigation_schema_version": crate::preview_navigation::NAVIGATION_SCHEMA_VERSION,
             "dependency_candidates": inner.workspace.input_candidate_paths(uri.as_str())
@@ -1732,7 +1840,7 @@ impl Backend {
         pos: &TextDocumentPositionParams,
     ) -> Option<Vec<CallHierarchyItem>> {
         let inner = self.lock_inner();
-        let doc = inner.docs.get(&pos.text_document.uri)?;
+        let doc = inner.document(&pos.text_document.uri)?;
         let model = inner.workspace.get_model(pos.text_document.uri.as_str())?;
         let index = LineIndex::new(&doc.text);
         let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
@@ -1771,7 +1879,7 @@ impl Backend {
         }
         let name = data.get("name")?.as_str()?.to_string();
         let inner = self.lock_inner();
-        let doc = inner.docs.get(&item.uri)?;
+        let doc = inner.document(&item.uri)?;
         let model = inner.workspace.get_model(item.uri.as_str())?;
         let index = LineIndex::new(&doc.text);
         let mut calls = Vec::new();
@@ -1806,7 +1914,7 @@ impl Backend {
         }
         let start = data.get("start")?.as_u64()? as u32;
         let inner = self.lock_inner();
-        let doc = inner.docs.get(&item.uri)?;
+        let doc = inner.document(&item.uri)?;
         let model = inner.workspace.get_model(item.uri.as_str())?;
         let eq = model.equations.iter().find(|e| e.span.start == start)?;
         let index = LineIndex::new(&doc.text);
@@ -1878,6 +1986,14 @@ impl LanguageServer for Backend {
                 .and_then(|value| value.get("modelInfoChanged"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
+            inner.project.notifications = params
+                .capabilities
+                .experimental
+                .as_ref()
+                .and_then(|value| value.get("dygnosis"))
+                .and_then(|value| value.get("projectStatusChanged"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let workspace = params.capabilities.workspace.as_ref();
             inner.token_refresh = workspace
                 .and_then(|cap| cap.semantic_tokens.as_ref())
@@ -1894,6 +2010,8 @@ impl LanguageServer for Backend {
                     .log_message(MessageType::WARNING, explanation)
                     .await;
             }
+        } else {
+            self.lock_inner().project_reconfigure(true);
         }
         let mut result = initialize_result();
         if let Some(SemanticTokensServerCapabilities::SemanticTokensOptions(options)) =
@@ -1905,26 +2023,44 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        self.lock_inner().project.initialized = true;
         self.client
             .log_message(MessageType::INFO, "dygnosis initialized")
             .await;
+        self.kick_project();
     }
 
     async fn shutdown(&self) -> Result<()> {
+        let _output = self.output_gate.lock().await;
+        let mut inner = self.lock_inner();
+        inner.project.shutdown = true;
+        inner.project.epoch += 1;
+        self.project_wake.notify_one();
         Ok(())
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let output = self.output_gate.lock().await;
         let doc = params.text_document;
         for (uri, version, diagnostics) in self.upsert(doc.uri, doc.text, doc.version) {
             self.client
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
+        drop(output);
         self.refresh_presentation(false).await;
+        self.kick_project();
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let output = self.output_gate.lock().await;
+        if self
+            .lock_inner()
+            .document(&params.text_document.uri)
+            .is_some_and(|doc| params.text_document.version < doc.version)
+        {
+            return;
+        }
         let Some(change) = params.content_changes.last() else {
             return;
         };
@@ -1941,14 +2077,17 @@ impl LanguageServer for Backend {
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
+        drop(output);
         self.refresh_presentation(false).await;
+        self.kick_project();
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let output = self.output_gate.lock().await;
         let uri = params.text_document.uri;
         let snapshot = {
             let inner = self.lock_inner();
-            inner.docs.get(&uri).map(|d| (d.text.clone(), d.version))
+            inner.document(&uri).map(|d| (d.text.clone(), d.version))
         };
         let (text, version) = match (params.text, snapshot) {
             (Some(text), Some((_, version))) => (text, version),
@@ -1961,15 +2100,22 @@ impl LanguageServer for Backend {
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
+        drop(output);
         self.refresh_presentation(false).await;
+        self.kick_project();
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let output = self.output_gate.lock().await;
         let uri = params.text_document.uri;
         let to_publish = {
             let mut inner = self.lock_inner();
-            inner.docs.remove(&uri);
+            let key = crate::include_resolver::normalize_uri(uri.as_str());
+            inner.docs.retain(|candidate, _| {
+                crate::include_resolver::normalize_uri(candidate.as_str()) != key
+            });
             inner.workspace.remove_document(uri.as_str());
+            inner.project_changed(&uri, false);
             inner.refresh_diagnostics(Some(&uri))
         };
         for (uri, version, diagnostics) in to_publish {
@@ -1977,7 +2123,9 @@ impl LanguageServer for Backend {
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
+        drop(output);
         self.refresh_presentation(false).await;
+        self.kick_project();
     }
 
     async fn diagnostic(
@@ -1998,16 +2146,16 @@ impl LanguageServer for Backend {
 
     async fn workspace_diagnostic(
         &self,
-        _: WorkspaceDiagnosticParams,
+        params: WorkspaceDiagnosticParams,
     ) -> Result<WorkspaceDiagnosticReportResult> {
         let inner = self.lock_inner();
-        let items = inner
+        let mut items: Vec<_> = inner
             .published
             .iter()
             .map(|(uri, diagnostics)| {
                 WorkspaceDocumentDiagnosticReport::Full(WorkspaceFullDocumentDiagnosticReport {
                     uri: uri.clone(),
-                    version: inner.docs.get(uri).map(|doc| i64::from(doc.version)),
+                    version: inner.document(uri).map(|doc| i64::from(doc.version)),
                     full_document_diagnostic_report: FullDocumentDiagnosticReport {
                         result_id: None,
                         items: diagnostics.clone(),
@@ -2015,15 +2163,34 @@ impl LanguageServer for Backend {
                 })
             })
             .collect();
+        let mut removed = Vec::new();
+        for previous in params.previous_result_ids {
+            if !inner.published.contains_key(&previous.uri) {
+                removed.push(WorkspaceDocumentDiagnosticReport::Full(
+                    WorkspaceFullDocumentDiagnosticReport {
+                        uri: previous.uri,
+                        version: None,
+                        full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                            result_id: None,
+                            items: Vec::new(),
+                        },
+                    },
+                ));
+            }
+        }
+        removed.append(&mut items);
+        let items = removed;
         Ok(WorkspaceDiagnosticReportResult::Report(
             WorkspaceDiagnosticReport { items },
         ))
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        let output = self.output_gate.lock().await;
         let to_publish = {
             let mut inner = self.lock_inner();
             for event in &params.changes {
+                inner.project_changed(&event.uri, event.typ == FileChangeType::DELETED);
                 inner.workspace.remove_document(event.uri.as_str());
             }
             let snapshots: Vec<(Url, String, i32)> = inner
@@ -2044,7 +2211,9 @@ impl LanguageServer for Backend {
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
+        drop(output);
         self.refresh_presentation(false).await;
+        self.kick_project();
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -2188,10 +2357,17 @@ impl LanguageServer for Backend {
     }
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
+        if matches!(
+            params.command.as_str(),
+            "dynare/projectStatus" | "dynare/recheckProject" | "dynare/cancelProject"
+        ) {
+            return Ok(Some(self.project_command(&params.command).await));
+        }
         Ok(Some(self.execute(&params.command, &params.arguments)))
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        let output = self.output_gate.lock().await;
         for explanation in self.apply_settings(&params.settings) {
             self.client
                 .log_message(MessageType::WARNING, explanation)
@@ -2203,15 +2379,19 @@ impl LanguageServer for Backend {
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
+        drop(output);
         self.refresh_presentation(true).await;
+        self.kick_project();
     }
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        let output = self.output_gate.lock().await;
         let to_publish = {
             let mut inner = self.lock_inner();
             inner
                 .settings
                 .change_folders(params.event.added, params.event.removed);
+            inner.project_reconfigure(true);
             inner.refresh_diagnostics(None)
         };
         for (uri, version, diagnostics) in to_publish {
@@ -2219,7 +2399,9 @@ impl LanguageServer for Backend {
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
+        drop(output);
         self.refresh_presentation(true).await;
+        self.kick_project();
     }
 
     async fn prepare_call_hierarchy(
@@ -2300,6 +2482,9 @@ pub fn initialize_result() -> InitializeResult {
                     "dynare/compareModels".into(),
                     "dynare/showEffectiveModel".into(),
                     "dynare/modelInfo".into(),
+                    "dynare/projectStatus".into(),
+                    "dynare/recheckProject".into(),
+                    "dynare/cancelProject".into(),
                 ],
                 work_done_progress_options: WorkDoneProgressOptions::default(),
             }),
@@ -2318,6 +2503,7 @@ pub fn initialize_result() -> InitializeResult {
                 "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1},
                 "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
+                ,"projectDiagnostics": {"schema_version":project::SCHEMA_VERSION,"status_command":"dynare/projectStatus","recheck_command":"dynare/recheckProject","cancel_command":"dynare/cancelProject","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/projectStatusChanged","typing_pause_ms":250}
             }})),
             ..ServerCapabilities::default()
         },
@@ -2357,6 +2543,89 @@ fn library_to_lsp(text: &str, diags: &[crate::Diagnostic]) -> Vec<Diagnostic> {
             }
         })
         .collect()
+}
+
+/// Convert one root once, outside the background commit lock. Each written
+/// file has one shared source snapshot and one line-index construction.
+fn prepare_root_report(
+    root: &Url,
+    set: DiagnosticSet,
+    text: Arc<str>,
+    revision: String,
+) -> RootReport {
+    let errors = set
+        .diagnostics
+        .iter()
+        .filter(|diag| diag.severity == Severity::Error)
+        .count();
+    let warnings = set
+        .diagnostics
+        .iter()
+        .filter(|diag| diag.severity == Severity::Warning)
+        .count();
+    let mut files: HashMap<Url, (Arc<str>, Vec<crate::Diagnostic>)> = HashMap::new();
+    for (index, mut diagnostic) in set.diagnostics.into_iter().enumerate() {
+        if is_dropped_code(&diagnostic.code) {
+            continue;
+        }
+        let (uri, source) = if let Some(origin) = set.origins.get(index).and_then(Option::as_ref) {
+            let Some(uri) = (if origin.file == crate::include_resolver::normalize_uri(root.as_str())
+            {
+                Some(root.clone())
+            } else {
+                file_url_from_path_key(&origin.file)
+            }) else {
+                continue;
+            };
+            diagnostic.span = origin.span;
+            (uri, Arc::clone(&origin.text))
+        } else {
+            (root.clone(), Arc::clone(&text))
+        };
+        files
+            .entry(uri)
+            .or_insert_with(|| (source, Vec::new()))
+            .1
+            .push(diagnostic);
+    }
+    let routes = files
+        .into_iter()
+        .map(|(uri, (source, diagnostics))| {
+            let converted = library_to_lsp(&source, &diagnostics);
+            let rows = diagnostics
+                .into_iter()
+                .zip(converted)
+                .map(|(diagnostic, mut item)| {
+                    if crate::check_writing::is_writing_code(&diagnostic.code)
+                        || diagnostic.fix.is_some()
+                    {
+                        let data = item
+                            .data
+                            .get_or_insert_with(|| json!({}))
+                            .as_object_mut()
+                            .unwrap();
+                        data.insert("root".into(), json!(root));
+                        data.insert("input_revision".into(), json!(revision));
+                    }
+                    RoutedDiagnostic {
+                        diagnostic,
+                        lsp_diagnostic: item,
+                        text: Arc::clone(&source),
+                        root: root.clone(),
+                        revision: revision.clone(),
+                    }
+                })
+                .collect();
+            (uri, rows)
+        })
+        .collect();
+    RootReport {
+        root: root.clone(),
+        routes,
+        revision,
+        errors,
+        warnings,
+    }
 }
 
 fn related_location(site: &crate::diagnostic::DiagnosticOrigin) -> Option<Location> {
@@ -2417,7 +2686,10 @@ fn naming_code_actions(inner: &mut Inner, params: &CodeActionParams) -> Vec<Code
         })
         .filter_map(|diag| {
             let root = writing_root(diag)?;
-            inner.docs.contains_key(&root).then(|| (root, diag.clone()))
+            inner
+                .reports
+                .contains_key(&root)
+                .then(|| (root, diag.clone()))
         })
         .collect();
     notes.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
@@ -2517,7 +2789,7 @@ fn versioned_workspace_edit(inner: &Inner, changes: HashMap<Url, Vec<TextEdit>>)
             changes
                 .into_iter()
                 .map(|(uri, edits)| {
-                    let version = inner.docs.get(&uri).map(|doc| doc.version);
+                    let version = inner.document(&uri).map(|doc| doc.version);
                     TextDocumentEdit {
                         text_document: OptionalVersionedTextDocumentIdentifier { uri, version },
                         edits: edits.into_iter().map(OneOf::Left).collect(),
@@ -2567,6 +2839,9 @@ fn span_range(index: &LineIndex, text: &str, span: Span) -> Range {
 }
 
 fn file_url_from_path_key(path_key: &str) -> Option<Url> {
+    if crate::include_resolver::is_virtual_uri(path_key) {
+        return Url::parse(path_key).ok();
+    }
     let path = Path::new(path_key);
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     Url::from_file_path(path).ok()
@@ -2602,7 +2877,7 @@ fn preview_written_location(
         return None;
     }
     Some(
-        json!({"uri":uri,"range":range,"document_version":inner.docs.get(&uri).map(|doc|doc.version)}),
+        json!({"uri":uri,"range":range,"document_version":inner.document(&uri).map(|doc|doc.version)}),
     )
 }
 
@@ -3055,7 +3330,9 @@ fn extract_command_uri(arguments: &[Value]) -> Option<Url> {
 
 /// In-process server for tests. Stdio entry is [`run_stdio`].
 pub fn new_service() -> (LspService<Backend>, ClientSocket) {
-    LspService::new(Backend::new)
+    LspService::build(Backend::new)
+        .custom_method("dynare/activeModelChanged", Backend::active_model_changed)
+        .finish()
 }
 
 /// Run the language server over stdin/stdout.

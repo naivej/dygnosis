@@ -92,12 +92,18 @@ type NavigationTargets = HashMap<(String, Span), Option<String>>;
 struct InputFile {
     overlay: bool,
     bytes: Option<Vec<u8>>,
+    exists: bool,
+    directory: bool,
+    identity: Option<String>,
 }
+
+/// Compact provenance retained by project reports after parsed caches expire.
+pub(crate) type InputStamps = BTreeMap<String, u64>;
 
 /// URI/path-keyed document index plus include graph walks.
 #[derive(Default)]
 pub struct Workspace {
-    docs: HashMap<String, Doc>,
+    docs: HashMap<String, Arc<Doc>>,
     search_paths: Vec<PathBuf>,
     root_search_paths: HashMap<String, Vec<PathBuf>>,
     virtual_roots: HashSet<String>,
@@ -115,6 +121,69 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    /// Owned editor snapshot. Parsed overlays and joined source are immutable
+    /// and shared; disk IO and root analysis happen on the receiving worker.
+    pub(crate) fn snapshot_for_root(&self, uri: &str, search_paths: Vec<PathBuf>) -> Self {
+        let key = normalize_uri(uri);
+        let reuse_joined = self.root_paths(&key) == search_paths.as_slice();
+        let candidates = self.input_snapshots.get(&key);
+        let mut snapshot = Self::with_search_paths(search_paths);
+        snapshot.docs = self
+            .docs
+            .iter()
+            .filter(|(path, doc)| {
+                doc.overlay
+                    || path.as_str() == key
+                    || candidates.is_some_and(|files| files.contains_key(*path))
+            })
+            .map(|(path, doc)| (path.clone(), Arc::clone(doc)))
+            .collect();
+        if let Some(inputs) = candidates {
+            snapshot.input_snapshots.insert(key.clone(), inputs.clone());
+        }
+        if let Some(source) = self.spliced.get(&key).filter(|_| reuse_joined) {
+            snapshot.spliced.insert(key.clone(), Arc::clone(source));
+        }
+        if let Some(records) = self.records.get(&key) {
+            snapshot.records.insert(key.clone(), records.clone());
+        }
+        if let Some(candidates) = self.dependency_candidates.get(&key) {
+            snapshot
+                .dependency_candidates
+                .insert(key.clone(), candidates.clone());
+        }
+        snapshot.set_root_search_paths(uri, snapshot.search_paths.clone());
+        // set_root_search_paths invalidates the cache when the scope is first
+        // registered; restore the immutable joined source after that operation.
+        if let Some(source) = self.spliced.get(&key).filter(|_| reuse_joined) {
+            snapshot.spliced.insert(key, Arc::clone(source));
+        }
+        snapshot
+    }
+
+    /// Bound heavyweight editor caches without dropping input provenance.
+    /// Open overlay documents are always retained.
+    pub(crate) fn retain_analysis_roots(&mut self, roots: &HashSet<String>) {
+        self.effective.retain(|root, _| roots.contains(root));
+        self.spliced.retain(|root, _| roots.contains(root));
+        self.expand.retain(|root, _| roots.contains(root));
+        self.records.retain(|root, _| roots.contains(root));
+        self.companions.retain(|root, _| roots.contains(root));
+        let mut files = roots.clone();
+        for root in roots {
+            if let Some(inputs) = self.input_snapshots.get(root) {
+                files.extend(inputs.keys().cloned());
+            }
+        }
+        self.docs
+            .retain(|key, doc| doc.overlay || files.contains(key));
+        self.input_snapshots.retain(|root, _| roots.contains(root));
+        // These lightweight maps preserve owner/dependency provenance after
+        // model and full-byte snapshots are evicted.
+        self.root_search_paths
+            .retain(|root, _| roots.contains(root));
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -140,12 +209,12 @@ impl Workspace {
         let includepath_dirs = overlay_includepath_dirs_for(key, &model);
         self.docs.insert(
             key.to_string(),
-            Doc {
+            Arc::new(Doc {
                 source,
                 model,
                 overlay: true,
                 includepath_dirs,
-            },
+            }),
         );
         self.effective.clear();
         self.spliced.clear();
@@ -169,12 +238,12 @@ impl Workspace {
         let includepath_dirs = includepath_dirs_for(&key, &model);
         self.docs.insert(
             key.clone(),
-            Doc {
+            Arc::new(Doc {
                 source,
                 model,
                 overlay: true,
                 includepath_dirs,
-            },
+            }),
         );
         // Other roots may have spliced this file.
         self.effective.clear();
@@ -212,12 +281,12 @@ impl Workspace {
         let includepath_dirs = includepath_dirs_for(&key, &model);
         self.docs.insert(
             key.clone(),
-            Doc {
+            Arc::new(Doc {
                 source,
                 model,
                 overlay: false,
                 includepath_dirs,
-            },
+            }),
         );
         // Other roots may have spliced this file.
         self.effective.clear();
@@ -309,6 +378,50 @@ impl Workspace {
         };
         self.include_records(uri)?;
         self.companion_records(uri)?;
+        let resolved_inputs: Vec<_> =
+            self.records
+                .get(&key)
+                .into_iter()
+                .flat_map(|records| records.resolved.iter().map(|record| record.path.clone()))
+                .chain(
+                    self.companions.get(&key).into_iter().flat_map(|records| {
+                        records.iter().filter_map(|record| record.path.clone())
+                    }),
+                )
+                .collect();
+        self.dependency_candidates
+            .entry(key.clone())
+            .or_default()
+            .extend(resolved_inputs.iter().map(|path| path_key(path)));
+        if !self.overlay_only && !self.virtual_roots.contains(&key) {
+            // These checks read directory existence and a loader file outside
+            // include/companion resolution. They are revision inputs too.
+            let paths: Vec<_> = self
+                .get_effective_model(uri)
+                .into_iter()
+                .flat_map(|model| {
+                    let directories = model
+                        .includepaths
+                        .iter()
+                        .filter_map(|directive| includepath_literal(&directive.argument))
+                        .filter(|name| !name.is_empty())
+                        .map(|name| resolve_includepath(&key, &name));
+                    let loader = model.load_params_file.iter().map(|(name, _)| {
+                        let path = PathBuf::from(name);
+                        if path.is_absolute() {
+                            path
+                        } else {
+                            Path::new(&key).parent().unwrap_or(Path::new("")).join(path)
+                        }
+                    });
+                    directories.chain(loader)
+                })
+                .collect();
+            self.dependency_candidates
+                .entry(key.clone())
+                .or_default()
+                .extend(paths.iter().map(|path| path_key(path)));
+        }
         let mut files = self
             .dependency_candidates
             .get(&key)
@@ -331,6 +444,9 @@ impl Workspace {
         for (path, state) in &snapshot {
             path.hash(&mut hash);
             state.bytes.hash(&mut hash);
+            state.exists.hash(&mut hash);
+            state.directory.hash(&mut hash);
+            state.identity.hash(&mut hash);
         }
         self.input_snapshots.insert(key, snapshot);
         Some(format!("{:016x}", hash.finish()))
@@ -349,13 +465,50 @@ impl Workspace {
             .collect()
     }
 
+    pub(crate) fn input_stamps(&self, uri: &str) -> InputStamps {
+        self.input_snapshots
+            .get(&normalize_uri(uri))
+            .into_iter()
+            .flat_map(|snapshot| snapshot.iter())
+            .map(|(path, state)| {
+                let mut hash = std::collections::hash_map::DefaultHasher::new();
+                state.hash(&mut hash);
+                (path.clone(), hash.finish())
+            })
+            .collect()
+    }
+
+    /// This validation reads disk and must run on the background worker.
+    pub(crate) fn inputs_match(&self, stamps: &InputStamps) -> bool {
+        !stamps.is_empty()
+            && stamps.iter().all(|(path, expected)| {
+                let mut hash = std::collections::hash_map::DefaultHasher::new();
+                self.input_file(path).hash(&mut hash);
+                hash.finish() == *expected
+            })
+    }
+
     fn input_file(&self, key: &str) -> InputFile {
+        let identity = if self.overlay_only || is_virtual_uri(key) {
+            None
+        } else {
+            std::fs::canonicalize(key).ok().map(|path| {
+                let path = path.to_string_lossy();
+                path_key(Path::new(path.strip_prefix(r"\\?\").unwrap_or(&path)))
+            })
+        };
         if let Some(doc) = self.docs.get(key).filter(|doc| doc.overlay) {
             InputFile {
                 overlay: true,
                 bytes: Some(doc.source.as_bytes().to_vec()),
+                exists: true,
+                directory: false,
+                identity,
             }
         } else {
+            let metadata = (!is_virtual_uri(key))
+                .then(|| std::fs::metadata(key).ok())
+                .flatten();
             InputFile {
                 overlay: false,
                 bytes: if is_virtual_uri(key) {
@@ -363,6 +516,9 @@ impl Workspace {
                 } else {
                     std::fs::read(key).ok()
                 },
+                exists: metadata.is_some(),
+                directory: metadata.is_some_and(|metadata| metadata.is_dir()),
+                identity,
             }
         }
     }
@@ -1491,5 +1647,55 @@ mod compare_snapshot_tests {
             "disk write after captured revision"
         );
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod project_snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn snapshots_share_immutable_overlay_documents() {
+        let root = std::env::temp_dir().join("dygnosis-overlay-snapshot.mod");
+        let uri = root.to_str().unwrap();
+        let mut workspace = Workspace::new();
+        workspace.update_document(uri, "var before;");
+        let snapshot = workspace.snapshot_for_root(uri, Vec::new());
+        let key = normalize_uri(uri);
+        assert!(Arc::ptr_eq(&workspace.docs[&key], &snapshot.docs[&key]));
+        workspace.update_document(uri, "var after;");
+        assert_eq!(snapshot.get_source(uri), Some("var before;"));
+        assert_eq!(workspace.get_source(uri), Some("var after;"));
+    }
+
+    #[test]
+    fn heavyweight_cache_eviction_keeps_owner_and_dependency_provenance() {
+        let folder =
+            std::env::temp_dir().join(format!("dygnosis-project-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let included = folder.join("body.data");
+        std::fs::write(&included, "y=0;\n").unwrap();
+        let mut workspace = Workspace::new();
+        let mut roots = Vec::new();
+        for number in 0..12 {
+            let root = folder.join(format!("root-{number}.mod"));
+            std::fs::write(&root, "var y; model;\n@#include \"body.data\"\nend;\n").unwrap();
+            workspace.input_revision(root.to_str().unwrap()).unwrap();
+            roots.push(path_key(&root));
+        }
+        let retained = roots.iter().rev().take(8).cloned().collect();
+        workspace.retain_analysis_roots(&retained);
+        assert!(workspace.effective.len() <= 8);
+        assert!(workspace.spliced.len() <= 8);
+        assert!(workspace.input_snapshots.len() <= 8);
+        assert!(
+            workspace.docs.len() <= 9,
+            "eight roots and their shared include"
+        );
+        assert_eq!(workspace.owner_roots(included.to_str().unwrap()).len(), 12);
+        assert_eq!(workspace.dependency_candidates.len(), 12);
+        let absolute = folder.canonicalize().unwrap();
+        assert!(absolute.starts_with(std::env::temp_dir().canonicalize().unwrap()));
+        std::fs::remove_dir_all(absolute).unwrap();
     }
 }
