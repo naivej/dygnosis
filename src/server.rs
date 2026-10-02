@@ -32,6 +32,7 @@ use crate::refs::{
     option_owner_at,
 };
 use crate::server_model_map::{common_leaves, WrittenView};
+use crate::server_names::{NameRole, NameSites, SemanticMapping};
 use crate::server_settings::{
     PresentationSettings, ResourceSettings, SettingsStore, CONFIGURATION_SCHEMA_VERSION,
     MODEL_INFO_SCHEMA_VERSION,
@@ -190,6 +191,9 @@ struct Inner {
     model_info_notifications: bool,
     token_refresh: bool,
     hint_refresh: bool,
+    semantic_mapping: SemanticMapping,
+    completion_label_details: bool,
+    completion_snippets: bool,
 }
 
 impl Default for Inner {
@@ -204,11 +208,37 @@ impl Default for Inner {
             model_info_notifications: false,
             token_refresh: false,
             hint_refresh: false,
+            semantic_mapping: SemanticMapping::default(),
+            completion_label_details: false,
+            completion_snippets: false,
         }
     }
 }
 
 impl Inner {
+    fn name_views(&mut self, uri: &Url) -> Option<Vec<(Model, crate::model_map::WrittenModelMap)>> {
+        let mut roots = self.known_owner_roots(uri);
+        if roots.is_empty() && is_model_root(uri) {
+            roots.push(uri.clone());
+        }
+        if roots.is_empty() {
+            let model = self.workspace.get_model(uri.as_str())?.clone();
+            let text = self.workspace.get_source(uri.as_str())?;
+            return Some(vec![(model, crate::expand::expand_report(text).model_map)]);
+        }
+        let mut views = Vec::new();
+        for root in roots {
+            self.prepare_root(&root);
+            let model = self.workspace.get_effective_model(root.as_str())?.clone();
+            let map = self
+                .workspace
+                .expand_report(root.as_str())?
+                .model_map
+                .clone();
+            views.push((model, map));
+        }
+        Some(views)
+    }
     fn prepare_root(&mut self, uri: &Url) -> ResourceSettings {
         let settings = self.settings.resolve(uri);
         self.workspace
@@ -509,19 +539,20 @@ impl Backend {
     }
 
     fn hover_at(&self, pos: &TextDocumentPositionParams) -> Option<Hover> {
-        let inner = self.lock_inner();
-        let doc = inner.docs.get(&pos.text_document.uri)?;
-        let index = LineIndex::new(&doc.text);
-        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
-        let (word, span) = ident_at(&doc.text, byte)?;
-        let range = Some(span_range(&index, &doc.text, span));
-        if let Some(cmd) = option_command_at(&doc.text, byte) {
+        let mut inner = self.lock_inner();
+        let text = inner.docs.get(&pos.text_document.uri)?.text.clone();
+        let normalized = crate::parser::normalize_newlines(&text);
+        let index = LineIndex::new(&normalized);
+        let byte = index.offset_utf16(&text, span_pos(pos.position));
+        let (word, span) = ident_at(&text, byte)?;
+        let range = Some(span_range(&index, &text, span));
+        if let Some(cmd) = option_command_at(&text, byte) {
             if let Some((name, command_doc)) = command_options(&cmd)
                 .iter()
                 .find(|(name, _)| name.eq_ignore_ascii_case(&word))
             {
                 let mut md = format!("**`{cmd}` option**: `{word}`");
-                let description = shocks_overwrite_doc(&doc.text, byte, &cmd, name, command_doc);
+                let description = shocks_overwrite_doc(&text, byte, &cmd, name, command_doc);
                 if !description.is_empty() {
                     md.push_str("\n\n");
                     md.push_str(description);
@@ -530,7 +561,7 @@ impl Backend {
             }
         }
         if word.eq_ignore_ascii_case("heterogeneity") {
-            if let Some(head) = heterogeneity_declaration_head(&doc.text, byte) {
+            if let Some(head) = heterogeneity_declaration_head(&text, byte) {
                 let md = format!("**`{head}` option**: `heterogeneity`\n\n{HETEROGENEITY_OPTION}");
                 return Some(markdown_hover(md, range));
             }
@@ -538,8 +569,15 @@ impl Backend {
         if let Some(help) = family_help(&word) {
             return Some(markdown_hover(format!("**`{word}`**\n\n{help}"), range));
         }
-        let model = inner.workspace.get_model(pos.text_document.uri.as_str())?;
-        let md = decl_hover_markdown(model, &word)?;
+        let preferences = inner.presentation_for(&pos.text_document.uri);
+        let views = inner.name_views(&pos.text_document.uri)?;
+        let mut descriptions = views
+            .iter()
+            .map(|(model, _)| decl_hover_markdown(model, &word, &preferences));
+        let md = descriptions.next()??;
+        if !descriptions.all(|description| description.as_ref() == Some(&md)) {
+            return None;
+        }
         Some(markdown_hover(md, range))
     }
 
@@ -802,16 +840,26 @@ impl Backend {
     }
 
     fn ident_highlights(&self, pos: &TextDocumentPositionParams) -> Option<Vec<DocumentHighlight>> {
-        let inner = self.lock_inner();
-        let doc = inner.docs.get(&pos.text_document.uri)?;
-        let index = LineIndex::new(&doc.text);
-        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
-        let (word, _) = ident_at(&doc.text, byte)?;
-        let hits = occurrences(&doc.text, &word)
+        let mut inner = self.lock_inner();
+        let text = inner.docs.get(&pos.text_document.uri)?.text.clone();
+        let normalized = crate::parser::normalize_newlines(&text);
+        let index = LineIndex::new(&normalized);
+        let byte = index.offset_utf16(&text, span_pos(pos.position));
+        let (word, _) = ident_at(&text, byte)?;
+        let views = inner.name_views(&pos.text_document.uri)?;
+        let sites: Vec<_> = views
+            .iter()
+            .map(|(model, map)| NameSites::new(model, map, &pos.text_document.uri, &text))
+            .collect();
+        let hits = occurrences(&text, &word)
             .into_iter()
             .map(|span| DocumentHighlight {
-                range: span_range(&index, &doc.text, span),
-                kind: Some(DocumentHighlightKind::TEXT),
+                range: span_range(&index, &text, span),
+                kind: Some(if sites.iter().all(|sites| sites.is_write(span)) {
+                    DocumentHighlightKind::WRITE
+                } else {
+                    DocumentHighlightKind::READ
+                }),
             })
             .collect::<Vec<_>>();
         if hits.is_empty() {
@@ -822,15 +870,16 @@ impl Backend {
     }
 
     fn complete(&self, pos: &TextDocumentPositionParams) -> Option<CompletionResponse> {
-        let inner = self.lock_inner();
-        let doc = inner.docs.get(&pos.text_document.uri)?;
-        let index = LineIndex::new(&doc.text);
-        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
-        if let Some(cmd) = option_command_at(&doc.text, byte) {
+        let mut inner = self.lock_inner();
+        let text = inner.docs.get(&pos.text_document.uri)?.text.clone();
+        let normalized = crate::parser::normalize_newlines(&text);
+        let index = LineIndex::new(&normalized);
+        let byte = index.offset_utf16(&text, span_pos(pos.position));
+        if let Some(cmd) = option_command_at(&text, byte) {
             let items = command_options(&cmd)
                 .iter()
                 .map(|(name, doc_str)| {
-                    let documentation = shocks_overwrite_doc(&doc.text, byte, &cmd, name, doc_str);
+                    let documentation = shocks_overwrite_doc(&text, byte, &cmd, name, doc_str);
                     CompletionItem {
                         label: (*name).into(),
                         kind: Some(CompletionItemKind::PROPERTY),
@@ -845,7 +894,7 @@ impl Backend {
             }
             return Some(CompletionResponse::Array(items));
         }
-        if let Some(head) = heterogeneity_declaration_head(&doc.text, byte) {
+        if let Some(head) = heterogeneity_declaration_head(&text, byte) {
             return Some(CompletionResponse::Array(vec![CompletionItem {
                 label: "heterogeneity".into(),
                 kind: Some(CompletionItemKind::PROPERTY),
@@ -854,8 +903,21 @@ impl Backend {
                 ..CompletionItem::default()
             }]));
         }
-        let model = inner.workspace.get_model(pos.text_document.uri.as_str())?;
-        Some(CompletionResponse::Array(default_completions(model)))
+        let preferences = inner.presentation_for(&pos.text_document.uri);
+        let views = inner.name_views(&pos.text_document.uri)?;
+        let mut groups = views.iter().map(|(model, _)| {
+            default_completions(
+                model,
+                &preferences,
+                inner.completion_label_details,
+                inner.completion_snippets,
+            )
+        });
+        let mut items = groups.next()?;
+        for group in groups {
+            items.retain(|item| group.contains(item));
+        }
+        Some(CompletionResponse::Array(items))
     }
 
     fn signature_at(&self, pos: &TextDocumentPositionParams) -> Option<SignatureHelp> {
@@ -1265,92 +1327,78 @@ impl Backend {
     }
 
     fn semantic_tokens(&self, uri: &Url, range: Option<Range>) -> Option<SemanticTokens> {
-        let inner = self.lock_inner();
-        let doc = inner.docs.get(uri)?;
-        let model = inner.workspace.get_model(uri.as_str())?;
-        let index = LineIndex::new(&doc.text);
-        let endo: HashMap<String, ()> = model
-            .final_decls(&["var"])
+        let mut inner = self.lock_inner();
+        let text = inner.docs.get(uri)?.text.clone();
+        let views = inner.name_views(uri)?;
+        let sites: Vec<_> = views
             .iter()
-            .map(|d| (model.name(d.name).to_string(), ()))
-            .collect();
-        let exo: HashMap<String, ()> = model
-            .final_decls(&["varexo", "varexo_det"])
-            .iter()
-            .map(|d| (model.name(d.name).to_string(), ()))
-            .collect();
-        let params: HashMap<String, ()> = model
-            .final_parameters()
-            .iter()
-            .map(|d| (model.name(d.name).to_string(), ()))
-            .collect();
-        let local: HashMap<String, ()> = model
-            .equations
-            .iter()
-            .filter(|eq| eq.is_local || eq.model_local)
-            .filter_map(|eq| {
-                let name = eq.lhs.trim();
-                if name.is_empty() {
-                    None
-                } else {
-                    Some((name.to_string(), ()))
-                }
+            .map(|(model, map)| {
+                (
+                    NameSites::new(model, map, uri, &text),
+                    classify_variable_timing(model),
+                )
             })
             .collect();
-        let timing = classify_variable_timing(model);
-        let mut decl_starts = HashMap::new();
-        for d in model
-            .endogenous
-            .iter()
-            .chain(model.exogenous.iter())
-            .chain(model.parameters.iter())
-        {
-            decl_starts.insert(d.span.start, ());
-        }
+        let mapping = inner.semantic_mapping.clone();
+        let normalized = crate::parser::normalize_newlines(&text);
+        let index = LineIndex::new(&normalized);
         let mut raw = Vec::new();
-        for tok in tokenize(&doc.text) {
+        for tok in tokenize(&text) {
             if tok.kind != TokenKind::Ident {
                 continue;
             }
-            let name = tok.text(&doc.text);
-            let start = index.position_utf16(&doc.text, tok.span.start);
+            let name = tok.text(&text);
+            let start = index.position_utf16(&text, tok.span.start);
             if let Some(range) = range {
                 if !pos_in_range_half_open(Position::new(start.line, start.character), range) {
                     continue;
                 }
             }
-            let ttype = if local.contains_key(name) {
-                3u32
-            } else if endo.contains_key(name) {
-                0
-            } else if exo.contains_key(name) {
-                1
-            } else if params.contains_key(name) {
-                2
-            } else {
+            let role = sites.first()?.0.role(name, tok.span);
+            if !sites
+                .iter()
+                .all(|(sites, _)| sites.role(name, tok.span) == role)
+            {
+                continue;
+            }
+            let Some(role) = role else {
                 continue;
             };
-            let mut mods = 0u32;
-            if decl_starts.contains_key(&tok.span.start) {
-                mods |= 1;
-            }
-            if ttype == 0 {
-                if let Some(info) = timing.get(name) {
-                    match info.class {
-                        TimingClass::ForwardLooking | TimingClass::Mixed => mods |= 1 << 1,
-                        _ => {}
+            let Some(ttype) = mapping.token_type(role) else {
+                continue;
+            };
+            let mods = sites
+                .iter()
+                .map(|(sites, timing)| {
+                    let mut mods = 0u32;
+                    if sites.is_declaration(tok.span) {
+                        mods |= mapping.declaration;
                     }
-                    match info.class {
-                        TimingClass::Predetermined | TimingClass::Mixed => mods |= 1 << 2,
-                        _ => {}
+                    if role == NameRole::Endogenous {
+                        if let Some(info) = timing.get(name) {
+                            match info.class {
+                                TimingClass::ForwardLooking | TimingClass::Mixed => {
+                                    mods |= mapping.forward
+                                }
+                                _ => {}
+                            }
+                            match info.class {
+                                TimingClass::Predetermined | TimingClass::Mixed => {
+                                    mods |= mapping.predetermined
+                                }
+                                _ => {}
+                            }
+                        }
                     }
-                }
-            }
-            let end = index.position_utf16(&doc.text, tok.span.end);
+                    mods
+                })
+                .reduce(|common, modifiers| common & modifiers)
+                .unwrap_or(0);
+            let end = index.position_utf16(&text, tok.span.end);
             let length = if start.line == end.line {
                 end.character.saturating_sub(start.character)
             } else {
-                tok.text(&doc.text).encode_utf16().count() as u32
+                tok.text(&text).encode_utf16().count() as u32
             };
             raw.push((start.line, start.character, length, ttype, mods));
         }
@@ -1718,6 +1766,19 @@ impl LanguageServer for Backend {
                     .unwrap_or_default()
             });
             inner.settings.set_folders(folders);
+            let document = params.capabilities.text_document.as_ref();
+            inner.semantic_mapping = SemanticMapping::negotiate(
+                document.and_then(|document| document.semantic_tokens.as_ref()),
+            );
+            let completion = document
+                .and_then(|document| document.completion.as_ref())
+                .and_then(|completion| completion.completion_item.as_ref());
+            inner.completion_label_details = completion
+                .and_then(|completion| completion.label_details_support)
+                .unwrap_or(false);
+            inner.completion_snippets = completion
+                .and_then(|completion| completion.snippet_support)
+                .unwrap_or(false);
             inner.model_info_notifications = params
                 .capabilities
                 .experimental
@@ -1743,7 +1804,13 @@ impl LanguageServer for Backend {
                     .await;
             }
         }
-        Ok(initialize_result())
+        let mut result = initialize_result();
+        if let Some(SemanticTokensServerCapabilities::SemanticTokensOptions(options)) =
+            &mut result.capabilities.semantic_tokens_provider
+        {
+            options.legend = self.lock_inner().semantic_mapping.legend.clone();
+        }
+        Ok(result)
     }
 
     async fn initialized(&self, _: InitializedParams) {
@@ -2128,19 +2195,7 @@ pub fn initialize_result() -> InitializeResult {
             }),
             semantic_tokens_provider: Some(
                 SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
-                    legend: SemanticTokensLegend {
-                        token_types: vec![
-                            SemanticTokenType::VARIABLE,
-                            SemanticTokenType::TYPE,
-                            SemanticTokenType::MACRO,
-                            SemanticTokenType::PARAMETER,
-                        ],
-                        token_modifiers: vec![
-                            SemanticTokenModifier::DECLARATION,
-                            SemanticTokenModifier::new("forwardLooking"),
-                            SemanticTokenModifier::new("predetermined"),
-                        ],
-                    },
+                    legend: SemanticMapping::default().legend,
                     range: Some(true),
                     full: Some(SemanticTokensFullOptions::Bool(true)),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
@@ -2542,7 +2597,11 @@ fn markdown_hover(value: String, range: Option<Range>) -> Hover {
     }
 }
 
-fn decl_hover_markdown(model: &Model, word: &str) -> Option<String> {
+fn decl_hover_markdown(
+    model: &Model,
+    word: &str,
+    preferences: &PresentationSettings,
+) -> Option<String> {
     let name = model.intern.lookup(word)?;
     let kind = model
         .final_symbol_kind(name)
@@ -2552,13 +2611,18 @@ fn decl_hover_markdown(model: &Model, word: &str) -> Option<String> {
         if let Some(info) = classify_variable_timing(model).get(word) {
             parts.push(format_timing_line(info));
         }
+        append_name_metadata(&mut parts, model, word, preferences);
         return Some(parts.join("\n\n"));
     }
     if kind == Some("varexo_det") {
-        return Some(format!("**Exogenous deterministic variable**: `{word}`"));
+        let mut parts = vec![format!("**Exogenous deterministic variable**: `{word}`")];
+        append_name_metadata(&mut parts, model, word, preferences);
+        return Some(parts.join("\n\n"));
     }
     if kind == Some("varexo") {
-        return Some(format!("**Exogenous variable**: `{word}`"));
+        let mut parts = vec![format!("**Exogenous variable**: `{word}`")];
+        append_name_metadata(&mut parts, model, word, preferences);
+        return Some(parts.join("\n\n"));
     }
     if kind == Some("parameters") {
         let mut parts = vec![format!("**Parameter**: `{word}`")];
@@ -2566,9 +2630,36 @@ fn decl_hover_markdown(model: &Model, word: &str) -> Option<String> {
             Some(n) => parts.push(format!("Value: `{n}`")),
             None => parts.push("Value: *not assigned*".into()),
         }
+        append_name_metadata(&mut parts, model, word, preferences);
         return Some(parts.join("\n\n"));
     }
     None
+}
+
+fn append_name_metadata(
+    parts: &mut Vec<String>,
+    model: &Model,
+    word: &str,
+    preferences: &PresentationSettings,
+) {
+    let Some(declaration) = model
+        .written_declarations
+        .iter()
+        .find(|written| model.name(written.declaration.name) == word)
+        .map(|written| &written.declaration)
+    else {
+        return;
+    };
+    if preferences.name_details.long_name {
+        if let Some(long) = &declaration.long_name {
+            parts.push(crate::server_names::literal(long));
+        }
+    }
+    if preferences.name_details.tex {
+        if let Some(tex) = &declaration.tex_name {
+            parts.push(format!("TeX: {}", crate::server_names::code(tex)));
+        }
+    }
 }
 
 fn find_named<'a>(decls: &'a [Decl], model: &Model, word: &str) -> Option<&'a Decl> {
@@ -2648,7 +2739,12 @@ fn ranges_overlap(left: Range, right: Range) -> bool {
     }
 }
 
-fn default_completions(model: &Model) -> Vec<CompletionItem> {
+fn default_completions(
+    model: &Model,
+    preferences: &PresentationSettings,
+    label_details: bool,
+    snippets: bool,
+) -> Vec<CompletionItem> {
     let mut items = Vec::new();
     for (kw, doc) in DYNARE_KEYWORDS.iter().chain(FAMILY_COMMAND_HELP) {
         items.push(CompletionItem {
@@ -2661,30 +2757,41 @@ fn default_completions(model: &Model) -> Vec<CompletionItem> {
     }
     for d in model.final_decls(&["var"]) {
         let name = model.name(d.name);
-        items.push(CompletionItem {
-            label: name.into(),
-            kind: Some(CompletionItemKind::VARIABLE),
-            detail: Some("endogenous variable".into()),
-            ..CompletionItem::default()
-        });
+        items.push(name_completion(
+            d,
+            name,
+            "endogenous variable",
+            CompletionItemKind::VARIABLE,
+            preferences,
+            label_details,
+        ));
     }
     for d in model.final_decls(&["varexo", "varexo_det"]) {
         let name = model.name(d.name);
-        items.push(CompletionItem {
-            label: name.into(),
-            kind: Some(CompletionItemKind::VARIABLE),
-            detail: Some("exogenous variable".into()),
-            ..CompletionItem::default()
-        });
+        let role = if model.final_symbol_kind(d.name) == Some("varexo_det") {
+            "deterministic exogenous variable"
+        } else {
+            "exogenous variable"
+        };
+        items.push(name_completion(
+            d,
+            name,
+            role,
+            CompletionItemKind::EVENT,
+            preferences,
+            label_details,
+        ));
     }
     for d in model.final_parameters() {
         let name = model.name(d.name);
-        items.push(CompletionItem {
-            label: name.into(),
-            kind: Some(CompletionItemKind::VARIABLE),
-            detail: Some("parameter".into()),
-            ..CompletionItem::default()
-        });
+        items.push(name_completion(
+            d,
+            name,
+            "parameter",
+            CompletionItemKind::CONSTANT,
+            preferences,
+            label_details,
+        ));
     }
     for (name, doc) in BUILTIN_FNS.iter().chain(FAMILY_OPERATOR_HELP) {
         items.push(CompletionItem {
@@ -2695,15 +2802,71 @@ fn default_completions(model: &Model) -> Vec<CompletionItem> {
             ..CompletionItem::default()
         });
     }
-    items.push(CompletionItem {
-        label: "model".into(),
-        kind: Some(CompletionItemKind::SNIPPET),
-        detail: Some("model equation block".into()),
-        insert_text: Some("model;\n$0\nend;".into()),
-        insert_text_format: Some(InsertTextFormat::SNIPPET),
-        ..CompletionItem::default()
-    });
+    for block in ["model", "steady_state_model", "initval", "endval", "shocks"] {
+        items.push(CompletionItem {
+            label: block.into(),
+            kind: Some(CompletionItemKind::SNIPPET),
+            detail: Some(format!("{block} block")),
+            insert_text: Some(format!(
+                "{block};\n{}\nend;",
+                if snippets { "$0" } else { "" }
+            )),
+            insert_text_format: Some(if snippets {
+                InsertTextFormat::SNIPPET
+            } else {
+                InsertTextFormat::PLAIN_TEXT
+            }),
+            ..CompletionItem::default()
+        });
+    }
     items
+}
+
+fn name_completion(
+    declaration: &Decl,
+    name: &str,
+    role: &str,
+    kind: CompletionItemKind,
+    preferences: &PresentationSettings,
+    supports_details: bool,
+) -> CompletionItem {
+    let long = declaration
+        .long_name
+        .as_ref()
+        .filter(|_| preferences.name_details.long_name);
+    let detail = if !supports_details {
+        long.map(|long| format!("{role} · {long}"))
+            .unwrap_or_else(|| role.to_string())
+    } else {
+        role.to_string()
+    };
+    let label_details = if supports_details {
+        long.map(|long| CompletionItemLabelDetails {
+            detail: None,
+            description: Some(long.clone()),
+        })
+    } else {
+        None
+    };
+    let documentation = declaration
+        .tex_name
+        .as_ref()
+        .filter(|_| preferences.name_details.tex)
+        .map(|tex| {
+            Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format!("TeX: {}", crate::server_names::code(tex)),
+            })
+        });
+    CompletionItem {
+        label: name.to_string(),
+        insert_text: Some(name.to_string()),
+        kind: Some(kind),
+        detail: Some(detail),
+        label_details,
+        documentation,
+        ..CompletionItem::default()
+    }
 }
 
 #[allow(deprecated)]

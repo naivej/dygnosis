@@ -60,6 +60,7 @@ pub struct WrittenModelMap {
     pub equations: Vec<EquationOccurrence>,
     /// Captured declaration type-event indices with proven token occurrences.
     pub type_events: Vec<(usize, SourceOccurrence)>,
+    pub writes: Vec<SourceOccurrence>,
 }
 
 /// Complete inventory of block branches the parser already recognizes.

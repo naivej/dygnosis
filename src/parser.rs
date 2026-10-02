@@ -2236,6 +2236,9 @@ impl Parser<'_> {
         range: &Range<usize>,
         dimension: Option<Name>,
     ) {
+        if equation.is_local {
+            self.record_lhs_write(equation, range);
+        }
         self.model
             .written_equations
             .push(crate::model::WrittenEquation {
@@ -2244,6 +2247,39 @@ impl Parser<'_> {
                 token_range: range.clone(),
                 dimension,
             });
+    }
+
+    fn record_write(&mut self, name: Name, token: usize) {
+        self.model.write_targets.push(crate::model::WrittenWrite {
+            name,
+            token_range: token..token + 1,
+        });
+    }
+
+    fn record_lhs_write(&mut self, equation: &Equation, range: &Range<usize>) {
+        if !equation
+            .rhs_expr
+            .is_some_and(|expr| !matches!(self.model.exprs.get(expr).kind, ExprKind::Error))
+        {
+            return;
+        }
+        if let Some(ExprKind::Ident {
+            name,
+            timing: 0,
+            timing_span: None,
+            ident_span,
+            ..
+        }) = equation.lhs_expr.map(|id| &self.model.exprs.get(id).kind)
+        {
+            let name = *name;
+            if let Some(token) = range.clone().find(|&token| {
+                self.tokens[token].kind == TokenKind::Ident
+                    && self.tokens[token].span == *ident_span
+                    && self.tokens[token].text(self.src) == self.intern.get(name)
+            }) {
+                self.record_write(name, token);
+            }
+        }
     }
 
     fn parse_var_remove_statement(&mut self) {
@@ -2548,7 +2584,8 @@ impl Parser<'_> {
         // Same body as `model`: an opener spelling is an identifier here.
         self.in_equation_body = true;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
-            if let Some((eq, _)) = self.parse_equation_statement() {
+            if let Some((eq, range)) = self.parse_equation_statement() {
+                self.record_lhs_write(&eq, &range);
                 self.model.steady_state_equations.push(eq);
             }
         }
@@ -2608,7 +2645,7 @@ impl Parser<'_> {
         }
         let end = self.block_end_after_consume();
         self.model.endval_block = Some(Span { start, end });
-        for (raw, span) in self.statements_in(body_i, body_end_i) {
+        for (raw, span, range) in self.statements_in(body_i, body_end_i) {
             if statement_is_end_word(&raw) {
                 self.record_issue(ParseIssue {
                     kind: ParseIssueKind::UnexpectedEndAssign,
@@ -2617,6 +2654,9 @@ impl Parser<'_> {
                 continue;
             }
             if let Some(a) = self.assignment_from(&raw, span) {
+                if self.tokens[range.start].kind == TokenKind::Ident {
+                    self.record_write(a.name, range.start);
+                }
                 self.model.endval.push(a);
             }
         }
@@ -2683,6 +2723,7 @@ impl Parser<'_> {
         if self.i >= end_i || !self.at(TokenKind::Ident) {
             return None;
         }
+        let name_token_i = self.i;
         let name_tok = self.bump();
         let lexeme = self.lexeme(&name_tok).to_string();
         let name = self.intern.intern(&lexeme);
@@ -2690,9 +2731,13 @@ impl Parser<'_> {
             return None;
         }
         let (lag, _) = self.parse_signed_int_in_parens();
+        let has_equal = self.at(TokenKind::Eq);
         self.eat(TokenKind::Eq);
         let expr = self.parse_expr();
         let end = self.finish_shock_stmt(end_i);
+        if has_equal {
+            self.record_write(name, name_token_i);
+        }
         Some(HistvalEntry {
             symbol_type_context: self.model.symbol_context(),
             name,
@@ -7957,6 +8002,7 @@ impl Parser<'_> {
             self.eat(TokenKind::Semi);
             return None;
         }
+        let target_token = self.i;
         let tok = self.bump();
         let name = self.lexeme(&tok).to_string();
         let rhs_start = self.tokens[self.i].span.end;
@@ -8046,6 +8092,7 @@ impl Parser<'_> {
         self.eat(TokenKind::Semi);
         let expression = join_lexemes(self.src, &self.tokens[expr_i..expr_end_i]);
         let id = self.intern.intern(&name);
+        self.record_write(id, target_token);
         Some(Assignment {
             symbol_type_context: self.model.symbol_context(),
             name: id,
@@ -8074,7 +8121,7 @@ impl Parser<'_> {
         }
     }
 
-    fn statements_in(&self, start_i: usize, end_i: usize) -> Vec<(String, Span)> {
+    fn statements_in(&self, start_i: usize, end_i: usize) -> Vec<(String, Span, Range<usize>)> {
         let mut out = Vec::new();
         let mut stmt_start = start_i;
         for i in start_i..end_i {
@@ -8091,6 +8138,7 @@ impl Parser<'_> {
                             start: self.tokens[stmt_start].span.start,
                             end: tok.span.end,
                         },
+                        stmt_start..i,
                     ));
                 }
                 stmt_start = i + 1;
@@ -8104,6 +8152,7 @@ impl Parser<'_> {
                     start: self.tokens[stmt_start].span.start,
                     end: last.span.end,
                 },
+                stmt_start..end_i,
             ));
         }
         out

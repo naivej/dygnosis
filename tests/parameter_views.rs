@@ -47,6 +47,27 @@ async fn completion_and_semantic_tokens_agree_with_final_type_views() {
     let uri = Url::parse("file:///parameter_views.mod").unwrap();
     let (service, _) = dygnosis::server::new_service();
     let server = service.inner();
+    let initialized = server
+        .initialize(InitializeParams {
+            capabilities: serde_json::from_value(serde_json::json!({
+                "textDocument": {"semanticTokens": {
+                    "requests": {"full": true},
+                    "tokenTypes": ["dynareParameter", "dynareEndogenous"],
+                    "tokenModifiers": [],
+                    "formats": ["relative"]
+                }}
+            }))
+            .unwrap(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let SemanticTokensServerCapabilities::SemanticTokensOptions(options) =
+        initialized.capabilities.semantic_tokens_provider.unwrap()
+    else {
+        panic!("expected semantic token legend");
+    };
+    let legend = options.legend;
     server
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -105,6 +126,14 @@ async fn completion_and_semantic_tokens_agree_with_final_type_views() {
             kinds.insert(character, token.token_type);
         }
     }
-    assert_eq!(kinds[&2], 2, "parameter z");
-    assert_eq!(kinds[&4], 0, "endogenous p");
+    assert_eq!(
+        legend.token_types[kinds[&2] as usize].as_str(),
+        "dynareParameter",
+        "parameter z"
+    );
+    assert_eq!(
+        legend.token_types[kinds[&4] as usize].as_str(),
+        "dynareEndogenous",
+        "endogenous p"
+    );
 }

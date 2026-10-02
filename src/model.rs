@@ -98,6 +98,14 @@ pub struct WrittenEquation {
     pub dimension: Option<Name>,
 }
 
+/// An already parsed declaration/assignment target, kept by execution token
+/// position so macro copies cannot be recovered by matching written spans.
+#[derive(Clone, Debug)]
+pub struct WrittenWrite {
+    pub name: Name,
+    pub token_range: Range<usize>,
+}
+
 /// One name of a `heterogeneity_dimension` statement, file order (one record
 /// per name, each carrying the whole statement's span).
 #[derive(Clone, Debug)]
@@ -997,6 +1005,7 @@ pub struct Model {
     pub written_declarations: Vec<WrittenDeclaration>,
     pub written_equations: Vec<WrittenEquation>,
     pub type_event_occurrences: Vec<(usize, Range<usize>)>,
+    pub write_targets: Vec<WrittenWrite>,
     pub endogenous: Vec<Decl>,
     pub exogenous: Vec<Decl>,
     pub deterministic_exogenous: Vec<Decl>,

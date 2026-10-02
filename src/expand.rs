@@ -304,6 +304,11 @@ fn build_model_map(
             .iter()
             .map(|(index, range)| (*index, source(range, range)))
             .collect(),
+        writes: model
+            .write_targets
+            .iter()
+            .map(|write| source(&write.token_range, &write.token_range))
+            .collect(),
     }
 }
 
