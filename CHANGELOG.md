@@ -2,8 +2,6 @@
 
 ## v0.11.0
 
-**Unreleased checkpoint.** Names work remains on `codex/0.11-names`; final integration and release checks are pending. The name presentation and semantic-token entries below describe that pending work.
-
 - Workspace-folder and loose-file settings isolate include paths and cached inputs across roots. Complete configuration snapshots and opt-in `dynare/modelInfoChanged` notifications support live refresh.
 - Adds LSP `dynare/modelInfo`, sharing MCP counts and timing while retaining written statements, declarations, counted equations, block categories, related files, and verified source segments. Outline and folding stay local to the requested file. Incomplete input withholds authoritative counts and numbers. Equation numbers describe the written model before Dynare transformation.
 - Hover and completion show written `long_name` and TeX metadata with independent presentation controls. Completion distinguishes endogenous, exogenous, and parameter icons, and offers empty block skeletons. Highlights distinguish declaration and assignment writes from reads.

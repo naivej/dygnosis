@@ -1,7 +1,5 @@
 # Editor settings and LSP contracts
 
-**Draft for unfinished 0.11.0.** Name presentation, completion changes, write highlights, and new semantic roles remain on `codex/0.11-names`. Those sections describe the pending integration. Settings, model information, diagnostic locations, and expression hints are already integrated; final release verification remains open.
-
 Dygnosis 0.11.0 supplies these features through the language server. Configure an LSP client to launch `dygnosis` over stdio. The VS Code extension in `editors/vscode` is still an unpublished scaffold; its Settings UI, custom color registration, model view, and packaging belong to a later release.
 
 ## Settings

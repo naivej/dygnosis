@@ -4,8 +4,6 @@ Dygnosis is a second Dynare preprocessor that helps you check and edit Dynare `.
 
 *This project is under active development.*
 
-*0.11.0 is an unfinished development checkpoint. Name presentation, snippets, read/write highlights, and new semantic roles remain on the separate `codex/0.11-names` branch. Final integration and release checks are pending.*
-
 ## Install
 
 With Git, Rust and Cargo installed:
