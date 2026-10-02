@@ -4,6 +4,7 @@
 //! (method of moments, matched moments and IRFs, and IRF and moment calibration).
 //! Dynare compute (steady state, BK, identification, MATLAB) stays out.
 
+pub mod assignment_values;
 pub mod auto_fix;
 pub mod catalog;
 pub mod check_clash;

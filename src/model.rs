@@ -978,12 +978,22 @@ pub struct Assignment {
     pub native: bool,
 }
 
+/// Proof for the new assignment trace; legacy numeric readers ignore it.
+#[derive(Clone, Debug)]
+pub struct AssignmentSyntax {
+    pub full_rhs: bool,
+    pub written_plain_number: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Model {
     pub source: String,
     pub intern: Interner,
     pub statements: Vec<Statement>,
     pub execution_steps: Vec<ExecutionStep>,
+    pub assignment_syntax: HashMap<ExprId, AssignmentSyntax>,
+    pub numeric_literals: HashMap<ExprId, f64>,
+    pub opaque_tokens: HashMap<usize, Vec<crate::lexer::Token>>,
     pub written_declarations: Vec<WrittenDeclaration>,
     pub written_equations: Vec<WrittenEquation>,
     pub type_event_occurrences: Vec<(usize, Range<usize>)>,

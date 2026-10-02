@@ -132,6 +132,13 @@ struct RoutedDiagnostic {
     revision: String,
 }
 
+struct ValueHintSite {
+    value: Option<f64>,
+    range: Option<Range>,
+    plain: bool,
+    statement_id: usize,
+}
+
 /// Source URI is the outer grouping key. An occurrence ordinal keeps repeated
 /// diagnostics from one compilation unit while merging identical other roots.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -592,6 +599,89 @@ impl Backend {
             flatten_workspace_symbols(&uri, &nested, None, &q, &mut out);
         }
         out
+    }
+
+    fn value_hints(&self, params: &InlayHintParams) -> Vec<InlayHint> {
+        let uri = &params.text_document.uri;
+        let mut inner = self.lock_inner();
+        if !inner.presentation_for(uri).parameter_value_hints {
+            return Vec::new();
+        }
+        let owners = inner.known_owner_roots(uri);
+        let root = if owners.len() == 1 {
+            owners[0].clone()
+        } else if owners.is_empty() && is_model_root(uri) {
+            uri.clone()
+        } else {
+            return Vec::new();
+        };
+        let Some(revision) = inner.root_revision(&root) else {
+            return Vec::new();
+        };
+        let Some(model) = inner.workspace.get_effective_model(root.as_str()).cloned() else {
+            return Vec::new();
+        };
+        let Some(report) = inner.workspace.expand_report(root.as_str()).cloned() else {
+            return Vec::new();
+        };
+        if !report.complete
+            || !report.model_map.complete
+            || !inner.workspace.includes_complete(root.as_str())
+        {
+            return Vec::new();
+        }
+        let key = crate::include_resolver::normalize_uri(uri.as_str());
+        let Some(text) = inner.workspace.get_source(uri.as_str()) else {
+            return Vec::new();
+        };
+        // All executions at an anchor take part, including unknown values.
+        let mut sites: std::collections::BTreeMap<(u32, u32), ValueHintSite> =
+            std::collections::BTreeMap::new();
+        for value in crate::assignment_values::assignment_values(&model) {
+            let source = &report.model_map.statements[value.statement_id];
+            let Some(anchor) = source
+                .anchor
+                .as_ref()
+                .filter(|anchor| anchor.file.as_deref() == Some(key.as_str()))
+            else {
+                continue;
+            };
+            let range = if source.segments.len() == 1
+                && source.segments[0].file.as_deref() == Some(key.as_str())
+            {
+                crate::server_model_map::written_range(text, source.segments[0].span)
+            } else {
+                None
+            };
+            let proof = value.value.filter(|_| range.is_some());
+            sites
+                .entry((anchor.span.start, anchor.span.end))
+                .and_modify(|site| {
+                    if site.value.map(f64::to_bits) != proof.map(f64::to_bits)
+                        || site.range != range
+                    {
+                        site.value = None;
+                    }
+                    site.plain |= value.written_plain_number;
+                })
+                .or_insert(ValueHintSite {
+                    value: proof,
+                    range,
+                    plain: value.written_plain_number,
+                    statement_id: value.statement_id,
+                });
+        }
+        sites.into_values().filter_map(|ValueHintSite {value, range, plain, statement_id:id}| {
+            let value = value?;
+            let position = range?.end;
+            if plain || !pos_in_range(position, params.range) { return None; }
+            Some(InlayHint {
+                position, label: InlayHintLabel::String(format!("= {value}")), kind: None,
+                text_edits: None, tooltip: Some(InlayHintTooltip::String("Value from this expression and earlier assignments.".into())),
+                padding_left: Some(true), padding_right: Some(false),
+                data: Some(json!({"root_uri":root,"revision":revision,"statement_id":format!("s{id}")})),
+            })
+        }).collect()
     }
 
     fn decl_location(&self, pos: &TextDocumentPositionParams) -> Option<Location> {
@@ -1608,6 +1698,9 @@ impl Backend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        Ok(Some(self.value_hints(&params)))
+    }
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         {
             let mut inner = self.lock_inner();
@@ -2005,6 +2098,7 @@ pub fn initialize_result() -> InitializeResult {
                 work_done_progress_options: WorkDoneProgressOptions::default(),
             })),
             hover_provider: Some(HoverProviderCapability::Simple(true)),
+            inlay_hint_provider: Some(OneOf::Left(true)),
             document_symbol_provider: Some(OneOf::Left(true)),
             workspace_symbol_provider: Some(OneOf::Left(true)),
             definition_provider: Some(OneOf::Left(true)),

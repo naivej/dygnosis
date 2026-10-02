@@ -193,58 +193,78 @@ fn format_time_offset(offset: i32) -> String {
     }
 }
 
-/// Fold a numeric assignment for `name` from parameter / helper assignments.
-pub fn assigned_number(model: &Model, name: &str) -> Option<f64> {
+/// Shared arithmetic operations. Strict mode uses retained numeric tokens and
+/// requires finite intermediates; legacy mode retains the written-number reader.
+pub(crate) fn arithmetic_number(
+    model: &Model,
+    id: crate::expr::ExprId,
+    known: &HashMap<Name, f64>,
+    strict: bool,
+) -> Option<f64> {
     use crate::expr::{BinOp, ExprKind, UnOp};
-    use crate::intern::Name;
-
-    fn fold(model: &Model, id: crate::expr::ExprId, known: &HashMap<Name, f64>) -> Option<f64> {
-        match &model.exprs.get(id).kind {
-            ExprKind::Number => {
-                let span = model.exprs.get(id).span;
-                let raw = model.source.get(span.start as usize..span.end as usize)?;
-                raw.parse().ok()
+    let value = match &model.exprs.get(id).kind {
+        ExprKind::Number => {
+            if strict {
+                return model
+                    .numeric_literals
+                    .get(&id)
+                    .copied()
+                    .filter(|value| value.is_finite());
             }
-            ExprKind::Ident { name, timing, .. } => {
-                if *timing != 0 {
-                    return None;
-                }
-                known.get(name).copied()
-            }
-            ExprKind::Unary { op, arg } => {
-                let v = fold(model, *arg, known)?;
-                Some(match op {
-                    UnOp::Pos => v,
-                    UnOp::Neg => -v,
-                })
-            }
-            ExprKind::Binary { op, lhs, rhs } => {
-                let l = fold(model, *lhs, known)?;
-                let r = fold(model, *rhs, known)?;
-                match op {
-                    BinOp::Add => Some(l + r),
-                    BinOp::Sub => Some(l - r),
-                    BinOp::Mul => Some(l * r),
-                    BinOp::Div => Some(l / r),
-                    BinOp::Pow => Some(l.powf(r)),
-                    BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::EqEq | BinOp::Ne => None,
-                }
-            }
-            ExprKind::Call { .. }
-            | ExprKind::String
-            | ExprKind::Error
-            | ExprKind::SteadyState { .. }
-            | ExprKind::Expectation { .. } => None,
+            let span = model.exprs.get(id).span;
+            let raw = model.source.get(span.start as usize..span.end as usize)?;
+            raw.parse().ok()
         }
-    }
+        ExprKind::Ident {
+            name,
+            timing,
+            timing_span,
+            ..
+        } => {
+            if *timing != 0 || (strict && timing_span.is_some()) {
+                return None;
+            }
+            known.get(name).copied()
+        }
+        ExprKind::Unary { op, arg } => {
+            let v = arithmetic_number(model, *arg, known, strict)?;
+            Some(match op {
+                UnOp::Pos => v,
+                UnOp::Neg => -v,
+            })
+        }
+        ExprKind::Binary { op, lhs, rhs } => {
+            let l = arithmetic_number(model, *lhs, known, strict)?;
+            let r = arithmetic_number(model, *rhs, known, strict)?;
+            match op {
+                BinOp::Add => Some(l + r),
+                BinOp::Sub => Some(l - r),
+                BinOp::Mul => Some(l * r),
+                BinOp::Div => Some(l / r),
+                BinOp::Pow => Some(l.powf(r)),
+                BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::EqEq | BinOp::Ne => None,
+            }
+        }
+        ExprKind::Call { .. }
+        | ExprKind::String
+        | ExprKind::Error
+        | ExprKind::SteadyState { .. }
+        | ExprKind::Expectation { .. } => None,
+    };
+    value.filter(|value| !strict || value.is_finite())
+}
 
+/// Legacy final-value walk and numeric source reader remain unchanged.
+pub fn assigned_number(model: &Model, name: &str) -> Option<f64> {
     let mut known = HashMap::new();
     for a in model
         .param_assignments
         .iter()
         .chain(model.helper_assignments.iter())
     {
-        let value = a.expr.and_then(|id| fold(model, id, &known));
+        let value = a
+            .expr
+            .and_then(|id| arithmetic_number(model, id, &known, false));
         match value {
             Some(v) if v.is_finite() => {
                 known.insert(a.name, v);

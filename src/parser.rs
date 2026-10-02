@@ -735,6 +735,25 @@ enum ExprStop {
     Semi,
 }
 
+fn arithmetic_gap(mut text: &str) -> bool {
+    loop {
+        text = text.trim_start();
+        if text.is_empty() {
+            return true;
+        }
+        if text.starts_with("//") {
+            text = text.find('\n').map(|end| &text[end..]).unwrap_or("");
+        } else if text.starts_with("/*") {
+            let Some(end) = text.find("*/") else {
+                return false;
+            };
+            text = &text[end + 2..];
+        } else {
+            return false;
+        }
+    }
+}
+
 pub(crate) fn normalize_newlines(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let bytes = text.as_bytes();
@@ -1301,6 +1320,10 @@ impl Parser<'_> {
                 self.record_statement(from, assignment, dotted_index);
             } else if from < self.i {
                 let span = self.covering_tokens(from..self.i);
+                self.model.opaque_tokens.insert(
+                    self.model.execution_steps.len(),
+                    self.tokens[from..self.i].to_vec(),
+                );
                 self.model
                     .execution_steps
                     .push(crate::model::ExecutionStep::Opaque(span));
@@ -7936,9 +7959,11 @@ impl Parser<'_> {
         }
         let tok = self.bump();
         let name = self.lexeme(&tok).to_string();
+        let rhs_start = self.tokens[self.i].span.end;
         self.eat(TokenKind::Eq);
         let expr_i = self.i;
         let expr = self.parse_expr();
+        let parsed_end_i = self.i;
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             if self.looks_like_assignment_start()
                 || self.at_follower_keyword()
@@ -7953,6 +7978,66 @@ impl Parser<'_> {
             self.bump();
         }
         let expr_end_i = self.i;
+        if let Some(expr) = expr {
+            let rhs_end = self.current_start();
+            let written = self
+                .src
+                .get(rhs_start as usize..rhs_end as usize)
+                .unwrap_or("");
+            let plain = tokenize(written);
+            let plain: Vec<_> = plain
+                .iter()
+                .filter(|token| token.kind != TokenKind::Eof)
+                .map(|token| token.kind)
+                .collect();
+            let mut depth = 0i32;
+            let balanced = self.tokens[expr_i..expr_end_i].iter().all(|token| {
+                match token.kind {
+                    TokenKind::LParen => depth += 1,
+                    TokenKind::RParen => depth -= 1,
+                    _ => {}
+                }
+                depth >= 0
+            }) && depth == 0;
+            let last_ok = self
+                .tokens
+                .get(expr_end_i.saturating_sub(1))
+                .is_some_and(|token| {
+                    matches!(
+                        token.kind,
+                        TokenKind::Number
+                            | TokenKind::Ident
+                            | TokenKind::RParen
+                            | TokenKind::String
+                    )
+                });
+            let mut cursor = rhs_start;
+            let mut gaps_ok = true;
+            for token in &self.tokens[expr_i..expr_end_i] {
+                if cursor < token.span.start {
+                    gaps_ok &= arithmetic_gap(
+                        self.src
+                            .get(cursor as usize..token.span.start as usize)
+                            .unwrap_or("?"),
+                    );
+                }
+                cursor = cursor.max(token.span.end);
+            }
+            if cursor < rhs_end {
+                gaps_ok &= arithmetic_gap(&self.src[cursor as usize..rhs_end as usize]);
+            }
+            self.model.assignment_syntax.insert(
+                expr,
+                crate::model::AssignmentSyntax {
+                    full_rhs: parsed_end_i == expr_end_i && balanced && last_ok && gaps_ok,
+                    written_plain_number: matches!(
+                        plain.as_slice(),
+                        [TokenKind::Number]
+                            | [TokenKind::Plus | TokenKind::Minus, TokenKind::Number]
+                    ),
+                },
+            );
+        }
         let stmt_end = if self.at(TokenKind::Semi) {
             self.tokens[self.i].span.end
         } else {
@@ -8881,7 +8966,12 @@ impl Parser<'_> {
         }
         if self.at(TokenKind::Number) {
             let tok = self.bump();
-            return Some(self.alloc(ExprKind::Number, tok.span));
+            let value = self.lexeme(&tok).parse::<f64>().ok();
+            let id = self.alloc(ExprKind::Number, tok.span);
+            if let Some(value) = value {
+                self.model.numeric_literals.insert(id, value);
+            }
+            return Some(id);
         }
         if self.at(TokenKind::String) {
             let tok = self.bump();

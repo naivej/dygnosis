@@ -2172,7 +2172,7 @@ fn assert_no_out_json(json: &str) {
 #[test]
 fn initialize_capabilities_wave_c() {
     let result = initialize_result();
-    assert!(result.capabilities.inlay_hint_provider.is_none());
+    assert!(result.capabilities.inlay_hint_provider.is_some());
     assert!(result.capabilities.folding_range_provider.is_some());
     assert!(result.capabilities.selection_range_provider.is_some());
     assert!(result.capabilities.document_link_provider.is_some());
@@ -2207,20 +2207,20 @@ fn initialize_capabilities_wave_c() {
 
     let json = serde_json::to_string(&result).expect("serialize initialize result");
     assert_no_out_json(&json);
-    assert!(!json.contains("inlayHintProvider"), "{json}");
+    assert!(json.contains("inlayHintProvider"), "{json}");
     assert!(!json.contains("codeLensProvider"), "{json}");
 }
 
 #[tokio::test]
-async fn inlay_hint_is_not_provided() {
-    let text = read_mod("trend_rbc_gov_inv");
+async fn inlay_hints_are_available_on_real_calibration_expressions() {
+    let text = read_mod("trend_rbc_gov_inv").replacen("betta   = 0.99;", "betta   = 1-0.01;", 1);
     let uri = archive_url("trend_rbc_gov_inv");
     let (service, _socket) = new_service();
     service
         .inner()
         .did_open(open_params(uri.clone(), text.clone(), 1))
         .await;
-    let err = service
+    let rows = service
         .inner()
         .inlay_hint(InlayHintParams {
             text_document: TextDocumentIdentifier { uri },
@@ -2228,8 +2228,10 @@ async fn inlay_hint_is_not_provided() {
             work_done_progress_params: WorkDoneProgressParams::default(),
         })
         .await
-        .expect_err("inlay hints are not provided");
-    assert_eq!(err.code, tower_lsp::jsonrpc::ErrorCode::MethodNotFound);
+        .expect("inlay provider")
+        .expect("hint list");
+    assert_eq!(rows.len(), 1);
+    assert!(matches!(&rows[0].label, InlayHintLabel::String(label) if label == "= 0.99"));
 }
 
 #[tokio::test]
