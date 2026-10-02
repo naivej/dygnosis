@@ -1782,10 +1782,30 @@ fn resolve_mapped<'a>(
     }
 }
 
+/// VS Code's minimum host has draft-07 metadata built in. Generate that
+/// dialect rather than making tool discovery load the SDK's 2020-12 metadata,
+/// whose dynamic references that host cannot validate.
+fn mcp_input_schema<T: JsonSchema>() -> std::sync::Arc<rmcp::model::JsonObject> {
+    let schema = schemars::generate::SchemaSettings::draft07()
+        .into_generator()
+        .into_root_schema_for::<T>();
+    let mut object = schema
+        .as_object()
+        .expect("MCP input schema must be an object")
+        .clone();
+    assert_eq!(object.get("type"), Some(&json!("object")));
+    // Retain the SDK's input-schema convention: parameter type names and docs
+    // are not tool-level descriptions.
+    object.remove("title");
+    object.remove("description");
+    std::sync::Arc::new(object)
+}
+
 #[tool_router]
 impl DygnosisMcp {
     #[tool(
         name = "dynare_diagnose",
+        input_schema = mcp_input_schema::<IncludeMapParams>(),
         description = "Run diagnostics on a .mod file and return code, range, severity, and message."
     )]
     fn diagnose_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
@@ -1802,6 +1822,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_model_info",
+        input_schema = mcp_input_schema::<IncludeMapParams>(),
         description = "Summarise aggregate and per-dimension heterogeneous names, counts, timing, and block flags."
     )]
     fn model_info_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
@@ -1831,6 +1852,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_compare_models",
+        input_schema = mcp_input_schema::<CompareModelsParams>(),
         description = "Compare two .mod files by names, symbol kind and metadata, calibrations, aggregate and per-dimension heterogeneous equations (names and tags), and written shock setup."
     )]
     fn compare_models_tool(
@@ -1850,6 +1872,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_find_references",
+        input_schema = mcp_input_schema::<FindReferencesParams>(),
         description = "Find every whole-word use of a name. Skips comments."
     )]
     fn find_references_tool(
@@ -1869,6 +1892,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_rename",
+        input_schema = mcp_input_schema::<RenameParams>(),
         description = "Rename a name. Skips comments. Without a files map, returns the rewritten text (or the original if the new name is not a legal identifier). With a map, returns only files that changed."
     )]
     fn rename_tool(&self, Parameters(params): Parameters<RenameParams>) -> CallToolResult {
@@ -1897,6 +1921,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_auto_fix",
+        input_schema = mcp_input_schema::<FileContentParams>(),
         description = "Apply stored diagnostic fixes to a .mod file. Leaves the text unchanged when macros would make the rewrite unsafe."
     )]
     fn auto_fix_tool(&self, Parameters(params): Parameters<FileContentParams>) -> String {
@@ -1905,6 +1930,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_explain",
+        input_schema = mcp_input_schema::<ExplainParams>(),
         description = "Return markdown documentation for a diagnostic code."
     )]
     fn explain_tool(&self, Parameters(params): Parameters<ExplainParams>) -> String {
@@ -1921,6 +1947,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_list_options",
+        input_schema = mcp_input_schema::<ListOptionsParams>(),
         description = "List valid options for a Dynare command, or list known commands when omitted."
     )]
     fn list_options_tool(
@@ -1932,6 +1959,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_equations",
+        input_schema = mcp_input_schema::<EquationsParams>(),
         description = "List aggregate and dimension-labelled heterogeneous equations with text, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds."
     )]
     fn equations_tool(&self, Parameters(params): Parameters<EquationsParams>) -> CallToolResult {
@@ -1971,6 +1999,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_related_files",
+        input_schema = mcp_input_schema::<IncludeMapParams>(),
         description = "List include targets and companion files for the active .mod (kind, filename, resolved, path)."
     )]
     fn related_files_tool(
@@ -1990,6 +2019,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_expand",
+        input_schema = mcp_input_schema::<IncludeMapParams>(),
         description = "Return the full compilation unit after include splice and macro expand, with origin jumps for counted aggregate and heterogeneous equations."
     )]
     fn expand_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
@@ -2019,6 +2049,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_format",
+        input_schema = mcp_input_schema::<FormatParams>(),
         description = "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it. Empty or whitespace-only input is unchanged."
     )]
     fn format_tool(
@@ -2033,6 +2064,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_extract",
+        input_schema = mcp_input_schema::<ExtractParams>(),
         description = "Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model."
     )]
     fn extract_tool(
@@ -2054,6 +2086,7 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_workspace_diagnose",
+        input_schema = mcp_input_schema::<WorkspaceDiagnoseParams>(),
         description = "Diagnose root .mod files from a files map and roots, or from file and directory paths. Each root is reported on its own, with a summary; one failed root does not drop the others."
     )]
     fn workspace_diagnose_tool(
@@ -2077,6 +2110,64 @@ impl ServerHandler for DygnosisMcp {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_schemas_use_the_offline_compatible_draft() {
+        for tool in DygnosisMcp::tool_router().list_all() {
+            assert_eq!(tool.input_schema["type"], "object", "{}", tool.name);
+            if tool.name == "dynare_list_diagnostic_codes" {
+                assert_eq!(tool.input_schema["properties"], json!({}));
+            } else {
+                assert_eq!(
+                    tool.input_schema.get("$schema"),
+                    Some(&json!("http://json-schema.org/draft-07/schema#")),
+                    "{} must use the schema built into the minimum VS Code host",
+                    tool.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn input_schema_compatibility_preserves_every_tool_argument() {
+        fn assert_same<T: JsonSchema + 'static>(names: &[&str]) {
+            let mut previous = rmcp::handler::server::common::schema_for_input::<T>()
+                .expect("SDK input schema")
+                .as_ref()
+                .clone();
+            previous.remove("$schema");
+            let tools = DygnosisMcp::tool_router().list_all();
+            for name in names {
+                let mut current = tools
+                    .iter()
+                    .find(|tool| tool.name == *name)
+                    .expect("registered tool")
+                    .input_schema
+                    .as_ref()
+                    .clone();
+                current.remove("$schema");
+                // Compare the whole shape, including required fields, nullable
+                // types, maps, arrays, numeric limits, and serde defaults.
+                assert_eq!(current, previous, "{name}");
+            }
+        }
+        assert_same::<IncludeMapParams>(&[
+            "dynare_diagnose",
+            "dynare_model_info",
+            "dynare_related_files",
+            "dynare_expand",
+        ]);
+        assert_same::<CompareModelsParams>(&["dynare_compare_models"]);
+        assert_same::<FindReferencesParams>(&["dynare_find_references"]);
+        assert_same::<RenameParams>(&["dynare_rename"]);
+        assert_same::<FileContentParams>(&["dynare_auto_fix"]);
+        assert_same::<ExplainParams>(&["dynare_explain"]);
+        assert_same::<ListOptionsParams>(&["dynare_list_options"]);
+        assert_same::<EquationsParams>(&["dynare_equations"]);
+        assert_same::<FormatParams>(&["dynare_format"]);
+        assert_same::<ExtractParams>(&["dynare_extract"]);
+        assert_same::<WorkspaceDiagnoseParams>(&["dynare_workspace_diagnose"]);
+    }
 
     #[test]
     fn rmcp_stdio_registers_rust_tools() {
