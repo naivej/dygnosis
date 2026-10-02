@@ -4,6 +4,8 @@ Dygnosis is a second Dynare preprocessor that helps you check and edit Dynare `.
 
 *This project is under active development.*
 
+*0.11.0 is an unfinished development checkpoint. Name presentation, snippets, read/write highlights, and new semantic roles remain on the separate `codex/0.11-names` branch. Final integration and release checks are pending.*
+
 ## Install
 
 With Git, Rust and Cargo installed:
@@ -39,7 +41,10 @@ Configure an LSP client to launch `dygnosis` over stdio. Available features incl
 - Go to definition, find references and rename, including across known include files
 - Outline, workspace symbols, syntax colors, folding and links to related files
 - Document/range formatting, available diagnostic fixes and commented shock templates
+- Linked duplicate locations and proven expression-value inlay hints
 - Expanded model text with jumps back to source equations
+
+Workspace folders have separate settings and include paths. The `dynare/modelInfo` command supplies shared counts, written source locations, and input revisions for client model views. Equation labels are Dygnosis numbers before transformation. See the [editor settings guide](docs/editor-settings.md) for configuration, root ownership, and semantic token migration. The VS Code extension remains an unpublished scaffold in this release.
 
 ### AI agents (MCP)
 

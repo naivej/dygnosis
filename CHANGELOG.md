@@ -1,8 +1,15 @@
 # Changelog
 
-## Unreleased
+## v0.11.0
 
-- Adds the v0.11 VS Code extension scaffold under `editors/vscode/`, with TypeScript and ESLint setup. The client implementation and editor features remain planned.
+**Unreleased checkpoint.** Names work remains on `codex/0.11-names`; final integration and release checks are pending. The name presentation and semantic-token entries below describe that pending work.
+
+- Workspace-folder and loose-file settings isolate include paths and cached inputs across roots. Complete configuration snapshots and opt-in `dynare/modelInfoChanged` notifications support live refresh.
+- Adds LSP `dynare/modelInfo`, sharing MCP counts and timing while retaining written statements, declarations, counted equations, block categories, related files, and verified source segments. Outline and folding stay local to the requested file. Incomplete input withholds authoritative counts and numbers. Equation numbers describe the written model before Dynare transformation.
+- Hover and completion show written `long_name` and TeX metadata with independent presentation controls. Completion distinguishes endogenous, exogenous, and parameter icons, and offers empty block skeletons. Highlights distinguish declaration and assignment writes from reads.
+- Semantic tokens negotiate `dynareEndogenous`, `dynareExogenous`, `dynareParameter`, and `dynareModelLocal`, falling back to supported `variable` tokens. Full and range responses use the negotiated legend and modifiers. Existing Dynare-specific color rules need the [selector migration](docs/editor-settings.md#semantic-token-migration).
+- Applicable duplicate and include-cycle diagnostics link to earlier written locations in LSP and MCP. Published fixes work in unopened includes with current source snapshots and correct versions for open files. W020 and W022 carry LSP Unnecessary; E021 does not.
+- Restores expression-value inlay hints from an ordered trace of proven finite arithmetic. Plain numbers stay quiet; unknown execution and differing macro copies withhold hints. Existing hover and comparison values retain their behavior.
 
 ## v0.10.2
 
