@@ -5,14 +5,15 @@
 //! records are stored here. This module does not emit diagnostic codes.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::companion::{self, CompanionKind, CompanionRecord};
 use crate::expand::{expand_report_from_spliced, ExpandReport, SpliceSegment};
 use crate::include_resolver::{
-    normalize_separators, normalize_uri, path_key, resolve_companion_path, resolve_include_path,
-    uri_to_path,
+    is_virtual_uri, normalize_separators, normalize_uri, path_key, resolve_companion_path,
+    resolve_include_path, resolve_scoped_include_path, uri_to_path,
 };
 use crate::model::{IncludeDirective, IncludePathDirective, Model};
 use crate::parser::parse;
@@ -69,11 +70,23 @@ struct SplicedSource {
     segments: Vec<SpliceSegment>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct InputFile {
+    overlay: bool,
+    bytes: Option<Vec<u8>>,
+}
+
 /// URI/path-keyed document index plus include graph walks.
 #[derive(Default)]
 pub struct Workspace {
     docs: HashMap<String, Doc>,
     search_paths: Vec<PathBuf>,
+    root_search_paths: HashMap<String, Vec<PathBuf>>,
+    virtual_roots: HashSet<String>,
+    // Retain input provenance when model/source caches are cleared.
+    dependency_candidates: HashMap<String, HashSet<String>>,
+    input_snapshots: HashMap<String, BTreeMap<String, InputFile>>,
+    include_owners: HashMap<String, HashSet<String>>,
     effective: HashMap<String, Model>,
     spliced: HashMap<String, Arc<SplicedSource>>,
     expand: HashMap<String, ExpandReport>,
@@ -119,8 +132,8 @@ impl Workspace {
         self.effective.clear();
         self.spliced.clear();
         self.expand.clear();
-        self.records.remove(key);
-        self.companions.remove(key);
+        self.records.clear();
+        self.companions.clear();
     }
 
     pub fn with_search_paths(search_paths: Vec<PathBuf>) -> Self {
@@ -149,8 +162,8 @@ impl Workspace {
         self.effective.clear();
         self.spliced.clear();
         self.expand.clear();
-        self.records.remove(&key);
-        self.companions.remove(&key);
+        self.records.clear();
+        self.companions.clear();
     }
 
     /// Drop this document so a later load can read disk again.
@@ -192,8 +205,8 @@ impl Workspace {
         self.effective.clear();
         self.spliced.clear();
         self.expand.clear();
-        self.records.remove(&key);
-        self.companions.remove(&key);
+        self.records.clear();
+        self.companions.clear();
         self.docs.get(&key).map(|d| &d.model)
     }
 
@@ -223,6 +236,140 @@ impl Workspace {
         self.companions.clear();
     }
 
+    /// Set one root's paths without changing any other root or the CLI/MCP defaults.
+    pub fn set_root_search_paths(&mut self, uri: &str, paths: Vec<PathBuf>) {
+        let key = normalize_uri(uri);
+        if is_virtual_uri(uri) {
+            self.virtual_roots.insert(key.clone());
+        }
+        let paths = append_unique(&[], &paths);
+        if self.root_search_paths.get(&key) == Some(&paths) {
+            return;
+        }
+        self.root_search_paths.insert(key.clone(), paths);
+        self.invalidate_root(&key);
+    }
+
+    fn invalidate_root(&mut self, key: &str) {
+        self.effective.remove(key);
+        self.spliced.remove(key);
+        self.expand.remove(key);
+        self.records.remove(key);
+        self.companions.remove(key);
+    }
+
+    fn root_paths(&self, key: &str) -> &[PathBuf] {
+        self.root_search_paths
+            .get(key)
+            .map(Vec::as_slice)
+            .unwrap_or(&self.search_paths)
+    }
+
+    /// Observe disk changes without replacing editor overlays. Missing search
+    /// candidates are inputs too: creating one can change an include's owner.
+    pub fn input_revision(&mut self, uri: &str) -> Option<String> {
+        let key = normalize_uri(uri);
+        if let Some(previous) = self.input_snapshots.get(&key).cloned() {
+            let changed: Vec<_> = previous
+                .iter()
+                .filter_map(|(path, state)| {
+                    (self.input_file(path) != *state).then_some(path.clone())
+                })
+                .collect();
+            if !changed.is_empty() {
+                for path in changed {
+                    if self.docs.get(&path).is_some_and(|doc| !doc.overlay) {
+                        self.docs.remove(&path);
+                    }
+                }
+                self.invalidate_root(&key);
+            }
+        }
+        let Some(key) = self.ensure_loaded(uri) else {
+            self.include_owners.remove(&key);
+            return None;
+        };
+        self.include_records(uri)?;
+        self.companion_records(uri)?;
+        let mut files = self
+            .dependency_candidates
+            .get(&key)
+            .cloned()
+            .unwrap_or_default();
+        files.insert(key.clone());
+        let snapshot: BTreeMap<_, _> = files
+            .into_iter()
+            .map(|path| {
+                let state = self.input_file(&path);
+                (path, state)
+            })
+            .collect();
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut hash);
+        self.root_paths(&key).hash(&mut hash);
+        snapshot.hash(&mut hash);
+        self.input_snapshots.insert(key, snapshot);
+        Some(format!("{:016x}", hash.finish()))
+    }
+
+    fn input_file(&self, key: &str) -> InputFile {
+        if let Some(doc) = self.docs.get(key).filter(|doc| doc.overlay) {
+            InputFile {
+                overlay: true,
+                bytes: Some(doc.source.as_bytes().to_vec()),
+            }
+        } else {
+            InputFile {
+                overlay: false,
+                bytes: if is_virtual_uri(key) {
+                    None
+                } else {
+                    std::fs::read(key).ok()
+                },
+            }
+        }
+    }
+
+    /// Known compilation-unit owners from resolved include edges. Retained
+    /// across cache invalidation so an editor edit does not lose root context.
+    pub fn owner_roots(&self, uri: &str) -> Vec<String> {
+        let key = normalize_uri(uri);
+        let mut roots: Vec<_> = self
+            .include_owners
+            .iter()
+            .filter(|(root, included)| root.as_str() != key && included.contains(&key))
+            .map(|(root, _)| root.clone())
+            .collect();
+        roots.sort();
+        roots
+    }
+
+    fn record_candidates(
+        &mut self,
+        root: &str,
+        including_key: &str,
+        filename: &str,
+        paths: &[PathBuf],
+    ) {
+        if self.virtual_roots.contains(root) {
+            return;
+        }
+        let name = PathBuf::from(normalize_separators(filename));
+        let mut candidates = Vec::new();
+        if name.is_absolute() {
+            candidates.push(name);
+        } else {
+            if let Some(parent) = Path::new(including_key).parent() {
+                candidates.push(parent.join(&name));
+            }
+            candidates.extend(paths.iter().map(|path| path.join(&name)));
+        }
+        self.dependency_candidates
+            .entry(root.to_owned())
+            .or_default()
+            .extend(candidates.iter().map(|path| path_key(path)));
+    }
+
     pub fn get_model(&self, uri: &str) -> Option<&Model> {
         self.docs.get(&normalize_uri(uri)).map(|d| &d.model)
     }
@@ -239,6 +386,10 @@ impl Workspace {
     /// Whether this workspace represents only caller-supplied map entries.
     pub(crate) fn is_overlay_only(&self) -> bool {
         self.overlay_only
+    }
+
+    pub(crate) fn is_virtual_root(&self, uri: &str) -> bool {
+        self.virtual_roots.contains(&normalize_uri(uri))
     }
 
     /// A virtual directory exists when a supplied file has that directory as
@@ -379,6 +530,13 @@ impl Workspace {
         self.records.get(&key)
     }
 
+    /// Whether every include resolved without a cycle. Macro completion is a
+    /// separate condition; consumers need both before claiming a full model.
+    pub fn includes_complete(&mut self, uri: &str) -> bool {
+        self.include_records(uri)
+            .is_some_and(|records| records.unresolved.is_empty() && records.cycles.is_empty())
+    }
+
     /// Companion records for the root `.mod` (convention + named mentions).
     pub fn companion_records(&mut self, uri: &str) -> Option<&[CompanionRecord]> {
         let key = self.ensure_loaded(uri)?;
@@ -396,6 +554,9 @@ impl Workspace {
         let key = normalize_uri(uri);
         if self.docs.contains_key(&key) {
             return Some(key);
+        }
+        if is_virtual_uri(uri) {
+            return None;
         }
         let path = uri_to_path(uri);
         if path.exists() {
@@ -438,24 +599,33 @@ impl Workspace {
         self.docs.keys().cloned().collect()
     }
 
-    fn configured_search(&self, extra: &[PathBuf]) -> Vec<PathBuf> {
-        append_unique(&self.search_paths, extra)
+    fn configured_search(&self, root: &str, extra: &[PathBuf]) -> Vec<PathBuf> {
+        append_unique(self.root_paths(root), extra)
     }
 
     fn resolve_filename(
-        &self,
+        &mut self,
+        root_key: &str,
         including_key: &str,
         filename: &str,
         active_search: &[PathBuf],
     ) -> Option<PathBuf> {
+        if self.virtual_roots.contains(root_key) {
+            return None;
+        }
         if self.overlay_only {
             return self
                 .overlay_include_key(including_key, filename, active_search)
                 .map(PathBuf::from);
         }
-        let paths = self.configured_search(active_search);
+        let paths = self.configured_search(root_key, active_search);
+        self.record_candidates(root_key, including_key, filename, &paths);
         let known = self.known_keys();
-        resolve_include_path(filename, including_key, &paths, Some(&known))
+        if self.root_search_paths.contains_key(root_key) {
+            resolve_scoped_include_path(filename, including_key, &paths, Some(&known))
+        } else {
+            resolve_include_path(filename, including_key, &paths, Some(&known))
+        }
     }
 
     /// Workspace key for a resolved include. Overlay keys stay as stored.
@@ -518,11 +688,14 @@ impl Workspace {
     }
 
     fn resolve_companion_from_root(
-        &self,
+        &mut self,
         root_key: &str,
         name: &str,
         extra_suffixes: &[&str],
     ) -> Option<PathBuf> {
+        if self.virtual_roots.contains(root_key) {
+            return None;
+        }
         if self.overlay_only {
             let paths = self
                 .docs
@@ -544,15 +717,39 @@ impl Workspace {
             }
             return None;
         }
-        let mut paths = self.search_paths.clone();
+        let mut paths = self.root_paths(root_key).to_vec();
         if let Some(doc) = self.docs.get(root_key) {
             paths = append_unique(&paths, &doc.includepath_dirs);
         }
         let known = self.known_keys();
+        self.record_candidates(root_key, root_key, name, &paths);
+        if Path::new(name).extension().is_none() {
+            for suffix in extra_suffixes {
+                self.record_candidates(root_key, root_key, &format!("{name}{suffix}"), &paths);
+            }
+        }
+        if self.root_search_paths.contains_key(root_key) {
+            if let Some(path) = resolve_scoped_include_path(name, root_key, &paths, Some(&known)) {
+                return Some(path);
+            }
+            if Path::new(name).extension().is_none() {
+                for suffix in extra_suffixes {
+                    if let Some(path) = resolve_scoped_include_path(
+                        &format!("{name}{suffix}"),
+                        root_key,
+                        &paths,
+                        Some(&known),
+                    ) {
+                        return Some(path);
+                    }
+                }
+            }
+            return None;
+        }
         resolve_companion_path(name, root_key, &paths, Some(&known), extra_suffixes)
     }
 
-    fn build_companions(&self, root_key: &str) -> Vec<CompanionRecord> {
+    fn build_companions(&mut self, root_key: &str) -> Vec<CompanionRecord> {
         let Some(doc) = self.docs.get(root_key) else {
             return Vec::new();
         };
@@ -579,6 +776,7 @@ impl Workspace {
     }
 
     fn walk_graph(&mut self, root_key: &str) -> IncludeRecords {
+        self.dependency_candidates.remove(root_key);
         let mut records = IncludeRecords::default();
         let mut seen_cycles: HashSet<Vec<String>> = HashSet::new();
         self.dfs_graph(
@@ -589,6 +787,12 @@ impl Workspace {
             &mut records,
             &mut seen_cycles,
         );
+        let included = records
+            .resolved
+            .iter()
+            .map(|record| self.include_key(&record.path))
+            .collect();
+        self.include_owners.insert(root_key.to_owned(), included);
         records
     }
 
@@ -616,14 +820,15 @@ impl Workspace {
                     *active_search = append_unique(active_search, &added);
                 }
                 IncludeEvent::Include(dir) => {
-                    let resolved = self.resolve_filename(current_key, &dir.filename, active_search);
+                    let resolved =
+                        self.resolve_filename(&stack[0], current_key, &dir.filename, active_search);
                     match resolved {
                         None => {
                             let mut searched = Vec::new();
                             if let Some(parent) = Path::new(current_key).parent() {
                                 searched.push(parent.display().to_string());
                             }
-                            for p in active_search.iter() {
+                            for p in self.configured_search(&stack[0], active_search) {
                                 let s = p.display().to_string();
                                 if !searched.iter().any(|d| d == &s) {
                                     searched.push(s);
@@ -737,7 +942,8 @@ impl Workspace {
                     *active_search = append_unique(active_search, &added);
                 }
                 SpliceEvent::Include(dir) => {
-                    let resolved = self.resolve_filename(key, &dir.filename, active_search);
+                    let resolved =
+                        self.resolve_filename(&root_key, key, &dir.filename, active_search);
                     let (body, nested_map) = match resolved {
                         None => (String::new(), Vec::new()),
                         Some(path) => {

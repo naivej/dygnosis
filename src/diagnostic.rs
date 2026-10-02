@@ -413,7 +413,9 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
     };
     let mut extra = Vec::new();
     extra.extend(crate::check_e060::check_e060(&records));
-    extra.extend(crate::check_e060::check_e061(&records));
+    if !ws.is_virtual_root(abs_path) {
+        extra.extend(crate::check_e060::check_e061(&records));
+    }
     extra.extend(crate::check_e060::check_w061(ws, abs_path));
     let companions = ws
         .companion_records(abs_path)

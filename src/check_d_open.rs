@@ -117,6 +117,9 @@ pub fn check_workspace_d_open(
     model: &Model,
     abs_path: &str,
 ) -> Vec<Diagnostic> {
+    if ws.is_virtual_root(abs_path) {
+        return Vec::new();
+    }
     let key = if ws.is_overlay_only() {
         abs_path.to_string()
     } else {

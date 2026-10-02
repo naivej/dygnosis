@@ -31,7 +31,20 @@ pub fn path_key(path: &Path) -> String {
 
 /// Normalize a URI or path string to a [`path_key`].
 pub fn normalize_uri(uri_or_path: &str) -> String {
+    if is_virtual_uri(uri_or_path) {
+        return uri_or_path.to_owned();
+    }
     path_key(&uri_to_path(uri_or_path))
+}
+
+pub(crate) fn is_virtual_uri(uri_or_path: &str) -> bool {
+    uri_or_path.split_once(':').is_some_and(|(scheme, _)| {
+        scheme.len() > 1
+            && scheme != "file"
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    })
 }
 
 /// Walk up from `start_path` to the nearest directory containing `.git`.
@@ -61,6 +74,38 @@ pub fn resolve_include_path(
     including_file_uri_or_path: &str,
     search_paths: &[PathBuf],
     known_paths: Option<&HashSet<String>>,
+) -> Option<PathBuf> {
+    resolve_include_path_inner(
+        directive_filename,
+        including_file_uri_or_path,
+        search_paths,
+        known_paths,
+        true,
+    )
+}
+
+/// Scoped LSP roots use only explicit candidates, never another root's virtual suffix match.
+pub(crate) fn resolve_scoped_include_path(
+    directive_filename: &str,
+    including_file_uri_or_path: &str,
+    search_paths: &[PathBuf],
+    known_paths: Option<&HashSet<String>>,
+) -> Option<PathBuf> {
+    resolve_include_path_inner(
+        directive_filename,
+        including_file_uri_or_path,
+        search_paths,
+        known_paths,
+        false,
+    )
+}
+
+fn resolve_include_path_inner(
+    directive_filename: &str,
+    including_file_uri_or_path: &str,
+    search_paths: &[PathBuf],
+    known_paths: Option<&HashSet<String>>,
+    virtual_fallback: bool,
 ) -> Option<PathBuf> {
     if directive_filename.is_empty() {
         return None;
@@ -99,6 +144,9 @@ pub fn resolve_include_path(
         }
     }
 
+    if !virtual_fallback {
+        return None;
+    }
     if matches_known(&candidate_rel, &known) {
         return Some(resolve_or_abs(&candidate_rel));
     }

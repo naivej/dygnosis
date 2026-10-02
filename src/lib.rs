@@ -62,6 +62,7 @@ mod pinned_options;
 pub mod preprocessor;
 pub mod refs;
 pub mod server;
+pub mod server_settings;
 mod shape_gate;
 pub(crate) mod shock_template;
 mod signature_help;

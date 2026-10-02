@@ -1,7 +1,8 @@
 //! LSP server (stdio). Wave a: document loop. Wave b: navigation / edit. Wave c: intel / format / commands.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::hash::{Hash, Hasher};
+use std::path::Path;
 use std::sync::Mutex;
 
 use serde_json::{json, Value};
@@ -19,7 +20,7 @@ use crate::diagnostic::{
 use crate::equation_names::equation_name_plan;
 use crate::expand::{EquationOrigin, OriginFrame};
 use crate::explain;
-use crate::format::{format_range, format_text, parse_format_indent};
+use crate::format::{format_range, format_text};
 use crate::lexer::{tokenize, TokenKind};
 use crate::model::{Decl, Equation, Model};
 use crate::model_diff::{compare_models_with_sources, CompareSource};
@@ -29,6 +30,10 @@ use crate::model_info::{
 use crate::refs::{
     enclosing_paren_has_ident, ident_at, is_legal_ident, occurrences, option_command_at,
     option_owner_at,
+};
+use crate::server_settings::{
+    PresentationSettings, ResourceSettings, SettingsStore, CONFIGURATION_SCHEMA_VERSION,
+    MODEL_INFO_SCHEMA_VERSION,
 };
 use crate::span::{LineIndex, Span};
 use crate::workspace::Workspace;
@@ -154,8 +159,11 @@ struct Inner {
     docs: HashMap<Url, OpenDoc>,
     published: HashMap<Url, Vec<Diagnostic>>,
     workspace: Workspace,
-    format_indent_unit: String,
-    search_paths: Vec<PathBuf>,
+    settings: SettingsStore,
+    tracked_roots: HashMap<Url, String>,
+    model_info_notifications: bool,
+    token_refresh: bool,
+    hint_refresh: bool,
 }
 
 impl Default for Inner {
@@ -164,13 +172,71 @@ impl Default for Inner {
             docs: HashMap::new(),
             published: HashMap::new(),
             workspace: Workspace::new(),
-            format_indent_unit: "\t".into(),
-            search_paths: Vec::new(),
+            settings: SettingsStore::default(),
+            tracked_roots: HashMap::new(),
+            model_info_notifications: false,
+            token_refresh: false,
+            hint_refresh: false,
         }
     }
 }
 
 impl Inner {
+    fn prepare_root(&mut self, uri: &Url) -> ResourceSettings {
+        let settings = self.settings.resolve(uri);
+        self.workspace
+            .set_root_search_paths(uri.as_str(), settings.search_paths.clone());
+        settings
+    }
+
+    fn presentation_for(&self, uri: &Url) -> PresentationSettings {
+        self.settings.resolve(uri).presentation
+    }
+
+    fn known_owner_roots(&self, uri: &Url) -> Vec<Url> {
+        let owners = self.workspace.owner_roots(uri.as_str());
+        let mut roots: Vec<_> = self
+            .tracked_roots
+            .keys()
+            .filter(|root| owners.contains(&crate::include_resolver::normalize_uri(root.as_str())))
+            .cloned()
+            .collect();
+        roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        roots
+    }
+
+    fn root_revision(&mut self, uri: &Url) -> Option<String> {
+        let settings = self.prepare_root(uri);
+        let inputs = self.workspace.input_revision(uri.as_str())?;
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        settings.hash(&mut hash);
+        inputs.hash(&mut hash);
+        let revision = format!("{:016x}", hash.finish());
+        self.tracked_roots
+            .entry(uri.clone())
+            .or_insert_with(|| revision.clone());
+        Some(revision)
+    }
+
+    fn changed_model_info(&mut self) -> Vec<Value> {
+        let mut roots: Vec<_> = self.tracked_roots.keys().cloned().collect();
+        roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        let mut changes = Vec::new();
+        for root in roots {
+            let previous = self.tracked_roots.get(&root).cloned();
+            let revision = self.root_revision(&root);
+            if previous.as_ref() != revision.as_ref() {
+                if let Some(revision) = &revision {
+                    self.tracked_roots.insert(root.clone(), revision.clone());
+                } else {
+                    self.tracked_roots.remove(&root);
+                }
+                changes.push(json!({"schema_version": MODEL_INFO_SCHEMA_VERSION, "root_uri": root, "revision": revision}));
+            }
+        }
+        changes
+    }
+
     /// Recheck each open compilation unit, then route writing summaries to their source file.
     /// Publishing the union with the previous routes clears notes whose owner changed.
     fn refresh_diagnostics(
@@ -181,6 +247,11 @@ impl Inner {
         roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
         let mut checks: Vec<(Url, DiagnosticSet)> = Vec::new();
         for uri in roots {
+            if is_model_root(&uri) {
+                self.root_revision(&uri);
+            } else {
+                self.prepare_root(&uri);
+            }
             checks.push((
                 uri.clone(),
                 check_in_workspace_with_origins(&mut self.workspace, uri.as_str()),
@@ -323,6 +394,45 @@ impl Backend {
 
     fn lock_inner(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn presentation_settings(&self, uri: &Url) -> PresentationSettings {
+        self.lock_inner().presentation_for(uri)
+    }
+
+    pub fn model_input_revision(&self, root: &Url) -> Option<String> {
+        self.lock_inner().root_revision(root)
+    }
+
+    pub fn known_model_roots(&self, document: &Url) -> Vec<Url> {
+        self.lock_inner().known_owner_roots(document)
+    }
+
+    async fn refresh_presentation(&self, settings_changed: bool) {
+        let (changes, notify, tokens, hints) = {
+            let mut inner = self.lock_inner();
+            let changes = inner.changed_model_info();
+            let refresh = settings_changed || !changes.is_empty();
+            (
+                changes,
+                inner.model_info_notifications,
+                refresh && inner.token_refresh,
+                refresh && inner.hint_refresh,
+            )
+        };
+        if notify {
+            for change in changes {
+                self.client
+                    .send_notification::<ModelInfoChanged>(change)
+                    .await;
+            }
+        }
+        if tokens {
+            let _ = self.client.semantic_tokens_refresh().await;
+        }
+        if hints {
+            let _ = self.client.inlay_hint_refresh().await;
+        }
     }
 
     fn upsert(
@@ -777,38 +887,8 @@ impl Backend {
         })
     }
 
-    fn apply_settings(&self, settings: &Value) {
-        let dynare = settings.get("dynare").unwrap_or(settings);
-        let Some(obj) = dynare.as_object() else {
-            return;
-        };
-        let mut inner = self.lock_inner();
-        if let Some(value) = obj.get("formatIndent") {
-            if let Some(unit) = parse_format_indent(value) {
-                inner.format_indent_unit = unit;
-            }
-        }
-        let mut paths_changed = false;
-        if let Some(raw) = obj.get("searchPaths") {
-            if let Some(paths) = parse_path_array(raw) {
-                inner.search_paths = paths;
-                paths_changed = true;
-            }
-        }
-        if let Some(raw) = obj.get("searchPathsByRoot") {
-            if let Some(extras) = parse_search_paths_by_root(raw) {
-                for extra in extras {
-                    if !inner.search_paths.iter().any(|p| p == &extra) {
-                        inner.search_paths.push(extra);
-                        paths_changed = true;
-                    }
-                }
-            }
-        }
-        if paths_changed {
-            let paths = inner.search_paths.clone();
-            inner.workspace.set_search_paths(paths);
-        }
+    fn apply_settings(&self, settings: &Value) -> Vec<String> {
+        self.lock_inner().settings.apply(settings)
     }
 
     fn folding_ranges(&self, uri: &Url) -> Option<Vec<FoldingRange>> {
@@ -1138,7 +1218,8 @@ impl Backend {
     fn format_document(&self, uri: &Url) -> Option<Vec<TextEdit>> {
         let inner = self.lock_inner();
         let doc = inner.docs.get(uri)?;
-        let formatted = format_text(&doc.text, &inner.format_indent_unit)?;
+        let settings = inner.settings.resolve(uri);
+        let formatted = format_text(&doc.text, &settings.format_indent_unit)?;
         Some(vec![full_document_edit(&doc.text, formatted)])
     }
 
@@ -1149,11 +1230,12 @@ impl Backend {
         if range.end.character == 0 && end_line > range.start.line {
             end_line -= 1;
         }
+        let settings = inner.settings.resolve(uri);
         let (start_line, end_line, replacement) = format_range(
             &doc.text,
             range.start.line,
             end_line,
-            &inner.format_indent_unit,
+            &settings.format_indent_unit,
         )?;
         Some(vec![line_range_edit(
             &doc.text,
@@ -1178,6 +1260,12 @@ impl Backend {
             Err(v) => return v,
         };
         let mut inner = self.lock_inner();
+        if let Ok(uri) = Url::parse(&uri_a) {
+            inner.prepare_root(&uri);
+        }
+        if let Ok(uri) = Url::parse(&uri_b) {
+            inner.prepare_root(&uri);
+        }
         let Some(model_a) = inner.workspace.get_effective_model(uri_a.as_str()).cloned() else {
             return json!({"error": format!("No parsed model for uri_a: {uri_a}"), "code": "URI_A_NOT_FOUND"});
         };
@@ -1213,12 +1301,14 @@ impl Backend {
             return json!({"success": false, "message": "Missing or invalid URI argument"});
         };
         let mut inner = self.lock_inner();
+        inner.prepare_root(&uri);
         if !inner.docs.contains_key(&uri) {
             return json!({"success": false, "message": "Document not available"});
         }
         let Some(report) = inner.workspace.expand_report(uri.as_str()).cloned() else {
             return json!({"success": false, "message": "Document not available"});
         };
+        let complete = report.complete && inner.workspace.includes_complete(uri.as_str());
         let has_heterogeneous = !report.heterogeneous_origins.is_empty();
         let origins: Vec<Value> = report
             .origins
@@ -1230,7 +1320,7 @@ impl Backend {
             "effective_text": report.effective_text,
             "origins": origins,
         });
-        if !report.complete {
+        if !complete {
             result["status"] = json!("incomplete");
         }
         result
@@ -1347,8 +1437,46 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        {
+            let mut inner = self.lock_inner();
+            let folders = params.workspace_folders.unwrap_or_else(|| {
+                #[allow(deprecated)]
+                params
+                    .root_uri
+                    .clone()
+                    .map(|uri| {
+                        vec![WorkspaceFolder {
+                            uri,
+                            name: String::new(),
+                        }]
+                    })
+                    .unwrap_or_default()
+            });
+            inner.settings.set_folders(folders);
+            inner.model_info_notifications = params
+                .capabilities
+                .experimental
+                .as_ref()
+                .and_then(|value| value.get("dygnosis"))
+                .and_then(|value| value.get("modelInfoChanged"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let workspace = params.capabilities.workspace.as_ref();
+            inner.token_refresh = workspace
+                .and_then(|cap| cap.semantic_tokens.as_ref())
+                .and_then(|cap| cap.refresh_support)
+                .unwrap_or(false);
+            inner.hint_refresh = workspace
+                .and_then(|cap| cap.inlay_hint.as_ref())
+                .and_then(|cap| cap.refresh_support)
+                .unwrap_or(false);
+        }
         if let Some(opts) = params.initialization_options {
-            self.apply_settings(&opts);
+            for explanation in self.apply_settings(&opts) {
+                self.client
+                    .log_message(MessageType::WARNING, explanation)
+                    .await;
+            }
         }
         Ok(initialize_result())
     }
@@ -1370,6 +1498,7 @@ impl LanguageServer for Backend {
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
+        self.refresh_presentation(false).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -1389,6 +1518,7 @@ impl LanguageServer for Backend {
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
+        self.refresh_presentation(false).await;
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -1408,6 +1538,7 @@ impl LanguageServer for Backend {
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
+        self.refresh_presentation(false).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -1423,6 +1554,7 @@ impl LanguageServer for Backend {
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
+        self.refresh_presentation(false).await;
     }
 
     async fn diagnostic(
@@ -1489,6 +1621,7 @@ impl LanguageServer for Backend {
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
         }
+        self.refresh_presentation(false).await;
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -1636,7 +1769,34 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        self.apply_settings(&params.settings);
+        for explanation in self.apply_settings(&params.settings) {
+            self.client
+                .log_message(MessageType::WARNING, explanation)
+                .await;
+        }
+        let to_publish = self.lock_inner().refresh_diagnostics(None);
+        for (uri, version, diagnostics) in to_publish {
+            self.client
+                .publish_diagnostics(uri, diagnostics, version)
+                .await;
+        }
+        self.refresh_presentation(true).await;
+    }
+
+    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        let to_publish = {
+            let mut inner = self.lock_inner();
+            inner
+                .settings
+                .change_folders(params.event.added, params.event.removed);
+            inner.refresh_diagnostics(None)
+        };
+        for (uri, version, diagnostics) in to_publish {
+            self.client
+                .publish_diagnostics(uri, diagnostics, version)
+                .await;
+        }
+        self.refresh_presentation(true).await;
     }
 
     async fn prepare_call_hierarchy(
@@ -1732,6 +1892,18 @@ pub fn initialize_result() -> InitializeResult {
             }),
             call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
             position_encoding: Some(PositionEncodingKind::UTF16),
+            workspace: Some(WorkspaceServerCapabilities {
+                workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                    supported: Some(true),
+                    change_notifications: Some(OneOf::Left(true)),
+                }),
+                ..WorkspaceServerCapabilities::default()
+            }),
+            experimental: Some(json!({"dygnosis": {
+                "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION},
+                "modelInfoChanged": true,
+                "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
+            }})),
             ..ServerCapabilities::default()
         },
         server_info: Some(ServerInfo {
@@ -1822,6 +1994,7 @@ fn naming_action_for_root(
     note: Diagnostic,
     shared_site: bool,
 ) -> Option<CodeAction> {
+    inner.prepare_root(root);
     let plan = equation_name_plan(&mut inner.workspace, root.as_str())?;
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
     for edit in plan.edits {
@@ -2529,33 +2702,18 @@ fn equation_at<'a>(
     None
 }
 
-fn parse_path_array(value: &Value) -> Option<Vec<PathBuf>> {
-    let arr = value.as_array()?;
-    let mut out = Vec::new();
-    for item in arr {
-        if let Some(s) = item.as_str() {
-            let s = s.trim();
-            if !s.is_empty() {
-                out.push(PathBuf::from(s));
-            }
-        }
-    }
-    Some(out)
+fn is_model_root(uri: &Url) -> bool {
+    Path::new(uri.path())
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("mod") || ext.eq_ignore_ascii_case("dyn"))
 }
 
-fn parse_search_paths_by_root(value: &Value) -> Option<Vec<PathBuf>> {
-    let obj = value.as_object()?;
-    let mut out = Vec::new();
-    for extras in obj.values() {
-        if let Some(paths) = parse_path_array(extras) {
-            for p in paths {
-                if !out.iter().any(|e| e == &p) {
-                    out.push(p);
-                }
-            }
-        }
-    }
-    Some(out)
+enum ModelInfoChanged {}
+
+impl notification::Notification for ModelInfoChanged {
+    type Params = Value;
+    const METHOD: &'static str = "dynare/modelInfoChanged";
 }
 
 fn explain_command(arguments: &[Value]) -> Value {
