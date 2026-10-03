@@ -317,6 +317,7 @@ impl Backend {
     }
 
     pub async fn active_model_changed(&self, params: Value) {
+        super::ordering::ready().await;
         let uri = match params.get("root_uri") {
             Some(Value::Null) => None,
             Some(Value::String(raw)) => {
@@ -330,6 +331,7 @@ impl Backend {
             _ => return,
         };
         self.lock_inner().project.explicit_active = uri;
+        super::ordering::committed();
         self.kick_project();
     }
 
@@ -390,6 +392,7 @@ impl Backend {
             }
             inner.merge_diagnostics(None)
         };
+        super::ordering::committed();
         publish(&self.client, publications).await;
         self.kick_project();
         send_status(&self.client, &self.inner).await;

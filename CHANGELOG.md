@@ -10,6 +10,7 @@ Unreleased candidate. The 0.11 series has no published intermediate releases.
 - Adds structural model Diff with filters and verified source navigation, and written-source and macro-origin jumps from the effective-model preview. Edits and changed inputs disable stale navigation until refresh.
 - **Dygnosis: Set up MCP for this project** creates project-local `.mcp.json` with a stable managed executable. Managed updates preserve the command path and wait for a running Windows MCP process to stop.
 - Checks unopened saved `.mod` roots in workspace folders by default, with project progress, Recheck, cancellation and folder exclusions. Open models and excluded dependencies retain their editor diagnostics.
+- LSP requests observe preceding document opens and changes. Waiting requests remain cancellable when the server is busy.
 - Duplicate checks reach heterogeneous shock rows. Includes in inactive macro branches and empty loops no longer produce false missing-file or syntax errors.
 - Steady-state assignments accept valid scalar and multiple targets, check target types and right-side symbol roles, and retain the pinned Dynare wording. Valid assigned outputs, excluded names and qualified native calls no longer receive the repaired false diagnostics.
 - Related-file discovery retains qualified external-function and derivative-helper names and resolves their package files.

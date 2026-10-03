@@ -8,6 +8,13 @@ use std::sync::{Arc, Mutex};
 #[path = "server_project.rs"]
 mod project;
 
+#[path = "server_ordering.rs"]
+mod ordering;
+
+#[cfg(test)]
+#[path = "server_ordering_tests.rs"]
+mod ordering_tests;
+
 use serde_json::{json, Value};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -1958,9 +1965,11 @@ impl Backend {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        ordering::ready().await;
         Ok(Some(self.value_hints(&params)))
     }
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        ordering::ready().await;
         {
             let mut inner = self.lock_inner();
             let folders = params.workspace_folders.unwrap_or_else(|| {
@@ -2016,14 +2025,17 @@ impl LanguageServer for Backend {
                 .and_then(|cap| cap.refresh_support)
                 .unwrap_or(false);
         }
-        if let Some(opts) = params.initialization_options {
-            for explanation in self.apply_settings(&opts) {
-                self.client
-                    .log_message(MessageType::WARNING, explanation)
-                    .await;
-            }
+        let explanations = if let Some(opts) = params.initialization_options {
+            self.apply_settings(&opts)
         } else {
             self.lock_inner().project_reconfigure(true);
+            Vec::new()
+        };
+        ordering::committed();
+        for explanation in explanations {
+            self.client
+                .log_message(MessageType::WARNING, explanation)
+                .await;
         }
         let mut result = initialize_result();
         if let Some(SemanticTokensServerCapabilities::SemanticTokensOptions(options)) =
@@ -2035,7 +2047,9 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        ordering::ready().await;
         self.lock_inner().project.initialized = true;
+        ordering::committed();
         self.client
             .log_message(MessageType::INFO, "dygnosis initialized")
             .await;
@@ -2043,18 +2057,23 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
+        ordering::ready().await;
         let _output = self.output_gate.lock().await;
         let mut inner = self.lock_inner();
         inner.project.shutdown = true;
         inner.project.epoch += 1;
+        ordering::committed();
         self.project_wake.notify_one();
         Ok(())
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        ordering::ready().await;
         let output = self.output_gate.lock().await;
         let doc = params.text_document;
-        for (uri, version, diagnostics) in self.upsert(doc.uri, doc.text, doc.version) {
+        let to_publish = self.upsert(doc.uri, doc.text, doc.version);
+        ordering::committed();
+        for (uri, version, diagnostics) in to_publish {
             self.client
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
@@ -2065,6 +2084,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        ordering::ready().await;
         let output = self.output_gate.lock().await;
         if self
             .lock_inner()
@@ -2084,6 +2104,7 @@ impl LanguageServer for Backend {
             change.text.clone(),
             params.text_document.version,
         );
+        ordering::committed();
         for (uri, version, diagnostics) in to_publish {
             self.client
                 .publish_diagnostics(uri, diagnostics, version)
@@ -2095,6 +2116,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        ordering::ready().await;
         let output = self.output_gate.lock().await;
         let uri = params.text_document.uri;
         let snapshot = {
@@ -2107,7 +2129,9 @@ impl LanguageServer for Backend {
             (None, Some((text, version))) => (text, version),
             (None, None) => return,
         };
-        for (uri, version, diagnostics) in self.upsert(uri, text, version) {
+        let to_publish = self.upsert(uri, text, version);
+        ordering::committed();
+        for (uri, version, diagnostics) in to_publish {
             self.client
                 .publish_diagnostics(uri, diagnostics, version)
                 .await;
@@ -2118,6 +2142,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        ordering::ready().await;
         let output = self.output_gate.lock().await;
         let uri = params.text_document.uri;
         let to_publish = {
@@ -2130,6 +2155,7 @@ impl LanguageServer for Backend {
             inner.project_changed(&uri, false);
             inner.refresh_diagnostics(Some(&uri))
         };
+        ordering::committed();
         for (uri, version, diagnostics) in to_publish {
             self.client
                 .publish_diagnostics(uri, diagnostics, version)
@@ -2144,6 +2170,7 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReportResult> {
+        ordering::ready().await;
         let items = self.pull_items(&params.text_document.uri);
         Ok(DocumentDiagnosticReportResult::Report(
             DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
@@ -2160,6 +2187,7 @@ impl LanguageServer for Backend {
         &self,
         params: WorkspaceDiagnosticParams,
     ) -> Result<WorkspaceDiagnosticReportResult> {
+        ordering::ready().await;
         let inner = self.lock_inner();
         let mut items: Vec<_> = inner
             .published
@@ -2198,6 +2226,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        ordering::ready().await;
         let output = self.output_gate.lock().await;
         let to_publish = {
             let mut inner = self.lock_inner();
@@ -2218,6 +2247,7 @@ impl LanguageServer for Backend {
             }
             inner.refresh_diagnostics(None)
         };
+        ordering::committed();
         for (uri, version, diagnostics) in to_publish {
             self.client
                 .publish_diagnostics(uri, diagnostics, version)
@@ -2229,6 +2259,7 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        ordering::ready().await;
         Ok(self.hover_at(&params.text_document_position_params))
     }
 
@@ -2236,6 +2267,7 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
+        ordering::ready().await;
         Ok(self
             .doc_symbols(&params.text_document.uri)
             .map(DocumentSymbolResponse::Nested))
@@ -2245,6 +2277,7 @@ impl LanguageServer for Backend {
         &self,
         params: WorkspaceSymbolParams,
     ) -> Result<Option<Vec<SymbolInformation>>> {
+        ordering::ready().await;
         Ok(Some(self.workspace_symbols(&params.query)))
     }
 
@@ -2252,6 +2285,7 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
+        ordering::ready().await;
         Ok(self.definition_at(&params.text_document_position_params))
     }
 
@@ -2259,6 +2293,7 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
+        ordering::ready().await;
         Ok(self
             .decl_location(&params.text_document_position_params)
             .map(GotoDefinitionResponse::Scalar))
@@ -2268,12 +2303,14 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
+        ordering::ready().await;
         Ok(self
             .decl_location(&params.text_document_position_params)
             .map(GotoDefinitionResponse::Scalar))
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        ordering::ready().await;
         Ok(self.ident_locations(&params.text_document_position))
     }
 
@@ -2281,14 +2318,17 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentHighlightParams,
     ) -> Result<Option<Vec<DocumentHighlight>>> {
+        ordering::ready().await;
         Ok(self.ident_highlights(&params.text_document_position_params))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        ordering::ready().await;
         Ok(self.complete(&params.text_document_position))
     }
 
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        ordering::ready().await;
         Ok(self.signature_at(&params.text_document_position_params))
     }
 
@@ -2296,16 +2336,19 @@ impl LanguageServer for Backend {
         &self,
         params: TextDocumentPositionParams,
     ) -> Result<Option<PrepareRenameResponse>> {
+        ordering::ready().await;
         Ok(self
             .prepare_rename_at(&params)
             .map(PrepareRenameResponse::Range))
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        ordering::ready().await;
         Ok(self.rename_at(&params.text_document_position, &params.new_name))
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        ordering::ready().await;
         let mut actions = self.quick_fixes(&params).unwrap_or_default();
         for action in self.shock_templates(&params) {
             actions.push(CodeActionOrCommand::CodeAction(action));
@@ -2321,10 +2364,12 @@ impl LanguageServer for Backend {
         &self,
         params: LinkedEditingRangeParams,
     ) -> Result<Option<LinkedEditingRanges>> {
+        ordering::ready().await;
         Ok(self.linked_ranges(&params.text_document_position_params))
     }
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        ordering::ready().await;
         Ok(self.folding_ranges(&params.text_document.uri))
     }
 
@@ -2332,10 +2377,12 @@ impl LanguageServer for Backend {
         &self,
         params: SelectionRangeParams,
     ) -> Result<Option<Vec<SelectionRange>>> {
+        ordering::ready().await;
         Ok(self.selection_ranges(&params.text_document.uri, &params.positions))
     }
 
     async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
+        ordering::ready().await;
         Ok(self.document_links(&params.text_document.uri))
     }
 
@@ -2343,6 +2390,7 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
+        ordering::ready().await;
         Ok(self
             .semantic_tokens(&params.text_document.uri, None)
             .map(SemanticTokensResult::Tokens))
@@ -2352,12 +2400,14 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensRangeParams,
     ) -> Result<Option<SemanticTokensRangeResult>> {
+        ordering::ready().await;
         Ok(self
             .semantic_tokens(&params.text_document.uri, Some(params.range))
             .map(SemanticTokensRangeResult::Tokens))
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        ordering::ready().await;
         Ok(self.format_document(&params.text_document.uri))
     }
 
@@ -2365,10 +2415,12 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentRangeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
+        ordering::ready().await;
         Ok(self.format_line_range(&params.text_document.uri, params.range))
     }
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
+        ordering::ready().await;
         if matches!(
             params.command.as_str(),
             "dynare/projectStatus" | "dynare/recheckProject" | "dynare/cancelProject"
@@ -2379,13 +2431,16 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        ordering::ready().await;
         let output = self.output_gate.lock().await;
-        for explanation in self.apply_settings(&params.settings) {
+        let explanations = self.apply_settings(&params.settings);
+        let to_publish = self.lock_inner().refresh_diagnostics(None);
+        ordering::committed();
+        for explanation in explanations {
             self.client
                 .log_message(MessageType::WARNING, explanation)
                 .await;
         }
-        let to_publish = self.lock_inner().refresh_diagnostics(None);
         for (uri, version, diagnostics) in to_publish {
             self.client
                 .publish_diagnostics(uri, diagnostics, version)
@@ -2397,6 +2452,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        ordering::ready().await;
         let output = self.output_gate.lock().await;
         let to_publish = {
             let mut inner = self.lock_inner();
@@ -2406,6 +2462,7 @@ impl LanguageServer for Backend {
             inner.project_reconfigure(true);
             inner.refresh_diagnostics(None)
         };
+        ordering::committed();
         for (uri, version, diagnostics) in to_publish {
             self.client
                 .publish_diagnostics(uri, diagnostics, version)
@@ -2420,6 +2477,7 @@ impl LanguageServer for Backend {
         &self,
         params: CallHierarchyPrepareParams,
     ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        ordering::ready().await;
         Ok(self.prepare_hierarchy(&params.text_document_position_params))
     }
 
@@ -2427,6 +2485,7 @@ impl LanguageServer for Backend {
         &self,
         params: CallHierarchyIncomingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        ordering::ready().await;
         Ok(self.incoming(&params.item))
     }
 
@@ -2434,6 +2493,7 @@ impl LanguageServer for Backend {
         &self,
         params: CallHierarchyOutgoingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        ordering::ready().await;
         Ok(self.outgoing(&params.item))
     }
 }
@@ -3352,7 +3412,9 @@ pub async fn run_stdio() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
     let (service, socket) = new_service();
-    Server::new(stdin, stdout, socket).serve(service).await;
+    Server::new(stdin, stdout, socket)
+        .serve(ordering::OrderedService::new(service))
+        .await;
 }
 
 /// Debug TCP listener (one accept). Not the editor ship path.
@@ -3366,7 +3428,9 @@ pub async fn run_tcp(host: &str, port: u16) {
         .unwrap_or_else(|e| panic!("TCP accept: {e}"));
     let (read, write) = tokio::io::split(stream);
     let (service, socket) = new_service();
-    Server::new(read, write, socket).serve(service).await;
+    Server::new(read, write, socket)
+        .serve(ordering::OrderedService::new(service))
+        .await;
 }
 
 fn pos_in_range(pos: Position, range: Range) -> bool {
