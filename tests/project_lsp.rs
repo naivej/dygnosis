@@ -778,6 +778,83 @@ async fn committed_dependency_candidates_wait_for_the_next_report() {
         .contains(&json!(files.uri("observed/params.inc"))));
 }
 
+#[cfg(any(unix, windows))]
+#[tokio::test]
+async fn retargeted_include_routes_to_current_open_alias_version() {
+    let files = Files::new();
+    files.write(
+        "root.mod",
+        "@#include \"observed/body.data\"\nvar y; model; y=0; end;\n",
+    );
+    files.write("observed/body.data", "parameters first_unused;\n");
+    files.write("replacement/body.data", "parameters second_unused;\n");
+    let alias = files.uri("observed/body.data");
+    let mut wire = Wire::new();
+    wire.start(vec![files.folder("")], json!({}), vec![], false)
+        .await;
+    wire.complete().await;
+    wire.open(&alias, "parameters first_unused;\n", 7);
+    wire.complete().await;
+    assert!(wire
+        .pull(&alias)
+        .await
+        .iter()
+        .any(|item| item["code"] == "W022"
+            && item["message"].as_str().unwrap().contains("first_unused")));
+
+    let observed = files.0.join("observed");
+    let replacement = files.0.join("replacement");
+    fs::rename(&observed, files.0.join("previous")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&replacement, &observed).unwrap();
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Both the junction and its target stay inside the owned fixture.
+        let result = Command::new("cmd.exe")
+            .creation_flags(0x08000000)
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&observed)
+            .arg(&replacement)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{result:?}");
+    }
+
+    wire.seen.clear();
+    wire.change(&alias, "parameters second_unused;\n", 8);
+    wire.command("dynare/recheckProject").await;
+    wire.complete().await;
+    let current = wire.pull(&alias).await;
+    assert!(current.iter().any(|item| {
+        item["code"] == "W022" && item["message"].as_str().unwrap().contains("second_unused")
+    }));
+    assert!(!current
+        .iter()
+        .any(|item| item["message"].as_str().unwrap().contains("first_unused")));
+    let physical = files.uri("replacement/body.data");
+    assert_eq!(wire.pull(&physical).await, current);
+    assert!(wire.seen.iter().any(|message| {
+        message["method"] == "textDocument/publishDiagnostics"
+            && message["params"]["uri"] == alias
+            && message["params"]["version"] == 8
+            && message["params"]["diagnostics"] == json!(current)
+    }));
+    let workspace = wire
+        .request("workspace/diagnostic", json!({"previousResultIds":[]}))
+        .await;
+    assert!(workspace["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| { item["uri"] == alias && item["items"] == json!(current) }));
+    assert!(!workspace["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| { item["uri"] == physical && !item["items"].as_array().unwrap().is_empty() }));
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn a_case_alias_open_is_the_same_project_report_owner() {

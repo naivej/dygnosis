@@ -381,25 +381,24 @@ impl Inner {
         let mut routed_from: HashMap<Url, Vec<Url>> = HashMap::new();
         let mut library_routed: HashMap<Url, Vec<crate::Diagnostic>> = HashMap::new();
         let mut routed_library: HashMap<Url, Vec<RoutedDiagnostic>> = HashMap::new();
+        // Resolve each URI once for this merge. The next merge observes the
+        // filesystem again, including aliases whose target has changed.
+        let mut identities = HashMap::new();
+        let mut identity = |uri: &Url| {
+            identities
+                .entry(uri.clone())
+                .or_insert_with(|| crate::include_resolver::normalize_uri(uri.as_str()))
+                .clone()
+        };
         let mut source_identities: HashMap<_, _> = self
             .reports
             .keys()
-            .map(|uri| {
-                (
-                    crate::include_resolver::normalize_uri(uri.as_str()),
-                    uri.clone(),
-                )
-            })
+            .map(|uri| (identity(uri), uri.clone()))
             .collect();
-        source_identities.extend(self.docs.keys().map(|uri| {
-            (
-                crate::include_resolver::normalize_uri(uri.as_str()),
-                uri.clone(),
-            )
-        }));
+        source_identities.extend(self.docs.keys().map(|uri| (identity(uri), uri.clone())));
         for (root, report) in &checks {
             for (source, rows) in &report.routes {
-                let key = crate::include_resolver::normalize_uri(source.as_str());
+                let key = identity(source);
                 let uri = source_identities
                     .get(&key)
                     .cloned()
@@ -473,13 +472,10 @@ impl Inner {
         if let Some(first) = first {
             if let Some(at) = publish.iter().position(|uri| uri == first) {
                 let first = publish.remove(at);
-                let key = crate::include_resolver::normalize_uri(first.as_str());
+                let key = identity(&first);
                 let mut aliases: Vec<_> = publish
                     .iter()
-                    .filter(|uri| {
-                        !routed.contains_key(*uri)
-                            && crate::include_resolver::normalize_uri(uri.as_str()) == key
-                    })
+                    .filter(|uri| !routed.contains_key(*uri) && identity(uri) == key)
                     .cloned()
                     .collect();
                 publish.retain(|uri| !aliases.contains(uri));
@@ -490,18 +486,34 @@ impl Inner {
                 publish = aliases;
             }
         }
+        let mut open_versions = HashMap::new();
+        for (uri, doc) in &self.docs {
+            // Match document(): an exact URI wins, otherwise the first native
+            // identity match in the open-document iteration supplies its version.
+            open_versions.entry(identity(uri)).or_insert(doc.version);
+        }
+        let current_versions: HashMap<_, _> = publish
+            .iter()
+            .map(|uri| {
+                let version = self
+                    .docs
+                    .get(uri)
+                    .map(|doc| doc.version)
+                    .or_else(|| open_versions.get(&identity(uri)).copied());
+                (uri.clone(), version)
+            })
+            .collect();
         let output = publish
             .into_iter()
             .filter(|uri| {
                 Some(uri) == first
                     || self.published.get(uri) != routed.get(uri)
-                    || self.publication_versions.get(uri).copied()
-                        != Some(self.document(uri).map(|doc| doc.version))
+                    || self.publication_versions.get(uri).copied() != Some(current_versions[uri])
             })
             .map(|uri| {
                 let version = routed
                     .contains_key(&uri)
-                    .then(|| self.document(&uri).map(|doc| doc.version))
+                    .then(|| current_versions[&uri])
                     .flatten();
                 let diagnostics = routed.get(&uri).cloned().unwrap_or_default();
                 (uri, version, diagnostics)
@@ -509,7 +521,7 @@ impl Inner {
             .collect();
         self.publication_versions = routed
             .keys()
-            .map(|uri| (uri.clone(), self.document(uri).map(|doc| doc.version)))
+            .map(|uri| (uri.clone(), current_versions[uri]))
             .collect();
         self.published = routed;
         output
