@@ -286,7 +286,7 @@ async fn missing_macro_terminators_withhold_only_new_navigation_in_both_transpor
         ("@#for i in []\n@#if 1\n", "@#endif\n@#endfor\n"),
     ] {
         let unclosed = format!("{base}{open_suffix}");
-        let closed = format!("{unclosed}{close_suffix}");
+        let closed = format!("{unclosed}\n{close_suffix}");
         let unclosed_report = expand_report(&unclosed);
         let closed_report = expand_report(&closed);
         // Termination is a new navigation proof, not a silent change to legacy expansion.
@@ -432,13 +432,13 @@ async fn collected_macro_errors_gate_navigation_in_every_input_mode() {
     let (service, _socket) = new_service();
     let backend = service.inner();
     for (directive, expected_complete) in [
-        ("@#for(i) in [(1,2)]", false),
+        ("@#for(i,j) in [(1,2,3)]", false),
+        ("@#for(i) in [(1,2)]", true),
         ("@#for(i,j) in [(1,2)]", true),
         ("@#for i in [1,2]", true),
     ] {
-        let source = format!("var y; model; y=0; end;\n{directive}\n@#endfor\n");
-        // check_for_tuple records E284 before unroll_for. A one-name loop can
-        // still unroll its empty body, so the old incomplete flag stays false.
+        let source = format!("var y; model; y=0; end;\n{directive}\n\n@#endfor\n");
+        // Multiple indices unpack the tuple; a single index keeps it whole.
         let model = dygnosis::parse(&source);
         assert_eq!(
             model
@@ -447,11 +447,11 @@ async fn collected_macro_errors_gate_navigation_in_every_input_mode() {
                 .any(|(_, code, _)| *code == "E284"),
             !expected_complete
         );
-        assert!(model.macro_incomplete_span.is_none());
+        assert_eq!(model.macro_incomplete_span.is_none(), expected_complete);
         let report = expand_report(&source);
-        assert!(report.complete && report.model_map.complete);
-        assert_eq!(report.n_equations, 1);
-        assert_eq!(report.origins.len(), 1);
+        assert_eq!(report.complete, expected_complete);
+        assert_eq!(report.n_equations, usize::from(expected_complete));
+        assert_eq!(report.origins.len(), usize::from(expected_complete));
         assert_eq!(report.navigation_complete, expected_complete);
         let free = dynare_expand(&source, None, None);
         let files = HashMap::from([(root.as_str().to_string(), source.clone())]);
@@ -467,7 +467,10 @@ async fn collected_macro_errors_gate_navigation_in_every_input_mode() {
                 result["navigation"].as_array().unwrap().len(),
                 usize::from(expected_complete)
             );
-            assert_eq!(result["origins"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                result["origins"].as_array().unwrap().len(),
+                usize::from(expected_complete)
+            );
         }
         assert_eq!(free["effective_text"], mapped["effective_text"]);
         assert_eq!(free["effective_text"], lsp["effective_text"]);
@@ -571,8 +574,7 @@ async fn dormant_include_contents_do_not_refuse_navigation_or_supply_targets() {
             }
         }
     }
-    // A dormant malformed file can corrupt the legacy splice's branch stack.
-    // Keep that legacy text, but never navigate rows emitted only by that fault.
+    // A dormant malformed file cannot corrupt expansion or navigation.
     let source = format!("{base}@#if 0\n@#include \"bad.inc\"\n@#endif\n");
     let body = "@#else\nvar z; model; z=1; end;\n";
     let files = HashMap::from([
@@ -584,10 +586,11 @@ async fn dormant_include_contents_do_not_refuse_navigation_or_supply_targets() {
     open(backend, &bad, body, 1).await;
     let lsp = preview(backend, &root).await;
     for result in [&mcp, &lsp] {
-        assert!(result["effective_text"].as_str().unwrap().contains("z = 1"));
-        assert_eq!(result["complete"], false);
-        assert_eq!(result["navigation"], json!([]));
+        assert!(!result["effective_text"].as_str().unwrap().contains("z = 1"));
+        assert_eq!(result["complete"], true);
+        assert_eq!(result["navigation"].as_array().unwrap().len(), 1);
     }
+    assert_eq!(mcp["n_equations"], 1);
 }
 
 #[tokio::test]

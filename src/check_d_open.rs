@@ -472,71 +472,46 @@ fn check_dsge_prior_weight(model: &Model) -> Vec<Diagnostic> {
     )]
 }
 
-/// E305: `@#includepath` argument that cannot be a string (a number literal).
+/// E305 is decided by the shared macro evaluator, including variable/function arguments.
 fn check_includepath_not_string(model: &Model) -> Vec<Diagnostic> {
-    let mut out = Vec::new();
-    for directive in &model.includepaths {
-        let argument = directive.argument.trim();
-        if argument.parse::<f64>().is_ok() {
-            out.push(err(
-                directive.span,
-                "E305",
-                "File name does not evaluate to a string",
-            ));
-        }
-    }
-    out
+    model
+        .macro_type_errors
+        .iter()
+        .filter(|(_, code, _)| *code == "E305")
+        .map(|(span, code, message)| err(*span, code, message.clone()))
+        .collect()
 }
 
 /// E304: `@#includepath` argument that is not a directory (resolved against the
 /// invocation root's parent, including directives written in child files).
 fn check_includepath_dirs(ws: &mut Workspace, model: &Model, abs_path: &str) -> Vec<Diagnostic> {
     let mut out = Vec::new();
-    for directive in &model.includepaths {
-        let Some(literal) = quoted_literal(&directive.argument) else {
-            continue;
-        };
-        let Some((_owner, _)) = ws.map_effective_origin(abs_path, directive.span) else {
+    if model.includepaths.is_empty() {
+        return out;
+    }
+    let executed = crate::macro_expand::executed_includepaths(&model.source);
+    for (span, literal) in executed {
+        let Some((_owner, _)) = ws.map_effective_origin(abs_path, span) else {
             continue;
         };
         let is_directory = if literal.is_empty() {
             false
         } else if ws.is_overlay_only() {
-            ws.overlay_directory_exists(abs_path, literal)
+            ws.overlay_directory_exists(abs_path, &literal)
         } else {
-            crate::workspace::resolve_includepath(abs_path, literal).is_dir()
+            crate::workspace::resolve_includepath(abs_path, &literal).is_dir()
         };
         if is_directory {
             continue;
         }
         out.push(err(
-            directive.span,
+            span,
             "E304",
             format!("{literal} does not evaluate to a valid directory"),
         ));
+        break;
     }
     out
-}
-
-/// The inner text when `raw` is exactly one quoted literal.
-fn quoted_literal(raw: &str) -> Option<&str> {
-    let s = raw.trim();
-    let bytes = s.as_bytes();
-    if bytes.len() < 2 {
-        return None;
-    }
-    let quote = bytes[0];
-    if quote != b'"' && quote != b'\'' {
-        return None;
-    }
-    if *bytes.last()? != quote {
-        return None;
-    }
-    let inner = &s[1..s.len() - 1];
-    if inner.as_bytes().contains(&quote) {
-        return None;
-    }
-    Some(inner)
 }
 
 /// E306 / W204 / E380: the `load_params_and_steady_state` file next to the `.mod`.

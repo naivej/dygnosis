@@ -16,50 +16,6 @@ use crate::workspace::{IncludeRecords, Workspace};
 
 const CONDITIONAL_OPENERS: &[&str] = &["if", "ifdef", "ifndef"];
 
-const MACRO_BUILTIN_NAMES: &[&str] = &[
-    "true",
-    "false",
-    "inf",
-    "nan",
-    "length",
-    "isempty",
-    "isboolean",
-    "isreal",
-    "isstring",
-    "isarray",
-    "istuple",
-    "isdefined",
-    "defined",
-    "exp",
-    "log",
-    "ln",
-    "log10",
-    "sin",
-    "cos",
-    "tan",
-    "asin",
-    "acos",
-    "atan",
-    "sqrt",
-    "cbrt",
-    "sign",
-    "floor",
-    "ceil",
-    "trunc",
-    "round",
-    "mod",
-    "max",
-    "min",
-    "sum",
-    "erf",
-    "erfc",
-    "gamma",
-    "lgamma",
-    "abs",
-    "normpdf",
-    "normcdf",
-];
-
 pub fn check_e060(records: &IncludeRecords) -> Vec<Diagnostic> {
     records
         .cycles
@@ -174,6 +130,28 @@ pub fn check_e062(model: &Model) -> Vec<Diagnostic> {
             if stack.is_empty() {
                 emit_stray(&mut diagnostics, directive, "@#for");
             } else if stack.last().unwrap().kind == "for" {
+                if crate::macro_expand::for_body_is_empty(
+                    &model.source,
+                    stack.last().unwrap().span,
+                    directive.span,
+                ) {
+                    let written =
+                        &model.source[directive.span.start as usize..directive.span.end as usize];
+                    let keyword_end = written
+                        .to_ascii_lowercase()
+                        .find("endfor")
+                        .map(|start| start + 6)
+                        .unwrap_or(written.len());
+                    diagnostics.push(Diagnostic::new(
+                        Span {
+                            start: directive.span.start,
+                            end: directive.span.start + keyword_end as u32,
+                        },
+                        Severity::Error,
+                        "E062",
+                        "syntax error, unexpected ENDFOR",
+                    ));
+                }
                 stack.pop();
                 seen_else.pop();
             } else {
@@ -206,41 +184,16 @@ pub fn check_e062(model: &Model) -> Vec<Diagnostic> {
     diagnostics
 }
 
+/// Unknown names are recorded by the shared evaluator at their executed site.
 pub fn check_e063(model: &Model) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-    let has_includes = !model.includes.is_empty();
-    for interp in &model.macro_interps {
-        let line = line_text(&model.source, interp.span.start);
-        if line.trim_start().starts_with("@#") {
-            continue;
-        }
-        let before_line = line_of(&model.source, interp.span.start);
-        let known = known_names_before(model, before_line);
-        let expr = interp.inner.trim();
-        if expr.is_empty() {
-            continue;
-        }
-        let unknown = unknown_names(expr, &known);
-        if unknown.is_empty() {
-            continue;
-        }
-        let message = if is_simple_ident(expr) {
-            format!("Unknown variable {expr}")
-        } else {
-            if has_includes {
-                continue;
-            }
-            let unknown_joined = unknown.join(", ");
-            format!("Unknown variable {unknown_joined}")
-        };
-        diagnostics.push(Diagnostic::new(
-            interp.span,
-            Severity::Error,
-            "E063",
-            message,
-        ));
-    }
-    diagnostics
+    model
+        .macro_type_errors
+        .iter()
+        .filter(|(_, code, _)| *code == "E063")
+        .map(|(span, code, message)| {
+            Diagnostic::new(*span, Severity::Error, *code, message.clone())
+        })
+        .collect()
 }
 
 pub fn check_e064(model: &Model) -> Vec<Diagnostic> {
@@ -517,25 +470,6 @@ fn first_scalar_span(source: &str) -> Span {
     }
 }
 
-fn line_of(source: &str, byte: u32) -> usize {
-    let end = (byte as usize).min(source.len());
-    source[..end].bytes().filter(|&b| b == b'\n').count()
-}
-
-fn line_text(source: &str, byte: u32) -> &str {
-    let b = (byte as usize).min(source.len());
-    let start = source[..b].rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let end = source[b..]
-        .find('\n')
-        .map(|i| b + i)
-        .unwrap_or(source.len());
-    &source[start..end]
-}
-
-fn is_simple_ident(s: &str) -> bool {
-    leading_ident(s).is_some_and(|n| n == s)
-}
-
 fn leading_ident(s: &str) -> Option<&str> {
     let mut chars = s.char_indices();
     let (_, first) = chars.next()?;
@@ -588,150 +522,10 @@ fn define_value_truthy(arg: &str) -> bool {
     !is_false_literal(val)
 }
 
-fn for_vars(arg: &str) -> Vec<String> {
-    let mut s = arg.trim();
-    if let Some(rest) = s.strip_prefix('(') {
-        s = rest.trim_start();
-    }
-    let mut vars = Vec::new();
-    loop {
-        s = s.trim_start();
-        if s.is_empty() {
-            break;
-        }
-        if s.len() >= 2 && s[..2].eq_ignore_ascii_case("in") {
-            let after = &s[2..];
-            if after
-                .chars()
-                .next()
-                .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '_')
-            {
-                break;
-            }
-        }
-        let Some(ident) = leading_ident(s) else {
-            break;
-        };
-        vars.push(ident.to_string());
-        s = s[ident.len()..].trim_start();
-        if let Some(rest) = s.strip_prefix(',') {
-            s = rest;
-            continue;
-        }
-        break;
-    }
-    vars
-}
-
 fn strip_error_arg(arg: &str) -> String {
     arg.trim()
         .trim_matches(|c| c == '"' || c == '\'')
         .to_string()
-}
-
-fn is_builtin(name: &str) -> bool {
-    MACRO_BUILTIN_NAMES
-        .iter()
-        .any(|b| b.eq_ignore_ascii_case(name))
-}
-
-fn unknown_names(expr: &str, known: &HashSet<String>) -> Vec<String> {
-    let (scannable, guarded) = strip_defined_calls(expr);
-    let scannable = mask_strings(&scannable);
-    let mut idents = Vec::new();
-    let mut i = 0usize;
-    while i < scannable.len() {
-        let rest = &scannable[i..];
-        if let Some(ident) = leading_ident(rest) {
-            if !is_builtin(ident) && !idents.iter().any(|x| x == ident) {
-                idents.push(ident.to_string());
-            }
-            i += ident.len();
-        } else {
-            let ch = rest.chars().next().unwrap();
-            i += ch.len_utf8();
-        }
-    }
-    idents
-        .into_iter()
-        .filter(|n| !known.contains(n) && !guarded.contains(n))
-        .collect()
-}
-
-fn mask_strings(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '"' || c == '\'' {
-            out.push(' ');
-            for d in chars.by_ref() {
-                out.push(' ');
-                if d == c {
-                    break;
-                }
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-fn strip_defined_calls(expr: &str) -> (String, HashSet<String>) {
-    let lower = expr.to_ascii_lowercase();
-    let bytes = expr.as_bytes();
-    let mut out = bytes.to_vec();
-    let mut guarded = HashSet::new();
-    let mut i = 0usize;
-    while i < lower.len() {
-        let rest = &lower[i..];
-        let kw = if rest.starts_with("isdefined") {
-            Some("isdefined")
-        } else if rest.starts_with("defined") {
-            Some("defined")
-        } else {
-            None
-        };
-        let Some(kw) = kw else {
-            i += 1;
-            continue;
-        };
-        if i > 0 {
-            let prev = bytes[i - 1];
-            if prev.is_ascii_alphanumeric() || prev == b'_' {
-                i += 1;
-                continue;
-            }
-        }
-        let after_kw = i + kw.len();
-        let after = expr.get(after_kw..).unwrap_or("");
-        let trimmed = after.trim_start();
-        let skip = after.len() - trimmed.len();
-        if !trimmed.starts_with('(') {
-            i += 1;
-            continue;
-        }
-        let inner = trimmed[1..].trim_start();
-        let Some(ident) = leading_ident(inner) else {
-            i += 1;
-            continue;
-        };
-        let after_ident = inner[ident.len()..].trim_start();
-        if !after_ident.starts_with(')') {
-            i += 1;
-            continue;
-        }
-        let close_rel = expr[after_kw..].len() - after_ident.len() + 1;
-        let end = after_kw + close_rel;
-        guarded.insert(ident.to_string());
-        for b in out.iter_mut().take(end).skip(i) {
-            *b = b' ';
-        }
-        let _ = skip;
-        i = end;
-    }
-    let scannable = String::from_utf8(out).unwrap_or_else(|_| expr.to_string());
-    (scannable, guarded)
 }
 
 #[derive(Default)]
@@ -785,46 +579,6 @@ impl IfStack {
             _ => {}
         }
     }
-}
-
-fn known_names_before(model: &Model, before_line: usize) -> HashSet<String> {
-    let mut stack = IfStack::default();
-    let mut known = HashSet::new();
-    let mut for_stack: Vec<Vec<String>> = Vec::new();
-    for d in &model.macro_directives {
-        let line = line_of(&model.source, d.span.start);
-        let emitting = stack.emitting();
-        if line < before_line {
-            match d.kind.as_str() {
-                "define" if emitting => {
-                    if let Some(name) = define_name(d.argument.as_deref().unwrap_or("")) {
-                        known.insert(name);
-                    }
-                }
-                "for" => {
-                    let vars = for_vars(d.argument.as_deref().unwrap_or(""));
-                    if emitting {
-                        for v in &vars {
-                            known.insert(v.clone());
-                        }
-                    }
-                    for_stack.push(vars);
-                }
-                "endfor" => {
-                    if let Some(vars) = for_stack.pop() {
-                        for v in vars {
-                            if !for_stack.iter().any(|open| open.contains(&v)) {
-                                known.remove(&v);
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        stack.apply(d);
-    }
-    known
 }
 
 pub(crate) fn collect_steady_state_operands(

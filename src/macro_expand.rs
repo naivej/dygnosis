@@ -162,67 +162,120 @@ struct ExpandState<'a> {
     discarded: &'a mut Vec<Span>,
     incomplete: &'a mut Option<Span>,
     include_seen: bool,
-    navigation_includes: Option<&'a mut dyn NavigationIncludeVisitor>,
+    file_visitor: Option<&'a mut dyn MacroFileVisitor>,
 }
 
-trait NavigationIncludeVisitor {
-    fn visit(&mut self, span: Span, defines: &mut HashMap<String, MacroVal>) -> bool;
+trait MacroFileVisitor {
+    fn visit(&mut self, span: Span, defines: &mut HashMap<String, MacroVal>, certain: bool)
+        -> bool;
+    fn path(&mut self, span: Span, path: &str, certain: bool) -> bool;
 }
 
-type NavigationIncludeLoader<'a> = dyn FnMut(&str, Span) -> Option<(String, String)> + 'a;
+pub(crate) enum MacroFileDirective<'a> {
+    Include,
+    IncludePath(&'a str),
+}
 
-struct NavigationIncludes<'a> {
-    load: &'a mut NavigationIncludeLoader<'a>,
+pub(crate) enum MacroFileLoad {
+    Source { file: String, source: String },
+    Path,
+}
+
+/// Executed directive with the caller chain needed for written error locations.
+pub(crate) struct MacroFileEvent<'a> {
+    pub file: &'a str,
+    pub span: Span,
+    pub parents: &'a [(String, Span)],
+    pub directive: MacroFileDirective<'a>,
+    /// Earlier unsupported execution may have changed definitions/search paths.
+    pub certain: bool,
+}
+
+type MacroFileLoader<'a> = dyn FnMut(MacroFileEvent<'_>) -> Option<MacroFileLoad> + 'a;
+
+struct MacroFiles<'a> {
+    load: &'a mut MacroFileLoader<'a>,
     files: Vec<String>,
+    parents: Vec<(String, Span)>,
     sites: HashSet<(String, Span)>,
 }
 
-pub(crate) struct NavigationMacroProof {
+pub(crate) struct MacroFileProof {
     pub complete: bool,
     pub sites: HashSet<(String, Span)>,
 }
 
-impl NavigationIncludeVisitor for NavigationIncludes<'_> {
-    fn visit(&mut self, span: Span, defines: &mut HashMap<String, MacroVal>) -> bool {
-        let file = self.files.last().expect("navigation root").clone();
+impl MacroFileVisitor for MacroFiles<'_> {
+    fn visit(
+        &mut self,
+        span: Span,
+        defines: &mut HashMap<String, MacroVal>,
+        certain: bool,
+    ) -> bool {
+        let file = self.files.last().expect("macro root").clone();
         self.sites.insert((file.clone(), span));
-        let Some((file, source)) = (self.load)(&file, span) else {
+        let Some(MacroFileLoad::Source {
+            file: target,
+            source,
+        }) = (self.load)(MacroFileEvent {
+            file: &file,
+            span,
+            parents: &self.parents,
+            directive: MacroFileDirective::Include,
+            certain,
+        })
+        else {
             return false;
         };
-        if self.files.contains(&file) {
+        if self.files.contains(&target) {
             return false;
         }
-        self.files.push(file);
-        let complete = navigation_file_complete(&source, defines, self);
+        self.parents.push((file, span));
+        self.files.push(target);
+        let complete = macro_file_complete(&source, defines, self);
         self.files.pop();
+        self.parents.pop();
         complete
+    }
+
+    fn path(&mut self, span: Span, path: &str, certain: bool) -> bool {
+        matches!(
+            (self.load)(MacroFileEvent {
+                file: self.files.last().expect("macro root"),
+                span,
+                parents: &self.parents,
+                directive: MacroFileDirective::IncludePath(path),
+                certain,
+            }),
+            Some(MacroFileLoad::Path)
+        )
     }
 }
 
-/// Validate original files reached by executed includes, sharing the existing
-/// macro evaluator's definitions and branch/loop execution. This metadata run
-/// never supplies emitted model text or diagnostics to the product.
-pub(crate) fn navigation_macros_complete(
+/// Visit original files in macro execution order, sharing definitions and the
+/// existing branch/loop evaluator. Dormant directives never call the loader.
+pub(crate) fn walk_macro_files(
     root: &str,
     source: &str,
-    mut load: impl FnMut(&str, Span) -> Option<(String, String)>,
-) -> NavigationMacroProof {
-    let mut includes = NavigationIncludes {
+    mut load: impl FnMut(MacroFileEvent<'_>) -> Option<MacroFileLoad>,
+) -> MacroFileProof {
+    let mut includes = MacroFiles {
         load: &mut load,
         files: vec![root.to_string()],
+        parents: Vec::new(),
         sites: HashSet::new(),
     };
-    let complete = navigation_file_complete(source, &mut HashMap::new(), &mut includes);
-    NavigationMacroProof {
+    let complete = macro_file_complete(source, &mut HashMap::new(), &mut includes);
+    MacroFileProof {
         complete,
         sites: includes.sites,
     }
 }
 
-fn navigation_file_complete(
+fn macro_file_complete(
     text: &str,
     defines: &mut HashMap<String, MacroVal>,
-    includes: &mut dyn NavigationIncludeVisitor,
+    includes: &mut dyn MacroFileVisitor,
 ) -> bool {
     let source = crate::parser::normalize_newlines(text);
     let tokens = crate::lexer::tokenize(&source);
@@ -242,7 +295,7 @@ fn navigation_file_complete(
         discarded: &mut discarded,
         incomplete: &mut incomplete,
         include_seen: false,
-        navigation_includes: Some(includes),
+        file_visitor: Some(includes),
     };
     expand_seq(&mut state, &tokens);
     incomplete.is_none() && errors.is_empty()
@@ -294,18 +347,23 @@ fn macro_blocks_complete(src: &str, tokens: &[Token]) -> bool {
             continue;
         }
         match dir_kind(src, token) {
-            Dir::If | Dir::Ifdef | Dir::Ifndef => stack.push((Dir::If, false)),
-            Dir::For => stack.push((Dir::For, false)),
+            Dir::If | Dir::Ifdef | Dir::Ifndef => stack.push((Dir::If, false, token.span)),
+            Dir::For => stack.push((Dir::For, false, token.span)),
             Dir::Endif => {
-                if stack.pop().map(|(kind, _)| kind) != Some(Dir::If) {
+                if stack.pop().map(|(kind, _, _)| kind) != Some(Dir::If) {
                     return false;
                 }
             }
-            Dir::Endfor if stack.pop().map(|(kind, _)| kind) != Some(Dir::For) => {
-                return false;
+            Dir::Endfor => {
+                let Some((Dir::For, _, opener)) = stack.pop() else {
+                    return false;
+                };
+                if for_body_is_empty(src, opener, token.span) {
+                    return false;
+                }
             }
             kind @ (Dir::Elseif | Dir::Else) => {
-                let Some((Dir::If, seen_else)) = stack.last_mut() else {
+                let Some((Dir::If, seen_else, _)) = stack.last_mut() else {
                     return false;
                 };
                 if *seen_else {
@@ -319,11 +377,40 @@ fn macro_blocks_complete(src: &str, tokens: &[Token]) -> bool {
     stack.is_empty()
 }
 
+/// The macro parser needs a statement between `for` and `endfor`. A blank
+/// line or comment is a text statement, even when .mod tokenization skips it.
+pub(crate) fn for_body_is_empty(source: &str, opener: Span, closer: Span) -> bool {
+    let Some(gap) = source.get(opener.end as usize..closer.start as usize) else {
+        return false;
+    };
+    let body = gap
+        .strip_prefix("\r\n")
+        .or_else(|| gap.strip_prefix('\n'))
+        .unwrap_or(gap);
+    body.chars().all(|ch| matches!(ch, ' ' | '\t'))
+}
+
 /// Source ranges of `@#if` / `@#ifndef` branches that expansion discarded.
 pub(crate) fn inactive_macro_spans(src: &str) -> Vec<Span> {
     let tokens = crate::lexer::tokenize(src);
     let (_, _, _, _, discarded, _, _) = expand_macros_traced_full(src, tokens);
     discarded
+}
+
+/// Executed path directives in an already joined source. This uses the same
+/// branch/loop walker as file loading; empty loops never visit their body.
+pub(crate) fn executed_includepaths(src: &str) -> Vec<(Span, String)> {
+    let mut paths = Vec::new();
+    walk_macro_files("<joined>", src, |event| {
+        if let MacroFileDirective::IncludePath(path) = event.directive {
+            if event.certain {
+                paths.push((event.span, path.to_string()));
+            }
+            return Some(MacroFileLoad::Path);
+        }
+        None
+    });
+    paths
 }
 
 pub(crate) fn has_include_directives(src: &str) -> bool {
@@ -362,7 +449,7 @@ fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull 
             discarded: &mut discarded,
             incomplete: &mut incomplete,
             include_seen: false,
-            navigation_includes: None,
+            file_visitor: None,
         };
         let (out, traces) = expand_seq(&mut state, &tokens);
         (out, traces, state.include_seen)
@@ -518,12 +605,26 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                     if directive_name(tok.text(state.src)).eq_ignore_ascii_case("include")
                         && emitting(&stack)
                     {
-                        if let Some(visitor) = state.navigation_includes.as_deref_mut() {
-                            if !visitor.visit(tok.span, state.defines) {
+                        if let Some(visitor) = state.file_visitor.as_deref_mut() {
+                            if !visitor.visit(tok.span, state.defines, state.incomplete.is_none()) {
                                 state.incomplete.get_or_insert(tok.span);
                             }
                         } else {
                             state.include_seen = true;
+                        }
+                    } else if directive_name(tok.text(state.src))
+                        .eq_ignore_ascii_case("includepath")
+                        && emitting(&stack)
+                    {
+                        if let Some(path) = eval_includepath(state, tok) {
+                            if let Some(visitor) = state.file_visitor.as_deref_mut() {
+                                if !visitor.path(tok.span, &path, state.incomplete.is_none()) {
+                                    state.incomplete.get_or_insert(tok.span);
+                                }
+                            }
+                        } else {
+                            state.incomplete.get_or_insert(tok.span);
+                            emit(state, &mut out, &mut traces, tok.clone());
                         }
                     }
                     i += 1;
@@ -771,10 +872,6 @@ fn unroll_for(
         }
         planned.push((value, members));
     }
-    let previous: Vec<_> = vars
-        .iter()
-        .map(|name| (name.clone(), state.defines.get(name).cloned()))
-        .collect();
     let body_span = tokens_body_span(body);
     for (value, members) in planned {
         for (name, member) in vars.iter().zip(members) {
@@ -808,16 +905,9 @@ fn unroll_for(
         }
         state.origin_stack.pop();
     }
-    for (name, prior) in previous {
-        match prior {
-            Some(value) => {
-                state.defines.insert(name, value);
-            }
-            None => {
-                state.defines.remove(&name);
-            }
-        }
-    }
+    // Dynare defines each index in the shared environment and leaves its
+    // final value (including body/nested-loop redefinitions) after the loop.
+    // An empty collection never binds the index.
     true
 }
 
@@ -999,6 +1089,35 @@ fn eval_condition(state: &mut ExpandState<'_>, tok: &Token, kw: &str) -> Option<
         Err(error) => {
             if let Some((code, message)) = error.diagnostic() {
                 state.type_errors.push((tok.span, code, message));
+            }
+            None
+        }
+    }
+}
+
+fn eval_includepath(state: &mut ExpandState<'_>, tok: &Token) -> Option<String> {
+    let argument = strip_kw(tok.text(state.src), "includepath")?;
+    let argument = strip_line_comment(argument).trim();
+    match eval_macro_expr(argument, state.defines, 0) {
+        Ok(MacroVal::Text(path)) => Some(path),
+        Ok(_) => {
+            state.type_errors.push((
+                tok.span,
+                "E305",
+                "File name does not evaluate to a string".to_string(),
+            ));
+            None
+        }
+        Err(error) => {
+            if !(state.include_seen
+                && matches!(
+                    error,
+                    MacroEvalError::UnknownVariable(_) | MacroEvalError::UnknownFunction(_)
+                ))
+            {
+                if let Some((code, message)) = error.diagnostic() {
+                    state.type_errors.push((tok.span, code, message));
+                }
             }
             None
         }
@@ -1538,6 +1657,10 @@ fn check_for_tuple(state: &mut ExpandState<'_>, tok: &Token) {
         .map(|p| p.trim())
         .filter(|p| !p.is_empty())
         .count();
+    if names == 1 {
+        // One index receives the whole tuple; only multiple indices unpack it.
+        return;
+    }
     let after = rest[close + 1..].trim_start();
     let Some(after) = strip_word(after, "in") else {
         return;

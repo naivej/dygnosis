@@ -398,6 +398,121 @@ async fn root_change_drops_its_child_diagnostic() {
 }
 
 #[tokio::test]
+async fn executed_include_definition_overlay_turns_child_diagnostics_off_and_on() {
+    let dir = scratch("active-include-definition");
+    let root = dir.join("root.mod");
+    let flags = dir.join("flags.inc");
+    let child = dir.join("child.inc");
+    let source = "@#include \"flags.inc\"\nvar y; model;\n@#if ENABLED\n@#include \"child.inc\"\n@#else\ny=0;\n@#endif\nend;\n";
+    fs::write(&root, source).unwrap();
+    fs::write(&flags, "@#define ENABLED=1\n").unwrap();
+    fs::write(&child, "/*😀*/ y=missing;\n").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    backend.did_open(open(uri(&root), source)).await;
+    let before = items(backend.diagnostic(pull(uri(&child))).await.unwrap());
+    let error = before
+        .iter()
+        .find(|item| item.code == Some(NumberOrString::String("E020".into())))
+        .unwrap();
+    assert_eq!(
+        error.range,
+        Range::new(Position::new(0, 9), Position::new(0, 16))
+    );
+    backend
+        .did_open(open(uri(&flags), "@#define ENABLED=0\n"))
+        .await;
+    let dormant = items(backend.diagnostic(pull(uri(&child))).await.unwrap());
+    assert!(!has_code(&dormant, "E020"), "{dormant:?}");
+    let root_items = items(backend.diagnostic(pull(uri(&root))).await.unwrap());
+    assert!(
+        !root_items
+            .iter()
+            .any(|item| item.severity == Some(DiagnosticSeverity::ERROR)),
+        "{root_items:?}"
+    );
+    backend
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri(&flags),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: "@#define ENABLED=1\n".into(),
+            }],
+        })
+        .await;
+    let after = items(backend.diagnostic(pull(uri(&child))).await.unwrap());
+    assert_eq!(count_code(&after, "E020"), 1, "{after:?}");
+    let path = dir.canonicalize().unwrap();
+    let temporary = std::env::temp_dir().canonicalize().unwrap();
+    assert!(path.starts_with(&temporary) && path != temporary);
+    fs::remove_dir_all(path).unwrap();
+}
+
+#[tokio::test]
+async fn evaluated_include_path_updates_lsp_child_owner_and_model_facts() {
+    let dir = scratch("evaluated-path");
+    let root = dir.join("root.mod");
+    let flags = dir.join("paths.inc");
+    let first = dir.join("visible/chosen.inc");
+    let second = dir.join("other/chosen.inc");
+    fs::create_dir(dir.join("visible")).unwrap();
+    fs::create_dir(dir.join("other")).unwrap();
+    let source = "@#include \"paths.inc\"\n@#includepath P\n@#include \"chosen.inc\"\n";
+    fs::write(&root, source).unwrap();
+    fs::write(&flags, "@#define P=\"visible\"\n").unwrap();
+    fs::write(&first, "var y; model; y=missing; end;\n").unwrap();
+    fs::write(&second, "var y; model; y=0; end;\n").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    backend.did_open(open(uri(&root), source)).await;
+    assert!(has_code(
+        &items(backend.diagnostic(pull(uri(&first))).await.unwrap()),
+        "E020"
+    ));
+    let info = backend
+        .execute_command(ExecuteCommandParams {
+            command: "dynare/modelInfo".to_string(),
+            arguments: vec![serde_json::json!({"root_uri": uri(&root)})],
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(info["n_equations"], 1, "{info}");
+    backend
+        .did_open(open(uri(&flags), "@#define P=\"other\"\n"))
+        .await;
+    let old = items(backend.diagnostic(pull(uri(&first))).await.unwrap());
+    assert!(!has_code(&old, "E020"), "{old:?}");
+    let root_items = items(backend.diagnostic(pull(uri(&root))).await.unwrap());
+    assert!(
+        !root_items
+            .iter()
+            .any(|item| item.severity == Some(DiagnosticSeverity::ERROR)),
+        "{root_items:?}"
+    );
+    let changed = backend
+        .execute_command(ExecuteCommandParams {
+            command: "dynare/modelInfo".to_string(),
+            arguments: vec![serde_json::json!({"root_uri": uri(&root)})],
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(changed["n_equations"], 1, "{changed}");
+    assert_ne!(changed["revision"], info["revision"]);
+    let path = dir.canonicalize().unwrap();
+    let temporary = std::env::temp_dir().canonicalize().unwrap();
+    assert!(path.starts_with(&temporary) && path != temporary);
+    fs::remove_dir_all(path).unwrap();
+}
+
+#[tokio::test]
 async fn different_root_context_messages_remain_on_shared_child() {
     let dir = scratch("context");
     let first = dir.join("first.mod");

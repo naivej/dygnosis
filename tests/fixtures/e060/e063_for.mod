@@ -1,5 +1,6 @@
-// inventory: e063_for_var_after_endfor
+// inventory: quiet_e063_for_var_after_endfor
 @#for i in 1:2
+@#define seen=i
 @#endfor
 var y;
 varexo e;

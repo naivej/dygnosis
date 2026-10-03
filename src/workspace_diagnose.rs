@@ -866,10 +866,23 @@ end;
         ]);
         let report = diagnose_map(&files, &[root.to_string()]).expect("colon map");
         let entry = by_root(&report, root);
-        assert_eq!(entry.status, RootStatus::Failed, "{entry:?}");
-        assert_eq!(
-            entry.failure.as_deref(),
-            Some("unresolved @#include \"one.inc\"")
+        // The invalid directory refuses before an include lookup. It cannot
+        // certify an unresolved file or search either colon-separated name.
+        assert_eq!(entry.status, RootStatus::Ok, "{entry:?}");
+        assert_eq!(entry.failure, None);
+        assert!(
+            entry
+                .diagnostics
+                .iter()
+                .any(|item| item.diagnostic.code == "E304"),
+            "{entry:?}"
+        );
+        assert!(
+            !entry
+                .diagnostics
+                .iter()
+                .any(|item| item.diagnostic.code == "E061"),
+            "{entry:?}"
         );
     }
 

@@ -91,7 +91,7 @@ fn nonliteral_and_text_only_include_activity_is_not_invented_as_resolution() {
 }
 
 #[test]
-fn cached_activity_rechecks_definitions_and_preserves_raw_diagnostics() {
+fn cached_activity_rechecks_definitions_and_diagnostic_records() {
     let text = format!(
         "@#include \"flags.inc\"\n@#if ENABLED\n@#include \"absent.inc\"\n@#endif\n{MODEL}"
     );
@@ -99,21 +99,19 @@ fn cached_activity_rechecks_definitions_and_preserves_raw_diagnostics() {
     assert!(workspace.includes_complete(&root));
     assert_eq!(
         workspace.include_records(&root).unwrap().unresolved.len(),
-        1
+        0
     );
     let before = workspace.get_effective_model(&root).unwrap().clone();
-    // This existing raw-site E061 is scheduled for the activity-aware
-    // diagnostics fix in 0.11.4; new count authority must not inherit it.
-    assert!(
-        dygnosis::check_e061(workspace.include_records(&root).unwrap())
-            .iter()
-            .any(|diag| diag.code == "E061")
-    );
+    assert!(dygnosis::check_e061(workspace.include_records(&root).unwrap()).is_empty());
     workspace.update_document(
         "C:/dygnosis-include-activity/flags.inc",
         "@#define ENABLED=1\n",
     );
     assert!(!workspace.includes_complete(&root));
+    assert_eq!(
+        dygnosis::check_e061(workspace.include_records(&root).unwrap()).len(),
+        1
+    );
     assert_eq!(
         before.non_local_equation_count(),
         workspace

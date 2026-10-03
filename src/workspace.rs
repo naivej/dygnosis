@@ -15,7 +15,7 @@ use crate::include_resolver::{
     is_virtual_uri, normalize_separators, normalize_uri, path_key, resolve_companion_path,
     resolve_include_path, resolve_scoped_include_path, uri_to_path,
 };
-use crate::model::{IncludeDirective, IncludePathDirective, Model};
+use crate::model::Model;
 use crate::parser::parse;
 use crate::span::Span;
 
@@ -57,11 +57,6 @@ pub struct IncludeSite {
     pub span: Span,
 }
 
-struct IncludeStack {
-    files: Vec<String>,
-    edges: Vec<IncludeSite>,
-}
-
 /// Include graph results for one root document. No diagnostic codes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct IncludeRecords {
@@ -74,7 +69,6 @@ struct Doc {
     source: String,
     model: Model,
     overlay: bool,
-    includepath_dirs: Vec<PathBuf>,
 }
 
 /// One joined include source and its written-file map. The model, expand view,
@@ -84,9 +78,17 @@ struct SplicedSource {
     segments: Vec<SpliceSegment>,
     includes_complete: bool,
     navigation: NavigationSource,
+    include_search: Vec<PathBuf>,
 }
 
-type NavigationTargets = HashMap<(String, Span), Option<String>>;
+type IncludeTargets = HashMap<(String, Span), Option<String>>;
+
+struct IncludeWalk {
+    records: IncludeRecords,
+    proof: crate::macro_expand::MacroFileProof,
+    targets: IncludeTargets,
+    search: Vec<PathBuf>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct InputFile {
@@ -156,7 +158,10 @@ impl Workspace {
         // set_root_search_paths invalidates the cache when the scope is first
         // registered; restore the immutable joined source after that operation.
         if let Some(source) = self.spliced.get(&key).filter(|_| reuse_joined) {
-            snapshot.spliced.insert(key, Arc::clone(source));
+            snapshot.spliced.insert(key.clone(), Arc::clone(source));
+            if let Some(records) = self.records.get(&key) {
+                snapshot.records.insert(key, records.clone());
+            }
         }
         snapshot
     }
@@ -206,14 +211,12 @@ impl Workspace {
     /// Store one overlay under `key` exactly. No disk and no path folding.
     fn insert_overlay(&mut self, key: &str, source: String) {
         let model = parse(&source);
-        let includepath_dirs = overlay_includepath_dirs_for(key, &model);
         self.docs.insert(
             key.to_string(),
             Arc::new(Doc {
                 source,
                 model,
                 overlay: true,
-                includepath_dirs,
             }),
         );
         self.effective.clear();
@@ -235,14 +238,12 @@ impl Workspace {
         let key = normalize_uri(uri);
         let source = source.into();
         let model = parse(&source);
-        let includepath_dirs = includepath_dirs_for(&key, &model);
         self.docs.insert(
             key.clone(),
             Arc::new(Doc {
                 source,
                 model,
                 overlay: true,
-                includepath_dirs,
             }),
         );
         // Other roots may have spliced this file.
@@ -278,14 +279,12 @@ impl Workspace {
         }
         let source = read_text(path)?;
         let model = parse(&source);
-        let includepath_dirs = includepath_dirs_for(&key, &model);
         self.docs.insert(
             key.clone(),
             Arc::new(Doc {
                 source,
                 model,
                 overlay: false,
-                includepath_dirs,
             }),
         );
         // Other roots may have spliced this file.
@@ -400,12 +399,6 @@ impl Workspace {
                 .get_effective_model(uri)
                 .into_iter()
                 .flat_map(|model| {
-                    let directories = model
-                        .includepaths
-                        .iter()
-                        .filter_map(|directive| includepath_literal(&directive.argument))
-                        .filter(|name| !name.is_empty())
-                        .map(|name| resolve_includepath(&key, &name));
                     let loader = model.load_params_file.iter().map(|(name, _)| {
                         let path = PathBuf::from(name);
                         if path.is_absolute() {
@@ -414,13 +407,18 @@ impl Workspace {
                             Path::new(&key).parent().unwrap_or(Path::new("")).join(path)
                         }
                     });
-                    directories.chain(loader)
+                    loader
                 })
                 .collect();
+            let directories = self
+                .spliced
+                .get(&key)
+                .into_iter()
+                .flat_map(|source| source.include_search.iter());
             self.dependency_candidates
                 .entry(key.clone())
                 .or_default()
-                .extend(paths.iter().map(|path| path_key(path)));
+                .extend(paths.iter().chain(directories).map(|path| path_key(path)));
         }
         let mut files = self
             .dependency_candidates
@@ -644,8 +642,9 @@ impl Workspace {
         self.docs.keys().cloned().collect()
     }
 
-    /// Parse of the spliced source: resolved include bodies in place of
-    /// directives; unresolved and cyclic edges left empty.
+    /// Parse of the joined source: executed include bodies replace directives;
+    /// required unresolved/cyclic edges stay empty. Dormant sites remain for
+    /// the ordinary macro branch/loop expansion to skip.
     pub fn get_effective_model(&mut self, uri: &str) -> Option<&Model> {
         let key = self.ensure_loaded(uri)?;
         if !self.effective.contains_key(&key) {
@@ -757,18 +756,16 @@ impl Workspace {
             .unwrap_or_default()
     }
 
-    /// Include records for slice 12 (spans, resolved path or unresolved, cycles).
+    /// Executed include records (written spans, resolved targets, misses, cycles).
     pub fn include_records(&mut self, uri: &str) -> Option<&IncludeRecords> {
         let key = self.ensure_loaded(uri)?;
         if !self.records.contains_key(&key) {
-            let records = self.walk_graph(&key);
-            self.records.insert(key.clone(), records);
+            self.spliced_source(&key);
         }
         self.records.get(&key)
     }
 
-    /// Whether the required include expansion is proven complete. Raw graph
-    /// diagnostics remain unchanged, including inactive written include sites.
+    /// Whether expansion of executed includes is proven complete.
     pub fn includes_complete(&mut self, uri: &str) -> bool {
         let Some(key) = self.ensure_loaded(uri) else {
             return false;
@@ -935,12 +932,9 @@ impl Workspace {
         if self.virtual_roots.contains(root_key) {
             return None;
         }
+        let joined = self.spliced_source(root_key);
         if self.overlay_only {
-            let paths = self
-                .docs
-                .get(root_key)
-                .map(|doc| doc.includepath_dirs.as_slice())
-                .unwrap_or_default();
+            let paths = &joined.include_search;
             if let Some(key) = self.overlay_include_key(root_key, name, paths) {
                 return Some(PathBuf::from(key));
             }
@@ -957,9 +951,13 @@ impl Workspace {
             return None;
         }
         let mut paths = self.root_paths(root_key).to_vec();
-        if let Some(doc) = self.docs.get(root_key) {
-            paths = append_unique(&paths, &doc.includepath_dirs);
-        }
+        let directories: Vec<_> = joined
+            .include_search
+            .iter()
+            .filter(|path| path.is_dir())
+            .cloned()
+            .collect();
+        paths = append_unique(&paths, &directories);
         let known = self.known_keys();
         self.record_candidates(root_key, root_key, name, &paths);
         if Path::new(name).extension().is_none() {
@@ -1014,139 +1012,168 @@ impl Workspace {
         })
     }
 
-    fn walk_graph(&mut self, root_key: &str) -> IncludeRecords {
+    /// Resolve files only when the shared macro walker executes their site.
+    fn walk_graph(&mut self, root_key: &str) -> IncludeWalk {
         self.dependency_candidates.remove(root_key);
         let mut records = IncludeRecords::default();
-        let mut seen_cycles: HashSet<Vec<String>> = HashSet::new();
-        self.dfs_graph(
-            root_key,
-            &mut IncludeStack {
-                files: vec![root_key.to_string()],
-                edges: Vec::new(),
-            },
-            &mut Vec::new(),
-            None,
-            &mut records,
-            &mut seen_cycles,
-        );
+        let mut targets = IncludeTargets::new();
+        let mut active_search = Vec::new();
+        let mut seen_sites = HashSet::new();
+        let mut seen_cycles = HashSet::new();
+        let source = self.docs.get(root_key).expect("loaded root").source.clone();
+        let proof = crate::macro_expand::walk_macro_files(root_key, &source, |event| {
+            if !event.certain {
+                if matches!(
+                    event.directive,
+                    crate::macro_expand::MacroFileDirective::Include
+                ) {
+                    targets.insert((event.file.to_string(), event.span), None);
+                }
+                return None;
+            }
+            let document = self.docs.get(event.file)?;
+            if let crate::macro_expand::MacroFileDirective::IncludePath(path) = event.directive {
+                let added = if self.overlay_only {
+                    PathBuf::from(overlay_includepath_key(root_key, path))
+                } else {
+                    resolve_includepath(root_key, path)
+                };
+                if !path.is_empty() && !self.overlay_only {
+                    // The directory check reads existence/type even when it
+                    // refuses. Creating that directory must invalidate E304.
+                    self.dependency_candidates
+                        .entry(root_key.to_string())
+                        .or_default()
+                        .insert(path_key(&added));
+                }
+                let valid = if self.overlay_only {
+                    self.overlay_directory_exists(root_key, path)
+                } else {
+                    !path.is_empty() && added.is_dir()
+                };
+                if !valid {
+                    return None;
+                }
+                let added = vec![added];
+                active_search = append_unique(&active_search, &added);
+                return Some(crate::macro_expand::MacroFileLoad::Path);
+            }
+            let directive = document
+                .model
+                .includes
+                .iter()
+                .find(|directive| directive.span == event.span)?
+                .clone();
+            let site = (event.file.to_string(), event.span);
+            let first_visit = seen_sites.insert(site.clone());
+            let root_span = event
+                .parents
+                .first()
+                .map(|(_, span)| *span)
+                .unwrap_or(event.span);
+            let Some(path) =
+                self.resolve_filename(root_key, event.file, &directive.filename, &active_search)
+            else {
+                targets.insert(site, None);
+                if first_visit {
+                    let mut searched = Vec::new();
+                    if let Some(parent) = Path::new(event.file).parent() {
+                        searched.push(parent.display().to_string());
+                    }
+                    for path in self.configured_search(root_key, &active_search) {
+                        let display = path.display().to_string();
+                        if !searched.contains(&display) {
+                            searched.push(display);
+                        }
+                    }
+                    records.unresolved.push(UnresolvedInclude {
+                        filename: directive.filename,
+                        span: root_span,
+                        included_from: (!event.parents.is_empty())
+                            .then(|| file_basename(event.file)),
+                        searched,
+                    });
+                }
+                return None;
+            };
+            let target = self.include_key(&path);
+            let callers: Vec<_> = event
+                .parents
+                .iter()
+                .map(|(file, _)| file.clone())
+                .chain(std::iter::once(event.file.to_string()))
+                .collect();
+            if let Some(index) = callers.iter().position(|file| file == &target) {
+                let mut chain = callers[index..].to_vec();
+                let min_index = chain
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, file)| *file)
+                    .map(|(index, _)| index)
+                    .unwrap();
+                let canonical: Vec<_> = chain[min_index..]
+                    .iter()
+                    .chain(&chain[..min_index])
+                    .cloned()
+                    .collect();
+                chain.push(target);
+                if seen_cycles.insert(canonical) {
+                    let earlier = event
+                        .parents
+                        .get(index.saturating_sub(1))
+                        .map(|(file, span)| IncludeSite {
+                            file: file.clone(),
+                            span: *span,
+                        })
+                        .unwrap_or_else(|| IncludeSite {
+                            file: event.file.to_string(),
+                            span: event.span,
+                        });
+                    records.cycles.push(CycleRecord {
+                        chain,
+                        span: root_span,
+                        earlier,
+                        closing: IncludeSite {
+                            file: event.file.to_string(),
+                            span: event.span,
+                        },
+                    });
+                }
+                targets.insert(site, None);
+                return None;
+            }
+            targets
+                .entry(site)
+                .and_modify(|existing| {
+                    if existing.as_deref() != Some(target.as_str()) {
+                        *existing = None;
+                    }
+                })
+                .or_insert_with(|| Some(target.clone()));
+            if first_visit {
+                records.resolved.push(ResolvedInclude {
+                    filename: directive.filename,
+                    span: event.span,
+                    path,
+                });
+            }
+            let source = self.source_for_key(&target)?;
+            Some(crate::macro_expand::MacroFileLoad::Source {
+                file: target,
+                source,
+            })
+        });
         let included = records
             .resolved
             .iter()
             .map(|record| self.include_key(&record.path))
             .collect();
-        self.include_owners.insert(root_key.to_owned(), included);
-        records
-    }
-
-    fn dfs_graph(
-        &mut self,
-        current_key: &str,
-        stack: &mut IncludeStack,
-        active_search: &mut Vec<PathBuf>,
-        root_span: Option<Span>,
-        records: &mut IncludeRecords,
-        seen_cycles: &mut HashSet<Vec<String>>,
-    ) {
-        if self.model_for_key(current_key).is_none() {
-            return;
-        }
-        let events = {
-            let model = self.docs.get(current_key).unwrap();
-            ordered_events(&model.model)
-        };
-        for event in events {
-            match event {
-                IncludeEvent::IncludePath(dir) => {
-                    // The first entry remains the root invocation directory.
-                    let added = self.directive_search_paths(&stack.files[0], &dir);
-                    *active_search = append_unique(active_search, &added);
-                }
-                IncludeEvent::Include(dir) => {
-                    let resolved = self.resolve_filename(
-                        &stack.files[0],
-                        current_key,
-                        &dir.filename,
-                        active_search,
-                    );
-                    match resolved {
-                        None => {
-                            let mut searched = Vec::new();
-                            if let Some(parent) = Path::new(current_key).parent() {
-                                searched.push(parent.display().to_string());
-                            }
-                            for p in self.configured_search(&stack.files[0], active_search) {
-                                let s = p.display().to_string();
-                                if !searched.iter().any(|d| d == &s) {
-                                    searched.push(s);
-                                }
-                            }
-                            records.unresolved.push(UnresolvedInclude {
-                                filename: dir.filename,
-                                span: root_span.unwrap_or(dir.span),
-                                included_from: root_span.map(|_| file_basename(current_key)),
-                                searched,
-                            });
-                        }
-                        Some(path) => {
-                            let resolved_key = self.include_key(&path);
-                            if let Some(idx) = stack.files.iter().position(|k| k == &resolved_key) {
-                                let mut cycle: Vec<String> = stack.files[idx..].to_vec();
-                                cycle.push(resolved_key);
-                                let rotation: Vec<String> = cycle[..cycle.len() - 1].to_vec();
-                                if let Some(min_idx) = rotation
-                                    .iter()
-                                    .enumerate()
-                                    .min_by_key(|(_, k)| *k)
-                                    .map(|(i, _)| i)
-                                {
-                                    let mut canonical = rotation[min_idx..].to_vec();
-                                    canonical.extend(rotation[..min_idx].iter().cloned());
-                                    if seen_cycles.insert(canonical) {
-                                        records.cycles.push(CycleRecord {
-                                            chain: cycle,
-                                            span: root_span.unwrap_or(dir.span),
-                                            earlier: stack
-                                                .edges
-                                                .get(idx.saturating_sub(1))
-                                                .cloned()
-                                                .unwrap_or_else(|| IncludeSite {
-                                                    file: current_key.to_string(),
-                                                    span: dir.span,
-                                                }),
-                                            closing: IncludeSite {
-                                                file: current_key.to_string(),
-                                                span: dir.span,
-                                            },
-                                        });
-                                    }
-                                }
-                                continue;
-                            }
-                            records.resolved.push(ResolvedInclude {
-                                filename: dir.filename.clone(),
-                                span: dir.span,
-                                path: path.clone(),
-                            });
-                            let nested_root = root_span.or(Some(dir.span));
-                            stack.files.push(resolved_key.clone());
-                            stack.edges.push(IncludeSite {
-                                file: current_key.to_string(),
-                                span: dir.span,
-                            });
-                            self.dfs_graph(
-                                &resolved_key,
-                                stack,
-                                active_search,
-                                nested_root,
-                                records,
-                                seen_cycles,
-                            );
-                            stack.files.pop();
-                            stack.edges.pop();
-                        }
-                    }
-                }
-            }
+        self.include_owners.insert(root_key.to_string(), included);
+        IncludeWalk {
+            records,
+            proof,
+            targets,
+            search: active_search,
         }
     }
 
@@ -1154,235 +1181,74 @@ impl Workspace {
         if let Some(source) = self.spliced.get(key) {
             return Arc::clone(source);
         }
-        // Resolving includes may load documents and invalidate other cached
-        // roots. Insert only after the full walk has finished.
-        let raw_complete = self
-            .include_records(key)
-            .is_some_and(|records| records.unresolved.is_empty() && records.cycles.is_empty());
-        let mut include_targets = HashMap::new();
-        let (text, segments) = self.splice_with_map(
-            key,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            false,
-            &mut include_targets,
-        );
-        // Reuse the exact targets already resolved by the legacy splice. Only
-        // executed includes load a raw file in this separate navigation proof.
-        let navigation_proof = self.docs.get(key).map(|document| {
-            crate::macro_expand::navigation_macros_complete(key, &document.source, |file, span| {
-                let target = include_targets.get(&(file.to_string(), span))?.as_ref()?;
-                let source = self.docs.get(target)?.source.clone();
-                Some((target.clone(), source))
-            })
-        });
-        let navigation = navigation_proof
-            .filter(|proof| proof.complete)
-            .and_then(|proof| {
-                self.navigation_splice(key, &proof.sites, &include_targets, &mut Vec::new())
-            })
-            .map(|(text, segments)| NavigationSource::Mapped { text, segments })
-            .unwrap_or(NavigationSource::Unavailable);
-        let includes_complete =
-            if raw_complete && !crate::macro_expand::has_include_directives(&text) {
-                true
-            } else {
-                // Only this metadata pass retains failed directives, so the macro
-                // visitor can distinguish required sites from known false branches.
-                let (activity, _) = self.splice_with_map(
-                    key,
-                    &mut Vec::new(),
-                    &mut Vec::new(),
-                    true,
-                    &mut HashMap::new(),
-                );
-                crate::macro_expand::required_includes_complete(&activity)
-            };
+        // Loading an executed include can invalidate other roots. Publish the
+        // records and joined source only after the ordered walk has finished.
+        let IncludeWalk {
+            records,
+            proof,
+            targets,
+            search: include_search,
+        } = self.walk_graph(key);
+        let (text, segments) = self.splice_with_map(key, &proof.sites, &targets, &mut Vec::new());
+        let targets_complete = targets.values().all(Option::is_some);
+        let navigation = if proof.complete && targets_complete {
+            NavigationSource::Mapped {
+                text: text.clone(),
+                segments: segments.clone(),
+            }
+        } else {
+            NavigationSource::Unavailable
+        };
+        // Include availability is separate from macro syntax/evaluation. An
+        // executed malformed file still needs its normal diagnostics.
+        let includes_complete = records.unresolved.is_empty()
+            && records.cycles.is_empty()
+            && targets_complete
+            && (!crate::macro_expand::has_include_directives(&text)
+                || crate::macro_expand::required_includes_complete(&text));
         let source = Arc::new(SplicedSource {
             text,
             segments,
             includes_complete,
             navigation,
+            include_search,
         });
+        self.records.insert(key.to_string(), records);
         self.spliced.insert(key.to_string(), Arc::clone(&source));
         source
     }
 
+    /// Splice only executed sites, using the targets selected in execution order.
+    /// Dormant directives stay in place so ordinary branch expansion skips them.
     fn splice_with_map(
-        &mut self,
-        key: &str,
-        stack: &mut Vec<String>,
-        active_search: &mut Vec<PathBuf>,
-        keep_unresolved: bool,
-        include_targets: &mut NavigationTargets,
-    ) -> (String, Vec<SpliceSegment>) {
-        if stack.iter().any(|k| k == key) {
-            return (String::new(), Vec::new());
-        }
-        let Some(source) = self.source_for_key(key) else {
-            return (String::new(), Vec::new());
-        };
-        let root_key = stack.first().map(String::as_str).unwrap_or(key).to_string();
-        let mut all: Vec<SpliceEvent> = {
-            let Some(doc) = self.docs.get(key) else {
-                return identity_splice(&source, Some(key.to_string()));
-            };
-            doc.model
-                .includes
-                .iter()
-                .cloned()
-                .map(SpliceEvent::Include)
-                .chain(
-                    doc.model
-                        .includepaths
-                        .iter()
-                        .cloned()
-                        .map(SpliceEvent::IncludePath),
-                )
-                .collect()
-        };
-        all.sort_by_key(|e| match e {
-            SpliceEvent::Include(d) => d.span.start,
-            SpliceEvent::IncludePath(d) => d.span.start,
-        });
-        let mut replacements: Vec<(Span, String, Vec<SpliceSegment>)> = Vec::new();
-        for event in all {
-            match event {
-                SpliceEvent::IncludePath(dir) => {
-                    let added = self.directive_search_paths(&root_key, &dir);
-                    *active_search = append_unique(active_search, &added);
-                }
-                SpliceEvent::Include(dir) => {
-                    let resolved =
-                        self.resolve_filename(&root_key, key, &dir.filename, active_search);
-                    let (body, nested_map) = match resolved {
-                        None if keep_unresolved => identity_splice(
-                            &source[dir.span.start as usize..dir.span.end as usize],
-                            None,
-                        ),
-                        None => (String::new(), Vec::new()),
-                        Some(path) => {
-                            let resolved_key = self.include_key(&path);
-                            include_targets
-                                .entry((key.to_string(), dir.span))
-                                .and_modify(|target| {
-                                    if target.as_deref() != Some(resolved_key.as_str()) {
-                                        *target = None;
-                                    }
-                                })
-                                .or_insert_with(|| Some(resolved_key.clone()));
-                            if stack.iter().any(|k| k == &resolved_key) || resolved_key == key {
-                                if keep_unresolved {
-                                    identity_splice(
-                                        &source[dir.span.start as usize..dir.span.end as usize],
-                                        None,
-                                    )
-                                } else {
-                                    (String::new(), Vec::new())
-                                }
-                            } else {
-                                stack.push(key.to_string());
-                                let nested = self.splice_with_map(
-                                    &resolved_key,
-                                    stack,
-                                    active_search,
-                                    keep_unresolved,
-                                    include_targets,
-                                );
-                                stack.pop();
-                                nested
-                            }
-                        }
-                    };
-                    replacements.push((dir.span, body, nested_map));
-                }
-            }
-        }
-        apply_replacements_mapped(&source, &replacements, Some(key.to_string()))
-    }
-
-    /// Metadata projection over already resolved targets. Dormant directives
-    /// stay in their caller's source; their file bodies cannot affect the proof.
-    fn navigation_splice(
         &self,
         key: &str,
         sites: &HashSet<(String, Span)>,
-        targets: &NavigationTargets,
+        targets: &IncludeTargets,
         stack: &mut Vec<String>,
-    ) -> Option<(String, Vec<SpliceSegment>)> {
+    ) -> (String, Vec<SpliceSegment>) {
         if stack.iter().any(|file| file == key) {
-            return None;
+            return (String::new(), Vec::new());
         }
-        let document = self.docs.get(key)?;
+        let Some(document) = self.docs.get(key) else {
+            return (String::new(), Vec::new());
+        };
         stack.push(key.to_string());
         let mut replacements = Vec::new();
         for directive in &document.model.includes {
             let site = (key.to_string(), directive.span);
             if sites.contains(&site) {
-                let target = targets.get(&site)?.as_deref()?;
-                let (body, segments) = self.navigation_splice(target, sites, targets, stack)?;
+                let (body, segments) = targets
+                    .get(&site)
+                    .and_then(Option::as_deref)
+                    .map(|target| self.splice_with_map(target, sites, targets, stack))
+                    .unwrap_or_default();
                 replacements.push((directive.span, body, segments));
             }
         }
         stack.pop();
-        Some(apply_replacements_mapped(
-            &document.source,
-            &replacements,
-            Some(key.to_string()),
-        ))
+        apply_replacements_mapped(&document.source, &replacements, Some(key.to_string()))
     }
-
-    fn directive_search_paths(&self, key: &str, directive: &IncludePathDirective) -> Vec<PathBuf> {
-        if self.overlay_only {
-            overlay_includepath_paths(key, directive)
-        } else {
-            includepath_paths(key, directive)
-        }
-    }
-}
-
-enum IncludeEvent {
-    Include(IncludeDirective),
-    IncludePath(IncludePathDirective),
-}
-
-enum SpliceEvent {
-    Include(IncludeDirective),
-    IncludePath(IncludePathDirective),
-}
-
-fn ordered_events(model: &Model) -> Vec<IncludeEvent> {
-    let mut events: Vec<IncludeEvent> = model
-        .includes
-        .iter()
-        .cloned()
-        .map(IncludeEvent::Include)
-        .chain(
-            model
-                .includepaths
-                .iter()
-                .cloned()
-                .map(IncludeEvent::IncludePath),
-        )
-        .collect();
-    events.sort_by_key(|e| match e {
-        IncludeEvent::Include(d) => d.span.start,
-        IncludeEvent::IncludePath(d) => d.span.start,
-    });
-    events
-}
-
-fn identity_splice(source: &str, file: Option<String>) -> (String, Vec<SpliceSegment>) {
-    let segs = if source.is_empty() {
-        Vec::new()
-    } else {
-        vec![SpliceSegment {
-            spliced: Span::new(0, source.len()),
-            file,
-            origin: Span::new(0, source.len()),
-        }]
-    };
-    (source.to_string(), segs)
 }
 
 fn apply_replacements_mapped(
@@ -1487,37 +1353,6 @@ fn overlay_join(parent: &str, name: &str) -> String {
     }
 }
 
-fn includepath_dirs_for(key: &str, model: &Model) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    for dir in &model.includepaths {
-        for p in includepath_paths(key, dir) {
-            // A resolved path that is not a directory never helps an include.
-            if !p.is_dir() {
-                continue;
-            }
-            if !paths.iter().any(|e| e == &p) {
-                paths.push(p);
-            }
-        }
-    }
-    paths
-}
-
-fn overlay_includepath_dirs_for(key: &str, model: &Model) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    for directive in &model.includepaths {
-        paths = append_unique(&paths, &overlay_includepath_paths(key, directive));
-    }
-    paths
-}
-
-fn overlay_includepath_paths(key: &str, directive: &IncludePathDirective) -> Vec<PathBuf> {
-    includepath_literal(&directive.argument)
-        .into_iter()
-        .map(|raw| PathBuf::from(overlay_includepath_key(key, &raw)))
-        .collect()
-}
-
 fn overlay_includepath_key(key: &str, raw: &str) -> String {
     let path = overlay_key(raw);
     let joined = if overlay_absolute(&path) {
@@ -1544,14 +1379,6 @@ fn overlay_includepath_key(key: &str, raw: &str) -> String {
     lookup
 }
 
-fn includepath_paths(key: &str, directive: &IncludePathDirective) -> Vec<PathBuf> {
-    includepath_literal(&directive.argument)
-        .map(|raw| resolve_includepath(key, &raw))
-        .into_iter()
-        .collect()
-}
-
-/// Resolve one `@#includepath` argument against the invocation root's parent.
 pub fn resolve_includepath(key: &str, raw: &str) -> PathBuf {
     let path = PathBuf::from(normalize_separators(raw));
     let path = if path.is_absolute() {

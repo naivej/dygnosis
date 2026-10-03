@@ -386,8 +386,8 @@ fn e063_defined_before_use() {
 }
 
 #[test]
-fn e063_for_var_not_known_after_endfor() {
-    assert_fire("e060/e063_for.mod", "E063", "Unknown variable i", "@{i}");
+fn e063_for_var_remains_known_after_endfor() {
+    assert_quiet("e060/e063_for.mod");
 }
 
 #[test]

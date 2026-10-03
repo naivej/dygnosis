@@ -132,7 +132,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E062", ExplainEntry {
         title: "Macro syntax error",
-        body: "A Dynare macro `@#if` block has no matching `@#endif`, a `@#for` block has no matching `@#endfor`, or a function definition ends while its expression still needs an operand. Dynare refuses during macro parsing; a trailing operator in `@#define f(x) = x+` prints `syntax error, unexpected EOL`.\n\n**Warrant**\n\nFor unmatched blocks, the editor names the opener or stray closer and points at that directive; Dynare's bison location does not.\n\n**Fix**\n\nClose the macro block with the matching directive, or complete the function expression before the end of the definition.",
+        body: "A Dynare macro `@#if` block has no matching `@#endif`, a `@#for` block has no matching `@#endfor` or has an empty body, or a function definition ends while its expression still needs an operand. Dynare refuses during macro parsing: an empty loop body prints `syntax error, unexpected ENDFOR`, and a trailing operator in `@#define f(x) = x+` prints `syntax error, unexpected EOL`. A blank line or comment counts as a loop body; an empty iteration array with a nonempty body is valid.\n\n**Warrant**\n\nFor unmatched blocks, the editor names the opener or stray closer and points at that directive; Dynare's bison location does not. For an empty loop body, the editor selects the closing keyword without leading indentation or a trailing comment.\n\n**Fix**\n\nClose the macro block with the matching directive, add the intended loop body, or complete the function expression before the end of the definition.",
         kind: ExplainKind::Shared,
     }),
     ("E063", ExplainEntry {
@@ -892,7 +892,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E284", ExplainEntry {
         title: "@#for tuple arity mismatch",
-        body: "An ``@#for`` tuple has a different size from the index list. Dynare refuses: `Encountered tuple of size {n} but only have {m} index variables`.\n\n**Fix**\n\nMatch the number of index names to the tuple size.",
+        body: "An ``@#for`` tuple has a different size from its multiple index variables. A single index variable binds the whole tuple. Dynare refuses mismatched unpacking: `Encountered tuple of size {n} but only have {m} index variables`.\n\n**Fix**\n\nMatch the number of unpacking index names to the tuple size.",
         kind: ExplainKind::Shared,
     }),
     ("E285", ExplainEntry {
