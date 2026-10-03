@@ -115,14 +115,14 @@ jobs:
             editors/vscode/dist/${{ matrix.target }}/*.tar.gz
             editors/vscode/dist/${{ matrix.target }}/*.json
             editors/vscode/dist/${{ matrix.target }}/*.txt
-      - name: Upload logs after a failure
-        if: failure()
+      - name: Upload installed host logs after success or failure
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: failure-${{ matrix.target }}
+          name: host-logs-${{ matrix.target }}
           retention-days: 7
           include-hidden-files: true
-          path: editors/vscode/.test-data/**/installed-host.json
+          path: editors/vscode/.test-data/**/host-evidence/**
 
   verified:
     needs: native
@@ -136,12 +136,28 @@ jobs:
           node-version: '24'
       - uses: actions/download-artifact@v4
         with:
-          pattern: '*-x64'
-          path: verified-packages
+          name: win32-x64
+          path: verified-packages/win32-x64
       - uses: actions/download-artifact@v4
         with:
-          pattern: '*-arm64'
-          path: verified-packages
+          name: win32-arm64
+          path: verified-packages/win32-arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: darwin-x64
+          path: verified-packages/darwin-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: darwin-arm64
+          path: verified-packages/darwin-arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x64
+          path: verified-packages/linux-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64
+          path: verified-packages/linux-arm64
       - name: Verify complete matrix and immutable package checksums
         run: node editors/vscode/scripts/collect-artifacts.cjs --directory verified-packages
       - uses: actions/upload-artifact@v4

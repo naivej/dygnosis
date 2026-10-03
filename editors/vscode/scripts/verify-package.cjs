@@ -1,34 +1,14 @@
 const assert = require("node:assert/strict");
-const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { parseArgs } = require("node:util");
-const { clearTimeout } = require("node:timers");
 const { downloadAndUnzipVSCode } = require("@vscode/test-electron");
 const { inspectVsix } = require("./vsix.cjs");
 const { resolveCli } = require("./vscode-cli.cjs");
+const { runHost } = require("./package-host.cjs");
 const { assertNative, binaryName, execute, extensionRoot, hostFacts, probeBinary, sha256, writeJson } = require("./common.cjs");
 
-async function runHost(executable, args, env, root) {
-  const windows = process.platform === "win32";
-  const launchFile = path.join(root, "host-launch.json");
-  if (windows) await writeJson(launchFile, { executable, args });
-  const command = windows ? "powershell.exe" : executable;
-  const commandArgs = windows ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(__dirname, "launch-host.ps1"), "-LaunchFile", launchFile] : args;
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, commandArgs, { stdio: "inherit", windowsHide: true, shell: false, env });
-    const timer = setTimeout(() => {
-      try {
-        if (windows) execute("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"]);
-        else child.kill("SIGKILL");
-      } catch (error) { reject(new Error("Could not stop timed-out package host", { cause: error })); return; }
-      reject(new Error("Installed VSIX host did not finish within its timeout"));
-    }, windows ? 130000 : 120000);
-    child.on("error", error => { clearTimeout(timer); reject(error); });
-    child.on("exit", code => { clearTimeout(timer); if (code === 0) resolve(); else reject(new Error(`VS Code host exited ${code}`)); });
-  });
-}
 async function main() {
   const { values } = parseArgs({ options: { target: { type: "string" }, vscode: { type: "string", default: "stable" }, executable: { type: "string" } } });
   const info = assertNative(values.target);
@@ -79,7 +59,8 @@ async function main() {
   const hostResult = path.join(root, "installed-host.json");
   const env = { ...process.env, DYGNOSIS_PACKAGE_SOURCE: JSON.stringify(provenance), DYGNOSIS_PACKAGE_RUN_ID: runId, DYGNOSIS_PACKAGE_EXTENSIONS: extensions, DYGNOSIS_PACKAGE_HOST_RESULT: hostResult };
   delete env.ELECTRON_RUN_AS_NODE;
-  await runHost(executable, [workspace, `--extensionDevelopmentPath=${harness}`, `--extensionTestsPath=${path.join(__dirname, "installed-host.cjs")}`, "--user-data-dir", profile, "--extensions-dir", extensions, "--skip-welcome", "--skip-release-notes", "--disable-workspace-trust", "--disable-gpu", "--no-sandbox"], env, root);
+  await runHost({ executable, args: [workspace, `--extensionDevelopmentPath=${harness}`, `--extensionTestsPath=${path.join(__dirname, "installed-host.cjs")}`, "--user-data-dir", profile, "--extensions-dir", extensions, "--skip-welcome", "--skip-release-notes", "--disable-workspace-trust", "--disable-gpu", "--no-sandbox"], env, root, profile,
+    identity: { runId, target: source.target, version: source.version, commit: source.commit, requested_vscode: values.vscode } });
   const host = JSON.parse(await fs.readFile(hostResult, "utf8"));
   assert.equal(host.runId, runId); assert.equal(host.passed, true);
   assert.equal(host.platform, info.platform); assert.equal(host.arch, info.arch);

@@ -18,9 +18,16 @@ async function waitFor(predicate, description) {
 }
 exports.run = async function run() {
   const source = JSON.parse(process.env.DYGNOSIS_PACKAGE_SOURCE);
-  const evidence = { runId: process.env.DYGNOSIS_PACKAGE_RUN_ID, vscode: vscode.version, platform: process.platform, arch: process.arch, target: source.target, version: source.version, commit: source.commit, checks: [] };
-  let service;
+  const evidence = { runId: process.env.DYGNOSIS_PACKAGE_RUN_ID, vscode: vscode.version, platform: process.platform, arch: process.arch, target: source.target, version: source.version, commit: source.commit, checks: [], passed: false };
+  const checkpoint = async step => {
+    evidence.current_step = step;
+    const temporary = process.env.DYGNOSIS_PACKAGE_HOST_RESULT + ".tmp";
+    await writeJson(temporary, evidence);
+    await fs.rename(temporary, process.env.DYGNOSIS_PACKAGE_HOST_RESULT);
+  };
+  let service, checksPassed = false;
   try {
+    await checkpoint("installed extension activation");
     const extension = vscode.extensions.getExtension(`${source.publisher}.dygnosis`);
     assert.ok(extension, "The installed Dygnosis extension is absent");
     assert.equal(extension.packageJSON.version, source.version);
@@ -38,11 +45,14 @@ exports.run = async function run() {
     if (!projectDiagnostics) assert.equal(service.client, undefined, "Before project diagnostics ships, activation before a model must leave LSP idle");
     else await service.restart(); // Later releases may already analyze the unopened workspace.
     evidence.checks.push("installed extension activation before opening a Dynare document");
+    await checkpoint("installed bundled MCP initialize, discovery and model-info call");
     evidence.mcp = await probeMcp(binary, source.version);
     evidence.checks.push("installed bundled MCP initialize/tools/list/tool call before opening a model");
+    await checkpoint("native VS Code MCP discovery and model-info invocation");
     evidence.native_vscode_mcp = await probeNativeMcp(vscode, `${source.publisher}.dygnosis`);
     if (!projectDiagnostics) assert.equal(service.client, undefined, "Native MCP must work before the first LSP launch");
     evidence.checks.push("native VS Code MCP discovery of every tool and actual model-info invocation before opening a model");
+    await checkpoint("bundled LSP counts, symbols and Problems diagnostics");
     const workspace = vscode.workspace.workspaceFolders[0].uri.fsPath;
     const file = path.join(workspace, "installed model.mod");
     await fs.writeFile(file, model);
@@ -62,6 +72,7 @@ exports.run = async function run() {
     await vscode.workspace.applyEdit(edit);
     await waitFor(() => vscode.languages.getDiagnostics(document.uri).some(diagnostic => diagnostic.severity === vscode.DiagnosticSeverity.Error), "real bundled LSP error reaches VS Code Problems");
     evidence.checks.push("bundled language-client handshake, model counts, native symbols and Problems diagnostics");
+    await checkpoint("explicit user override LSP and MCP launch");
     const override = path.join(workspace, "explicit override with spaces", binaryName(source.target));
     await fs.mkdir(path.dirname(override), { recursive: true });
     await fs.copyFile(binary, override);
@@ -75,10 +86,12 @@ exports.run = async function run() {
     evidence.overrideMcp = await probeMcp(override, source.version);
     evidence.selected_lsp_paths = launchLogs.filter(message => message.startsWith("LSP executable:"));
     evidence.checks.push("explicit user override with spaces launches LSP and MCP");
-    evidence.passed = true;
-  } catch (error) { evidence.passed = false; evidence.error = String(error); throw error; }
+    checksPassed = true;
+  } catch (error) { evidence.passed = false; evidence.failed_step = evidence.current_step; evidence.error = String(error); throw error; }
   finally {
+    await checkpoint("installed extension shutdown");
     await service?.shutdown();
-    await writeJson(process.env.DYGNOSIS_PACKAGE_HOST_RESULT, evidence);
+    evidence.passed = checksPassed;
+    await checkpoint("finished");
   }
 };
