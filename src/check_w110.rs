@@ -5,7 +5,9 @@ use std::collections::{HashMap, HashSet};
 use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::intern::Name;
 use crate::lexer::{tokenize, TokenKind};
-use crate::model::{Decl, EstimatedParamKind, Model, PeriodPoint, ShockBlockKind, ShockKind};
+use crate::model::{
+    Decl, EstimatedParamKind, Model, PeriodPoint, ShockBlock, ShockBlockKind, ShockKind,
+};
 use crate::span::Span;
 
 const FALLBACK: Span = Span { start: 0, end: 1 };
@@ -108,34 +110,48 @@ fn check_w060(model: &Model) -> Vec<Diagnostic> {
 fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
     let mut seen: HashMap<SeenKey, Span> = HashMap::new();
     let mut diagnostics = Vec::new();
-    for (index, stmt) in model.shock_stmts.iter().enumerate() {
-        if model.shock_stmt_block_starts.binary_search(&index).is_ok() {
+    for block in &model.shock_blocks {
+        if ordinary_shock_handler(block) && block.kind != ShockBlockKind::Regular {
+            // learnt_in=1 has only scheduled rows, but its pinned handler
+            // delegates to end_shocks and clears the retained skew map.
             seen.clear();
+            continue;
         }
-        let span = nonempty(stmt.span);
-        match &stmt.kind {
-            ShockKind::Var(name) | ShockKind::Stderr(name) => {
-                let key = SeenKey::Var(*name);
-                if let Some(&first_span) = seen.get(&key) {
-                    let n = model.name(*name);
-                    diagnostics.push(
-                        Diagnostic::new(
-                            span,
-                            Severity::Error,
-                            "E111",
-                            format!("shocks: variance or stderr of shock on {n} declared twice"),
-                        )
-                        .with_related(RelatedDiagnostic::new(
-                            first_span,
-                            "Earlier variance or standard error entry",
-                        )),
-                    );
-                }
-                seen.entry(key).or_insert(stmt.span);
-                if let (ShockKind::Var(_), Some(v)) = (&stmt.kind, stmt.rhs) {
-                    if v < 0.0 {
+        if !matches!(
+            block.kind,
+            ShockBlockKind::Regular | ShockBlockKind::Heterogeneous
+        ) {
+            continue;
+        }
+        for stmt in &block.stochastic {
+            let span = nonempty(stmt.span);
+            match &stmt.kind {
+                ShockKind::Var(name) | ShockKind::Stderr(name) => {
+                    let key = SeenKey::Var(*name);
+                    if let Some(&first_span) = seen.get(&key) {
                         let n = model.name(*name);
-                        diagnostics.push(Diagnostic::new(
+                        diagnostics.push(
+                            Diagnostic::new(
+                                span,
+                                Severity::Error,
+                                "E111",
+                                format!(
+                                    "shocks: variance or stderr of shock on {n} declared twice"
+                                ),
+                            )
+                            .with_related(RelatedDiagnostic::new(
+                                first_span,
+                                "Earlier variance or standard error entry",
+                            )),
+                        );
+                    }
+                    seen.entry(key).or_insert(stmt.span);
+                    if let (ShockBlockKind::Regular, ShockKind::Var(_), Some(v)) =
+                        (block.kind, &stmt.kind, stmt.rhs)
+                    {
+                        if v < 0.0 {
+                            let n = model.name(*name);
+                            diagnostics.push(Diagnostic::new(
                             span,
                             Severity::Warning,
                             "W112",
@@ -144,15 +160,15 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                                 python_g(v)
                             ),
                         ));
+                        }
                     }
                 }
-            }
-            ShockKind::Cov(names) => {
-                let key = SeenKey::Pair(sorted_names(model, names));
-                if let Some(&first_span) = seen.get(&key).filter(|_| names.len() >= 2) {
-                    let first = model.name(names[0]);
-                    let second = model.name(names[1]);
-                    diagnostics.push(Diagnostic::new(
+                ShockKind::Cov(names) => {
+                    let key = SeenKey::Pair(sorted_names(model, names));
+                    if let Some(&first_span) = seen.get(&key).filter(|_| names.len() >= 2) {
+                        let first = model.name(names[0]);
+                        let second = model.name(names[1]);
+                        diagnostics.push(Diagnostic::new(
                         span,
                         Severity::Error,
                         "E111",
@@ -160,75 +176,73 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                             "shocks: covariance or correlation shock on variable pair ({first}, {second}) declared twice"
                         ),
                     ).with_related(RelatedDiagnostic::new(first_span, "Earlier covariance or correlation entry")));
-                }
-                seen.entry(key).or_insert(stmt.span);
-            }
-            ShockKind::Skew(names) => {
-                let key = if names.len() == 1 {
-                    SeenKey::Skew(vec![names[0]; 3])
-                } else {
-                    SeenKey::Skew(sorted_names(model, names))
-                };
-                if let Some(&first_span) = seen.get(&key) {
-                    if names.len() == 1 {
-                        diagnostics.push(
-                            Diagnostic::new(
-                                span,
-                                Severity::Error,
-                                "E393",
-                                format!(
-                                    "shocks: skewness of {} declared twice",
-                                    model.name(names[0])
-                                ),
-                            )
-                            .with_related(RelatedDiagnostic::new(
-                                first_span,
-                                "Earlier skewness entry",
-                            )),
-                        );
-                    } else if names.len() == 3 {
-                        diagnostics.push(
-                            Diagnostic::new(
-                                span,
-                                Severity::Error,
-                                "E394",
-                                format!(
-                                    "shocks: co-skewness of ({}, {}, {}) declared twice",
-                                    model.name(names[0]),
-                                    model.name(names[1]),
-                                    model.name(names[2])
-                                ),
-                            )
-                            .with_related(RelatedDiagnostic::new(
-                                first_span,
-                                "Earlier co-skewness entry",
-                            )),
-                        );
                     }
-                } else {
-                    seen.insert(key, stmt.span);
+                    seen.entry(key).or_insert(stmt.span);
                 }
-            }
-            ShockKind::Corr { a, b } => {
-                let key = SeenKey::Pair(sorted_names(model, &[*a, *b]));
-                if let Some(&first_span) = seen.get(&key) {
-                    let first = model.name(*a);
-                    let second = model.name(*b);
-                    diagnostics.push(Diagnostic::new(
-                        span,
-                        Severity::Error,
-                        "E111",
-                        format!(
-                            "shocks: covariance or correlation shock on variable pair ({first}, {second}) declared twice"
-                        ),
-                    ).with_related(RelatedDiagnostic::new(first_span, "Earlier covariance or correlation entry")));
+                ShockKind::Skew(names) => {
+                    let key = if names.len() == 1 {
+                        SeenKey::Skew(vec![names[0]; 3])
+                    } else {
+                        SeenKey::Skew(sorted_names(model, names))
+                    };
+                    if let Some(&first_span) = seen.get(&key) {
+                        if names.len() == 1 {
+                            diagnostics.push(
+                                Diagnostic::new(
+                                    span,
+                                    Severity::Error,
+                                    "E393",
+                                    format!(
+                                        "shocks: skewness of {} declared twice",
+                                        model.name(names[0])
+                                    ),
+                                )
+                                .with_related(
+                                    RelatedDiagnostic::new(first_span, "Earlier skewness entry"),
+                                ),
+                            );
+                        } else if names.len() == 3 {
+                            diagnostics.push(
+                                Diagnostic::new(
+                                    span,
+                                    Severity::Error,
+                                    "E394",
+                                    format!(
+                                        "shocks: co-skewness of ({}, {}, {}) declared twice",
+                                        model.name(names[0]),
+                                        model.name(names[1]),
+                                        model.name(names[2])
+                                    ),
+                                )
+                                .with_related(
+                                    RelatedDiagnostic::new(first_span, "Earlier co-skewness entry"),
+                                ),
+                            );
+                        }
+                    } else {
+                        seen.insert(key, stmt.span);
+                    }
                 }
-                seen.entry(key).or_insert(stmt.span);
-                if let Some(v) = stmt.rhs {
-                    if v.abs() > 1.0 {
+                ShockKind::Corr { a, b } => {
+                    let key = SeenKey::Pair(sorted_names(model, &[*a, *b]));
+                    if let Some(&first_span) = seen.get(&key) {
                         let first = model.name(*a);
                         let second = model.name(*b);
                         diagnostics.push(Diagnostic::new(
+                        span,
+                        Severity::Error,
+                        "E111",
+                        format!(
+                            "shocks: covariance or correlation shock on variable pair ({first}, {second}) declared twice"
+                        ),
+                    ).with_related(RelatedDiagnostic::new(first_span, "Earlier covariance or correlation entry")));
+                    }
+                    seen.entry(key).or_insert(stmt.span);
+                    if let (ShockBlockKind::Regular, Some(v)) = (block.kind, stmt.rhs) {
+                        if v.abs() > 1.0 {
+                            let first = model.name(*a);
+                            let second = model.name(*b);
+                            diagnostics.push(Diagnostic::new(
                             span,
                             Severity::Warning,
                             "W110",
@@ -237,12 +251,26 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                                 python_g(v)
                             ),
                         ));
+                        }
                     }
                 }
             }
         }
+        // Pinned ParsingDriver::end_heterogeneous_shocks clears the variance
+        // and pair maps, but retains skew_shocks until end_shocks consumes it.
+        if ordinary_shock_handler(block) {
+            seen.clear();
+        } else {
+            seen.retain(|key, _| matches!(key, SeenKey::Skew(_)));
+        }
     }
     diagnostics
+}
+
+fn ordinary_shock_handler(block: &ShockBlock) -> bool {
+    block.kind == ShockBlockKind::Regular
+        || (block.kind == ShockBlockKind::LearntIn
+            && matches!(block.options.learnt_in, Some(PeriodPoint::Integer(1))))
 }
 
 fn check_shock_types(model: &Model) -> Vec<Diagnostic> {
@@ -258,8 +286,32 @@ fn check_shock_types(model: &Model) -> Vec<Diagnostic> {
         .filter(|n| !det.contains(n))
         .collect();
     let obs: HashSet<Name> = model.varobs.iter().map(|v| v.name).collect();
+    let heterogeneous: HashSet<Name> = model
+        .exogenous
+        .iter()
+        .filter(|decl| model.final_heterogeneity(decl).is_some())
+        .map(|decl| decl.name)
+        .collect();
+    let mut pending_skew = Vec::new();
+    let mut consumed_skew = Vec::new();
+    for block in &model.shock_blocks {
+        if ordinary_shock_handler(block) {
+            consumed_skew.append(&mut pending_skew);
+            continue;
+        }
+        if block.kind == ShockBlockKind::Heterogeneous {
+            pending_skew.extend(
+                block
+                    .stochastic
+                    .iter()
+                    .filter(|stmt| matches!(stmt.kind, ShockKind::Skew(_))),
+            );
+        }
+    }
+    // Heterogeneous blocks retain skew_shocks; the next ordinary block owns
+    // their Check-stage type check. Keep the written row as the error's span.
     let mut out = Vec::new();
-    for stmt in &model.shock_stmts {
+    for stmt in model.shock_stmts.iter().chain(consumed_skew) {
         let span = nonempty(stmt.span);
         let is_exo = |name: &Name| {
             if model.trend_vars.iter().any(|trend| trend.name == *name) {
@@ -329,7 +381,11 @@ fn check_shock_types(model: &Model) -> Vec<Diagnostic> {
                     ));
                 }
             }
-            ShockKind::Skew(names) if names.iter().any(|n| !is_exo(n)) => {
+            ShockKind::Skew(names)
+                if names.iter().any(|n| {
+                    model.final_symbol_kind(*n) != Some("varexo") || heterogeneous.contains(n)
+                }) =>
+            {
                 let a = names.first().map(|n| model.name(*n)).unwrap_or("");
                 let b = names.get(1).map(|n| model.name(*n)).unwrap_or(a);
                 let c = names.get(2).map(|n| model.name(*n)).unwrap_or(a);

@@ -312,7 +312,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E111", ExplainEntry {
         title: "Shock variance or correlation specified more than once",
-        body: "A shock's variance / standard error, or a covariance/correlation pair, is specified more than once in one `shocks` block. Covariance followed by correlation also counts. Dynare refuses: `shocks: variance or stderr of shock on e declared twice` and `shocks: covariance or correlation shock on variable pair (e, u) declared twice`. A later block may repeat the pair.\n\n**Fix**\n\nKeep one variance and one covariance/correlation specification per target in each block.",
+        body: "A shock's variance / standard error, or a covariance/correlation pair, is specified more than once in one ordinary or heterogeneous `shocks` block. Covariance followed by correlation also counts. Dynare refuses: `shocks: variance or stderr of shock on e declared twice` and `shocks: covariance or correlation shock on variable pair (e, u) declared twice`. A later block may repeat the pair.\n\n**Fix**\n\nKeep one variance and one covariance/correlation specification per target in each block.",
         kind: ExplainKind::Shared,
     }),
     ("E113", ExplainEntry {
@@ -822,7 +822,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E270", ExplainEntry {
         title: "shocks skewness on a non-exogenous name",
-        body: "``shocks`` sets skewness on a name that is not exogenous. Dynare refuses: `shocks: setting skewness for '{a}', '{b}', '{c}' is not allowed; skewness can only be specified for exogenous variables`.\n\n**Fix**\n\nUse ``skew`` only on ``varexo`` names.",
+        body: "An ordinary ``shocks`` block holds skewness on a name that is not an aggregate exogenous variable. Dynare refuses: `shocks: setting skewness for '{a}', '{b}', '{c}' is not allowed; skewness can only be specified for exogenous variables`. In Dynare 7.2, an ordinary block, including ``shocks(learnt_in=1)``, also consumes skewness retained by preceding ``shocks(heterogeneity=…)`` blocks.\n\n**Warrant**\n\nDynare prints this Check refusal without a source range. The diagnostic points to the written skewness row, including a row retained from a heterogeneous block.\n\n**Fix**\n\nUse ``skew`` only on aggregate ``varexo`` names when an ordinary shocks block consumes it.",
         kind: ExplainKind::Shared,
     }),
     ("E271", ExplainEntry {
@@ -1629,12 +1629,12 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E393", ExplainEntry {
         title: "Shock skewness declared twice",
-        body: "The same single-shock skewness is specified twice within one `shocks` block. Dynare refuses: `shocks: skewness of e declared twice`. A later `shocks` block may specify it again.\n\n**Fix**\n\nKeep one `skew e` row in each block.",
+        body: "The same single-shock skewness is specified twice. Dynare refuses: `shocks: skewness of e declared twice`. An ordinary `shocks` block, including `shocks(learnt_in=1)`, clears the skewness entries at its end. Dynare 7.2 retains entries after `shocks(heterogeneity=…)`, so repetition in a following heterogeneous or ordinary block also counts.\n\n**Fix**\n\nRemove the repeated `skew e` row.",
         kind: ExplainKind::Shared,
     }),
     ("E394", ExplainEntry {
         title: "Shock co-skewness declared twice",
-        body: "The same three-shock co-skewness is specified twice within one `shocks` block, even if the names are reordered. Dynare refuses: `shocks: co-skewness of (v, e, u) declared twice`. A later `shocks` block may specify it again.\n\n**Fix**\n\nKeep one row for each unordered triple in a block.",
+        body: "The same three-shock co-skewness is specified twice, even if the names are reordered. Dynare refuses: `shocks: co-skewness of (v, e, u) declared twice`. An ordinary `shocks` block, including `shocks(learnt_in=1)`, clears the skewness entries at its end. Dynare 7.2 retains entries after `shocks(heterogeneity=…)`, so repetition in a following heterogeneous or ordinary block also counts.\n\n**Fix**\n\nRemove the repeated row for the unordered triple.",
         kind: ExplainKind::Shared,
     }),
     ("E395", ExplainEntry {

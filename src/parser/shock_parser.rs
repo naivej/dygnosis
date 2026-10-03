@@ -122,19 +122,16 @@ impl Parser<'_> {
             }
         }
         self.i = saved;
-        let body_start = self.tokens.get(body_i).map(|t| t.span.start).unwrap_or(end);
-        let body_end = self
-            .tokens
-            .get(body_end_i)
-            .map(|t| t.span.start)
-            .unwrap_or(end);
         let stochastic = if matches!(kind, ShockBlockKind::Regular) {
-            self.model
-                .shock_stmts
-                .iter()
-                .filter(|stmt| stmt.span.start >= body_start && stmt.span.start < body_end)
-                .cloned()
-                .collect()
+            // Macro copies share written spans. The flat view's latest start
+            // records this block's parser execution, independently of spans.
+            let first = self
+                .model
+                .shock_stmt_block_starts
+                .last()
+                .copied()
+                .unwrap_or(self.model.shock_stmts.len());
+            self.model.shock_stmts[first..].to_vec()
         } else if kind == ShockBlockKind::Heterogeneous {
             self.read_stochastic_rows(body_i, body_end_i)
         } else {
