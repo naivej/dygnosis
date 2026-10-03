@@ -1,7 +1,7 @@
 # Structural model Diff
 
-This development feature is prepared for 0.11.2. It is not part of the released
-extension until that release's integration and package checks pass.
+The 0.11.4 candidate includes structural model comparison. Package verification
+and publication remain pending; see [distribution](distribution.md).
 
 Open a model and run **Dygnosis: Diff with…**. On an include, choose its known
 model owner when asked. A native file dialog chooses the second `.mod` or `.dyn`.

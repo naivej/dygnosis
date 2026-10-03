@@ -1,6 +1,6 @@
 # Editor settings and LSP contracts
 
-Dygnosis 0.11.0 supplies these contracts through the language server. Configure an LSP client to launch `dygnosis` over stdio. The unpublished VS Code client preparation in `editors/vscode` adds native Settings, a [count bar](vscode-status.md), [model view](vscode-model-view.md), [colors](vscode-colors.md), [CodeLens](vscode-lenses.md), and [diagnostic controls](vscode-diagnostics.md). See [distribution](distribution.md) for candidate packages and release verification.
+Dygnosis supplies these contracts through the language server. Configure an LSP client to launch `dygnosis` over stdio. The 0.11.4 VS Code candidate in `editors/vscode` adds native Settings, a [count bar](vscode-status.md), [model view](vscode-model-view.md), [colors](vscode-colors.md), [CodeLens](vscode-lenses.md), [diagnostic controls](vscode-diagnostics.md), [model Diff](vscode-diff.md), [origin navigation](preview-origins.md), and [project checks](project-diagnostics.md). See [distribution](distribution.md) for candidate packages and release verification.
 
 ## Settings
 
@@ -140,7 +140,7 @@ Migrate rules that targeted a specific old Dynare role as follows:
 | `macro:dynare` for model parameters | `dynareParameter:dynare` |
 | `parameter:dynare` for model locals | `dynareModelLocal:dynare` |
 
-The planned VS Code adapter registers `variable` as the parent of all four custom types, so a generic `variable` rule can style every role there. Keep role-specific selectors when that is the intended scope. This server release does not install VS Code token registrations or theme rules.
+The VS Code client registers `variable` as the parent of all four custom types, so a generic `variable` rule can style every role there. Keep role-specific selectors when that is the intended scope. Other LSP clients supply their own token registrations and theme rules.
 
 ## Expression value hints
 

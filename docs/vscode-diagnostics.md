@@ -1,6 +1,6 @@
 # Diagnostic controls in VS Code
 
-Dygnosis diagnostics appear in the editor and Problems panel. Related locations appear beneath a diagnostic and open the earlier declaration or include site. The extension checks open model roots and their includes; project-wide discovery arrives in 0.11.3.
+Dygnosis diagnostics appear in the editor and Problems panel. Related locations appear beneath a diagnostic and open the earlier declaration or include site. The extension checks open model roots and their includes. It also checks unopened saved `.mod` roots in workspace folders by default; see [project checks](project-diagnostics.md).
 
 Use the lightbulb or **Quick Fix** on a Dygnosis diagnostic to choose:
 

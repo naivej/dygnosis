@@ -1,13 +1,20 @@
 # Changelog
 
-## Unreleased — 0.11 client preparation
+## v0.11.4
+
+Unreleased candidate. The 0.11 series has no published intermediate releases.
 
 - Adds a native VS Code client with bundled/explicit executable selection, per-folder settings, include ownership, negotiated semantic roles, and an effective-model preview.
 - Adds model counts, a native model view and equation navigation, configurable block tinting, and equation/reference/preview CodeLens actions.
 - Adds in-memory Ignore/Show diagnostic controls and safe read-only diagnostic explanations. Existing fixes retain their diagnostic and source context.
-- Prepares native VSIX and standalone packaging, exact source/license/checksum records, installed-host checks, and gated publication. Candidate checks do not establish a published release; native MCP, target, theme, upgrade, and remote gates remain tracked in the development plan.
-
-## v0.11.0
+- Adds structural model Diff with filters and verified source navigation, and written-source and macro-origin jumps from the effective-model preview. Edits and changed inputs disable stale navigation until refresh.
+- **Dygnosis: Set up MCP for this project** creates project-local `.mcp.json` with a stable managed executable. Managed updates preserve the command path and wait for a running Windows MCP process to stop.
+- Checks unopened saved `.mod` roots in workspace folders by default, with project progress, Recheck, cancellation and folder exclusions. Open models and excluded dependencies retain their editor diagnostics.
+- Duplicate checks reach heterogeneous shock rows. Includes in inactive macro branches and empty loops no longer produce false missing-file or syntax errors.
+- Steady-state assignments accept valid scalar and multiple targets, check target types and right-side symbol roles, and retain the pinned Dynare wording. Valid assigned outputs, excluded names and qualified native calls no longer receive the repaired false diagnostics.
+- Related-file discovery retains qualified external-function and derivative-helper names and resolves their package files.
+- Model expressions retain complete qualified external-function calls, require their declarations at the call, and check argument counts and malformed arguments with Dynare's sentences.
+- Prepares native VSIX and standalone archives with the bundled engine, licenses and checksums. Package verification and publication remain open.
 
 - Workspace-folder and loose-file settings isolate include paths and cached inputs across roots. Complete configuration snapshots and opt-in `dynare/modelInfoChanged` notifications support live refresh.
 - Adds LSP `dynare/modelInfo`, sharing MCP counts and timing while retaining written statements, declarations, counted equations, block categories, related files, and verified source segments. Outline and folding stay local to the requested file. Incomplete input withholds authoritative counts and numbers. Equation numbers describe the written model before Dynare transformation.

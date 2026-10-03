@@ -1,19 +1,19 @@
 # Dygnosis packages
 
-The 0.11 client preparation includes the Dygnosis engine for its workspace host. It
+The 0.11.4 candidate includes the Dygnosis engine for its workspace host. It
 does not download the engine when activated. Its analysis requires no separate
 Rust, Python, MATLAB or Dynare installation. Dygnosis reads models and stops
 before MATLAB computation; it does not run the official Dynare preprocessor.
 
-All six candidate targets passed installed VS Code 1.102.0/1.140.0 and unpacked
-standalone checks, including the final collector, in
-[native CI](https://github.com/naivej/dygnosis/actions/runs/37068721595).
+Earlier candidates passed all six installed VS Code 1.102.0/1.140.0 and unpacked
+standalone checks, including the collector, in
+[native CI](https://github.com/naivej/dygnosis/actions/runs/37086177953).
 Release review and publication remain pending; final release versions require
 a fresh matching package matrix.
 
 | Package target | Native verification host | Runtime evidence |
 |---|---|---|
-| `win32-x64` | Windows Server 2022, build 20348 | Native launch passed; C runtime linked statically. Windows desktop upgrade check remains pending. |
+| `win32-x64` | Windows Server 2022, build 20348 | Native launch passed; C runtime linked statically. Running-image managed updates passed locally; final packaged/client upgrade checks remain pending. |
 | `win32-arm64` | Windows 11 ARM, build 26200 | Native ARM64 launch passed |
 | `darwin-x64` | macOS 15 Intel, Darwin 24.6 | Native launch passed; deployment target 13.0 is not a tested minimum |
 | `darwin-arm64` | macOS 15 ARM, Darwin 24.6 | Native ARM64 launch passed |
@@ -30,12 +30,13 @@ also require their recorded system `libgcc_s`, `libm`, and loader. The table
 records tested candidate hosts and measured symbols rather than untested older
 OS support. Remote placement and final native MCP routing remain release gates.
 
-Each release offers target-specific VSIX files and standalone `.tar.gz` archives
-on its [GitHub Release](https://github.com/naivej/dygnosis/releases). The VSIX
-files on GitHub and Marketplace use the same tested bytes. Updates replace the
+The release workflow prepares target-specific VSIX files and standalone `.tar.gz`
+archives for [GitHub Releases](https://github.com/naivej/dygnosis/releases). The
+0.11.4 candidate is not published. Publication uses the same verified VSIX bytes
+for GitHub and Marketplace. Updates replace the
 client and its engine together. An explicit absolute `dynare.serverPath` in
 user/machine settings selects another executable for both LSP and the VS Code
-MCP provider. Read the [settings guide](editor-settings.md) for recovery controls.
+MCP provider. Read the [MCP guide](vscode-mcp.md) for executable override recovery.
 
 For standalone CLI or MCP use, choose the archive matching your host and verify
 its SHA-256 against the release evidence. Unpack it into a persistent directory;
