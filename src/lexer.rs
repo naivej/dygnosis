@@ -41,6 +41,9 @@ pub struct Token {
     pub span: Span,
     /// Synthesized text after expansion; `None` means `src[span]`.
     pub lexeme: Option<String>,
+    /// Lexical adjacency inside one interpolation, before its spans are mapped
+    /// to the written source. `None` uses the ordinary source-span boundary.
+    pub(crate) expanded_adjacent_next: Option<bool>,
 }
 
 impl Token {
@@ -49,6 +52,7 @@ impl Token {
             kind,
             span,
             lexeme: None,
+            expanded_adjacent_next: None,
         }
     }
 
@@ -57,6 +61,7 @@ impl Token {
             kind,
             span,
             lexeme: Some(lexeme.into()),
+            expanded_adjacent_next: None,
         }
     }
 

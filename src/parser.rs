@@ -2584,6 +2584,9 @@ impl Parser<'_> {
         // Same body as `model`: an opener spelling is an identifier here.
         self.in_equation_body = true;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
+            if self.refuse_ss_scalar_target() {
+                continue;
+            }
             if let Some((eq, range)) = self.parse_equation_statement() {
                 self.record_lhs_write(&eq, &range);
                 self.model.steady_state_equations.push(eq);
@@ -2595,6 +2598,254 @@ impl Parser<'_> {
         }
         let end = self.finish_block_named("steady_state_model", opener_span, body_i);
         self.model.ss_block = Some(Span { start, end });
+    }
+
+    /// 7.2's `steady_state_equation` takes `symbol EQUAL`, rather than a
+    /// model-expression LHS. Its bracketed multiple-output form is separate.
+    /// Refuse before parsing an invalid target as a use or an implicit local.
+    fn refuse_ss_scalar_target(&mut self) -> bool {
+        let (index, expected) = if self.at(TokenKind::Ident) {
+            if self
+                .ss_block_word_token(self.i)
+                .is_some_and(|token| token != "END" && !Self::ss_symbol_token(token))
+            {
+                (self.i, None)
+            } else if self.peek_kind(1) == Some(TokenKind::Eq) {
+                return false;
+            } else {
+                (self.i + 1, Some("EQUAL"))
+            }
+        } else if matches!(
+            self.tokens[self.i].kind,
+            TokenKind::LParen
+                | TokenKind::Number
+                | TokenKind::Hash
+                | TokenKind::Plus
+                | TokenKind::Minus
+        ) {
+            (self.i, None)
+        } else {
+            return false;
+        };
+        let token = &self.tokens[index];
+        let mut span = token.span;
+        let combined_equal = self.tokens.get(index + 1).is_some_and(|next| {
+            next.kind == TokenKind::Eq
+                && token
+                    .expanded_adjacent_next
+                    .unwrap_or(next.span.start == span.end)
+        });
+        let unexpected = match token.kind {
+            TokenKind::Plus | TokenKind::Star if combined_equal => {
+                span.end = self.tokens[index + 1].span.end;
+                if token.kind == TokenKind::Plus {
+                    "PLUS_EQUAL".to_string()
+                } else {
+                    "TIMES_EQUAL".to_string()
+                }
+            }
+            TokenKind::Star => "TIMES".to_string(),
+            TokenKind::Slash => "DIVIDE".to_string(),
+            TokenKind::Caret => "POWER".to_string(),
+            TokenKind::Dot => "'.'".to_string(),
+            TokenKind::Hash => "'#'".to_string(),
+            TokenKind::LBrack => "'['".to_string(),
+            TokenKind::RBrack => "']'".to_string(),
+            TokenKind::EqEq => "EQUAL_EQUAL".to_string(),
+            TokenKind::Ne => "EXCLAMATION_EQUAL".to_string(),
+            TokenKind::Lt => "LESS".to_string(),
+            TokenKind::Gt => "GREATER".to_string(),
+            TokenKind::Le => "LESS_EQUAL".to_string(),
+            TokenKind::Ge => "GREATER_EQUAL".to_string(),
+            TokenKind::String => "QUOTED_STRING".to_string(),
+            TokenKind::Perpendicular => "PERPENDICULAR".to_string(),
+            TokenKind::Eof => "end of file".to_string(),
+            TokenKind::Ident => self
+                .ss_block_word_token(index)
+                .map(str::to_string)
+                .unwrap_or_else(|| self.bison_token_name(index)),
+            _ => self.bison_token_name(index),
+        };
+        let message = match expected {
+            Some(expected) => {
+                format!("syntax error, unexpected {unexpected}, expecting {expected}")
+            }
+            None => format!("syntax error, unexpected {unexpected}"),
+        };
+        self.push_bison(span, message);
+        // A refused target may have unmatched parentheses. Its semicolon or
+        // block boundary still ends recovery; balancing would consume later rows.
+        while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) && !self.at_block_stop() {
+            self.bump();
+        }
+        self.eat(TokenKind::Semi);
+        true
+    }
+
+    fn ss_block_word_token(&self, index: usize) -> Option<&'static str> {
+        // Complete literal-word rules in the pinned lexer's DYNARE_BLOCK state.
+        // Token naming is independent of the Bison symbol production below.
+        const WORDS: &[(&str, &str)] = &[
+            ("end", "END"),
+            ("relative_irf", "RELATIVE_IRF"),
+            ("from_initval_to_endval", "FROM_INITVAL_TO_ENDVAL"),
+            ("model_name", "MODEL_NAME"),
+            ("name", "NAME"),
+            ("diff", "DIFF"),
+            ("use_calibration", "USE_CALIBRATION"),
+            ("growth", "GROWTH"),
+            ("var", "VAR"),
+            ("varexo", "VAREXO"),
+            ("stderr", "STDERR"),
+            ("values", "VALUES"),
+            ("corr", "CORR"),
+            ("skew", "SKEW"),
+            ("periods", "PERIODS"),
+            ("scales", "SCALES"),
+            ("add", "ADD"),
+            ("multiply", "MULTIPLY"),
+            ("cutoff", "CUTOFF"),
+            ("mfs", "MFS"),
+            ("static_mfs", "STATIC_MFS"),
+            ("balanced_growth_test_tol", "BALANCED_GROWTH_TEST_TOL"),
+            ("heterogeneity", "HETEROGENEITY"),
+            ("gamma_pdf", "GAMMA_PDF"),
+            ("beta_pdf", "BETA_PDF"),
+            ("normal_pdf", "NORMAL_PDF"),
+            ("inv_gamma_pdf", "INV_GAMMA_PDF"),
+            ("inv_gamma1_pdf", "INV_GAMMA1_PDF"),
+            ("inv_gamma2_pdf", "INV_GAMMA2_PDF"),
+            ("uniform_pdf", "UNIFORM_PDF"),
+            ("weibull_pdf", "WEIBULL_PDF"),
+            ("dsge_prior_weight", "DSGE_PRIOR_WEIGHT"),
+            ("surprise", "SURPRISE"),
+            ("bind", "BIND"),
+            ("relax", "RELAX"),
+            ("error_bind", "ERROR_BIND"),
+            ("error_relax", "ERROR_RELAX"),
+            ("relative_to_initval", "RELATIVE_TO_INITVAL"),
+            ("restriction", "RESTRICTION"),
+            ("component", "COMPONENT"),
+            ("target", "TARGET"),
+            ("auxname", "AUXNAME"),
+            (
+                "auxname_target_nonstationary",
+                "AUXNAME_TARGET_NONSTATIONARY",
+            ),
+            ("kind", "KIND"),
+            ("ll", "LL"),
+            ("dl", "DL"),
+            ("dd", "DD"),
+            ("weights", "WEIGHTS"),
+            ("exogenize", "EXOGENIZE"),
+            ("endogenize", "ENDOGENIZE"),
+            ("stderr_multiples", "STDERR_MULTIPLES"),
+            ("diagonal_only", "DIAGONAL_ONLY"),
+            ("equation", "EQUATION"),
+            ("exclusion", "EXCLUSION"),
+            ("lag", "LAG"),
+            ("coeff", "COEFF"),
+            ("overwrite", "OVERWRITE"),
+            ("learnt_in", "LEARNT_IN"),
+            ("upper_cholesky", "UPPER_CHOLESKY"),
+            ("lower_cholesky", "LOWER_CHOLESKY"),
+            ("use_dll", "USE_DLL"),
+            ("block", "BLOCK"),
+            ("bytecode", "BYTECODE"),
+            ("all_values_required", "ALL_VALUES_REQUIRED"),
+            ("no_static", "NO_STATIC"),
+            ("differentiate_forward_vars", "DIFFERENTIATE_FORWARD_VARS"),
+            ("parallel_local_files", "PARALLEL_LOCAL_FILES"),
+            ("linear", "LINEAR"),
+            ("exp", "EXP"),
+            ("log", "LOG"),
+            ("log10", "LOG10"),
+            ("ln", "LN"),
+            ("sin", "SIN"),
+            ("cos", "COS"),
+            ("tan", "TAN"),
+            ("asin", "ASIN"),
+            ("acos", "ACOS"),
+            ("atan", "ATAN"),
+            ("sinh", "SINH"),
+            ("cosh", "COSH"),
+            ("tanh", "TANH"),
+            ("asinh", "ASINH"),
+            ("acosh", "ACOSH"),
+            ("atanh", "ATANH"),
+            ("sqrt", "SQRT"),
+            ("cbrt", "CBRT"),
+            ("max", "MAX"),
+            ("min", "MIN"),
+            ("abs", "ABS"),
+            ("sign", "SIGN"),
+            ("normcdf", "NORMCDF"),
+            ("normpdf", "NORMPDF"),
+            ("erf", "ERF"),
+            ("erfc", "ERFC"),
+            ("steady_state", "STEADY_STATE"),
+            ("expectation", "EXPECTATION"),
+            ("var_expectation", "VAR_EXPECTATION"),
+            ("pac_expectation", "PAC_EXPECTATION"),
+            ("pac_target_nonstationary", "PAC_TARGET_NONSTATIONARY"),
+            ("sum", "SUM"),
+            ("varobs", "VAROBS"),
+            ("varexobs", "VAREXOBS"),
+            ("nan", "NAN_CONSTANT"),
+            ("inf", "INF_CONSTANT"),
+            ("constants", "CONSTANTS"),
+        ];
+        let token = self.tokens.get(index)?;
+        if token.kind != TokenKind::Ident {
+            return None;
+        }
+        WORDS
+            .iter()
+            .find(|(word, _)| self.lexeme(token).eq_ignore_ascii_case(word))
+            .map(|(_, token)| *token)
+    }
+
+    fn ss_symbol_token(token: &str) -> bool {
+        // DynareBison.yy:5165, not a list of words that happen to look reserved.
+        matches!(
+            token,
+            "IDENTIFIER"
+                | "ALPHA"
+                | "BETA"
+                | "NINV"
+                | "ABAND"
+                | "CMS"
+                | "NCMS"
+                | "CNUM"
+                | "GAMMA"
+                | "INV_GAMMA"
+                | "INV_GAMMA1"
+                | "INV_GAMMA2"
+                | "NORMAL"
+                | "UNIFORM"
+                | "EPS"
+                | "PDF"
+                | "FIG"
+                | "NONE"
+                | "DR"
+                | "PRIOR"
+                | "TRUE"
+                | "FALSE"
+                | "BIND"
+                | "RELAX"
+                | "ERROR_BIND"
+                | "ERROR_RELAX"
+                | "KIND"
+                | "LL"
+                | "DL"
+                | "DD"
+                | "ADD"
+                | "MULTIPLY"
+                | "MFS"
+                | "RESIDUAL"
+                | "AIM"
+                | "NAME"
+        )
     }
 
     fn parse_initval_block(&mut self) {

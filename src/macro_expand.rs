@@ -619,14 +619,16 @@ fn merge_adjacent(src: &str, prev: &Token, next: &Token) -> Option<Token> {
     if !is_dynare_ident(&combined) {
         return None;
     }
-    Some(Token::with_lexeme(
+    let mut merged = Token::with_lexeme(
         TokenKind::Ident,
         Span {
             start: prev.span.start,
             end: next.span.end,
         },
         combined,
-    ))
+    );
+    merged.expanded_adjacent_next = next.expanded_adjacent_next;
+    Some(merged)
 }
 
 fn is_dynare_ident(text: &str) -> bool {
@@ -893,7 +895,7 @@ fn subst_interp(
         .is_some_and(|piece| (piece.span.end as usize) < repl.len());
     let last = pieces.len() - 1;
     pieces
-        .into_iter()
+        .iter()
         .enumerate()
         .map(|(index, piece)| {
             let mut span = tok.span;
@@ -906,7 +908,11 @@ fn subst_interp(
             if span.start >= span.end {
                 return Err(MacroEvalError::Unsupported);
             }
-            Ok(Token::with_lexeme(piece.kind, span, piece.text(&repl)))
+            let mut replacement = Token::with_lexeme(piece.kind, span, piece.text(&repl));
+            replacement.expanded_adjacent_next = pieces
+                .get(index + 1)
+                .map(|next| piece.span.end == next.span.start);
+            Ok(replacement)
         })
         .collect()
 }
