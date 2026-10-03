@@ -84,7 +84,7 @@ const vscode = {
     },
     onDidChangeWorkspaceFolders: listener => host.folderChanged.event(listener),
     onDidChangeConfiguration: listener => host.configured.event(listener),
-    onDidChangeTextDocument: listener => host.edited.event(listener),
+    onDidChangeTextDocument: listener => host.edited.event(event => listener({ contentChanges: [{ text: "changed" }], ...event })),
     onDidCloseTextDocument: listener => host.closed.event(listener),
   },
   commands: {
@@ -123,15 +123,15 @@ function setup(options = {}) {
   host = { folders: options.folders ?? [folder()], settings: options.settings ?? {}, resources: new Map(), scopes: [],
     editor: options.editor, items: [], views: [], watchers: [], picks: [], choices: [], inputs: [], inputValues: [], updates: [], executed: [], relativePaths: [], commands: new Map(),
     active: new Emitter(), folderChanged: new Emitter(), configured: new Emitter(), edited: new Emitter(), closed: new Emitter() };
-  const changed = new Emitter();
+  const changed = new Emitter(), updated = new Emitter();
   const service = { client: options.client, currentInstance: 1, starts: 0, queries: [], logged: [], status: options.status ?? facts(), onDidChange: changed.event,
-    log: message => service.logged.push(message),
+    log: message => service.logged.push(message), onDidUpdateModelInfo: updated.event,
     ensureStarted: async () => { if (!service.client) { ++service.starts; service.client = connection(); changed.fire(); } },
     execute: async (command, args, token) => { service.queries.push({ command, args, token }); return service.status; },
     chosenRootForDocument: current => current.languageId === "dynare" && /\.(mod|dyn)$/i.test(current.uri.path) ? current.uri : undefined,
   };
   const configure = (key, value) => { host.settings[key] = value; host.configured.fire({ affectsConfiguration: section => section === "dynare" || `dynare.${key}`.startsWith(section) }); };
-  return { host, service, changed, configure };
+  return { host, service, changed, updated, configure };
 }
 function rows(env) { return env.host.views[0].options.treeDataProvider.getChildren(); }
 function liveWatchers(env, pattern) { return env.host.watchers.filter(watcher => !watcher.disposed && (!pattern || watcher.pattern.pattern === pattern)); }
@@ -221,6 +221,32 @@ test("only the chosen owner is sent for priority, including include roots, null 
   env.host.editor = { document: document("untitled:/scratch.mod") }; env.service.chosenRootForDocument = current => current.uri;
   env.host.active.fire(); assert.deepEqual(env.service.client.sent.at(-1).params, { root_uri: "untitled:/scratch.mod" });
   registration.dispose();
+});
+test("restored model facts signal chosen priority without project queries, broad invalidation or stale owner guesses", async () => {
+  const child = document(`${project}/shared.inc`), env = setup({ editor: { document: child } });
+  let chosen;
+  env.service.chosenRootForDocument = () => chosen;
+  const registration = registerProjectStatus(env.service); await flush();
+  const beforeQueries = env.service.queries.length, beforeUpdates = env.service.client.sent.length;
+  chosen = uri(`${other}/owner.mod`);
+  env.updated.fire({ client_instance: env.service.currentInstance, root_uri: chosen.toString() });
+  assert.equal(env.service.queries.length, beforeQueries);
+  assert.equal(env.service.client.sent.length, beforeUpdates + 1);
+  assert.deepEqual(env.service.client.sent.at(-1).params, { root_uri: `${other}/owner.mod` });
+  env.updated.fire({ client_instance: env.service.currentInstance, root_uri: `${project}/obsolete-owner.mod` });
+  assert.equal(env.service.client.sent.length, beforeUpdates + 1, "proof event payload cannot choose its own root");
+  chosen = undefined; env.changed.fire(); assert.deepEqual(env.service.client.sent.at(-1).params, { root_uri: null });
+  chosen = uri(`${other}/owner.mod`); const afterInvalidation = env.service.client.sent.length;
+  env.updated.fire({ client_instance: env.service.currentInstance - 1, root_uri: chosen.toString() });
+  assert.equal(env.service.client.sent.length, afterInvalidation, "an old-instance restoration event is ignored");
+  env.updated.fire({ client_instance: env.service.currentInstance, root_uri: chosen.toString() });
+  assert.deepEqual(env.service.client.sent.at(-1).params, { root_uri: chosen.toString() });
+  assert.equal(env.service.queries.length, beforeQueries); registration.dispose(); assert.equal(env.updated.listeners.size, 0);
+});
+test("metadata-only editor events preserve project coverage without querying or advancing the pass", async () => {
+  const env = setup(), registration = registerProjectStatus(env.service); await flush();
+  const before = env.service.queries.length; env.host.edited.fire({ document: document(), contentChanges: [] });
+  assert.match(env.host.items[0].text, /1\/1 checked/); await flush(); assert.equal(env.service.queries.length, before); registration.dispose();
 });
 test("exact arbitrary-extension, missing and companion candidate watches treat glob characters literally", async () => {
   const candidates = [`${other}/part%5B1%5D%7Bcopy%7D.data`, `${other}/missing.noext`, `${other}/main_steadystate.m`];
@@ -405,6 +431,6 @@ test("malformed notification clears stale coverage, and disposal prevents late u
   registration.dispose(); pending.resolve(facts([root("checked", { errors: 99 })])); await flush();
   assert.equal(env.host.items[0].visible, false); assert.equal(env.host.items[0].disposed, true); assert.equal(env.host.views[0].disposed, true);
   assert.equal(liveWatchers(env).length, 0); assert.equal(env.host.commands.size, 0);
-  for (const emitter of [env.changed, env.host.active, env.host.folderChanged, env.host.configured, env.host.edited, env.host.closed]) assert.equal(emitter.listeners.size, 0);
+  for (const emitter of [env.changed, env.updated, env.host.active, env.host.folderChanged, env.host.configured, env.host.edited, env.host.closed]) assert.equal(emitter.listeners.size, 0);
   assert.equal(env.service.client.subscriptions.get(capability.status_notification).listeners.size, 0);
 });

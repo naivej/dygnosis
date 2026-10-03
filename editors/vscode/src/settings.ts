@@ -21,15 +21,25 @@ export function listSetting(key: string, resource: vscode.Uri | undefined, allow
   if (result.length !== value.length) log(`Invalid or repeated entries in dynare.${key} were ignored.`);
   return result;
 }
+export function projectDiagnosticsSetting(log: Log): boolean {
+  const value: unknown = vscode.workspace.getConfiguration("dynare").get("projectDiagnostics", true);
+  if (typeof value === "boolean") return value;
+  log("Invalid dynare.projectDiagnostics; using true.");
+  return true;
+}
+function stringListSetting(key: string, resource: vscode.Uri | undefined, log: Log): string[] {
+  const raw = valueSetting(key, resource, []);
+  const values = Array.isArray(raw) ? raw.filter((item): item is string => typeof item === "string") : [];
+  if (!Array.isArray(raw) || values.length !== raw.length) log(`Invalid dynare.${key} entries were ignored.`);
+  return values;
+}
 export function engineSettings(resource: vscode.Uri | undefined, log: Log) {
-  const rawPaths = valueSetting("searchPaths", resource, []);
-  const searchPaths = Array.isArray(rawPaths) ? rawPaths.filter((item): item is string => typeof item === "string") : [];
-  if (!Array.isArray(rawPaths) || searchPaths.length !== rawPaths.length) log("Invalid dynare.searchPaths entries were ignored.");
+  const searchPaths = stringListSetting("searchPaths", resource, log);
   const rawIndent = valueSetting("formatIndent", resource, "tab");
   const formatIndent = rawIndent === "tab" || (typeof rawIndent === "number" && Number.isInteger(rawIndent) && rawIndent >= 1 && rawIndent <= 8) ? rawIndent : "tab";
   if (formatIndent !== rawIndent) log("Invalid dynare.formatIndent; using a tab.");
   return {
-    searchPaths, formatIndent,
+    searchPaths, formatIndent, projectExcludePaths: stringListSetting("projectExcludePaths", resource, log),
     nameDetails: {
       longName: booleanSetting("nameDetails.longName", resource, true, log),
       tex: booleanSetting("nameDetails.tex", resource, true, log),
@@ -44,7 +54,7 @@ export function engineSettings(resource: vscode.Uri | undefined, log: Log) {
 export function configurationSnapshot(log: Log) {
   return { dynare: { configuration: {
     schemaVersion: 1,
-    loose: engineSettings(undefined, log),
+    loose: { ...engineSettings(undefined, log), projectDiagnostics: projectDiagnosticsSetting(log) },
     folders: (vscode.workspace.workspaceFolders ?? []).filter(folder => folder.uri.scheme === "file").map(folder => ({
       uri: folder.uri.toString(), settings: engineSettings(folder.uri, log),
     })),

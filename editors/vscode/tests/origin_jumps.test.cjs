@@ -602,6 +602,102 @@ test("real client cancellation releases the initial preview proof on close", asy
   env.engine.infos[0].reply.resolve(env.engine.snapshot()); await env.dispose();
 });
 
+test("a delayed root file observation after the initial proof requires Refresh before a source jump", async () => {
+  const env = await realClientSetup(), show = vscode.window.showTextDocument;
+  let observed = false;
+  vscode.window.showTextDocument = async (document, options) => {
+    if (!observed && document.uri.scheme === "dygnosis-effective") {
+      await flush();
+      assert.equal(env.engine.infos.length, 1, "the initial preview proof has completed");
+      observed = true;
+      // Replay native root-create delivery after its proof, before the preview
+      // becomes active. The bytes and engine revision have not changed.
+      env.service.invalidate(undefined, uri(main));
+    }
+    return show(document, options);
+  };
+  try {
+    const session = await env.show();
+    assert.equal(observed, true);
+    assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
+    const requests = env.engine.infos.length;
+    await env.run("goToWrittenSource");
+    assert.equal(env.host.editor.document, session.document, "stale mappings cannot reveal a source");
+    assert.equal(env.engine.infos.length, requests, "an unavailable action does not silently refresh its mapping");
+    await env.run("refreshEffectiveModel");
+    assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
+    assert.equal(session.result.revision, "current");
+    await env.run("goToWrittenSource");
+    assert.equal(env.host.editor.document, env.rootDocument);
+    assert.deepEqual(env.host.shown.at(-1).options.selection, new Range(1, 0, 1, 3));
+  } finally { vscode.window.showTextDocument = show; await env.dispose(); }
+});
+
+test("unrelated root notifications during source loading obtain a bounded new proof for the unchanged preview", async context => {
+  for (const interruptions of [1, 3, 4]) await context.test(`${interruptions} interruptions`, async () => {
+    const env = await realClientSetup(), include = "file:///project/unopened.inc";
+    let interrupted = 0;
+    try {
+      env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include] });
+      const session = await env.show();
+      env.host.load = async value => {
+        const loaded = doc(value.toString(), "y=3;\n"); env.host.documents.set(value.toString(), loaded); env.host.opened.fire(loaded);
+        env.engine.value.navigation[0].written_locations[0].document_version = loaded.version;
+        return loaded;
+      };
+      env.engine.infoHook = call => {
+        if (!env.host.documents.has(include) || interrupted >= interruptions) return false;
+        ++interrupted;
+        void Promise.resolve().then(() => { env.service.invalidate("file:///project/other.mod"); call.reply.resolve(env.engine.snapshot()); });
+        return true;
+      };
+      await env.run("goToWrittenSource");
+      assert.equal(interrupted, interruptions);
+      assert.equal(session.result.revision, "current");
+      if (interruptions < 4) {
+        assert.equal(env.host.editor.document.uri.toString(), include);
+        assert.deepEqual(env.host.shown.at(-1).options.selection, new Range(0, 0, 0, 3));
+      } else {
+        assert.equal(env.host.editor.document, session.document);
+        assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
+      }
+    } finally { await env.dispose(); }
+  });
+});
+
+test("loader proof retries reject changed bytes and relevant hard input after an unrelated interruption", async context => {
+  for (const change of ["revision", "source-version", "root-notification", "global-notification"]) await context.test(change, async () => {
+    const env = await realClientSetup(), include = "file:///project/unopened.inc";
+    let interrupted = false;
+    try {
+      env.engine.value = payload({ effective_text: "model;\ny = 3;\nend;", navigation: [row({ written_locations: [target(include, new Range(0, 0, 0, 3), null)] })], dependency_candidates: [main, include] });
+      const session = await env.show(); let loaded;
+      env.host.load = async value => {
+        loaded = doc(value.toString(), "y=3;\n"); env.host.documents.set(value.toString(), loaded); env.host.opened.fire(loaded);
+        env.engine.value.navigation[0].written_locations[0].document_version = loaded.version;
+        return loaded;
+      };
+      env.engine.infoHook = call => {
+        if (!loaded || interrupted) return false;
+        interrupted = true;
+        void Promise.resolve().then(() => {
+          env.service.invalidate("file:///project/other.mod");
+          if (change === "revision") { env.engine.value.revision = "changed"; env.engine.value.effective_text = "model;\ny = 4;\nend;"; }
+          if (change === "source-version") { ++loaded.version; loaded.text = "y=4;\n"; env.host.edited.fire({ document: loaded, contentChanges: [{ text: loaded.text }] }); }
+          if (change === "root-notification") env.service.invalidate(main);
+          if (change === "global-notification") env.service.invalidate();
+          call.reply.resolve(env.engine.snapshot());
+        });
+        return true;
+      };
+      await env.run("goToWrittenSource");
+      assert.equal(interrupted, true);
+      assert.equal(env.host.editor.document, session.document);
+      assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
+    } finally { await env.dispose(); }
+  });
+});
+
 test("real client Refresh supersedes an unresolved initial proof without waiting for it", async () => {
   const env = await realClientSetup(); env.engine.hold = true;
   const session = await env.show(); env.engine.hold = false;

@@ -42,7 +42,7 @@ const vscode = {
   window: {
     get activeTextEditor() { return host.editor; },
     createOutputChannel: () => ({ appendLine() {}, append() {}, show() {}, dispose() {} }),
-    showErrorMessage: () => Promise.resolve(undefined), showQuickPick: items => Promise.resolve(items[0]),
+    showErrorMessage: () => Promise.resolve(undefined), showQuickPick: items => { host.picks.push(items); return Promise.resolve(host.pick ? host.pick(items) : items[0]); },
     showTextDocument: (document, options) => { host.opened.push(document.uri.toString()); host.reveals.push({ document, options }); return Promise.resolve({ document }); },
   },
   commands: { registerCommand: (name, callback) => { host.commands.set(name, callback); return new Disposable(() => host.commands.delete(name)); } },
@@ -70,7 +70,7 @@ Module._load = function(id, ...args) { return id === "vscode" ? vscode : id === 
 const { DygnosisClient, extendCapabilities } = require("../out/client");
 Module._load = originalLoad;
 function reset() {
-  host = { documents: [], folders: [{ uri: Uri.parse("file:///project"), name: "project" }], settings: {}, commands: new Map(), opened: [], reveals: [], managed: [], watchers: [], notifications: [], symbols: 0 };
+  host = { documents: [], folders: [{ uri: Uri.parse("file:///project"), name: "project" }], settings: {}, commands: new Map(), opened: [], reveals: [], managed: [], watchers: [], notifications: [], picks: [], symbols: 0 };
   for (const name of ["created", "disk", "deleted", "open", "edit", "close", "folder", "config"]) host[name] = new Emitter();
 }
 function model(root = "file:///project/root.mod", related = []) {
@@ -291,6 +291,130 @@ test("navigation capabilities advertise the agreed comparison and effective-prev
   assert.deepEqual(capabilities.experimental.dygnosis.compareModels, { navigation_schema_version: 1 });
   assert.deepEqual(capabilities.experimental.dygnosis.effectivePreview, { navigation_schema_version: 1, dependency_candidates: true });
   assert.equal(capabilities.experimental.dygnosis.modelInfo.schema_version, 1);
+  assert.equal(capabilities.experimental.dygnosis.projectStatusChanged, true);
+});
+test("chosen context reads only a proven selected owner and restores it on a separate model-info event", async () => {
+  reset(); const client = service(); await client.ensureStarted();
+  const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod");
+  const child = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  host.documents.push({ uri: a, languageId: "dynare", version: 1 }, { uri: b, languageId: "dynare", version: 1 }, child);
+  let requests = 0;
+  const related = [{ kind: "include", filename: "shared.inc", resolved: true, path: child.uri.fsPath }];
+  host.managed[0].client.sendRequest = (_method, params) => { ++requests; return Promise.resolve(model(params.arguments[0].root_uri, related)); };
+  const updates = [], choices = []; let broadChanges = 0, invalidations = 0;
+  const restored = client.onDidUpdateModelInfo(info => {
+    updates.push(info); choices.push(client.chosenRootForDocument(child)?.toString());
+    void client.modelInfo(Uri.parse(info.root_uri));
+  });
+  const broad = client.onDidChange(() => { ++broadChanges; }), input = client.onDidInvalidate(() => { ++invalidations; });
+  await client.modelInfo(a); await client.modelInfo(b); await flush();
+  assert.equal(client.knownOwners(child.uri).length, 2); assert.equal(client.chosenRootForDocument(child), undefined, "known owners are not chosen owners");
+  const beforeLookup = requests;
+  client.selectOwner(child.uri, b); assert.equal(client.chosenRootForDocument(child).toString(), b.toString());
+  assert.equal(requests, beforeLookup, "the synchronous accessor issues no lookup");
+  client.invalidate(b.toString()); assert.equal(client.chosenRootForDocument(child), undefined, "retained selection alone is not proof");
+  assert.equal(client.knownOwners(child.uri).length, 1, "remaining proof must not silently choose the other owner");
+  const broadBeforeRestore = broadChanges, inputBeforeRestore = invalidations;
+  await client.modelInfo(b); await flush();
+  assert.equal(client.chosenRootForDocument(child).toString(), b.toString()); assert.equal(choices.at(-1), b.toString());
+  assert.equal(updates.at(-1).client_instance, client.currentInstance);
+  assert.equal(broadChanges, broadBeforeRestore, "restoration preserves broad navigation-change semantics");
+  assert.equal(invalidations, inputBeforeRestore); assert.equal(updates.length, 3); assert.equal(requests, 3, "event readers reuse the cache without a feedback loop");
+  await client.modelInfo(b); assert.equal(updates.length, 3, "cached reads do not emit proof-restoration updates");
+  restored.dispose(); broad.dispose(); input.dispose(); await client.shutdown();
+});
+test("ambient sole-owner include presentation does not gain explicit project priority", async () => {
+  reset(); const client = service(); await client.ensureStarted();
+  const root = Uri.parse("file:///project/root.mod"), child = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  host.documents.push({ uri: root, languageId: "dynare", version: 1 }, child);
+  const related = [{ kind: "include", filename: "shared.inc", resolved: true, path: child.uri.fsPath }];
+  host.managed[0].client.sendRequest = (_method, params) => Promise.resolve({ ...model(root.toString(), related), document_uri: params.arguments[0].document_uri });
+  try {
+    await client.modelInfo(root); assert.equal(client.knownOwners(child.uri).length, 1); assert.equal(client.chosenRootForDocument(child), undefined);
+    assert.equal((await client.rootForDocument(child, false)).toString(), root.toString(), "ambient include presentation remains convenient");
+    assert.equal(client.chosenRootForDocument(child), undefined, "automatic discovery is not a user choice");
+    assert.equal((await client.modelForDocument(child)).root_uri, root.toString()); assert.equal(host.picks.length, 0);
+    client.invalidate(root.toString()); await client.modelInfo(root);
+    assert.equal(client.chosenRootForDocument(child), undefined, "new proof does not promote automatic provenance");
+    client.selectOwner(child.uri, root); assert.equal(client.chosenRootForDocument(child).toString(), root.toString(), "explicit same-owner selection upgrades the automatic context");
+    client.invalidate(root.toString()); assert.equal(client.chosenRootForDocument(child), undefined); await client.modelInfo(root);
+    assert.equal(client.chosenRootForDocument(child).toString(), root.toString(), "fresh proof restores an explicit choice");
+  } finally { await client.shutdown(); }
+});
+test("multi-owner presentation waits for a user pick before project priority is explicit", async () => {
+  reset(); const client = service(); await client.ensureStarted();
+  const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod"), child = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  host.documents.push({ uri: a, languageId: "dynare", version: 1 }, { uri: b, languageId: "dynare", version: 1 }, child);
+  const related = [{ kind: "include", filename: "shared.inc", resolved: true, path: child.uri.fsPath }];
+  host.managed[0].client.sendRequest = (_method, params) => Promise.resolve(model(params.arguments[0].root_uri, related));
+  try {
+    await client.modelInfo(a); await client.modelInfo(b);
+    assert.equal(await client.rootForDocument(child, false), undefined); assert.equal(client.chosenRootForDocument(child), undefined); assert.equal(host.picks.length, 0);
+    host.pick = items => items.find(item => item.root.toString() === b.toString());
+    assert.equal((await client.rootForDocument(child, true)).toString(), b.toString()); assert.equal(host.picks.length, 1);
+    assert.equal(client.chosenRootForDocument(child).toString(), b.toString());
+    assert.equal((await client.rootForDocument(child, false)).toString(), b.toString()); assert.equal(host.picks.length, 1);
+  } finally { await client.shutdown(); }
+});
+test("native navigation upgrades automatic provenance, close clears priority and restart requires restored proof", async () => {
+  reset(); const client = service(); await client.ensureStarted();
+  const root = Uri.parse("file:///project/root.mod"), child = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  host.documents.push({ uri: root, languageId: "dynare", version: 1 }, child);
+  const related = [{ kind: "include", filename: "shared.inc", resolved: true, path: child.uri.fsPath }];
+  const reply = (_method, params) => Promise.resolve({ ...model(root.toString(), related), document_uri: params.arguments[0].document_uri });
+  host.managed[0].client.sendRequest = reply;
+  try {
+    await client.modelInfo(root); await client.rootForDocument(child, false); assert.equal(client.chosenRootForDocument(child), undefined);
+    const location = { uri: child.uri.toString(), range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } };
+    await client.openLocation(location, root); const loaded = host.documents.at(-1);
+    assert.equal(client.chosenRootForDocument(loaded).toString(), root.toString(), "accepted native source navigation is explicit");
+    await client.restart(); assert.equal(client.chosenRootForDocument(loaded), undefined, "restart withdraws old proof");
+    host.managed.at(-1).client.sendRequest = reply; await client.modelInfo(root);
+    assert.equal(client.chosenRootForDocument(loaded).toString(), root.toString(), "restart preserves explicit intent after fresh proof");
+    loaded.isClosed = true; host.close.fire(loaded);
+    const reopened = { ...loaded, isClosed: false }; host.documents.push(reopened); await client.modelInfo(root);
+    assert.equal((await client.rootForDocument(reopened, false)).toString(), root.toString(), "close preserves existing presentation convenience");
+    assert.equal(client.chosenRootForDocument(reopened), undefined, "reopening does not inherit explicit priority");
+    client.selectOwner(reopened.uri, root); assert.equal(client.chosenRootForDocument(reopened).toString(), root.toString());
+    const removed = host.folders; host.folders = [{ uri: Uri.parse("file:///other"), name: "other" }];
+    host.folder.fire({ added: host.folders, removed }); await client.modelInfo(root);
+    assert.equal(client.chosenRootForDocument(reopened), undefined, "folder-set change clears the explicit choice");
+    await client.rootForDocument(reopened, false); assert.equal(client.chosenRootForDocument(reopened), undefined, "ambient rediscovery stays automatic after folder clearing");
+  } finally { await client.shutdown(); }
+});
+test("ordinary and untitled roots need no owner proof while includes and retained mod fragments cannot guess one", async () => {
+  reset(); const client = service();
+  client.modelInfo = () => { throw new Error("no model lookup"); }; client.ownerChoices = () => { throw new Error("no owner discovery"); };
+  for (const value of ["file:///project/root.mod", "file:///outside/loose.DYN", "untitled:/scratch.mod"]) {
+    const doc = { uri: Uri.parse(value), languageId: "dynare", version: 1 };
+    assert.equal(client.chosenRootForDocument(doc).toString(), value);
+    assert.equal(client.chosenRootForDocument({ ...doc, isClosed: true }), undefined);
+  }
+  const owner = Uri.parse("file:///project/owner.mod"), fragment = { uri: Uri.parse("file:///project/fragment.mod"), languageId: "dynare", version: 1 };
+  assert.equal(client.chosenRootForDocument({ uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare" }), undefined);
+  assert.equal(client.chosenRootForDocument({ uri: Uri.parse("dygnosis-effective:/root.mod"), languageId: "dynare" }), undefined);
+  assert.equal(client.chosenRootForDocument({ uri: fragment.uri, languageId: "plaintext" }), undefined);
+  client.selectOwner(fragment.uri, owner); assert.equal(client.chosenRootForDocument(fragment), undefined);
+  client.treatAsRoot(fragment.uri); assert.equal(client.chosenRootForDocument(fragment).toString(), fragment.uri.toString());
+  await client.shutdown();
+});
+test("late model-info proofs cannot announce a wrong owner or restore invalidated inputs", async () => {
+  reset(); const client = service(); await client.ensureStarted();
+  const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod"), child = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  host.documents.push({ uri: a, languageId: "dynare", version: 1 }, { uri: b, languageId: "dynare", version: 1 }, child);
+  const related = [{ kind: "include", filename: "shared.inc", resolved: true, path: child.uri.fsPath }];
+  const old = deferred(), choices = []; let updates = 0;
+  host.managed[0].client.sendRequest = (_method, params) => params.arguments[0].root_uri === a.toString() ? old.promise : Promise.resolve(model(b.toString(), related));
+  const listener = client.onDidUpdateModelInfo(() => { ++updates; choices.push(client.chosenRootForDocument(child)?.toString()); });
+  client.selectOwner(child.uri, a); const first = client.modelInfo(a); await flush();
+  client.selectOwner(child.uri, b); await client.modelInfo(b);
+  old.resolve(model(a.toString(), related)); await first;
+  assert.deepEqual(choices, [b.toString(), b.toString()], "an old owner's valid response reads the newer selected context");
+  const obsolete = deferred(); host.managed[0].client.sendRequest = () => obsolete.promise;
+  const stale = client.modelInfo(b, b, true); await flush(); client.invalidate();
+  obsolete.resolve(model(b.toString(), related)); assert.equal(await stale, undefined);
+  assert.equal(updates, 2); assert.equal(client.chosenRootForDocument(child), undefined);
+  listener.dispose(); await client.shutdown();
 });
 
 test("input invalidation has its own root event and excludes owner presentation changes", async () => {

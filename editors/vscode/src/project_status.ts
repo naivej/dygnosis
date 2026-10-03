@@ -1,6 +1,8 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { record } from "./protocol";
+import { projectDiagnosticsSetting } from "./settings";
+import type { ModelSnapshot } from "./client";
 
 const states = ["pending", "checking", "checked", "incomplete", "failed", "excluded"] as const;
 type RootState = typeof states[number];
@@ -31,6 +33,7 @@ interface ProjectConnection {
 export interface ProjectClientPort {
   readonly client: ProjectConnection | undefined; readonly currentInstance: number;
   readonly onDidChange: vscode.Event<void>; readonly onDidReady?: vscode.Event<void>;
+  readonly onDidUpdateModelInfo: vscode.Event<ModelSnapshot>;
   ensureStarted(): Promise<void>;
   execute(command: string, args: unknown[], token?: vscode.CancellationToken): Promise<unknown>;
   chosenRootForDocument(document: vscode.TextDocument): vscode.Uri | undefined;
@@ -182,11 +185,7 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
   const watchers = new Map<string, vscode.Disposable>();
   const dependencies = new Map<string, vscode.Disposable>();
   const dependencyTargets = new Map<string, Set<string>>();
-  const enabled = (): boolean => {
-    const value: unknown = vscode.workspace.getConfiguration("dynare").get("projectDiagnostics", true);
-    if (typeof value === "boolean") return value;
-    service.log("Invalid dynare.projectDiagnostics; using true."); return true;
-  };
+  const enabled = (): boolean => projectDiagnosticsSetting(message => service.log(message));
   const snapshot = (): string => JSON.stringify([enabled(), folders().map(folder => [folder.uri.toString(),
     vscode.workspace.getConfiguration("dynare", folder.uri).get<unknown>("projectExcludePaths", [])])]);
   const clearWatchers = (owned: Map<string, vscode.Disposable>): void => { for (const watcher of owned.values()) watcher.dispose(); owned.clear(); };
@@ -377,8 +376,11 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
   };
   const subscriptions = [
     service.onDidChange(synchronize), vscode.window.onDidChangeActiveTextEditor(sendActiveRoot),
+    service.onDidUpdateModelInfo(info => {
+      if (!disposed && info.client_instance === service.currentInstance && instance === info.client_instance && connection === service.client) sendActiveRoot();
+    }),
     vscode.workspace.onDidChangeWorkspaceFolders(reconfigure),
-    vscode.workspace.onDidChangeTextDocument(event => documentChanged(event.document)),
+    vscode.workspace.onDidChangeTextDocument(event => { if (event.contentChanges.length) documentChanged(event.document); }),
     vscode.workspace.onDidCloseTextDocument(documentChanged),
     vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration("dynare")) reconfigure(); }),
     vscode.commands.registerCommand("dygnosis.projectStatus", () => vscode.commands.executeCommand("dygnosis.project.focus")),

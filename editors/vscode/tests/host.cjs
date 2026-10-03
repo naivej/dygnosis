@@ -20,6 +20,20 @@ async function currentSnapshot(service, document, query, description, accept = (
   }, description);
   return info;
 }
+async function writeObservedInput(service, filename, text) {
+  const identity = value => process.platform === "win32" ? value.fsPath.toLowerCase() : value.fsPath;
+  const expected = identity(vscode.Uri.file(filename));
+  let observed = false;
+  const subscription = service.onDidInvalidate(event => {
+    if (event.reason === "file" && event.uri && identity(vscode.Uri.parse(event.uri)) === expected) observed = true;
+  });
+  try {
+    await fs.writeFile(filename, text);
+    // Folder-only startup makes these writes faster than native watcher delivery.
+    // Observe the new input before constructing a preview from it.
+    await waitFor(() => observed, `native file observation for ${path.basename(filename)}`);
+  } finally { subscription.dispose(); }
+}
 exports.run = async function run() {
   const resultFile = process.env.DYGNOSIS_HOST_RESULT;
   const evidence = { vscode: vscode.version, runId: process.env.DYGNOSIS_HOST_RUN_ID, checks: [] };
@@ -28,13 +42,41 @@ exports.run = async function run() {
     const extension = vscode.extensions.getExtension("dygnosis.dygnosis");
     assert.ok(extension);
     const service = await extension.activate();
-    assert.equal(service.client, undefined, "startup registration must not eagerly launch LSP");
-    evidence.checks.push("activate before model/LSP launch");
+    const projectFeature = extension.packageJSON.contributes.configuration.some(group => Object.hasOwn(group.properties, "dynare.projectDiagnostics"));
+    if (projectFeature) {
+      await waitFor(() => service.client && service.supportsModelInfo, "folder-only project LSP startup");
+      let projectStatus;
+      await waitFor(async () => { projectStatus = await service.execute("dynare/projectStatus"); return projectStatus?.complete; }, "folder-only discovery completes");
+      assert.equal(projectStatus.enabled, true); assert.equal(projectStatus.roots.length, 0);
+      evidence.checks.push("folder-only project activation and empty discovery without opening a model");
+    } else {
+      assert.equal(service.client, undefined, "startup registration must not eagerly launch LSP");
+      evidence.checks.push("activate before model/LSP launch");
+    }
     evidence.native_vscode_mcp = await probeNativeMcp(vscode, extension.id);
-    assert.equal(service.client, undefined, "native MCP must work before any model/LSP opens");
+    if (!projectFeature) assert.equal(service.client, undefined, "native MCP must work before any model/LSP opens");
     evidence.checks.push("native MCP discovers every tool and invokes model info before a model opens");
+    if (projectFeature) {
+      const projectOnly = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "project-only.mod");
+      await writeObservedInput(service, projectOnly, "var z; model; z=project_unknown; end;\n");
+      let projectStatus;
+      await waitFor(async () => { projectStatus = await service.execute("dynare/projectStatus"); return projectStatus?.complete && projectStatus.roots.some(root => root.root_uri.endsWith("project-only.mod") && root.state === "checked" && root.errors > 0); }, "unopened model receives project diagnostics");
+      const projectUri = vscode.Uri.file(projectOnly);
+      await waitFor(() => vscode.languages.getDiagnostics(projectUri).some(item => item.severity === vscode.DiagnosticSeverity.Error), "unopened project Error reaches Problems");
+      assert.ok(!vscode.workspace.textDocuments.some(item => item.uri.toString() === projectUri.toString()));
+      await vscode.commands.executeCommand("dygnosis.cancelProject");
+      await waitFor(async () => (await service.execute("dynare/projectStatus"))?.cancelled === true, "native Cancel stops this pass");
+      await vscode.commands.executeCommand("dygnosis.recheckProject");
+      await waitFor(async () => { const result = await service.execute("dynare/projectStatus"); return result?.complete && !result.cancelled; }, "native Recheck resumes discovery");
+      await vscode.workspace.getConfiguration("dynare").update("projectDiagnostics", false, vscode.ConfigurationTarget.Workspace);
+      await waitFor(async () => (await service.execute("dynare/projectStatus"))?.enabled === false, "project setting off reaches engine");
+      await waitFor(() => vscode.languages.getDiagnostics(projectUri).length === 0, "off clears unopened project contribution");
+      await vscode.workspace.getConfiguration("dynare").update("projectDiagnostics", true, vscode.ConfigurationTarget.Workspace);
+      await waitFor(async () => { const result = await service.execute("dynare/projectStatus"); return result?.enabled && result.complete; }, "project setting on resumes checking");
+      evidence.checks.push("unopened project Problems, native Cancel/Recheck, scoped off/on and contribution clearing");
+    }
     const filename = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "model.mod");
-    await fs.writeFile(filename, "var y; parameters p; p=1/2; model; y=p; end;\n");
+    await writeObservedInput(service, filename, "var y; parameters p; p=1/2; model; y=p; end;\n");
     const document = await vscode.workspace.openTextDocument(filename);
     await vscode.window.showTextDocument(document);
     await waitFor(() => service.client && service.supportsModelInfo, "language client startup");
@@ -72,8 +114,8 @@ exports.run = async function run() {
     evidence.checks.push("native preview source action uses the engine's exact written range");
     const previewRootPath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "preview-include.mod");
     const previewBodyPath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "preview-body.inc");
-    await fs.writeFile(previewBodyPath, "y=3;\n");
-    await fs.writeFile(previewRootPath, "var y;\nmodel;\n@#include \"preview-body.inc\"\nend;\n");
+    await writeObservedInput(service, previewBodyPath, "y=3;\n");
+    await writeObservedInput(service, previewRootPath, "var y;\nmodel;\n@#include \"preview-body.inc\"\nend;\n");
     const previewRoot = await vscode.workspace.openTextDocument(previewRootPath);
     await vscode.window.showTextDocument(previewRoot);
     await currentSnapshot(service, previewRoot, () => service.modelInfo(previewRoot.uri), "preview include root snapshot");
@@ -91,8 +133,8 @@ exports.run = async function run() {
     evidence.checks.push("native preview source action opens an unopened include and retains its explicit root");
     const includingPath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "including.mod");
     const fragmentPath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "fragment.mod");
-    await fs.writeFile(fragmentPath, "y=1;\n");
-    await fs.writeFile(includingPath, "var y;\nmodel;\n@#include \"fragment.mod\"\nend;\n");
+    await writeObservedInput(service, fragmentPath, "y=1;\n");
+    await writeObservedInput(service, includingPath, "var y;\nmodel;\n@#include \"fragment.mod\"\nend;\n");
     const including = await vscode.workspace.openTextDocument(includingPath);
     const editor = await vscode.window.showTextDocument(including);
     await currentSnapshot(service, including, () => service.modelInfo(including.uri), "including model snapshot after file creation");

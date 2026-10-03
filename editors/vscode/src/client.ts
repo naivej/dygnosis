@@ -33,7 +33,8 @@ export function extendCapabilities(capabilities: ClientCapabilities): void {
   }
   const experimental: Record<string, unknown> = record(capabilities.experimental) ? capabilities.experimental : {};
   experimental.dygnosis = { modelInfo: { schema_version: 1 }, modelInfoChanged: true, configuration: { schema_version: 1 },
-    compareModels: { navigation_schema_version: 1 }, effectivePreview: { navigation_schema_version: 1, dependency_candidates: true } };
+    compareModels: { navigation_schema_version: 1 }, effectivePreview: { navigation_schema_version: 1, dependency_candidates: true },
+    projectStatusChanged: true };
   capabilities.experimental = experimental;
 }
 class DygnosisCapabilities implements StaticFeature {
@@ -90,14 +91,17 @@ export class DygnosisClient implements vscode.Disposable {
   private readonly lifecycle = new ClientLifecycle<ClientProcess>();
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChange = this.changed.event;
+  private readonly modelInfoUpdated = new vscode.EventEmitter<ModelSnapshot>();
+  readonly onDidUpdateModelInfo = this.modelInfoUpdated.event;
   private readonly invalidated = new vscode.EventEmitter<InputInvalidation>();
   readonly onDidInvalidate = this.invalidated.event;
-  private readonly disposables: vscode.Disposable[] = [this.output, this.changed, this.invalidated];
+  private readonly disposables: vscode.Disposable[] = [this.output, this.changed, this.invalidated, this.modelInfoUpdated];
   private readonly cache = new Map<string, CachedRequest>();
   private readonly freshTails = new Map<string, Promise<void>>();
   private readonly cancelFreshRequests = new Set<() => void>();
   private readonly infos = new Map<string, ModelInfo>();
   private readonly selectedOwners = new Map<string, string>();
+  private readonly explicitOwnerDocuments = new Set<string>();
   private readonly ownedDocuments = new Set<string>();
   private instanceSubscriptions: vscode.Disposable[] = [];
   private instance = 0;
@@ -154,9 +158,9 @@ export class DygnosisClient implements vscode.Disposable {
         }
       }),
       vscode.workspace.onDidCloseTextDocument(document => {
-        if (isAnalysisDocument(document)) { this.pruneSourceLinks(document.uri); this.invalidate(); }
+        if (isAnalysisDocument(document)) { this.explicitOwnerDocuments.delete(document.uri.toString()); this.pruneSourceLinks(document.uri); this.invalidate(); }
       }),
-      vscode.workspace.onDidChangeWorkspaceFolders(() => { this.selectedOwners.clear(); this.ownedDocuments.clear(); void this.sendSettings(); }),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => { this.selectedOwners.clear(); this.explicitOwnerDocuments.clear(); this.ownedDocuments.clear(); void this.sendSettings(); }),
       vscode.workspace.onDidChangeConfiguration(event => {
         if (!event.affectsConfiguration("dynare")) return;
         if (event.affectsConfiguration("dynare.serverPath")) void this.restart();
@@ -362,7 +366,9 @@ export class DygnosisClient implements vscode.Disposable {
       if (info.document_version !== currentVersion) return undefined;
       this.infos.set(rootKey, info);
       this.watchDependencies(info);
-      return { ...info, client_instance: this.instance };
+      const snapshot = { ...info, client_instance: this.instance };
+      this.modelInfoUpdated.fire(snapshot);
+      return snapshot;
     }).catch((error: unknown) => {
       if (!cancellation.token.isCancellationRequested) { this.log(String(error)); void this.failure(String(error)); }
       return undefined;
@@ -397,6 +403,17 @@ export class DygnosisClient implements vscode.Disposable {
     return [...this.infos.values()].filter(info => this.ownsDocument(info, document))
       .map(info => vscode.Uri.parse(info.root_uri));
   }
+  /** Read proven chosen context without requests, discovery, or a picker. */
+  chosenRootForDocument(document: vscode.TextDocument): vscode.Uri | undefined {
+    if (this.closed || document.isClosed || !isAnalysisDocument(document)) return undefined;
+    const key = document.uri.toString(), selected = this.selectedOwners.get(key);
+    if (selected) {
+      if (!this.explicitOwnerDocuments.has(key)) return undefined;
+      const info = this.infos.get(selected);
+      return info && this.ownsDocument(info, document.uri) ? vscode.Uri.parse(selected) : undefined;
+    }
+    return isRootUri(document.uri) && !this.ownedDocuments.has(key) ? document.uri : undefined;
+  }
   async ownerChoices(document: vscode.TextDocument): Promise<vscode.Uri[]> {
     const roots = new Set(vscode.workspace.textDocuments.filter(doc => isRootUri(doc.uri) && !this.ownedDocuments.has(doc.uri.toString())).map(doc => doc.uri.toString()));
     for (const root of this.selectedOwners.values()) roots.add(root);
@@ -413,13 +430,14 @@ export class DygnosisClient implements vscode.Disposable {
       if (!info) return undefined;
       if (this.ownsDocument(info, document.uri)) return root;
       this.selectedOwners.delete(key);
+      this.explicitOwnerDocuments.delete(key);
     }
     if (isRootUri(document.uri) && !this.ownedDocuments.has(key)) return document.uri;
     // Discover owners only from available models, never analyze an include as a root.
     const selection = this.selectedOwners.get(key);
     const owners = await this.ownerChoices(document);
     if (this.selectedOwners.get(key) !== selection) return undefined;
-    if (owners.length === 1) { this.selectOwner(document.uri, owners[0]); return owners[0]; }
+    if (owners.length === 1) { this.rememberOwner(document.uri, owners[0], false); return owners[0]; }
     if (!prompt || owners.length === 0) return undefined;
     const pick = await vscode.window.showQuickPick(owners.map(root => ({ label: vscode.workspace.asRelativePath(root), description: root.fsPath, root })), { placeHolder: "Choose the model that owns this include" });
     if (this.selectedOwners.get(key) !== selection) return undefined;
@@ -463,10 +481,16 @@ export class DygnosisClient implements vscode.Disposable {
     return root ? this.modelInfo(root, document.uri) : undefined;
   }
   selectOwner(document: vscode.Uri, root: vscode.Uri): void {
-    if (document.toString() === root.toString()) return;
-    this.selectedOwners.set(document.toString(), root.toString()); this.ownedDocuments.add(document.toString()); this.changed.fire();
+    this.rememberOwner(document, root, true);
   }
-  treatAsRoot(document: vscode.Uri): void { this.selectedOwners.delete(document.toString()); this.ownedDocuments.delete(document.toString()); this.changed.fire(); this.scheduleRootRefresh(); }
+  private rememberOwner(document: vscode.Uri, root: vscode.Uri, explicit: boolean): void {
+    if (document.toString() === root.toString()) return;
+    const key = document.toString();
+    this.selectedOwners.set(key, root.toString()); this.ownedDocuments.add(key);
+    if (explicit) this.explicitOwnerDocuments.add(key); else this.explicitOwnerDocuments.delete(key);
+    this.changed.fire();
+  }
+  treatAsRoot(document: vscode.Uri): void { this.selectedOwners.delete(document.toString()); this.explicitOwnerDocuments.delete(document.toString()); this.ownedDocuments.delete(document.toString()); this.changed.fire(); this.scheduleRootRefresh(); }
   async openLocation(location: { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }, root?: vscode.Uri, guard?: NavigationGuard, options?: { viewColumn?: vscode.ViewColumn }): Promise<void> {
     const uri = vscode.Uri.parse(location.uri);
     const range = new vscode.Range(location.range.start.line, location.range.start.character, location.range.end.line, location.range.end.character);

@@ -190,6 +190,30 @@
         "command": "dygnosis.setupProjectMcp",
         "title": "Set up MCP for this project",
         "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "dygnosis.projectStatus",
+        "title": "Show project checks",
+        "category": "Dygnosis",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "dygnosis.recheckProject",
+        "title": "Recheck project",
+        "category": "Dygnosis",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dygnosis.cancelProject",
+        "title": "Cancel project checks",
+        "category": "Dygnosis",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "dygnosis.configureProjectExclusions",
+        "title": "Configure project exclusions",
+        "category": "Dygnosis",
+        "icon": "$(settings-gear)"
       }
     ],
     "menus": {
@@ -305,6 +329,28 @@
           "command": "dygnosis.refreshModelView",
           "when": "view == dygnosis.model",
           "group": "navigation@4"
+        },
+        {
+          "command": "dygnosis.recheckProject",
+          "when": "view == dygnosis.project",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dygnosis.cancelProject",
+          "when": "view == dygnosis.project",
+          "group": "navigation@2"
+        },
+        {
+          "command": "dygnosis.configureProjectExclusions",
+          "when": "view == dygnosis.project",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "dygnosis.configureProjectExclusions",
+          "when": "view == dygnosis.project && viewItem == dygnosis.projectFolder",
+          "group": "inline"
         }
       ]
     },
@@ -1332,6 +1378,26 @@
             "description": "Sections shown in model Diff. Empty hides all content."
           }
         }
+      },
+      {
+        "title": "Dygnosis: Project checks",
+        "properties": {
+          "dynare.projectDiagnostics": {
+            "type": "boolean",
+            "default": true,
+            "scope": "window",
+            "description": "Check unopened saved .mod models in workspace folders. Turning this off cancels background work and clears its project reports."
+          },
+          "dynare.projectExcludePaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "resource",
+            "description": "Paths and patterns excluded from background root discovery in this folder. Open files and dependencies remain checked. Use *, ?, **, or a directory ending with /."
+          }
+        }
       }
     ],
     "semanticTokenTypes": [
@@ -1412,6 +1478,10 @@
         {
           "id": "dygnosis.model",
           "name": "Dynare model"
+        },
+        {
+          "id": "dygnosis.project",
+          "name": "Dynare project checks"
         }
       ]
     },

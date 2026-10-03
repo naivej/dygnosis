@@ -279,6 +279,9 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
         const info = await service.revalidate(state.session.root, payload.revision, state.instance, state.session.root, request.token);
         if (!current()) return undefined;
         if (fileEpoch !== state.fileEpoch && loadedDocument) continue;
+        // Another root can advance the client's global input epoch without
+        // invalidating this loader. Obtain a new proof; never accept that reply.
+        if (!info && loadedDocument) continue;
         if (!info?.complete) return undefined;
         const freshRow = fresh.navigation.find(candidate => candidate.id === row.id && candidate.statement_id === row.statement_id);
         if (!freshRow || JSON.stringify(freshRow.effective_range) !== JSON.stringify(row.effective_range)) return undefined;
