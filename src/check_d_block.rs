@@ -20,6 +20,7 @@ pub fn check_d_block(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_namespace(model));
     out.extend(check_const_fold(model));
     out.extend(check_matlab_locals(model));
+    out.extend(check_ss_rhs_roles(model));
     out
 }
 
@@ -317,6 +318,22 @@ fn outside_ident_uses(model: &Model) -> Vec<(Name, Span)> {
         push_expr(&mut out, id);
     }
     out
+}
+
+fn check_ss_rhs_roles(model: &Model) -> Vec<Diagnostic> {
+    model.steady_state_rhs_uses.iter().filter_map(|&(name, span, context)| {
+        let spelling = model.name(name);
+        let (code, message) = if model.heterogeneous_in_context(name, context) {
+            ("E463", format!("Symbol '{spelling}' cannot be used outside model declaration, because it is heterogeneous."))
+        } else { match model.symbol_kind_in_context(name, context)? {
+            "model_local_variable" => ("E282", format!("Variable {spelling} not allowed outside model declaration. Its scope is only inside model.")),
+            "external_function" => ("E279", format!("Symbol '{spelling}' is the name of a MATLAB/Octave function, and cannot be used as a variable.")),
+            "epilogue" => ("E294", format!("Symbol '{spelling}' cannot be used outside the epilogue block.")),
+            "excluded" => ("E426", format!("Variable '{spelling}' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement")),
+            _ => return None,
+        } };
+        Some(err(span, code, message))
+    }).collect()
 }
 
 fn lhs_ident(model: &Model, eq: &Equation) -> Option<Name> {

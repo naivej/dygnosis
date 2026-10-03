@@ -1057,6 +1057,9 @@ pub struct Model {
     /// Preserve the written assignment even though the live model drops it.
     pub pruned_initializations: Vec<PrunedInitialization>,
     pub steady_state_equations: Vec<Equation>,
+    /// Bare RHS uses with their Parse-time symbol history. Macro copies may
+    /// share written spans, and later type changes must not alter these roles.
+    pub steady_state_rhs_uses: Vec<(Name, Span, SymbolContext)>,
     pub initval: Vec<Assignment>,
     pub endval: Vec<Assignment>,
     pub is_linear: bool,

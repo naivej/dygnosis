@@ -479,7 +479,7 @@ fn check_w042(model: &Model) -> Vec<Diagnostic> {
 
     let assigned = ss_assigned_names(model);
     let missing: Vec<String> = model
-        .endogenous
+        .final_endogenous()
         .iter()
         .map(|d| model.name(d.name).to_string())
         .filter(|n| !assigned.contains(n))

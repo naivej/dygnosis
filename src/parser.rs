@@ -3569,16 +3569,21 @@ impl Parser<'_> {
         declared.sort_by_key(|(_, span)| (span.start, span.end));
         for (name, span) in declared {
             self.record_symbol_declaration(name, span, crate::model::SymbolKind::ExternalFunction);
-            if let Some(at) = (statement_from..self.i).find(|&at| self.tokens[at].span == span) {
+            if let Some(at) =
+                (statement_from..self.i).find(|&at| self.tokens[at].span.start == span.start)
+            {
+                let end = (at..self.i)
+                    .find(|&at| self.tokens[at].span.end == span.end)
+                    .map_or(at + 1, |at| at + 1);
                 self.model
                     .type_event_occurrences
-                    .push((self.model.symbol_type_events.len() - 1, at..at + 1));
+                    .push((self.model.symbol_type_events.len() - 1, at..end));
                 self.model
                     .written_declarations
                     .push(crate::model::WrittenDeclaration {
                         statement_id: self.model.statements.len(),
                         written_kind: "external_function".to_string(),
-                        token_range: at..at + 1,
+                        token_range: at..end,
                         declaration: Decl {
                             parse_order: at + 1,
                             symbol_type_context: self.model.symbol_context(),
@@ -3620,6 +3625,20 @@ impl Parser<'_> {
                 let tok = self.bump();
                 value_lex = self.lexeme(&tok).to_string();
                 value_span = tok.span;
+                if tok.kind == TokenKind::Ident
+                    && matches!(
+                        ident.to_ascii_lowercase().as_str(),
+                        "name" | "first_deriv_provided" | "second_deriv_provided"
+                    )
+                {
+                    while self.at(TokenKind::Dot) && self.peek_kind(1) == Some(TokenKind::Ident) {
+                        self.bump();
+                        let part = self.bump();
+                        value_lex.push('.');
+                        value_lex.push_str(self.lexeme(&part));
+                        value_span.end = part.span.end;
+                    }
+                }
             }
         }
         Some(TopOption {
@@ -9490,12 +9509,60 @@ impl Parser<'_> {
         if self.in_dynare_block && lexeme == "dsge_prior_weight" {
             self.model.reserved_block_symbol_uses.push(tok.span);
         }
-        if self.in_steady_state_rhs
-            && (lexeme.eq_ignore_ascii_case("nan") || lexeme.eq_ignore_ascii_case("inf"))
-        {
-            return self.alloc(ExprKind::Number, tok.span);
+        if self.in_steady_state_rhs {
+            if lexeme.eq_ignore_ascii_case("nan") || lexeme.eq_ignore_ascii_case("inf") {
+                return self.alloc(ExprKind::Number, tok.span);
+            }
+            if let Some(token) = self.ss_block_word_token(self.i - 1) {
+                if !Self::ss_symbol_token(token) && !is_dynare_expression_builtin(&lexeme) {
+                    self.push_bison(tok.span, format!("syntax error, unexpected {token}"));
+                    return self.alloc(ExprKind::Error, tok.span);
+                }
+            }
         }
-        if self.at(TokenKind::Dot) && self.peek_kind(1) == Some(TokenKind::Ident) {
+        if self.in_steady_state_rhs
+            && is_dynare_expression_builtin(&lexeme)
+            && !self.at(TokenKind::LParen)
+        {
+            let (span, unexpected) = self.ss_unexpected_token(self.i);
+            self.push_bison(
+                span,
+                format!("syntax error, unexpected {unexpected}, expecting '('"),
+            );
+            return self.alloc(ExprKind::Error, tok.span);
+        }
+        if self.at(TokenKind::Dot)
+            && (self.in_steady_state_rhs || self.peek_kind(1) == Some(TokenKind::Ident))
+        {
+            if self.in_steady_state_rhs {
+                let mut qualified = lexeme;
+                let mut span = tok.span;
+                while self.at(TokenKind::Dot) {
+                    self.bump();
+                    if !self.at(TokenKind::Ident)
+                        || self
+                            .ss_block_word_token(self.i)
+                            .is_some_and(|token| !Self::ss_symbol_token(token))
+                    {
+                        let (bad_span, unexpected) = self.ss_unexpected_token(self.i);
+                        self.push_bison(bad_span, format!("syntax error, unexpected {unexpected}"));
+                        return self.alloc(ExprKind::Error, span);
+                    }
+                    let next = self.bump();
+                    qualified.push('.');
+                    qualified.push_str(self.lexeme(&next));
+                    span.end = next.span.end;
+                }
+                if self.at(TokenKind::LParen) {
+                    let callee = self.intern.intern(&qualified);
+                    return self.parse_call(
+                        callee,
+                        Token::with_lexeme(TokenKind::Ident, span, qualified),
+                    );
+                }
+                self.model.namespace_qualified.push((qualified, span));
+                return self.alloc(ExprKind::Error, span);
+            }
             self.bump();
             let rhs = self.bump();
             let rhs_lex = self.lexeme(&rhs).to_string();
@@ -9594,6 +9661,13 @@ impl Parser<'_> {
 
     fn parse_timing(&mut self, name: Name, ident: Token) -> ExprId {
         let (timing, timing_span) = self.parse_signed_int_in_parens();
+        self.refuse_ss_variable_call(
+            name,
+            Span {
+                start: ident.span.start,
+                end: timing_span.end,
+            },
+        );
         self.alloc(
             ExprKind::Ident {
                 name,
@@ -9612,6 +9686,12 @@ impl Parser<'_> {
         let callee_token = self.i - 1;
         self.eat(TokenKind::LParen);
         let mut args = Vec::new();
+        if self.in_steady_state_rhs && self.at(TokenKind::RParen) {
+            self.push_bison(
+                self.tokens[self.i].span,
+                "syntax error, unexpected ')'".to_string(),
+            );
+        }
         if !self.at(TokenKind::RParen) && !self.at_expr_stop() {
             loop {
                 if let Some(id) = self.parse_expr() {
@@ -9631,6 +9711,13 @@ impl Parser<'_> {
                 .map(|id| self.expr_span(*id).end)
                 .unwrap_or(kw.span.end)
         };
+        self.refuse_ss_variable_call(
+            callee,
+            Span {
+                start: kw.span.start,
+                end,
+            },
+        );
         if self.in_epilogue
             && !is_builtin_function(self.intern.get(callee))
             && !self.is_known_symbol(callee)
@@ -9685,6 +9772,22 @@ impl Parser<'_> {
             self.model.sum_argument_roles.insert(id, role);
         }
         id
+    }
+
+    fn refuse_ss_variable_call(&mut self, name: Name, span: Span) {
+        if self.in_steady_state_rhs
+            && !is_dynare_expression_builtin(self.intern.get(name))
+            && self.is_known_symbol(name)
+            && self.model.final_symbol_kind(name) != Some("external_function")
+        {
+            self.push_bison(
+                span,
+                format!(
+                    "Using variable {} with a lead or a lag is not allowed in this context",
+                    self.intern.get(name)
+                ),
+            );
+        }
     }
 
     fn parse_signed_int_in_parens(&mut self) -> (i32, Span) {
@@ -9801,6 +9904,18 @@ impl Parser<'_> {
     }
 
     fn alloc(&mut self, kind: ExprKind, span: Span) -> ExprId {
+        if self.in_steady_state_rhs {
+            if let ExprKind::Ident {
+                name, ident_span, ..
+            } = &kind
+            {
+                self.model.steady_state_rhs_uses.push((
+                    *name,
+                    *ident_span,
+                    self.model.symbol_context(),
+                ));
+            }
+        }
         if !self.model_function_context && !self.in_native_assignment {
             if let ExprKind::Ident {
                 name, ident_span, ..

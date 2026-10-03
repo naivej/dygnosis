@@ -212,7 +212,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W042", ExplainEntry {
         title: "Endogenous variable missing from steady_state_model",
-        body: "The `steady_state_model` block does not assign a value for every endogenous variable. Dynare warns: `variable 'c' is not assigned a value`. Dynare will fall back to the `initval` value (or zero).\n\n**Fix**\n\nAdd the missing assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).",
+        body: "The `steady_state_model` block does not assign a value for every endogenous variable. The set uses final symbol types: removed names and names retyped as parameters are excluded; names retyped as endogenous are included. Dynare warns: `variable 'c' is not assigned a value`. Dynare will fall back to the `initval` value (or zero).\n\n**Fix**\n\nAdd the missing assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).",
         kind: ExplainKind::Shared,
     }),
     ("E058", ExplainEntry {
@@ -852,7 +852,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E275", ExplainEntry {
         title: "Namespace-qualified symbol",
-        body: "An expression uses ``ident.ident`` outside a skipped ``shock_paths`` body. Dynare refuses: `Namespace-qualified symbol {ns}.{name} not allowed in this context`.\n\n**Fix**\n\nUse a declared symbol without a namespace prefix.",
+        body: "An expression uses a bare namespace-qualified value such as `pkg.foo` where that variable form is not allowed. Dynare refuses: `Namespace-qualified symbol {ns}.{name} not allowed in this context`. A qualified function call such as `pkg.foo(1)` is a different form and is allowed in a steady-state RHS.\n\n**Fix**\n\nUse a declared value without a namespace prefix, or supply the intended function arguments.",
         kind: ExplainKind::Shared,
     }),
     ("E276", ExplainEntry {
@@ -872,7 +872,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E279", ExplainEntry {
         title: "external_function name used as a variable outside model",
-        body: "A name declared with ``external_function(name=…)`` is used as a bare variable outside ``model``. Dynare refuses: `Symbol '{name}' is the name of a MATLAB/Octave function, and cannot be used as a variable.`\n\n**Fix**\n\nCall the function with arguments, or use a different name.",
+        body: "A name declared with `external_function(name=…)`, or registered by an earlier ordinary function call, is used as a bare variable outside `model`. This includes steady-state RHS values. Dynare refuses: `Symbol '{name}' is the name of a MATLAB/Octave function, and cannot be used as a variable.`\n\n**Warrant**\n\nFor a steady-state RHS, the range points at the written name and the role is the one known when that use was parsed.\n\n**Fix**\n\nCall the function with arguments, or use a different name.",
         kind: ExplainKind::Shared,
     }),
     ("E280", ExplainEntry {
@@ -887,7 +887,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E282", ExplainEntry {
         title: "Model-local used outside model",
-        body: "A ``#`` model-local name is used outside ``model`` (not in initval/endval/histval). Dynare refuses: `Variable {name} not allowed outside model declaration. Its scope is only inside model.`\n\n**Fix**\n\nKeep the name inside ``model``, or declare it as a parameter.",
+        body: "A `#` model-local name is used outside `model`, including a steady-state RHS (not in initval/endval/histval). Dynare refuses: `Variable {name} not allowed outside model declaration. Its scope is only inside model.`\n\n**Warrant**\n\nFor a steady-state RHS, the range points at the written name and the role is the one known when that use was parsed.\n\n**Fix**\n\nKeep the name inside `model`, or declare it as a parameter.",
         kind: ExplainKind::Shared,
     }),
     ("E283", ExplainEntry {
@@ -947,7 +947,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E294", ExplainEntry {
         title: "Epilogue name outside the epilogue block",
-        body: "A name declared in the ``epilogue`` block is used in the model or in another statement. Dynare refuses: `Symbol 'foo' cannot be used outside the epilogue block.`\n\n**Fix**\n\nUse the name only inside the ``epilogue`` block.",
+        body: "A name declared in the `epilogue` block is used in the model or another statement, including a steady-state RHS. Dynare refuses: `Symbol 'foo' cannot be used outside the epilogue block.`\n\n**Warrant**\n\nFor a steady-state RHS, the range points at the written name and the role is the one known when that use was parsed.\n\n**Fix**\n\nUse the name only inside the `epilogue` block.",
         kind: ExplainKind::Shared,
     }),
     ("E295", ExplainEntry {
@@ -1798,8 +1798,8 @@ Move the call out of the ``steady_state(…)`` operator.",
         kind: ExplainKind::Shared,
     }),
     ("E426", ExplainEntry {
-        title: "Removed variable used in a model expression",
-        body: "A model expression uses a variable after `model_remove` or `var_remove` changed its type to excluded. This includes planner objectives and Ramsey constraints. Dynare refuses: `Variable 'c' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement`. A use written before the removal is allowed.\n\n**Fix**\n\nKeep the variable in the model, or stop using it after its removal.",
+        title: "Removed variable used in an expression",
+        body: "An expression uses a variable after `model_remove` or `var_remove` changed its type to excluded. This includes planner objectives, Ramsey constraints, and steady-state RHS values. Dynare refuses: `Variable 'c' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement`. A use before the removal, or after a successful type restoration, is allowed.\n\n**Warrant**\n\nFor a steady-state RHS, the range points at the written name and its excluded role is captured when the use is parsed, including repeated macro copies.\n\n**Fix**\n\nKeep the variable in the model, or stop using it after its removal.",
         kind: ExplainKind::Shared,
     }),
     ("E427", ExplainEntry {
