@@ -1,53 +1,23 @@
 # Dygnosis for VS Code
 
-Unpublished v0.11.0 development scaffold. The extension has no runtime features yet.
-Ext-launch will build our own client in this folder and connect it to the
-Rust language server using `vscode-languageclient`. LLMacro's `vscode-dynare/`
-is a reference only. Language analysis stays in the binary.
+Dygnosis helps you check and edit Dynare models. Its bundled Rust engine provides live diagnostics, navigation, completion and model facts, and serves the same analysis to agents through MCP. Use official Dynare with MATLAB or Octave for simulation and estimation.
 
-The planned client uses VS Code's native navigation, Problems and quick fixes,
-Outline, Explorer Tree View, status bar, command menus, Settings, and theme
-support. Its actions should be easy to find and use with the keyboard.
-Planned model comparison uses an interactive webview of the binary's structured
-changes, with Before/After rows, filters, and source jumps.
-The planned CodeLens opens a model block's equation browser; declaration
-references and the effective-model preview are optional actions. It adds no
-solver actions or claimed usage counts.
-From 0.11.2, the read-only effective preview will offer written-source jumps,
-macro-origin picks, and Refresh using the engine's source mapping.
-Most UI features will be configurable through grouped Dygnosis settings or
-native VS Code controls. Block tinting has separate aggregate/heterogeneous
-model controls and detailed choices for other blocks, with sensible defaults.
-Name colors will use meaningful Dynare-specific labels for endogenous,
-exogenous, model-parameter, and model-local names, with standard fallbacks
-and independent styling through VS Code's semantic-token customization.
-Project diagnostics will be on by default from 0.11.3, checking unopened models
-in the background with active-file priority, progress, folder exclusions, and an off
-switch. Editor responsiveness and retained memory must pass the release checks.
+![Native editor with equation CodeLens, Ignore and Explain actions, model counts and project coverage](media/readme/workbench.png)
 
-From this folder, with Node.js 22.13+ (22.x) or 24+:
+*Illustration: actionable editing and distinct project coverage.*
 
-```sh
-npm ci
-npm run check
-npm run lint
-npm run compile
-```
+Open a model or project folder. Browse equations from CodeLens, follow related diagnostics, and use native Problems and Outline. Customize name colors, block tinting and optional value hints in Settings. Background checks cover unopened saved models, with Recheck, cancellation and folder exclusions.
 
-In the `dygnosis_dev` development repo, open its root folder or
-`dygnosis.code-workspace` in VS Code. The `.vscode/` folder lives at the
-development repo root. Press Ctrl+Shift+B to compile the extension,
-or F5 to compile and launch the Extension Development Host. The tasks and debug
-configuration point to this folder explicitly.
+![Structural Diff with paired parameter and equation changes, filters and source actions](media/readme/diff.png)
 
-Build output is written to `out/` and stays out of Git. The public
-product's Rust crate remains at the repository root; builds and rustfmt only
-process Rust sources, and Cargo source packages exclude `editors/**`.
+*Illustration: inspect structural changes with **Diff with…**.*
 
-The planned series starts with Rust preparation in 0.11.0. Version 0.11.1
-ships the first packaged client and matching bundled binary; 0.11.2 adds
-structural Diff, effective-preview origin jumps, and repo-local MCP setup;
-0.11.3 adds background project checks.
-The development manifest currently says `0.11.0`; the first published extension
-will be `0.11.1`, matching its bundled binary. Grammar, lifecycle, commands, and
-extension tests remain planned work.
+Compare parameters, equations and shock setup, then open either written source.
+
+![Read-only effective model tracing an equation to its written include and macro iteration](media/readme/origins.png)
+
+*Illustration: written-source and macro-origin navigation.*
+
+Trace expanded equations through includes and repeated macros. Refresh after edits for current mappings.
+
+VS Code 1.102+; native Windows, macOS and glibc Linux packages for x64/arm64. See [settings](https://github.com/naivej/dygnosis/blob/HEAD/docs/vscode.md), [project MCP setup](https://github.com/naivej/dygnosis/blob/HEAD/docs/project-mcp.md), [runtime support](https://github.com/naivej/dygnosis/blob/HEAD/docs/distribution.md), [contributing](https://github.com/naivej/dygnosis/blob/HEAD/editors/vscode/DEVELOPMENT.md), and [credits](https://github.com/naivej/dygnosis/blob/HEAD/README.md#credits). Based on LLMacro-Dynare-LSP. GPL-3.0-or-later.

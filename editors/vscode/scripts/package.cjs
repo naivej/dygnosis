@@ -64,7 +64,9 @@ async function main() {
   const output = path.join(extensionRoot, "dist", target);
   await fs.mkdir(output, { recursive: true });
   const vsix = path.join(output, `dygnosis-${version}-${target}.vsix`);
-  await vsce.createVSIX({ cwd: extensionRoot, target, packagePath: vsix, dependencies: true, useYarn: false, githubBranch: commit });
+  await vsce.createVSIX({ cwd: extensionRoot, target, packagePath: vsix, dependencies: true, useYarn: false, githubBranch: commit,
+    baseContentUrl: `https://github.com/naivej/dygnosis/blob/${commit}`,
+    baseImagesUrl: `https://github.com/naivej/dygnosis/raw/${commit}/editors/vscode` });
   const { inspectVsix } = require("./vsix.cjs");
   await inspectVsix(vsix, provenance);
   const standalone = path.join(output, `dygnosis-${version}-${target}`);
