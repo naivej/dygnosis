@@ -1,7 +1,7 @@
 //! Folder discovery and one background compilation unit at a time.
-//! No filesystem IO or parsing runs while holding the server's shared lock.
+//! Root-file loading and parsing run on the background worker.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -52,6 +52,8 @@ struct RootEntry {
     generation: u64,
     due: Option<Instant>,
     dependencies: HashSet<String>,
+    /// Native candidate identities observed for the last committed report.
+    dependency_uris: BTreeSet<Url>,
     owner_files: HashSet<String>,
     proven: bool,
     revision: Option<String>,
@@ -71,6 +73,7 @@ impl RootEntry {
             generation: 0,
             due: Some(Instant::now()),
             dependencies: HashSet::new(),
+            dependency_uris: BTreeSet::new(),
             owner_files: HashSet::new(),
             proven: false,
             revision: None,
@@ -139,7 +142,7 @@ impl ProjectState {
         let roots: Vec<_> = self.roots.iter().map(|(uri, entry)| {
             *counts.entry(entry.state).or_default() += 1;
             json!({"root_uri": uri, "state": entry.state, "revision": entry.revision, "errors": entry.errors, "warnings": entry.warnings, "failure": entry.failure,
-                "dependency_candidates": entry.dependencies.iter().filter_map(|path| file_url_from_path_key(path)).collect::<std::collections::BTreeSet<_>>()})
+                "dependency_candidates": entry.dependency_uris})
         }).collect();
         let complete = enabled
             && !self.cancelled
@@ -667,6 +670,7 @@ async fn run_worker(
                                 "incomplete"
                             };
                             entry.dependencies = checked.dependencies;
+                            entry.dependency_uris = checked.dependency_uris;
                             entry.owner_files = checked.owner_files;
                             entry.stamps = checked.stamps;
                             entry.force = false;
@@ -723,6 +727,7 @@ async fn run_worker(
 struct Checked {
     report: Arc<RootReport>,
     dependencies: HashSet<String>,
+    dependency_uris: BTreeSet<Url>,
     owner_files: HashSet<String>,
     current: bool,
     complete: bool,
@@ -746,9 +751,15 @@ fn compute(
     if let Some(prior) =
         prior.filter(|prior| prior.report.root == *root && workspace.inputs_match(&prior.stamps))
     {
+        let dependencies: HashSet<_> = prior.stamps.keys().cloned().collect();
+        let dependency_uris = dependencies
+            .iter()
+            .filter_map(|path| file_url_from_path_key(path))
+            .collect();
         return Ok(Checked {
             report: prior.report,
-            dependencies: prior.stamps.keys().cloned().collect(),
+            dependencies,
+            dependency_uris,
             owner_files: prior.owner_files,
             stamps: prior.stamps,
             reused: true,
@@ -772,10 +783,16 @@ fn compute(
     );
     let current = workspace.input_revision(root.as_str()).as_deref() == Some(&revision)
         && workspace.input_snapshot_is_current(root.as_str());
-    let dependencies = workspace
+    let dependencies: HashSet<_> = workspace
         .input_candidate_paths(root.as_str())
         .iter()
         .map(|path| path_key(path))
+        .collect();
+    // Resolve native identities once on the worker. Status reads describe
+    // these committed inputs and must not inspect a later filesystem state.
+    let dependency_uris = dependencies
+        .iter()
+        .filter_map(|path| file_url_from_path_key(path))
         .collect();
     let owner_files = workspace
         .include_records(root.as_str())
@@ -786,6 +803,7 @@ fn compute(
     Ok(Checked {
         report: Arc::new(prepare_root_report(root, set, text, revision)),
         dependencies,
+        dependency_uris,
         owner_files,
         current,
         complete,

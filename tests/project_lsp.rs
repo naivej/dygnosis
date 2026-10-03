@@ -719,6 +719,65 @@ async fn unchanged_inputs_reuse_reports_but_explicit_recheck_computes_again() {
     assert_eq!(recomputed["metrics"]["reused_jobs"], 0);
 }
 
+#[cfg(any(unix, windows))]
+#[tokio::test]
+async fn committed_dependency_candidates_wait_for_the_next_report() {
+    let files = Files::new();
+    files.write(
+        "root.mod",
+        "@#include \"observed/params.inc\"\nvar y; model; y=beta; end; initval; y=0; end;\n",
+    );
+    files.write("observed/params.inc", "parameters beta; beta=0.5;\n");
+    files.write("replacement/params.inc", "parameters beta; beta=0.9;\n");
+    let root_uri = files.uri("root.mod");
+    let mut wire = Wire::new();
+    wire.start(vec![files.folder("")], json!({}), vec![], false)
+        .await;
+    let before = wire.complete().await;
+    let committed = root(&before, &root_uri).clone();
+    assert!(committed["dependency_candidates"]
+        .as_array()
+        .unwrap()
+        .contains(&json!(files.uri("observed/params.inc"))));
+
+    // A status read must describe the committed report, even if a path now
+    // resolves elsewhere. A new analysis must then observe that new identity.
+    let observed = files.0.join("observed");
+    let replacement = files.0.join("replacement");
+    fs::rename(&observed, files.0.join("previous")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&replacement, &observed).unwrap();
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Directory junctions do not require symbolic-link privilege. Both
+        // ends are inside this test's verified temporary directory.
+        let result = Command::new("cmd.exe")
+            .creation_flags(0x08000000)
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&observed)
+            .arg(&replacement)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{result:?}");
+    }
+    let unchanged = wire.command("dynare/projectStatus").await;
+    assert_eq!(root(&unchanged, &root_uri), &committed);
+
+    wire.command("dynare/recheckProject").await;
+    let after = wire.complete().await;
+    let updated = root(&after, &root_uri);
+    assert_ne!(updated["revision"], committed["revision"]);
+    assert!(updated["dependency_candidates"]
+        .as_array()
+        .unwrap()
+        .contains(&json!(files.uri("replacement/params.inc"))));
+    assert!(!updated["dependency_candidates"]
+        .as_array()
+        .unwrap()
+        .contains(&json!(files.uri("observed/params.inc"))));
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn a_case_alias_open_is_the_same_project_report_owner() {
