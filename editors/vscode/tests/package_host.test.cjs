@@ -114,3 +114,60 @@ test("installed host nonzero root exit stops its already running owned descendan
   else assert.equal(record.code, 7);
   await assertWorkerStopped(options.root, record);
 });
+
+async function delayedLauncher(options, milliseconds, continueToHost) {
+  const script = path.join(options.root, "delayed launcher.ps1");
+  const realLauncher = path.resolve(__dirname, "../scripts/launch-host.ps1").replace(/'/g, "''");
+  await fs.writeFile(script, `param([string]$LaunchFile, [string]$Lifecycle)
+[System.IO.File]::WriteAllText($Lifecycle, '{"stage":"compiling","host_ready":false,"cleanup_verified":false}')
+Start-Sleep -Milliseconds ${milliseconds}
+${continueToHost ? `& '${realLauncher}' -LaunchFile $LaunchFile -Lifecycle $Lifecycle` : "exit 9"}
+`);
+  return script;
+}
+
+test("Windows startup delay keeps a separate budget from the owned host", { skip: process.platform !== "win32" }, async t => {
+  const options = await fixture(t, "pass");
+  options.launcherScript = await delayedLauncher(options, 1200, true);
+  options.startupTimeoutMs = 30000;
+  options.timeoutMs = 1000;
+  await runHost(options);
+  const record = await assertLogs(options.root);
+  assert.equal(record.passed, true);
+  assert.ok(record.startup_ms >= 1200);
+  assert.equal(record.launcher.host_ready, true);
+  assert.equal(record.cleanup_verified, true);
+  assert.equal(record.timeout_ms, 1000);
+  assert.equal(record.startup_timeout_ms, 30000);
+});
+
+test("Windows startup timeout retains the last boundary and empty host streams", { skip: process.platform !== "win32" }, async t => {
+  const options = await fixture(t, "pass");
+  options.launcherScript = await delayedLauncher(options, 5000, false);
+  options.startupTimeoutMs = 1000;
+  await assert.rejects(runHost(options), /launcher did not become ready.*(launcher_starting|compiling)/);
+  const evidence = path.join(options.root, "host-evidence");
+  const record = JSON.parse(await fs.readFile(path.join(evidence, "run.json"), "utf8"));
+  assert.equal(record.passed, false);
+  assert.equal(record.startup_timed_out, true);
+  assert.ok(["launcher_starting", "compiling"].includes(record.launcher.stage));
+  assert.equal(record.launcher.host_ready, false);
+  assert.equal(record.cleanup_verified, false);
+  assert.equal(await fs.readFile(path.join(evidence, "stdout.log"), "utf8"), "");
+  assert.equal(await fs.readFile(path.join(evidence, "stderr.log"), "utf8"), "");
+  assert.throws(() => process.kill(record.root_pid, 0), { code: "ESRCH" });
+});
+
+test("Windows validation failure writes lifecycle evidence before any host exists", { skip: process.platform !== "win32" }, async t => {
+  const options = await fixture(t, "pass");
+  options.executable = "relative.exe";
+  await assert.rejects(runHost(options), /launcher failed during validating/);
+  const evidence = path.join(options.root, "host-evidence");
+  const record = JSON.parse(await fs.readFile(path.join(evidence, "run.json"), "utf8"));
+  assert.equal(record.passed, false);
+  assert.equal(record.launcher.stage, "validating");
+  assert.equal(record.launcher.host_ready, false);
+  assert.equal(record.cleanup_verified, true);
+  assert.match(record.launcher.error, /absolute VS Code executable path/);
+  assert.equal(await fs.readFile(path.join(evidence, "stdout.log"), "utf8"), "");
+});
