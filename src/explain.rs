@@ -427,7 +427,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W131", ExplainEntry {
         title: "Variable silently overwritten in steady_state_model",
-        body: "A variable is assigned more than once in the ``steady_state_model`` block and the later assignment does not use the earlier value. Dynare warns: `in the 'steady_state_model' block, variable 'n' is declared twice`. (An in-place transformation that reuses the value, such as the ``A = log(A)`` log-model idiom, is intentional and is not flagged.)\n\n**Fix**\n\nRemove the redundant assignment, or fold the two into one.",
+        body: "An endogenous variable, parameter, or temporary is assigned more than once in the ``steady_state_model`` block. Dynare accepts and warns: `in the 'steady_state_model' block, variable 'n' is declared twice`. Each name in a bracketed output list counts as an assignment. Repeating a name within one list is accepted without this Warning. An in-place scalar transformation that reuses the value, such as the ``A = log(A)`` log-model idiom, is intentional and is not flagged.\n\n**Warrant**\n\nFor bracketed outputs the editor points at the repeated name. Scalar rows retain their assignment range. The scalar self-reuse exception suppresses Dynare's Warning on that deliberate transformation.\n\n**Fix**\n\nRemove the redundant assignment, or fold the two into one.",
         kind: ExplainKind::Shared,
     }),
     ("W140", ExplainEntry {

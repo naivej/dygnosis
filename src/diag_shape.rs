@@ -3,7 +3,6 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
-use crate::expr::ExprKind;
 use crate::intern::Name;
 use crate::lexer::{tokenize, Token, TokenKind};
 use crate::model::{Equation, Model};
@@ -509,72 +508,12 @@ fn is_static_eq(eq: &Equation) -> bool {
 }
 
 fn ss_assigned_names(model: &Model) -> HashSet<String> {
-    let mut assigned = HashSet::new();
-    for eq in &model.steady_state_equations {
-        if eq.is_local || eq.text.trim().starts_with('#') {
-            continue;
-        }
-        if let Some(id) = eq.lhs_expr {
-            if let ExprKind::Ident { name, timing, .. } = &model.exprs.get(id).kind {
-                if *timing == 0 {
-                    assigned.insert(model.name(*name).to_string());
-                    continue;
-                }
-            }
-        }
-        let lhs = eq.lhs.trim();
-        if is_simple_ident(lhs) {
-            assigned.insert(lhs.to_string());
-            continue;
-        }
-        if lhs.starts_with('[') && lhs.ends_with(']') {
-            assigned.extend(bracket_idents(lhs));
-        }
-    }
-    assigned
-}
-
-fn is_simple_ident(s: &str) -> bool {
-    let mut chars = s.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first.is_ascii_alphabetic() || first == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
-fn bracket_idents(lhs: &str) -> Vec<String> {
-    let inner = &lhs[1..lhs.len() - 1];
-    let mut names = Vec::new();
-    let mut cur = String::new();
-    for c in inner.chars() {
-        if c.is_ascii_alphanumeric() || c == '_' {
-            if cur.is_empty() && c.is_ascii_digit() {
-                cur.clear();
-                continue;
-            }
-            cur.push(c);
-        } else if !cur.is_empty() {
-            if cur
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-            {
-                names.push(std::mem::take(&mut cur));
-            } else {
-                cur.clear();
-            }
-        }
-    }
-    if !cur.is_empty()
-        && cur
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-    {
-        names.push(cur);
-    }
-    names
+    model
+        .steady_state_equations
+        .iter()
+        .flat_map(|eq| &eq.steady_state_targets)
+        .map(|target| model.name(target.name).to_string())
+        .collect()
 }
 
 fn check_i050(model: &Model) -> Vec<Diagnostic> {

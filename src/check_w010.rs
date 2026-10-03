@@ -27,9 +27,7 @@ const RUN_COMMANDS: &[&str] = &[
 pub fn check_w010(model: &Model) -> Vec<Diagnostic> {
     let mut assigned: HashSet<Name> = model.param_assignments.iter().map(|a| a.name).collect();
     for eq in &model.steady_state_equations {
-        if let Some(name) = ss_lhs_ident(model, eq) {
-            assigned.insert(name);
-        }
+        assigned.extend(eq.steady_state_targets.iter().map(|target| target.name));
     }
     let mut diagnostics = Vec::new();
     for p in model.final_parameters() {
@@ -320,6 +318,11 @@ fn unevaluable_subjects(model: &Model, param_names: &HashSet<Name>) -> Vec<Calib
 
     for eq in &model.steady_state_equations {
         let Some(name) = ss_lhs_ident(model, eq) else {
+            // A multiple-output RHS does not provide one scalar value per name.
+            // Its outputs also replace any earlier scalar calibration knowledge.
+            for target in &eq.steady_state_targets {
+                known.remove(&target.name);
+            }
             continue;
         };
         let value = eq.rhs_expr.and_then(|id| eval_expr(model, id, &known));

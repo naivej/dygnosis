@@ -165,6 +165,14 @@ pub struct HeterogeneityOption {
 }
 
 #[derive(Clone, Debug)]
+pub struct SteadyStateTarget {
+    pub name: Name,
+    pub span: Span,
+    /// Type table after the RHS and before registering this output name.
+    pub symbol_type_context: SymbolContext,
+}
+
+#[derive(Clone, Debug)]
 pub struct Equation {
     pub text: String,
     pub name: String,
@@ -173,6 +181,9 @@ pub struct Equation {
     pub rhs: String,
     pub lhs_expr: Option<ExprId>,
     pub rhs_expr: Option<ExprId>,
+    /// Scalar or bracketed outputs of a steady-state assignment, in written order.
+    /// Other equation domains leave this empty. Multiple outputs have no scalar LHS.
+    pub steady_state_targets: Vec<SteadyStateTarget>,
     /// `#name = expr` model-local (parser bumped `Hash`).
     pub is_local: bool,
     /// Same Hash-token flag; duplicate-`#` E030 walks this field.
@@ -2285,7 +2296,14 @@ impl Model {
     /// Identifier refs in `eq`, walking `lhs_expr` then `rhs_expr`.
     pub fn ident_refs(&self, eq: &Equation) -> Vec<IdentRef> {
         let mut out = Vec::new();
-        if let Some(id) = eq.lhs_expr {
+        if !eq.steady_state_targets.is_empty() {
+            out.extend(eq.steady_state_targets.iter().map(|target| IdentRef {
+                name: target.name,
+                span: target.span,
+                timing: 0,
+                timing_span: None,
+            }));
+        } else if let Some(id) = eq.lhs_expr {
             out.extend(self.exprs.walk_idents(id));
         }
         if let Some(id) = eq.rhs_expr {

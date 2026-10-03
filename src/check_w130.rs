@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::expr::{BinOp, ExprId, ExprKind};
 use crate::intern::Name;
-use crate::model::{DeprecatedOption, Equation, Model};
+use crate::model::{DeprecatedOption, Equation, Model, PolicyCommand};
 use crate::span::{LineIndex, Span};
 
 const SPECIAL_CALLS: &[&str] = &["abs", "max", "min", "sign"];
@@ -71,11 +71,18 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
     }
 
     let endogenous: HashSet<Name> = model.final_endogenous().iter().map(|d| d.name).collect();
+    // Both statements set ModFileStructure::ramsey_model_present before
+    // SteadyStateModel::checkPass. Its conditional steady state may use outputs
+    // not defined earlier in this block; duplicate assignments still warn.
+    let ramsey = model.policy_commands.iter().any(|command| {
+        matches!(
+            command,
+            PolicyCommand::RamseyModel | PolicyCommand::RamseyPolicy
+        )
+    });
     let mut assigned_anywhere = HashSet::new();
     for eq in &model.steady_state_equations {
-        if let Some(name) = ss_lhs_ident(model, eq) {
-            assigned_anywhere.insert(name);
-        }
+        assigned_anywhere.extend(eq.steady_state_targets.iter().map(|target| target.name));
     }
 
     let mut assigned_so_far: HashSet<Name> = model
@@ -88,7 +95,7 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     for eq in &model.steady_state_equations {
-        if let Some(rhs) = eq.rhs_expr {
+        if let Some(rhs) = eq.rhs_expr.filter(|_| !ramsey) {
             for r in model.exprs.walk_idents(rhs) {
                 if endogenous.contains(&r.name)
                     && !assigned_so_far.contains(&r.name)
@@ -96,8 +103,10 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
                     && flagged_use_before.insert(r.name)
                 {
                     let name = model.name(r.name);
-                    let lhs = ss_lhs_ident(model, eq)
-                        .map(|n| model.name(n).to_string())
+                    let lhs = eq
+                        .steady_state_targets
+                        .first()
+                        .map(|target| model.name(target.name).to_string())
                         .unwrap_or_else(|| name.to_string());
                     diagnostics.push(Diagnostic::new(
                         r.span,
@@ -111,15 +120,21 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
             }
         }
 
-        if let Some(lhs) = ss_lhs_ident(model, eq) {
-            if assigned_once.contains(&lhs) && endogenous.contains(&lhs) {
-                let reuses_self = eq
-                    .rhs_expr
-                    .is_some_and(|rhs| model.exprs.walk_idents(rhs).any(|r| r.name == lhs));
+        for target in &eq.steady_state_targets {
+            let lhs = target.name;
+            if assigned_once.contains(&lhs) {
+                let reuses_self = eq.lhs_expr.is_some()
+                    && eq
+                        .rhs_expr
+                        .is_some_and(|rhs| model.exprs.walk_idents(rhs).any(|r| r.name == lhs));
                 if !reuses_self {
                     let name = model.name(lhs);
                     diagnostics.push(Diagnostic::new(
-                        eq.span,
+                        if eq.lhs_expr.is_some() {
+                            eq.span
+                        } else {
+                            target.span
+                        },
                         Severity::Warning,
                         "W131",
                         format!(
@@ -128,9 +143,9 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
                     ));
                 }
             }
-            assigned_once.insert(lhs);
-            assigned_so_far.insert(lhs);
         }
+        assigned_once.extend(eq.steady_state_targets.iter().map(|target| target.name));
+        assigned_so_far.extend(eq.steady_state_targets.iter().map(|target| target.name));
     }
     diagnostics
 }

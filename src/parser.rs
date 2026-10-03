@@ -2587,8 +2587,7 @@ impl Parser<'_> {
             if self.refuse_ss_scalar_target() {
                 continue;
             }
-            if let Some((eq, range)) = self.parse_equation_statement() {
-                self.record_lhs_write(&eq, &range);
+            if let Some(eq) = self.parse_ss_equation() {
                 self.model.steady_state_equations.push(eq);
             }
         }
@@ -2627,6 +2626,11 @@ impl Parser<'_> {
         } else {
             return false;
         };
+        self.refuse_ss_target(index, expected);
+        true
+    }
+
+    fn ss_unexpected_token(&self, index: usize) -> (Span, String) {
         let token = &self.tokens[index];
         let mut span = token.span;
         let combined_equal = self.tokens.get(index + 1).is_some_and(|next| {
@@ -2666,6 +2670,11 @@ impl Parser<'_> {
                 .unwrap_or_else(|| self.bison_token_name(index)),
             _ => self.bison_token_name(index),
         };
+        (span, unexpected)
+    }
+
+    fn refuse_ss_target(&mut self, index: usize, expected: Option<&str>) {
+        let (span, unexpected) = self.ss_unexpected_token(index);
         let message = match expected {
             Some(expected) => {
                 format!("syntax error, unexpected {unexpected}, expecting {expected}")
@@ -2679,7 +2688,135 @@ impl Parser<'_> {
             self.bump();
         }
         self.eat(TokenKind::Semi);
-        true
+    }
+
+    fn parse_ss_equation(&mut self) -> Option<Equation> {
+        if self.at(TokenKind::Semi) {
+            self.bump();
+            return None;
+        }
+        let start = self.i;
+        let bracketed = self.at(TokenKind::LBrack);
+        if bracketed {
+            self.bump();
+        }
+        let mut targets = Vec::new();
+        loop {
+            if !self.at(TokenKind::Ident)
+                || self
+                    .ss_block_word_token(self.i)
+                    .is_some_and(|token| !Self::ss_symbol_token(token))
+            {
+                let bad = self.i;
+                // END inside a closed target list is not the block closer.
+                if self.at_ident_ci("end")
+                    && self.tokens[self.i + 1..]
+                        .iter()
+                        .take_while(|token| !matches!(token.kind, TokenKind::Semi | TokenKind::Eof))
+                        .any(|token| token.kind == TokenKind::RBrack)
+                {
+                    self.bump();
+                }
+                self.refuse_ss_target(bad, None);
+                return None;
+            }
+            let token = self.i;
+            let target = self.bump();
+            let spelling = self.lexeme(&target).to_string();
+            targets.push((self.intern.intern(&spelling), token));
+            if !bracketed {
+                break;
+            }
+            if self.at(TokenKind::RBrack) {
+                self.bump();
+                break;
+            }
+            if self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            if self.at(TokenKind::Ident) {
+                continue;
+            }
+            self.refuse_ss_target(self.i, None);
+            return None;
+        }
+        let equal = self.i;
+        if !self.at(TokenKind::Eq) {
+            self.refuse_ss_target(self.i, Some("EQUAL"));
+            return None;
+        }
+        self.bump();
+        let rhs_start = self.i;
+        let (rhs, clean) = self.parse_expr_side(ExprStop::Semi);
+        let end = self.i;
+        let span = Span {
+            start: self.tokens[start].span.start,
+            end: self.current_start(),
+        };
+        self.eat(TokenKind::Semi);
+        let rhs_expr = Some(if clean {
+            rhs.unwrap_or_else(|| self.alloc_error(span))
+        } else {
+            self.alloc_error(span)
+        });
+        let valid_rhs =
+            rhs_expr.is_some_and(|id| !matches!(self.model.exprs.get(id).kind, ExprKind::Error));
+        let mut outputs = Vec::new();
+        for &(name, token) in &targets {
+            let target_span = self.tokens[token].span;
+            let context = self.model.symbol_context();
+            if valid_rhs && !self.is_known_symbol(name) {
+                self.model.mod_file_locals.push(name);
+                self.record_symbol_declaration(
+                    name,
+                    target_span,
+                    crate::model::SymbolKind::ModFileLocal,
+                );
+                self.retain_last_symbol_occurrence(token);
+            }
+            if valid_rhs {
+                self.record_write(name, token);
+            }
+            outputs.push(crate::model::SteadyStateTarget {
+                name,
+                span: target_span,
+                symbol_type_context: context,
+            });
+        }
+        let lhs_expr = if bracketed {
+            None
+        } else {
+            let (name, token) = targets[0];
+            let span = self.tokens[token].span;
+            Some(self.alloc(
+                ExprKind::Ident {
+                    name,
+                    timing: 0,
+                    ident_span: span,
+                    timing_span: None,
+                },
+                span,
+            ))
+        };
+        Some(Equation {
+            text: join_lexemes(self.src, &self.tokens[start..end]),
+            name: String::new(),
+            span,
+            lhs: join_lexemes(self.src, &self.tokens[start..equal]),
+            rhs: join_lexemes(self.src, &self.tokens[rhs_start..end]),
+            lhs_expr,
+            rhs_expr,
+            steady_state_targets: outputs,
+            is_local: false,
+            model_local: false,
+            static_tag: false,
+            dynamic_tag: false,
+            tags: Vec::new(),
+            tag_map: BTreeMap::new(),
+            tag_twice: Vec::new(),
+            complementarity: None,
+        })
     }
 
     fn ss_block_word_token(&self, index: usize) -> Option<&'static str> {
@@ -11141,6 +11278,7 @@ fn equation_from_statement(raw: &str, span: Span) -> Option<Equation> {
         rhs,
         lhs_expr: None,
         rhs_expr: None,
+        steady_state_targets: Vec::new(),
         is_local: false,
         model_local: false,
         static_tag: false,

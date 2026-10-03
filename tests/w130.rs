@@ -263,13 +263,35 @@ fn w131_lag_ok() {
 #[test]
 fn w131_psi_param() {
     let src = check_mod("w130/w131_param.mod");
-    assert!(rust_family(&src).is_empty());
+    assert_duplicate_role(&src, "psi");
 }
 
 #[test]
 fn w131_nss_helper() {
     let src = check_mod("w130/w131_helper.mod");
-    assert!(rust_family(&src).is_empty());
+    assert_duplicate_role(&src, "n_ss");
+}
+
+fn assert_duplicate_role(src: &str, name: &str) {
+    let sentence =
+        format!("in the 'steady_state_model' block, variable '{name}' is declared twice");
+    let rows = rust_family(src);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].code, "W131");
+    assert_eq!(rows[0].message, sentence);
+    if let Some(pp) = dygnosis::find_preprocessor(None) {
+        let result = dygnosis::run_preprocessor(
+            src,
+            &pp,
+            None,
+            std::time::Duration::from_secs(30),
+            dygnosis::JsonStage::Check,
+        );
+        assert!(
+            result.success && result.raw_stdout.contains(&sentence),
+            "{result:?}"
+        );
+    }
 }
 
 #[test]
