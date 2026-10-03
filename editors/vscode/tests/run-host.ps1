@@ -11,6 +11,9 @@ if (-not $vscodeExecutable) {
 }
 if (-not (Test-Path -LiteralPath $vscodeExecutable)) { throw 'Set DYGNOSIS_VSCODE_EXECUTABLE to the minimum/current VS Code executable.' }
 if (-not $env:DYGNOSIS_TEST_BINARY) { throw 'Set DYGNOSIS_TEST_BINARY to the matching built engine.' }
+$hostUser = Join-Path $hostRoot 'profile/User'
+New-Item -ItemType Directory -Force -Path $hostUser | Out-Null
+@{ 'dynare.serverPath' = $env:DYGNOSIS_TEST_BINARY; 'extensions.autoUpdate' = $false; 'extensions.autoCheckUpdates' = $false } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $hostUser 'settings.json') -Encoding utf8
 $env:DYGNOSIS_HOST_RESULT = Join-Path $hostRoot 'result.json'
 $env:DYGNOSIS_HOST_RUN_ID = $runId
 $arguments = @(

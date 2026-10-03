@@ -139,6 +139,7 @@ function setup(doc = document(), extraDocs = []) {
   const changed = new Emitter();
   const service = { currentInstance: 1, roots: [], requests: [], validations: [], jumps: [], logged: [], engineRequests: [],
     log: message => service.logged.push(message), onDidChange: changed.event,
+    ensureStarted: async () => {},
     rootForDocument: async current => {
       service.roots.push(current.uri.toString());
       return service.root ?? (/\.(mod|dyn)$/i.test(current.uri.path) ? current.uri : undefined);

@@ -156,6 +156,40 @@
         "command": "dygnosis.showAllDiagnostics",
         "title": "Show all hidden checks",
         "category": "Dygnosis"
+      },
+      {
+        "command": "dygnosis.goToWrittenSource",
+        "title": "Go to written source",
+        "category": "Dygnosis",
+        "icon": "$(go-to-file)",
+        "enablement": "dygnosis.previewWrittenSource"
+      },
+      {
+        "command": "dygnosis.showMacroOrigins",
+        "title": "Show macro origins",
+        "category": "Dygnosis",
+        "icon": "$(list-tree)",
+        "enablement": "dygnosis.previewMacroOrigins"
+      },
+      {
+        "command": "dygnosis.refreshEffectiveModel",
+        "title": "Refresh effective model",
+        "category": "Dygnosis",
+        "icon": "$(refresh)",
+        "enablement": "dygnosis.effectivePreview"
+      },
+      {
+        "command": "dygnosis.diffWith",
+        "title": "Diff with…",
+        "category": "Dygnosis",
+        "enablement": "dygnosis.modelContext",
+        "icon": "$(diff)"
+      },
+      {
+        "category": "Dygnosis",
+        "command": "dygnosis.setupProjectMcp",
+        "title": "Set up MCP for this project",
+        "enablement": "isWorkspaceTrusted"
       }
     ],
     "menus": {
@@ -164,6 +198,26 @@
           "command": "dygnosis.showEffectiveModel",
           "when": "dygnosis.modelContext && dygnosis.toolbarActions",
           "group": "navigation"
+        },
+        {
+          "command": "dygnosis.goToWrittenSource",
+          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewToolbarActions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dygnosis.showMacroOrigins",
+          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewToolbarActions",
+          "group": "navigation@2"
+        },
+        {
+          "command": "dygnosis.refreshEffectiveModel",
+          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewToolbarActions",
+          "group": "navigation@3"
+        },
+        {
+          "command": "dygnosis.diffWith",
+          "when": "dygnosis.modelContext && dygnosis.toolbarActions",
+          "group": "navigation@2"
         }
       ],
       "editor/context": [
@@ -171,6 +225,26 @@
           "command": "dygnosis.showEffectiveModel",
           "when": "dygnosis.modelContext && dygnosis.contextActions",
           "group": "navigation"
+        },
+        {
+          "command": "dygnosis.goToWrittenSource",
+          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dygnosis.showMacroOrigins",
+          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
+          "group": "navigation@2"
+        },
+        {
+          "command": "dygnosis.refreshEffectiveModel",
+          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
+          "group": "navigation@3"
+        },
+        {
+          "command": "dygnosis.diffWith",
+          "when": "dygnosis.modelContext && dygnosis.contextActions",
+          "group": "navigation@2"
         }
       ],
       "commandPalette": [
@@ -193,6 +267,22 @@
         {
           "command": "dygnosis.chooseModelOwner",
           "when": "dygnosis.analysisDocument"
+        },
+        {
+          "command": "dygnosis.goToWrittenSource",
+          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview"
+        },
+        {
+          "command": "dygnosis.showMacroOrigins",
+          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview"
+        },
+        {
+          "command": "dygnosis.refreshEffectiveModel",
+          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview"
+        },
+        {
+          "command": "dygnosis.diffWith",
+          "when": "dygnosis.modelContext"
         }
       ],
       "view/title": [
@@ -1169,6 +1259,79 @@
             "description": "Offer Explain this check in diagnostic quick fixes. The Command Palette command remains available."
           }
         }
+      },
+      {
+        "title": "Dygnosis: Diff",
+        "properties": {
+          "dynare.diff.layout": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "sideBySide",
+              "stacked"
+            ],
+            "default": "auto",
+            "scope": "resource",
+            "description": "Model Diff layout. Auto stacks Before and After in a narrow view."
+          },
+          "dynare.diff.defaultExpansion": {
+            "type": "string",
+            "enum": [
+              "changes",
+              "all",
+              "none"
+            ],
+            "default": "changes",
+            "scope": "resource",
+            "description": "Initial section expansion in a new model Diff view."
+          },
+          "dynare.diff.defaultChangeKinds": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "added",
+                "removed",
+                "changed",
+                "unpaired"
+              ]
+            },
+            "default": [
+              "added",
+              "removed",
+              "changed",
+              "unpaired"
+            ],
+            "scope": "resource",
+            "description": "Change kinds initially shown in a new model Diff view. Empty hides all rows."
+          },
+          "dynare.diff.sections": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "symbols",
+                "parameters",
+                "aggregateEquations",
+                "heterogeneousEquations",
+                "shockSetup",
+                "shockAnalysisSetup"
+              ]
+            },
+            "default": [
+              "symbols",
+              "parameters",
+              "aggregateEquations",
+              "heterogeneousEquations",
+              "shockSetup",
+              "shockAnalysisSetup"
+            ],
+            "scope": "resource",
+            "description": "Sections shown in model Diff. Empty hides all content."
+          }
+        }
       }
     ],
     "semanticTokenTypes": [
@@ -1251,7 +1414,27 @@
           "name": "Dynare model"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "dygnosis.goToWrittenSource",
+        "key": "ctrl+alt+g",
+        "mac": "cmd+alt+g",
+        "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && editorTextFocus && dygnosis.previewWrittenSource"
+      },
+      {
+        "command": "dygnosis.showMacroOrigins",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && editorTextFocus && dygnosis.previewMacroOrigins"
+      },
+      {
+        "command": "dygnosis.refreshEffectiveModel",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && editorTextFocus"
+      }
+    ]
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",

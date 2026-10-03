@@ -32,7 +32,8 @@ export function extendCapabilities(capabilities: ClientCapabilities): void {
     semantic.tokenModifiers = [...new Set([...semantic.tokenModifiers, ...timingModifiers])];
   }
   const experimental: Record<string, unknown> = record(capabilities.experimental) ? capabilities.experimental : {};
-  experimental.dygnosis = { modelInfo: { schema_version: 1 }, modelInfoChanged: true, configuration: { schema_version: 1 } };
+  experimental.dygnosis = { modelInfo: { schema_version: 1 }, modelInfoChanged: true, configuration: { schema_version: 1 },
+    compareModels: { navigation_schema_version: 1 }, effectivePreview: { navigation_schema_version: 1, dependency_candidates: true } };
   capabilities.experimental = experimental;
 }
 class DygnosisCapabilities implements StaticFeature {
@@ -78,7 +79,9 @@ interface CachedRequest {
   result: Promise<ModelSnapshot | undefined>;
 }
 export interface ModelSnapshot extends ModelInfo { client_instance: number }
-export type NavigationGuard = (loadedDocument: vscode.TextDocument) => boolean | Promise<boolean>;
+export interface NavigationDecision { isCurrent(): boolean }
+export type NavigationGuard = (loadedDocument: vscode.TextDocument) => boolean | NavigationDecision | Promise<boolean | NavigationDecision>;
+export interface InputInvalidation { root?: string; reason: "input" | "file"; uri?: string }
 
 /** Shared service for status, view, tint, lenses, diagnostics and previews. */
 export class DygnosisClient implements vscode.Disposable {
@@ -87,8 +90,12 @@ export class DygnosisClient implements vscode.Disposable {
   private readonly lifecycle = new ClientLifecycle<ClientProcess>();
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChange = this.changed.event;
-  private readonly disposables: vscode.Disposable[] = [this.output, this.changed];
+  private readonly invalidated = new vscode.EventEmitter<InputInvalidation>();
+  readonly onDidInvalidate = this.invalidated.event;
+  private readonly disposables: vscode.Disposable[] = [this.output, this.changed, this.invalidated];
   private readonly cache = new Map<string, CachedRequest>();
+  private readonly freshTails = new Map<string, Promise<void>>();
+  private readonly cancelFreshRequests = new Set<() => void>();
   private readonly infos = new Map<string, ModelInfo>();
   private readonly selectedOwners = new Map<string, string>();
   private readonly ownedDocuments = new Set<string>();
@@ -141,7 +148,7 @@ export class DygnosisClient implements vscode.Disposable {
           this.output.appendLine(`Grammar only for ${document.uri.scheme}: documents; native analysis requires file or untitled.`);
       }),
       vscode.workspace.onDidChangeTextDocument(event => {
-        if (isAnalysisDocument(event.document)) {
+        if (event.contentChanges.length && isAnalysisDocument(event.document)) {
           this.pruneSourceLinks(event.document.uri, event.document.version);
           this.invalidate();
         }
@@ -164,22 +171,27 @@ export class DygnosisClient implements vscode.Disposable {
     for (const [key, link] of this.includeLinks) if (sameUri(link.source, source) && link.version !== version) this.includeLinks.delete(key);
   }
   log = (message: string): void => this.output.appendLine(message);
-  private watch(watcher: vscode.FileSystemWatcher): vscode.Disposable {
+  private watch(watcher: vscode.FileSystemWatcher, target?: vscode.Uri): vscode.Disposable {
     const listeners: vscode.Disposable[] = [watcher];
     for (const event of [watcher.onDidCreate, watcher.onDidChange, watcher.onDidDelete]) {
       listeners.push(event(uri => {
-        this.invalidate();
+        if (target && !sameUri(uri, target)) return;
+        this.invalidate(undefined, uri);
         void this.client?.sendNotification("workspace/didChangeWatchedFiles", { changes: [{ uri: uri.toString(), type: event === watcher.onDidCreate ? 1 : event === watcher.onDidDelete ? 3 : 2 }] });
       }));
     }
     return vscode.Disposable.from(...listeners);
   }
-  invalidate(root?: string): void {
+  invalidate(root?: string, file?: vscode.Uri): void {
     ++this.epoch;
+    // Every in-flight snapshot uses the global epoch. Release its fresh
+    // callers immediately; a server ignoring cancellation must not hold a queue.
+    for (const cancel of this.cancelFreshRequests) cancel();
     for (const [key, request] of this.cache) {
       if (!root || key.startsWith(`${root}\n`)) { request.cancellation.cancel(); request.cancellation.dispose(); this.cache.delete(key); }
     }
     if (root) this.infos.delete(root); else this.infos.clear();
+    this.invalidated.fire(file ? { root, reason: "file", uri: file.toString() } : { root, reason: "input" });
     this.changed.fire();
     this.scheduleRootRefresh();
     this.scheduleSymbolRefresh();
@@ -288,9 +300,53 @@ export class DygnosisClient implements vscode.Disposable {
     if (!client.initializeResult?.capabilities.executeCommandProvider?.commands.includes(command)) throw new Error(`The selected engine does not support ${command}. Use the bundle or update dynare.serverPath.`);
     return client.sendRequest(ExecuteCommandRequest.type, { command, arguments: args }, token);
   }
-  async modelInfo(root: vscode.Uri, document = root, fresh = false): Promise<ModelSnapshot | undefined> {
+  async modelInfo(root: vscode.Uri, document = root, fresh = false, token?: vscode.CancellationToken): Promise<ModelSnapshot | undefined> {
+    if (token?.isCancellationRequested) return undefined;
     await this.ensureStarted();
-    if (!this.modelInfoSupported || this.closed) return undefined;
+    if (!this.modelInfoSupported || this.closed || token?.isCancellationRequested) return undefined;
+    return fresh ? this.freshModelInfo(root, document, token) : this.requestModelInfo(root, document);
+  }
+  /** Fresh navigators sharing a root/document cannot cancel one another. */
+  private freshModelInfo(root: vscode.Uri, document: vscode.Uri, token?: vscode.CancellationToken): Promise<ModelSnapshot | undefined> {
+    const documentKey = document.toString(), key = `${root.toString()}\n${documentKey}`;
+    const epoch = this.epoch, instance = this.client;
+    const version = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === documentKey)?.version ?? null;
+    let cancelled = false, active: CachedRequest | undefined, abort: () => void = () => {};
+    const aborted = new Promise<undefined>(resolve => { abort = () => { resolve(undefined); }; });
+    const cancel = (): void => {
+      cancelled = true; abort();
+      if (active) {
+        active.cancellation.cancel(); active.cancellation.dispose();
+        if (this.cache.get(key) === active) this.cache.delete(key);
+      }
+    };
+    this.cancelFreshRequests.add(cancel);
+    const callerSubscription = token?.onCancellationRequested(cancel);
+    if (token?.isCancellationRequested) cancel();
+    const previous = this.freshTails.get(key) ?? Promise.resolve();
+    const task = previous.then(() => {
+      const currentVersion = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === documentKey)?.version ?? null;
+      if (cancelled || this.closed || epoch !== this.epoch || instance !== this.client || version !== currentVersion) return undefined;
+      const result = this.requestModelInfo(root, document, true);
+      active = this.cache.get(key);
+      return Promise.race([result, aborted]);
+    });
+    const result = Promise.race([task, aborted]);
+    // A cancelled queued caller returns immediately, but its slot must still
+    // wait for its predecessor so later live callers cannot bypass that proof.
+    const tail = task.then(() => {});
+    this.freshTails.set(key, tail);
+    void result.then(() => {
+      this.cancelFreshRequests.delete(cancel);
+      callerSubscription?.dispose();
+    });
+    void tail.then(() => {
+      if (this.freshTails.get(key) === tail) this.freshTails.delete(key);
+    });
+    return result;
+  }
+  private requestModelInfo(root: vscode.Uri, document: vscode.Uri, fresh = false): Promise<ModelSnapshot | undefined> {
+    if (!this.modelInfoSupported || this.closed) return Promise.resolve(undefined);
     const rootKey = root.toString(), documentKey = document.toString(), key = `${rootKey}\n${documentKey}`;
     const version = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === documentKey)?.version ?? null;
     const existing = this.cache.get(key);
@@ -314,9 +370,9 @@ export class DygnosisClient implements vscode.Disposable {
     this.cache.set(key, { epoch, version, cancellation, result });
     return result;
   }
-  async revalidate(root: vscode.Uri, expectedRevision: string, expectedInstance: number, document = root): Promise<ModelSnapshot | undefined> {
-    if (expectedInstance !== this.instance) return undefined;
-    const info = await this.modelInfo(root, document, true);
+  async revalidate(root: vscode.Uri, expectedRevision: string, expectedInstance: number, document = root, token?: vscode.CancellationToken): Promise<ModelSnapshot | undefined> {
+    if (expectedInstance !== this.instance || token?.isCancellationRequested) return undefined;
+    const info = await this.modelInfo(root, document, true, token);
     return info?.revision === expectedRevision && info.client_instance === expectedInstance ? info : undefined;
   }
   private watchDependencies(info: ModelInfo): void {
@@ -327,8 +383,8 @@ export class DygnosisClient implements vscode.Disposable {
       if (this.dependencyWatchers.has(candidate)) continue;
       const uri = vscode.Uri.parse(candidate);
       if (uri.scheme !== "file") continue;
-      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(requireDirectory(uri.fsPath)), uri.path.split("/").at(-1) ?? "*"));
-      this.dependencyWatchers.set(candidate, this.watch(watcher));
+      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(requireDirectory(uri.fsPath)), "*"));
+      this.dependencyWatchers.set(candidate, this.watch(watcher, uri));
     }
   }
   private pruneDependencyWatchers(): void {
@@ -411,17 +467,19 @@ export class DygnosisClient implements vscode.Disposable {
     this.selectedOwners.set(document.toString(), root.toString()); this.ownedDocuments.add(document.toString()); this.changed.fire();
   }
   treatAsRoot(document: vscode.Uri): void { this.selectedOwners.delete(document.toString()); this.ownedDocuments.delete(document.toString()); this.changed.fire(); this.scheduleRootRefresh(); }
-  async openLocation(location: { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }, root?: vscode.Uri, guard?: NavigationGuard): Promise<void> {
+  async openLocation(location: { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }, root?: vscode.Uri, guard?: NavigationGuard, options?: { viewColumn?: vscode.ViewColumn }): Promise<void> {
     const uri = vscode.Uri.parse(location.uri);
     const range = new vscode.Range(location.range.start.line, location.range.start.character, location.range.end.line, location.range.end.character);
-    await this.openSource(uri, root, guard, range);
+    await this.openSource(uri, root, guard, range, options);
   }
-  private async openSource(uri: vscode.Uri, root?: vscode.Uri, guard?: NavigationGuard, selection?: vscode.Range): Promise<void> {
+  private async openSource(uri: vscode.Uri, root?: vscode.Uri, guard?: NavigationGuard, selection?: vscode.Range, options?: { viewColumn?: vscode.ViewColumn }): Promise<void> {
     if (!["file", "untitled"].includes(uri.scheme)) throw new Error("This source location is unavailable to native analysis.");
     const document = await vscode.workspace.openTextDocument(uri);
-    if (guard && !await guard(document)) return;
-    if (root) this.selectOwner(uri, root);
-    await vscode.window.showTextDocument(document, { selection });
+    const decision = guard ? await guard(document) : true;
+    // An asynchronous proof may expire before this continuation can reveal it.
+    if (typeof decision === "boolean" ? !decision : decision.isCurrent() !== true) return;
+    if (root) this.selectOwner(document.uri, root);
+    await vscode.window.showTextDocument(document, { ...options, selection });
   }
   async failure(message: string): Promise<void> {
     this.log(message);

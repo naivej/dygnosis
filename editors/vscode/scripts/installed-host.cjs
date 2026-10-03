@@ -3,6 +3,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const vscode = require("vscode");
 const { binaryName, model, probeMcp, sha256, writeJson } = require("./common.cjs");
+const { probeNativeMcp } = require("./native-mcp-host.cjs");
 const samePath = (left, right) => process.platform === "win32"
   ? path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase()
   : path.resolve(left) === path.resolve(right);
@@ -39,6 +40,9 @@ exports.run = async function run() {
     evidence.checks.push("installed extension activation before opening a Dynare document");
     evidence.mcp = await probeMcp(binary, source.version);
     evidence.checks.push("installed bundled MCP initialize/tools/list/tool call before opening a model");
+    evidence.native_vscode_mcp = await probeNativeMcp(vscode, `${source.publisher}.dygnosis`);
+    if (!projectDiagnostics) assert.equal(service.client, undefined, "Native MCP must work before the first LSP launch");
+    evidence.checks.push("native VS Code MCP discovery of every tool and actual model-info invocation before opening a model");
     const workspace = vscode.workspace.workspaceFolders[0].uri.fsPath;
     const file = path.join(workspace, "installed model.mod");
     await fs.writeFile(file, model);
@@ -71,8 +75,6 @@ exports.run = async function run() {
     evidence.overrideMcp = await probeMcp(override, source.version);
     evidence.selected_lsp_paths = launchLogs.filter(message => message.startsWith("LSP executable:"));
     evidence.checks.push("explicit user override with spaces launches LSP and MCP");
-    // Direct stdio checks cannot prove native VS Code discovery/trust/tool routing.
-    evidence.native_vscode_mcp = "pending Ext-launch host evidence";
     evidence.passed = true;
   } catch (error) { evidence.passed = false; evidence.error = String(error); throw error; }
   finally {

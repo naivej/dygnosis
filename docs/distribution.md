@@ -6,10 +6,10 @@ Rust, Python, MATLAB or Dynare installation. Dygnosis reads models and stops
 before MATLAB computation; it does not run the official Dynare preprocessor.
 
 All six candidate targets passed installed VS Code 1.102.0/1.140.0 and unpacked
-standalone checks in [native CI](https://github.com/naivej/dygnosis/actions/runs/37065207944).
-Release review and publication remain pending. That run's final collector
-rejected platform checkout line endings in lockfile hashes; the provenance
-correction requires fresh matching artifacts before release.
+standalone checks, including the final collector, in
+[native CI](https://github.com/naivej/dygnosis/actions/runs/37068721595).
+Release review and publication remain pending; final release versions require
+a fresh matching package matrix.
 
 | Package target | Native verification host | Runtime evidence |
 |---|---|---|

@@ -1,3 +1,6 @@
+import { registerDiff } from "./diff";
+import { registerProjectMcp } from "./project_mcp";
+import { registerOriginJumps } from "./origin_jumps";
 import { registerDiagnosticActions } from "./quickfix";
 import { registerLenses } from "./lenses";
 import { registerColors } from "./color";
@@ -13,7 +16,9 @@ let service: DygnosisClient | undefined;
 export function activate(context: vscode.ExtensionContext): DygnosisClient {
   const client = new DygnosisClient(context);
   service = client;
-  context.subscriptions.push(client, registerDiagnosticActions(client), registerLenses(client), registerStatus(client), registerModelView(client), registerColors(client), registerMcp(context, client.log), registerEffectivePreview(client),
+  context.subscriptions.push(registerProjectMcp(context, client));
+  const previews = registerEffectivePreview(client);
+  context.subscriptions.push(client, registerDiagnosticActions(client), registerLenses(client), registerStatus(client), registerModelView(client), registerColors(client), registerMcp(context, client.log), previews, registerOriginJumps(client, previews), registerDiff(client),
     vscode.commands.registerCommand("dygnosis.restartServer", () => client.restart()),
     vscode.commands.registerCommand("dygnosis.showOutput", () => client.output.show()),
     vscode.commands.registerCommand("dygnosis.openSettings", () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:dygnosis.dygnosis")),
