@@ -192,6 +192,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         in_dynare_block: false,
         in_epilogue: false,
         model_function_context: false,
+        in_qualified_model_args: false,
         implicit_function_names: Vec::new(),
     };
     p.parse_file();
@@ -1011,6 +1012,8 @@ struct Parser<'a> {
     in_epilogue: bool,
     /// Function-call contexts using the pinned grammar's model_expression rule.
     model_function_context: bool,
+    /// Validate argument syntax only on the added qualified model-call surface.
+    in_qualified_model_args: bool,
     implicit_function_names: Vec<Name>,
 }
 
@@ -9406,7 +9409,10 @@ impl Parser<'_> {
             self.bump();
             let rhs = match self.parse_bp(r_bp) {
                 Some(id) => id,
-                None => self.alloc_error(self.expr_span(lhs)),
+                None => {
+                    self.refuse_qualified_argument_syntax();
+                    self.alloc_error(self.expr_span(lhs))
+                }
             };
             let span = Span {
                 start: self.expr_span(lhs).start,
@@ -9430,7 +9436,10 @@ impl Parser<'_> {
             let tok = self.bump();
             let arg = match self.parse_bp(UNARY_BP) {
                 Some(id) => id,
-                None => self.alloc_error(tok.span),
+                None => {
+                    self.refuse_qualified_argument_syntax();
+                    self.alloc_error(tok.span)
+                }
             };
             let span = Span {
                 start: tok.span.start,
@@ -9440,7 +9449,13 @@ impl Parser<'_> {
         }
         if self.at(TokenKind::LParen) {
             self.bump();
+            let parse_issues_before = self.model.parse_issues.len();
             let inner = self.parse_bp(0);
+            if (inner.is_none() || !self.at(TokenKind::RParen))
+                && self.model.parse_issues.len() == parse_issues_before
+            {
+                self.refuse_qualified_argument_syntax();
+            }
             self.eat(TokenKind::RParen);
             return inner;
         }
@@ -9454,6 +9469,7 @@ impl Parser<'_> {
             return Some(id);
         }
         if self.at(TokenKind::String) {
+            self.refuse_qualified_argument_syntax();
             let tok = self.bump();
             return Some(self.alloc(ExprKind::String, tok.span));
         }
@@ -9520,7 +9536,7 @@ impl Parser<'_> {
                 }
             }
         }
-        if self.in_steady_state_rhs
+        if (self.in_steady_state_rhs || self.model_function_context)
             && is_dynare_expression_builtin(&lexeme)
             && !self.at(TokenKind::LParen)
         {
@@ -9532,9 +9548,11 @@ impl Parser<'_> {
             return self.alloc(ExprKind::Error, tok.span);
         }
         if self.at(TokenKind::Dot)
-            && (self.in_steady_state_rhs || self.peek_kind(1) == Some(TokenKind::Ident))
+            && (self.in_steady_state_rhs
+                || self.model_function_context
+                || self.peek_kind(1) == Some(TokenKind::Ident))
         {
-            if self.in_steady_state_rhs {
+            if self.in_steady_state_rhs || self.model_function_context {
                 let mut qualified = lexeme;
                 let mut span = tok.span;
                 while self.at(TokenKind::Dot) {
@@ -9559,6 +9577,14 @@ impl Parser<'_> {
                         callee,
                         Token::with_lexeme(TokenKind::Ident, span, qualified),
                     );
+                }
+                if self.model_function_context {
+                    let (bad_span, unexpected) = self.ss_unexpected_token(self.i);
+                    self.push_bison(
+                        bad_span,
+                        format!("syntax error, unexpected {unexpected}, expecting '(' or '.'"),
+                    );
+                    return self.alloc(ExprKind::Error, span);
                 }
                 self.model.namespace_qualified.push((qualified, span));
                 return self.alloc(ExprKind::Error, span);
@@ -9684,18 +9710,28 @@ impl Parser<'_> {
 
     fn parse_call(&mut self, callee: Name, kw: Token) -> ExprId {
         let callee_token = self.i - 1;
+        let parse_issues_before = self.model.parse_issues.len();
         self.eat(TokenKind::LParen);
         let mut args = Vec::new();
-        if self.in_steady_state_rhs && self.at(TokenKind::RParen) {
+        let qualified_model = self.model_function_context && self.intern.get(callee).contains('.');
+        let previous_argument_scope = self.in_qualified_model_args;
+        self.in_qualified_model_args |= qualified_model;
+        if (self.in_steady_state_rhs || self.in_qualified_model_args) && self.at(TokenKind::RParen)
+        {
             self.push_bison(
                 self.tokens[self.i].span,
                 "syntax error, unexpected ')'".to_string(),
             );
         }
+        if self.in_qualified_model_args && self.at_expr_stop() && !self.at(TokenKind::RParen) {
+            self.refuse_qualified_argument_syntax();
+        }
         if !self.at(TokenKind::RParen) && !self.at_expr_stop() {
             loop {
                 if let Some(id) = self.parse_expr() {
                     args.push(id);
+                } else {
+                    self.refuse_qualified_argument_syntax();
                 }
                 if self.at(TokenKind::Comma) {
                     self.bump();
@@ -9704,6 +9740,17 @@ impl Parser<'_> {
                 break;
             }
         }
+        if self.in_qualified_model_args
+            && !self.at(TokenKind::RParen)
+            && self.model.parse_issues.len() == parse_issues_before
+        {
+            let (span, unexpected) = self.ss_unexpected_token(self.i);
+            self.push_bison(
+                span,
+                format!("syntax error, unexpected {unexpected}, expecting COMMA or ')'"),
+            );
+        }
+        self.in_qualified_model_args = previous_argument_scope;
         let end = if self.at(TokenKind::RParen) {
             self.bump().span.end
         } else {
@@ -9718,6 +9765,9 @@ impl Parser<'_> {
                 end,
             },
         );
+        if self.model.parse_issues.len() == parse_issues_before {
+            self.refuse_qualified_model_call(callee, kw.span, args.len());
+        }
         if self.in_epilogue
             && !is_builtin_function(self.intern.get(callee))
             && !self.is_known_symbol(callee)
@@ -9772,6 +9822,51 @@ impl Parser<'_> {
             self.model.sum_argument_roles.insert(id, role);
         }
         id
+    }
+
+    fn refuse_qualified_argument_syntax(&mut self) {
+        if self.in_qualified_model_args {
+            let (span, unexpected) = self.ss_unexpected_token(self.i);
+            self.push_bison(span, format!("syntax error, unexpected {unexpected}"));
+        }
+    }
+
+    /// Qualified MODEL_EXPRESSION calls use the symbol/function tables at this
+    /// parser position. Later declarations and macro source offsets do not
+    /// establish the declaration that the official parser sees here.
+    fn refuse_qualified_model_call(&mut self, callee: Name, span: Span, nargs: usize) {
+        let name = self.intern.get(callee);
+        if !self.model_function_context || !name.contains('.') {
+            return;
+        }
+        let declaration = self
+            .model
+            .external_functions
+            .iter()
+            .rev()
+            .find(|stmt| stmt.name.is_some_and(|(declared, _)| declared == callee));
+        let message = if let Some(declaration) = declaration {
+            (declaration.nargs.unwrap_or(1) as usize != nargs).then(|| {
+                format!("The number of arguments passed to {name}() does not match those of a previous call or declaration of this function.")
+            })
+        } else if self.implicit_function_names.contains(&callee)
+            || self.in_epilogue && !self.is_known_symbol(callee)
+        {
+            // Existing implicit-call and epilogue checks own their distinct
+            // official sentences.
+            None
+        } else if self.model.external_function_names.contains(&callee) {
+            Some(format!("Using a derivative of an external function ({name}) in the model block is currently not allowed."))
+        } else {
+            Some(format!("To use an external function ({name}) within the model block, you must first declare it via the external_function() statement."))
+        };
+        if let Some(message) = message {
+            self.model.shape_refuses.push(ShapeRefuse::official(
+                span,
+                "external_function",
+                message,
+            ));
+        }
     }
 
     fn refuse_ss_variable_call(&mut self, name: Name, span: Span) {
