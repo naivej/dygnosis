@@ -4,7 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { setTimeout: delay } = require("node:timers/promises");
-const { runHost } = require("../scripts/package-host.cjs");
+const { runHost, stopGroup } = require("../scripts/package-host.cjs");
 
 async function fixture(t, mode) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dygnosis host logs "));
@@ -84,6 +84,7 @@ test("installed host preserves full output and separate profile logs on success"
   const record = await assertLogs(options.root);
   assert.equal(record.passed, true);
   assert.equal(record.runId, "pass");
+  if (process.platform === "win32") assert.equal(record.startup_timeout_ms, 60000);
   assert.equal(JSON.parse(await fs.readFile(path.join(options.root, "host-evidence", "installed-host.json"), "utf8")).passed, true);
 });
 
@@ -129,7 +130,7 @@ ${continueToHost ? `& '${realLauncher}' -LaunchFile $LaunchFile -Lifecycle $Life
 test("Windows startup delay keeps a separate budget from the owned host", { skip: process.platform !== "win32" }, async t => {
   const options = await fixture(t, "pass");
   options.launcherScript = await delayedLauncher(options, 1200, true);
-  options.startupTimeoutMs = 30000;
+  options.startupTimeoutMs = 60000;
   options.timeoutMs = 1000;
   await runHost(options);
   const record = await assertLogs(options.root);
@@ -138,7 +139,7 @@ test("Windows startup delay keeps a separate budget from the owned host", { skip
   assert.equal(record.launcher.host_ready, true);
   assert.equal(record.cleanup_verified, true);
   assert.equal(record.timeout_ms, 1000);
-  assert.equal(record.startup_timeout_ms, 30000);
+  assert.equal(record.startup_timeout_ms, 60000);
 });
 
 test("Windows startup timeout retains the last boundary and empty host streams", { skip: process.platform !== "win32" }, async t => {
@@ -170,4 +171,41 @@ test("Windows validation failure writes lifecycle evidence before any host exist
   assert.equal(record.cleanup_verified, true);
   assert.match(record.launcher.error, /absolute VS Code executable path/);
   assert.equal(await fs.readFile(path.join(evidence, "stdout.log"), "utf8"), "");
+});
+
+test("Unix cleanup retries post-kill EPERM until ESRCH proves group absence", async () => {
+  const calls = [];
+  const states = ["EPERM", null, "ESRCH"];
+  await stopGroup(42, (pid, signal) => {
+    calls.push([pid, signal]);
+    if (signal === "SIGKILL") return true;
+    const code = states.shift();
+    if (code) throw Object.assign(new Error(`kill ${code}`), { code });
+    return true;
+  });
+  assert.deepEqual(calls, [[-42, "SIGKILL"], [-42, 0], [-42, 0], [-42, 0]]);
+  assert.equal(states.length, 0);
+});
+
+test("Unix cleanup fails immediately if the initial SIGKILL is denied", async () => {
+  const failure = Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+  let calls = 0;
+  await assert.rejects(stopGroup(42, (pid, signal) => {
+    calls++;
+    assert.equal(pid, -42);
+    assert.equal(signal, "SIGKILL");
+    throw failure;
+  }), error => error === failure);
+  assert.equal(calls, 1);
+});
+
+test("Unix cleanup cannot pass persistent EPERM without an absence proof", async () => {
+  let probes = 0;
+  await assert.rejects(stopGroup(42, (pid, signal) => {
+    assert.equal(pid, -42);
+    if (signal === "SIGKILL") return true;
+    probes++;
+    throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+  }, 30), /did not stop/);
+  assert.ok(probes > 0);
 });

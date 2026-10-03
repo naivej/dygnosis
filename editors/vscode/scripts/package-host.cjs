@@ -7,13 +7,20 @@ const { setTimeout: delay } = require("node:timers/promises");
 const { writeJson } = require("./common.cjs");
 
 const cleanupTimeoutMs = 10000;
-async function stopGroup(pid) {
-  try { process.kill(-pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
-  const deadline = Date.now() + cleanupTimeoutMs;
+async function stopGroup(pid, kill = process.kill, timeoutMs = cleanupTimeoutMs) {
+  try { kill(-pid, "SIGKILL"); } catch (error) { if (error.code === "ESRCH") return; throw error; }
+  const deadline = performance.now() + timeoutMs;
+  let probeError;
   while (true) {
-    try { process.kill(-pid, 0); } catch (error) { if (error.code === "ESRCH") return; throw error; }
-    if (Date.now() >= deadline) throw new Error("Owned host process group did not stop within 10 seconds");
-    await delay(20);
+    if (performance.now() >= deadline) throw new Error(`Owned host process group did not stop within ${timeoutMs / 1000} seconds`, { cause: probeError });
+    try { kill(-pid, 0); } catch (error) {
+      if (error.code === "ESRCH") return;
+      // After an accepted SIGKILL, Darwin may retain a group during teardown.
+      // EPERM is not proof of absence; retry only until ESRCH or the deadline.
+      if (error.code !== "EPERM") throw error;
+      probeError = error;
+    }
+    await delay(Math.min(20, Math.max(0, deadline - performance.now())));
   }
 }
 
@@ -46,7 +53,7 @@ async function waitForWindowsLauncher(exit, lifecycle, record, startupTimeoutMs,
   }
 }
 
-async function runHost({ executable, args, env, root, profile, identity, timeoutMs = 120000, startupTimeoutMs = 30000,
+async function runHost({ executable, args, env, root, profile, identity, timeoutMs = 120000, startupTimeoutMs = 60000,
   launcherScript = path.join(__dirname, "launch-host.ps1") }) {
   const windows = process.platform === "win32";
   const evidenceRoot = path.join(root, "host-evidence");
@@ -150,4 +157,4 @@ async function runHost({ executable, args, env, root, profile, identity, timeout
   return evidenceRoot;
 }
 
-module.exports = { runHost };
+module.exports = { runHost, stopGroup };
