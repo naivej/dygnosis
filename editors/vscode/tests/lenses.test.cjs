@@ -196,7 +196,7 @@ test("resource controls use approved defaults and native visibility with safe in
 });
 test("default actionable model lens reuses the cache facts and creates no reference scan or solver command", async () => {
   const env = setup(); const lenses = await env.provide();
-  assert.equal(lenses.length, 1); assert.equal(lenses[0].command.title, "Browse 1 equations");
+  assert.equal(lenses.length, 1); assert.equal(lenses[0].command.title, "Browse 1 equation");
   assert.deepEqual(lenses[0].range, new Range(3, 0, 3, 5)); assert.equal(env.service.requests.length, 1);
   assert.equal(env.host.references.length, 0); assert.equal(env.service.engineRequests.length, 0);
   env.host.answers.push(items => items[0]); await env.run(lenses[0]);
@@ -209,7 +209,7 @@ test("aggregate, heterogeneous and multiple model blocks keep their separate sur
   const rows = [equation(), equation("e2", { block_id: "s2", scope: "dimension", dimension: "households", location: location("file:///project/hank.inc", 2) }),
     equation("e3", { block_id: "s2", scope: "dimension", dimension: "households", number: 2 })];
   env.service.info = () => facts(env.doc, { statements: blocks, equations: rows });
-  const lenses = await env.provide(); assert.deepEqual(lenses.map(row => row.command.title), ["Browse 1 equations", "Browse 2 equations", "Browse 0 equations"]);
+  const lenses = await env.provide(); assert.deepEqual(lenses.map(row => row.command.title), ["Browse 1 equation", "Browse 2 equations", "Browse 0 equations"]);
   env.host.answers.push(items => items[0]); await env.run(lenses[1]);
   assert.equal(env.host.picks[0].items.length, 2); assert.ok(env.host.picks[0].items.every(row => /households/.test(row.description)));
   assert.equal(env.service.jumps[0].target.uri, "file:///project/hank.inc");
