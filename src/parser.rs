@@ -188,6 +188,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         in_model: false,
         in_equation_body: false,
         in_native_assignment: false,
+        in_steady_state_rhs: false,
         in_dynare_block: false,
         in_epilogue: false,
         model_function_context: false,
@@ -1003,6 +1004,8 @@ struct Parser<'a> {
     in_equation_body: bool,
     /// Native MATLAB assignment text is retained for guidance, but declares no symbols.
     in_native_assignment: bool,
+    /// Ordinary expression grammar while reading a steady-state assignment RHS.
+    in_steady_state_rhs: bool,
     /// Dynare's reserved block tokens also apply to the opener's options.
     in_dynare_block: bool,
     in_epilogue: bool,
@@ -2277,6 +2280,25 @@ impl Parser<'_> {
                     && self.tokens[token].span == *ident_span
                     && self.tokens[token].text(self.src) == self.intern.get(name)
             }) {
+                let earlier_use = self.model.written_equations.iter().any(|row| {
+                    [row.equation.lhs_expr, row.equation.rhs_expr]
+                        .into_iter()
+                        .flatten()
+                        .any(|expr| self.model_expression_mentions(expr, name))
+                }) || equation
+                    .rhs_expr
+                    .is_some_and(|expr| self.model_expression_mentions(expr, name));
+                if equation.is_local && self.model.final_symbol_kind(name).is_none() && !earlier_use
+                {
+                    // The pinned pound action declares an unknown name after
+                    // reading its RHS. Later parse-time contexts need its role.
+                    self.record_symbol_declaration(
+                        name,
+                        self.tokens[token].span,
+                        crate::model::SymbolKind::ModelLocalVariable,
+                    );
+                    self.retain_last_symbol_occurrence(token);
+                }
                 self.record_write(name, token);
             }
         }
@@ -2577,6 +2599,26 @@ impl Parser<'_> {
             .retain(|observed| observed.name != decl.name);
     }
 
+    fn model_expression_mentions(&self, expr: ExprId, name: Name) -> bool {
+        match &self.model.exprs.get(expr).kind {
+            ExprKind::Ident { name: used, .. } => *used == name,
+            ExprKind::Call { callee, args } => {
+                *callee == name
+                    || args
+                        .iter()
+                        .any(|arg| self.model_expression_mentions(*arg, name))
+            }
+            ExprKind::Unary { arg, .. }
+            | ExprKind::SteadyState { arg }
+            | ExprKind::Expectation { arg, .. } => self.model_expression_mentions(*arg, name),
+            ExprKind::Binary { lhs, rhs, .. } => {
+                self.model_expression_mentions(*lhs, name)
+                    || self.model_expression_mentions(*rhs, name)
+            }
+            ExprKind::Number | ExprKind::String | ExprKind::Error => false,
+        }
+    }
+
     fn parse_ss_block(&mut self) {
         let opener_span = self.bump_plain_opener();
         let start = opener_span.start;
@@ -2748,7 +2790,9 @@ impl Parser<'_> {
         }
         self.bump();
         let rhs_start = self.i;
+        self.in_steady_state_rhs = true;
         let (rhs, clean) = self.parse_expr_side(ExprStop::Semi);
+        self.in_steady_state_rhs = false;
         let end = self.i;
         let span = Span {
             start: self.tokens[start].span.start,
@@ -6747,43 +6791,33 @@ impl Parser<'_> {
             // would stick updates the type history and the declaration lists.
             let restored: Vec<Name> = names
                 .iter()
-                .filter(|(name, _)| self.change_type_succeeds(*name, start))
+                .filter(|(name, _)| self.change_type_succeeds(*name))
                 .map(|(name, _)| *name)
                 .collect();
             let kind = change_type_event_kind(new_type);
             let used_names = names
                 .iter()
-                .filter(|(name, _)| self.symbol_used_in_expression_before(*name, start))
+                .filter(|(name, _)| self.symbol_used_in_expression(*name))
                 .map(|(name, _)| *name)
                 .collect();
             let known_names = names
                 .iter()
-                .filter(|(name, _)| self.symbol_declared_before(*name, start))
+                .filter(|(name, _)| self.symbol_is_declared(*name))
                 .map(|(name, _)| *name)
                 .collect();
             for name in restored {
                 if !self
                     .model
-                    .retyped_trend_decls
+                    .endogenous
                     .iter()
+                    .chain(&self.model.exogenous)
+                    .chain(&self.model.deterministic_exogenous)
+                    .chain(&self.model.parameters)
+                    .chain(&self.model.retyped_trend_decls)
                     .any(|decl| decl.name == name)
                 {
-                    if let Some(trend) = self
-                        .model
-                        .trend_vars
-                        .iter()
-                        .find(|trend| trend.name == name)
-                    {
-                        self.model.retyped_trend_decls.push(Decl {
-                            parse_order: self.i,
-                            symbol_type_context: self.model.symbol_context(),
-                            name,
-                            span: trend.span,
-                            long_name: None,
-                            tex_name: None,
-                            log_transform: false,
-                            heterogeneity: None,
-                        });
+                    if let Some(declaration) = self.model.retyped_declaration(name) {
+                        self.model.retyped_trend_decls.push(declaration);
                     }
                 }
                 self.symbol_roles.insert(name, role);
@@ -6811,29 +6845,18 @@ impl Parser<'_> {
     /// `change_type` applies when the name is already declared and no earlier
     /// expression has used it. An `initval` / `endval` left-hand name is an
     /// assignment, not that use.
-    fn change_type_succeeds(&self, name: Name, pos: u32) -> bool {
-        self.symbol_declared_before(name, pos) && !self.symbol_used_in_expression_before(name, pos)
+    fn change_type_succeeds(&self, name: Name) -> bool {
+        self.symbol_is_declared(name) && !self.symbol_used_in_expression(name)
     }
 
-    fn symbol_declared_before(&self, name: Name, pos: u32) -> bool {
-        self.generated_policy_discount == Some(name)
-            || self.model.trend_vars.iter().any(|trend| trend.name == name)
-            || self
-                .model
-                .excluded_endogenous
-                .iter()
-                .any(|decl| decl.name == name)
-            || self
-                .model
-                .endogenous
-                .iter()
-                .chain(&self.model.exogenous)
-                .chain(&self.model.deterministic_exogenous)
-                .chain(&self.model.parameters)
-                .any(|decl| decl.name == name && decl.span.start < pos)
+    fn symbol_is_declared(&self, name: Name) -> bool {
+        // This table contains only symbols encountered so far in parser
+        // execution, including functions and implicit locals. Written offsets
+        // cannot establish that order across repeated macro expansions.
+        self.generated_policy_discount == Some(name) || self.model.final_symbol_kind(name).is_some()
     }
 
-    fn symbol_used_in_expression_before(&self, name: Name, pos: u32) -> bool {
+    fn symbol_used_in_expression(&self, name: Name) -> bool {
         if self
             .model
             .surgery_exits
@@ -6869,6 +6892,7 @@ impl Parser<'_> {
             .chain(&self.model.helper_assignments)
             .chain(&self.model.initval)
             .chain(&self.model.endval)
+            .filter(|assignment| !assignment.native)
         {
             ids.extend(assignment.expr);
         }
@@ -6891,7 +6915,7 @@ impl Parser<'_> {
             self.model
                 .exprs
                 .walk_idents(id)
-                .any(|ident| ident.name == name && ident.span.start < pos)
+                .any(|ident| ident.name == name)
         })
     }
 
@@ -9438,6 +9462,14 @@ impl Parser<'_> {
         )
     }
 
+    fn is_expression_builtin(&self, name: &str) -> bool {
+        if self.in_steady_state_rhs {
+            is_dynare_expression_builtin(name)
+        } else {
+            is_builtin_function(name)
+        }
+    }
+
     fn parse_ident_expr(&mut self) -> ExprId {
         let tok = self.bump();
         let lexeme = self.lexeme(&tok).to_string();
@@ -9457,6 +9489,11 @@ impl Parser<'_> {
         let name = self.intern.intern(&lexeme);
         if self.in_dynare_block && lexeme == "dsge_prior_weight" {
             self.model.reserved_block_symbol_uses.push(tok.span);
+        }
+        if self.in_steady_state_rhs
+            && (lexeme.eq_ignore_ascii_case("nan") || lexeme.eq_ignore_ascii_case("inf"))
+        {
+            return self.alloc(ExprKind::Number, tok.span);
         }
         if self.at(TokenKind::Dot) && self.peek_kind(1) == Some(TokenKind::Ident) {
             self.bump();
@@ -9481,7 +9518,7 @@ impl Parser<'_> {
             && !self.in_native_assignment
             && !becoming_call
             && !self.in_epilogue
-            && !is_builtin_function(&lexeme)
+            && !self.is_expression_builtin(&lexeme)
             && !self.is_known_symbol(name)
             && !self.model.mod_file_locals.contains(&name)
         {
@@ -9508,7 +9545,7 @@ impl Parser<'_> {
         if let Some(kind) = pac_parser::named_operator_kind(&lexeme) {
             return self.parse_named_model_operator(tok, name, kind);
         }
-        if !becoming_call && self.looks_like_timing() && !is_builtin_function(&lexeme) {
+        if !becoming_call && self.looks_like_timing() && !self.is_expression_builtin(&lexeme) {
             return self.parse_timing(name, tok);
         }
         self.parse_call(name, tok)
@@ -9612,7 +9649,7 @@ impl Parser<'_> {
         }
         if !self.model_function_context
             && !self.in_native_assignment
-            && !is_builtin_function(self.intern.get(callee))
+            && !self.is_expression_builtin(self.intern.get(callee))
             && !self.is_known_symbol(callee)
         {
             self.push_external_function_name(callee);
@@ -11462,6 +11499,19 @@ fn block_keyword_token(lex: &str) -> Option<&'static str> {
         .iter()
         .find(|(name, _)| lex.eq_ignore_ascii_case(name))
         .map(|(_, token)| *token)
+}
+
+/// Reserved functions in the pinned Bison ordinary `expression` production.
+/// MATLAB/Octave functions such as `floor` are ordinary symbol calls there.
+pub(crate) fn is_dynare_expression_builtin(name: &str) -> bool {
+    const BUILTINS: &[&str] = &[
+        "exp", "log", "ln", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh",
+        "tanh", "asinh", "acosh", "atanh", "sqrt", "cbrt", "abs", "sign", "max", "min", "normcdf",
+        "normpdf", "erf", "erfc",
+    ];
+    BUILTINS
+        .iter()
+        .any(|builtin| name.eq_ignore_ascii_case(builtin))
 }
 
 fn is_builtin_function(name: &str) -> bool {

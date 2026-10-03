@@ -17,7 +17,8 @@ const MATH_BUILTINS: &[&str] = &[
 ];
 
 pub fn check_w130(model: &Model) -> Vec<Diagnostic> {
-    let mut diagnostics = check_ss_order(model);
+    let mut diagnostics = check_ss_target_types(model);
+    diagnostics.extend(check_ss_order(model));
     diagnostics.extend(check_static_dynamic_tags(model));
     diagnostics.extend(check_w200(model));
     diagnostics.extend(check_linear_ops(model));
@@ -65,12 +66,39 @@ fn check_w201(model: &Model) -> Vec<Diagnostic> {
     )]
 }
 
+fn check_ss_target_types(model: &Model) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for eq in &model.steady_state_equations {
+        // The official driver checks output types only after a parsed RHS.
+        if !eq
+            .rhs_expr
+            .is_some_and(|rhs| !matches!(model.exprs.get(rhs).kind, ExprKind::Error))
+        {
+            continue;
+        }
+        for target in &eq.steady_state_targets {
+            let kind = model.symbol_kind_in_context(target.name, target.symbol_type_context);
+            if matches!(kind, None | Some("var" | "parameters" | "mod_file_local"))
+                && !model.heterogeneous_in_context(target.name, target.symbol_type_context)
+            {
+                continue;
+            }
+            diagnostics.push(Diagnostic::new(
+                target.span,
+                Severity::Error,
+                "E481",
+                format!("{} has incorrect type", model.name(target.name)),
+            ));
+        }
+    }
+    diagnostics
+}
+
 fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
     if model.steady_state_equations.is_empty() {
         return Vec::new();
     }
 
-    let endogenous: HashSet<Name> = model.final_endogenous().iter().map(|d| d.name).collect();
     // Both statements set ModFileStructure::ramsey_model_present before
     // SteadyStateModel::checkPass. Its conditional steady state may use outputs
     // not defined earlier in this block; duplicate assignments still warn.
@@ -80,16 +108,7 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
             PolicyCommand::RamseyModel | PolicyCommand::RamseyPolicy
         )
     });
-    let mut assigned_anywhere = HashSet::new();
-    for eq in &model.steady_state_equations {
-        assigned_anywhere.extend(eq.steady_state_targets.iter().map(|target| target.name));
-    }
-
-    let mut assigned_so_far: HashSet<Name> = model
-        .final_decls(&["parameters", "varexo", "varexo_det"])
-        .iter()
-        .map(|d| d.name)
-        .collect();
+    let mut assigned_so_far: HashSet<Name> = HashSet::new();
     let mut assigned_once: HashSet<Name> = HashSet::new();
     let mut flagged_use_before: HashSet<Name> = HashSet::new();
     let mut diagnostics = Vec::new();
@@ -97,9 +116,13 @@ fn check_ss_order(model: &Model) -> Vec<Diagnostic> {
     for eq in &model.steady_state_equations {
         if let Some(rhs) = eq.rhs_expr.filter(|_| !ramsey) {
             for r in model.exprs.walk_idents(rhs) {
-                if endogenous.contains(&r.name)
+                let needs_definition = match model.final_symbol_kind(r.name) {
+                    Some("mod_file_local") => true,
+                    Some("var") => !model.heterogeneous_in_context(r.name, model.symbol_context()),
+                    _ => false,
+                };
+                if needs_definition
                     && !assigned_so_far.contains(&r.name)
-                    && assigned_anywhere.contains(&r.name)
                     && flagged_use_before.insert(r.name)
                 {
                     let name = model.name(r.name);

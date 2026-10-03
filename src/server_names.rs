@@ -194,9 +194,26 @@ pub(crate) struct NameSites {
 impl NameSites {
     pub fn new(model: &Model, map: &WrittenModelMap, uri: &Url, text: &str) -> Self {
         let key = crate::include_resolver::normalize_uri(uri.as_str());
+        // Implicit pound definitions now have parser type history, but their
+        // editor role still belongs only to the model scope below. Explicit
+        // model_local_variable declarations and later ordinary retypes retain
+        // their existing global projection.
+        let implicit_locals: HashSet<_> = model
+            .symbol_type_events
+            .iter()
+            .filter(|event| {
+                model.final_symbol_kind(event.name) == Some("model_local_variable")
+                    && !model
+                        .model_local_variables
+                        .iter()
+                        .any(|decl| decl.name == event.name)
+            })
+            .map(|event| event.name)
+            .collect();
         let roles = model
             .symbol_type_events
             .iter()
+            .filter(|event| !implicit_locals.contains(&event.name))
             .filter_map(|event| {
                 model
                     .final_symbol_kind(event.name)
@@ -207,6 +224,7 @@ impl NameSites {
         let known_names = model
             .symbol_type_events
             .iter()
+            .filter(|event| !implicit_locals.contains(&event.name))
             .map(|event| model.name(event.name).to_string())
             .collect();
         let mut declarations = Vec::new();

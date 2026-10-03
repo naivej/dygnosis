@@ -1362,8 +1362,9 @@ pub struct Model {
     pub load_params_file: Option<(String, Span)>,
     /// Every `trend_var` / `log_trend_var` entry, file order.
     pub trend_vars: Vec<TrendVar>,
-    /// Declaration locations for trend names successfully changed to an
-    /// ordinary type. Their written trend records remain in `trend_vars`.
+    /// Declaration records for non-ordinary symbols successfully changed to an
+    /// ordinary type. Original source lists remain intact; the historical field
+    /// name is retained for the Rust interface.
     pub retyped_trend_decls: Vec<Decl>,
     /// Every `var(deflator=…)` / `var(log_deflator=…)` name, file order.
     pub nonstationary_vars: Vec<NonstationaryVar>,
@@ -2119,6 +2120,59 @@ impl Model {
 
     pub(crate) fn parameter_in_context(&self, name: Name, context: SymbolContext) -> bool {
         self.symbol_kind_in_context(name, context) == Some("parameters")
+    }
+
+    /// Whether a name still has its declared dimension at a parser position.
+    /// A successful type change makes it ordinary, even if the keyword stays
+    /// `var` or `parameters`. Macro copies can share spans, so use event order.
+    pub(crate) fn heterogeneous_in_context(&self, name: Name, context: SymbolContext) -> bool {
+        if self.symbol_type_events[..context.index()]
+            .iter()
+            .any(|event| event.name == name && event.changed)
+        {
+            return false;
+        }
+        self.endogenous
+            .iter()
+            .chain(&self.exogenous)
+            .chain(&self.parameters)
+            .any(|decl| {
+                decl.name == name
+                    && decl.symbol_type_context.index() <= context.index()
+                    && decl.heterogeneity.is_some()
+            })
+    }
+
+    /// An ordinary declaration view at a recorded symbol's first written site.
+    /// Implicit locals have a type-event occurrence rather than a declaration
+    /// keyword. Preserve its execution order and context without inventing one.
+    pub(crate) fn retyped_declaration(&self, name: Name) -> Option<Decl> {
+        if let Some(written) = self
+            .written_declarations
+            .iter()
+            .find(|row| row.declaration.name == name)
+        {
+            return Some(written.declaration.clone());
+        }
+        let (event_index, event) = self
+            .symbol_type_events
+            .iter()
+            .enumerate()
+            .find(|(_, event)| event.name == name && !event.changed)?;
+        let (_, occurrence) = self
+            .type_event_occurrences
+            .iter()
+            .find(|(index, _)| *index == event_index)?;
+        Some(Decl {
+            parse_order: occurrence.end,
+            symbol_type_context: SymbolContext(event_index + 1),
+            name,
+            span: event.span,
+            long_name: None,
+            tex_name: None,
+            log_transform: false,
+            heterogeneity: None,
+        })
     }
 
     /// Final type of `name` for a check that asks what the name is.

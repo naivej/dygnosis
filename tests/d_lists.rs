@@ -631,5 +631,5 @@ fn a_declared_name_of_the_right_type_is_quiet() {
 /// W212 is the added removal guidance. The registry includes it.
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 383);
+    assert_eq!(known_codes().len(), 384);
 }

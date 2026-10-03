@@ -47,7 +47,7 @@ const E243_MSG: &str = "histval: y(0) declared twice";
 
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 383);
+    assert_eq!(known_codes().len(), 384);
 }
 
 #[test]

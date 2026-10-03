@@ -362,9 +362,8 @@ fn outside_exprs(model: &Model) -> Vec<ExprId> {
         }
     }
     for eq in &model.steady_state_equations {
-        if let Some(expr) = eq.lhs_expr {
-            out.push(expr);
-        }
+        // Output names are checked by the steady-state target action, not by
+        // the ordinary-expression heterogeneous-variable rule.
         if let Some(expr) = eq.rhs_expr {
             out.push(expr);
         }

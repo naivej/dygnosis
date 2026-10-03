@@ -102,22 +102,45 @@ impl ComparisonInput {
             if input.symbols.contains_key(&name) {
                 continue;
             }
-            if let Some(index) = model.written_declarations.iter().position(|written| {
-                written.declaration.name == decl.name
-                    && written.declaration.parse_order == decl.parse_order
-            }) {
-                if let Some(source) = report.model_map.declarations.get(index) {
-                    input.symbols.insert(
-                        name,
-                        target(
-                            format!("d{}", decl.parse_order),
-                            source,
-                            model
-                                .final_heterogeneity(decl)
-                                .map(|dimension| model.name(dimension).to_owned()),
-                        ),
-                    );
-                }
+            let source = model
+                .written_declarations
+                .iter()
+                .position(|written| {
+                    written.declaration.name == decl.name
+                        && written.declaration.parse_order == decl.parse_order
+                })
+                .and_then(|index| report.model_map.declarations.get(index))
+                .or_else(|| {
+                    // A retyped implicit local has a proven type-event site,
+                    // although no declaration keyword was written there.
+                    let event = model
+                        .type_event_occurrences
+                        .iter()
+                        .find(|(index, range)| {
+                            let event = &model.symbol_type_events[*index];
+                            !event.changed
+                                && event.name == decl.name
+                                && range.end == decl.parse_order
+                        })?
+                        .0;
+                    report
+                        .model_map
+                        .type_events
+                        .iter()
+                        .find(|(index, _)| *index == event)
+                        .map(|(_, source)| source)
+                });
+            if let Some(source) = source {
+                input.symbols.insert(
+                    name,
+                    target(
+                        format!("d{}", decl.parse_order),
+                        source,
+                        model
+                            .final_heterogeneity(decl)
+                            .map(|dimension| model.name(dimension).to_owned()),
+                    ),
+                );
             }
         }
         for (name, parameter) in &mut input.parameters {

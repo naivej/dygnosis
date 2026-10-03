@@ -188,6 +188,7 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     let occbin_diags = crate::check_occbin::check_occbin(model);
     let observed_diags = crate::check_w090::check_w090(model);
     let block_diags = crate::check_d_block::check_d_block(model);
+    let steady_state_diags = crate::check_w130::check_w130(model);
     let open_diags = crate::check_d_open::check_d_open(model);
     let surgery_parse = crate::check_d_surgery::check_d_surgery(model);
     // The equation/declaration/surgery families are parsed before checkPass.
@@ -204,6 +205,7 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
             .iter()
             .any(|diag| matches!(diag.code.as_str(), "E093" | "E261"))
         || block_diags.iter().any(|diag| diag.code == "E271")
+        || steady_state_diags.iter().any(|diag| diag.code == "E481")
         || open_diags.iter().any(|diag| {
             matches!(
                 diag.code.as_str(),
@@ -228,7 +230,7 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     out.extend(crate::check_w100::check_w100(model));
     out.extend(crate::check_w110::check_w110(model));
     out.extend(crate::check_w120::check_w120_family(model));
-    out.extend(crate::check_w130::check_w130(model));
+    out.extend(steady_state_diags);
     out.extend(crate::check_symbol_list::check_symbol_list(model));
     out.extend(block_diags);
     out.extend(shock_diags);

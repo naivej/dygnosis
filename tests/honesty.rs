@@ -444,6 +444,16 @@ const HONESTY_FIRE: &[HonestyRow] = &[
         stage: JsonStage::Check,
     },
     HonestyRow {
+        code: "E481",
+        fixture: "w130/e481_target_type.mod",
+        kind: HonestyKind::Error {
+            workspace_only: false,
+        },
+        their_needle: "e has incorrect type",
+        our_needle: "e has incorrect type",
+        stage: JsonStage::Check,
+    },
+    HonestyRow {
         code: "E170",
         fixture: "occbin/e170_two_blocks.mod",
         kind: HonestyKind::Error {
