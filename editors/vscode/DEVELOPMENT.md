@@ -42,6 +42,7 @@ Check the output at normal README width and verify every depicted action and
 label against the current implementation. Generated PNGs are committed. The
 renderer is excluded from the VSIX along with other development scripts; it
 is not an extension runtime dependency. The package script sets an immutable
-image base for this nested extension folder. Its content base stays at the
-product root for copied CHANGELOG links; README documentation links are
-absolute. Check the actual VSIX README after packaging.
+image and content bases for this nested extension folder. Copied CHANGELOG
+documentation links are made absolute from the product root. README links
+retain their normal relative form in GitHub and become immutable package
+links. Check the actual VSIX README after packaging.

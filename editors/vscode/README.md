@@ -20,4 +20,4 @@ Compare parameters, equations and shock setup, then open either written source.
 
 Trace expanded equations through includes and repeated macros. Refresh after edits for current mappings.
 
-VS Code 1.102+; native Windows, macOS and glibc Linux packages for x64/arm64. See [settings](https://github.com/naivej/dygnosis/blob/HEAD/docs/vscode.md), [project MCP setup](https://github.com/naivej/dygnosis/blob/HEAD/docs/project-mcp.md), [runtime support](https://github.com/naivej/dygnosis/blob/HEAD/docs/distribution.md), [contributing](https://github.com/naivej/dygnosis/blob/HEAD/editors/vscode/DEVELOPMENT.md), and [credits](https://github.com/naivej/dygnosis/blob/HEAD/README.md#credits). Based on LLMacro-Dynare-LSP. GPL-3.0-or-later.
+VS Code 1.102+; native Windows, macOS and glibc Linux packages for x64/arm64. See [settings](../../docs/vscode.md), [project MCP setup](../../docs/project-mcp.md), [runtime support](../../docs/distribution.md), [contributing](DEVELOPMENT.md), and [credits](../../README.md#credits). Based on LLMacro-Dynare-LSP. GPL-3.0-or-later.
