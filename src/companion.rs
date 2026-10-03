@@ -223,9 +223,29 @@ fn harvest_command_options(
                 };
                 let val = &tokens[val_i];
                 if let Some(kind) = option_kind(&command, option) {
-                    if let Some((name, named_in)) = option_value(source, val, kind) {
+                    let value = if command.eq_ignore_ascii_case("external_function")
+                        && val.kind == TokenKind::Ident
+                    {
+                        let (name, named_in, end) = qualified_name(source, tokens, val_i);
+                        i += end - val_i;
+                        Some((name, named_in))
+                    } else {
+                        option_value(source, val, kind)
+                    };
+                    if let Some((name, named_in)) = value {
                         option_value_spans.insert((named_in.start, named_in.end));
-                        let path = resolve(&name, extra_suffixes(kind));
+                        let path = if kind == CompanionKind::HelperM {
+                            resolve_helper(
+                                &name,
+                                val.kind == TokenKind::String
+                                    && name.rsplit_once('.').is_some_and(|(_, extension)| {
+                                        extension.eq_ignore_ascii_case("m")
+                                    }),
+                                resolve,
+                            )
+                        } else {
+                            resolve(&name, extra_suffixes(kind))
+                        };
                         pending.push(Pending {
                             kind,
                             named_in,
@@ -242,6 +262,59 @@ fn harvest_command_options(
         }
         i += 1;
     }
+}
+
+/// The full written function name, including namespace components and trivia.
+fn qualified_name(source: &str, tokens: &[Token], start: usize) -> (String, Span, usize) {
+    let mut name = tokens[start].text(source).to_string();
+    let mut end = start;
+    while tokens
+        .get(end + 1)
+        .is_some_and(|t| t.kind == TokenKind::Dot)
+        && tokens
+            .get(end + 2)
+            .is_some_and(|t| t.kind == TokenKind::Ident)
+    {
+        name.push('.');
+        name.push_str(tokens[end + 2].text(source));
+        end += 2;
+    }
+    (
+        name,
+        Span::new(
+            tokens[start].span.start as usize,
+            tokens[end].span.end as usize,
+        ),
+        end,
+    )
+}
+
+/// Package function identities resolve relative to their package's parent.
+/// Explicit quoted `.m` paths retain the collector's existing file semantics.
+fn resolve_helper(
+    name: &str,
+    literal_path: bool,
+    resolve: &mut impl FnMut(&str, &[&str]) -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    if !literal_path && name.contains('.') {
+        let parts: Vec<_> = name.split('.').collect();
+        if parts.iter().all(|part| {
+            let mut bytes = part.bytes();
+            bytes
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == b'_')
+                && bytes.all(|c| c.is_ascii_alphanumeric() || c == b'_')
+        }) {
+            let mut path = parts[..parts.len() - 1]
+                .iter()
+                .map(|part| format!("+{part}/"))
+                .collect::<String>();
+            path.push_str(parts.last().unwrap());
+            path.push_str(".m");
+            return resolve(&path, &[]);
+        }
+    }
+    resolve(name, extra_suffixes(CompanionKind::HelperM))
 }
 
 fn option_kind(command: &str, option: &str) -> Option<CompanionKind> {
@@ -352,6 +425,19 @@ fn harvest_ident_helpers(
     resolve: &mut impl FnMut(&str, &[&str]) -> Option<PathBuf>,
     pending: &mut Vec<Pending>,
 ) {
+    let mut call_name_spans = HashMap::new();
+    for i in 0..tokens.len().saturating_sub(1) {
+        if tokens[i].kind != TokenKind::Ident || i > 0 && tokens[i - 1].kind == TokenKind::Dot {
+            continue;
+        }
+        let (name, named_in, end) = qualified_name(source, tokens, i);
+        if tokens
+            .get(end + 1)
+            .is_some_and(|t| t.kind == TokenKind::LParen)
+        {
+            call_name_spans.insert((named_in.start, name), named_in);
+        }
+    }
     let mut calls = Vec::new();
     for a in model
         .param_assignments
@@ -373,7 +459,11 @@ fn harvest_ident_helpers(
         }
     }
     for (name, named_in) in calls {
-        if let Some(path) = resolve(&name, extra_suffixes(CompanionKind::HelperM)) {
+        let named_in = call_name_spans
+            .get(&(named_in.start, name.clone()))
+            .copied()
+            .unwrap_or(named_in);
+        if let Some(path) = resolve_helper(&name, false, resolve) {
             pending.push(Pending {
                 kind: CompanionKind::HelperM,
                 named_in,
@@ -385,7 +475,14 @@ fn harvest_ident_helpers(
     }
 
     for i in 0..tokens.len().saturating_sub(1) {
-        if tokens[i].kind != TokenKind::Ident || tokens[i + 1].kind != TokenKind::LParen {
+        if tokens[i].kind != TokenKind::Ident || i > 0 && tokens[i - 1].kind == TokenKind::Dot {
+            continue;
+        }
+        let (name, named_in, end) = qualified_name(source, tokens, i);
+        if tokens
+            .get(end + 1)
+            .is_none_or(|t| t.kind != TokenKind::LParen)
+        {
             continue;
         }
         let ident = &tokens[i];
@@ -397,21 +494,20 @@ fn harvest_ident_helpers(
         if cmd_spans.iter().any(|s| span_contains(*s, ident.span)) {
             continue;
         }
-        let name = ident.text(source);
-        if is_parse_skip_command(name) {
+        if is_parse_skip_command(&name) {
             continue;
         }
-        if is_timing_paren(tokens, source, i + 1) {
+        if end == i && is_timing_paren(tokens, source, end + 1) {
             continue;
         }
         if name.is_empty() {
             continue;
         }
-        if let Some(path) = resolve(name, extra_suffixes(CompanionKind::HelperM)) {
+        if let Some(path) = resolve_helper(&name, false, resolve) {
             pending.push(Pending {
                 kind: CompanionKind::HelperM,
-                named_in: ident.span,
-                name: name.to_string(),
+                named_in,
+                name,
                 path: Some(path),
                 rank: RANK_LEFTOVER,
             });
@@ -424,8 +520,7 @@ fn collect_calls(model: &Model, id: ExprId, out: &mut Vec<(String, Span)>) {
     match &expr.kind {
         ExprKind::Call { callee, args } => {
             let name = model.name(*callee).to_string();
-            let start = expr.span.start as usize;
-            out.push((name.clone(), Span::new(start, start + name.len())));
+            out.push((name, expr.span));
             for arg in args {
                 collect_calls(model, *arg, out);
             }
