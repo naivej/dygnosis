@@ -148,12 +148,44 @@ fn option_twice_same_statement_dsge_var() {
 
 #[test]
 fn namespace_qualified_dot_pair() {
-    let model = parse("var y; varexo e; model; y = self.y; end;");
-    assert!(
-        model.namespace_qualified.iter().any(|(s, _)| s == "self.y"),
-        "expected self.y, got {:?}",
-        model.namespace_qualified
-    );
+    let source = "var y; varexo e; model; y = self.y; end;";
+    let model = parse(source);
+    assert!(model.namespace_qualified.is_empty());
+    let diags = analyze(&model);
+    let syntax = find(&diags, "E001");
+    let syntax_message = "syntax error, unexpected ';', expecting '(' or '.'";
+    assert_eq!(syntax.severity, Severity::Error);
+    assert_eq!(syntax.message, syntax_message);
+    let semicolon = source.find("self.y").unwrap() + "self.y".len();
+    assert_eq!(syntax.span.start as usize, semicolon);
+    assert_eq!(syntax.span.end as usize, semicolon + 1);
+
+    let control = "var y; varexo e; model; y = e; end; steady_state_model; y = self.y; end;";
+    let model = parse(control);
+    assert_eq!(model.namespace_qualified.len(), 1);
+    let (name, span) = &model.namespace_qualified[0];
+    assert_eq!(name, "self.y");
+    assert_eq!(&control[span.start as usize..span.end as usize], "self.y");
+    let diags = analyze(&model);
+    let namespace = find(&diags, "E275");
+    let namespace_message = "Namespace-qualified symbol self.y not allowed in this context";
+    assert_eq!(namespace.severity, Severity::Error);
+    assert_eq!(namespace.message, namespace_message);
+    assert_eq!(namespace.span, *span);
+
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: pinned Dynare preprocessor unavailable");
+        return;
+    };
+    for (source, sentence) in [
+        (source, format!("line 1, col 35: {syntax_message}")),
+        (control, format!("line 1, cols 61-66: {namespace_message}")),
+    ] {
+        let check = run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+        let text = format!("{}{}", check.raw_stdout, check.raw_stderr);
+        assert!(!check.success, "{text}");
+        assert!(text.contains(&sentence), "{text}");
+    }
 }
 
 #[test]
