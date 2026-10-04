@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.11.6
+
+Unreleased candidate.
+
+- Reduces the Windows x64 release executable by about 9% while retaining both editor and agent transports.
+- W011 parameter-assignment warnings use stable source order, including macro assignments that share a source range.
+
 ## v0.11.5
 
 Unreleased candidate. Package verification and publication remain open.
