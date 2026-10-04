@@ -36,7 +36,6 @@
     }
   },
   "activationEvents": [
-    "onLanguage:dynare",
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
@@ -1478,11 +1477,13 @@
       "explorer": [
         {
           "id": "dygnosis.model",
-          "name": "Dynare model"
+          "name": "Dynare model",
+          "icon": "media/logo_s.png"
         },
         {
           "id": "dygnosis.project",
-          "name": "Dynare project checks"
+          "name": "Dynare project checks",
+          "icon": "media/logo_s.png"
         }
       ]
     },
