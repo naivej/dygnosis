@@ -1,5 +1,5 @@
-//! Thin diagnostics. Code, severity, and message match the Python oracle for
-//! thin codes; a recorded Python bug is fixed on this surface, not preserved.
+//! Thin diagnostics. The pinned official Dynare preprocessor is the ground
+//! truth for language refusals and warnings before MATLAB or Octave.
 
 use crate::model::Model;
 use crate::parser::parse;
