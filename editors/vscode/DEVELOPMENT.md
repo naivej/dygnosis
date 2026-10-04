@@ -12,12 +12,14 @@ npm run check
 npm run lint
 npm run compile
 npm test
+npm run package
 ```
 
-Build output is written to `out/` and stays out of Git. In the `dygnosis_dev`
-development checkout, open its root folder or `dygnosis.code-workspace`.
-Ctrl+Shift+B compiles the extension; F5 launches the Extension Development Host.
-The root `.vscode/` tasks and debug configuration point to this folder.
+Build output is written to `out/` and stays out of Git. `npm run package` builds a candidate VSIX for this machine at `dist/<target>/dygnosis-<version>-<target>.vsix`.
+
+In the `dygnosis_dev` development checkout, open its root folder. Ctrl+Shift+B
+compiles the extension; F5 launches the Extension Development Host. The root
+`.vscode/` tasks and debug configuration point to this folder.
 
 For actual host tests, set `DYGNOSIS_TEST_BINARY` to a matching built engine,
 `DYGNOSIS_VSCODE_EXECUTABLE` to the chosen minimum/current Code executable and

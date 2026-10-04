@@ -49,6 +49,7 @@
     "test": "npm run compile && node --test tests/*.test.cjs",
     "test:host": "npm run compile && node tests/run-host.cjs",
     "vscode:prepublish": "npm run check && npm run lint && npm run compile",
+    "package": "node scripts/package.cjs --candidate",
     "package:target": "node scripts/package.cjs",
     "verify:package": "node scripts/verify-package.cjs"
   },
@@ -1513,7 +1514,7 @@
     "@vscode/test-electron": "3.1.0",
     "@vscode/vsce": "4.0.0",
     "eslint": "^10.0.0",
-    "typescript": "^5.9.0",
+    "typescript": "~6.0.3",
     "typescript-eslint": "^8.0.0",
     "yauzl": "3.4.0"
   },

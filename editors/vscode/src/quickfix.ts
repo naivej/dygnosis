@@ -1,11 +1,16 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
-import { Lexer, MarkedToken, Token } from "marked";
-import { decodeHTML } from "entities";
+import { createRequire } from "node:module";
+import type { MarkedToken, Token } from "marked" with { "resolution-mode": "import" };
 import { DocumentDiagnosticRequest, Middleware, WorkspaceDiagnosticRequest, WorkspaceDocumentDiagnosticReport, vsdiag } from "vscode-languageclient/node";
 import { DygnosisClient, isAnalysisDocument } from "./client";
 import { record } from "./protocol";
 import { booleanSetting } from "./settings";
+
+// marked and entities publish ESM only. This file emits CommonJS, so load the values with require.
+const nodeRequire = createRequire(__filename);
+const { Lexer } = nodeRequire("marked") as { Lexer: { lex(markdown: string): Token[] } };
+const entities = nodeRequire("entities") as { decodeHTML(html: string): string };
 
 type PushNext = NonNullable<Middleware["handleDiagnostics"]> extends
   (uri: vscode.Uri, diagnostics: vscode.Diagnostic[], next: infer Next) => void ? Next : never;
@@ -39,7 +44,7 @@ function overlapping(left: vscode.Range, right: vscode.Range): boolean {
 /** Native Markdown previews are untrusted; never pass executable links or HTML through. */
 export function safeExplanation(markdown: string): string {
   const safeTarget = (target: string): boolean => {
-    let decoded = decodeHTML(target.trim());
+    let decoded = entities.decodeHTML(target.trim());
     try { decoded = decodeURIComponent(decoded); } catch { /* Keep malformed escapes literal. */ }
     decoded = decoded.replace(/\s/g, "");
     return !decoded.includes(":") || /^(?:https?:\/\/|mailto:)/i.test(decoded);

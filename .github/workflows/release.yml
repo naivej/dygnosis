@@ -1,9 +1,9 @@
-# Legacy Rust notes releases through v0.11.0. Later tags build and verify packages;
-# publication uses the separate, manually dispatched Extension publication job.
+# Cross-platform compatibility for a version tag, then a GitHub Release of the
+# tested engine binaries. VSIX files and Marketplace publication stay local.
 #
 # Usage:
-#   git tag v0.1.0
-#   git push origin v0.1.0
+#   git tag v0.12.0
+#   git push origin v0.12.0
 
 name: Release
 
@@ -16,54 +16,91 @@ permissions:
   contents: read
 
 jobs:
-  route:
+  tag:
     runs-on: ubuntu-22.04
-    outputs:
-      legacy: ${{ steps.version.outputs.legacy }}
     steps:
-      - id: version
+      - name: Require a version tag
         env:
           TAG: ${{ github.ref_name }}
-        run: |
-          node -e 'const fs=require("node:fs"); const m=/^v(\d+)\.(\d+)\.(\d+)$/.exec(process.env.TAG); if(!m) throw new Error("Expected a vMAJOR.MINOR.PATCH tag"); const [major,minor,patch]=m.slice(1).map(Number); const legacy=major===0 && (minor<11 || (minor===11 && patch===0)); fs.appendFileSync(process.env.GITHUB_OUTPUT,`legacy=${legacy}\n`);'
+        run: node -e 'if (!/^v\d+\.\d+\.\d+$/.test(process.env.TAG)) throw new Error("Expected a vMAJOR.MINOR.PATCH tag")'
 
-  release:
-    needs: route
-    if: needs.route.outputs.legacy == 'true'
+  compatibility:
+    needs: tag
+    name: Compatibility
+    uses: ./.github/workflows/ci.yml
+    with:
+      release_tag: ${{ github.ref_name }}
+    permissions:
+      contents: read
+
+  publish:
+    needs: compatibility
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
 
-      - name: Create release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+      - name: Extract release notes
+        shell: bash
         run: |
-          set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::Release $TAG already exists."
+          awk -v tag="$GITHUB_REF_NAME" '
+            { sub(/\r$/, "") }
+            /^##[[:space:]]+/ {
+              if (found) exit
+              title = $0
+              sub(/^##[[:space:]]+/, "", title)
+              sub(/[[:space:]].*$/, "", title)
+              if (title == tag) found = 1
+              next
+            }
+            found { print }
+            END {
+              if (!found) {
+                print "No changelog entry for " tag > "/dev/stderr"
+                exit 1
+              }
+            }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "Changelog entry is empty for $GITHUB_REF_NAME" >&2
             exit 1
           fi
-          NOTES="$(mktemp)"
-          # Take the ## $TAG section from CHANGELOG.md (until the next ## heading).
-          awk -v tag="$TAG" '
-            $0 == "## " tag { keep=1; next }
-            keep && /^## / { exit }
-            keep { print }
-          ' CHANGELOG.md > "$NOTES"
-          if [ ! -s "$NOTES" ]; then
-            echo "::error::No ## $TAG section in CHANGELOG.md"
-            exit 1
-          fi
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --notes-file "$NOTES"
 
-  extension-artifacts:
-    needs: route
-    if: needs.route.outputs.legacy == 'false'
-    uses: ./.github/workflows/extension-build.yml
-    with:
-      release_tag: ${{ github.ref_name }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-packages
+          path: artifacts
+
+      - name: Stage tested engine binaries
+        shell: bash
+        run: |
+          mkdir -p release
+          for dir in artifacts/*/; do
+            target="$(basename "$dir")"
+            archive="$(find "$dir" -name '*.tar.gz' -print -quit)"
+            test -n "$archive"
+            member="$(tar -tzf "$archive" | grep -E '/dygnosis(\.exe)?$')"
+            case "$target" in
+              win32-*) name="dygnosis-${target}.exe" ;;
+              *) name="dygnosis-${target}" ;;
+            esac
+            tar -xOf "$archive" "$member" > "release/$name"
+            case "$target" in
+              win32-*) ;;
+              *) chmod 755 "release/$name" ;;
+            esac
+          done
+          test "$(find release -type f ! -name SHA256SUMS | wc -l)" -eq 6
+          (cd release && sha256sum dygnosis-* > SHA256SUMS)
+          ls -l release
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

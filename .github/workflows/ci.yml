@@ -1,31 +1,24 @@
-name: Extension artifacts
+name: CI
 
 on:
-  pull_request:
-    paths: ['src/**', 'tests/**', 'Cargo.*', 'media/logo_s.png', 'editors/vscode/**', '.github/workflows/extension-build.yml', 'LICENSE', 'CHANGELOG.md']
-  push:
-    branches: [main, 'codex/**']
-    paths: ['src/**', 'tests/**', 'Cargo.*', 'media/logo_s.png', 'editors/vscode/**', '.github/workflows/extension-build.yml', 'LICENSE', 'CHANGELOG.md']
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: 'Existing matching version tag. Empty builds candidates without publication.'
-        type: string
-        required: false
   workflow_call:
     inputs:
       release_tag:
+        description: vMAJOR.MINOR.PATCH tag to build and launch
+        required: true
         type: string
-        required: false
+
+# Cross-platform compatibility for the Rust engine and the VS Code extension.
+# Format, Clippy, the TypeScript client checks, and publication stay local.
 
 permissions:
   contents: read
 
 jobs:
   native:
-    name: '${{ matrix.target }} native package and launch'
+    name: ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -38,72 +31,60 @@ jobs:
           - { target: linux-arm64, runner: ubuntu-22.04-arm, rust: aarch64-unknown-linux-gnu, arch: arm64 }
     env:
       CARGO_TERM_COLOR: always
-      MACOSX_DEPLOYMENT_TARGET: '13.0'
-    defaults:
-      run:
-        working-directory: editors/vscode
-        shell: bash
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_tag || github.sha }}
+          ref: ${{ inputs.release_tag }}
           fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.0"
+          targets: ${{ matrix.rust }}
+
+      - name: Test the engine
+        run: cargo test
+
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
           architecture: ${{ matrix.arch }}
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: '1.98.0'
-          targets: ${{ matrix.rust }}
-      - name: Dependencies and client checks
-        run: |
-          npm ci --ignore-scripts
-          npm run check
-          npm run lint
-          npm test
+
       - name: Linux display dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libasound2 libgbm1 libgtk-3-0 libnss3
-      - name: Build matching native engine and packages
+
+      - name: Package and launch the extension
+        working-directory: editors/vscode
+        shell: bash
         env:
+          TARGET: ${{ matrix.target }}
           RELEASE_TAG: ${{ inputs.release_tag }}
-          TARGET: ${{ matrix.target }}
         run: |
-          if [ -n "$RELEASE_TAG" ]; then
-            npm run package:target -- --target "$TARGET" --tag "$RELEASE_TAG"
-          else
-            npm run package:target -- --target "$TARGET" --candidate
-          fi
-      - name: Record native dynamic-library requirements
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
+          npm ci --ignore-scripts
+          npm run package:target -- --target "$TARGET" --tag "$RELEASE_TAG"
           if [ "$RUNNER_OS" = Linux ]; then
             ldd "bin/dygnosis" > "dist/$TARGET/runtime-libraries.txt"
             readelf --version-info "bin/dygnosis" >> "dist/$TARGET/runtime-libraries.txt"
             ldd --version >> "dist/$TARGET/runtime-libraries.txt"
+            xvfb-run -a npm run verify:package -- --target "$TARGET" --vscode 1.102.0
+            xvfb-run -a npm run verify:package -- --target "$TARGET" --vscode stable
           elif [ "$RUNNER_OS" = macOS ]; then
             otool -L "bin/dygnosis" > "dist/$TARGET/runtime-libraries.txt"
             otool -l "bin/dygnosis" >> "dist/$TARGET/runtime-libraries.txt"
+            npm run verify:package -- --target "$TARGET" --vscode 1.102.0
+            npm run verify:package -- --target "$TARGET" --vscode stable
           else
             powershell -NoProfile -Command 'Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,OSArchitecture | Format-List' > "dist/$TARGET/runtime-libraries.txt"
-          fi
-      - name: Installed minimum/current VS Code and unpacked standalone launches
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a npm run verify:package -- --target "$TARGET" --vscode 1.102.0
-            xvfb-run -a npm run verify:package -- --target "$TARGET" --vscode stable
-          else
             npm run verify:package -- --target "$TARGET" --vscode 1.102.0
             npm run verify:package -- --target "$TARGET" --vscode stable
           fi
+
       - name: Upload exact tested packages and evidence
         uses: actions/upload-artifact@v4
         with:
@@ -115,6 +96,7 @@ jobs:
             editors/vscode/dist/${{ matrix.target }}/*.tar.gz
             editors/vscode/dist/${{ matrix.target }}/*.json
             editors/vscode/dist/${{ matrix.target }}/*.txt
+
       - name: Upload installed host logs after success or failure
         if: always()
         uses: actions/upload-artifact@v4
@@ -130,10 +112,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_tag || github.sha }}
+          ref: ${{ inputs.release_tag }}
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
       - uses: actions/download-artifact@v4
         with:
           name: win32-x64

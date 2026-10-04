@@ -30,28 +30,27 @@ also require their recorded system `libgcc_s`, `libm`, and loader. The table
 records tested candidate hosts and measured symbols rather than untested older
 OS support. Remote placement and final native MCP routing remain release gates.
 
-The release workflow prepares target-specific VSIX files and standalone `.tar.gz`
-archives for [GitHub Releases](https://github.com/naivej/dygnosis/releases). The
-0.11.5 candidate is not published. Publication uses the same verified VSIX bytes
-for GitHub and Marketplace. Updates replace the
+A version tag runs the compatibility workflow, then publishes the six tested
+engine binaries to [GitHub Releases](https://github.com/naivej/dygnosis/releases).
+The asset names are `dygnosis-<target>` and `dygnosis-<target>.exe` on Windows,
+plus `SHA256SUMS`. Marketplace publication of the VSIX files is local. The
+0.11.5 candidate is not published. Updates replace the
 client and its engine together. An explicit absolute `dynare.serverPath` in
 user/machine settings selects another executable for both LSP and the VS Code
 MCP provider. Read the [MCP guide](vscode-mcp.md) for executable override recovery.
 
-For standalone CLI or MCP use, choose the archive matching your host and verify
-its SHA-256 against the release evidence. Unpack it into a persistent directory;
-the archive includes the executable, GPL license, dependency notices, and
-`SOURCE.json` with the exact product source commit and source archive link.
-Keep those files together when redistributing the binary.
+For standalone CLI or MCP use, download the binary for your host from the GitHub
+Release and verify its SHA-256 against `SHA256SUMS`. Keep the executable in a
+persistent directory. The tag's source tree has the GPL license, dependency
+notices, and `SOURCE.json` for that commit.
 
 ```sh
-tar -xzf dygnosis-VERSION-linux-x64.tar.gz
-/absolute/path/dygnosis-VERSION-linux-x64/dygnosis --version
-/absolute/path/dygnosis-VERSION-linux-x64/dygnosis check /path/to/model.mod
+/absolute/path/dygnosis-linux-x64 --version
+/absolute/path/dygnosis-linux-x64 check /path/to/model.mod
 ```
 
-Windows can unpack `.tar.gz` using `tar` or an archive application. Use the
-absolute unpacked `dygnosis.exe` path. Configure an MCP client to start that
+On Windows the asset is `dygnosis-win32-x64.exe` or `dygnosis-win32-arm64.exe`.
+Use that absolute path. Configure an MCP client to start that
 executable with the single argument `mcp`; LSP clients start it without
 arguments. Passing executable and argument fields separately keeps paths with
 spaces usable. Standalone packages need no Node.js installation.

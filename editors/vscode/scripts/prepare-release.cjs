@@ -13,7 +13,7 @@ async function main() {
   const run = JSON.parse(execute("gh", ["api", `repos/${repository}/actions/runs/${runId}`]));
   assert.equal(run.conclusion, "success"); assert.equal(run.head_sha, commit);
   assert.equal(run.repository.full_name, repository);
-  assert.ok([".github/workflows/extension-build.yml", ".github/workflows/release.yml"].includes(run.path.split("@")[0]), "Artifacts must come from the reviewed package verification workflow");
+  assert.ok([".github/workflows/ci.yml", ".github/workflows/release.yml"].includes(run.path.split("@")[0]), "Artifacts must come from the compatibility workflow");
   execute(process.execPath, [path.join(__dirname, "collect-artifacts.cjs"), "--directory", directory, "--release", "--gates", gates], { stdio: "inherit" });
   const verified = JSON.parse(await fs.readFile(path.join(directory, "verified-artifacts.json"), "utf8"));
   assert.equal(verified.commit, commit); assert.equal(verified.tag, tag); assert.equal(verified.publication_ready, true);

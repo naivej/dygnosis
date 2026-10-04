@@ -9,7 +9,7 @@ const { assertNative, execute, extensionRoot, productRoot, binaryName, hostFacts
 
 async function main() {
   const { values } = parseArgs({ options: { target: { type: "string" }, tag: { type: "string" }, candidate: { type: "boolean" }, binary: { type: "string" } } });
-  const target = values.target;
+  const target = values.target ?? (values.candidate ? `${process.platform}-${process.arch}` : undefined);
   const info = assertNative(target);
   const manifest = JSON.parse(await fs.readFile(path.join(extensionRoot, "package.json"), "utf8"));
   const cargo = await fs.readFile(path.join(productRoot, "Cargo.toml"), "utf8");
