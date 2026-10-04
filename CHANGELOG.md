@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.11.5
+
+Unreleased candidate. Package verification and publication remain open.
+
+- Model-expression diagnostics reach heterogeneous and replacement equations, planner and Ramsey expressions, OccBin constraints, trends and deflators, matched moments, VAR expectations and PAC expressions.
+- External-function calls in model expressions require a declaration before use and the declared argument count. Calls with integer arguments remain function calls. Invalid variable calls and malformed argument lists use Dynare's messages and point to the written call or offending token.
+- Symbol-role and deterministic-exogenous timing errors retain Dynare's wording across these expressions. A later declaration or type change does not change an earlier use.
+
 ## v0.11.4
 
 Unreleased candidate. The 0.11 series has no published intermediate releases.

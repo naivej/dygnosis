@@ -278,6 +278,13 @@ fn check_epilogue(model: &Model) -> Vec<Diagnostic> {
         return out;
     }
     for (name, span) in ident_uses(model, &outside_expr_ids(model)) {
+        if model
+            .model_expression_uses
+            .iter()
+            .any(|usage| usage.name == name && usage.span == span)
+        {
+            continue;
+        }
         let Some(&start) = decl_start.get(&name) else {
             continue;
         };

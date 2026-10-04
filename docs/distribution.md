@@ -1,6 +1,6 @@
 # Dygnosis packages
 
-The 0.11.4 candidate includes the Dygnosis engine for its workspace host. It
+The 0.11.5 candidate includes the Dygnosis engine for its workspace host. It
 does not download the engine when activated. Its analysis requires no separate
 Rust, Python, MATLAB or Dynare installation. Dygnosis reads models and stops
 before MATLAB computation; it does not run the official Dynare preprocessor.
@@ -32,7 +32,7 @@ OS support. Remote placement and final native MCP routing remain release gates.
 
 The release workflow prepares target-specific VSIX files and standalone `.tar.gz`
 archives for [GitHub Releases](https://github.com/naivej/dygnosis/releases). The
-0.11.4 candidate is not published. Publication uses the same verified VSIX bytes
+0.11.5 candidate is not published. Publication uses the same verified VSIX bytes
 for GitHub and Marketplace. Updates replace the
 client and its engine together. An explicit absolute `dynare.serverPath` in
 user/machine settings selects another executable for both LSP and the VS Code

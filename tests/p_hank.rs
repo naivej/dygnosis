@@ -800,13 +800,12 @@ fn det_exo_lead_reaches_heterogeneous_bodies() {
         .unwrap_or_else(|| panic!("missing E024: {diagnostics:?}"));
     assert_eq!(
         ours.message,
-        "Exogenous deterministic variable ed cannot be given a lead or a lag"
+        "Exogenous deterministic variable ed cannot be given a lead or a lag."
     );
     if let Some(ref binary) = binary {
         let (accepted, report) = official_check(&source, binary);
         assert!(!accepted);
-        // Our E024 keeps its existing no-period wording; the official sentence
-        // carries a trailing full stop.
+        // Both messages retain the official terminal period.
         assert!(
             report.contains("Exogenous deterministic variable ed cannot be given a lead or a lag."),
             "{report}"

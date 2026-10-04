@@ -179,12 +179,12 @@ fn collect_matched_moments(ctx: &Ctx<'_>, units: &mut Vec<Unit>, seq: &mut u32) 
             continue;
         }
         for row in &rows {
-            let Some(expr) = row.expr else {
+            if row.expr.is_none() {
                 continue;
-            };
+            }
             // Their parser refuses the row itself when it names a mod-file local
             // or an external function, before the walk at `end;` runs.
-            if let Some((pos, diag)) = ctx.row_scope_refusal(expr) {
+            if let Some((pos, diag)) = ctx.row_scope_refusal(row) {
                 push(units, seq, pos, 0, diag);
             }
         }
@@ -529,7 +529,7 @@ fn walk_block(ctx: &Ctx<'_>, rows: &[&MatchedMoment], end: u32) -> Option<Diagno
         let Some(expr) = row.expr else {
             continue;
         };
-        if let Some(reason) = ctx.walk(expr, end) {
+        if let Some(reason) = ctx.walk(expr, end, row.walk_context) {
             return Some(err(
                 ctx.model.exprs.get(expr).span,
                 "E386",
@@ -633,10 +633,6 @@ struct Ctx<'a> {
     /// `#name` model-locals, a symbol type of their own: they are legal in the
     /// model tree and refused by the walk on their type.
     model_locals: HashSet<Name>,
-    /// Names whose first appearance in the file is inside a `matched_moments`
-    /// row. Their parser registers those as it reads the row, so the row is not
-    /// refused for them; the walk reports them on their type.
-    born_in_moment_row: HashSet<Name>,
     /// Where each `(name, timing)` first appears, standing in for their node
     /// order: their tree creates a node the first time the file mentions it.
     order: HashMap<(Name, i32), u32>,
@@ -698,34 +694,14 @@ impl<'a> Ctx<'a> {
         }
         idents.sort_unstable_by_key(|(start, _, _)| *start);
         let mut order: HashMap<(Name, i32), u32> = HashMap::new();
-        // Where the file first writes each name.
-        let mut born_at: HashMap<Name, u32> = HashMap::new();
         let mut next = FIRST_FREE_INDEX;
-        for (start, name, timing) in idents {
-            born_at.entry(name).or_insert(start);
+        for (_, name, timing) in idents {
             order.entry((name, timing)).or_insert_with(|| {
                 let index = next;
                 next += 1;
                 index
             });
         }
-        // A name whose first appearance is inside a moment row is theirs to
-        // register; one born anywhere else is already a mod-file local when a
-        // row mentions it.
-        let row_ranges: Vec<(u32, u32)> = model
-            .matched_moments
-            .iter()
-            .map(|row| (row.span.start, row.span.end))
-            .collect();
-        let born_in_moment_row: HashSet<Name> = born_at
-            .iter()
-            .filter(|(_, at)| {
-                row_ranges
-                    .iter()
-                    .any(|(start, end)| **at >= *start && **at < *end)
-            })
-            .map(|(name, _)| *name)
-            .collect();
         Self {
             model,
             endogenous,
@@ -733,7 +709,6 @@ impl<'a> Ctx<'a> {
             deterministic_exogenous,
             declared,
             model_locals,
-            born_in_moment_row,
             order,
             next_index: Cell::new(next),
         }
@@ -788,68 +763,56 @@ impl<'a> Ctx<'a> {
     ///
     /// A `#` model-local is a symbol type of their own and is legal in the model
     /// tree, so it goes to the walk on its type.
-    fn row_scope_refusal(&self, expr: ExprId) -> Option<(u32, Diagnostic)> {
-        for ident in self.model.exprs.walk_idents(expr) {
-            let name = self.model.name(ident.name);
-            // An external function name is in their table before the row is read,
-            // and their parser tests that type first — even though the name may
-            // never have been written in an expression before.
-            if self.model.external_function_names.contains(&ident.name) {
-                return Some((
-                    ident.span.start,
-                    err(
-                        ident.span,
+    fn row_scope_refusal(&self, row: &MatchedMoment) -> Option<(u32, Diagnostic)> {
+        for usage in &self.model.model_expression_uses[row.expression_uses.clone()] {
+            let name = self.model.name(usage.name);
+            let (span, code, message) =
+                match self.model.symbol_kind_in_context(usage.name, usage.context) {
+                    Some("external_function") => (
+                        usage.span,
                         "E280",
                         crate::model::external_function_in_model_message(name),
                     ),
-                ));
-            }
-            // A lead on a `varexo_det` is refused while the expression is read,
-            // before the walk at `end;`.
-            if ident.timing != 0 && self.deterministic_exogenous.contains(&ident.name) {
-                let end = ident.timing_span.map(|t| t.end).unwrap_or(ident.span.end);
-                return Some((
-                    ident.span.start,
-                    err(
-                        Span {
-                            start: ident.span.start,
-                            end,
-                        },
-                        "E024",
-                        format!(
-                            "Exogenous deterministic variable {name} cannot be given a lead or a lag"
-                        ),
-                    ),
-                ));
-            }
-            if self.model_locals.contains(&ident.name)
-                || self.born_in_moment_row.contains(&ident.name)
-            {
-                continue;
-            }
-            if self.model.mod_file_locals.contains(&ident.name) {
-                return Some((
-                    ident.span.start,
-                    err(
-                        ident.span,
+                    Some("mod_file_local") => (
+                        usage.span,
                         "E281",
                         crate::model::mod_file_local_in_model_message(name),
                     ),
-                ));
-            }
+                    Some("varexo_det") if usage.timing != 0 => (
+                        usage.full_span,
+                        "E024",
+                        format!(
+                        "Exogenous deterministic variable {name} cannot be given a lead or a lag."
+                    ),
+                    ),
+                    Some("epilogue") => (
+                        usage.span,
+                        "E294",
+                        format!("Symbol '{name}' cannot be used outside the epilogue block."),
+                    ),
+                    _ => continue,
+                };
+            return Some((span.start, err(span, code, message)));
         }
         None
     }
 
     /// The first reason the walk finds, in their order.
-    fn walk(&self, expr: ExprId, at: u32) -> Option<String> {
-        self.walk_folded(&self.fold(expr), at)
+    fn walk(&self, expr: ExprId, at: u32, context: crate::model::SymbolContext) -> Option<String> {
+        self.walk_folded(&self.fold(expr), at, context)
     }
 
-    fn walk_folded(&self, folded: &Folded, at: u32) -> Option<String> {
+    fn walk_folded(
+        &self,
+        folded: &Folded,
+        at: u32,
+        context: crate::model::SymbolContext,
+    ) -> Option<String> {
         match folded {
             Folded::Var { name, .. } => {
-                if self.endogenous.contains(name) || self.model.surgery_exit_after(*name, at) {
+                if self.model.symbol_kind_in_context(*name, context) == Some("var")
+                    || self.model.surgery_exit_after(*name, at)
+                {
                     None
                 } else {
                     Some(format!(
@@ -867,8 +830,8 @@ impl<'a> Ctx<'a> {
                 } else {
                     (second, first)
                 };
-                self.walk_folded(first, at)
-                    .or_else(|| self.walk_folded(second, at))
+                self.walk_folded(first, at, context)
+                    .or_else(|| self.walk_folded(second, at, context))
             }
             Folded::Pow(left, right) => {
                 if !matches!(**left, Folded::Var { .. }) {
@@ -885,7 +848,7 @@ impl<'a> Ctx<'a> {
                         )
                     }
                 }
-                self.walk_folded(left, at)
+                self.walk_folded(left, at, context)
             }
             Folded::Plus(..) | Folded::Minus(..) | Folded::Divide(..) | Folded::BinaryOp => {
                 Some("Unsupported binary operator".to_string())

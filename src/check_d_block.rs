@@ -20,6 +20,7 @@ pub fn check_d_block(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_namespace(model));
     out.extend(check_const_fold(model));
     out.extend(check_matlab_locals(model));
+    out.extend(check_model_expression_roles(model));
     out.extend(check_ss_rhs_roles(model));
     out
 }
@@ -240,7 +241,6 @@ fn check_const_fold(model: &Model) -> Vec<Diagnostic> {
 
 fn check_matlab_locals(model: &Model) -> Vec<Diagnostic> {
     let externals: HashSet<Name> = model.external_function_names.iter().copied().collect();
-    let mod_locals: HashSet<Name> = model.mod_file_locals.iter().copied().collect();
     let pound: HashSet<Name> = model
         .equations
         .iter()
@@ -248,29 +248,7 @@ fn check_matlab_locals(model: &Model) -> Vec<Diagnostic> {
         .filter_map(|eq| lhs_ident(model, eq))
         .collect();
     let mut out = Vec::new();
-    let mut seen_in: HashSet<(Name, &'static str)> = HashSet::new();
     let mut seen_out: HashSet<(Name, &'static str)> = HashSet::new();
-
-    for eq in &model.equations {
-        for r in model.ident_refs(eq) {
-            if externals.contains(&r.name) && seen_in.insert((r.name, "E280")) {
-                let name = model.name(r.name);
-                out.push(err(
-                    r.span,
-                    "E280",
-                    crate::model::external_function_in_model_message(name),
-                ));
-            }
-            if mod_locals.contains(&r.name) && seen_in.insert((r.name, "E281")) {
-                let name = model.name(r.name);
-                out.push(err(
-                    r.span,
-                    "E281",
-                    crate::model::mod_file_local_in_model_message(name),
-                ));
-            }
-        }
-    }
 
     for (id, span) in outside_ident_uses(model) {
         if externals.contains(&id) && seen_out.insert((id, "E279")) {
@@ -314,8 +292,30 @@ fn outside_ident_uses(model: &Model) -> Vec<(Name, Span)> {
             push_expr(&mut out, id);
         }
     }
-    if let Some(id) = model.planner_objective_expr {
-        push_expr(&mut out, id);
+    out
+}
+
+/// ParsingDriver::add_model_variable checks these roles before the consumer's
+/// own restrictions. Read the captured symbol table, including macro order.
+fn check_model_expression_roles(model: &Model) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for usage in &model.model_expression_uses {
+        let name = model.name(usage.name);
+        let kind = model.symbol_kind_in_context(usage.name, usage.context);
+        let refusal = match kind {
+            Some("external_function") => Some(("E280", crate::model::external_function_in_model_message(name))),
+            Some("mod_file_local") => Some(("E281", crate::model::mod_file_local_in_model_message(name))),
+            Some("epilogue") if usage.command != "epilogue" => Some(("E294", format!("Symbol '{name}' cannot be used outside the epilogue block."))),
+            None if usage.command == "occbin_constraints" => Some(("E182", format!("Exogenous variable {name} cannot be used in 'occbin_constraints'."))),
+            None if matches!(usage.command, "model_replace" | "planner_objective" | "trend_var" | "log_trend_var" | "var") => Some(("E020", format!("Undeclared identifier '{name}' in equation. Fix: add '{name}' to a var, varexo, or parameters declaration."))),
+            _ => None,
+        };
+        if let Some((code, message)) = refusal {
+            if seen.insert((usage.name, usage.span, code)) {
+                out.push(err(usage.span, code, message));
+            }
+        }
     }
     out
 }

@@ -192,7 +192,8 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         in_dynare_block: false,
         in_epilogue: false,
         model_function_context: false,
-        in_qualified_model_args: false,
+        model_expression_command: "",
+        in_model_call_args: false,
         implicit_function_names: Vec::new(),
     };
     p.parse_file();
@@ -1012,8 +1013,10 @@ struct Parser<'a> {
     in_epilogue: bool,
     /// Function-call contexts using the pinned grammar's model_expression rule.
     model_function_context: bool,
-    /// Validate argument syntax only on the added qualified model-call surface.
-    in_qualified_model_args: bool,
+    /// The written consumer whose grammar reads MODEL_EXPRESSION.
+    model_expression_command: &'static str,
+    /// Validate complete expressions in every model-call argument slot.
+    in_model_call_args: bool,
     implicit_function_names: Vec<Name>,
 }
 
@@ -1095,7 +1098,7 @@ impl Parser<'_> {
             let parameters_before = self.model.param_assignments.len();
             let helpers_before = self.model.helper_assignments.len();
             let dotted_before = self.model.dotted_statements.len();
-            self.model_function_context = [
+            self.model_expression_command = [
                 "model",
                 "model_replace",
                 "epilogue",
@@ -1111,7 +1114,10 @@ impl Parser<'_> {
                 "var",
             ]
             .iter()
-            .any(|word| self.at_ident_ci(word));
+            .copied()
+            .find(|word| self.at_ident_ci(word))
+            .unwrap_or("");
+            self.model_function_context = !self.model_expression_command.is_empty();
             self.in_dynare_block = BLOCK_OPENERS.iter().any(|word| self.at_ident_ci(word))
                 || [
                     "mshocks",
@@ -3944,6 +3950,7 @@ impl Parser<'_> {
             start: opener_span.start,
             end,
         });
+        let first_row = self.model.matched_moments.len();
         let saved = self.i;
         self.i = body_i;
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
@@ -3958,6 +3965,10 @@ impl Parser<'_> {
                 self.i = body_end_i;
                 break;
             }
+        }
+        let walk_context = self.model.symbol_context();
+        for row in &mut self.model.matched_moments[first_row..] {
+            row.walk_context = walk_context;
         }
         self.in_equation_body = false;
         self.i = saved;
@@ -3976,6 +3987,7 @@ impl Parser<'_> {
         }
         let start = self.current_start();
         let expr_from = self.i;
+        let use_from = self.model.model_expression_uses.len();
         let expr = self.parse_expr();
         if !self.at(TokenKind::Semi) {
             // `y = 3` stops on EQUAL and names nothing it expected.
@@ -3995,6 +4007,8 @@ impl Parser<'_> {
             text,
             span: Span { start, end },
             expr,
+            expression_uses: use_from..self.model.model_expression_uses.len(),
+            walk_context: self.model.symbol_context(),
         })
     }
 
@@ -4541,6 +4555,9 @@ impl Parser<'_> {
                         .to_string(),
                     span: Span { start, end },
                     expr: Some(expr),
+                    expression_uses: self.model.model_expression_uses.len()
+                        ..self.model.model_expression_uses.len(),
+                    walk_context: self.model.symbol_context(),
                 });
             }
             self.record_mom_syntax(
@@ -9410,7 +9427,7 @@ impl Parser<'_> {
             let rhs = match self.parse_bp(r_bp) {
                 Some(id) => id,
                 None => {
-                    self.refuse_qualified_argument_syntax();
+                    self.refuse_model_argument_syntax();
                     self.alloc_error(self.expr_span(lhs))
                 }
             };
@@ -9437,7 +9454,7 @@ impl Parser<'_> {
             let arg = match self.parse_bp(UNARY_BP) {
                 Some(id) => id,
                 None => {
-                    self.refuse_qualified_argument_syntax();
+                    self.refuse_model_argument_syntax();
                     self.alloc_error(tok.span)
                 }
             };
@@ -9454,7 +9471,7 @@ impl Parser<'_> {
             if (inner.is_none() || !self.at(TokenKind::RParen))
                 && self.model.parse_issues.len() == parse_issues_before
             {
-                self.refuse_qualified_argument_syntax();
+                self.refuse_model_argument_syntax();
             }
             self.eat(TokenKind::RParen);
             return inner;
@@ -9469,7 +9486,7 @@ impl Parser<'_> {
             return Some(id);
         }
         if self.at(TokenKind::String) {
-            self.refuse_qualified_argument_syntax();
+            self.refuse_model_argument_syntax();
             let tok = self.bump();
             return Some(self.alloc(ExprKind::String, tok.span));
         }
@@ -9603,11 +9620,11 @@ impl Parser<'_> {
         }
         let becoming_call = self.at(TokenKind::LParen)
             && (!self.looks_like_timing()
-                || self.model.external_function_names.contains(&name)
+                || self.model.final_symbol_kind(name) == Some("external_function")
                 || (!self.model_function_context
                     && !self.in_native_assignment
                     && !self.is_known_symbol(name)));
-        if !self.in_model
+        if !self.model_function_context
             && !self.in_native_assignment
             && !becoming_call
             && !self.in_epilogue
@@ -9713,25 +9730,23 @@ impl Parser<'_> {
         let parse_issues_before = self.model.parse_issues.len();
         self.eat(TokenKind::LParen);
         let mut args = Vec::new();
-        let qualified_model = self.model_function_context && self.intern.get(callee).contains('.');
-        let previous_argument_scope = self.in_qualified_model_args;
-        self.in_qualified_model_args |= qualified_model;
-        if (self.in_steady_state_rhs || self.in_qualified_model_args) && self.at(TokenKind::RParen)
-        {
+        let previous_argument_scope = self.in_model_call_args;
+        self.in_model_call_args |= self.model_function_context;
+        if (self.in_steady_state_rhs || self.in_model_call_args) && self.at(TokenKind::RParen) {
             self.push_bison(
                 self.tokens[self.i].span,
                 "syntax error, unexpected ')'".to_string(),
             );
         }
-        if self.in_qualified_model_args && self.at_expr_stop() && !self.at(TokenKind::RParen) {
-            self.refuse_qualified_argument_syntax();
+        if self.in_model_call_args && self.at_expr_stop() && !self.at(TokenKind::RParen) {
+            self.refuse_model_argument_syntax();
         }
         if !self.at(TokenKind::RParen) && !self.at_expr_stop() {
             loop {
                 if let Some(id) = self.parse_expr() {
                     args.push(id);
                 } else {
-                    self.refuse_qualified_argument_syntax();
+                    self.refuse_model_argument_syntax();
                 }
                 if self.at(TokenKind::Comma) {
                     self.bump();
@@ -9740,7 +9755,7 @@ impl Parser<'_> {
                 break;
             }
         }
-        if self.in_qualified_model_args
+        if self.in_model_call_args
             && !self.at(TokenKind::RParen)
             && self.model.parse_issues.len() == parse_issues_before
         {
@@ -9750,7 +9765,7 @@ impl Parser<'_> {
                 format!("syntax error, unexpected {unexpected}, expecting COMMA or ')'"),
             );
         }
-        self.in_qualified_model_args = previous_argument_scope;
+        self.in_model_call_args = previous_argument_scope;
         let end = if self.at(TokenKind::RParen) {
             self.bump().span.end
         } else {
@@ -9766,7 +9781,15 @@ impl Parser<'_> {
             },
         );
         if self.model.parse_issues.len() == parse_issues_before {
-            self.refuse_qualified_model_call(callee, kw.span, args.len());
+            self.refuse_model_call(
+                callee,
+                kw.span,
+                Span {
+                    start: kw.span.start,
+                    end,
+                },
+                args.len(),
+            );
         }
         if self.in_epilogue
             && !is_builtin_function(self.intern.get(callee))
@@ -9824,21 +9847,35 @@ impl Parser<'_> {
         id
     }
 
-    fn refuse_qualified_argument_syntax(&mut self) {
-        if self.in_qualified_model_args {
+    fn refuse_model_argument_syntax(&mut self) {
+        if self.in_model_call_args {
             let (span, unexpected) = self.ss_unexpected_token(self.i);
             self.push_bison(span, format!("syntax error, unexpected {unexpected}"));
         }
     }
 
-    /// Qualified MODEL_EXPRESSION calls use the symbol/function tables at this
+    /// MODEL_EXPRESSION calls use the symbol/function tables at this
     /// parser position. Later declarations and macro source offsets do not
     /// establish the declaration that the official parser sees here.
-    fn refuse_qualified_model_call(&mut self, callee: Name, span: Span, nargs: usize) {
+    fn refuse_model_call(&mut self, callee: Name, span: Span, full_span: Span, nargs: usize) {
         let name = self.intern.get(callee);
-        if !self.model_function_context || !name.contains('.') {
+        if !self.model_function_context
+            || self.is_expression_builtin(name)
+            || name.eq_ignore_ascii_case("SUM")
+        {
             return;
         }
+        if self.is_known_symbol(callee)
+            && self.model.final_symbol_kind(callee) != Some("external_function")
+        {
+            if nargs > 1 {
+                self.push_bison(full_span, format!("Symbol {name} is being treated as if it were a function (it is given several arguments)"));
+            }
+            return;
+        }
+        // Qualified calls retain the existing editor callee-range warrant.
+        // The unqualified grammar's official range includes the argument list.
+        let span = if name.contains('.') { span } else { full_span };
         let declaration = self
             .model
             .external_functions
@@ -10026,9 +10063,22 @@ impl Parser<'_> {
         }
         if self.model_function_context {
             if let ExprKind::Ident {
-                name, ident_span, ..
+                name,
+                ident_span,
+                timing,
+                ..
             } = &kind
             {
+                self.model
+                    .model_expression_uses
+                    .push(crate::model::ModelExpressionUse {
+                        name: *name,
+                        span: *ident_span,
+                        full_span: span,
+                        timing: *timing,
+                        context: self.model.symbol_context(),
+                        command: self.model_expression_command,
+                    });
                 if self.model.final_symbol_kind(*name) == Some("excluded") {
                     self.model
                         .var_removed_model_uses

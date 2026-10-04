@@ -1,6 +1,6 @@
 # Structural model Diff
 
-The 0.11.4 candidate includes structural model comparison. Package verification
+The 0.11.5 candidate includes structural model comparison. Package verification
 and publication remain pending; see [distribution](distribution.md).
 
 Open a model and run **Dygnosis: Diff with…**. On an include, choose its known

@@ -1074,7 +1074,7 @@ fn the_syntax_s061_held_is_their_sentence() {
         (
             "fmom_mm_det",
             "E024",
-            "Exogenous deterministic variable tau cannot be given a lead or a lag",
+            "Exogenous deterministic variable tau cannot be given a lead or a lag.",
             "tau(1)",
         ),
     ];

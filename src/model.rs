@@ -421,6 +421,18 @@ impl SymbolKind {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SymbolContext(usize);
 
+/// An identifier read by the MODEL_EXPRESSION grammar, with the symbol table
+/// at that read. Later declarations and repeated macro spans cannot change it.
+#[derive(Clone, Copy, Debug)]
+pub struct ModelExpressionUse {
+    pub name: Name,
+    pub span: Span,
+    pub full_span: Span,
+    pub timing: i32,
+    pub context: SymbolContext,
+    pub command: &'static str,
+}
+
 impl SymbolContext {
     pub(crate) fn index(self) -> usize {
         self.0
@@ -1060,6 +1072,7 @@ pub struct Model {
     /// Bare RHS uses with their Parse-time symbol history. Macro copies may
     /// share written spans, and later type changes must not alter these roles.
     pub steady_state_rhs_uses: Vec<(Name, Span, SymbolContext)>,
+    pub model_expression_uses: Vec<ModelExpressionUse>,
     pub initval: Vec<Assignment>,
     pub endval: Vec<Assignment>,
     pub is_linear: bool,
@@ -1784,6 +1797,10 @@ pub struct MatchedMoment {
     pub span: Span,
     /// `parse_expr`; `None` when the row was empty.
     pub expr: Option<ExprId>,
+    /// MODEL_EXPRESSION uses allocated for this row in parser execution order.
+    pub(crate) expression_uses: Range<usize>,
+    /// The moment walk reads symbol types when its block reaches `end;`.
+    pub(crate) walk_context: SymbolContext,
 }
 
 /// One `matched_irfs` block.

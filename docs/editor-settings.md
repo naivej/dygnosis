@@ -1,6 +1,6 @@
 # Editor settings and LSP contracts
 
-Dygnosis supplies these contracts through the language server. Configure an LSP client to launch `dygnosis` over stdio. The 0.11.4 VS Code candidate in `editors/vscode` adds native Settings, a [count bar](vscode-status.md), [model view](vscode-model-view.md), [colors](vscode-colors.md), [CodeLens](vscode-lenses.md), [diagnostic controls](vscode-diagnostics.md), [model Diff](vscode-diff.md), [origin navigation](preview-origins.md), and [project checks](project-diagnostics.md). See [distribution](distribution.md) for candidate packages and release verification.
+Dygnosis supplies these contracts through the language server. Configure an LSP client to launch `dygnosis` over stdio. The 0.11.5 VS Code candidate in `editors/vscode` adds native Settings, a [count bar](vscode-status.md), [model view](vscode-model-view.md), [colors](vscode-colors.md), [CodeLens](vscode-lenses.md), [diagnostic controls](vscode-diagnostics.md), [model Diff](vscode-diff.md), [origin navigation](preview-origins.md), and [project checks](project-diagnostics.md). See [distribution](distribution.md) for candidate packages and release verification.
 
 ## Settings
 

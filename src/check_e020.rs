@@ -102,38 +102,27 @@ fn check_e023(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_e024(model: &Model) -> Vec<Diagnostic> {
-    let det: HashSet<Name> = model
-        .deterministic_exogenous
-        .iter()
-        .map(|d| d.name)
-        .collect();
-    if det.is_empty() {
-        return Vec::new();
-    }
     let mut seen = HashSet::new();
     let mut diagnostics = Vec::new();
-    for eq in all_model_equations(model) {
-        for r in model.ident_refs(eq) {
-            if r.timing == 0 || !det.contains(&r.name) || !seen.insert(r.name) {
-                continue;
-            }
-            let end = r.timing_span.map(|t| t.end).unwrap_or(r.span.end);
-            let name = model.name(r.name);
-            diagnostics.push(Diagnostic {
-                span: Span {
-                    start: r.span.start,
-                    end,
-                },
-                severity: Severity::Error,
-                code: "E024".to_string(),
-                message: format!(
-                    "Exogenous deterministic variable {name} cannot be given a lead or a lag"
-                ),
-                fix: None,
-                related: Vec::new(),
-                tags: Vec::new(),
-            });
+    for usage in &model.model_expression_uses {
+        if usage.timing == 0
+            || model.symbol_kind_in_context(usage.name, usage.context) != Some("varexo_det")
+            || !seen.insert((usage.name, usage.span))
+        {
+            continue;
         }
+        let name = model.name(usage.name);
+        diagnostics.push(Diagnostic {
+            span: usage.full_span,
+            severity: Severity::Error,
+            code: "E024".to_string(),
+            message: format!(
+                "Exogenous deterministic variable {name} cannot be given a lead or a lag."
+            ),
+            fix: None,
+            related: Vec::new(),
+            tags: Vec::new(),
+        });
     }
     diagnostics
 }

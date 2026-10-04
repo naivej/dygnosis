@@ -8,7 +8,36 @@
 //! Missing `end;` is the existing block **E001** (see `e001.rs`).
 
 use dygnosis::model::{CalibrationRange, FamilyValueKind};
-use dygnosis::{analyze, check_parse, parse, Diagnostic};
+use dygnosis::{
+    analyze, check_parse, find_preprocessor, parse, run_preprocessor, Diagnostic, JsonStage,
+    Severity,
+};
+
+fn official_check(source: &str, accepted: bool, sentence: Option<&str>) {
+    let pinned = std::path::PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    let preprocessor = if pinned.is_file() {
+        Some(pinned)
+    } else {
+        find_preprocessor(None).filter(|path| {
+            path.components()
+                .any(|part| part.as_os_str().to_string_lossy() == "7.2")
+        })
+    };
+    let Some(preprocessor) = preprocessor else {
+        return;
+    };
+    let result = run_preprocessor(
+        source,
+        &preprocessor,
+        None,
+        std::time::Duration::from_secs(30),
+        JsonStage::Check,
+    );
+    assert_eq!(result.success, accepted, "{source}: {result:?}");
+    if let Some(sentence) = sentence {
+        assert!(result.raw_stdout.contains(sentence), "{source}: {result:?}");
+    }
+}
 
 fn fixture(rel: &str) -> String {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -322,15 +351,13 @@ fn mom_option_side_effects_still_run() {
     assert!(model.matched_irfs.is_empty());
 }
 
-/// A name first seen inside a block row is a mod-file local at 7.1, so a later
-/// model block using it refuses with **E281** (its scope is outside the model),
-/// not with **E020**. Every name-bearing slot of the five blocks must register.
+/// Ordinary expressions in these block rows create mod-file locals. A later
+/// model use refuses with E281. Matched moments use model expressions instead.
 #[test]
 fn block_row_names_are_mod_file_locals() {
     let head = "var y c; varexo e; parameters a; a = 0.5;\n\
                 model; y = a*y(-1) + e; c = y; end;\n";
     for body in [
-        "matched_moments;\nzzz;\nend;\n",
         "matched_irfs;\nvar y; varexo e; periods 1; values (zzz); end;\n",
         "matched_irfs;\nvar y; varexo e; periods 1; values 1; weights (zzz); end;\n",
         "matched_irfs_weights;\ny(1), e, c(2), e, zzz;\nend;\n",
@@ -338,6 +365,7 @@ fn block_row_names_are_mod_file_locals() {
         "irf_calibration;\ny, e, [zzz, 1];\nend;\n",
     ] {
         let source = format!("{head}{body}model;\nc = y + zzz;\nend;\n");
+        official_check(&source, false, Some("Variable zzz not allowed inside model declaration. Its scope is only outside model."));
         let diags = analyze(&parse(&source));
         let codes: Vec<&str> = codes(&diags);
         assert!(
@@ -349,6 +377,31 @@ fn block_row_names_are_mod_file_locals() {
             "{body:?}: the name is a mod-file local, so not E020: {codes:?}"
         );
     }
+}
+
+#[test]
+fn matched_moment_unknown_names_use_model_expression_scope() {
+    let source = "var y c; varexo e; parameters a; a=0.5; model; y=a*y(-1)+e; c=y; end; matched_moments; zzz; end; model; c=y+zzz; end;";
+    let sentence =
+        "Matched moment expression has incorrect format: Variable zzz is not an endogenous";
+    official_check(source, false, Some(sentence));
+    let rows = analyze(&parse(source));
+    let row = rows
+        .iter()
+        .find(|row| row.code == "E386" && row.message == sentence)
+        .unwrap_or_else(|| panic!("{rows:?}"));
+    assert_eq!(row.severity, Severity::Error);
+    assert_eq!(
+        &source[row.span.start as usize..row.span.end as usize],
+        "zzz"
+    );
+    assert!(!rows.iter().any(|row| row.code == "E281"), "{rows:?}");
+
+    let source = "var y zzz; model; y=0; zzz=0; end; matched_moments; zzz; end;";
+    official_check(source, true, None);
+    assert!(!analyze(&parse(source))
+        .iter()
+        .any(|row| row.severity == Severity::Error));
 }
 
 /// `priors` and the other still-skipped openers keep their old path.

@@ -44,7 +44,7 @@ Configure an LSP client to launch `dygnosis` over stdio. Available features incl
 
 Workspace folders have separate settings and include paths. The `dynare/modelInfo` command supplies shared counts, written source locations, and input revisions for client model views. Equation labels are Dygnosis numbers before transformation. See the [editor settings guide](docs/editor-settings.md) for configuration, root ownership, and semantic token migration.
 
-The 0.11.4 VS Code candidate adds a [count bar](docs/vscode-status.md), [model view and equation jumps](docs/vscode-model-view.md), [colors and block tinting](docs/vscode-colors.md), [CodeLens actions](docs/vscode-lenses.md), [diagnostic controls](docs/vscode-diagnostics.md), [structural Diff](docs/vscode-diff.md), [origin navigation](docs/preview-origins.md), and [project checks](docs/project-diagnostics.md). It can also [set up MCP for a project](docs/project-mcp.md). Package verification and publication remain open; see the [distribution guide](docs/distribution.md).
+The 0.11.5 VS Code candidate adds a [count bar](docs/vscode-status.md), [model view and equation jumps](docs/vscode-model-view.md), [colors and block tinting](docs/vscode-colors.md), [CodeLens actions](docs/vscode-lenses.md), [diagnostic controls](docs/vscode-diagnostics.md), [structural Diff](docs/vscode-diff.md), [origin navigation](docs/preview-origins.md), and [project checks](docs/project-diagnostics.md). It can also [set up MCP for a project](docs/project-mcp.md). Package verification and publication remain open; see the [distribution guide](docs/distribution.md).
 
 ### AI agents (MCP)
 

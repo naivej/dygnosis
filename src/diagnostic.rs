@@ -204,7 +204,12 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
         || observed_diags
             .iter()
             .any(|diag| matches!(diag.code.as_str(), "E093" | "E261"))
-        || block_diags.iter().any(|diag| diag.code == "E271")
+        || block_diags.iter().any(|diag| {
+            matches!(
+                diag.code.as_str(),
+                "E020" | "E182" | "E271" | "E280" | "E281" | "E294"
+            )
+        })
         || steady_state_diags.iter().any(|diag| diag.code == "E481")
         || open_diags.iter().any(|diag| {
             matches!(
@@ -232,7 +237,18 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     out.extend(crate::check_w120::check_w120_family(model));
     out.extend(steady_state_diags);
     out.extend(crate::check_symbol_list::check_symbol_list(model));
-    out.extend(block_diags);
+    // Captured replacement uses also retain unknown names that a later
+    // declaration hides from the equation pass. Keep its richer message when
+    // both passes found the same written E020 range.
+    for diag in block_diags {
+        if diag.code != "E020"
+            || !out
+                .iter()
+                .any(|existing| existing.code == "E020" && existing.span == diag.span)
+        {
+            out.push(diag);
+        }
+    }
     out.extend(shock_diags);
     out.extend(open_diags);
     // E271 is already emitted for each repeated option by check_shape. The
@@ -240,7 +256,17 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     // type refusal from pre-empting that statement.
     out.extend(ms_diags.into_iter().filter(|d| d.code != "E271"));
     out.extend(surgery_parse);
-    out.extend(crate::check_mom::check_mom(model));
+    // The moment row-scope pass reads the same captured model-expression
+    // uses as the generic role/timing passes. Keep one diagnostic per refusal.
+    for diag in crate::check_mom::check_mom(model) {
+        if !out.iter().any(|existing| {
+            existing.code == diag.code
+                && existing.span == diag.span
+                && existing.message == diag.message
+        }) {
+            out.push(diag);
+        }
+    }
     if !parse_refused {
         out.extend(crate::check_d_pac::check_check(model));
     }
