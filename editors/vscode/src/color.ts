@@ -31,42 +31,6 @@ export const tintCategoryDefaults: ReadonlyArray<readonly [string, TintStyle]> =
   ["pac_target_info", "subtle"], ["epilogue", "subtle"], ["verbatim", "subtle"], ["priors", "subtle"],
 ];
 
-/** Exact manifest additions owned by this slice, available to integration/tests. */
-export const colorContributions = {
-  semanticTokenTypes: [
-    { id: "dynareEndogenous", superType: "variable", description: "A Dynare endogenous variable." },
-    { id: "dynareExogenous", superType: "variable", description: "A Dynare exogenous or deterministic exogenous variable." },
-    { id: "dynareParameter", superType: "variable", description: "A Dynare model parameter." },
-    { id: "dynareModelLocal", superType: "variable", description: "A Dynare model-local variable." },
-  ],
-  semanticTokenModifiers: [
-    { id: "forwardLooking", description: "Forward-looking timing of a Dynare endogenous variable." },
-    { id: "predetermined", description: "Predetermined timing of a Dynare endogenous variable." },
-  ],
-  semanticTokenScopes: [{ language: "dynare", scopes: {
-    dynareEndogenous: ["variable.other.readwrite.dynare.endogenous"],
-    dynareExogenous: ["variable.other.readwrite.dynare.exogenous"],
-    dynareParameter: ["variable.other.readwrite.dynare.parameter"],
-    dynareModelLocal: ["variable.other.readwrite.dynare.modelLocal"],
-  } }],
-  colors: [
-    { id: "dynare.blockTint.modelBackground", description: "Whole-line background for Model-strength Dynare block tinting. Supports transparency.",
-      defaults: { dark: "#569CD61A", light: "#007ACC12", highContrast: "#00000000", highContrastLight: "#00000000" } },
-    { id: "dynare.blockTint.subtleBackground", description: "Whole-line background for Subtle Dynare block tinting. Supports transparency.",
-      defaults: { dark: "#569CD608", light: "#007ACC06", highContrast: "#00000000", highContrastLight: "#00000000" } },
-  ],
-  configuration: { title: "Dygnosis: Appearance", properties: {
-    "dynare.blockTint.enabled": { type: "boolean", default: true, scope: "resource", description: "Tint recognized Dynare blocks using the current theme's background colors." },
-    ...Object.fromEntries(tintCategoryDefaults.map(([category, fallback]) => [`dynare.blockTint.${category}`, {
-      type: "string", enum: tintStyles, enumItemLabels: ["Off", "Subtle", "Model-strength"],
-      default: fallback, scope: "resource", description: `Background style for Dynare ${category} blocks.`,
-    }])),
-    "dynare.blockTint.heterogeneousModels": { type: "object", default: {}, scope: "resource",
-      additionalProperties: { type: "string", enum: tintStyles }, propertyNames: { minLength: 1 },
-      markdownDescription: "Override the heterogeneous model tint by written dimension name, for example `{\"households\": \"off\"}`. Takes priority over the heterogeneous model style. [Edit in settings.json](command:dygnosis.editSettingsJson)." },
-  } },
-};
-
 export interface TintPreferences {
   enabled: boolean;
   styles: ReadonlyMap<string, TintStyle>;

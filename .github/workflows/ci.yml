@@ -1,12 +1,25 @@
 name: CI
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Branch or commit to verify as an unpublished candidate
+        required: true
+        type: string
+      candidate:
+        description: Build candidate artifacts without a release tag
+        default: true
+        type: boolean
   workflow_call:
     inputs:
       release_tag:
         description: vMAJOR.MINOR.PATCH tag to build and launch
         required: true
         type: string
+      candidate:
+        default: false
+        type: boolean
 
 # Cross-platform compatibility for the Rust engine and the VS Code extension.
 # Format, Clippy, the TypeScript client checks, and publication stay local.
@@ -65,9 +78,14 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          CANDIDATE: ${{ inputs.candidate }}
         run: |
           npm ci --ignore-scripts
-          npm run package:target -- --target "$TARGET" --tag "$RELEASE_TAG"
+          if [ "$CANDIDATE" = true ]; then
+            npm run package:target -- --target "$TARGET" --candidate
+          else
+            npm run package:target -- --target "$TARGET" --tag "$RELEASE_TAG"
+          fi
           if [ "$RUNNER_OS" = Linux ]; then
             ldd "bin/dygnosis" > "dist/$TARGET/runtime-libraries.txt"
             readelf --version-info "bin/dygnosis" >> "dist/$TARGET/runtime-libraries.txt"

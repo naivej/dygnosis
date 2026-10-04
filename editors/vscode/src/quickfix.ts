@@ -93,14 +93,13 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
   const pushed = new Map<string, RawSet>();
   const pulled = new Map<string, RawSet>();
   const actionContexts = new Map<string, ActionContext>();
-  const explanations = new Map<string, string>();
   const progressSubscriptions = new Set<vscode.Disposable>();
   const middleware = service.middleware;
   const previousPush = middleware.handleDiagnostics;
   const previousPull = middleware.provideDiagnostics;
   const previousWorkspace = middleware.provideWorkspaceDiagnostics;
   const previousActions = middleware.provideCodeActions;
-  let disposed = false, actionSequence = 0, previewSequence = 0, folderGeneration = 0, inputGeneration = 0;
+  let disposed = false, actionSequence = 0, folderGeneration = 0, inputGeneration = 0;
   let instance = service.currentInstance;
   const status = vscode.window.createStatusBarItem("dygnosis.hiddenDiagnostics", vscode.StatusBarAlignment.Left, 9);
   status.name = "Dygnosis hidden checks";
@@ -268,10 +267,7 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     const saved = actionContexts.get(argument.diagnosticAction);
     return saved && saved.instance === service.currentInstance && saved.version === versionFor(saved.uri) ? saved : undefined;
   };
-  const provider = vscode.workspace.registerTextDocumentContentProvider("dygnosis-explain", {
-    provideTextDocumentContent: uri => explanations.get(uri.toString()) ?? "This explanation is no longer available.",
-  });
-  const registrations = [provider, status,
+  const registrations = [status,
     vscode.commands.registerCommand("dygnosis.ignoreDiagnostic", (argument: unknown) => {
       const saved = savedAction(argument), code = saved ? diagnosticCode(saved.diagnostic) : undefined;
       if (!code || !saved || disposed || !booleanSetting("diagnosticActions.ignore", saved.uri, true, service.log)) return;
@@ -301,35 +297,25 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
         input === inputGeneration && (!saved || !!savedAction(argument));
       const code = saved ? diagnosticCode(saved.diagnostic) : (await vscode.window.showInputBox({ title: "Dygnosis: Explain a check", prompt: "Enter a diagnostic code, for example W010" }))?.trim();
       if (!code || !current()) return;
-      let previewUri: vscode.Uri | undefined;
       try {
         const markdown = await service.execute("dynare/explainDiagnostic", [code]);
         if (!current()) return;
-        if (typeof markdown !== "string") throw new Error("The selected engine returned no diagnostic explanation. Use the bundle or update dynare.serverPath.");
-        const uri = vscode.Uri.from({ scheme: "dygnosis-explain", path: `/${++previewSequence}/${encodeURIComponent(code)}.md` });
-        previewUri = uri;
-        explanations.set(uri.toString(), safeExplanation(markdown));
-        const document = await vscode.workspace.openTextDocument(uri);
-        if (!current()) return;
-        await vscode.languages.setTextDocumentLanguage(document, "markdown");
-        if (!current()) return;
-        await vscode.commands.executeCommand("markdown.showPreviewToSide", uri);
+        if (typeof markdown !== "string") throw new Error("The selected engine returned no diagnostic explanation. Use the bundled binary or update dynare.serverPath.");
+        await vscode.commands.executeCommand("dygnosis.openHelp", { code, markdown: safeExplanation(markdown), engineVersion: service.client?.initializeResult?.serverInfo?.version });
       } catch (error) { if (current()) await service.failure(String(error)); }
-      finally { if (previewUri && !current()) explanations.delete(previewUri.toString()); }
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       ++folderGeneration;
       hiddenCodes.clear(); actionContexts.clear(); refresh();
     }),
     vscode.workspace.onDidCloseTextDocument(document => {
-      if (document.uri.scheme === "dygnosis-explain") explanations.delete(document.uri.toString());
       for (const [key, saved] of actionContexts) if (saved.uri.toString() === document.uri.toString()) actionContexts.delete(key);
       pushed.delete(document.uri.toString()); pulled.delete(document.uri.toString());
     }),
     service.onDidChange(() => { ++inputGeneration; actionContexts.clear(); syncInstance(); }),
   ];
   return vscode.Disposable.from(...registrations, new vscode.Disposable(() => {
-    disposed = true; hiddenCodes.clear(); pushed.clear(); pulled.clear(); actionContexts.clear(); explanations.clear();
+    disposed = true; hiddenCodes.clear(); pushed.clear(); pulled.clear(); actionContexts.clear();
     for (const subscription of progressSubscriptions) subscription.dispose();
     progressSubscriptions.clear();
     if (middleware.handleDiagnostics === push) middleware.handleDiagnostics = previousPush;

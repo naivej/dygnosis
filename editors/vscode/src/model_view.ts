@@ -58,7 +58,7 @@ function timingItems(id: string, info: Pick<ModelInfo, "static" | "predetermined
     const item = new ModelItem(`${id}:${key}`, label, "symbol-variable",
       names.map((name, index) => new ModelItem(`${id}:${key}:${String(index)}`, name, "symbol-variable")));
     item.description = String(names.length);
-    item.accessibilityInformation = { label: `${label}: ${String(names.length)} variables` };
+    item.accessibilityInformation = { label: `${label}: ${String(names.length)} ${names.length === 1 ? "variable" : "variables"}` };
     return item;
   });
 }
@@ -87,7 +87,7 @@ function equationPicks(equations: Equation[]): EquationPick[] {
     return {
       label: `${String(equation.number)} · ${equation.name || "Unnamed equation"}`,
       description: `${scopeLabel(equation)} · ${sourceLabel(equation.location)}`,
-      detail: `${origins ? `${origins} · ` : ""}Occurrence ${equation.id} · ${equation.text}`,
+      detail: `${origins ? `${origins} · ` : ""}${equation.text}`,
       equation,
     };
   });
@@ -177,14 +177,14 @@ export async function browseModelEquations(service: DygnosisClient, context: Mod
   const blocks = context.blockIds.map(id => info.statements.find(row => row.id === id));
   if (!blocks.length || blocks.some(row => !row || row.name !== "model" || row.kind !== "block" ||
       !row.complete || row.native || !row.lens_anchor)) return;
-  const picks = blocks.map(block => {
+  const picks = blocks.map((block, index) => {
     const row = block!;
     const equations = info.equations.filter(equation => equation.block_id === row.id);
     const origins = row.origin_frames.map(frame => frame.variable && frame.value !== null
       ? `${frame.variable}=${frame.value}` : frame.kind).join(", ");
     return { label: row.dimension ? `Dimension ${row.dimension}` : "Aggregate",
       description: `${String(equations.length)} equations · ${sourceLabel(row.lens_anchor)}`,
-      detail: `${origins ? `${origins} · ` : ""}Model occurrence ${row.id}`, block: row, equations };
+      detail: `${origins ? `${origins} · ` : ""}Expansion ${index + 1}`, block: row, equations };
   });
   const chosen = picks.length === 1 ? picks[0] : await vscode.window.showQuickPick(picks,
     { placeHolder: "Choose the model block occurrence", matchOnDescription: true, matchOnDetail: true });

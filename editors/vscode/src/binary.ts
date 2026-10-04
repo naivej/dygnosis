@@ -32,7 +32,7 @@ function runVersion(executable: string): Promise<string> {
 }
 export async function validateMcpBinary(binary: Binary, log: Log): Promise<void> {
   const version = await runVersion(binary.path);
-  if (!/^dygnosis\s+\d+\./i.test(version)) throw new Error(`The selected executable is not a compatible Dygnosis MCP engine: ${binary.path}. Open dynare.serverPath or use the bundle.`);
+  if (!/^dygnosis\s+\d+\./i.test(version)) throw new Error(`The selected executable is not a compatible Dygnosis MCP engine: ${binary.path}. Open dynare.serverPath or use the bundled binary.`);
   log(`MCP executable: ${binary.path} (${version})`);
   await new Promise<void>((resolve, reject) => {
     const child = spawn(binary.path, ["mcp"], { windowsHide: true, shell: false, stdio: "pipe" });
@@ -44,7 +44,7 @@ export async function validateMcpBinary(binary: Binary, log: Log): Promise<void>
       child.kill();
       if (error) reject(error); else resolve();
     };
-    const timer = setTimeout(() => finish(new Error("The selected Dygnosis engine did not answer MCP initialization within 5 seconds. Update dynare.serverPath or use the bundle.")), 5000);
+    const timer = setTimeout(() => finish(new Error("The selected Dygnosis engine did not answer MCP initialization within 5 seconds. Update dynare.serverPath or use the bundled binary.")), 5000);
     child.on("error", error => finish(error));
     child.on("exit", () => finish(new Error("The selected Dygnosis engine exited before completing MCP initialization.")));
     child.stdout.on("data", (data: Buffer) => {
@@ -57,7 +57,7 @@ export async function validateMcpBinary(binary: Binary, log: Log): Promise<void>
           const response: unknown = JSON.parse(line);
           if (!record(response) || response.id !== 1) continue;
           if (!record(response.result) || !record(response.result.capabilities) || !record(response.result.capabilities.tools) || !record(response.result.serverInfo) || response.result.serverInfo.name !== "dygnosis") {
-            finish(new Error("The selected engine is incompatible with the Dygnosis MCP provider. Update dynare.serverPath or use the bundle."));
+            finish(new Error("The selected engine is incompatible with the Dygnosis MCP provider. Update dynare.serverPath or use the bundled binary."));
           } else finish();
         } catch (error) { finish(new Error("The selected engine returned invalid MCP JSON.", { cause: error })); }
       }

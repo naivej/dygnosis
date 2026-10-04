@@ -12,9 +12,11 @@ import { DygnosisClient, isAnalysisDocument } from "./client";
 import { registerMcp } from "./mcp";
 import { registerEffectivePreview } from "./preview";
 import { listSetting } from "./settings";
+import { registerHelp } from "./help";
 
 let service: DygnosisClient | undefined;
 export function activate(context: vscode.ExtensionContext): DygnosisClient {
+  context.subscriptions.push(registerHelp(context));
   const client = new DygnosisClient(context);
   service = client;
   context.subscriptions.push(registerProjectMcp(context, client));

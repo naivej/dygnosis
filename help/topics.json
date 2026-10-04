@@ -1,0 +1,16 @@
+[
+  {"id":"get-started","title":"Get started","keywords":["install","Marketplace","GitHub","first model","language mode"]},
+  {"id":"edit-models","title":"Edit a model","keywords":["completion","hover","snippets","signature","format","fix","selection"]},
+  {"id":"navigate-code","title":"Navigate code","keywords":["definition","Peek","references","rename","Outline","folding","call hierarchy"]},
+  {"id":"diagnostics","title":"Understand checks","keywords":["Problems","Error","Warning","Information","Explain","ignore","restore"]},
+  {"id":"model-and-includes","title":"Inspect a model and its includes","keywords":["counts","timing","equations","owner","root","CodeLens","searchPaths"]},
+  {"id":"appearance","title":"Read names, hints and colors","keywords":["semantic tokens","tint","theme","long_name","TeX","inlay"]},
+  {"id":"project-checks","title":"Check a project","keywords":["coverage","background","saved","exclude","cancel","Recheck"]},
+  {"id":"effective-model","title":"Trace the effective model","keywords":["expand","macro","origins","written source","refresh"]},
+  {"id":"structural-diff","title":"Compare models","keywords":["Diff","Before","After","layout","pairing","filter"]},
+  {"id":"agents","title":"Connect an agent","keywords":["MCP","tools",".mcp.json","managed binary","approval"]},
+  {"id":"reference","title":"Commands, checks and options","keywords":["keyboard","shortcut","index","reference"]},
+  {"id":"integrations","title":"LSP and MCP contracts","keywords":["schema","coordinates","UTF-16","revision","supplied text","file map"]},
+  {"id":"troubleshoot","title":"Resolve a problem","keywords":["unavailable","incomplete","restart","Output","serverPath","trust","virtual"]},
+  {"id":"about","title":"About Dygnosis","keywords":["Dynare 7.2","limits","license","credits","MATLAB","Octave"]}
+]

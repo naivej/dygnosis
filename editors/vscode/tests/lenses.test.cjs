@@ -102,10 +102,11 @@ Module._load = function(id, ...args) {
   };
   return originalLoad.call(this, id, ...args);
 };
-const { lensContributions, lensPreferences, modelLensGroups, declarationLensGroups, registerLenses } = require("../out/lenses");
+const { lensPreferences, modelLensGroups, declarationLensGroups, registerLenses } = require("../out/lenses");
 const { browseModelEquations } = require("../out/model_view");
 const { registerEffectivePreview } = require("../out/preview");
 Module._load = originalLoad;
+const lensContributions = { configuration: require("../package.json").contributes.configuration.find(group => group.title === "Dygnosis: Actions") };
 
 function location(value = "file:///project/main.mod", line = 3, start = 0, end = 5) {
   return { uri: value, range: { start: { line, character: start }, end: { line, character: end } } };
@@ -227,7 +228,8 @@ test("repeated macro openers group once, omit ambiguous count and choose occurre
   const lenses = await env.provide(); assert.equal(lenses.length, 1); assert.equal(lenses[0].command.title, "Browse equations (2 occurrences)");
   env.host.answers.push(items => items[1], items => items[1]); await env.run(lenses[0]);
   assert.deepEqual(env.host.picks[0].items.map(row => row.label), ["Aggregate", "Dimension firms"]);
-  assert.match(env.host.picks[0].items[0].detail, /i=1.*s1/); assert.match(env.host.picks[0].items[1].detail, /i=2.*s2/);
+  assert.match(env.host.picks[0].items[0].detail, /i=1.*Expansion 1/); assert.match(env.host.picks[0].items[1].detail, /i=2.*Expansion 2/);
+  assert.deepEqual(env.host.picks[0].items.map(row => row.block.id), ["s1", "s2"]);
   assert.deepEqual(env.host.picks[1].items.map(row => row.label), ["1 · Euler", "2 · Euler"]);
   assert.equal(env.service.jumps.length, 1); env.registration.dispose();
 });

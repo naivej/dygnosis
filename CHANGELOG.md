@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.11.7
+
+- **Dygnosis: Open Help** opens one offline reference with search, reading history, topic links, examples and feature guides. Help is available before a model opens and when the engine is unavailable. First-use guidance and persistent Explorer actions make it easy to find.
+- **Explain this check** and **Explain a check** open the matching Help explanation and identify the active engine edition. Commands, check explanations, command options and MCP schemas come from the shipped manifest and engine.
+- Settings explain their controls; feature guides link to relevant settings. UI and recovery text use consistent action names. Equation pickers show source context and macro values without opaque internal IDs.
+- MCP input descriptions state how supplied text, include maps, active roots and disk paths work. The Marketplace is the main installation route; GitHub binaries support MCP without VS Code.
+
 ## v0.11.6
 
 - The Windows x64 release executable is about 9% smaller than in 0.11.5. The Windows x64 standalone archive is about 6% smaller, and the VSIX is about 5% smaller. The editor and agent transports both stay in the binary.

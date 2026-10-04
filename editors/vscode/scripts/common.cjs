@@ -104,6 +104,23 @@ function rpc(executable, args, framed) {
   };
 }
 const model = "var y; parameters p; p=1/2; model; y=p; end;\n";
+const mcpProbeCases = {
+  dynare_auto_fix: { file_content: model },
+  dynare_compare_models: { file_content_a: model, file_content_b: model.replace("1/2", "1/3") },
+  dynare_diagnose: { files: { "/main.mod": "var y; model;\n@#include \"body.inc\"\nend;", "/body.inc": "y=0;" }, active_file: "/main.mod" },
+  dynare_equations: { file_content: model },
+  dynare_expand: { file_content: model },
+  dynare_explain: { code: "E001" },
+  dynare_extract: { file_content: model, names: ["y"] },
+  dynare_find_references: { file_content: model, symbol: "y" },
+  dynare_format: { file_content: model, formatIndent: 4 },
+  dynare_list_diagnostic_codes: {},
+  dynare_list_options: { command: "stoch_simul" },
+  dynare_model_info: { file_content: model },
+  dynare_related_files: { files: { "/main.mod": "var y; model;\n@#include \"body.inc\"\nend;", "/body.inc": "y=0;" }, active_file: "/main.mod" },
+  dynare_rename: { file_content: model, old_name: "y", new_name: "output" },
+  dynare_workspace_diagnose: { files: { "/main.mod": model }, roots: ["/main.mod"] },
+};
 async function probeMcp(executable, version) {
   const session = rpc(executable, ["mcp"], false);
   try {
@@ -113,12 +130,21 @@ async function probeMcp(executable, version) {
     assert.ok(initialized.capabilities.tools);
     session.notify("notifications/initialized", {});
     const list = await session.request("tools/list", {});
-    assert.ok(list.tools.some(tool => tool.name === "dynare_model_info"));
-    const response = await session.request("tools/call", { name: "dynare_model_info", arguments: { file_content: model } });
-    assert.ok(!response.isError, "MCP tool returned an error");
-    const info = JSON.parse(response.content.find(item => item.type === "text").text);
+    assert.deepEqual(list.tools.map(tool => tool.name).sort(), Object.keys(mcpProbeCases).sort());
+    const results = {};
+    for (const [name, args] of Object.entries(mcpProbeCases)) {
+      const response = await session.request("tools/call", { name, arguments: args });
+      assert.ok(!response.isError, `${name} returned an error`);
+      results[name] = response.content.filter(item => item.type === "text").map(item => item.text).join("\n");
+      assert.ok(results[name].length, `${name} returned no text`);
+    }
+    const info = JSON.parse(results.dynare_model_info);
     assert.equal(info.n_endogenous, 1); assert.equal(info.n_equations, 1);
-    return { initialize: true, discovery: true, tool: "dynare_model_info", n_equations: info.n_equations };
+    const reference = JSON.parse(await fs.readFile(path.join(productRoot, "help/reference.json"), "utf8"));
+    assert.deepEqual(list.tools, reference.tools, "Packaged MCP metadata differs from Help");
+    assert.match(results.dynare_explain, /E001/);
+    assert.match(results.dynare_rename, /output/);
+    return { initialize: true, discovery: true, tool: "dynare_model_info", tools: Object.keys(results), metadata_matches_help: true, n_equations: info.n_equations };
   } finally { session.close(); }
 }
 async function probeBinary(executable, version, workspace) {
@@ -139,4 +165,4 @@ async function probeBinary(executable, version, workspace) {
   } finally { session.close(); }
   return { version, lsp: { initialize: true, symbols: true }, mcp: await probeMcp(executable, version) };
 }
-module.exports = { extensionRoot, productRoot, targets, targetInfo, assertNative, execute, sha256, writeJson, binaryName, hostFacts, probeBinary, probeMcp, model };
+module.exports = { extensionRoot, productRoot, targets, targetInfo, assertNative, execute, sha256, writeJson, binaryName, hostFacts, probeBinary, probeMcp, model, mcpProbeCases, rpc };

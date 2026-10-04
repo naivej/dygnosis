@@ -1,23 +1,17 @@
-# Dygnosis for VS Code
+# Dygnosis
 
-Dygnosis helps you check and edit Dynare models. Its bundled Rust engine provides live diagnostics, navigation, completion and model facts, and serves the same analysis to agents through MCP. Use official Dynare with MATLAB or Octave for simulation and estimation.
+![Dygnosis](media/logo_s.png)
 
-![Native editor with equation CodeLens, Ignore and Explain actions, model counts and project coverage](media/readme/workbench.png)
+Dygnosis helps people and agents check and edit Dynare models. It shows problems in the written source and shares its Rust analysis engine between the editor and MCP.
 
-*Illustration: actionable editing and distinct project coverage.*
+- Edit with live diagnostics, completion, fixes, references and rename.
+- Inspect model counts, equations, includes and expanded source.
+- Compare models and check unopened saved models in a project.
 
-Open a model or project folder. Browse equations from CodeLens, follow related diagnostics, and use native Problems and Outline. Customize name colors, block tinting and optional value hints in Settings. Background checks cover unopened saved models, with Recheck, cancellation and folder exclusions.
+Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=dygnosis.dygnosis). The extension includes the engine. Run **Dygnosis: Open Help**, or select the question mark in either Dygnosis Explorer view, for the complete offline reference. Its [source topics](../../help/get-started.md) are also readable here.
 
-![Structural Diff with paired parameter and equation changes, filters and source actions](media/readme/diff.png)
+For MCP without VS Code, download the native Rust binary from [GitHub Releases](https://github.com/naivej/dygnosis/releases) and follow [MCP setup](../../help/get-started.md#mcp-without-vs-code). Each tool describes its inputs.
 
-*Illustration: inspect structural changes with **Diff with…**.*
+Language support follows Dynare 7.2. Dygnosis stops before MATLAB or Octave and does not run the official preprocessor. Use official Dynare for final validation and numerical results. See [scope and credits](../../help/about.md) and the [changelog](../../CHANGELOG.md).
 
-Compare parameters, equations and shock setup, then open either written source.
-
-![Read-only effective model tracing an equation to its written include and macro iteration](media/readme/origins.png)
-
-*Illustration: written-source and macro-origin navigation.*
-
-Trace expanded equations through includes and repeated macros. Refresh after edits for current mappings.
-
-VS Code 1.102+; native Windows, macOS and glibc Linux packages for x64/arm64. See [settings](../../docs/vscode.md), [project MCP setup](../../docs/project-mcp.md), [runtime support](../../docs/distribution.md), [contributing](https://github.com/naivej/dygnosis_dev/blob/main/README.md), and [credits](../../README.md#credits). Based on LLMacro-Dynare-LSP. GPL-3.0-or-later.
+[GPL-3.0-or-later](../../LICENSE).

@@ -77,8 +77,10 @@ Module._load = function(id, ...args) {
   };
   return originalLoad.call(this, id, ...args);
 };
-const { colorContributions, dimensionOverrides, registerColors, tintCategoryDefaults, tintPreferences, tintRanges } = require("../out/color");
+const { dimensionOverrides, registerColors, tintCategoryDefaults, tintPreferences, tintRanges } = require("../out/color");
 Module._load = originalLoad;
+const manifest = require("../package.json").contributes;
+const colorContributions = { ...manifest, configuration: manifest.configuration.find(group => group.title === "Dygnosis: Appearance") };
 
 const registry = tintCategoryDefaults.map(([category, fallback]) => ({ category, default: fallback }));
 function location(value = "file:///project/main.mod", start = 2, end = 5, character = 0, lastCharacter = 4) {

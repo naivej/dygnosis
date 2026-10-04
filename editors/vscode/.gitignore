@@ -1,5 +1,6 @@
 /node_modules/
 /out/
+/help/
 /.npm-cache/
 /.test-data/
 /.vscode-test/

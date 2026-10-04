@@ -102,6 +102,7 @@
     }
   }
   controls.refresh.addEventListener("click", () => api.postMessage({ type: "refresh" }));
+  document.getElementById("help").addEventListener("click", () => api.postMessage({ type: "help" }));
   controls.search.addEventListener("input", () => { choices.search = controls.search.value; update(); });
   controls.scope.addEventListener("change", () => { choices.scope = controls.scope.value; update(); });
   controls.layout.addEventListener("change", () => { choices.layout = controls.layout.value; update(); });

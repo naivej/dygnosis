@@ -29,7 +29,7 @@ export function diffHtml(webview: vscode.Webview, assets: vscode.Uri): string {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${style.toString()}"><title>Dygnosis model Diff</title></head><body>
 <main><h1>Model Diff</h1><div id="models"></div><p id="status" role="status" aria-live="polite">Loading comparison…</p>
-<div class="toolbar"><button id="refresh" type="button">Refresh</button><label>Search <input id="search" type="search" placeholder="Names, values, or equations"></label>
+<div class="toolbar"><button id="refresh" type="button">Refresh</button><button id="help" type="button">Help</button><label>Search <input id="search" type="search" placeholder="Names, values, or equations"></label>
 <label>Scope <select id="scope"><option value="all">All scopes</option></select></label>
 <label>Layout <select id="layout"><option value="auto">Auto</option><option value="sideBySide">Side by side</option><option value="stacked">Stacked</option></select></label>
 <label>Expansion <select id="expansion"><option value="changes">Changes</option><option value="all">All</option><option value="none">None</option></select></label></div>
@@ -182,6 +182,7 @@ export function registerDiff(service: DygnosisClient): vscode.Disposable {
         } else if (message.type === "choices" && message.key === key) {
           view.choices = normalizeChoices(message.choices, preferences); remembered.set(key, view.choices);
         } else if (message.type === "refresh") void refresh(view);
+        else if (message.type === "help") void vscode.commands.executeCommand("dygnosis.openHelp", "structural-diff");
         else if (message.type === "openSource" && message.token === view.generation && typeof message.rowId === "string" &&
           (message.side === "before" || message.side === "after") && view.status === "ready") {
           const row = view.snapshot?.rows.find(row => row.id === message.rowId);

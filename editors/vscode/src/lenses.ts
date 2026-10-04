@@ -4,16 +4,6 @@ import { sameWrittenLocation } from "./model_view";
 import type { Declaration, Location, ModelInfo, Statement } from "./protocol";
 import { booleanSetting, Log } from "./settings";
 
-/** Exact manifest additions for Ext-launch integration. */
-export const lensContributions = { configuration: { title: "Dygnosis: Actions", properties: {
-  "dynare.codeLens.modelEquations": { type: "boolean", default: true, scope: "resource",
-    description: "Browse surviving equations at each safely mapped model opener. Numbers are before transformation. Also respects editor.codeLens." },
-  "dynare.codeLens.declarationReferences": { type: "boolean", default: false, scope: "resource",
-    description: "Offer native Find All References at declaration lines. Several names open a symbol picker; no usage count is shown." },
-  "dynare.codeLens.effectiveModel": { type: "boolean", default: false, scope: "resource",
-    description: "Offer Show effective model at the first safely mapped model opener. Also respects editor.codeLens." },
-} } };
-
 export interface LensPreferences { modelEquations: boolean; declarationReferences: boolean; effectiveModel: boolean }
 interface ModelGroup { anchor: Location; statements: Statement[]; count: number | null }
 interface DeclarationGroup { anchor: Location; declarations: Declaration[] }

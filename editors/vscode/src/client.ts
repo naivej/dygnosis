@@ -255,7 +255,7 @@ export class DygnosisClient implements vscode.Disposable {
         }));
         this.refreshSymbols();
         this.invalidate();
-        if (!this.modelInfoSupported) void this.failure("This engine does not support Dygnosis model views. Update dynare.serverPath or use the bundled binary.");
+        if (!this.modelInfoSupported) void this.failure("This engine does not support the Dynare model view. Update dynare.serverPath or use the bundled binary.");
       });
     } catch (error) { if (!this.closed && generation === this.startGeneration) await this.failure(`Dygnosis could not start. Reinstall the extension or check dynare.serverPath. ${String(error)}`); }
   }
@@ -301,7 +301,7 @@ export class DygnosisClient implements vscode.Disposable {
     await this.ensureStarted();
     const client = this.client;
     if (!client) throw new Error("Dygnosis is unavailable. Open Dygnosis Output or restart the language server.");
-    if (!client.initializeResult?.capabilities.executeCommandProvider?.commands.includes(command)) throw new Error(`The selected engine does not support ${command}. Use the bundle or update dynare.serverPath.`);
+    if (!client.initializeResult?.capabilities.executeCommandProvider?.commands.includes(command)) throw new Error(`The selected engine does not support ${command}. Use the bundled binary or update dynare.serverPath.`);
     return client.sendRequest(ExecuteCommandRequest.type, { command, arguments: args }, token);
   }
   async modelInfo(root: vscode.Uri, document = root, fresh = false, token?: vscode.CancellationToken): Promise<ModelSnapshot | undefined> {
@@ -509,10 +509,11 @@ export class DygnosisClient implements vscode.Disposable {
     this.log(message);
     if (this.reportedFailure === message) return;
     this.reportedFailure = message;
-    const action = await vscode.window.showErrorMessage(message, "Show Output", "Use bundled binary", "Open Settings");
+    const action = await vscode.window.showErrorMessage(message, "Show Output", "Use bundled binary", "Open Settings", "Open Help");
     if (action === "Show Output") this.output.show();
     else if (action === "Use bundled binary") await vscode.workspace.getConfiguration("dynare").update("serverPath", "", vscode.ConfigurationTarget.Global);
     else if (action === "Open Settings") await vscode.commands.executeCommand("workbench.action.openSettings", "@ext:dygnosis.dygnosis dynare.serverPath");
+    else if (action === "Open Help") await vscode.commands.executeCommand("dygnosis.openHelp", "troubleshoot");
   }
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;

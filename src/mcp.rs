@@ -43,67 +43,22 @@ const OUT_CODES: &[&str] = &[
     "E040", "W040", "W041", "I041", "W071", "I070", "I071", "W080", "W081", "DYNR",
 ];
 
-const TOOLS: &[(&str, &str)] = &[
-    (
-        "dynare_diagnose",
-        "Run diagnostics on a .mod file and return code, range, severity, and message.",
-    ),
-    (
-        "dynare_model_info",
-        "Summarise aggregate and per-dimension heterogeneous names, counts, timing, and block flags.",
-    ),
-    (
-        "dynare_compare_models",
-        "Compare two .mod files by names, calibrations, aggregate and per-dimension heterogeneous equations (names and tags), and written shock setup.",
-    ),
-    (
-        "dynare_find_references",
-        "Find every whole-word use of a name. Skips comments.",
-    ),
-    (
-        "dynare_rename",
-        "Rename a name. Skips comments. Without a files map, returns the rewritten text (or the original if the new name is not a legal identifier). With a map, returns only files that changed.",
-    ),
-    (
-        "dynare_auto_fix",
-        "Apply stored diagnostic fixes to a .mod file. Leaves the text unchanged when macros would make the rewrite unsafe.",
-    ),
-    (
-        "dynare_explain",
-        "Return markdown documentation for a diagnostic code.",
-    ),
-    (
-        "dynare_list_diagnostic_codes",
-        "List all diagnostic codes, classified as shared, skipped, or added relative to Dynare.",
-    ),
-    (
-        "dynare_list_options",
-        "List valid options for a Dynare command, or list known commands when omitted.",
-    ),
-    (
-        "dynare_equations",
-        "List aggregate and dimension-labelled heterogeneous equations with text, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds.",
-    ),
-    (
-        "dynare_related_files",
-        "List include targets and companion files for the active .mod (kind, filename, resolved, path).",
-    ),
-    (
-        "dynare_expand",
-        "Return the full compilation unit after include splice and macro expand, with origin jumps for counted aggregate and heterogeneous equations.",
-    ),
-    (
-        "dynare_format",
-        "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it. Empty or whitespace-only input is unchanged.",
-    ),
-    (
-        "dynare_extract",
-        "Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model.",
-    ),
-    (
-        "dynare_workspace_diagnose",
-        "Diagnose root .mod files from a files map and roots, or from file and directory paths. Each root is reported on its own, with a summary; one failed root does not drop the others.",
-    ),
+const TOOL_NAMES: &[&str] = &[
+    "dynare_diagnose",
+    "dynare_model_info",
+    "dynare_compare_models",
+    "dynare_find_references",
+    "dynare_rename",
+    "dynare_auto_fix",
+    "dynare_explain",
+    "dynare_list_diagnostic_codes",
+    "dynare_list_options",
+    "dynare_equations",
+    "dynare_related_files",
+    "dynare_expand",
+    "dynare_format",
+    "dynare_extract",
+    "dynare_workspace_diagnose",
 ];
 
 /// One diagnostic as MCP JSON: 1-based line/column, severity `ERROR`/`WARNING`/`INFORMATION`/`HINT`.
@@ -149,7 +104,6 @@ pub struct McpWorkspaceReference {
     pub end_column: u32,
 }
 
-/// Registered tool names in registration order.
 const MACRO_INCOMPLETE_MESSAGE: &str = "Macro expansion is incomplete";
 
 /// Shared by MCP and the LSP commands so both transports report the same status.
@@ -157,17 +111,18 @@ pub(crate) fn macro_incomplete_status() -> Value {
     json!({"status": "incomplete", "message": MACRO_INCOMPLETE_MESSAGE})
 }
 
+/// Registered tool names in registration order.
 pub fn registered_tool_names() -> Vec<&'static str> {
-    TOOLS.iter().map(|(name, _)| *name).collect()
+    TOOL_NAMES.to_vec()
 }
 
 /// JSON for tools/list assertions (names + descriptions). No live client.
 pub fn tools_list_json() -> Value {
-    json!({
-        "tools": TOOLS.iter().map(|(name, description)| {
-            json!({ "name": name, "description": description })
-        }).collect::<Vec<_>>()
-    })
+    let tools = DygnosisMcp::tool_router().list_all();
+    json!({"tools": TOOL_NAMES.iter().map(|name| {
+        let tool = tools.iter().find(|tool| tool.name == *name).expect("registered tool");
+        json!({"name": tool.name, "description": tool.description})
+    }).collect::<Vec<_>>()})
 }
 
 /// Empty `files` is missing: single-file path.
@@ -1638,10 +1593,13 @@ fn tool_text(text: String) -> CallToolResult {
 /// Map args for diagnose / model_info: optional `file_content` overlay.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct IncludeMapParams {
+    /// Full root text. Supply this when files is absent or empty. With a nonempty map, it replaces the active_file entry for this request.
     #[serde(default)]
     file_content: Option<String>,
+    /// Root key in a nonempty files map. It must exactly match a supplied key. A map is supplied text, not permission to read disk files.
     #[serde(default)]
     active_file: Option<String>,
+    /// Map of file keys to complete text, including executed includes. Use active_file to choose the root. An absent or empty map uses file_content only.
     #[serde(default)]
     files: Option<HashMap<String, String>>,
 }
@@ -1651,101 +1609,136 @@ struct DygnosisMcp;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct FileContentParams {
+    /// Complete .mod text to process. The tool returns text; it does not write a file.
     file_content: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct FormatParams {
+    /// Complete .mod text. Formatting does not write to disk.
     file_content: String,
+    /// Indentation: "tab" or an integer from 1 to 8 spaces. Omitted values use a tab.
     #[serde(default, rename = "formatIndent")]
     format_indent: Option<Value>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ExtractParams {
+    /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
     file_content: String,
+    /// Root key in the supplied files map. For nonempty maps it must match a key exactly; it is not a disk path to load.
     #[serde(default)]
     active_file: Option<String>,
+    /// File-key to complete-text map, including executed includes. No disk files are read in map mode. A nonempty map needs an active_file root key.
     #[serde(default)]
     files: Option<HashMap<String, String>>,
+    /// Equation names to select. Supply at least one name or tag filter.
     #[serde(default)]
     names: Vec<String>,
+    /// Equation tag names and required values to select. Supply at least one name or tag filter.
     #[serde(default)]
     tags: HashMap<String, String>,
+    /// Optional heterogeneity dimension name for equation selection.
     #[serde(default)]
     dimension: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct WorkspaceDiagnoseParams {
+    /// Nonempty supplied file-key to text map. Combine with nonempty roots; do not combine with paths.
     #[serde(default)]
     files: Option<HashMap<String, String>>,
+    /// Nonempty list of root .mod keys in files. Required for workspace map mode; omit when using paths.
     #[serde(default)]
     roots: Option<Vec<String>>,
+    /// Nonempty file or directory paths on this server host. Path mode reads disk, walks directories and skips generated + directories. Do not combine with files or roots.
     #[serde(default)]
     paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct CompareModelsParams {
+    /// Complete Before model text, overlaid on active_file_a when a map is supplied.
     file_content_a: String,
+    /// Complete After model text, overlaid on active_file_b when a map is supplied.
     file_content_b: String,
+    /// Before root key in files_a or the shared files map.
     #[serde(default)]
     active_file_a: Option<String>,
+    /// After root key in files_b or the shared files map.
     #[serde(default)]
     active_file_b: Option<String>,
+    /// Before include text map. Overrides the shared files map for this side.
     #[serde(default)]
     files_a: Option<HashMap<String, String>>,
+    /// After include text map. Overrides the shared files map for this side.
     #[serde(default)]
     files_b: Option<HashMap<String, String>>,
+    /// Shared supplied include map for both sides when files_a or files_b is absent.
     #[serde(default)]
     files: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ExplainParams {
+    /// Diagnostic code, such as E020 or W013. Use dynare_list_diagnostic_codes to find documented codes and their classification.
     code: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ListOptionsParams {
+    /// Dynare command name. Omit it to list known commands; an unknown name returns known=false rather than inventing options.
     #[serde(default)]
     command: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct EquationsParams {
+    /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
     #[serde(default)]
     file_content: Option<String>,
+    /// Root key in the supplied files map. For nonempty maps it must match a key exactly; it is not a disk path to load.
     #[serde(default)]
     active_file: Option<String>,
+    /// File-key to complete-text map, including executed includes. No disk files are read in map mode. A nonempty map needs an active_file root key.
     #[serde(default)]
     files: Option<HashMap<String, String>>,
+    /// Optional equation-name filter. Searches aggregate and heterogeneous equations.
     #[serde(default)]
     name: Option<String>,
+    /// Optional aggregate equation number, starting at one. The index filter applies to aggregate equations.
     #[serde(default)]
     index: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct FindReferencesParams {
+    /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
     #[serde(default)]
     file_content: Option<String>,
+    /// Exact name to find. Results skip comments and use one-based Unicode-scalar source coordinates.
     symbol: String,
+    /// Root key in the supplied files map. For nonempty maps it must match a key exactly; it is not a disk path to load.
     #[serde(default)]
     active_file: Option<String>,
+    /// File-key to complete-text map, including executed includes. No disk files are read in map mode. A nonempty map needs an active_file root key.
     #[serde(default)]
     files: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct RenameParams {
+    /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
     #[serde(default)]
     file_content: Option<String>,
+    /// Exact identifier to rename. Comments are excluded; the tool returns text and does not write files.
     old_name: String,
+    /// Replacement identifier. An illegal identifier leaves text unchanged.
     new_name: String,
+    /// Root key in the supplied files map. For nonempty maps it must match a key exactly; it is not a disk path to load.
     #[serde(default)]
     active_file: Option<String>,
+    /// File-key to complete-text map, including executed includes. No disk files are read in map mode. A nonempty map needs an active_file root key.
     #[serde(default)]
     files: Option<HashMap<String, String>>,
 }
@@ -1806,7 +1799,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_diagnose",
         input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "Run diagnostics on a .mod file and return code, range, severity, and message."
+        description = "Check supplied model text and return code, severity, message and written source range. Lines and Unicode-scalar columns are one-based. A files map supplies includes; this mode does not read disk."
     )]
     fn diagnose_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
         let diags = match resolve_mapped(
@@ -1823,7 +1816,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_model_info",
         input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "Summarise aggregate and per-dimension heterogeneous names, counts, timing, and block flags."
+        description = "Return aggregate and per-dimension names, counts, written timing and block flags. These are facts before equation transformation, not numerical results. Incomplete expansion withholds authoritative counts."
     )]
     fn model_info_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
         let info = match nonempty_map(params.files.as_ref()) {
@@ -1853,7 +1846,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_compare_models",
         input_schema = mcp_input_schema::<CompareModelsParams>(),
-        description = "Compare two .mod files by names, symbol kind and metadata, calibrations, aggregate and per-dimension heterogeneous equations (names and tags), and written shock setup."
+        description = "Compare two supplied models by symbol kinds and metadata, proven parameter values, aggregate and per-dimension equations, and written shock setup. Each side keeps its own supplied includes. Returns structural changes and verified one-based source ranges, not numerical equivalence."
     )]
     fn compare_models_tool(
         &self,
@@ -1873,7 +1866,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_find_references",
         input_schema = mcp_input_schema::<FindReferencesParams>(),
-        description = "Find every whole-word use of a name. Skips comments."
+        description = "Find whole-word occurrences of a name, including declarations, and skip comments. Source lines and Unicode-scalar columns are one-based. A files map returns file keys; without a map, positions refer to file_content."
     )]
     fn find_references_tool(
         &self,
@@ -1960,7 +1953,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_equations",
         input_schema = mcp_input_schema::<EquationsParams>(),
-        description = "List aggregate and dimension-labelled heterogeneous equations with text, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds."
+        description = "List aggregate and per-dimension equations with text, identifiers and verified source locations. Lines and Unicode-scalar columns are one-based. Count gap and index filter apply to aggregate equations; name searches both kinds. Numbers are before transformation."
     )]
     fn equations_tool(&self, Parameters(params): Parameters<EquationsParams>) -> CallToolResult {
         let index = params.index.map(|i| i as usize);
@@ -2020,7 +2013,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_expand",
         input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "Return the full compilation unit after include splice and macro expand, with origin jumps for counted aggregate and heterogeneous equations."
+        description = "Return model text after include and macro expansion, before equation transformation, with verified written source and macro locations. Lines and Unicode-scalar columns are one-based. complete=false means expansion is incomplete and authoritative equation counts or source jumps are withheld."
     )]
     fn expand_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
         let value = match nonempty_map(params.files.as_ref()) {
@@ -2065,7 +2058,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_extract",
         input_schema = mcp_input_schema::<ExtractParams>(),
-        description = "Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model."
+        description = "Extract equations by names and tags, with required declarations, model locals and heterogeneity dimensions. Names match any supplied name; all supplied tags must match, and names and tags combine. The result is a model fragment that needs completion before running Dynare."
     )]
     fn extract_tool(
         &self,
@@ -2180,19 +2173,6 @@ mod tests {
             .collect();
         want.sort_unstable();
         assert_eq!(got, want);
-
-        for name in [
-            "dynare_model_info",
-            "dynare_equations",
-            "dynare_expand",
-            "dynare_format",
-            "dynare_extract",
-            "dynare_workspace_diagnose",
-        ] {
-            let expected = TOOLS.iter().find(|(tool, _)| *tool == name).unwrap().1;
-            let actual = listed.iter().find(|tool| tool.name == name).unwrap();
-            assert_eq!(actual.description.as_deref(), Some(expected));
-        }
 
         let blob = serde_json::to_string(&listed).expect("tools json");
         for phrase in [

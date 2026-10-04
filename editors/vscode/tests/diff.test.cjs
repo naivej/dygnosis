@@ -301,7 +301,7 @@ class Element {
 }
 function descendants(element) { return [element, ...element.children.flatMap(descendants)]; }
 function webview() {
-  const elements = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "counts", "results", "refresh"].map(id => [id, new Element(id)]));
+  const elements = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "counts", "results", "refresh", "help"].map(id => [id, new Element(id)]));
   const events = {}, posted = [], states = [];
   const sandbox = { document: { getElementById: id => elements[id], createElement: tag => new Element(tag) }, window: { addEventListener: (name, callback) => events[name] = callback },
     acquireVsCodeApi: () => ({ getState: () => undefined, setState: value => states.push(value), postMessage: message => posted.push(message) }) };

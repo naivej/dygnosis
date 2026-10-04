@@ -291,17 +291,17 @@ test("folder changes clear hidden codes and stale commands cannot hide after an 
   assert.equal(service.middleware.handleDiagnostics, undefined);
 });
 
-test("Explain requests backend Markdown, opens an excluded read-only native preview, and strips command links", async () => {
+test("Explain requests backend Markdown, opens exact-code Help, and strips command links", async () => {
   const service = reset(), registration = registerDiagnosticActions(service), doc = document(), diagnostic = note();
   push(service, doc, [diagnostic]); host.markdown = "# W010\n[Run](command:danger)\n<img src=x onerror=alert(1)>\n[Docs](https://www.dynare.org/)";
   const actions = await offers(service, doc, [diagnostic]);
   const explain = actions.find(action => action.command.command === "dygnosis.explainDiagnostic");
   await command("dygnosis.explainDiagnostic", ...explain.command.arguments);
   assert.deepEqual(host.calls[0], { command: "dynare/explainDiagnostic", args: ["W010"] });
-  const preview = host.opened[0]; assert.equal(preview.uri.scheme, "dygnosis-explain"); assert.equal(preview.languageId, "markdown");
-  assert.equal(host.executed[0].name, "markdown.showPreviewToSide");
-  assert.equal(host.providers.get("dygnosis-explain").provideTextDocumentContent(preview.uri).includes("command:"), false);
-  assert.deepEqual(await offers(service, preview, [diagnostic]), []);
+  assert.equal(host.executed[0].name, "dygnosis.openHelp");
+  assert.equal(host.executed[0].args[0].code, "W010");
+  assert.equal(host.executed[0].args[0].markdown.includes("command:"), false);
+  assert.equal(host.opened.length, 0);
   host.input = "E001"; await command("dygnosis.explainDiagnostic"); assert.equal(host.calls[1].args[0], "E001");
   assert.doesNotMatch(marked.parse(safeExplanation("[bad](command%3Adanger)\n[bad][ref]\n[ref]: command:danger\n<a href='command:danger'>x</a>")), /(?:href|src)="(?:command|javascript|data|vscode):/i);
   assert.equal(diagnosticCode(p2c.asDiagnostic({ ...wire(), code: 100, codeDescription: { href: "https://example.org/check" } })), "100");
@@ -332,41 +332,13 @@ test("Markdown destinations are normalized by the parser; safe formatting and li
   assert.equal(marked.parse(safeExplanation(ordinary)), marked.parse(ordinary));
 });
 
-test("Explain cannot show a preview after document-load or language-setting races", async () => {
-  for (const stage of ["load", "language"] ) {
-    for (const invalidate of ["dispose", "folders", "server"] ) {
-      for (const palette of [false, true]) {
-        const service = reset(), registration = registerDiagnosticActions(service), doc = document(), diagnostic = note(), pending = deferred();
-        push(service, doc, [diagnostic]);
-        const actions = await offers(service, doc, [diagnostic]);
-        const explain = actions.find(action => action.command.command === "dygnosis.explainDiagnostic");
-        if (stage === "load") host.loadDocument = () => pending.promise;
-        else host.setLanguage = () => pending.promise;
-        host.input = "W010";
-        const result = command("dygnosis.explainDiagnostic", ...(palette ? [] : explain.command.arguments));
-        await new Promise(resolve => setImmediate(resolve));
-        assert.equal(host.opened.length, 1);
-        if (invalidate === "dispose") registration.dispose();
-        else if (invalidate === "folders") host.folder.fire();
-        else { ++service.currentInstance; host.changed.fire(); }
-        pending.resolve(host.opened[0]); await result;
-        assert.deepEqual(host.executed, [], `${stage}/${invalidate}/${palette ? "palette" : "quickfix"}`);
-        if (invalidate !== "dispose") {
-          assert.equal(host.providers.get("dygnosis-explain").provideTextDocumentContent(host.opened[0].uri), "This explanation is no longer available.");
-          registration.dispose();
-        }
-      }
-    }
-  }
-});
-
 test("palette Explain starts the first engine and rejects a restart during its backend reply", async () => {
   const service = reset(), registration = registerDiagnosticActions(service);
   service.currentInstance = 0;
   service.ensureStarted = () => { service.currentInstance = 1; host.changed.fire(); return Promise.resolve(); };
   host.input = "W010";
   await command("dygnosis.explainDiagnostic");
-  assert.equal(host.executed[0].name, "markdown.showPreviewToSide");
+  assert.equal(host.executed[0].name, "dygnosis.openHelp");
   host.executed.length = 0; host.opened.length = 0;
   service.ensureStarted = () => Promise.resolve();
   const pending = deferred(); service.execute = () => pending.promise;

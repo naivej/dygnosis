@@ -18,7 +18,7 @@ export function registerMcp(context: vscode.ExtensionContext, log: Log): vscode.
         await validateMcpBinary(binary, log);
         return new vscode.McpStdioServerDefinition("Dygnosis", binary.path, ["mcp"], {}, binary.version);
       } catch (error) {
-        throw new Error(`Dygnosis MCP could not start: ${String(error)}. Open dynare.serverPath, use the bundle, or show Dygnosis Output.`, { cause: error });
+        throw new Error(`Dygnosis MCP could not start: ${String(error)}. Open dynare.serverPath, use the bundled binary, or show Dygnosis Output.`, { cause: error });
       }
     },
   });

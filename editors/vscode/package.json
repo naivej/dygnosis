@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Dynare language tooling for VS Code",
-  "version": "0.11.6",
+  "version": "0.11.7",
   "publisher": "dygnosis",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -36,11 +36,13 @@
     }
   },
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onWebviewPanel:dygnosis.help",
+    "onUri"
   ],
   "main": "./out/extension.js",
   "scripts": {
-    "compile": "tsc -p .",
+    "compile": "tsc -p . && node scripts/help.cjs",
     "watch": "tsc -w -p .",
     "check": "tsc -p . --noEmit",
     "lint": "eslint . --max-warnings 0",
@@ -50,7 +52,8 @@
     "vscode:prepublish": "npm run check && npm run lint && npm run compile",
     "package": "node scripts/package.cjs --candidate",
     "package:target": "node scripts/package.cjs",
-    "verify:package": "node scripts/verify-package.cjs"
+    "verify:package": "node scripts/verify-package.cjs",
+    "help:generate": "node scripts/help.cjs --generate"
   },
   "contributes": {
     "languages": [
@@ -82,6 +85,12 @@
       }
     ],
     "commands": [
+      {
+        "command": "dygnosis.openHelp",
+        "title": "Open Help",
+        "category": "Dygnosis",
+        "icon": "$(question)"
+      },
       {
         "command": "dygnosis.restartServer",
         "title": "Restart language server",
@@ -242,6 +251,11 @@
           "command": "dygnosis.diffWith",
           "when": "dygnosis.modelContext && dygnosis.toolbarActions",
           "group": "navigation@2"
+        },
+        {
+          "command": "dygnosis.openHelp",
+          "when": "resourceScheme == dygnosis-effective",
+          "group": "navigation@99"
         }
       ],
       "editor/context": [
@@ -269,6 +283,11 @@
           "command": "dygnosis.diffWith",
           "when": "dygnosis.modelContext && dygnosis.contextActions",
           "group": "navigation@2"
+        },
+        {
+          "command": "dygnosis.openHelp",
+          "when": "resourceScheme == dygnosis-effective",
+          "group": "navigation@99"
         }
       ],
       "commandPalette": [
@@ -344,6 +363,16 @@
           "command": "dygnosis.configureProjectExclusions",
           "when": "view == dygnosis.project",
           "group": "navigation@3"
+        },
+        {
+          "command": "dygnosis.openHelp",
+          "when": "view == dygnosis.model",
+          "group": "navigation@99"
+        },
+        {
+          "command": "dygnosis.openHelp",
+          "when": "view == dygnosis.project",
+          "group": "navigation@99"
         }
       ],
       "view/item/context": [
@@ -371,7 +400,7 @@
             },
             "default": [],
             "scope": "resource",
-            "description": "Additional include directories, resolved against the model's workspace folder or loose-file directory."
+            "description": "Additional include directories, resolved against the model's workspace folder or loose-file directory. Used for the model root; a displayed include keeps its chosen owner. Untitled documents have no disk base."
           },
           "dynare.formatIndent": {
             "oneOf": [
@@ -519,7 +548,7 @@
               "contextMenu"
             ],
             "scope": "window",
-            "description": "Locations for model actions. Commands remain in the Command Palette."
+            "description": "Locations for model actions. Commands remain in the Command Palette. An empty list hides toolbar and context-menu actions."
           },
           "dynare.codeLens.modelEquations": {
             "type": "boolean",
@@ -531,7 +560,7 @@
             "type": "boolean",
             "default": false,
             "scope": "resource",
-            "description": "Offer native Find All References at declaration lines. Several names open a symbol picker; no usage count is shown."
+            "description": "Offer native Find All References at declaration lines. Several names open a symbol picker; no usage count is shown. Also respects editor.codeLens."
           },
           "dynare.codeLens.effectiveModel": {
             "type": "boolean",
@@ -564,7 +593,7 @@
             ],
             "default": "model",
             "scope": "resource",
-            "description": "Background style for Dynare model.aggregate blocks."
+            "description": "Background style for aggregate model blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.model.heterogeneous": {
             "type": "string",
@@ -580,7 +609,7 @@
             ],
             "default": "model",
             "scope": "resource",
-            "description": "Background style for Dynare model.heterogeneous blocks."
+            "description": "Background style for heterogeneous model blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.model_replace": {
             "type": "string",
@@ -596,7 +625,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare model_replace blocks."
+            "description": "Background style for model_replace blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.steady_state_model": {
             "type": "string",
@@ -612,7 +641,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare steady_state_model blocks."
+            "description": "Background style for steady_state_model blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.initval": {
             "type": "string",
@@ -628,7 +657,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare initval blocks."
+            "description": "Background style for initval blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.endval.standard": {
             "type": "string",
@@ -644,7 +673,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare endval.standard blocks."
+            "description": "Background style for endval blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.endval.learnt_in": {
             "type": "string",
@@ -660,7 +689,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare endval.learnt_in blocks."
+            "description": "Background style for endval(learnt_in) blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.histval": {
             "type": "string",
@@ -676,7 +705,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare histval blocks."
+            "description": "Background style for histval blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.filter_initial_state": {
             "type": "string",
@@ -692,7 +721,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare filter_initial_state blocks."
+            "description": "Background style for filter_initial_state blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.shocks.standard": {
             "type": "string",
@@ -708,7 +737,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare shocks.standard blocks."
+            "description": "Background style for shocks blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.shocks.surprise": {
             "type": "string",
@@ -724,7 +753,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare shocks.surprise blocks."
+            "description": "Background style for shocks(surprise) blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.shocks.learnt_in": {
             "type": "string",
@@ -740,7 +769,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare shocks.learnt_in blocks."
+            "description": "Background style for shocks(learnt_in) blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.shocks.heterogeneous": {
             "type": "string",
@@ -756,7 +785,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare shocks.heterogeneous blocks."
+            "description": "Background style for shocks(heterogeneity) blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.mshocks.standard": {
             "type": "string",
@@ -772,7 +801,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare mshocks.standard blocks."
+            "description": "Background style for mshocks blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.mshocks.learnt_in": {
             "type": "string",
@@ -788,7 +817,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare mshocks.learnt_in blocks."
+            "description": "Background style for mshocks(learnt_in) blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.heteroskedastic_shocks": {
             "type": "string",
@@ -804,7 +833,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare heteroskedastic_shocks blocks."
+            "description": "Background style for heteroskedastic_shocks blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.shock_paths.standard": {
             "type": "string",
@@ -820,7 +849,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare shock_paths.standard blocks."
+            "description": "Background style for shock_paths blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.shock_paths.learnt_in": {
             "type": "string",
@@ -836,7 +865,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare shock_paths.learnt_in blocks."
+            "description": "Background style for shock_paths(learnt_in) blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.perfect_foresight_controlled_paths.standard": {
             "type": "string",
@@ -852,7 +881,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare perfect_foresight_controlled_paths.standard blocks."
+            "description": "Background style for perfect_foresight_controlled_paths blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.perfect_foresight_controlled_paths.learnt_in": {
             "type": "string",
@@ -868,7 +897,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare perfect_foresight_controlled_paths.learnt_in blocks."
+            "description": "Background style for perfect_foresight_controlled_paths(learnt_in) blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.conditional_forecast_paths": {
             "type": "string",
@@ -884,7 +913,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare conditional_forecast_paths blocks."
+            "description": "Background style for conditional_forecast_paths blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.estimated_params": {
             "type": "string",
@@ -900,7 +929,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare estimated_params blocks."
+            "description": "Background style for estimated_params blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.estimated_params_init": {
             "type": "string",
@@ -916,7 +945,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare estimated_params_init blocks."
+            "description": "Background style for estimated_params_init blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.estimated_params_bounds": {
             "type": "string",
@@ -932,7 +961,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare estimated_params_bounds blocks."
+            "description": "Background style for estimated_params_bounds blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.estimated_params_remove": {
             "type": "string",
@@ -948,7 +977,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare estimated_params_remove blocks."
+            "description": "Background style for estimated_params_remove blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.observation_trends": {
             "type": "string",
@@ -964,7 +993,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare observation_trends blocks."
+            "description": "Background style for observation_trends blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.deterministic_trends": {
             "type": "string",
@@ -980,7 +1009,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare deterministic_trends blocks."
+            "description": "Background style for deterministic_trends blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.matched_moments": {
             "type": "string",
@@ -996,7 +1025,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare matched_moments blocks."
+            "description": "Background style for matched_moments blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.matched_irfs": {
             "type": "string",
@@ -1012,7 +1041,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare matched_irfs blocks."
+            "description": "Background style for matched_irfs blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.matched_irfs_weights": {
             "type": "string",
@@ -1028,7 +1057,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare matched_irfs_weights blocks."
+            "description": "Background style for matched_irfs_weights blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.generate_irfs": {
             "type": "string",
@@ -1044,7 +1073,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare generate_irfs blocks."
+            "description": "Background style for generate_irfs blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.irf_calibration": {
             "type": "string",
@@ -1060,7 +1089,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare irf_calibration blocks."
+            "description": "Background style for irf_calibration blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.moment_calibration": {
             "type": "string",
@@ -1076,7 +1105,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare moment_calibration blocks."
+            "description": "Background style for moment_calibration blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.optim_weights": {
             "type": "string",
@@ -1092,7 +1121,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare optim_weights blocks."
+            "description": "Background style for optim_weights blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.osr_params_bounds": {
             "type": "string",
@@ -1108,7 +1137,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare osr_params_bounds blocks."
+            "description": "Background style for osr_params_bounds blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.ramsey_constraints": {
             "type": "string",
@@ -1124,7 +1153,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare ramsey_constraints blocks."
+            "description": "Background style for ramsey_constraints blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.homotopy_setup": {
             "type": "string",
@@ -1140,7 +1169,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare homotopy_setup blocks."
+            "description": "Background style for homotopy_setup blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.occbin_constraints": {
             "type": "string",
@@ -1156,7 +1185,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare occbin_constraints blocks."
+            "description": "Background style for occbin_constraints blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.svar_identification": {
             "type": "string",
@@ -1172,7 +1201,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare svar_identification blocks."
+            "description": "Background style for svar_identification blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.shock_groups": {
             "type": "string",
@@ -1188,7 +1217,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare shock_groups blocks."
+            "description": "Background style for shock_groups blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.init2shocks": {
             "type": "string",
@@ -1204,7 +1233,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare init2shocks blocks."
+            "description": "Background style for init2shocks blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.pac_target_info": {
             "type": "string",
@@ -1220,7 +1249,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare pac_target_info blocks."
+            "description": "Background style for pac_target_info blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.epilogue": {
             "type": "string",
@@ -1236,7 +1265,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare epilogue blocks."
+            "description": "Background style for epilogue blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.verbatim": {
             "type": "string",
@@ -1252,7 +1281,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare verbatim blocks."
+            "description": "Background style for verbatim blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.priors": {
             "type": "string",
@@ -1268,7 +1297,7 @@
             ],
             "default": "subtle",
             "scope": "resource",
-            "description": "Background style for Dynare priors blocks."
+            "description": "Background style for priors blocks. Off clears the tint; Subtle and Model select the theme's two tint strengths. The block tint enabled switch takes priority."
           },
           "dynare.blockTint.heterogeneousModels": {
             "type": "object",
@@ -1375,7 +1404,7 @@
               "shockAnalysisSetup"
             ],
             "scope": "resource",
-            "description": "Sections shown in model Diff. Empty hides all content."
+            "description": "Sections shown in model Diff. Empty hides all content. Changes update open comparisons; list order sets section order."
           }
         }
       },
@@ -1505,6 +1534,36 @@
         "key": "ctrl+alt+r",
         "mac": "cmd+alt+r",
         "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && editorTextFocus"
+      }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "dygnosis.model",
+        "contents": "Open a .mod or .dyn model to inspect its equations and names.\n[Open Dygnosis Help](command:dygnosis.openHelp)"
+      },
+      {
+        "view": "dygnosis.project",
+        "contents": "Open a folder to check saved .mod models.\n[Open Dygnosis Help](command:dygnosis.openHelp)"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "dygnosis.getStarted",
+        "title": "Get started with Dygnosis",
+        "description": "Edit and check a Dynare model in VS Code.",
+        "steps": [
+          {
+            "id": "dygnosis.help",
+            "title": "Open Dygnosis Help",
+            "description": "Install, start a model and find each feature in one offline reference.\n[Open Help](command:dygnosis.openHelp)",
+            "media": {
+              "markdown": "media/welcome.md"
+            },
+            "completionEvents": [
+              "onCommand:dygnosis.openHelp"
+            ]
+          }
+        ]
       }
     ]
   },

@@ -80,6 +80,14 @@ async function inspectVsix(file, expected) {
   assert.equal(source.license.source_sha256, await sha256(path.join(productRoot, "LICENSE")));
   assert.equal(hash(data(source.license.vsix_path)), source.license.source_sha256);
   data("extension/out/extension.js"); data("extension/language-configuration.json"); data("extension/syntaxes/dynare.tmLanguage.json");
+  data("extension/out/help.js"); data("extension/out/help_content.js");
+  data("extension/media/help.css"); data("extension/media/help.js"); data("extension/media/welcome.md");
+  const help = json("help/bundle.json");
+  assert.equal(help.version, source.version); assert.equal(help.reference.version, source.version);
+  assert.deepEqual(help.reference.tools, JSON.parse(await require("node:fs/promises").readFile(path.join(productRoot, "help/reference.json"), "utf8")).tools);
+  for (const topic of help.topics) for (const [, image] of topic.markdown.matchAll(/!\[[^\]]*\]\((assets\/[^)]+)\)/g)) data(`extension/help/${image}`);
+  assert.ok(manifest.contributes.commands.some(command => command.command === "dygnosis.openHelp"));
+  assert.ok(manifest.activationEvents.includes("onWebviewPanel:dygnosis.help"));
   for (const dependency of source.runtime_dependencies) data(`extension/${dependency}`);
   const notices = json("THIRD-PARTY-NOTICES.json");
   assert.ok(notices.some(notice => notice.kind === "toolchain"));
@@ -88,6 +96,7 @@ async function inspectVsix(file, expected) {
   for (const filename of entries.keys()) {
     assert.ok(!/^extension\/(?:src|tests|scripts|dist|\.test-data|\.vscode-test|\.npm-cache)\//.test(filename), `Development file in VSIX: ${filename}`);
     assert.ok(!filename.endsWith(".ts") && !filename.endsWith(".map"), `Source file in VSIX: ${filename}`);
+    assert.ok(!filename.endsWith(".log"), `Test log in VSIX: ${filename}`);
   }
   return { files: entries.size, sha256: await sha256(file), executablePermission: targetInfo(source.target).platform === "win32" ? "not applicable" : true };
 }

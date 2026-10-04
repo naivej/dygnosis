@@ -38,6 +38,14 @@ exports.run = async function run() {
     const binary = path.join(extension.extensionPath, "bin", binaryName(source.target));
     assert.equal(await sha256(binary), source.binary_sha256);
     service = await extension.activate();
+    await checkpoint("offline Help before opening a model");
+    const helpBundle = JSON.parse(await fs.readFile(path.join(extension.extensionPath, "help/bundle.json"), "utf8"));
+    assert.equal(helpBundle.version, source.version);
+    await vscode.commands.executeCommand("dygnosis.openHelp", "get-started");
+    await waitFor(() => vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.label === "Dygnosis Help" && tab.input instanceof vscode.TabInputWebview)), "native Help panel before a model");
+    await vscode.commands.executeCommand("dygnosis.openHelp", "check:E001");
+    assert.equal(vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => tab.label === "Dygnosis Help").length, 1, "Help reuses one panel");
+    evidence.checks.push("installed Help before a model, exact-code route and one panel");
     const launchLogs = [];
     const originalLog = service.log;
     service.log = message => { launchLogs.push(message); originalLog(message); };
@@ -51,7 +59,7 @@ exports.run = async function run() {
     await checkpoint("native VS Code MCP discovery and model-info invocation");
     evidence.native_vscode_mcp = await probeNativeMcp(vscode, `${source.publisher}.dygnosis`);
     if (!projectDiagnostics) assert.equal(service.client, undefined, "Native MCP must work before the first LSP launch");
-    evidence.checks.push("native VS Code MCP discovery of every tool and actual model-info invocation before opening a model");
+    evidence.checks.push("native VS Code MCP discovery and actual invocation of all fifteen tools before opening a model");
     await checkpoint("bundled LSP counts, symbols and Problems diagnostics");
     const workspace = vscode.workspace.workspaceFolders[0].uri.fsPath;
     const file = path.join(workspace, "installed model.mod");
@@ -86,6 +94,10 @@ exports.run = async function run() {
     evidence.overrideMcp = await probeMcp(override, source.version);
     evidence.selected_lsp_paths = launchLogs.filter(message => message.startsWith("LSP executable:"));
     evidence.checks.push("explicit user override with spaces launches LSP and MCP");
+    await service.shutdown();
+    await vscode.commands.executeCommand("dygnosis.openHelp", "troubleshoot");
+    assert.equal(service.client, undefined, "Help does not start the stopped engine");
+    evidence.checks.push("installed Help remains available after engine shutdown");
     checksPassed = true;
   } catch (error) { evidence.passed = false; evidence.failed_step = evidence.current_step; evidence.error = String(error); throw error; }
   finally {

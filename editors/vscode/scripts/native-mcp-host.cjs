@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { mcpProbeCases } = require("./common.cjs");
 
 const expectedTools = ["auto_fix", "compare_models", "diagnose", "equations", "expand", "explain", "extract", "find_references", "format", "list_diagnostic_codes", "list_options", "model_info", "related_files", "rename", "workspace_diagnose"];
 
@@ -16,12 +17,16 @@ async function probeNativeMcp(vscode, extensionId) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     for (const name of expectedTools) assert.ok(tools.some(tool => tool.name.endsWith(`_dynare_${name}`)), `Native MCP omitted dynare_${name}`);
-    const tool = tools.find(item => item.name.endsWith("_dynare_model_info"));
-    const result = await vscode.lm.invokeTool(tool.name, { input: { file_content: "var y; model; y=0; end;" } }, cancellation.token);
-    const text = result.content.filter(item => item instanceof vscode.LanguageModelTextPart).map(item => item.value).join("\n");
-    const model = JSON.parse(text);
+    const results = {};
+    for (const [name, input] of Object.entries(mcpProbeCases)) {
+      const tool = tools.find(item => item.name.endsWith(`_${name}`));
+      const result = await vscode.lm.invokeTool(tool.name, { input }, cancellation.token);
+      results[name] = result.content.filter(item => item instanceof vscode.LanguageModelTextPart).map(item => item.value).join("\n");
+      assert.ok(results[name].length, `${name} returned no text through VS Code`);
+    }
+    const model = JSON.parse(results.dynare_model_info);
     assert.equal(model.n_equations, 1); assert.equal(model.n_endogenous, 1);
-    return { server_id: serverId, tools: tools.map(item => item.name), tool: tool.name,
+    return { server_id: serverId, tools: tools.map(item => item.name), tool: tools.find(item => item.name.endsWith("_dynare_model_info")).name, invoked_tools: Object.keys(results),
       n_equations: model.n_equations, workspace_trusted: vscode.workspace.isTrusted, passed: true };
   } finally {
     cancellation.cancel(); cancellation.dispose();

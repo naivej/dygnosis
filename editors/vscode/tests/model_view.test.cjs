@@ -266,7 +266,8 @@ test("named search distinguishes scopes, files and macro occurrences at the same
   env.service.info = () => facts(env.doc, { equations: repeated }); await flush();
   env.host.answers.push(items => items[1]); await env.run("jumpToNamedEquation");
   const picker = env.host.picks[0]; assert.equal(picker.items.length, 3); assert.equal(picker.options.matchOnDescription, true); assert.equal(picker.options.matchOnDetail, true);
-  assert.match(picker.items[0].detail, /i=1.*copy:1/); assert.match(picker.items[1].detail, /i=2.*copy:2/);
+  assert.match(picker.items[0].detail, /i=1/); assert.match(picker.items[1].detail, /i=2/);
+  assert.equal(picker.items[0].equation.id, "copy:1"); assert.equal(picker.items[1].equation.id, "copy:2");
   assert.match(picker.items[2].description, /Dimension firms.*firms.inc:6/);
   assert.equal(env.service.jumps.length, 1); env.registration.dispose();
 });

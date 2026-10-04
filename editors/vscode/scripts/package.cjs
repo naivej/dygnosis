@@ -36,6 +36,9 @@ async function main() {
     binary = path.join(process.env.CARGO_TARGET_DIR ? path.resolve(productRoot, process.env.CARGO_TARGET_DIR) : path.join(productRoot, "target"), info.rust, "release", binaryName(target));
   }
   assert.equal(execute(binary, ["--version"]).trim(), `dygnosis ${version}`);
+  // Package Help references from the exact engine selected for this artifact.
+  await require("./help.cjs").generate(binary);
+  await require("./help.cjs").build();
   assert.equal(await sha256(path.join(extensionRoot, manifest.icon)), await sha256(path.join(productRoot, "media/logo_s.png")), "Extension logo differs from the product source");
   const logo = await fs.readFile(path.join(productRoot, "media/logo_s.png"));
   assert.equal(logo.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
@@ -47,7 +50,7 @@ async function main() {
   // CHANGELOG originates at the product root; README originates in this folder.
   const changelog = path.join(extensionRoot, "CHANGELOG.md");
   await fs.writeFile(changelog, (await fs.readFile(changelog, "utf8"))
-    .replace(/\]\((docs\/[^)]+)\)/g, `](https://github.com/naivej/dygnosis/blob/${commit}/$1)`));
+    .replace(/\]\((docs\/[^)]+)\)/g, '](https://github.com/naivej/dygnosis/blob/v0.11.6/$1)'));
   const runtimeFiles = await vsce.listFiles({ cwd: extensionRoot, packageManager: vsce.PackageManager.Npm });
   const notices = await collectLicenses(info.rust, runtimeFiles);
   const cargoLock = await sourceFileHashes(productRoot, commit, "Cargo.lock");
@@ -79,7 +82,7 @@ async function main() {
   await fs.cp(path.join(extensionRoot, "licenses"), path.join(standalone, "licenses"), { recursive: true });
   await fs.copyFile(binary, path.join(standalone, binaryName(target)));
   if (info.platform !== "win32") await fs.chmod(path.join(standalone, binaryName(target)), 0o755);
-  await fs.writeFile(path.join(standalone, "README.txt"), `Dygnosis ${version} (${target})\nSource: ${provenance.source}\nLicense: GPL-3.0-or-later; see LICENSE and THIRD-PARTY-NOTICES.json.\n\nUnpack the archive before use. No Rust, Node, MATLAB or Dynare install is needed.\nRun the executable with --version, check PATH_TO_MODEL, or mcp.\nAn LSP client starts the executable without arguments.\nUse its absolute unpacked path for an MCP client, with argument mcp.\nRuntime requirements and verified hosts: https://github.com/naivej/dygnosis/blob/${commit}/docs/distribution.md\n`);
+  await fs.writeFile(path.join(standalone, "README.txt"), `Dygnosis ${version} (${target})\nSource: ${provenance.source}\nLicense: GPL-3.0-or-later; see LICENSE and THIRD-PARTY-NOTICES.json.\n\nExtract the archive to a persistent directory. No Rust, Node.js, VS Code, MATLAB or Dynare install is needed.\nConfigure your MCP client's executable field with the absolute path to ${binaryName(target)} and its argument list with ["mcp"]. Each tool describes its inputs.\nUse --version to identify the executable. Reconnect your MCP client after replacing it.\nAn LSP client starts the executable without arguments.\nInstallation and runtime requirements: https://github.com/naivej/dygnosis/blob/${commit}/help/get-started.md\n`);
   const archive = `${standalone}.tar.gz`;
   execute("tar", ["-czf", archive, "-C", output, path.basename(standalone)]);
   const files = [vsix, archive];

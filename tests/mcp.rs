@@ -514,26 +514,9 @@ fn registered_tools_include_format() {
     let list = tools_list_json();
     let tools = list["tools"].as_array().expect("tools array");
     assert_eq!(tools.len(), 15);
-    assert_eq!(
-        tools[9]["description"],
-        "List aggregate and dimension-labelled heterogeneous equations with text, idents, and origin jumps. The count gap and index filter apply to aggregate equations; name searches both kinds."
-    );
-    assert_eq!(
-        tools[11]["description"],
-        "Return the full compilation unit after include splice and macro expand, with origin jumps for counted aggregate and heterogeneous equations."
-    );
-    assert_eq!(
-        tools[12]["description"],
-        "Format a .mod file with the editor's rules. Returns the full text only when formatting changes it. Empty or whitespace-only input is unchanged."
-    );
-    assert_eq!(
-        tools[13]["description"],
-        "Extract equations by name or tag, with the declarations, model locals, and heterogeneity dimension they need. The text is a fragment, not a runnable model."
-    );
-    assert_eq!(
-        tools[14]["description"],
-        "Diagnose root .mod files from a files map and roots, or from file and directory paths. Each root is reported on its own, with a summary; one failed root does not drop the others."
-    );
+    assert!(tools.iter().all(|tool| tool["description"]
+        .as_str()
+        .is_some_and(|text| !text.is_empty())));
 
     let blob = serde_json::to_string(&tools_list_json()).expect("tools list json");
     for name in DROPPED_TOOLS {
