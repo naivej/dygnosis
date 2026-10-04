@@ -31,9 +31,10 @@ records tested candidate hosts and measured symbols rather than untested older
 OS support. Remote placement and final native MCP routing remain release gates.
 
 A version tag runs the compatibility workflow, then publishes the six tested
-engine binaries to [GitHub Releases](https://github.com/naivej/dygnosis/releases).
-The asset names are `dygnosis-<target>` and `dygnosis-<target>.exe` on Windows,
-plus `SHA256SUMS`. Marketplace publication of the VSIX files is local. The
+engine binaries and the six VSIX files to [GitHub Releases](https://github.com/naivej/dygnosis/releases).
+The asset names are `dygnosis-<target>`, `dygnosis-<target>.exe` on Windows,
+`dygnosis-<version>-<target>.vsix`, and `SHA256SUMS`. Marketplace publication
+of the VSIX files is local. The
 0.11.5 candidate is not published. Updates replace the
 client and its engine together. An explicit absolute `dynare.serverPath` in
 user/machine settings selects another executable for both LSP and the VS Code

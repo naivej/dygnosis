@@ -46,8 +46,9 @@ which calls [CI](../.github/workflows/ci.yml). Each of the six native hosts runs
 the installed extension in VS Code 1.102.0 and current stable. The `verified`
 job checks that the six results share one commit, version, publisher, and tag.
 The Release workflow then creates the GitHub Release from the `## vX.Y.Z`
-changelog section and uploads the six tested engine binaries and `SHA256SUMS`.
-The VSIX files stay in the `verified-packages` artifact. Format, Clippy, `npm run check`,
+changelog section and uploads the six tested engine binaries, the six VSIX
+files, and `SHA256SUMS`. The `verified-packages` artifact also keeps the
+standalone archives and verification reports. Format, Clippy, `npm run check`,
 `npm run lint`, `npm test`, and Marketplace publication stay on a developer
 machine. Packaging needs network access for
 locked crates/npm dependencies, VS Code test hosts, and the exact upstream MCP
