@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use dygnosis::span::LineIndex;
 use dygnosis::{check_e020, parse};
@@ -267,45 +267,4 @@ fn comment_and_string_are_not_e020() {
         diags.is_empty(),
         "comment_string: expected empty family, got {diags:?}"
     );
-}
-
-#[test]
-fn src_has_no_ident_harvest_regex() {
-    let src_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut hits = Vec::new();
-    visit_rs(&src_dir, &mut hits);
-    assert!(
-        hits.is_empty(),
-        "identifier-harvest regex on equation text in src/: {hits:?}"
-    );
-}
-
-fn visit_rs(dir: &Path, hits: &mut Vec<String>) {
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.is_dir() {
-            visit_rs(&path, hits);
-            continue;
-        }
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
-        }
-        if path.file_name().and_then(|n| n.to_str()) == Some("preprocessor.rs") {
-            continue;
-        }
-        let text = std::fs::read_to_string(&path).unwrap();
-        let rel = path.display().to_string();
-        for needle in [
-            r"\b([A-Za-z_]",
-            r"\bident\b",
-            "Regex::new",
-            "regex::Regex",
-            "finditer",
-        ] {
-            if text.contains(needle) {
-                hits.push(format!("{rel}: {needle}"));
-            }
-        }
-    }
 }

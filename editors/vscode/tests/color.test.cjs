@@ -149,14 +149,6 @@ test("all 45 schema controls match the engine registry, defaults and native cont
   assert.match(overrides.markdownDescription, /command:dygnosis.editSettingsJson/); assert.match(overrides.markdownDescription, /households/);
 });
 
-const approvedPlan = path.resolve(__dirname, "../../../../dev_logs/0.11/masterplan.md");
-test("all 45 schema controls also match the private development plan's approved tint table", { skip: !fs.existsSync(approvedPlan) }, () => {
-  const plan = fs.readFileSync(approvedPlan, "utf8");
-  const approved = [...plan.matchAll(/^\| `([^`]+)` \|[^\n]*\| `(off|subtle|model)` \|\r?$/gm)].map(match => [match[1], match[2]]);
-  const ordered = rows => [...rows].sort(([left], [right]) => left.localeCompare(right));
-  assert.equal(approved.length, 45); assert.deepEqual(ordered(tintCategoryDefaults), ordered(approved));
-});
-
 test("four independently customizable roles use variable parent and explicit Dynare fallback scopes", () => {
   assert.deepEqual(colorContributions.semanticTokenTypes.map(row => row.id), ["dynareEndogenous", "dynareExogenous", "dynareParameter", "dynareModelLocal"]);
   assert.ok(colorContributions.semanticTokenTypes.every(row => row.superType === "variable"));
@@ -197,6 +189,8 @@ test("runtime uses the response registry rather than a second block-kind classif
 
 test("every shipped category's default, off, subtle and model choices reach its written segment", () => {
   for (const [category, fallback] of tintCategoryDefaults) {
+    const expectedDefault = ["model.aggregate", "model.heterogeneous"].includes(category) ? "model" : "subtle";
+    assert.equal(fallback, expectedDefault, `${category} default`);
     const info = facts(undefined, { statements: [block({ category, name: "ignored", subtype: "ignored" })] });
     for (const choice of [fallback, "off", "subtle", "model"]) {
       const result = pure(info, { styles: new Map([[category, choice]]) });
