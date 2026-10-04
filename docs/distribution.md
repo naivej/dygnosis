@@ -1,19 +1,12 @@
 # Dygnosis packages
 
-The 0.11.5 candidate includes the Dygnosis engine for its workspace host. It
-does not download the engine when activated. Its analysis requires no separate
-Rust, Python, MATLAB or Dynare installation. Dygnosis reads models and stops
-before MATLAB computation; it does not run the official Dynare preprocessor.
-
-Earlier candidates passed all six installed VS Code 1.102.0/1.140.0 and unpacked
-standalone checks, including the collector, in
-[native CI](https://github.com/naivej/dygnosis/actions/runs/37086177953).
-Release review and publication remain pending; final release versions require
-a fresh matching package matrix.
+Each package includes the Dygnosis engine for one workspace host. The extension
+does not download the engine when it starts. Analysis needs no separate Rust,
+Python, MATLAB, or Dynare installation.
 
 | Package target | Native verification host | Runtime evidence |
 |---|---|---|
-| `win32-x64` | Windows Server 2022, build 20348 | Native launch passed; C runtime linked statically. Running-image managed updates passed locally; final packaged/client upgrade checks remain pending. |
+| `win32-x64` | Windows Server 2022, build 20348 | Native launch passed; C runtime linked statically. Running-image managed updates passed locally. |
 | `win32-arm64` | Windows 11 ARM, build 26200 | Native ARM64 launch passed |
 | `darwin-x64` | macOS 15 Intel, Darwin 24.6 | Native launch passed; deployment target 13.0 is not a tested minimum |
 | `darwin-arm64` | macOS 15 ARM, Darwin 24.6 | Native ARM64 launch passed |
@@ -21,23 +14,19 @@ a fresh matching package matrix.
 | `linux-arm64` | Ubuntu 22.04 ARM | Native ARM64 launch passed; highest required glibc symbol version is 2.34 |
 
 The extension requires VS Code 1.102.0 or later. It runs in the workspace
-extension host: WSL, SSH and container workspaces need the package matching
-that host. A Windows desktop with a Linux remote workspace is a required
-release check. Browser-only, Alpine and 32-bit hosts are outside this matrix.
+extension host. WSL, SSH, and container workspaces need the package for that
+host. Browser-only, Alpine, and 32-bit hosts are outside this matrix.
 VS Code has its own [OS and Linux library requirements](https://code.visualstudio.com/docs/supporting/requirements);
 the packaged engine's measured requirements can be higher. Linux packages
 also require their recorded system `libgcc_s`, `libm`, and loader. The table
-records tested candidate hosts and measured symbols rather than untested older
-OS support. Remote placement and final native MCP routing remain release gates.
+records tested hosts and measured symbols.
 
-A version tag runs the compatibility workflow, then publishes the six tested
-engine binaries and the six VSIX files to [GitHub Releases](https://github.com/naivej/dygnosis/releases).
-The asset names are `dygnosis-<target>`, `dygnosis-<target>.exe` on Windows,
-`dygnosis-<version>-<target>.vsix`, and `SHA256SUMS`. Marketplace publication
-of the VSIX files is local. The
-0.11.5 candidate is not published. Updates replace the
+[GitHub Releases](https://github.com/naivej/dygnosis/releases) has the six
+engine binaries and the six VSIX files. The asset names are `dygnosis-<target>`,
+`dygnosis-<target>.exe` on Windows, `dygnosis-<version>-<target>.vsix`, and
+`SHA256SUMS`. Install the VSIX for the workspace host. An update replaces the
 client and its engine together. An explicit absolute `dynare.serverPath` in
-user/machine settings selects another executable for both LSP and the VS Code
+user or machine settings selects another executable for both LSP and the VS Code
 MCP provider. Read the [MCP guide](vscode-mcp.md) for executable override recovery.
 
 For standalone CLI or MCP use, download the binary for your host from the GitHub

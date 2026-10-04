@@ -1,8 +1,5 @@
 # Structural model Diff
 
-The 0.11.5 candidate includes structural model comparison. Package verification
-and publication remain pending; see [distribution](distribution.md).
-
 Open a model and run **Dygnosis: Diff with…**. On an include, choose its known
 model owner when asked. A native file dialog chooses the second `.mod` or `.dyn`.
 The active model root is **Before**; the selected model is **After**. The view
