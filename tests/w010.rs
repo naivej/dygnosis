@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use dygnosis::span::LineIndex;
-use dygnosis::{check_w010_family, parse};
+use dygnosis::{check_w010_family, check_w011, parse};
 
 const ARCHIVES: &[&str] = &[
     "trend_rbc_gov_inv",
@@ -224,6 +224,59 @@ fn w011_latest_wins_before_steady() {
         got.is_empty(),
         "W011 latest-wins should be empty, got {got:?}"
     );
+}
+
+#[test]
+fn w011_repeated_checks_keep_written_assignment_order() {
+    let source = "parameters zeta alpha middle;\n\
+                  zeta=missing_z;\nalpha=missing_a;\nmiddle=missing_m;\n\
+                  steady;\nalpha=missing_later;\n";
+    let expected = [
+        ("zeta=missing_z;", "zeta", "missing_z"),
+        ("alpha=missing_a;", "alpha", "missing_a"),
+        ("middle=missing_m;", "middle", "missing_m"),
+        ("alpha=missing_later;", "alpha", "missing_later"),
+    ];
+    for _ in 0..16 {
+        let model = parse(source);
+        let diagnostics = check_w011(&model);
+        assert_eq!(diagnostics.len(), expected.len());
+        for (diagnostic, (assignment, name, expression)) in diagnostics.iter().zip(expected) {
+            let start = source.find(assignment).unwrap() as u32;
+            assert_eq!(diagnostic.span.start, start);
+            assert_eq!(diagnostic.span.end, start + assignment.len() as u32);
+            assert_eq!(diagnostic.code, "W011");
+            assert_eq!(diagnostic.severity, dygnosis::Severity::Warning);
+            assert_eq!(diagnostic.message, format!(
+                "Parameter '{name}' assignment could not be evaluated: {name} = {expression}. Check that all referenced names are declared and assigned."
+            ));
+        }
+    }
+}
+
+#[test]
+fn w011_shared_macro_span_keeps_message_order() {
+    let source = "parameters zeta alpha middle;\n\
+                  @#for parameter in [\"zeta\", \"alpha\", \"middle\"]\n\
+                  @{parameter}=missing;\n\
+                  @#endfor\n";
+    let expected = ["alpha", "middle", "zeta"].map(|name| format!(
+        "Parameter '{name}' assignment could not be evaluated: {name} = missing. Check that all referenced names are declared and assigned."
+    ));
+    for _ in 0..16 {
+        let diagnostics = check_w011(&parse(source));
+        assert_eq!(diagnostics.len(), expected.len());
+        assert!(diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.span == diagnostics[0].span));
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| &diagnostic.message)
+                .collect::<Vec<_>>(),
+            expected.iter().collect::<Vec<_>>()
+        );
+    }
 }
 
 #[test]

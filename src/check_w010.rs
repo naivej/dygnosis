@@ -80,6 +80,15 @@ pub fn check_w011(model: &Model) -> Vec<Diagnostic> {
     for i in latest.values() {
         push_w011(&mut diagnostics, &mut reported, model, &subjects[*i]);
     }
+    // HashMap order varies between checks. Macro copies can share a written
+    // span, so the unchanged message also supplies a deterministic tie-break.
+    diagnostics.sort_by(|left, right| {
+        (left.span.start, left.span.end, &left.message).cmp(&(
+            right.span.start,
+            right.span.end,
+            &right.message,
+        ))
+    });
     diagnostics
 }
 
