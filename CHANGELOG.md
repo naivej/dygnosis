@@ -2,42 +2,58 @@
 
 ## v0.11.6
 
-Unreleased candidate.
-
-- Reduces the Windows x64 release executable by about 9% while retaining both editor and agent transports.
-- W011 parameter-assignment warnings use stable source order, including macro assignments that share a source range.
+- The Windows x64 release executable is about 9% smaller than in 0.11.5. The Windows x64 standalone archive is about 6% smaller, and the VSIX is about 5% smaller. The editor and agent transports both stay in the binary.
+- W011, "Parameter assignment cannot be evaluated", is reported in written source order. Macro assignments that share one source range keep a stable order.
 
 ## v0.11.5
 
-Unreleased candidate. Package verification and publication remain open.
-
-- Model-expression diagnostics reach heterogeneous and replacement equations, planner and Ramsey expressions, OccBin constraints, trends and deflators, matched moments, VAR expectations and PAC expressions.
-- External-function calls in model expressions require a declaration before use and the declared argument count. Calls with integer arguments remain function calls. Invalid variable calls and malformed argument lists use Dynare's messages and point to the written call or offending token.
-- Symbol-role and deterministic-exogenous timing errors retain Dynare's wording across these expressions. A later declaration or type change does not change an earlier use.
+- Model-expression diagnostics reach heterogeneous and replacement equations, epilogue expressions, planner and Ramsey expressions, OccBin constraints, trends and deflators, matched moments, VAR expectations, PAC expressions, and complementarity conditions.
+- External-function calls in those expressions require a declaration before use and the declared argument count. Calls with integer arguments remain function calls. Invalid variable calls and malformed argument lists use Dynare's messages and point to the written call or the offending token.
+- Symbol-role errors and deterministic-exogenous timing errors use Dynare's wording on these expressions. A later declaration or type change does not change an earlier use.
 
 ## v0.11.4
 
-Unreleased candidate. The 0.11 series has no published intermediate releases.
-
-- Adds a native VS Code client with bundled/explicit executable selection, per-folder settings, include ownership, negotiated semantic roles, and an effective-model preview.
-- Adds model counts, a native model view and equation navigation, configurable block tinting, and equation/reference/preview CodeLens actions.
-- Adds in-memory Ignore/Show diagnostic controls and safe read-only diagnostic explanations. Existing fixes retain their diagnostic and source context.
-- Adds structural model Diff with filters and verified source navigation, and written-source and macro-origin jumps from the effective-model preview. Edits and changed inputs disable stale navigation until refresh.
-- **Dygnosis: Set up MCP for this project** creates project-local `.mcp.json` with a stable managed executable. Managed updates preserve the command path and wait for a running Windows MCP process to stop.
-- Checks unopened saved `.mod` roots in workspace folders by default, with project progress, Recheck, cancellation and folder exclusions. Open models and excluded dependencies retain their editor diagnostics.
-- LSP requests observe preceding document opens and changes. Waiting requests remain cancellable when the server is busy.
-- Duplicate checks reach heterogeneous shock rows. Includes in inactive macro branches and empty loops no longer produce false missing-file or syntax errors.
-- Steady-state assignments accept valid scalar and multiple targets, check target types and right-side symbol roles, and retain the pinned Dynare wording. Valid assigned outputs, excluded names and qualified native calls no longer receive the repaired false diagnostics.
+- Duplicate checks reach heterogeneous shock rows for E111, E393, and E394, and link to the earlier row.
+- Includes in inactive macro branches and empty loops no longer produce false missing-file or syntax errors.
+- Steady-state assignments accept valid scalar targets and multiple outputs. A target of the wrong type is E481, `NAME has incorrect type`, using the type at that assignment. The editor marks the output name. An endogenous or temporary name used on the right side before it is assigned is E130.
+- Valid assigned outputs, excluded names, and qualified native calls no longer receive the repaired false diagnostics. Right-side symbol roles use Dynare's sentences.
 - Related-file discovery retains qualified external-function and derivative-helper names and resolves their package files.
 - Model expressions retain complete qualified external-function calls, require their declarations at the call, and check argument counts and malformed arguments with Dynare's sentences.
-- Prepares native VSIX and standalone archives with the bundled engine, licenses and checksums. Package verification and publication remain open.
 
-- Workspace-folder and loose-file settings isolate include paths and cached inputs across roots. Complete configuration snapshots and opt-in `dynare/modelInfoChanged` notifications support live refresh.
-- Adds LSP `dynare/modelInfo`, sharing MCP counts and timing while retaining written statements, declarations, counted equations, block categories, related files, and verified source segments. Outline and folding stay local to the requested file. Incomplete input withholds authoritative counts and numbers. Equation numbers describe the written model before Dynare transformation.
-- Hover and completion show written `long_name` and TeX metadata with independent presentation controls. Completion distinguishes endogenous, exogenous, and parameter icons, and offers empty block skeletons. Highlights distinguish declaration and assignment writes from reads.
-- Semantic tokens negotiate `dynareEndogenous`, `dynareExogenous`, `dynareParameter`, and `dynareModelLocal`, falling back to supported `variable` tokens. Full and range responses use the negotiated legend and modifiers. Existing Dynare-specific color rules need the [selector migration](docs/editor-settings.md#semantic-token-migration).
-- Applicable duplicate and include-cycle diagnostics link to earlier written locations in LSP and MCP. Published fixes work in unopened includes with current source snapshots and correct versions for open files. W020 and W022 carry LSP Unnecessary; E021 does not.
-- Restores expression-value inlay hints from an ordered trace of proven finite arithmetic. Plain numbers stay quiet; unknown execution and differing macro copies withhold hints. Existing hover and comparison values retain their behavior.
+## v0.11.3
+
+- Saved `.mod` files in a workspace folder are checked when they are not open. `dynare.projectDiagnostics` is on by default. Progress is separate from the model-count bar. **Dygnosis: Recheck project** runs discovery again. Cancelling pauses that pass until an edit or Recheck.
+- `dynare.projectExcludePaths` keeps matching roots out of that discovery. An open model keeps its editor diagnostics. An excluded file that another model includes still affects that model. `.dyn`, loose, and untitled models keep their editor diagnostics. Turning project checks off leaves ordinary diagnostics on open files.
+- The extension page shows the shipped editor, structural Diff, and effective-model jumps.
+
+## v0.11.2
+
+- **Diff with…** compares the active model (Before) with a chosen model (After). It shows symbols, parameter values, aggregate equations, heterogeneous equations, and shock setup, with change and dimension filters. Each side opens its written source when that location is known. Edits, includes, and search-path changes mark the comparison stale until refresh.
+- Those written locations are also in MCP comparison results. Values and pairing stay the same.
+- The effective-model preview jumps to the written equation and to the macro directive that produced the row, including the loop value. **Refresh effective model** replaces the text and those jumps together. Edits and changed inputs disable jumps until refresh. The preview stays read-only.
+- **Dygnosis: Set up MCP for this project** writes project-local `.mcp.json` in a trusted workspace. The bundled engine is copied to a stable path. Managed updates keep that command path. On Windows, a running agent process keeps the current executable until it stops. Other servers in the file, and global agent settings, stay as they are.
+
+## v0.11.1
+
+First VS Code extension. It checks open models and the files they include.
+
+- Adds a VS Code extension for `.mod`, `.dyn`, and `.inc`, for VS Code 1.102 or newer. The extension includes the engine for Windows, macOS, and Linux, on x64 and ARM64. `dynare.serverPath` selects another executable for the editor and for VS Code's agent tools. Those tools register before a model is opened.
+- Adds model counts, a Dynare model view, and equation navigation. An include asks which model owns it when more than one model is known. Block tinting follows the theme and can be set per block. **Browse equations** CodeLens is on. Declaration references and **Show effective model** CodeLens stay off until enabled.
+- **Ignore this check** hides one code in this window. **Show** and **Show all** restore hidden codes. The file, the command line, and agents still report those codes. **Explain this check** opens a read-only explanation. Existing fixes keep their diagnostic and source context.
+- **Show effective model** opens a read-only preview of the expanded model. That preview stays outside model checking.
+- The language server applies document opens and edits before it answers a later request. A request that is waiting can still be cancelled.
+- Prepares a VSIX and a standalone archive for each of the six targets above, with the engine, licenses, and checksums. Publication remains open.
+
+## v0.11.0
+
+Language server and agent tools.
+
+- Workspace folders and loose files keep separate include paths and cached inputs. A settings change sends the full configuration. Clients can opt in to `dynare/modelInfoChanged` when the model should refresh.
+- Adds `dynare/modelInfo`. Counts and timing match `dynare_model_info`. The response also has written statements, declarations, counted equations, block categories, related files, and source segments. Outline and folding stay in the file on screen. Incomplete expansion withholds counts and equation numbers. Equation numbers describe the written model before Dynare rewrites it.
+- Hover and completion show the written `long_name` and TeX name. Each can be hidden. Completion uses separate icons for endogenous variables, exogenous variables, and parameters, and offers empty block skeletons. Highlights mark declarations and assignment targets as writes, and other uses as reads.
+- Semantic tokens negotiate `dynareEndogenous`, `dynareExogenous`, `dynareParameter`, and `dynareModelLocal`. A client that does not support a role receives `variable`. Full and range responses use that legend. Existing Dynare-specific color rules need the [selector migration](docs/editor-settings.md#semantic-token-migration).
+- Duplicate and include-cycle diagnostics link to the earlier written location in the editor and in MCP results. A fix in an unopened include uses the current source. An edit to an open file uses that file's version. W020 and W022 carry LSP Unnecessary. E021 does not.
+- Expression-value hints return for an assignment whose right side is not a plain number. The hint is the value at that assignment when the arithmetic is finite and known. Plain numbers stay quiet. Unknown execution, and macro copies that do not share one value, withhold the hint. Hover values and comparison values stay as they were.
 
 ## v0.10.2
 
