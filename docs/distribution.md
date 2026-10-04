@@ -6,7 +6,7 @@ Python, MATLAB, or Dynare installation.
 
 | Package target | Native verification host | Runtime evidence |
 |---|---|---|
-| `win32-x64` | Windows Server 2022, build 20348 | Native launch passed; C runtime linked statically. Running-image managed updates passed locally. |
+| `win32-x64` | Windows Server 2022, build 20348 | Native launch passed; C runtime linked statically |
 | `win32-arm64` | Windows 11 ARM, build 26200 | Native ARM64 launch passed |
 | `darwin-x64` | macOS 15 Intel, Darwin 24.6 | Native launch passed; deployment target 13.0 is not a tested minimum |
 | `darwin-arm64` | macOS 15 ARM, Darwin 24.6 | Native ARM64 launch passed |

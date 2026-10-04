@@ -1,6 +1,6 @@
 # Comparison navigation
 
-The development engine adds a `navigation` object to LSP `dynare/compareModels` and MCP `dynare_compare_models`. Existing comparison fields, values, ordering, equation pairing, shock locations, and Markdown retain their meanings. The LSP initialize response advertises `experimental.dygnosis.compareModels.navigation_schema_version: 1`.
+The engine adds a `navigation` object to LSP `dynare/compareModels` and MCP `dynare_compare_models`. Existing comparison fields, values, ordering, equation pairing, shock locations, and Markdown retain their meanings. The LSP initialize response advertises `experimental.dygnosis.compareModels.navigation_schema_version: 1`.
 
 `navigation.schema_version` is `1`. `before` and `after` each contain `root_uri`, an opaque `revision`, and `complete`. MCP uses the supplied active file as `root_uri`, or null when none was supplied. Each revision covers that side's root, included files, resolved search candidates, and analysis settings; LSP uses the same revision as `dynare/modelInfo`. A revision is for equality checks within the running engine, not a persistent hash.
 
