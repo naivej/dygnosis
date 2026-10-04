@@ -125,11 +125,11 @@ Use the native controls for [equation browsing](settings:dynare.codeLens.modelEq
 [declaration references](settings:dynare.codeLens.declarationReferences) and
 [effective preview](settings:dynare.codeLens.effectiveModel) to choose the actions.
 
-All three settings apply to the displayed file and support workspace/folder overrides. Changes apply immediately. Use **Reset Setting** to restore a default. Native `editor.codeLens` controls overall visibility; it also stops this surface's model requests when off. For Dynare files only, a language override is convenient:
+All three settings apply to the displayed file and support workspace/folder overrides. Changes apply immediately. Use **Reset Setting** to restore a default. Native `editor.codeLens` controls overall visibility; it also stops this surface's model requests when off. To hide lenses in Dynare files only, put this in User or Workspace settings:
 
 ```json
-"[dynare]": {
-  "editor.codeLens": false
+{
+  "[dynare]": { "editor.codeLens": false }
 }
 ```
 

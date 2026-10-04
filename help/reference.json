@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "caf879825a82321eb4648221105dcb70f30d44e80fea77bd225e88a18481029f",
+  "fingerprint": "a35d85df6831f4f06eb8c9c7a3b00b2e8a0bfc01bd9a5ebda74912721c1ff358",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -54,7 +54,7 @@
               "type": "string"
             },
             "default": null,
-            "description": "Shared supplied include map for both sides when files_a or files_b is absent.",
+            "description": "Shared supplied include map for either side whose files_a or files_b is absent or empty.",
             "type": [
               "object",
               "null"
@@ -65,7 +65,7 @@
               "type": "string"
             },
             "default": null,
-            "description": "Before include text map. Overrides the shared files map for this side.",
+            "description": "Before include text map. A nonempty map overrides the shared files map for this side.",
             "type": [
               "object",
               "null"
@@ -76,7 +76,7 @@
               "type": "string"
             },
             "default": null,
-            "description": "After include text map. Overrides the shared files map for this side.",
+            "description": "After include text map. A nonempty map overrides the shared files map for this side.",
             "type": [
               "object",
               "null"
@@ -221,7 +221,7 @@
     },
     {
       "name": "dynare_explain",
-      "description": "Return markdown documentation for a diagnostic code.",
+      "description": "Return the Markdown explanation for a diagnostic code. An unknown code returns the known code list.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {

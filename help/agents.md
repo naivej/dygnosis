@@ -10,7 +10,7 @@ its Output. In a chat that supports MCP, the tool picker controls which tools
 are available. VS Code manages its own server/tool approval and trust controls;
 see its [MCP guide](https://code.visualstudio.com/docs/agent-customization/mcp-servers).
 
-An absolute user/machine `dynare.serverPath` override applies to both the
+An absolute user/machine [server path](settings:dynare.serverPath) override applies to both the
 language client and native MCP provider. Use the matching native engine for
 the workspace host. A remote window runs the workspace extension and its
 engine there. If an override is incompatible, the Dygnosis Output and Settings

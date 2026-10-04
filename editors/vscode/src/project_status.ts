@@ -194,12 +194,18 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
   const message = (label: string, icon = "info", detail = label): void => {
     item.text = `$(${icon}) Dynare project: ${label}`; item.tooltip = detail;
     item.accessibilityInformation = { label: `Dynare project: ${label}. Open project checks.` };
-    item.show(); view.message = detail; view.description = undefined; tree.replace([]);
+    item.show(); view.message = detail; view.description = undefined;
+    const help = new ProjectItem("help", "Open Dygnosis Help", "question");
+    help.command = { command: "dygnosis.openHelp", title: "Open Dygnosis Help", arguments: [label === "unavailable" ? "troubleshoot" : "project-checks"] };
+    tree.replace([help]);
   };
   const render = (): void => {
     if (disposed) return;
     if (!enabled()) { message("off", "circle-slash", "Project diagnostics are off. Enable dynare.projectDiagnostics in Settings."); return; }
-    if (!folders().length) { message("no folders", "info", "Open a file-backed workspace folder to check unopened .mod models."); return; }
+    if (!folders().length) {
+      message("no folders", "info", "Open a file-backed workspace folder to check unopened .mod models.");
+      view.message = undefined; tree.replace([]); return;
+    }
     if (!status) { message(capability ? "updating" : connection || startupFailed ? "unavailable" : "starting", capability || (!connection && !startupFailed) ? "sync~spin" : "warning",
       capability ? "Refreshing project coverage." : connection ? "Project checks require a compatible engine. Use the bundled binary or update dynare.serverPath." :
         startupFailed ? "Dygnosis is unavailable. Restart the language server or open Dygnosis Output for details." : "Starting Dygnosis project checks."); return; }

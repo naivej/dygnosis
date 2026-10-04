@@ -1668,13 +1668,13 @@ struct CompareModelsParams {
     /// After root key in files_b or the shared files map.
     #[serde(default)]
     active_file_b: Option<String>,
-    /// Before include text map. Overrides the shared files map for this side.
+    /// Before include text map. A nonempty map overrides the shared files map for this side.
     #[serde(default)]
     files_a: Option<HashMap<String, String>>,
-    /// After include text map. Overrides the shared files map for this side.
+    /// After include text map. A nonempty map overrides the shared files map for this side.
     #[serde(default)]
     files_b: Option<HashMap<String, String>>,
-    /// Shared supplied include map for both sides when files_a or files_b is absent.
+    /// Shared supplied include map for either side whose files_a or files_b is absent or empty.
     #[serde(default)]
     files: Option<HashMap<String, String>>,
 }
@@ -1924,7 +1924,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_explain",
         input_schema = mcp_input_schema::<ExplainParams>(),
-        description = "Return markdown documentation for a diagnostic code."
+        description = "Return the Markdown explanation for a diagnostic code. An unknown code returns the known code list."
     )]
     fn explain_tool(&self, Parameters(params): Parameters<ExplainParams>) -> String {
         dynare_explain(&params.code)

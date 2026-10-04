@@ -133,7 +133,7 @@ function setup(options = {}) {
   const configure = (key, value) => { host.settings[key] = value; host.configured.fire({ affectsConfiguration: section => section === "dynare" || `dynare.${key}`.startsWith(section) }); };
   return { host, service, changed, updated, configure };
 }
-function rows(env) { return env.host.views[0].options.treeDataProvider.getChildren(); }
+function rows(env) { return env.host.views[0].options.treeDataProvider.getChildren().filter(row => row.id !== "help"); }
 function liveWatchers(env, pattern) { return env.host.watchers.filter(watcher => !watcher.disposed && (!pattern || watcher.pattern.pattern === pattern)); }
 
 test("capability requires supported schema, exact commands, notification names and command advertisement", () => {

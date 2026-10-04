@@ -18,12 +18,16 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
   let subscriptions: vscode.Disposable[] = [];
   const bundle = JSON.parse(readFileSync(path.join(root.fsPath, "bundle.json"), "utf8")) as HelpBundle;
   const pages = helpPages(bundle);
+  const explanationPage = (request: HelpRequest) => request.code && request.markdown ? {
+    id: `check:${request.code}`, title: `${request.code}: active engine explanation`, keywords: [request.code],
+    html: helpMarkdown(`${request.markdown}\n\n[Use diagnostic actions](help:diagnostics) · [Diagnostic code index](help:reference#diagnostic-codes)`, () => undefined), edition: `Active engine ${request.engineVersion ?? "unknown version"}; Help ${bundle.version}`,
+    explanation: { code: request.code, markdown: request.markdown, engineVersion: request.engineVersion },
+  } : undefined;
   const send = (request: HelpRequest): void => {
     if (!panel || !ready) { pending = request; return; }
     const destination = request.code ? `check:${request.code}` : request.topic ?? "get-started";
     const page = pages.find(topic => topic.id === destination.split("#")[0]);
-    const extra = request.code && request.markdown ? { id: destination, title: `${request.code}: active engine explanation`, keywords: [request.code],
-      html: helpMarkdown(request.markdown, () => undefined), edition: `Active engine ${request.engineVersion ?? "unknown version"}; Help ${bundle.version}` } : undefined;
+    const extra = explanationPage(request);
     void panel.webview.postMessage({ type: "open", destination: page || extra ? destination : "reference", extra });
   };
   const attach = (next: vscode.WebviewPanel): void => {
@@ -43,7 +47,13 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
       try {
       if (message.type === "ready") {
         ready = true;
-        await next.webview.postMessage({ type: "bundle", version: bundle.version, topics: pages.map(page => ({ ...page, html: helpMarkdown(page.markdown, file => next.webview.asWebviewUri(vscode.Uri.joinPath(root, file)).toString()) })) });
+        const historyExtras = Array.isArray(message.history) ? message.history.slice(-100).map((entry: unknown) => {
+          if (!record(entry) || !record(entry.explanation)) return undefined;
+          const source = entry.explanation;
+          if (typeof source.code !== "string" || !/^[A-Z]\d{3}$/.test(source.code) || typeof entry.destination !== "string" || entry.destination.split("#")[0] !== `check:${source.code}` || typeof source.markdown !== "string" || source.markdown.length > 1024 * 1024) return undefined;
+          return explanationPage({ code: source.code, markdown: source.markdown, engineVersion: typeof source.engineVersion === "string" ? source.engineVersion.slice(0, 300) : undefined });
+        }) : [];
+        await next.webview.postMessage({ type: "bundle", version: bundle.version, historyExtras, topics: pages.map(page => ({ ...page, html: helpMarkdown(page.markdown, file => next.webview.asWebviewUri(vscode.Uri.joinPath(root, file)).toString()) })) });
         if (pending) { const request = pending; pending = undefined; send(request); }
       } else if (message.type === "permalink" && typeof message.destination === "string" && pages.some(page => page.id === String(message.destination).split("#")[0])) {
         await vscode.env.clipboard.writeText(`${vscode.env.uriScheme}://${context.extension.id}/help?topic=${encodeURIComponent(message.destination)}`);

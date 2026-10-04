@@ -112,7 +112,7 @@
     if (!message || message.type !== "render" || !Array.isArray(message.rows)) return;
     payload = message; choices = message.choices;
     controls.models.replaceChildren();
-    for (const [label, uri] of [["Before (active model)", message.before], ["After (selected model)", message.after]]) {
+    for (const [label, uri] of [["Before", message.before], ["After", message.after]]) {
       const model = node("p"); model.append(node("strong", `${label}: `), node("code", uri)); controls.models.append(model);
     }
     controls.status.textContent = message.message; controls.status.className = message.status;

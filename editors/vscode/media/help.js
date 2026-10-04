@@ -3,16 +3,16 @@
   'use strict';
   const api = acquireVsCodeApi();
   const saved = api.getState();
-  const history = Array.isArray(saved?.history) ? saved.history.filter(entry => typeof entry?.destination === 'string').slice(-100).map(entry => ({ destination: entry.destination, scroll: Number.isFinite(entry.scroll) && entry.scroll >= 0 ? entry.scroll : 0 })) : [];
+  const history = Array.isArray(saved?.history) ? saved.history.filter(entry => typeof entry?.destination === 'string').slice(-100).map(entry => ({ destination: entry.destination, scroll: Number.isFinite(entry.scroll) && entry.scroll >= 0 ? entry.scroll : 0, explanation: entry.explanation })) : [];
   const state = { history: history.length ? history : [{ destination: 'get-started', scroll: 0 }], index: Number.isInteger(saved?.index) && saved.index >= 0 && saved.index < history.length ? saved.index : 0, query: typeof saved?.query === 'string' ? saved.query.slice(0, 300) : '' };
   const controls = Object.fromEntries(['edition', 'back', 'forward', 'permalink', 'search', 'clear', 'contents', 'main', 'breadcrumb', 'results', 'article', 'notice', 'enlarged', 'close-image'].map(id => [id, document.getElementById(id)]));
-  let topics = [], version = '', extra;
+  let topics = [], version = '';
   const node = (tag, text) => { const result = document.createElement(tag); result.textContent = text; return result; };
-  const remember = () => api.setState(state);
+  const remember = () => api.setState({ ...state, history: state.history.map(({ destination, scroll, explanation }) => ({ destination, scroll, explanation })) });
   const current = () => state.history[state.index];
   function render(focus = false) {
     const destination = current().destination, [id, anchor] = destination.split('#');
-    const topic = extra?.id === id ? extra : topics.find(topic => topic.id === id) ?? topics[0];
+    const topic = current().extra ?? topics.find(topic => topic.id === id) ?? topics.find(topic => topic.id === 'reference');
     if (!topic) return;
     controls.edition.textContent = topic.edition ?? `Edition ${version}`;
     controls.breadcrumb.textContent = `Help › ${topic.title}`;
@@ -26,10 +26,10 @@
     });
     remember();
   }
-  function open(destination) {
+  function open(destination, extra) {
     if (!topics.some(topic => topic.id === destination.split('#')[0]) && extra?.id !== destination.split('#')[0]) return;
     current().scroll = window.scrollY;
-    if (current().destination !== destination) { state.history = state.history.slice(0, state.index + 1); state.history.push({ destination, scroll: 0 }); state.index = state.history.length - 1; }
+    if (current().destination !== destination || JSON.stringify(current().explanation) !== JSON.stringify(extra?.explanation)) { state.history = state.history.slice(0, state.index + 1); state.history.push({ destination, scroll: 0, extra, explanation: extra?.explanation }); state.history = state.history.slice(-100); state.index = state.history.length - 1; }
     state.query = ''; controls.search.value = ''; render(true);
   }
   function search() {
@@ -39,7 +39,7 @@
     if (query) {
       const words = query.split(/\s+/);
       const found = topics.filter(topic => words.every(word => `${topic.title} ${topic.keywords.join(' ')} ${topic.markdown}`.toLowerCase().includes(word))).slice(0, 50);
-      controls.results.append(node('p', found.length ? `${found.length} matching topics` : 'No results. Try a feature name, command, setting key or diagnostic code.'));
+      controls.results.append(node('p', found.length ? `${found.length} matching ${found.length === 1 ? 'topic' : 'topics'}` : 'No results. Try a feature name, command, setting key or diagnostic code.'));
       for (const topic of found) {
         const button = node('button', topic.title); button.type = 'button'; button.addEventListener('click', () => open(topic.id));
         const text = topic.markdown.replace(/[#`*[\]]/g, ' ').replace(/\s+/g, ' '), position = text.toLowerCase().indexOf(words[0]);
@@ -63,7 +63,7 @@
       if (target.startsWith('help:')) open(target.slice(5));
       else if (target.startsWith('check:')) open(target);
       else if (target.startsWith('tool:') || target.startsWith('option:')) open(target);
-      else if (target.startsWith('#')) open(`${current().destination.split('#')[0]}${target}`);
+      else if (target.startsWith('#')) open(`${current().destination.split('#')[0]}${target}`, current().extra);
       else api.postMessage({ type: 'link', target });
     }
     const copy = event.target.closest('[data-copy]');
@@ -76,10 +76,11 @@
     const message = event.data;
     if (message.type === 'bundle') {
       topics = message.topics; version = message.version; controls.contents.replaceChildren();
+      for (const [index, entry] of state.history.entries()) entry.extra = message.historyExtras?.[index];
       for (const topic of topics.filter(topic => !topic.id.includes(':'))) { const button = node('button', topic.title); button.type = 'button'; button.dataset.topic = topic.id; button.addEventListener('click', () => open(topic.id)); controls.contents.append(button); }
       render();
-    } else if (message.type === 'open') { extra = message.extra; open(message.destination); }
+    } else if (message.type === 'open') open(message.destination, message.extra);
     else if (message.type === 'notice') controls.notice.textContent = message.text;
   });
-  api.postMessage({ type: 'ready' });
+  api.postMessage({ type: 'ready', history: state.history.map(({ destination, explanation }) => ({ destination, explanation })) });
 })();

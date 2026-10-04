@@ -1,6 +1,6 @@
-# Editor settings and LSP contracts
+# Connect an LSP client
 
-Dygnosis supplies these contracts through the language server. Configure an LSP client to launch `dygnosis` over stdio. The VS Code extension adds native Settings, a [count bar](model-and-includes.md), [model view](model-and-includes.md), [colors](appearance.md), [CodeLens](model-and-includes.md), [diagnostic controls](diagnostics.md), [model Diff](structural-diff.md), [origin navigation](effective-model.md), and [project checks](integrations.md). See [distribution](get-started.md) for host packages and runtime requirements.
+Configure an LSP client to launch `dygnosis` over stdio, without arguments. The VS Code extension adds native Settings, a [count bar](model-and-includes.md), [model view](model-and-includes.md), [colors](appearance.md), [CodeLens](model-and-includes.md), [diagnostic controls](diagnostics.md), [model Diff](structural-diff.md), [origin navigation](effective-model.md), and [project checks](project-checks.md). See [distribution](get-started.md) for host packages and runtime requirements.
 
 ## LSP configuration messages
 

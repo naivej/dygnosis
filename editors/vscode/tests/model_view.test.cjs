@@ -136,7 +136,7 @@ function setup(doc = document(), visible = true) {
   };
   const registration = registerModelView(service);
   return { host, service, changed, configure, registration, doc, view: host.views[0],
-    rows: () => host.views[0].treeDataProvider.getChildren(),
+    rows: () => host.views[0].treeDataProvider.getChildren().filter(row => row.id !== "help"),
     run: (id, ...args) => host.commands.get(`dygnosis.${id}`)(...args) };
 }
 function descendants(item) { return [item, ...item.children.flatMap(descendants)]; }
@@ -188,7 +188,14 @@ test("no root, non-Dynare documents and virtual previews clear the model", async
   const env = setup(); await flush();
   for (const doc of [document("file:///project/part.inc"), document("dygnosis-effective:/main.mod"), document("file:///project/data.txt", { languageId: "plaintext" }), undefined]) {
     env.host.editor = doc ? { document: doc } : undefined; env.host.active.fire(env.host.editor); await flush();
-    assert.equal(env.rows().length, 0); assert.match(env.view.message, /No model root|Open a Dynare/);
+    assert.equal(env.rows().length, 0);
+    if (doc?.uri.scheme === "file" && doc.languageId === "dynare") {
+      assert.match(env.view.message, /No model root/);
+      assert.deepEqual(env.view.treeDataProvider.getChildren()[0].command.arguments, ["model-and-includes"]);
+    } else {
+      assert.equal(env.view.message, undefined, "allow VS Code to display the welcome Help button");
+      assert.equal(env.view.treeDataProvider.getChildren().length, 0);
+    }
   }
   env.registration.dispose();
 });

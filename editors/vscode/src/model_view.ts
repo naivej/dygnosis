@@ -183,7 +183,7 @@ export async function browseModelEquations(service: DygnosisClient, context: Mod
     const origins = row.origin_frames.map(frame => frame.variable && frame.value !== null
       ? `${frame.variable}=${frame.value}` : frame.kind).join(", ");
     return { label: row.dimension ? `Dimension ${row.dimension}` : "Aggregate",
-      description: `${String(equations.length)} equations · ${sourceLabel(row.lens_anchor)}`,
+      description: `${String(equations.length)} ${equations.length === 1 ? "equation" : "equations"} · ${sourceLabel(row.lens_anchor)}`,
       detail: `${origins ? `${origins} · ` : ""}Expansion ${index + 1}`, block: row, equations };
   });
   const chosen = picks.length === 1 ? picks[0] : await vscode.window.showQuickPick(picks,
@@ -217,7 +217,9 @@ export function registerModelView(service: DygnosisClient): vscode.Disposable {
   };
   const clear = (message?: string): void => {
     currentContext = undefined;
-    tree.replace([]);
+    const help = new ModelItem("help", "Open Dygnosis Help", "question");
+    help.command = { command: "dygnosis.openHelp", title: "Open Dygnosis Help", arguments: ["model-and-includes"] };
+    tree.replace(message ? [help] : []);
     view.description = undefined;
     view.message = message;
     contextKeys(false, false);
@@ -227,7 +229,6 @@ export function registerModelView(service: DygnosisClient): vscode.Disposable {
     clear();
     const document = vscode.window.activeTextEditor?.document;
     if (disposed || !document || document.isClosed || !isAnalysisDocument(document)) {
-      view.message = "Open a Dynare model or an include with a known owner.";
       return;
     }
     const sections = sectionsFor(document);
@@ -243,7 +244,8 @@ export function registerModelView(service: DygnosisClient): vscode.Disposable {
       const owners = service.knownOwners(document.uri);
       contextKeys(false, owners.length > 0);
       if (!root) {
-        view.message = owners.length > 0 ? "Choose the model that owns this include." : "No model root is available for this file.";
+        clear(owners.length > 0 ? "Choose the model that owns this include." : "No model root is available for this file.");
+        contextKeys(false, owners.length > 0);
         return;
       }
       const info = await service.modelInfo(root, document.uri);
@@ -257,7 +259,9 @@ export function registerModelView(service: DygnosisClient): vscode.Disposable {
       view.description = vscode.workspace.asRelativePath(root);
       contextKeys(info.complete && info.equations.length > 0, service.knownOwners(document.uri).length > 0);
       if (!info.complete) {
-        view.message = `${info.message ?? "Model expansion is incomplete."} Counts and equation navigation are unavailable.`;
+        clear(`${info.message ?? "Model expansion is incomplete."} Counts and equation navigation are unavailable.`);
+        view.description = vscode.workspace.asRelativePath(root);
+        contextKeys(false, service.knownOwners(document.uri).length > 0);
         return;
       }
       currentContext = { document, version, root, info };

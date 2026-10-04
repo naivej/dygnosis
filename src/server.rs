@@ -3081,7 +3081,7 @@ fn decl_hover_markdown(
         return Some(parts.join("\n\n"));
     }
     if kind == Some("varexo_det") {
-        let mut parts = vec![format!("**Exogenous deterministic variable**: `{word}`")];
+        let mut parts = vec![format!("**Deterministic exogenous variable**: `{word}`")];
         append_name_metadata(&mut parts, model, word, preferences);
         return Some(parts.join("\n\n"));
     }

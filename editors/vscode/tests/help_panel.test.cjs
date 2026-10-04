@@ -80,3 +80,15 @@ test('active engine explanation is escaped and labelled beside the bundled editi
   assert.match(opened.extra.edition, /Active engine 0.10.0; Help 0.11.7/); assert.doesNotMatch(opened.extra.html, /<script/);
   env.registration.dispose();
 });
+
+test('restored explanation history is rendered from validated Markdown, not saved HTML', async () => {
+  const env = setup(true); env.open(); const panel = env.host.panels[0];
+  await panel.receive({ type: 'ready', history: [
+    { destination: 'check:E999', explanation: { code: 'E999', markdown: '# Saved\n\n<script>evil()</script>', engineVersion: '0.10.0' }, html: '<script>evil()</script>' },
+    { destination: 'check:E020', explanation: { code: 'E999', markdown: 'Wrong code' } },
+  ] });
+  const restored = panel.messages[0].historyExtras;
+  assert.match(restored[0].html, /Saved/); assert.doesNotMatch(restored[0].html, /<script/);
+  assert.match(restored[0].edition, /Active engine 0.10.0/); assert.equal(restored[1], undefined);
+  env.registration.dispose();
+});
