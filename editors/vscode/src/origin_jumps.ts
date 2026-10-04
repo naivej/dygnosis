@@ -25,27 +25,6 @@ export interface PreviewNavigation {
   effective_text: string; navigation_schema_version: 1; root_uri: string; revision: string;
   document_version: number | null; complete: boolean; navigation: PreviewRow[]; dependency_candidates: string[];
 }
-const previewWhen = "resourceScheme == dygnosis-effective && dygnosis.effectivePreview";
-/** Add these entries to contributes; no ordinary model menu is changed. */
-export const originJumpContributions = {
-  commands: [
-    { command: "dygnosis.goToWrittenSource", title: "Go to written source", category: "Dygnosis", icon: "$(go-to-file)", enablement: "dygnosis.previewWrittenSource" },
-    { command: "dygnosis.showMacroOrigins", title: "Show macro origins", category: "Dygnosis", icon: "$(list-tree)", enablement: "dygnosis.previewMacroOrigins" },
-    { command: "dygnosis.refreshEffectiveModel", title: "Refresh effective model", category: "Dygnosis", icon: "$(refresh)", enablement: "dygnosis.effectivePreview" },
-  ],
-  menus: {
-    commandPalette: ["dygnosis.goToWrittenSource", "dygnosis.showMacroOrigins", "dygnosis.refreshEffectiveModel"].map(command => ({ command, when: previewWhen })),
-    "editor/title": ["dygnosis.goToWrittenSource", "dygnosis.showMacroOrigins", "dygnosis.refreshEffectiveModel"].map((command, index) =>
-      ({ command, when: `${previewWhen} && dygnosis.previewToolbarActions`, group: `navigation@${String(index + 1)}` })),
-    "editor/context": ["dygnosis.goToWrittenSource", "dygnosis.showMacroOrigins", "dygnosis.refreshEffectiveModel"].map((command, index) =>
-      ({ command, when: `${previewWhen} && dygnosis.previewContextActions`, group: `navigation@${String(index + 1)}` })),
-  },
-  keybindings: [
-    { command: "dygnosis.goToWrittenSource", key: "ctrl+alt+g", mac: "cmd+alt+g", when: `${previewWhen} && editorTextFocus && dygnosis.previewWrittenSource` },
-    { command: "dygnosis.showMacroOrigins", key: "ctrl+alt+m", mac: "cmd+alt+m", when: `${previewWhen} && editorTextFocus && dygnosis.previewMacroOrigins` },
-    { command: "dygnosis.refreshEffectiveModel", key: "ctrl+alt+r", mac: "cmd+alt+r", when: `${previewWhen} && editorTextFocus` },
-  ],
-};
 function natural(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
 function version(value: unknown): boolean { return value === null || natural(value); }
 function nullableString(value: unknown): boolean { return value === null || typeof value === "string"; }
@@ -121,7 +100,7 @@ function targetFitsDocument(target: PreviewLocation, document: vscode.TextDocume
 }
 function sourceLabel(target: PreviewLocation): string { return `${vscode.workspace.asRelativePath(vscode.Uri.parse(target.uri))}:${String(target.range.start.line + 1)}`; }
 function rowLabel(row: PreviewRow): string {
-  return `${row.scope === "aggregate" ? "Aggregate" : `Dimension ${row.dimension ?? "(unnamed)"}`} · ${row.number === null ? row.kind : `Equation ${String(row.number)}`} · Occurrence ${row.id}`;
+  return `${row.scope === "aggregate" ? "Aggregate" : `Dimension ${row.dimension ?? "(unnamed)"}`} · ${row.number === null ? row.kind : `Equation ${String(row.number)}`} · Preview line ${String(row.effective_range.start.line + 1)}`;
 }
 interface SourcePick extends vscode.QuickPickItem { target: PreviewLocation; frameIndex?: number; site?: "directive" | "body" }
 export function writtenSourcePicks(row: PreviewRow): SourcePick[] {

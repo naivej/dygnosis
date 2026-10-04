@@ -751,7 +751,7 @@ fn check_w051(model: &Model) -> Vec<Diagnostic> {
                 severity: Severity::Warning,
                 code: "W051".to_string(),
                 message: format!(
-                    "Exogenous variable '{name}' is set in initval. This is unusual -- exogenous shocks are typically zero at steady state."
+                    "Exogenous variable '{name}' is assigned in initval. Check that this initial value is intended for your simulation."
                 ),
                 fix: None,
                 related: Vec::new(),

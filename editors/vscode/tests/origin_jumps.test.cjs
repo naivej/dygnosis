@@ -120,7 +120,12 @@ Module._load = function(id, ...args) {
   return originalLoad.call(this, id, ...args);
 };
 const { registerEffectivePreview } = require("../out/preview");
-const { registerOriginJumps, parsePreviewNavigation, previewRowAt, writtenSourcePicks, macroOriginPicks, originJumpContributions } = require("../out/origin_jumps");
+const { registerOriginJumps, parsePreviewNavigation, previewRowAt, writtenSourcePicks, macroOriginPicks } = require("../out/origin_jumps");
+const contributed = require("../package.json").contributes;
+const originCommands = ["dygnosis.goToWrittenSource", "dygnosis.showMacroOrigins", "dygnosis.refreshEffectiveModel"];
+const originJumpContributions = { commands: contributed.commands.filter(item => originCommands.includes(item.command)),
+  menus: Object.fromEntries(Object.entries(contributed.menus).map(([key, items]) => [key, items.filter(item => originCommands.includes(item.command))])),
+  keybindings: contributed.keybindings.filter(item => originCommands.includes(item.command)) };
 const { DygnosisClient } = require("../out/client");
 Module._load = originalLoad;
 
@@ -239,7 +244,7 @@ test("source and macro pick labels retain scope, occurrence, kind and loop bindi
     { kind: "for", variable: "country", value: '"US"', directive_locations: [target(main, new Range(0, 0, 0, 9))], body_locations: [target("file:///project/body.inc", new Range(2, 0, 2, 3), null)] },
     { kind: "if", variable: null, value: null, directive_locations: [target()], body_locations: [] },
   ] });
-  assert.match(writtenSourcePicks(value)[0].description, /Dimension households.*Occurrence e1/);
+  assert.match(writtenSourcePicks(value)[0].description, /Dimension households.*Preview line 2/);
   const picks = macroOriginPicks(value);
   assert.deepEqual(picks.map(pick => pick.label), ['for · country="US" · directive', 'for · country="US" · body', "if · directive"]);
   assert.match(picks[1].description, /body\.inc:3/);

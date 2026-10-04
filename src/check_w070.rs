@@ -211,7 +211,7 @@ pub fn check_w070(model: &Model) -> Vec<Diagnostic> {
             Severity::Warning,
             "W070",
             format!(
-                "Parameter '{pname}' = {} is outside the conventional range {range}: {}. This is a warning, not an error \u{2014} override if intentional.",
+                "Parameter '{pname}' = {} is outside the conventional range {range}: {}. Check this name's meaning and value in your model.",
                 python_g(value),
                 bound.rationale
             ),

@@ -3094,7 +3094,7 @@ fn decl_hover_markdown(
         let mut parts = vec![format!("**Parameter**: `{word}`")];
         match assigned_number(model, word) {
             Some(n) => parts.push(format!("Value: `{n}`")),
-            None => parts.push("Value: *not assigned*".into()),
+            None => parts.push("Value: *not available to Dygnosis*".into()),
         }
         append_name_metadata(&mut parts, model, word, preferences);
         return Some(parts.join("\n\n"));

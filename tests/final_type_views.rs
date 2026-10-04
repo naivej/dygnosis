@@ -104,7 +104,7 @@ async fn hover_uses_final_types_and_definition_keeps_written_location() {
     for (name, expected, timing) in [
         ("q", "**Endogenous variable**", true),
         ("z", "**Parameter**", false),
-        ("e", "**Exogenous deterministic variable**", false),
+        ("e", "**Deterministic exogenous variable**", false),
         ("d", "**Exogenous variable**", false),
     ] {
         let character = SOURCE.lines().nth(9).unwrap().find(name).unwrap() as u32;

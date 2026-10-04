@@ -1988,7 +1988,9 @@ fn omitted(model: &Model) -> Vec<OmittedContext> {
     {
         out.push(OmittedContext {
             kind: "initialization".to_string(),
-            detail: "initval, endval, and histval blocks are not in the fragment".to_string(),
+            detail:
+                "initval, endval, histval, and filter_initial_state blocks are not in the fragment"
+                    .to_string(),
         });
     }
     let classic_execution = model.stoch_simul_span.is_some()

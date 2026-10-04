@@ -6,6 +6,8 @@ Choose a result with the keyboard or mouse. **Clear search** returns to the
 current topic. **Back** and **Forward** retain your reading position.
 **Copy topic link** copies a link that opens this topic in VS Code. The
 destination uses the installed Dygnosis extension and its local Help edition.
+An active-engine check absent from that edition has no topic link; the button
+is disabled with that reason.
 
 The command list, diagnostic explanations, recognized command options and MCP
 tool schemas below are generated from the shipped manifest and engine. The

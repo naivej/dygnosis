@@ -152,7 +152,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E999", ExplainEntry {
         title: "Additional errors truncated",
-        body: "More diagnostics were produced than are shown at once. Fix the visible errors first; the next analysis pass will surface anything that was previously hidden.",
+        body: "Dygnosis 0.11.7 does not emit this code. This explanation remains available for older results.",
         kind: ExplainKind::Added,
     }),
     ("I050", ExplainEntry {
@@ -182,17 +182,17 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W010", ExplainEntry {
         title: "Parameter declared but never assigned",
-        body: "A name appears in the `parameters` block but no assignment was found in the parameter section or in `steady_state_model`. At runtime, the parameter will be undefined and most computations will fail.\n\n**Fix**\n\nAssign a numerical value, or remove the declaration if the parameter is no longer used.",
+        body: "A parameter is declared, but Dygnosis found no assignment to it in the parameter section or `steady_state_model`. Dygnosis does not run MATLAB or external calibration files.\n\n**Next step**\n\nAssign a value before the parameter is used, or confirm that the intended external code supplies it. Remove the declaration if it is no longer needed.",
         kind: ExplainKind::Added,
     }),
     ("W011", ExplainEntry {
         title: "Parameter assignment cannot be evaluated",
-        body: "An assignment like `phi = 1/(1-beta)` could not be evaluated because one or more right-hand-side symbols are not yet defined. The parameter falls back to undefined.\n\n**Fix**\n\nReorder the parameter section so that dependencies appear before dependents.",
+        body: "Dygnosis could not obtain a number from this parameter assignment. A referenced value may be unavailable at that point, or the expression may need a function or external code that Dygnosis does not evaluate. This Warning does not establish what MATLAB will compute.\n\n**Next step**\n\nCheck the expression and assignment order. For example, assign `beta` before evaluating `phi = 1/(1-beta)`. If external code supplies the value, confirm that it runs before the parameter is used.",
         kind: ExplainKind::Added,
     }),
     ("W012", ExplainEntry {
-        title: "Undeclared helper variable in parameter section",
-        body: "An identifier appears on the right-hand side of a parameter assignment but is not declared as a parameter or known helper variable.\n\n**Fix**\n\nAdd a declaration, or replace the helper with an explicit numeric value.",
+        title: "Helper assignment without a declaration",
+        body: "A name is assigned without a declaration on a line before the first `model`, `initval`, `steady_state_model` or `shocks` block. If none of those blocks is present, the check considers all helper assignments. The name may be intended as a model parameter or only as a helper value.\n\n**Next step**\n\nIf the name is a model parameter, declare it in `parameters`. If it is only a helper value, confirm that the assignment is intentional.",
         kind: ExplainKind::Added,
     }),
     ("W020", ExplainEntry {
@@ -222,12 +222,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W051", ExplainEntry {
         title: "Exogenous variable set in initval",
-        body: "Setting an exogenous variable in `initval` has no effect on the steady-state computation. Shocks are zero at the deterministic steady state by construction.",
+        body: "A variable declared with `varexo` is assigned in `initval`. This can be intentional in a perfect foresight model: a following `steady` command computes the steady state conditional on the exogenous values in `initval`. In a stochastic model, exogenous innovations use zero as their initial value.\n\n**Next step**\n\nCheck whether the assignment matches the intended simulation. This Warning does not compute a steady state.",
         kind: ExplainKind::Added,
     }),
     ("W052", ExplainEntry {
         title: "Endogenous variable missing from initval",
-        body: "The `initval` block does not provide an initial guess for every endogenous variable. The solver will start from zero for the missing entries, which may slow or prevent convergence on nonlinear models.",
+        body: "The `initval` block omits one or more endogenous variables. Dynare assumes zero for variables omitted from `initval`; the block can supply solver guesses and, in a perfect foresight model, initial or terminal conditions.\n\n**Next step**\n\nCheck the omitted names and provide values where needed for your model. Dygnosis does not test convergence or compute a solution.",
         kind: ExplainKind::Added,
     }),
     ("E059", ExplainEntry {
@@ -247,7 +247,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W070", ExplainEntry {
         title: "Parameter outside its conventional range",
-        body: "A parameter assignment falls outside the theoretically admissible range for its standard interpretation. The conventional-range table is opinionated but conservative: it flags values that violate the *theoretical* admissible range under the parameter's conventional meaning, not values that simply look unusual.\n\n**Common causes**\n\n- Unit error: e.g. `beta = 99` when 0.99 was meant\n- Sign error on a quantity that must be non-negative   (variance, standard deviation, depreciation rate)\n- Gross-vs-net confusion on a rate parameter\n\n**Fix**\n\nCorrect the value, or — if the calibration is intentional — ignore the warning.",
+        body: "A parameter's name matches a conventional meaning in Dygnosis's range table, and its value is outside that range. The name alone does not establish what the parameter means in your model.\n\n**Next step**\n\nCheck the meaning, units and sign. For example, `beta = 99` may mean that `0.99` was intended. Keep the value and hide this Warning if your model uses a different meaning or an intentional calibration.",
         kind: ExplainKind::Added,
     }),
     ("E090", ExplainEntry {
@@ -261,8 +261,8 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Added,
     }),
     ("W092", ExplainEntry {
-        title: "Stochastic singularity",
-        body: "There are more observed variables (``varobs``) than shocks (structural shocks plus measurement errors). The likelihood is then stochastically singular and estimation cannot proceed: the model cannot generate enough independent variation to match the observed series.\n\n**Fix**\n\nAdd structural shocks, add measurement errors on the observed variables (an ``stderr`` on an observed variable), or reduce the number of observed variables so that observables ≤ shocks.",
+        title: "More observed variables than shock sources",
+        body: "Dygnosis counts more distinct declared endogenous names in `varobs` than distinct names with the final declared type `varexo` plus endogenous measurement-error entries in `shocks` or `estimated_params`. Dynare's estimation guidance requires at least as many shocks or measurement errors as observed variables to avoid stochastic singularity. This count does not evaluate the likelihood, shock covariance matrix or identification.\n\n**Next step**\n\nReview the observed variables and written shock sources. If the model needs them, add structural shocks or measurement errors, such as `stderr y_obs` in `estimated_params`. Run Dynare to check the numerical estimation setup.",
         kind: ExplainKind::Added,
     }),
     ("E093", ExplainEntry {
@@ -291,8 +291,8 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Shared,
     }),
     ("W102", ExplainEntry {
-        title: "planner_discount is not a valid discount factor",
-        body: "``planner_discount`` must be a discount factor in the interval (0, 1]. A value outside this range is almost certainly a mistake (for example, entering a discount rate instead of a factor).\n\n**Fix**\n\nSet ``planner_discount`` to a value such as 0.99.",
+        title: "planner_discount outside (0, 1]",
+        body: "The written value of `planner_discount` is outside the conventional discount-factor range (0, 1]. Dygnosis adds this Warning; it does not report a Dynare preprocessor refusal.\n\n**Next step**\n\nCheck whether you entered a discount rate instead of a factor, and confirm the value intended for your policy objective.",
         kind: ExplainKind::Added,
     }),
     ("E103", ExplainEntry {
@@ -307,7 +307,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W110", ExplainEntry {
         title: "Shock correlation outside [-1, 1]",
-        body: "A ``corr`` entry in the shocks block sets a correlation whose magnitude exceeds one. A correlation coefficient must lie in [-1, 1], and the implied covariance matrix would not be positive semidefinite.\n\n**Fix**\n\nSet the correlation to a value in [-1, 1].",
+        body: "A `corr` entry in the `shocks` block sets a correlation outside [-1, 1]. Dygnosis checks this written value; it does not evaluate the shock covariance matrix.\n\n**Fix**\n\nSet the correlation to a value in [-1, 1].",
         kind: ExplainKind::Added,
     }),
     ("E111", ExplainEntry {
@@ -327,7 +327,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W120", ExplainEntry {
         title: "Stochastic command with no stochastic exogenous variable",
-        body: "``stoch_simul`` / ``estimation`` drive the model with stochastic shocks, but the model declares no stochastic ``varexo``. ``varexo_det`` declarations are deterministic and do not count as stochastic shocks.\n\n**Fix**\n\nDeclare at least one stochastic exogenous variable (a dummy ``varexo`` plus a shocks-block entry is enough if the model is otherwise deterministic).",
+        body: "The file contains `stoch_simul` or `estimation`, but Dygnosis finds no written stochastic exogenous declaration. Names also declared with `varexo_det` are excluded from this check. This Warning does not establish whether the numerical procedure will succeed.\n\n**Next step**\n\nReview the intended command and shock setup. If the model needs stochastic shocks, declare them with `varexo` and use them in the model equations. An unused dummy shock can cause a separate Dynare refusal.",
         kind: ExplainKind::Added,
     }),
     ("W121", ExplainEntry {

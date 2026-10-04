@@ -327,7 +327,7 @@ fn shape_w051_varexo_in_initval() {
     assert_eq!(w051.severity, 2);
     assert!(w051
         .message
-        .contains("Exogenous variable 'e' is set in initval."));
+        .contains("Exogenous variable 'e' is assigned in initval."));
     assert_span(&text, w051, "e = 0.1;");
     let w052 = find_code(&got, "W052");
     assert_eq!(w052.severity, 2);

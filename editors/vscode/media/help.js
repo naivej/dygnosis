@@ -17,6 +17,8 @@
     controls.edition.textContent = topic.edition ?? `Edition ${version}`;
     controls.breadcrumb.textContent = `Help › ${topic.title}`;
     controls.article.innerHTML = topic.html;
+    controls.permalink.disabled = !topics.some(topic => topic.id === id);
+    controls.permalink.title = controls.permalink.disabled ? 'This check is not in this Help edition. A topic link is unavailable.' : '';
     controls.back.disabled = state.index === 0; controls.forward.disabled = state.index === state.history.length - 1;
     for (const button of controls.contents.querySelectorAll('button')) { if (button.dataset.topic === id) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); }
     search();

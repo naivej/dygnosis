@@ -215,7 +215,13 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
       status.discovery_failures.length ? "Coverage is incomplete: folder discovery failed." :
       status.counts.failed || status.counts.incomplete ? "Coverage is incomplete. Open affected models for details." : undefined;
     view.description = `${status.counts.checked} checked`;
-    tree.replace(treeRows(status, folders()));
+    const rows = treeRows(status, folders());
+    if (status.discovery_failures.length || status.counts.failed || status.counts.incomplete || status.roots.every(root => root.state === "excluded")) {
+      const help = new ProjectItem("help", "Open Dygnosis Help", "question");
+      help.command = { command: "dygnosis.openHelp", title: "Open Dygnosis Help", arguments: ["project-checks"] };
+      rows.push(help);
+    }
+    tree.replace(rows);
   };
   const current = (client: ProjectConnection, expectedInstance: number, expectedGeneration: number, expectedSnapshot: string): boolean =>
     !disposed && service.client === client && service.currentInstance === expectedInstance && connection === client &&

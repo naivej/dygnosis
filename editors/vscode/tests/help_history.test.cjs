@@ -39,6 +39,7 @@ test('reading history preserves each active-engine explanation and edition acros
   live.receive({ type: 'open', destination: 'diagnostics' }); live.back();
   assert.equal(live.controls.get('article').innerHTML, extra.html);
   assert.equal(live.controls.get('edition').textContent, extra.edition);
+  assert.equal(live.controls.get('permalink').disabled, true, 'an unknown active-engine code has no bundled topic link');
   const saved = live.state();
   assert.equal(saved.history[1].extra, undefined, 'persist source Markdown, never rendered HTML');
   const restored = reader(saved), historyExtras = saved.history.map(entry => entry.explanation ? extra : undefined);

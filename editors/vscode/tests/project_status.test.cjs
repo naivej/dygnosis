@@ -210,6 +210,18 @@ test("folder discovery failure cannot make another folder's successful roots loo
   assert.equal(rows(env)[1].children[0].label, "Discovery failed"); assert.equal(rows(env)[1].children[0].tooltip, "Permission denied");
   registration.dispose();
 });
+
+test("completed empty, excluded, incomplete and failed coverage offers contextual Help", async () => {
+  const states = [facts([]), facts([root("excluded")]), facts([root("incomplete")]), facts([root("failed")]),
+    facts([], { coverage_complete: false, discovery_failures: [{ folder_uri: project, failure: "Permission denied" }] })];
+  for (const status of states) {
+    const env = setup({ status }), registration = registerProjectStatus(env.service); await flush();
+    const help = env.host.views[0].options.treeDataProvider.getChildren().find(row => row.id === "help");
+    assert.equal(help?.command?.command, "dygnosis.openHelp");
+    assert.deepEqual(help.command.arguments, ["project-checks"]);
+    registration.dispose();
+  }
+});
 test("only the chosen owner is sent for priority, including include roots, null and untitled", async () => {
   const doc = document(`${project}/fragment.inc`), env = setup({ editor: { document: doc } });
   const registration = registerProjectStatus(env.service); await flush();

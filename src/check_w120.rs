@@ -46,7 +46,7 @@ pub fn check_w120(model: &Model) -> Vec<Diagnostic> {
         Severity::Warning,
         "W120",
         format!(
-            "'{name}' is a stochastic command but the model declares no stochastic exogenous variable. Dynare requires at least one 'varexo'; add a (dummy) shock and a shocks-block entry for it."
+            "'{name}' is a stochastic command, but no stochastic exogenous declaration was found. Review the intended command and shock setup."
         ),
     )]
 }

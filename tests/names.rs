@@ -492,7 +492,7 @@ async fn displayed_include_preferences_are_independent_of_its_owner() {
     );
     let deterministic = hover(server, position(&root, text, "d $", 0)).await;
     assert!(
-        deterministic.contains("Exogenous deterministic variable")
+        deterministic.contains("Deterministic exogenous variable")
             && deterministic.contains("`d_{t+1}`"),
         "{deterministic}"
     );

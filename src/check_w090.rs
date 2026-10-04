@@ -127,7 +127,7 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
                 Severity::Warning,
                 "W092",
                 format!(
-                    "Stochastic singularity: {n_obs} observed variable(s) but only {n_shocks} shock(s) (structural shocks plus measurement errors). The likelihood is stochastically singular; add measurement errors or shocks, or reduce the number of observed variables."
+                    "{n_obs} observed variable(s) but only {n_shocks} shock source(s) found (structural shocks plus measurement errors). Review the observed variables and shock sources before estimation."
                 ),
             ));
         }
