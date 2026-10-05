@@ -22,6 +22,7 @@
           "class": "endogenous",
           "name": "i",
           "timing": 0,
+          "dynare_timing": 0,
           "timing_class": "static"
         }
       ],

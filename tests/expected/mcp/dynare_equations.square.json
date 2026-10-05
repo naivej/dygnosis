@@ -14,23 +14,27 @@
           "class": "endogenous",
           "name": "is",
           "timing": 0,
+          "dynare_timing": 0,
           "timing_class": "predetermined"
         },
         {
           "class": "parameter",
           "name": "rhos",
-          "timing": 0
+          "timing": 0,
+          "dynare_timing": 0
         },
         {
           "class": "endogenous",
           "name": "is",
           "timing": -1,
+          "dynare_timing": -1,
           "timing_class": "predetermined"
         },
         {
           "class": "varexo",
           "name": "e",
-          "timing": 0
+          "timing": 0,
+          "dynare_timing": 0
         }
       ],
       "index": 0,
@@ -52,12 +56,14 @@
           "class": "endogenous",
           "name": "i",
           "timing": 0,
+          "dynare_timing": 0,
           "timing_class": "static"
         },
         {
           "class": "endogenous",
           "name": "is",
           "timing": 0,
+          "dynare_timing": 0,
           "timing_class": "predetermined"
         }
       ],
@@ -83,6 +89,7 @@
           "class": "endogenous",
           "name": "i",
           "timing": 0,
+          "dynare_timing": 0,
           "timing_class": "static"
         }
       ],

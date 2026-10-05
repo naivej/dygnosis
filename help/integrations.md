@@ -96,6 +96,22 @@ Omit `document_uri` to use the root itself. Choose an available `.mod` or `.dyn`
 
 The response contains the shared MCP model counts and timing fields, plus `schema_version`, `root_uri`, `document_uri`, `document_version`, `revision`, `complete`, and `owner_roots`. `document_version` is null for a document that is not open. The opaque revision covers the root's settings and current input paths and contents, including unsaved overlays, disk dependencies, and missing candidates. Opening or closing an editor overlay with identical text keeps the revision; changed text, dependency availability, or settings invalidate it. Treat revisions as equality tokens within the current server instance.
 
+Timing classes, lists, counts, and displayed offset sets use the shared
+predetermined-variable convention conversion. For a valid marked aggregate
+endogenous name in a dynamic equation or model-local definition, the Dynare
+offset is the written offset minus one. Static-only replacement equations do
+not contribute to dynamic timing; heterogeneous model equations keep their
+written offsets. This conversion does not reproduce the other Transform steps
+or predict a solver result.
+
+In MCP `dynare_equations`, each identifier's existing `timing` remains its
+**written offset**. The additive `dynare_timing` is its **offset after the
+predetermined-variable convention conversion**. Unshifted uses have equal
+values. Use the returned `timing_class` and model-info summary counts for
+classification. Older engines omit `dynare_timing`; clients must not invent a
+shifted value when it is absent. Equation text, comparisons, extraction, and
+effective-model text keep written offsets.
+
 Additive `statements`, `declarations`, and `equations` describe the whole chosen root. Source records carry verified `location`, `segments`, `anchor`, and macro context where available. A span split across files has separate segments rather than an invented continuous range. Statements also provide safe `lens_anchor` values for client actions. `related_files` lists includes and companion files; `block_categories` supplies the recognized category registry and defaults.
 
 Equation numbers are **Dygnosis numbers before transformation**. Aggregate equations and each heterogeneity dimension have their own sequence. Removed equations and static replacement rows are not counted. These numbers describe the file being edited and may differ from numbers after Dynare adds auxiliary equations for MATLAB.

@@ -3,10 +3,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::model::{Complementarity, Equation, Model};
-use crate::model_info::{
-    classify_aggregate_variable_timing, classify_variable_timing, TimingClass,
-};
 use crate::span::Span;
+use crate::timing::{TimingAnalysis, TimingClass};
 
 /// One counted model equation (`!is_local && !static_tag`). `index` is 0-based
 /// among those rows and is the identity.
@@ -35,7 +33,10 @@ pub(crate) struct HeterogeneousEquationBlockRows {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EquationIdent {
     pub name: String,
+    /// Written offset in the equation's source.
     pub timing: i32,
+    /// Offset after predetermined-variable convention conversion only.
+    pub dynare_timing: i32,
     pub class: IdentClass,
     pub timing_class: Option<TimingClass>,
 }
@@ -73,19 +74,19 @@ pub struct CountGap {
 }
 
 pub fn equations(model: &Model) -> Vec<EquationRow> {
-    let timing = classify_aggregate_variable_timing(model);
+    let timing = TimingAnalysis::new(model);
     let mut rows = Vec::new();
     for eq in &model.equations {
         if !is_counted(eq) {
             continue;
         }
-        rows.push(equation_row(model, eq, rows.len(), &timing));
+        rows.push(equation_row(model, eq, rows.len(), &timing, None));
     }
     rows
 }
 
 pub(crate) fn heterogeneous_equations(model: &Model) -> Vec<HeterogeneousEquationBlockRows> {
-    let timing = classify_variable_timing(model);
+    let timing = TimingAnalysis::new(model);
     let mut next_index = HashMap::new();
     model
         .heterogeneous_models
@@ -96,7 +97,13 @@ pub(crate) fn heterogeneous_equations(model: &Model) -> Vec<HeterogeneousEquatio
             let mut rows = Vec::new();
             for eq in &block.equations {
                 if is_counted(eq) {
-                    rows.push(equation_row(model, eq, *index, &timing));
+                    rows.push(equation_row(
+                        model,
+                        eq,
+                        *index,
+                        &timing,
+                        Some(block.dimension),
+                    ));
                     *index += 1;
                 }
             }
@@ -113,7 +120,8 @@ fn equation_row(
     model: &Model,
     eq: &Equation,
     index: usize,
-    timing: &HashMap<String, crate::model_info::TimingInfo>,
+    timing: &TimingAnalysis,
+    heterogeneous_dimension: Option<crate::intern::Name>,
 ) -> EquationRow {
     let idents = model
         .ident_refs(eq)
@@ -122,13 +130,23 @@ fn equation_row(
             let name = model.name(reference.name).to_string();
             let class = ident_class(model, reference.name);
             let timing_class = if class == IdentClass::Endogenous {
-                timing.get(&name).map(|info| info.class)
+                let classes = if heterogeneous_dimension.is_some() {
+                    &timing.all
+                } else {
+                    &timing.aggregate
+                };
+                classes.get(&name).map(|info| info.class)
             } else {
                 None
             };
             EquationIdent {
                 name,
                 timing: reference.timing,
+                dynare_timing: if heterogeneous_dimension.is_some() {
+                    reference.timing
+                } else {
+                    timing.aggregate_dynare_offset(reference.name, reference.timing)
+                },
                 class,
                 timing_class,
             }
@@ -183,13 +201,17 @@ pub fn explain_equation(row: &EquationRow) -> String {
         (false, true) => "dynamic".to_string(),
         (true, true) => "static, dynamic".to_string(),
     };
-    let mut out = format!("### {title}\n\nindex: {}\nflags: {flags}\n\n", row.index);
+    let mut out = format!(
+        "### {title}\n\nindex: {}\nflags: {flags}\n\nDynare offsets apply only the predetermined-variable convention conversion.\n\n",
+        row.index
+    );
     for id in &row.idents {
         out.push_str(&format!(
-            "- `{}`: {}, offset {}",
+            "- `{}`: {}, written offset {}, Dynare offset {}",
             id.name,
             id.class.as_str(),
-            id.timing
+            id.timing,
+            id.dynare_timing
         ));
         if let Some(tc) = id.timing_class {
             out.push_str(", ");

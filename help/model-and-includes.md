@@ -5,9 +5,13 @@ aggregate counts and timing, each heterogeneity dimension, and related files.
 All facts come from the Dygnosis engine. Aggregate counts and dimension counts
 stay separate. Expand a timing class to see its variables.
 
-**Static** means no written lead or lag; **Predetermined** has lags and no
+**Static** means no lead or lag; **Predetermined** has lags and no
 leads; **Forward-looking** has leads and no lags; **Mixed** has both. These
-classes describe equation uses before transformation. An endogenous name with
+classes use Dynare's end-of-period convention: a valid
+`predetermined_variables k;` converts written `k(+1)` to current `k`, and
+written `k` to `k(-1)`, for timing analysis. Static-only replacement rows do
+not contribute; heterogeneous model equations keep their written offsets.
+Equation text stays as written. An endogenous name with
 no equation use also has no lead or lag. The labels do not give a solver result.
 Aggregate counts cover the aggregate model; each heterogeneity dimension has
 its own declarations, equations and timing lists.
@@ -88,7 +92,7 @@ keyboard through **Focus Status Bar**.
 
 The counts describe the written model before transformation. Each dimension
 has its own count domain; its counts are shown separately in the tooltip.
-Timing classes describe written leads and lags. These are model facts, not
+Timing classes use the timing convention described above. These are model facts, not
 solver results. Counts refresh while you edit. Updating, incomplete expansion,
 or unavailable model information replaces the numbers until current facts are
 available. The bar is hidden on `.inc` files and read-only previews.

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Timing classes, model summaries, hovers, colors and Outline use Dynare's
+  end-of-period convention for valid `predetermined_variables` marks. Written
+  equations stay unchanged. MCP identifier `timing` remains the written offset;
+  the added `dynare_timing` gives the offset after this convention conversion.
+
 ## v0.11.7
 
 - **Dygnosis: Open Help** opens one offline reference with search, reading history, topic links, examples and feature guides. Help is available before a model opens and when the engine is unavailable. First-use guidance and persistent Explorer actions make it easy to find.

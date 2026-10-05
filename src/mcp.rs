@@ -430,6 +430,7 @@ fn equation_row_json(
             let mut v = json!({
                 "name": id.name,
                 "timing": id.timing,
+                "dynare_timing": id.dynare_timing,
                 "class": id.class.as_str(),
             });
             if let Some(tc) = id.timing_class {
@@ -1816,7 +1817,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_model_info",
         input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "Return aggregate and per-dimension names, counts, written timing and block flags. These are facts before equation transformation, not numerical results. Incomplete expansion withholds authoritative counts."
+        description = "Return aggregate and per-dimension names, counts, timing classes and block flags. Classes and timing counts use offsets after the predetermined-variable convention conversion, without other equation transformations or numerical results. Incomplete expansion withholds authoritative counts."
     )]
     fn model_info_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
         let info = match nonempty_map(params.files.as_ref()) {
@@ -1953,7 +1954,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_equations",
         input_schema = mcp_input_schema::<EquationsParams>(),
-        description = "List aggregate and per-dimension equations with text, identifiers and verified source locations. Lines and Unicode-scalar columns are one-based. Count gap and index filter apply to aggregate equations; name searches both kinds. Numbers are before transformation."
+        description = "List aggregate and per-dimension written equations, identifiers and verified source locations. Identifier timing is the written offset; dynare_timing is the offset after the predetermined-variable convention conversion, not full Transform output. Use timing_class and model-info counts for classification. Older engines omit dynare_timing; do not infer it. Lines and Unicode-scalar columns are one-based. Count gap and index filter apply to aggregate equations; name searches both kinds. Equation numbers are before transformation."
     )]
     fn equations_tool(&self, Parameters(params): Parameters<EquationsParams>) -> CallToolResult {
         let index = params.index.map(|i| i as usize);
