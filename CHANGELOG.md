@@ -9,6 +9,8 @@
 - An empty aggregate `model; end;` reports `syntax error, unexpected END` on
   `end`, before later unused-variable checks or writing summaries.
 - A refused namespace-qualified assignment reports E275 without the duplicate assignment-evaluation warning.
+- Plain comparison equations participate in the preprocessor equation count check.
+- Exogenous assignments in `initval` stay quiet in perfect-foresight workflows, including permanent shocks.
 
 - Incomplete required includes, parsing, or macro expansion withhold MCP equation counts. Model comparison waits for both inputs to be complete.
 - MCP tools reject a nonempty file map with a missing or invalid active root using an explicit invalid-parameters error. A matching root still permits an empty text overlay.

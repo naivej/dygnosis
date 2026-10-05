@@ -46,7 +46,7 @@ fn stochastic_without_perfect_foresight(model: &Model) -> bool {
     stochastic && !perfect_foresight_command(model)
 }
 
-fn perfect_foresight_command(model: &Model) -> bool {
+pub(crate) fn perfect_foresight_command(model: &Model) -> bool {
     !model.simul_spans.is_empty()
         || model.perfect_foresight_solver_span.is_some()
         || model.pfee_solver_span.is_some()

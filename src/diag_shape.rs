@@ -767,6 +767,9 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_w051(model: &Model) -> Vec<Diagnostic> {
+    if crate::check_w211::perfect_foresight_command(model) {
+        return Vec::new();
+    }
     let det: HashSet<Name> = model
         .deterministic_exogenous
         .iter()
