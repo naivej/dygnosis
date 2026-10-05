@@ -234,9 +234,27 @@ Both sides use live overlays and their own root settings. Compare observes disk 
 
 ## MCP input schemas
 
+`dynare_equations` uses the model-info completeness decision for required
+includes, parsing, and macro expansion. Incomplete input returns
+`status: "incomplete"`, an explanatory `message`, `equations: []`, and
+`count_gap: null`, including filtered requests. `dynare_compare_models`
+returns only the incomplete status and message when either side is incomplete;
+it supplies no diff arrays, Markdown, or navigation claims. A missing include
+uses model-expansion wording.
+
+For `dynare_diagnose`, `dynare_model_info`, `dynare_equations`,
+`dynare_expand`, `dynare_related_files`, `dynare_find_references`, and
+`dynare_rename`, a nonempty `files` map requires `active_file` to match a key
+exactly. A missing key returns JSON-RPC invalid parameters (`-32602`):
+`"<key>" is not in the file map`. Omitting the key returns
+`active_file is required with a nonempty files map`. These errors return no
+successful model result. With a matching key, omitted `file_content` uses
+the map text; an explicit empty string overlays it with empty text. An absent
+or empty map retains single-file behavior.
+
 Dygnosis advertises its parameterized tools with an explicit JSON Schema
 draft-07 declaration. Tool names, arguments, required fields, nullable values,
-defaults, and results retain their existing meanings. The tool with no
+defaults, and valid-input results retain their existing meanings. The tool with no
 arguments retains its empty object schema.
 
 The minimum supported editor, VS Code 1.102.0, validates draft-07 schemas

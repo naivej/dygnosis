@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use dygnosis::{compare_models_with_sources, dynare_compare_models, parse, CompareSource};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 fn row<'a>(diff: &'a Value, id: &str) -> &'a Value {
     diff["navigation"]["rows"]
@@ -218,14 +218,14 @@ fn scopes_and_unmatched_rows_join_the_correct_output() {
 }
 
 #[test]
-fn incomplete_input_is_explicitly_unavailable_without_poisoning_other_side() {
+fn incomplete_input_withholds_mcp_comparison_and_navigation() {
     let before = "@#include \"missing-compare.inc\"\nvar y; model; y=1; end;";
     let after = "var y; model; y=2; end;";
     let diff = dynare_compare_models(before, after, None, None, None, None, None);
-    assert_eq!(diff["navigation"]["before"]["complete"], false);
-    assert_eq!(diff["navigation"]["after"]["complete"], true);
-    assert!(row(&diff, "/changed_equations/0")["before"].is_null());
-    assert!(row(&diff, "/changed_equations/0")["after"].is_object());
+    assert_eq!(
+        diff,
+        json!({"status": "incomplete", "message": "Model expansion is incomplete"})
+    );
 }
 
 #[test]
@@ -238,16 +238,11 @@ fn unnamed_mcp_compare_does_not_resolve_absolute_host_includes_for_navigation() 
         include.to_string_lossy().replace('\\', "/")
     );
     let after = before.replace("z=1", "z=2");
-    let mut diff = dynare_compare_models(&before, &after, None, None, None, None, None);
-    assert_eq!(diff["navigation"]["before"]["complete"], false);
-    assert_eq!(diff["navigation"]["after"]["complete"], false);
-    for navigation in diff["navigation"]["rows"].as_array().unwrap() {
-        assert!(
-            navigation["before"].is_null() && navigation["after"].is_null(),
-            "false host target: {navigation}"
-        );
-    }
-    diff.as_object_mut().unwrap().remove("navigation");
+    let diff = dynare_compare_models(&before, &after, None, None, None, None, None);
+    assert_eq!(
+        diff,
+        json!({"status": "incomplete", "message": "Model expansion is incomplete"})
+    );
     let legacy = compare_models_with_sources(
         &parse(&before),
         &parse(&after),
@@ -261,9 +256,8 @@ fn unnamed_mcp_compare_does_not_resolve_absolute_host_includes_for_navigation() 
         }),
     )
     .to_json();
-    assert_eq!(diff, legacy);
-    assert_eq!(diff["common_endogenous"], serde_json::json!(["z"]));
-    assert_eq!(diff["changed_equations"][0]["text_old"], "z = 1");
+    assert_eq!(legacy["common_endogenous"], serde_json::json!(["z"]));
+    assert_eq!(legacy["changed_equations"][0]["text_old"], "z = 1");
 }
 
 #[test]

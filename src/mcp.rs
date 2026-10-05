@@ -111,6 +111,16 @@ pub(crate) fn macro_incomplete_status() -> Value {
     json!({"status": "incomplete", "message": MACRO_INCOMPLETE_MESSAGE})
 }
 
+fn incomplete_model_status(model: &Model, includes_complete: bool) -> Option<Value> {
+    if model.macro_incomplete() {
+        Some(macro_incomplete_status())
+    } else if !includes_complete || !crate::model_map::parser_complete(model) {
+        Some(crate::model_info::model_incomplete_status())
+    } else {
+        None
+    }
+}
+
 /// Registered tool names in registration order.
 pub fn registered_tool_names() -> Vec<&'static str> {
     TOOL_NAMES.to_vec()
@@ -202,11 +212,8 @@ pub fn dynare_model_info(
                 crate::macro_expand::required_includes_complete(file_content),
             )
         };
-    if model.macro_incomplete() {
-        return macro_incomplete_status();
-    }
-    if !includes_complete || !crate::model_map::parser_complete(&model) {
-        return crate::model_info::model_incomplete_status();
+    if let Some(status) = incomplete_model_status(&model, includes_complete) {
+        return status;
     }
     model_info_json(&model)
 }
@@ -223,13 +230,10 @@ pub fn dynare_equations(
     index: Option<usize>,
 ) -> Value {
     let unit = mcp_unit(file_content, active_file, files);
-    if unit.model.macro_incomplete() || !unit.report.complete {
-        return json!({
-            "status": "incomplete",
-            "message": MACRO_INCOMPLETE_MESSAGE,
-            "equations": [],
-            "count_gap": null,
-        });
+    if let Some(mut status) = incomplete_model_status(&unit.model, unit.includes_complete) {
+        status["equations"] = json!([]);
+        status["count_gap"] = Value::Null;
+        return status;
     }
     let rows = equations(&unit.model);
     let heterogeneous = heterogeneous_equations(&unit.model);
@@ -478,6 +482,7 @@ struct McpUnit {
     root_file: Option<String>,
     revision: String,
     complete: bool,
+    includes_complete: bool,
 }
 
 fn mcp_unit(
@@ -498,8 +503,8 @@ impl McpUnit {
     fn free(file_content: &str) -> Self {
         use std::hash::{Hash, Hasher};
         let report = expand_report(file_content);
-        let complete = report.navigation_complete
-            && crate::macro_expand::required_includes_complete(file_content);
+        let includes_complete = crate::macro_expand::required_includes_complete(file_content);
+        let complete = report.navigation_complete && includes_complete;
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         file_content.hash(&mut hash);
         Self {
@@ -511,6 +516,7 @@ impl McpUnit {
             root_file: None,
             revision: format!("{:016x}", hash.finish()),
             complete,
+            includes_complete,
         }
     }
 
@@ -542,9 +548,9 @@ impl McpUnit {
                 heterogeneous_row_origins: Vec::new(),
             });
         let mut sources = HashMap::new();
-        let complete = report.navigation_complete
-            && ws.includes_complete(active)
-            && ws.input_snapshot_is_current(active);
+        let includes_complete = ws.includes_complete(active);
+        let complete =
+            report.navigation_complete && includes_complete && ws.input_snapshot_is_current(active);
         for uri in ws.document_uris() {
             if let Some(src) = ws.get_source(&uri) {
                 sources.insert(uri, src.to_string());
@@ -559,6 +565,7 @@ impl McpUnit {
             root_file: Some(active.to_string()),
             revision,
             complete,
+            includes_complete,
         }
     }
 
@@ -677,8 +684,10 @@ pub fn dynare_compare_models(
         active_file_b,
         first_nonempty_files(files_b, files),
     );
-    if model_a.macro_incomplete() || model_b.macro_incomplete() {
-        return macro_incomplete_status();
+    if let Some(status) = incomplete_model_status(&model_a, workspace_a.includes_complete(&root_a))
+        .or_else(|| incomplete_model_status(&model_b, workspace_b.includes_complete(&root_b)))
+    {
+        return status;
     }
     let diff = compare_models_with_sources(
         &model_a,
@@ -1596,7 +1605,7 @@ struct IncludeMapParams {
     /// Full root text. Supply this when files is absent or empty. With a nonempty map, it replaces the active_file entry for this request.
     #[serde(default)]
     file_content: Option<String>,
-    /// Root key in a nonempty files map. It must exactly match a supplied key. A map is supplied text, not permission to read disk files.
+    /// Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). A map supplies text, not permission to read disk.
     #[serde(default)]
     active_file: Option<String>,
     /// Map of file keys to complete text, including executed includes. Use active_file to choose the root. An absent or empty map uses file_content only.
@@ -1697,7 +1706,7 @@ struct EquationsParams {
     /// Complete root .mod text. With a nonempty files map, it overlays the active_file entry. Without a map, only this supplied text is used.
     #[serde(default)]
     file_content: Option<String>,
-    /// Root key in the supplied files map. For nonempty maps it must match a key exactly; it is not a disk path to load.
+    /// Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). It is not a disk path to load.
     #[serde(default)]
     active_file: Option<String>,
     /// File-key to complete-text map, including executed includes. No disk files are read in map mode. A nonempty map needs an active_file root key.
@@ -1718,7 +1727,7 @@ struct FindReferencesParams {
     file_content: Option<String>,
     /// Exact name to find. Results skip comments and use one-based Unicode-scalar source coordinates.
     symbol: String,
-    /// Root key in the supplied files map. For nonempty maps it must match a key exactly; it is not a disk path to load.
+    /// Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). It is not a disk path to load.
     #[serde(default)]
     active_file: Option<String>,
     /// File-key to complete-text map, including executed includes. No disk files are read in map mode. A nonempty map needs an active_file root key.
@@ -1735,7 +1744,7 @@ struct RenameParams {
     old_name: String,
     /// Replacement identifier. An illegal identifier leaves text unchanged.
     new_name: String,
-    /// Root key in the supplied files map. For nonempty maps it must match a key exactly; it is not a disk path to load.
+    /// Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). It is not a disk path to load.
     #[serde(default)]
     active_file: Option<String>,
     /// File-key to complete-text map, including executed includes. No disk files are read in map mode. A nonempty map needs an active_file root key.
@@ -1750,27 +1759,38 @@ struct MappedSource<'a> {
     files: Option<&'a HashMap<String, String>>,
 }
 
-/// `None` = missing `file_content` on the single-file path, or nonempty map
-/// without a usable `active_file`.
+/// `None` means missing `file_content` on the single-file path. A nonempty
+/// map requires an exact root key and never falls back to single-file input.
 fn resolve_mapped<'a>(
     file_content: Option<&'a str>,
     active_file: Option<&'a str>,
     files: Option<&'a HashMap<String, String>>,
-) -> Option<MappedSource<'a>> {
+) -> Result<Option<MappedSource<'a>>, rmcp::ErrorData> {
     match nonempty_map(files) {
-        None => Some(MappedSource {
-            content: file_content?,
+        None => Ok(file_content.map(|content| MappedSource {
+            content,
             active: None,
             files: None,
-        }),
+        })),
         Some(files) => {
-            let active = active_file.filter(|a| files.contains_key(*a))?;
+            let active = active_file.ok_or_else(|| {
+                rmcp::ErrorData::invalid_params(
+                    "active_file is required with a nonempty files map",
+                    None,
+                )
+            })?;
+            if !files.contains_key(active) {
+                return Err(rmcp::ErrorData::invalid_params(
+                    format!("\"{active}\" is not in the file map"),
+                    None,
+                ));
+            }
             let content = file_content.unwrap_or_else(|| files[active].as_str());
-            Some(MappedSource {
+            Ok(Some(MappedSource {
                 content,
                 active: Some(active),
                 files: Some(files),
-            })
+            }))
         }
     }
 }
@@ -1801,16 +1821,21 @@ impl DygnosisMcp {
         input_schema = mcp_input_schema::<IncludeMapParams>(),
         description = "Check supplied model text and return code, severity, message and written source range. Lines and Unicode-scalar columns are one-based. A files map supplies includes; this mode does not read disk."
     )]
-    fn diagnose_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
+    fn diagnose_tool(
+        &self,
+        Parameters(params): Parameters<IncludeMapParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
         let diags = match resolve_mapped(
             params.file_content.as_deref(),
             params.active_file.as_deref(),
             params.files.as_ref(),
-        ) {
+        )? {
             Some(src) => dynare_diagnose(src.content, src.active, src.files),
             None => Vec::new(),
         };
-        tool_json(serde_json::to_value(diags).expect("diagnose json"))
+        Ok(tool_json(
+            serde_json::to_value(diags).expect("diagnose json"),
+        ))
     }
 
     #[tool(
@@ -1818,35 +1843,25 @@ impl DygnosisMcp {
         input_schema = mcp_input_schema::<IncludeMapParams>(),
         description = "Return aggregate and per-dimension names, counts, written timing and block flags. These are facts before equation transformation, not numerical results. Incomplete expansion withholds authoritative counts."
     )]
-    fn model_info_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
-        let info = match nonempty_map(params.files.as_ref()) {
-            None => dynare_model_info(params.file_content.as_deref().unwrap_or(""), None, None),
-            Some(files) => match params
-                .active_file
-                .as_deref()
-                .filter(|a| files.contains_key(*a))
-            {
-                Some(active) => {
-                    let content = params
-                        .file_content
-                        .as_deref()
-                        .unwrap_or_else(|| files[active].as_str());
-                    dynare_model_info(content, Some(active), Some(files))
-                }
-                None => dynare_model_info(
-                    params.file_content.as_deref().unwrap_or(""),
-                    None,
-                    Some(files),
-                ),
-            },
+    fn model_info_tool(
+        &self,
+        Parameters(params): Parameters<IncludeMapParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let info = match resolve_mapped(
+            params.file_content.as_deref(),
+            params.active_file.as_deref(),
+            params.files.as_ref(),
+        )? {
+            Some(src) => dynare_model_info(src.content, src.active, src.files),
+            None => dynare_model_info("", None, None),
         };
-        tool_json(info)
+        Ok(tool_json(info))
     }
 
     #[tool(
         name = "dynare_compare_models",
         input_schema = mcp_input_schema::<CompareModelsParams>(),
-        description = "Compare two supplied models by symbol kinds and metadata, proven parameter values, aggregate and per-dimension equations, and written shock setup. Each side keeps its own supplied includes. Returns structural changes and verified one-based source ranges, not numerical equivalence."
+        description = "Compare two supplied models by symbol kinds and metadata, proven parameter values, aggregate and per-dimension equations, and written shock setup. Each side keeps its own supplied includes. Incomplete input on either side returns incomplete without diff claims. Returns structural changes and verified one-based source ranges, not numerical equivalence."
     )]
     fn compare_models_tool(
         &self,
@@ -1871,16 +1886,16 @@ impl DygnosisMcp {
     fn find_references_tool(
         &self,
         Parameters(params): Parameters<FindReferencesParams>,
-    ) -> CallToolResult {
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
         let value = match resolve_mapped(
             params.file_content.as_deref(),
             params.active_file.as_deref(),
             params.files.as_ref(),
-        ) {
+        )? {
             Some(src) => dynare_find_references(src.content, &params.symbol, src.active, src.files),
             None => json!([]),
         };
-        tool_json(value)
+        Ok(tool_json(value))
     }
 
     #[tool(
@@ -1888,12 +1903,15 @@ impl DygnosisMcp {
         input_schema = mcp_input_schema::<RenameParams>(),
         description = "Rename a name. Skips comments. Without a files map, returns the rewritten text (or the original if the new name is not a legal identifier). With a map, returns only files that changed."
     )]
-    fn rename_tool(&self, Parameters(params): Parameters<RenameParams>) -> CallToolResult {
+    fn rename_tool(
+        &self,
+        Parameters(params): Parameters<RenameParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
         match resolve_mapped(
             params.file_content.as_deref(),
             params.active_file.as_deref(),
             params.files.as_ref(),
-        ) {
+        )? {
             Some(src) => {
                 let result = dynare_rename(
                     src.content,
@@ -1903,12 +1921,11 @@ impl DygnosisMcp {
                     src.files,
                 );
                 match result {
-                    Value::String(text) => tool_text(text),
-                    other => tool_json(other),
+                    Value::String(text) => Ok(tool_text(text)),
+                    other => Ok(tool_json(other)),
                 }
             }
-            None if nonempty_map(params.files.as_ref()).is_some() => tool_json(json!({})),
-            None => tool_text(String::new()),
+            None => Ok(tool_text(String::new())),
         }
     }
 
@@ -1953,41 +1970,23 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_equations",
         input_schema = mcp_input_schema::<EquationsParams>(),
-        description = "List aggregate and per-dimension equations with text, identifiers and verified source locations. Lines and Unicode-scalar columns are one-based. Count gap and index filter apply to aggregate equations; name searches both kinds. Numbers are before transformation."
+        description = "List aggregate and per-dimension equations with text, identifiers and verified source locations. Lines and Unicode-scalar columns are one-based. Count gap and index filter apply to aggregate equations; name searches both kinds. Numbers are before transformation. Incomplete required includes, parsing, or macro expansion return incomplete with no equations and a null count gap."
     )]
-    fn equations_tool(&self, Parameters(params): Parameters<EquationsParams>) -> CallToolResult {
+    fn equations_tool(
+        &self,
+        Parameters(params): Parameters<EquationsParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
         let index = params.index.map(|i| i as usize);
         let name = params.name.as_deref();
-        let payload = match nonempty_map(params.files.as_ref()) {
-            None => dynare_equations(
-                params.file_content.as_deref().unwrap_or(""),
-                None,
-                None,
-                name,
-                index,
-            ),
-            Some(files) => match params
-                .active_file
-                .as_deref()
-                .filter(|a| files.contains_key(*a))
-            {
-                Some(active) => {
-                    let content = params
-                        .file_content
-                        .as_deref()
-                        .unwrap_or_else(|| files[active].as_str());
-                    dynare_equations(content, Some(active), Some(files), name, index)
-                }
-                None => dynare_equations(
-                    params.file_content.as_deref().unwrap_or(""),
-                    None,
-                    Some(files),
-                    name,
-                    index,
-                ),
-            },
+        let payload = match resolve_mapped(
+            params.file_content.as_deref(),
+            params.active_file.as_deref(),
+            params.files.as_ref(),
+        )? {
+            Some(src) => dynare_equations(src.content, src.active, src.files, name, index),
+            None => dynare_equations("", None, None, name, index),
         };
-        tool_json(payload)
+        Ok(tool_json(payload))
     }
 
     #[tool(
@@ -1998,16 +1997,16 @@ impl DygnosisMcp {
     fn related_files_tool(
         &self,
         Parameters(params): Parameters<IncludeMapParams>,
-    ) -> CallToolResult {
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
         let value = match resolve_mapped(
             params.file_content.as_deref(),
             params.active_file.as_deref(),
             params.files.as_ref(),
-        ) {
+        )? {
             Some(src) => dynare_related_files(src.content, src.active, src.files),
             None => json!([]),
         };
-        tool_json(value)
+        Ok(tool_json(value))
     }
 
     #[tool(
@@ -2015,29 +2014,19 @@ impl DygnosisMcp {
         input_schema = mcp_input_schema::<IncludeMapParams>(),
         description = "Return model text after include and macro expansion, before equation transformation, with verified written source and macro locations. Lines and Unicode-scalar columns are one-based. complete=false means expansion is incomplete and authoritative equation counts or source jumps are withheld."
     )]
-    fn expand_tool(&self, Parameters(params): Parameters<IncludeMapParams>) -> CallToolResult {
-        let value = match nonempty_map(params.files.as_ref()) {
-            None => dynare_expand(params.file_content.as_deref().unwrap_or(""), None, None),
-            Some(files) => match params
-                .active_file
-                .as_deref()
-                .filter(|a| files.contains_key(*a))
-            {
-                Some(active) => {
-                    let content = params
-                        .file_content
-                        .as_deref()
-                        .unwrap_or_else(|| files[active].as_str());
-                    dynare_expand(content, Some(active), Some(files))
-                }
-                None => dynare_expand(
-                    params.file_content.as_deref().unwrap_or(""),
-                    None,
-                    Some(files),
-                ),
-            },
+    fn expand_tool(
+        &self,
+        Parameters(params): Parameters<IncludeMapParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let value = match resolve_mapped(
+            params.file_content.as_deref(),
+            params.active_file.as_deref(),
+            params.files.as_ref(),
+        )? {
+            Some(src) => dynare_expand(src.content, src.active, src.files),
+            None => dynare_expand("", None, None),
         };
-        tool_json(value)
+        Ok(tool_json(value))
     }
 
     #[tool(

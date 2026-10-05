@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "9df9c50ed7052cea0131163ad1ca2eb61eaeb600959e09edc25771e027170639",
+  "fingerprint": "cb7766a6967bccc8ca425386c34389d729ce376cc025b261c6477389749e6f4c",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -21,7 +21,7 @@
     },
     {
       "name": "dynare_compare_models",
-      "description": "Compare two supplied models by symbol kinds and metadata, proven parameter values, aggregate and per-dimension equations, and written shock setup. Each side keeps its own supplied includes. Returns structural changes and verified one-based source ranges, not numerical equivalence.",
+      "description": "Compare two supplied models by symbol kinds and metadata, proven parameter values, aggregate and per-dimension equations, and written shock setup. Each side keeps its own supplied includes. Incomplete input on either side returns incomplete without diff claims. Returns structural changes and verified one-based source ranges, not numerical equivalence.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -98,7 +98,7 @@
         "properties": {
           "active_file": {
             "default": null,
-            "description": "Root key in a nonempty files map. It must exactly match a supplied key. A map is supplied text, not permission to read disk files.",
+            "description": "Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). A map supplies text, not permission to read disk.",
             "type": [
               "string",
               "null"
@@ -129,13 +129,13 @@
     },
     {
       "name": "dynare_equations",
-      "description": "List aggregate and per-dimension equations with text, identifiers and verified source locations. Lines and Unicode-scalar columns are one-based. Count gap and index filter apply to aggregate equations; name searches both kinds. Numbers are before transformation.",
+      "description": "List aggregate and per-dimension equations with text, identifiers and verified source locations. Lines and Unicode-scalar columns are one-based. Count gap and index filter apply to aggregate equations; name searches both kinds. Numbers are before transformation. Incomplete required includes, parsing, or macro expansion return incomplete with no equations and a null count gap.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
           "active_file": {
             "default": null,
-            "description": "Root key in the supplied files map. For nonempty maps it must match a key exactly; it is not a disk path to load.",
+            "description": "Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). It is not a disk path to load.",
             "type": [
               "string",
               "null"
@@ -190,7 +190,7 @@
         "properties": {
           "active_file": {
             "default": null,
-            "description": "Root key in a nonempty files map. It must exactly match a supplied key. A map is supplied text, not permission to read disk files.",
+            "description": "Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). A map supplies text, not permission to read disk.",
             "type": [
               "string",
               "null"
@@ -304,7 +304,7 @@
         "properties": {
           "active_file": {
             "default": null,
-            "description": "Root key in the supplied files map. For nonempty maps it must match a key exactly; it is not a disk path to load.",
+            "description": "Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). It is not a disk path to load.",
             "type": [
               "string",
               "null"
@@ -395,7 +395,7 @@
         "properties": {
           "active_file": {
             "default": null,
-            "description": "Root key in a nonempty files map. It must exactly match a supplied key. A map is supplied text, not permission to read disk files.",
+            "description": "Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). A map supplies text, not permission to read disk.",
             "type": [
               "string",
               "null"
@@ -432,7 +432,7 @@
         "properties": {
           "active_file": {
             "default": null,
-            "description": "Root key in a nonempty files map. It must exactly match a supplied key. A map is supplied text, not permission to read disk files.",
+            "description": "Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). A map supplies text, not permission to read disk.",
             "type": [
               "string",
               "null"
@@ -469,7 +469,7 @@
         "properties": {
           "active_file": {
             "default": null,
-            "description": "Root key in the supplied files map. For nonempty maps it must match a key exactly; it is not a disk path to load.",
+            "description": "Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). It is not a disk path to load.",
             "type": [
               "string",
               "null"

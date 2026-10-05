@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Incomplete required includes, parsing, or macro expansion withhold MCP equation counts. Model comparison waits for both inputs to be complete.
+- MCP tools reject a nonempty file map with a missing or invalid active root using an explicit invalid-parameters error. A matching root still permits an empty text overlay.
 - The `dynare_equations` schema states that `index` starts at zero, matching the existing selector.
 - Help supports native **Find** in the open page. The header search still finds topics.
 - The equation CodeLens says **Jump to equation** or **Jump to N equations**. Its picker opens the written equation before transformation.

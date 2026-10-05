@@ -1420,7 +1420,7 @@ fn model_info_files_without_active_withholds_unexpanded_include_counts() {
 fn compare_models_drop_var_and_param_raw() {
     let a = read_mod("trend_rbc_gov_inv");
     let b = a
-        .replacen("    log_n    (long_name='log labor');", "", 1)
+        .replacen("    log_n    (long_name='log labor');", "    ;", 1)
         .replacen("betta   = 0.99;", "betta   = 0.95;", 1);
     assert_ne!(a, b, "mutations must change the file");
     let diff = dynare_compare_models(&a, &b, None, None, None, None, None);
@@ -2295,7 +2295,9 @@ fn dynare_equations_swff_map_matches_model_info() {
 
     let no_active = dynare_equations(&files["swff.mod"], None, Some(&files), None, None);
     let info_no_active = dynare_model_info(&files["swff.mod"], None, Some(&files));
-    assert_eq!(no_active["count_gap"]["n_equations"], 40);
+    assert_eq!(no_active["status"], "incomplete");
+    assert!(no_active["count_gap"].is_null());
+    assert_eq!(no_active["equations"], json!([]));
     assert_eq!(info_no_active["status"], "incomplete");
     assert!(info_no_active.get("n_equations").is_none());
 }
