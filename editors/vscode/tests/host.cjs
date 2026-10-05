@@ -35,6 +35,97 @@ async function writeObservedInput(service, filename, text) {
     await waitFor(() => observed, `native file observation for ${path.basename(filename)}`);
   } finally { subscription.dispose(); }
 }
+function diagnosticCode(diagnostic) {
+  return typeof diagnostic.code === "object" ? diagnostic.code.value : diagnostic.code;
+}
+async function metadataCompletion(service, filename, source, prefix, placeholder, replacement) {
+  await writeObservedInput(service, filename, source);
+  const document = await vscode.workspace.openTextDocument(filename);
+  const editor = await vscode.window.showTextDocument(document);
+  await currentSnapshot(service, document, () => service.modelInfo(document.uri), "metadata completion snapshot");
+  const cursor = document.positionAt(source.indexOf(prefix) + prefix.length);
+  editor.selection = new vscode.Selection(cursor, cursor);
+  let completion;
+  await waitFor(async () => {
+    const result = await vscode.commands.executeCommand("vscode.executeCompletionItemProvider", document.uri, cursor);
+    completion = result?.items.find(item => item.insertText instanceof vscode.SnippetString &&
+      item.insertText.value.includes(`\${1:${placeholder}}`));
+    return !!completion;
+  }, `metadata completion with editable ${placeholder}`);
+  assert.equal(document.getText(), source, "requesting completion must not write metadata");
+  await vscode.commands.executeCommand("editor.action.triggerSuggest");
+  // Suggestion calculation finishes after Trigger Suggest returns. Acceptance
+  // does nothing until the native widget has the real provider result.
+  await waitFor(async () => {
+    await vscode.commands.executeCommand("acceptSelectedSuggestion");
+    return document.getText() !== source;
+  }, `native acceptance of ${placeholder} completion`);
+  const completed = source.slice(0, document.offsetAt(cursor)) + placeholder + source.slice(document.offsetAt(cursor));
+  assert.equal(document.getText(), completed, "completion must preserve the existing quotes and metadata key");
+  assert.equal(document.getText(editor.selection), placeholder, "the whole metadata value must be selected");
+  assert.deepEqual(editor.selection.start, cursor);
+  assert.deepEqual(editor.selection.end, cursor.translate(0, placeholder.length));
+  await vscode.commands.executeCommand("default:type", { text: replacement });
+  assert.equal(document.getText(), completed.replace(`${prefix}${placeholder}`, `${prefix}${replacement}`),
+    "typing must replace the whole selected metadata value");
+  await vscode.commands.executeCommand("leaveSnippet");
+}
+async function metadataAction(document, code, title) {
+  let action;
+  await waitFor(async () => {
+    const diagnostic = vscode.languages.getDiagnostics(document.uri).find(item => diagnosticCode(item) === code);
+    if (!diagnostic) return false;
+    const actions = await vscode.commands.executeCommand("vscode.executeCodeActionProvider", document.uri,
+      diagnostic.range, vscode.CodeActionKind.QuickFix.value, 100);
+    action = actions?.find(item => item.title === title);
+    return !!action;
+  }, `real ${title} code action`);
+  assert.ok(action.edit instanceof vscode.WorkspaceEdit, `${title} must return a native workspace edit`);
+  return action;
+}
+async function applyUndoReapplyMetadata(service, document, code, title, accept) {
+  const original = document.getText();
+  const first = await metadataAction(document, code, title);
+  assert.equal(document.getText(), original, "requesting a code action must not write metadata");
+  assert.equal(await vscode.workspace.applyEdit(first.edit), true);
+  const changed = document.getText();
+  assert.notEqual(changed, original); accept(changed);
+  await currentSnapshot(service, document, () => service.modelInfo(document.uri), `${title} applied snapshot`);
+  await waitFor(() => !vscode.languages.getDiagnostics(document.uri).some(item => diagnosticCode(item) === code), `${title} clears its note`);
+  const wholeDocument = new vscode.Range(document.positionAt(0), document.positionAt(changed.length));
+  const repeated = await vscode.commands.executeCommand("vscode.executeCodeActionProvider", document.uri,
+    wholeDocument, vscode.CodeActionKind.QuickFix.value, 100);
+  assert.ok(!repeated?.some(item => item.title.startsWith(title)), `${title} must not repeat after metadata exists`);
+  await vscode.commands.executeCommand("undo");
+  await waitFor(() => document.getText() === original, `native undo of ${title}`);
+  await currentSnapshot(service, document, () => service.modelInfo(document.uri), `${title} undo snapshot`);
+  const reapplied = await metadataAction(document, code, title);
+  assert.equal(await vscode.workspace.applyEdit(reapplied.edit), true);
+  assert.equal(document.getText(), changed, `${title} must produce the same edit after undo`);
+  await currentSnapshot(service, document, () => service.modelInfo(document.uri), `${title} reapplied snapshot`);
+}
+async function checkNativeMetadata(service, workspaceRoot, evidence) {
+  await metadataCompletion(service, path.join(workspaceRoot, "metadata-equation-completion.mod"),
+    "var y(long_name='y');\nmodel;\n[name=''] y=1;\nend;\n", "[name='", "eq1", "host_equation");
+  await metadataCompletion(service, path.join(workspaceRoot, "metadata-long-name-completion.mod"),
+    "var y (long_name='');\nmodel;\n[name='given'] y=1;\nend;\n", "long_name='", "y", "Host output");
+  evidence.checks.push("native equation-tag and long-name completion acceptance selects and replaces the whole value");
+  const filename = path.join(workspaceRoot, "metadata-actions.mod");
+  await writeObservedInput(service, filename, "var y z;\nmodel;\ny=z;\nz=1;\nend;\n");
+  const document = await vscode.workspace.openTextDocument(filename);
+  await vscode.window.showTextDocument(document);
+  await currentSnapshot(service, document, () => service.modelInfo(document.uri), "metadata actions snapshot");
+  await applyUndoReapplyMetadata(service, document, "I208", "Add equation tags", text => {
+    assert.equal((text.match(/\[name='eq[12]'\]/g) || []).length, 2);
+    assert.match(text, /\[name='eq1'\]\s+y=z;/);
+    assert.match(text, /\[name='eq2'\]\s+z=1;/);
+  });
+  await applyUndoReapplyMetadata(service, document, "I209", "Add long names", text => {
+    assert.match(text, /var y\s*\(long_name='y'\) z\s*\(long_name='z'\);/);
+    assert.equal((text.match(/\[name='eq[12]'\]/g) || []).length, 2);
+  });
+  evidence.checks.push("real equation-tag and long-name actions apply, undo, reapply, and do not repeat");
+}
 exports.run = async function run() {
   const resultFile = process.env.DYGNOSIS_HOST_RESULT;
   const evidence = { vscode: vscode.version, runId: process.env.DYGNOSIS_HOST_RUN_ID, checks: [] };
@@ -186,6 +277,7 @@ exports.run = async function run() {
     assert.notEqual(changedInfo.revision, firstInfo.revision);
     feature.register = register;
     evidence.checks.push("native include link retains mod owner; unsaved include refreshes Outline/model revision");
+    await checkNativeMetadata(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
     await service.restart(); assert.ok(service.client);
     await service.shutdown(); assert.equal(service.client, undefined);
     evidence.checks.push("restart/shutdown");

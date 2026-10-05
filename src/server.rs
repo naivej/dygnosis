@@ -25,7 +25,7 @@ use crate::catalog::{
     HETEROGENEITY_OPTION, HET_SHOCKS_OVERWRITE,
 };
 use crate::diagnostic::{check_file, check_in_workspace_with_origins, DiagnosticSet};
-use crate::equation_names::equation_name_plan;
+use crate::equation_names::{equation_name_plan, long_name_plan, metadata_completion};
 use crate::expand::{EquationOrigin, OriginFrame};
 use crate::explain;
 use crate::format::{format_range, format_text};
@@ -990,6 +990,9 @@ impl Backend {
         let normalized = crate::parser::normalize_newlines(&text);
         let index = LineIndex::new(&normalized);
         let byte = index.offset_utf16(&text, span_pos(pos.position));
+        if let Some(item) = metadata_completion_item(&mut inner, &pos.text_document.uri, byte) {
+            return Some(CompletionResponse::Array(vec![item]));
+        }
         if let Some(cmd) = option_command_at(&text, byte) {
             let items = command_options(&cmd)
                 .iter()
@@ -2780,7 +2783,7 @@ fn naming_code_actions(inner: &mut Inner, params: &CodeActionParams) -> Vec<Code
         .into_iter()
         .flatten()
         .filter(|diag| {
-            matches!(&diag.code, Some(NumberOrString::String(code)) if code == "I208")
+            matches!(&diag.code, Some(NumberOrString::String(code)) if matches!(code.as_str(), "I208" | "I209"))
                 && ranges_overlap(diag.range, params.range)
         })
         .filter_map(|diag| {
@@ -2804,7 +2807,7 @@ fn naming_code_actions(inner: &mut Inner, params: &CodeActionParams) -> Vec<Code
         .diagnostics
         .iter()
         .filter(|diag| ranges_overlap(diag.range, params.range))
-        .filter(|diagnostic| matches!(&diagnostic.code, Some(NumberOrString::String(code)) if code == "I208"))
+        .filter(|diagnostic| matches!(&diagnostic.code, Some(NumberOrString::String(code)) if matches!(code.as_str(), "I208" | "I209")))
         .collect();
     if !requested_notes.is_empty() {
         notes.retain(|(_, note)| {
@@ -2820,7 +2823,8 @@ fn naming_code_actions(inner: &mut Inner, params: &CodeActionParams) -> Vec<Code
 }
 
 fn writing_root(diag: &Diagnostic) -> Option<Url> {
-    if !matches!(&diag.code, Some(NumberOrString::String(code)) if code == "I208") {
+    if !matches!(&diag.code, Some(NumberOrString::String(code)) if matches!(code.as_str(), "I208" | "I209"))
+    {
         return None;
     }
     Url::parse(diag.data.as_ref()?.get("root")?.as_str()?).ok()
@@ -2857,7 +2861,15 @@ fn naming_action_for_root(
         note.data.as_ref()?.get("writing_context")?.clone(),
     )
     .ok()?;
-    let plan = equation_name_plan(&mut inner.workspace, root.as_str(), &context)?;
+    let plan = match &note.code {
+        Some(NumberOrString::String(code)) if code == "I208" => {
+            equation_name_plan(&mut inner.workspace, root.as_str(), &context)?
+        }
+        Some(NumberOrString::String(code)) if code == "I209" => {
+            long_name_plan(&mut inner.workspace, root.as_str(), &context)?
+        }
+        _ => return None,
+    };
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
     for edit in plan.edits {
         let url = naming_edit_url(inner, &params.text_document.uri, &edit.file)?;
@@ -3243,6 +3255,67 @@ fn ranges_overlap(left: Range, right: Range) -> bool {
     } else {
         left_start < right_end && right_start < left_end
     }
+}
+
+fn metadata_completion_item(inner: &mut Inner, uri: &Url, byte: u32) -> Option<CompletionItem> {
+    let mut roots = inner.known_owner_roots(uri);
+    if roots.is_empty() && is_model_root(uri) {
+        roots.push(uri.clone());
+    }
+    let mut agreed = None;
+    for root in roots {
+        inner.prepare_root(&root);
+        let completion =
+            metadata_completion(&mut inner.workspace, root.as_str(), uri.as_str(), byte)?;
+        if agreed
+            .as_ref()
+            .is_some_and(|previous| previous != &completion)
+        {
+            return None;
+        }
+        agreed = Some(completion);
+    }
+    let completion = agreed?;
+    let text = inner.document(uri)?.text.as_str();
+    let index = LineIndex::new(text);
+    let replacement = &completion.edit.new_text;
+    let new_text = if inner.completion_snippets {
+        let literal = |text: &str| {
+            text.replace('\\', "\\\\")
+                .replace('$', "\\$")
+                .replace('}', "\\}")
+        };
+        format!(
+            "{}${{1:{}}}{}",
+            literal(&replacement[..completion.value.start]),
+            &replacement[completion.value.clone()],
+            literal(&replacement[completion.value.end..])
+        )
+    } else {
+        replacement.clone()
+    };
+    Some(CompletionItem {
+        label: completion.label.into(),
+        kind: Some(CompletionItemKind::PROPERTY),
+        detail: Some(
+            if completion.label == "name" {
+                "Equation name tag"
+            } else {
+                "Symbol long name"
+            }
+            .into(),
+        ),
+        insert_text_format: Some(if inner.completion_snippets {
+            InsertTextFormat::SNIPPET
+        } else {
+            InsertTextFormat::PLAIN_TEXT
+        }),
+        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+            range: span_range(&index, text, completion.edit.span),
+            new_text,
+        })),
+        ..CompletionItem::default()
+    })
 }
 
 fn default_completions(

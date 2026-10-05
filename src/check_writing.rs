@@ -479,7 +479,7 @@ mod tests {
                 code,
                 &forged
             ));
-            workspace.update_document(root, &format!("{source}\n// changed"));
+            workspace.update_document(root, format!("{source}\n// changed"));
             assert!(!super::context_is_current(
                 &mut workspace,
                 root,

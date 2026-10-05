@@ -247,7 +247,9 @@ fn check_default_eq_tag(model: &Model) -> Vec<Diagnostic> {
             continue;
         }
         index += 1;
-        if eq.tag_map.get("name").is_some_and(|n| !n.is_empty()) {
+        // An explicit empty value is still a name tag. expandEqTags checks
+        // key presence before it attempts either default.
+        if eq.tag_map.contains_key("name") {
             continue;
         }
         let lhs = lhs_ident(model, eq)

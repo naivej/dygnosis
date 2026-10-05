@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "3b99c0abeeae264490500335ebea9d02c9d9e381182043704577b1e5f341b30c",
+  "fingerprint": "bc4e91b96088e3b15675fb1323f6fb7deda56b1fd151d176c624ab87b934484c",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -1213,7 +1213,7 @@
       "code": "E257",
       "kind": "shared",
       "title": "Default equation tag collides with existing name",
-      "markdown": "### E257: Default equation tag collides with existing name\n\nAn equation has no ``name`` tag, and both the LHS identifier and the 1-based equation index are already used as ``name`` values. Dynare refuses: `Error creating default equation tag: cannot assign default tag to equation number {n} because it is already in use`.\n\n**Fix**\n\nGive the equation an explicit ``[name=…]`` that does not collide.\n"
+      "markdown": "### E257: Default equation tag collides with existing name\n\nAn equation has no explicit ``name`` key. Dynare cannot use an available variable name from its left-hand side, and the equation's one-based number is already used as a name. An explicit ``name`` key, even with an empty value, prevents Dynare from assigning either default. Dynare refuses: `Error creating default equation tag: cannot assign default tag to equation number {n} because it is already in use`.\n\n**Fix**\n\nGive the equation an explicit ``[name=…]`` that does not collide.\n"
     },
     {
       "code": "E258",
@@ -2569,13 +2569,13 @@
       "code": "I208",
       "kind": "added",
       "title": "Counted equation has no name tag",
-      "markdown": "### I208: Counted equation has no name tag\n\nAt least one surviving counted model equation has no nonempty `name` tag. This is a writing preference, not a Dynare refusal.\n\nEach note counts unnamed equations owned by one written `model` block, or by `model_replace` for a surviving replacement row. `#` locals, static-only rows, and removed equations are not counted. Repeated macro executions of the same written opener contribute to one note per model root. Incomplete expansion withholds the note.\n\nThe range selects that opener's keyword. If it cannot be mapped safely, the previous equation range remains. Malformed or required tags still report their Dynare errors.\n\nThe editor can add `eq_N` name tags to the safely editable equations counted by that note, including equations in an include. Other blocks are outside that action.\n"
+      "markdown": "### I208: Counted equation has no name tag\n\nAt least one surviving counted model equation has no nonempty `name` tag. This is a writing preference; it does not mean Dynare will refuse the model.\n\nEach note counts unnamed equations from one written `model` block, or surviving replacement rows from one `model_replace` block. `#` locals, static-only rows, and removed equations are not counted. Repeated macro executions of the same written block contribute to one note per model file. Incomplete expansion withholds the note. The note points to the block that owns the equations.\n\nUse **Add equation tags** to add names such as `eq1` and `eq2` to the unnamed equations counted by this note, including equations in an included file. It chooses the lowest unused positive `eqN`. Names do not change when equations move. Empty literal `name` values are filled in place; existing names and other tags stay as written. If the include belongs to several model files, the action title identifies the selected model file. It also shows how many rows were skipped when an edit is not safe. Repeated macro text is edited only when one literal name works for every affected copy; otherwise it stays as written. After an input changes, request the current action again.\n"
     },
     {
       "code": "I209",
       "kind": "added",
       "title": "Declaration has no long_name",
-      "markdown": "### I209: Declaration has no long_name\n\nAt least one `var`, `varexo`, `varexo_det`, or `parameters` name has no nonempty explicit `long_name`. This is a writing preference, not a Dynare refusal.\n\nEach note counts eligible symbols owned by one written declaration statement. Each symbol is counted once in its scope and belongs to its first eligible declaration. Repeated macro executions of the same written opener contribute to one note per model root. Generated auxiliaries, model-local names, and other declaration kinds are not counted. Incomplete expansion withholds the note.\n\nThe range selects the declaration keyword. If it cannot be mapped safely, the previous declaration range remains.\n"
+      "markdown": "### I209: Declaration has no long_name\n\nAt least one `var`, `varexo`, `varexo_det`, or `parameters` name has no nonempty explicit `long_name`. This is a writing preference; it does not mean Dynare will refuse the model.\n\nEach note counts eligible symbols from one written declaration statement. Each symbol is counted once in its scope and belongs to its first eligible declaration. Repeated macro executions of the same written statement contribute to one note per model file. Generated auxiliaries, model-local names, and other declaration kinds are not counted. Incomplete expansion withholds the note. The note points to the declaration statement.\n\nUse **Add long names** to give each symbol counted by this note its own name. For example, the action adds `(long_name='y')` beside `y` in `var y;`. It changes only the symbols counted by this note, including symbols in an included file. Empty literal values are filled in place; existing nonempty values stay as written. TeX, partition options, comments, and other declaration options stay unchanged. If the include belongs to several model files, the action title identifies the selected model file. It shows how many rows were skipped when an edit is not safe. Repeated macro text is edited only when one literal value works for every affected copy; otherwise it stays as written. After an input changes, request the current action again.\n"
     },
     {
       "code": "I210",
