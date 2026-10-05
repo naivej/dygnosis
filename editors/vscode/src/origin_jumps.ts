@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type { DygnosisClient, InputInvalidation, NavigationGuard } from "./client";
 import { sameWrittenLocation } from "./model_view";
 import type { EffectivePreviewRegistry, EffectivePreviewSession } from "./preview";
+import { effectivePreviewArguments } from "./preview";
 import { location, record } from "./protocol";
 import type { Location, Position, Range } from "./protocol";
 import { listSetting } from "./settings";
@@ -213,7 +214,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     const current = (): boolean => !disposed && !state.closed && state.operation === request.operation && state.epoch === request.epoch &&
       state.session.generation === generation && !request.token.isCancellationRequested && service.currentInstance === instance;
     try {
-      const result = await service.execute("dynare/showEffectiveModel", [{ root_uri: state.session.root.toString() }], request.token);
+      const result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, state.session.root), request.token);
       if (!current()) return;
       let payload: PreviewNavigation | undefined;
       if (supportsNavigation(service)) {
@@ -249,7 +250,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       for (let attempt = 0; attempt < 4; ++attempt) {
         if (!current()) return undefined;
         const fileEpoch = state.fileEpoch;
-        const result = await service.execute("dynare/showEffectiveModel", [{ root_uri: state.session.root.toString() }], request.token);
+        const result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, state.session.root), request.token);
         if (!current()) return undefined;
         const fresh = parsePreviewNavigation(result, state.session.root);
         if (!fresh.complete || fresh.revision !== payload.revision || fresh.effective_text !== payload.effective_text || !rootVersionMatches(state, fresh)) return undefined;

@@ -2,6 +2,8 @@
 
 Show effective model opens include and macro expansion in a read-only editor. The preview shows the model before Dynare transforms equations. Edit the written files, then use Refresh effective model to update the preview.
 
+With the bundled engine or an engine that supports readable layout, statements start on separate lines, with indented block bodies. Equation tags stay with their equation, and model-local definitions have their own lines. Copying the preview keeps these line breaks. Strings, native text, and matrix contents keep their existing text. Older engines keep the compact preview.
+
 ![Written source beside the read-only effective preview](assets/effective-model.png)
 
 1. The written `.mod` file stays editable in the primary editor column.

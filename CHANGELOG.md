@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Show effective model** starts statements on separate lines and indents block bodies. Copying the preview keeps the line breaks. Refresh and source jumps use the same readable layout.
+
 ## v0.11.7
 
 - **Dygnosis: Open Help** opens one offline reference with search, reading history, topic links, examples and feature guides. Help is available before a model opens and when the engine is unavailable. First-use guidance and persistent Explorer actions make it easy to find.

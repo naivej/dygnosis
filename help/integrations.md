@@ -200,12 +200,14 @@ Changed inputs coalesce after the advertised `typing_pause_ms`. Unchanged checke
 
 Pass `{ "root_uri": "file:///.../model.mod" }`; the existing `{ "uri": ... }` and URI-string arguments also work. Choose an explicit `.mod` or `.dyn` root when viewing an include. The root need not be open: the server uses disk files, live include overlays, and that root's settings.
 
+The capability also advertises `readable_layout: true`. Pass `{ "root_uri": "file:///.../model.mod", "layout": "readable" }` to receive a display copy with separate statement lines and indented block bodies. Its `navigation.effective_range` values refer to that exact returned copy. Use the same layout for opening, refreshing, and revalidating navigation. The VS Code preview requests it automatically when advertised; an older server keeps the existing preview path. Requests without this opt-in, MCP expansion, stored expansion, equation text, comparison, extraction, and Format Document retain their existing output.
+
 The response adds `root_uri`, `revision`, `document_version` (null for an unopened root), `complete`, `navigation_schema_version`, `navigation`, and `dependency_candidates`. The last field lists exact file URI inputs, including missing candidates, from the same snapshot used by `dynare/modelInfo`; the advertised preview capability also sets `dependency_candidates: true`. Clients watch these paths without repeating include lookup. The revision covers source overlays, disk dependencies, and root settings. Subscribe to the existing model-info invalidation notification and discard a preview after an input, settings, or server-instance change. A disk change during response construction returns `success: false`, `code: "INPUT_CHANGED"`; refresh to obtain a new snapshot.
 
 Each navigation row contains:
 
 - `id` and `statement_id`, unique within the response revision;
-- `effective_range`, a half-open range in the exact emitted `effective_text`, recorded while joining tokens rather than found by searching text;
+- `effective_range`, a half-open range in the exact emitted `effective_text`, recorded while joining tokens and mapped through display whitespace edits for readable layout;
 - `written_locations`, verified equation-token portions in their written files;
 - `macro_frames`, in execution order, with `kind`, nullable `variable`/`value`, `directive_locations`, and independently clipped `body_locations`;
 - `kind` (`equation`, `local`, or `static`), `active`, nullable `number`, `scope` (`aggregate` or `heterogeneous`), and nullable `dimension`.

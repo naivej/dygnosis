@@ -23,6 +23,15 @@ function previewText(result: unknown): string | undefined {
   return record(result) && typeof result.effective_text === "string"
     ? (result.status === "incomplete" ? "// INCOMPLETE EXPANSION — this preview is partial.\n" : "") + result.effective_text : undefined;
 }
+/** Open, Refresh, and jump proofs must use the same advertised display layout. */
+export function effectivePreviewArguments(service: Pick<DygnosisClient, "client">, root: vscode.Uri, legacyUriString = false): unknown[] {
+  const experimental: unknown = service.client?.initializeResult?.capabilities.experimental;
+  const readable = record(experimental) && record(experimental.dygnosis) && record(experimental.dygnosis.effectivePreview) &&
+    experimental.dygnosis.effectivePreview.command === "dynare/showEffectiveModel" &&
+    experimental.dygnosis.effectivePreview.readable_layout === true;
+  return readable ? [{ root_uri: root.toString(), layout: "readable" }]
+    : [legacyUriString ? root.toString() : { root_uri: root.toString() }];
+}
 export function registerEffectivePreview(service: DygnosisClient): EffectivePreviewRegistry {
   const text = new Map<string, string>();
   const sessions = new Map<string, EffectivePreviewSession>();
@@ -56,7 +65,7 @@ export function registerEffectivePreview(service: DygnosisClient): EffectivePrev
       const validRoot = async (): Promise<boolean> => await valid() && service.currentInstance === instance &&
         (await service.rootForDocument(document))?.toString() === root.toString() && await valid() && service.currentInstance === instance;
       if (!await validRoot()) return;
-      const result = await service.execute("dynare/showEffectiveModel", [root.toString()]);
+      const result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, root, true));
       if (!await validRoot()) return;
       if (!record(result) || typeof result.effective_text !== "string") throw new Error("This engine cannot show the effective model. Update dynare.serverPath or use the bundled binary.");
       const uri = vscode.Uri.from({ scheme: "dygnosis-effective", path: `/${++sequence}/${root.path.split("/").at(-1) ?? "model.mod"}` });
