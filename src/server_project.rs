@@ -56,6 +56,10 @@ struct RootEntry {
     dependency_uris: BTreeSet<Url>,
     owner_files: HashSet<String>,
     proven: bool,
+    /// Path identity from discovery, a committed check, or an edit of this
+    /// root. Foreground scans compare the string. Merge still resolves
+    /// routing identities from the filesystem once per operation.
+    identity: String,
     revision: Option<String>,
     errors: usize,
     warnings: usize,
@@ -76,6 +80,7 @@ impl RootEntry {
             dependency_uris: BTreeSet::new(),
             owner_files: HashSet::new(),
             proven: false,
+            identity: String::new(),
             revision: None,
             errors: 0,
             warnings: 0,
@@ -104,18 +109,25 @@ impl ProjectState {
         }
         let key = normalize_uri(root.as_str());
         self.roots
-            .iter()
-            .any(|(uri, entry)| entry.selected && normalize_uri(uri.as_str()) == key)
+            .values()
+            .any(|entry| entry.selected && entry.identity == key)
+    }
+
+    /// Stored root identity. One fresh resolution when this URI is absent or the stored string is empty.
+    pub(super) fn observed_identity(&self, uri: &Url) -> String {
+        self.roots
+            .get(uri)
+            .map(|entry| entry.identity.clone())
+            .filter(|identity| !identity.is_empty())
+            .unwrap_or_else(|| normalize_uri(uri.as_str()))
     }
 
     pub fn owners(&self, uri: &Url) -> Vec<Url> {
         let key = normalize_uri(uri.as_str());
         self.roots
             .iter()
-            .filter(|(root, entry)| {
-                normalize_uri(root.as_str()) != key
-                    && entry.selected
-                    && entry.owner_files.contains(&key)
+            .filter(|(_, entry)| {
+                entry.identity != key && entry.selected && entry.owner_files.contains(&key)
             })
             .map(|(root, _)| root.clone())
             .collect()
@@ -169,22 +181,40 @@ impl Inner {
         if !is_model_root(uri) {
             return;
         }
+        // One fresh identity for the opened URI. Other roots keep the identity
+        // stored at discovery, check, or their own edit.
         let key = normalize_uri(uri.as_str());
         let alias = self
             .project
             .roots
-            .keys()
-            .find(|root| normalize_uri(root.as_str()) == key)
-            .cloned();
-        if let Some(alias) = alias.filter(|alias| alias != uri) {
+            .iter()
+            .find(|(root, entry)| *root != uri && entry.identity == key)
+            .map(|(root, _)| root.clone());
+        if let Some(alias) = alias {
             let mut entry = self.project.roots.remove(&alias).unwrap();
             if entry.selected {
                 entry.queue(TYPING_PAUSE);
             }
+            entry.identity = key.clone();
             self.project.roots.insert(uri.clone(), entry);
+        } else if let Some(entry) = self.project.roots.get_mut(uri) {
+            entry.identity = key.clone();
         }
-        self.reports
-            .retain(|root, _| root == uri || normalize_uri(root.as_str()) != key);
+        let report_roots: Vec<Url> = self.reports.keys().cloned().collect();
+        for root in report_roots {
+            if root == *uri {
+                continue;
+            }
+            let same = self
+                .project
+                .roots
+                .get(&root)
+                .map(|entry| entry.identity == key)
+                .unwrap_or_else(|| normalize_uri(root.as_str()) == key);
+            if same {
+                self.reports.remove(&root);
+            }
+        }
     }
 
     pub(super) fn project_reconfigure(&mut self, force: bool) {
@@ -236,28 +266,48 @@ impl Inner {
             self.project.discovery = "pending";
         }
         let key = normalize_uri(changed.as_str());
-        for (root, entry) in &mut self.project.roots {
-            if !entry.selected {
-                continue;
+        if !deleted {
+            if let Some(entry) = self.project.roots.get_mut(changed) {
+                entry.identity = key.clone();
             }
-            let same_root = normalize_uri(root.as_str()) == key;
-            if same_root && deleted {
-                entry.selected = false;
-                entry.generation += 1;
-                entry.due = None;
-                entry.state = "excluded";
-                entry.cached_report = None;
-                if !self.docs.contains_key(root) {
-                    self.reports.remove(root);
+        }
+        let roots: Vec<Url> = self.project.roots.keys().cloned().collect();
+        for root in roots {
+            // Drop the root borrow before touching reports. A delete
+            // canonicalizes only after the stored identity misses. Typing
+            // compares the stored string and does not stat every root.
+            let open = self.docs.contains_key(&root);
+            let remove_report = {
+                let Some(entry) = self.project.roots.get_mut(&root) else {
+                    continue;
+                };
+                if !entry.selected {
+                    continue;
                 }
-            } else if same_root
-                || !entry.proven
-                || entry.dependencies.contains(&key)
-                || (resuming && entry.state == "pending")
-            {
-                entry.queue(TYPING_PAUSE);
-                entry.proven = false;
-                self.reports.remove(root);
+                let same_root = root == *changed
+                    || entry.identity == key
+                    || (deleted && normalize_uri(root.as_str()) == key);
+                if same_root && deleted {
+                    entry.selected = false;
+                    entry.generation += 1;
+                    entry.due = None;
+                    entry.state = "excluded";
+                    entry.cached_report = None;
+                    !open
+                } else if same_root
+                    || !entry.proven
+                    || entry.dependencies.contains(&key)
+                    || (resuming && entry.state == "pending")
+                {
+                    entry.queue(TYPING_PAUSE);
+                    entry.proven = false;
+                    true
+                } else {
+                    false
+                }
+            };
+            if remove_report {
+                self.reports.remove(&root);
             }
         }
         if Path::new(changed.path())
@@ -267,8 +317,8 @@ impl Inner {
                 || !self
                     .project
                     .roots
-                    .keys()
-                    .any(|root| normalize_uri(root.as_str()) == key))
+                    .values()
+                    .any(|entry| entry.identity == key))
         {
             self.project.discovery_requested = true;
             self.project.discovery = "pending";
@@ -287,14 +337,16 @@ impl Inner {
             .keys()
             .map(|uri| normalize_uri(uri.as_str()))
             .collect();
-        for root in self
+        let retained: Vec<Url> = self
             .project
             .request_roots
             .iter()
             .rev()
             .take(RETAINED_REQUEST_ROOTS)
-        {
-            roots.insert(normalize_uri(root.as_str()));
+            .cloned()
+            .collect();
+        for root in retained {
+            roots.insert(self.project.observed_identity(&root));
         }
         self.workspace.retain_analysis_roots(&roots);
         // Project dependency provenance lives in ProjectState, independently
@@ -440,19 +492,24 @@ async fn run_worker(
                 }
             } else {
                 let now = Instant::now();
-                let active = inner
+                let active_uri = inner
                     .project
                     .explicit_active
+                    .clone()
+                    .or_else(|| inner.project.active.clone());
+                let active = active_uri
                     .as_ref()
-                    .or(inner.project.active.as_ref())
-                    .map(|root| normalize_uri(root.as_str()));
+                    .map(|root| inner.project.observed_identity(root));
                 let next = inner
                     .project
                     .roots
                     .iter()
                     .filter(|(_, entry)| entry.selected && entry.due.is_some_and(|due| due <= now))
-                    .min_by_key(|(root, entry)| {
-                        (Some(normalize_uri(root.as_str())) != active, entry.due)
+                    .min_by_key(|(_, entry)| {
+                        (
+                            Some(entry.identity.as_str()) != active.as_deref(),
+                            entry.due,
+                        )
                     })
                     .map(|(root, _)| root.clone());
                 if let Some(root) = next {
@@ -549,21 +606,22 @@ async fn run_worker(
                     inner.project.discovery_ms = started.elapsed().as_secs_f64() * 1000.0;
                     inner.project.discovery = "complete";
                     match result {
-                        Ok((roots, failures)) => {
-                            let roots: BTreeMap<_, _> = roots
-                                .into_iter()
-                                .map(|(root, selected)| {
-                                    let key = normalize_uri(root.as_str());
-                                    let identity = inner
-                                        .docs
-                                        .keys()
-                                        .chain(inner.project.roots.keys())
-                                        .find(|uri| normalize_uri(uri.as_str()) == key)
-                                        .cloned()
-                                        .unwrap_or(root);
-                                    (identity, selected)
-                                })
-                                .collect();
+                        Ok((found, failures)) => {
+                            // Resolve each open document once. A stored root
+                            // identity that is not in this walk is resolved
+                            // once, so a changed canonical target still binds
+                            // to the existing root.
+                            let mut open_identities = HashMap::new();
+                            for uri in inner.docs.keys() {
+                                open_identities
+                                    .entry(normalize_uri(uri.as_str()))
+                                    .or_insert_with(|| uri.clone());
+                            }
+                            let roots = bind_discovered_roots(
+                                &inner.project.roots,
+                                &open_identities,
+                                found,
+                            );
                             inner.project.discovery_failures = failures;
                             // A failed folder walk cannot prove prior roots gone.
                             // Keep them pending/incomplete rather than clear coverage.
@@ -579,12 +637,13 @@ async fn run_worker(
                                 roots.contains_key(root)
                                     || failed_folders.iter().any(|folder| in_folder(root, folder))
                             });
-                            for (root, selected) in roots {
+                            for (root, (key, selected)) in roots {
                                 let entry = inner
                                     .project
                                     .roots
                                     .entry(root)
                                     .or_insert_with(RootEntry::pending);
+                                let previous = std::mem::replace(&mut entry.identity, key);
                                 if !selected {
                                     entry.selected = false;
                                     entry.state = "excluded";
@@ -592,6 +651,9 @@ async fn run_worker(
                                     entry.generation += 1;
                                 } else if !entry.selected {
                                     entry.selected = true;
+                                    entry.queue(Duration::ZERO);
+                                } else if !previous.is_empty() && previous != entry.identity {
+                                    entry.proven = false;
                                     entry.queue(Duration::ZERO);
                                 }
                             }
@@ -646,13 +708,14 @@ async fn run_worker(
                     }
                     match result {
                         Ok(Ok(checked)) => {
+                            let mut open_versions = HashMap::new();
+                            for (uri, doc) in &inner.docs {
+                                open_versions
+                                    .entry(normalize_uri(uri.as_str()))
+                                    .or_insert(doc.version);
+                            }
                             let current = checked.dependencies.iter().all(|key| {
-                                let current = inner
-                                    .docs
-                                    .iter()
-                                    .find(|(uri, _)| normalize_uri(uri.as_str()) == *key)
-                                    .map(|(_, doc)| doc.version);
-                                current == overlays.get(key).copied()
+                                open_versions.get(key).copied() == overlays.get(key).copied()
                             });
                             if !checked.current || !current {
                                 inner
@@ -667,6 +730,7 @@ async fn run_worker(
                             inner.project.completed_jobs += 1;
                             inner.project.reused_jobs += u64::from(checked.reused);
                             let entry = inner.project.roots.get_mut(&root).unwrap();
+                            entry.identity = normalize_uri(root.as_str());
                             entry.state = if checked.complete {
                                 "checked"
                             } else {
@@ -816,8 +880,45 @@ fn compute(
     })
 }
 
-fn discover(settings: &SettingsStore) -> (BTreeMap<Url, bool>, Vec<Value>) {
-    let mut roots = BTreeMap::new();
+/// Bind walked roots to open documents or existing roots.
+/// A stored identity that is already in this walk is reused. Any other
+/// existing root is resolved once and kept when that resolution is in the walk.
+fn bind_discovered_roots(
+    existing: &BTreeMap<Url, RootEntry>,
+    open_identities: &HashMap<String, Url>,
+    found: Vec<(Url, String, bool)>,
+) -> BTreeMap<Url, (String, bool)> {
+    let fresh_keys: HashSet<String> = found.iter().map(|(_, key, _)| key.clone()).collect();
+    let mut stored_identities = HashMap::new();
+    for (uri, entry) in existing {
+        if !entry.identity.is_empty() && fresh_keys.contains(&entry.identity) {
+            stored_identities
+                .entry(entry.identity.clone())
+                .or_insert_with(|| uri.clone());
+        } else if let Some(key) = fresh_canonical(uri, &fresh_keys) {
+            stored_identities.entry(key).or_insert_with(|| uri.clone());
+        }
+    }
+    found
+        .into_iter()
+        .map(|(root, key, selected)| {
+            let identity = open_identities
+                .get(&key)
+                .cloned()
+                .or_else(|| stored_identities.get(&key).cloned())
+                .unwrap_or(root);
+            (identity, (key, selected))
+        })
+        .collect()
+}
+
+fn fresh_canonical(uri: &Url, fresh_keys: &HashSet<String>) -> Option<String> {
+    let key = normalize_uri(uri.as_str());
+    fresh_keys.contains(&key).then_some(key)
+}
+
+fn discover(settings: &SettingsStore) -> (Vec<(Url, String, bool)>, Vec<Value>) {
+    let mut roots = Vec::new();
     let mut seen = HashSet::new();
     let mut failures = Vec::new();
     for folder in &settings.folders {
@@ -825,12 +926,19 @@ fn discover(settings: &SettingsStore) -> (BTreeMap<Url, bool>, Vec<Value>) {
             continue;
         };
         match crate::check_walk::collect_mod_files(&path) {
-            Ok(paths) => for path in paths {
-                if let Ok(uri) = Url::from_file_path(path) {
-                    if seen.insert(normalize_uri(uri.as_str())) { roots.insert(uri.clone(), selection(settings, &uri) == Some(true)); }
+            Ok(paths) => {
+                for path in paths {
+                    if let Ok(uri) = Url::from_file_path(path) {
+                        let key = normalize_uri(uri.as_str());
+                        if seen.insert(key.clone()) {
+                            roots.push((uri.clone(), key, selection(settings, &uri) == Some(true)));
+                        }
+                    }
                 }
-            },
-            Err(error) => failures.push(json!({"folder_uri": folder.uri, "failure": format!("Cannot discover root models: {error}")})),
+            }
+            Err(error) => failures.push(
+                json!({"folder_uri": folder.uri, "failure": format!("Cannot discover root models: {error}")}),
+            ),
         }
     }
     (roots, failures)
@@ -995,6 +1103,137 @@ mod tests {
             inner.project.owners(&changed).is_empty(),
             "search candidates do not imply include ownership"
         );
+    }
+
+    #[test]
+    fn an_edit_matches_the_stored_root_identity() {
+        let mut inner = Inner::default();
+        inner.project.discovery = "complete";
+        let edited = Url::from_file_path(std::env::temp_dir().join("edited-root.mod")).unwrap();
+        let other = Url::from_file_path(std::env::temp_dir().join("quiet-root.mod")).unwrap();
+        for root in [&edited, &other] {
+            let mut entry = RootEntry::pending();
+            entry.due = None;
+            entry.state = "checked";
+            entry.proven = true;
+            entry.identity = normalize_uri(root.as_str());
+            inner.project.roots.insert(root.clone(), entry);
+        }
+        inner.project_changed(&edited, false);
+        assert!(inner.project.roots[&edited].due.is_some());
+        assert!(inner.project.roots[&other].due.is_none());
+        assert_eq!(
+            inner.project.roots[&edited].identity,
+            normalize_uri(edited.as_str())
+        );
+    }
+
+    #[test]
+    fn stored_identity_selects_include_owners_and_skips_the_file_itself() {
+        let mut inner = Inner::default();
+        let owner = Url::from_file_path(std::env::temp_dir().join("owner-root.mod")).unwrap();
+        let include = Url::from_file_path(std::env::temp_dir().join("shared.inc")).unwrap();
+        let key = normalize_uri(include.as_str());
+        let mut owner_entry = RootEntry::pending();
+        owner_entry.due = None;
+        owner_entry.state = "checked";
+        owner_entry.identity = normalize_uri(owner.as_str());
+        owner_entry.owner_files.insert(key.clone());
+        let mut self_entry = RootEntry::pending();
+        self_entry.due = None;
+        self_entry.state = "checked";
+        self_entry.identity = key;
+        self_entry
+            .owner_files
+            .insert(normalize_uri(include.as_str()));
+        inner.project.roots.insert(owner.clone(), owner_entry);
+        inner.project.roots.insert(include.clone(), self_entry);
+        assert_eq!(inner.project.owners(&include), vec![owner]);
+    }
+
+    #[test]
+    fn a_matching_stored_identity_keeps_the_existing_root() {
+        let root = Url::from_file_path(std::env::temp_dir().join("kept-root.mod")).unwrap();
+        let walked = Url::from_file_path(std::env::temp_dir().join("walked-root.mod")).unwrap();
+        let mut entry = RootEntry::pending();
+        entry.identity = "stored-key".to_string();
+        let mut existing = BTreeMap::new();
+        existing.insert(root.clone(), entry);
+        let bound = bind_discovered_roots(
+            &existing,
+            &HashMap::new(),
+            vec![(walked.clone(), "stored-key".to_string(), true)],
+        );
+        assert_eq!(bound.len(), 1);
+        assert!(bound.contains_key(&root));
+        assert_eq!(bound[&root].0, "stored-key");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_stale_root_identity_stays_bound_to_its_case_alias() {
+        let path =
+            std::env::temp_dir().join(format!("dygnosis-stale-{}-root.mod", std::process::id()));
+        let alias_path =
+            path.with_file_name(format!("dygnosis-stale-{}-ROOT.mod", std::process::id()));
+        let root = Url::from_file_path(&path).unwrap();
+        let alias = Url::from_file_path(&alias_path).unwrap();
+        let key = normalize_uri(root.as_str());
+        assert_eq!(key, normalize_uri(alias.as_str()));
+        let mut entry = RootEntry::pending();
+        entry.identity = "stale-root-identity".to_string();
+        entry.proven = true;
+        entry.due = None;
+        entry.state = "checked";
+        let mut existing = BTreeMap::new();
+        existing.insert(alias.clone(), entry);
+        let bound =
+            bind_discovered_roots(&existing, &HashMap::new(), vec![(root, key.clone(), true)]);
+        assert_eq!(bound.len(), 1);
+        assert!(bound.contains_key(&alias));
+        assert_eq!(bound[&alias].0, key);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_case_alias_reuses_the_stored_root_identity() {
+        let mut inner = Inner::default();
+        let path =
+            std::env::temp_dir().join(format!("dygnosis-identity-{}-root.mod", std::process::id()));
+        let alias_path =
+            path.with_file_name(format!("dygnosis-identity-{}-ROOT.mod", std::process::id()));
+        let root = Url::from_file_path(&path).unwrap();
+        let alias = Url::from_file_path(&alias_path).unwrap();
+        let key = normalize_uri(root.as_str());
+        assert_eq!(key, normalize_uri(alias.as_str()));
+        let mut entry = RootEntry::pending();
+        entry.due = None;
+        entry.state = "checked";
+        entry.proven = true;
+        entry.identity = key.clone();
+        inner.project.roots.insert(root.clone(), entry);
+        inner.reports.insert(
+            root.clone(),
+            Arc::new(RootReport {
+                root: root.clone(),
+                routes: HashMap::new(),
+                revision: String::new(),
+                errors: 0,
+                warnings: 0,
+            }),
+        );
+        inner.align_project_root(&alias);
+        assert_eq!(inner.project.roots.len(), 1);
+        assert!(inner.project.roots.contains_key(&alias));
+        assert!(!inner.reports.contains_key(&root));
+        assert!(inner.project.is_selected(&alias));
+        assert!(inner.project.is_selected(&root));
+        assert!(inner.project.roots[&alias].due.is_some());
+        inner.project.roots.get_mut(&alias).unwrap().due = None;
+        inner.project.roots.get_mut(&alias).unwrap().proven = true;
+        inner.project.roots.get_mut(&alias).unwrap().state = "checked";
+        inner.project_changed(&alias, false);
+        assert!(inner.project.roots[&alias].due.is_some());
     }
 
     #[test]

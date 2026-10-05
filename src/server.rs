@@ -288,14 +288,14 @@ impl Inner {
         let mut roots: Vec<_> = self
             .tracked_roots
             .keys()
-            .filter(|root| owners.contains(&crate::include_resolver::normalize_uri(root.as_str())))
+            .filter(|root| owners.contains(&self.project.observed_identity(root)))
             .cloned()
             .collect();
         roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
         roots.extend(self.project.owners(uri));
         roots.sort_by(|a, b| a.as_str().cmp(b.as_str()));
         let mut seen = HashSet::new();
-        roots.retain(|root| seen.insert(crate::include_resolver::normalize_uri(root.as_str())));
+        roots.retain(|root| seen.insert(self.project.observed_identity(root)));
         roots
     }
 
