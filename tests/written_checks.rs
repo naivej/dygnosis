@@ -31,7 +31,7 @@ const PAIRS: &[Pair] = &[
         fire: include_str!("fixtures/written/e192_fire.mod"),
         quiet: include_str!("fixtures/written/e192_quiet.mod"),
         official: "There are 1 equations but 2 endogenous variables in the model for heterogeneity dimension 'h'!",
-        span_needle: "model(heterogeneity=h)",
+        span_needle: "model",
     },
     Pair {
         code: "E189",

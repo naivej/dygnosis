@@ -64,6 +64,9 @@ pub struct Statement {
     pub name: String,
     pub token_range: Range<usize>,
     pub opener_range: Range<usize>,
+    /// First parsed token, retained separately from the full construct span.
+    /// Synthesized macro text still needs a written-source mapping proof.
+    pub keyword_span: Span,
     pub span: Span,
     pub complete: bool,
     pub category: Option<String>,

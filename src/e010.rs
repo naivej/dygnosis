@@ -76,6 +76,7 @@ fn planner_e010(model: &Model, span: Span, n_eq: usize, n_endo: usize) -> Diagno
         fix: None,
         related: Vec::new(),
         tags: Vec::new(),
+        model_dimension: None,
     }
 }
 
@@ -103,6 +104,7 @@ fn generic_e010(span: Span, n_eq: usize, n_endo: usize) -> Diagnostic {
         fix: None,
         related: Vec::new(),
         tags: Vec::new(),
+        model_dimension: None,
     }
 }
 
@@ -141,5 +143,6 @@ fn link_unused_endo(
         fix: None,
         related: Vec::new(),
         tags: Vec::new(),
+        model_dimension: None,
     })
 }

@@ -39,6 +39,9 @@ pub struct Diagnostic {
     pub related: Vec<RelatedDiagnostic>,
     /// LSP DiagnosticTag values (1 = Unnecessary, 2 = Deprecated).
     pub tags: Vec<i32>,
+    /// Heterogeneous count scope supplied by its producer. Macro executions
+    /// can share a written span while belonging to different dimensions.
+    pub model_dimension: Option<String>,
 }
 
 impl Diagnostic {
@@ -62,11 +65,17 @@ impl Diagnostic {
             fix: None,
             related: Vec::new(),
             tags,
+            model_dimension: None,
         }
     }
 
     pub fn with_related(mut self, related: RelatedDiagnostic) -> Self {
         self.related.push(related);
+        self
+    }
+
+    pub fn with_model_dimension(mut self, dimension: impl Into<String>) -> Self {
+        self.model_dimension = Some(dimension.into());
         self
     }
 }
@@ -105,6 +114,14 @@ pub struct DiagnosticSet {
 /// OccBin, written clash, estimation, shape, W010, E062–E065, W070, W090, W100, W110 (includes W060), W120, W130, symbol lists, D-block.
 /// W062 / E061 / W061 / W160 and I050 quiet are workspace-only (`check_file`), not here.
 pub fn analyze(model: &Model) -> Vec<Diagnostic> {
+    let mut diagnostics = analyze_positions(model);
+    crate::diagnostic_anchors::apply(model, &mut diagnostics, |_, _| true);
+    diagnostics
+}
+
+/// Keep analysis positions through every selection and suppression decision.
+/// Only the completed collection receives display ranges.
+fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     let macro_syntax = crate::check_e060::check_e062(model);
     if !macro_syntax.is_empty() {
         return macro_syntax;
@@ -404,7 +421,7 @@ pub(crate) fn check_in_workspace_with_origins(ws: &mut Workspace, abs_path: &str
 
 fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticSet> {
     let model = ws.get_effective_model(abs_path)?.clone();
-    let mut diags = analyze(&model);
+    let mut diags = analyze_positions(&model);
     if model.macro_incomplete() {
         // An unevaluated macro can change declarations, command options, and
         // which includes exist. Keep only the macro result already established
@@ -468,6 +485,9 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
     extra.extend(crate::check_w160::check_w160(&companions));
     diags.extend(extra);
     crate::check_w160::quiet_i050(&mut diags, &companions);
+    crate::diagnostic_anchors::apply(&model, &mut diags, |span, keyword| {
+        safely_mapped_keyword(ws, abs_path, span, keyword)
+    });
     let mut source_texts: HashMap<String, Arc<str>> = HashMap::new();
     crate::diagnostic_links::map_related(ws, abs_path, &mut diags, &mut source_texts);
     let origins: Vec<Option<DiagnosticOrigin>> = diags
@@ -488,6 +508,26 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
         writing_origins,
         origins,
     })
+}
+
+/// A display keyword must be continuous and have the same spelling in its
+/// written file. Otherwise the existing diagnostic range remains in force.
+fn safely_mapped_keyword(ws: &mut Workspace, root: &str, span: Span, keyword: &str) -> bool {
+    let Some((file, mapped)) = ws.map_effective_origin(root, span) else {
+        return false;
+    };
+    let tail = Span {
+        start: span.end - 1,
+        end: span.end,
+    };
+    let continuous = ws
+        .map_effective_origin(root, tail)
+        .is_some_and(|(tail_file, tail_span)| file == tail_file && mapped.end == tail_span.end);
+    continuous
+        && ws
+            .get_source(&file)
+            .and_then(|text| text.get(mapped.start as usize..mapped.end as usize))
+            .is_some_and(|text| text.eq_ignore_ascii_case(keyword))
 }
 
 /// These workspace checks already use root-file coordinates.

@@ -207,6 +207,7 @@ fn e001(span: Span, message: String, fix: Option<TextEdit>) -> Diagnostic {
         fix,
         related: Vec::new(),
         tags: Vec::new(),
+        model_dimension: None,
     }
 }
 
