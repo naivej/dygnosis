@@ -569,14 +569,14 @@ async fn unopened_root_fixes_retain_context_and_open_document_versions() {
     wire.start(vec![files.folder("")], json!({}), vec![], false)
         .await;
     wire.complete().await;
-    let notes = wire.pull(&files.uri("body.inc")).await;
+    let notes = wire.pull(&files.uri("root.mod")).await;
     let note = notes
         .iter()
         .find(|diag| diag["code"] == "I208")
         .unwrap()
         .clone();
     assert_eq!(note["data"]["root"], files.uri("root.mod"));
-    let actions = wire.request("textDocument/codeAction", json!({"textDocument":{"uri":files.uri("body.inc")},"range":note["range"],"context":{"diagnostics":[note]}})).await;
+    let actions = wire.request("textDocument/codeAction", json!({"textDocument":{"uri":files.uri("root.mod")},"range":note["range"],"context":{"diagnostics":[note]}})).await;
     let action = actions
         .as_array()
         .unwrap()
@@ -587,16 +587,17 @@ async fn unopened_root_fixes_retain_context_and_open_document_versions() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|edit| edit["textDocument"]["version"].is_null()));
+        .any(|edit| edit["textDocument"]["uri"] == files.uri("body.inc")
+            && edit["textDocument"]["version"].is_null()));
     wire.open(&files.uri("body.inc"), "y=0;\n", 9);
     wire.complete().await;
     let note = wire
-        .pull(&files.uri("body.inc"))
+        .pull(&files.uri("root.mod"))
         .await
         .into_iter()
         .find(|diag| diag["code"] == "I208")
         .unwrap();
-    let actions = wire.request("textDocument/codeAction", json!({"textDocument":{"uri":files.uri("body.inc")},"range":note["range"],"context":{"diagnostics":[note]}})).await;
+    let actions = wire.request("textDocument/codeAction", json!({"textDocument":{"uri":files.uri("root.mod")},"range":note["range"],"context":{"diagnostics":[note]}})).await;
     let action = actions
         .as_array()
         .unwrap()
@@ -607,7 +608,8 @@ async fn unopened_root_fixes_retain_context_and_open_document_versions() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|edit| edit["textDocument"]["version"] == 9));
+        .any(|edit| edit["textDocument"]["uri"] == files.uri("body.inc")
+            && edit["textDocument"]["version"] == 9));
 }
 
 #[tokio::test]
