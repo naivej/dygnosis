@@ -98,6 +98,7 @@ fn check_e023(model: &Model) -> Vec<Diagnostic> {
             tags: Vec::new(),
             model_dimension: None,
             display_keyword: None,
+            writing: None,
         });
     }
     diagnostics
@@ -126,6 +127,7 @@ fn check_e024(model: &Model) -> Vec<Diagnostic> {
             tags: Vec::new(),
             model_dimension: None,
             display_keyword: None,
+            writing: None,
         });
     }
     diagnostics
@@ -196,6 +198,7 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
                     tags: Vec::new(),
                     model_dimension: None,
                     display_keyword: None,
+                    writing: None,
                 });
             }
             if let Some(n) = local {
@@ -230,6 +233,7 @@ fn shadowing_diag(model: &Model, name: Name, span: Span) -> Diagnostic {
         tags: Vec::new(),
         model_dimension: None,
         display_keyword: None,
+        writing: None,
     }
 }
 
@@ -456,6 +460,7 @@ fn undeclared_diag(
         tags: Vec::new(),
         model_dimension: None,
         display_keyword: None,
+        writing: None,
     }
 }
 

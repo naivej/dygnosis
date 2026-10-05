@@ -229,8 +229,9 @@ async fn shared_include_fix_retains_each_root_context_without_duplicate_edits() 
 #[tokio::test]
 async fn naming_from_unopened_include_preserves_roots_versions_and_stale_context() {
     let temp = Scratch::new();
-    let child = temp.file("body.inc", "y=0;\n");
-    let text = "var y; model;\n@#include \"body.inc\"\n[name='root'] y=1; end;\n";
+    let child_text = "model; y=0;\n";
+    let child = temp.file("body.inc", child_text);
+    let text = "var y;\n@#include \"body.inc\"\n[name='root'] y=1; end;\n";
     let root = temp.file("root.mod", text);
     let (service, _socket) = new_service();
     let server = service.inner();
@@ -246,7 +247,7 @@ async fn naming_from_unopened_include_preserves_roots_versions_and_stale_context
     assert_eq!(named.len(), 1, "{named:?}");
     assert_eq!(edits(&named[0])[0].text_document.uri, child);
     assert_eq!(edits(&named[0])[0].text_document.version, None);
-    open(server, &child, "y=0;\n", 9).await;
+    open(server, &child, child_text, 9).await;
     let current = pull(server, &child)
         .await
         .into_iter()

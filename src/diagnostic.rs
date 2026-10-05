@@ -8,6 +8,7 @@ use crate::workspace::Workspace;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub use crate::check_writing::{WritingContext, WritingRows};
 pub use crate::diagnostic_links::{RelatedDiagnostic, RelatedFrame, RelatedOccurrence};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +45,8 @@ pub struct Diagnostic {
     pub model_dimension: Option<String>,
     /// Producer-selected keyword used only after analysis and safe mapping.
     pub display_keyword: Option<(Span, &'static str)>,
+    /// Exact rows and statement executions behind an I208 or I209 note.
+    pub writing: Option<WritingContext>,
 }
 
 impl Diagnostic {
@@ -69,6 +72,7 @@ impl Diagnostic {
             tags,
             model_dimension: None,
             display_keyword: None,
+            writing: None,
         }
     }
 
@@ -88,13 +92,6 @@ impl Diagnostic {
     }
 }
 
-/// Source of a compilation-unit writing summary after include expansion.
-#[derive(Clone, Debug)]
-pub struct WritingOrigin {
-    pub file: String,
-    pub text: String,
-}
-
 /// Written location of one diagnostic from an include-spliced model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiagnosticOrigin {
@@ -109,7 +106,6 @@ pub struct DiagnosticOrigin {
 pub struct DiagnosticSet {
     pub root: String,
     pub diagnostics: Vec<Diagnostic>,
-    pub writing_origins: HashMap<String, WritingOrigin>,
     /// Parallel to `diagnostics`. `None` means the span is already in root text.
     pub origins: Vec<Option<DiagnosticOrigin>>,
 }
@@ -124,6 +120,13 @@ pub struct DiagnosticSet {
 pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = analyze_positions(model);
     crate::diagnostic_anchors::apply(model, &mut diagnostics, |_, _| true);
+    crate::check_writing::group_summaries(model, &mut diagnostics, |span, keyword| {
+        let safe = model
+            .source
+            .get(span.start as usize..span.end as usize)
+            .is_some_and(|text| text.eq_ignore_ascii_case(keyword));
+        Some((String::new(), span, safe))
+    });
     diagnostics
 }
 
@@ -421,29 +424,27 @@ pub(crate) fn check_in_workspace_with_origins(ws: &mut Workspace, abs_path: &str
         DiagnosticSet {
             root: root_key(ws, abs_path),
             diagnostics: analyze(&model),
-            writing_origins: HashMap::new(),
             origins: Vec::new(),
         }
     })
 }
 
 fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticSet> {
+    let revision = ws.input_revision(abs_path)?;
     let model = ws.get_effective_model(abs_path)?.clone();
     let mut diags = analyze_positions(&model);
     if model.macro_incomplete() {
         // An unevaluated macro can change declarations, command options, and
         // which includes exist. Keep only the macro result already established
         // by analyze; file and companion checks would use an unfinished tree.
-        let writing_origins = HashMap::new();
         let mut source_texts = HashMap::new();
         let origins = diags
             .iter()
-            .map(|diag| diagnostic_origin(ws, abs_path, diag, &writing_origins, &mut source_texts))
+            .map(|diag| diagnostic_origin(ws, abs_path, diag, &mut source_texts))
             .collect();
         return Some(DiagnosticSet {
             root: root_key(ws, abs_path),
             diagnostics: diags,
-            writing_origins,
             origins,
         });
     }
@@ -475,11 +476,6 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
             }
         });
     }
-    let writing_origins = if expansion_blocked {
-        HashMap::new()
-    } else {
-        place_writing_anchors(ws, abs_path, &mut diags)
-    };
     let mut extra = Vec::new();
     extra.extend(crate::check_e060::check_e060(&records));
     if !ws.is_virtual_root(abs_path) {
@@ -496,12 +492,37 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
     crate::diagnostic_anchors::apply(&model, &mut diags, |span, keyword| {
         safely_mapped_keyword(ws, abs_path, span, keyword)
     });
+    crate::check_writing::group_summaries(&model, &mut diags, |span, keyword| {
+        let (file, written) = ws.map_effective_origin(abs_path, span)?;
+        Some((
+            file,
+            written,
+            safely_mapped_keyword(ws, abs_path, span, keyword),
+        ))
+    });
+    let root = root_key(ws, abs_path);
+    for context in diags
+        .iter_mut()
+        .filter_map(|diagnostic| diagnostic.writing.as_mut())
+    {
+        context.root = root.clone();
+        context.input_revision = revision.clone();
+    }
     let mut source_texts: HashMap<String, Arc<str>> = HashMap::new();
     crate::diagnostic_links::map_related(ws, abs_path, &mut diags, &mut source_texts);
     let origins: Vec<Option<DiagnosticOrigin>> = diags
         .iter()
-        .map(|diag| diagnostic_origin(ws, abs_path, diag, &writing_origins, &mut source_texts))
+        .map(|diag| diagnostic_origin(ws, abs_path, diag, &mut source_texts))
         .collect();
+    // Preserve check_file's written coordinates for writing notes. Their file
+    // and source snapshot are now per diagnostic in the ordinary origins list.
+    for (diagnostic, origin) in diags.iter_mut().zip(&origins) {
+        if crate::check_writing::is_writing_code(&diagnostic.code) {
+            if let Some(origin) = origin {
+                diagnostic.span = origin.span;
+            }
+        }
+    }
     if !records.resolved.is_empty() {
         for (diag, origin) in diags.iter_mut().zip(&origins) {
             let Some(fix) = diag.fix.take() else { continue };
@@ -511,9 +532,8 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
         }
     }
     Some(DiagnosticSet {
-        root: root_key(ws, abs_path),
+        root,
         diagnostics: diags,
-        writing_origins,
         origins,
     })
 }
@@ -547,21 +567,8 @@ fn diagnostic_origin(
     ws: &mut Workspace,
     root: &str,
     diag: &Diagnostic,
-    writing_origins: &HashMap<String, WritingOrigin>,
     source_texts: &mut HashMap<String, Arc<str>>,
 ) -> Option<DiagnosticOrigin> {
-    if crate::check_writing::is_writing_code(&diag.code) {
-        let writing = writing_origins.get(&diag.code)?;
-        let text = source_texts
-            .entry(writing.file.clone())
-            .or_insert_with(|| Arc::from(writing.text.as_str()))
-            .clone();
-        return Some(DiagnosticOrigin {
-            file: writing.file.clone(),
-            text,
-            span: diag.span,
-        });
-    }
     if is_root_text_code(&diag.code) {
         return None;
     }
@@ -690,57 +697,6 @@ fn root_key(ws: &Workspace, path: &str) -> String {
     }
 }
 
-/// Rewrite I208–I210 onto the file that owns the first site.
-/// A span that crosses two files keeps only its first byte.
-fn place_writing_anchors(
-    ws: &mut Workspace,
-    root: &str,
-    diags: &mut Vec<Diagnostic>,
-) -> HashMap<String, WritingOrigin> {
-    let mut origins = HashMap::new();
-    diags.retain_mut(|diag| {
-        if !crate::check_writing::is_writing_code(&diag.code) {
-            return true;
-        }
-        let Some((file, span)) = mapped_writing_span(ws, root, diag.span) else {
-            return false;
-        };
-        let Some(text) = ws.get_source(&file) else {
-            return false;
-        };
-        origins.insert(
-            diag.code.clone(),
-            WritingOrigin {
-                file,
-                text: text.to_string(),
-            },
-        );
-        diag.span = span;
-        true
-    });
-    origins
-}
-
-fn mapped_writing_span(ws: &mut Workspace, root: &str, span: Span) -> Option<(String, Span)> {
-    let (file, origin) = ws.map_effective_origin(root, span)?;
-    if span.end > span.start.saturating_add(1) {
-        let tail = Span {
-            start: span.end - 1,
-            end: span.end,
-        };
-        if let Some((end_file, _)) = ws.map_effective_origin(root, tail) {
-            if end_file != file {
-                let short = Span {
-                    start: span.start,
-                    end: span.start.saturating_add(1).min(span.end),
-                };
-                return ws.map_effective_origin(root, short);
-            }
-        }
-    }
-    Some((file, origin))
-}
-
 fn severity_label(severity: Severity) -> &'static str {
     match severity {
         Severity::Error => "ERROR",
@@ -757,7 +713,6 @@ pub fn format_check_lines(path: &str, diags: &[Diagnostic], src: &str) -> String
         &DiagnosticSet {
             root: String::new(),
             diagnostics: diags.to_vec(),
-            writing_origins: HashMap::new(),
             origins: Vec::new(),
         },
         src,

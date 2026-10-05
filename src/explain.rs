@@ -47,12 +47,12 @@ pub struct ExplainEntry {
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
-        body: "The Dynare parser could not interpret the source. The diagnostic range points at the offending token or the nearest recoverable position. Dynare refuses with a generic bison `ERROR` at a location, or with `character unrecognized by lexer` when active Dynare syntax holds a double-quoted string or a non-ASCII character.\n\n**Warrant**\n\nThe editor names the missing construct and points at a usable range; Dynare's bison location is often the next token, and its lexer note names no range at all. A non-ASCII character in active Dynare syntax keeps the sentence `character unrecognized by lexer` and the range is that character run. That covers declarations, equations, and shock statements. Comments, quoted labels, TeX names, verbatim text, the complementarity sign, native MATLAB text, and discarded macro branches are not flagged. For command-qualified option membership, value, or missing-comma errors, the editor names the offending option and command instead of reconstructing a Flex token enum. For a reserved block token (`dsge_prior_weight`), the message names the symbol and block context instead of Dynare's bare `unexpected DSGE_PRIOR_WEIGHT`. Ordinary statement expressions retain the identifier; declarations and the allowed estimated-parameter name slots remain legal. A function registered by a non-model call still needs an explicit external_function declaration before a model expression uses it. The existing missing-declaration E001 family keeps Dynare's Before using NAME() sentence on that shape. Qualified external calls in model expressions retain the complete callee identity and the official missing-declaration, derivative-only, or argument-count sentence. Their range points at the written callee instead of the complete call. Unqualified external calls keep the official declaration, derivative-role and argument-count sentences on the complete written call. A variable given several arguments retains the official refusal on the complete call. Malformed argument lists retain the official syntax sentence on the offending token.\n\n**Common causes**\n\n- Missing semicolon at the end of a declaration or equation\n- A timed or parenthesized target in ``steady_state_model``; write an untimed name before ``=``. ``histval`` and ``filter_initial_state`` use their separate lag syntax.\n- Unbalanced parentheses, braces, or block keywords\n- A reserved keyword used as an identifier\n- A reserved preprocessor symbol used where an expression is expected\n- A non-ASCII character in a name, such as `var café;`, `y = café;`, or `var café;` inside `shocks`. Comments, `long_name`, TeX, equation-name strings, verbatim text, native MATLAB, and an inactive `@#if`, `@#elseif`, `@#else`, `@#ifdef`, or `@#ifndef` branch may contain accents. Rename an active name to ASCII letters, digits, and underscores.\n\n**Fix**\n\nInspect the line cited and the line immediately preceding it. Dynare's preprocessor frequently flags the *next* line after a missing semicolon.",
+        body: "The Dynare parser could not interpret the source. The diagnostic range points at the offending token or the nearest recoverable position. Dynare refuses with a generic bison `ERROR` at a location, or with `character unrecognized by lexer` when active Dynare syntax holds a double-quoted string or a non-ASCII character.\n\n**Warrant**\n\nThe editor names the missing construct and points at a usable range; Dynare's bison location is often the next token, and its lexer note names no range at all. A non-ASCII character in active Dynare syntax keeps the sentence `character unrecognized by lexer` and the range is that character run. That covers declarations, equations, and shock statements. Comments, quoted labels, TeX names, verbatim text, the complementarity sign, native MATLAB text, and discarded macro branches are not flagged. For command-qualified option membership, value, or missing-comma errors, the editor names the offending option and command instead of reconstructing a Flex token enum. For a reserved block token (`dsge_prior_weight`), the message names the symbol and block context instead of Dynare's bare `unexpected DSGE_PRIOR_WEIGHT`. Ordinary statement expressions retain the identifier; declarations and the allowed estimated-parameter name slots remain legal. A function registered by a non-model call still needs an explicit external_function declaration before a model expression uses it. The existing missing-declaration E001 family keeps Dynare's Before using NAME() sentence on that shape. Qualified external calls in model expressions retain the complete callee identity and the official missing-declaration, derivative-only, or argument-count sentence. Their range points at the written callee instead of the complete call. Unqualified external calls keep the official declaration, derivative-role and argument-count sentences on the complete written call. A variable given several arguments retains the official refusal on the complete call. Malformed argument lists retain the official syntax sentence on the offending token.\n\n**Common causes**\n\n- Missing semicolon at the end of a declaration or equation\n- A timed or parenthesized target in ``steady_state_model``; write an untimed name before ``=``. ``histval`` and ``filter_initial_state`` use their separate lag syntax.\n- Unbalanced parentheses, braces, or block keywords\n- A reserved keyword used as an identifier\n- A reserved preprocessor symbol used where an expression is expected\n- A non-ASCII character in a name, such as `var café;`, `y = café;`, or `var café;` inside `shocks`. Comments, `long_name`, TeX, equation-name strings, verbatim text, native MATLAB, and an inactive `@#if`, `@#elseif`, `@#else`, `@#ifdef`, or `@#ifndef` branch may contain accents. Rename an active name to ASCII letters, digits, and underscores.\n\n**Fix**\n\nInspect the line cited and the line immediately preceding it. Dynare's preprocessor frequently flags the *next* line after a missing semicolon.\n\n**Range warrant**\n\nAn empty `matched_moments`, `matched_irfs`, `matched_irfs_weights`, `moment_calibration`, or `irf_calibration` block selects its own keyword. Other parse errors retain their token or expression ranges. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("W013", ExplainEntry {
         title: "Equation count does not match endogenous variable count",
-        body: "The number of equations inside the `model` block does not equal the number of endogenous variables declared in the `var` block.\n\nWhen ramsey_model, ramsey_policy, or discretionary_policy is present and instruments= lists N unique names, the expected gap is −N, not equality; a square file still warns.\n\n**Fix**\n\n- Add a missing equation, or remove a duplicate one\n- Declare the missing endogenous variable in `var`, or remove an   extra declaration\n- Check whether a commented-out equation was intended to be   active\n- For ramsey_model / ramsey_policy / discretionary_policy with N instruments, the intended gap is −N; do not add equations only to make the file square",
+        body: "The number of equations inside the `model` block does not equal the number of endogenous variables declared in the `var` block.\n\nWhen ramsey_model, ramsey_policy, or discretionary_policy is present and instruments= lists N unique names, the expected gap is −N, not equality; a square file still warns.\n\n**Fix**\n\n- Add a missing equation, or remove a duplicate one\n- Declare the missing endogenous variable in `var`, or remove an   extra declaration\n- Check whether a commented-out equation was intended to be   active\n- For ramsey_model / ramsey_policy / discretionary_policy with N instruments, the intended gap is −N; do not add equations only to make the file square\n\n**Range warrant**\n\nThe range selects the first safely mapped aggregate `model` keyword in execution order. The count still combines aggregate blocks. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Added,
     }),
     ("E020", ExplainEntry {
@@ -77,12 +77,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E026", ExplainEntry {
         title: "varexo_det with a perfect-foresight solver",
-        body: "A ``varexo_det`` declaration cannot appear with ``simul``, ``perfect_foresight_solver``, or ``perfect_foresight_with_expectation_errors_solver``. Dynare refuses: `A .mod file cannot contain both one of {perfect_foresight_solver, simul, perfect_foresight_with_expectation_errors_solver} and varexo_det declaration (all exogenous variables are deterministic in this case)`.\n\n**Fix**\n\nRemove the ``varexo_det`` declaration (use ``varexo``), or drop the perfect-foresight solver.",
+        body: "A ``varexo_det`` declaration cannot appear with ``simul``, ``perfect_foresight_solver``, or ``perfect_foresight_with_expectation_errors_solver``. Dynare refuses: `A .mod file cannot contain both one of {perfect_foresight_solver, simul, perfect_foresight_with_expectation_errors_solver} and varexo_det declaration (all exogenous variables are deterministic in this case)`.\n\n**Fix**\n\nRemove the ``varexo_det`` declaration (use ``varexo``), or drop the perfect-foresight solver.\n\n**Range warrant**\n\nThe range selects the `varexo_det` keyword that owns the first affected declaration. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E027", ExplainEntry {
         title: "varexo_det with Ramsey",
-        body: "``ramsey_model`` and ``ramsey_policy`` cannot be used with deterministic exogenous variables. Dynare refuses: `ramsey_model and ramsey_policy are incompatible with deterministic exogenous variables`.\n\n**Fix**\n\nRemove the ``varexo_det`` declaration, or drop the Ramsey command.",
+        body: "``ramsey_model`` and ``ramsey_policy`` cannot be used with deterministic exogenous variables. Dynare refuses: `ramsey_model and ramsey_policy are incompatible with deterministic exogenous variables`.\n\n**Fix**\n\nRemove the ``varexo_det`` declaration, or drop the Ramsey command.\n\n**Range warrant**\n\nThe range selects the `varexo_det` keyword that owns the first affected declaration. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E028", ExplainEntry {
@@ -157,17 +157,17 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("I050", ExplainEntry {
         title: "No initval or steady_state_model block",
-        body: "The file declares variables and equations but does not include an `initval` or `steady_state_model` block. This check is presence only; this tool does not compute a numerical steady state. A sibling FILENAME_steadystate.m also counts as presence.\n\n**Fix**\n\nAdd an `initval` block with initial guesses, or a `steady_state_model` block with closed-form assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).",
+        body: "The file declares variables and equations but does not include an `initval` or `steady_state_model` block. This check is presence only; this tool does not compute a numerical steady state. A sibling FILENAME_steadystate.m also counts as presence.\n\n**Fix**\n\nAdd an `initval` block with initial guesses, or a `steady_state_model` block with closed-form assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).\n\n**Range warrant**\n\nThe range selects the owning `model` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Added,
     }),
     ("I208", ExplainEntry {
         title: "Counted equation has no name tag",
-        body: "At least one counted model equation has no nonempty `name` tag. This is a writing preference, not a Dynare refusal.\n\n`#` locals and `[static]` replacement rows are not counted. One note gives the count for the compilation unit.\n\nMalformed or required tags still report their Dynare errors.\n\nThe editor can add `eq_N` name tags to the counted equations it can edit safely.",
+        body: "At least one surviving counted model equation has no nonempty `name` tag. This is a writing preference, not a Dynare refusal.\n\nEach note counts unnamed equations owned by one written `model` block, or by `model_replace` for a surviving replacement row. `#` locals, static-only rows, and removed equations are not counted. Repeated macro executions of the same written opener contribute to one note per model root. Incomplete expansion withholds the note.\n\nThe range selects that opener's keyword. If it cannot be mapped safely, the previous equation range remains. Malformed or required tags still report their Dynare errors.\n\nThe editor can add `eq_N` name tags to the safely editable equations counted by that note, including equations in an include. Other blocks are outside that action.",
         kind: ExplainKind::Added,
     }),
     ("I209", ExplainEntry {
         title: "Declaration has no long_name",
-        body: "At least one `var`, `varexo`, `varexo_det`, or `parameters` name has no nonempty explicit `long_name`. This is a writing preference, not a Dynare refusal.\n\nEach declared symbol is counted once in its scope. Declarations that come from a resolved macro are included. Generated auxiliaries, model-local names, and other declaration kinds are not counted.",
+        body: "At least one `var`, `varexo`, `varexo_det`, or `parameters` name has no nonempty explicit `long_name`. This is a writing preference, not a Dynare refusal.\n\nEach note counts eligible symbols owned by one written declaration statement. Each symbol is counted once in its scope and belongs to its first eligible declaration. Repeated macro executions of the same written opener contribute to one note per model root. Generated auxiliaries, model-local names, and other declaration kinds are not counted. Incomplete expansion withholds the note.\n\nThe range selects the declaration keyword. If it cannot be mapped safely, the previous declaration range remains.",
         kind: ExplainKind::Added,
     }),
     ("I210", ExplainEntry {
@@ -212,7 +212,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W042", ExplainEntry {
         title: "Endogenous variable missing from steady_state_model",
-        body: "The `steady_state_model` block does not assign a value for every endogenous variable. The set uses final symbol types: removed names and names retyped as parameters are excluded; names retyped as endogenous are included. Dynare warns: `variable 'c' is not assigned a value`. Dynare will fall back to the `initval` value (or zero).\n\n**Fix**\n\nAdd the missing assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).",
+        body: "The `steady_state_model` block does not assign a value for every endogenous variable. The set uses final symbol types: removed names and names retyped as parameters are excluded; names retyped as endogenous are included. Dynare warns: `variable 'c' is not assigned a value`. Dynare will fall back to the `initval` value (or zero).\n\n**Fix**\n\nAdd the missing assignments. For a numerical solve, use Dynare (for example `steady;` in MATLAB/Octave).\n\n**Range warrant**\n\nEach missing variable still has its own warning. Each range selects the owning `steady_state_model` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E058", ExplainEntry {
@@ -227,7 +227,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W052", ExplainEntry {
         title: "Endogenous variable missing from initval",
-        body: "The `initval` block omits one or more endogenous variables. Dynare assumes zero for variables omitted from `initval`; the block can supply solver guesses and, in a perfect foresight model, initial or terminal conditions.\n\n**Next step**\n\nCheck the omitted names and provide values where needed for your model. Dygnosis does not test convergence or compute a solution.",
+        body: "The `initval` block omits one or more endogenous variables. Dynare assumes zero for variables omitted from `initval`; the block can supply solver guesses and, in a perfect foresight model, initial or terminal conditions.\n\n**Next step**\n\nCheck the omitted names and provide values where needed for your model. Dygnosis does not test convergence or compute a solution.\n\n**Range warrant**\n\nThe range selects the owning `initval` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Added,
     }),
     ("E059", ExplainEntry {
@@ -262,7 +262,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W092", ExplainEntry {
         title: "More observed variables than shock sources",
-        body: "Dygnosis counts more distinct declared endogenous names in `varobs` than distinct names with the final declared type `varexo` plus endogenous measurement-error entries in `shocks` or `estimated_params`. Dynare's estimation guidance requires at least as many shocks or measurement errors as observed variables to avoid stochastic singularity. This count does not evaluate the likelihood, shock covariance matrix or identification.\n\n**Next step**\n\nReview the observed variables and written shock sources. If the model needs them, add structural shocks or measurement errors, such as `stderr y_obs` in `estimated_params`. Run Dynare to check the numerical estimation setup.",
+        body: "Dygnosis counts more distinct declared endogenous names in `varobs` than distinct names with the final declared type `varexo` plus endogenous measurement-error entries in `shocks` or `estimated_params`. Dynare's estimation guidance requires at least as many shocks or measurement errors as observed variables to avoid stochastic singularity. This count does not evaluate the likelihood, shock covariance matrix or identification.\n\n**Next step**\n\nReview the observed variables and written shock sources. If the model needs them, add structural shocks or measurement errors, such as `stderr y_obs` in `estimated_params`. Run Dynare to check the numerical estimation setup.\n\n**Range warrant**\n\nThe range selects the affected `varobs` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Added,
     }),
     ("E093", ExplainEntry {
@@ -282,7 +282,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E100", ExplainEntry {
         title: "planner_objective and optimal-policy commands go together",
-        body: "``planner_objective`` must appear with ``ramsey_model``, ``ramsey_policy``, ``osr``, or ``discretionary_policy``, and those commands (except ``osr``) need ``planner_objective``. Dynare refuses either missing direction: `A planner_objective statement must be used with a ramsey_model, a ramsey_policy, osr, or a discretionary_policy statement and vice versa.`\n\n**Fix**\n\nAdd the missing ``planner_objective <expression>;``, or add a matching policy command.",
+        body: "``planner_objective`` must appear with ``ramsey_model``, ``ramsey_policy``, ``osr``, or ``discretionary_policy``, and those commands (except ``osr``) need ``planner_objective``. Dynare refuses either missing direction: `A planner_objective statement must be used with a ramsey_model, a ramsey_policy, osr, or a discretionary_policy statement and vice versa.`\n\n**Fix**\n\nAdd the missing ``planner_objective <expression>;``, or add a matching policy command.\n\n**Range warrant**\n\nAn orphan planner-objective summary selects its owning `planner_objective` keyword. Checks about a present expression keep their expression range. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E101", ExplainEntry {
@@ -302,7 +302,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E104", ExplainEntry {
         title: "More than one planner_objective with Ramsey",
-        body: "With ``ramsey_model`` or ``ramsey_policy``, only one ``planner_objective`` statement is allowed. Dynare refuses: `there can only be one planner_objective statement`.\n\n**Fix**\n\nKeep a single ``planner_objective``.",
+        body: "With ``ramsey_model`` or ``ramsey_policy``, only one ``planner_objective`` statement is allowed. Dynare refuses: `there can only be one planner_objective statement`.\n\n**Fix**\n\nKeep a single ``planner_objective``.\n\n**Range warrant**\n\nThe range selects the later `planner_objective` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("W110", ExplainEntry {
@@ -352,12 +352,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E170", ExplainEntry {
         title: "Multiple occbin_constraints blocks",
-        body: "The file has more than one ``occbin_constraints`` block. Dynare refuses: `Multiple 'occbin_constraints' blocks are not allowed`.\n\n**Fix**\n\nKeep a single ``occbin_constraints`` block.",
+        body: "The file has more than one ``occbin_constraints`` block. Dynare refuses: `Multiple 'occbin_constraints' blocks are not allowed`.\n\n**Fix**\n\nKeep a single ``occbin_constraints`` block.\n\n**Range warrant**\n\nThe range selects the later `occbin_constraints` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E171", ExplainEntry {
         title: "Too many constraints in occbin_constraints",
-        body: "An ``occbin_constraints`` block lists more than two named constraints. Dynare refuses: `only up to two constraints are supported in 'occbin_constraints' block`.\n\n**Fix**\n\nRemove the extra constraint. OccBin supports at most two.",
+        body: "An ``occbin_constraints`` block lists more than two named constraints. Dynare refuses: `only up to two constraints are supported in 'occbin_constraints' block`.\n\n**Fix**\n\nRemove the extra constraint. OccBin supports at most two.\n\n**Range warrant**\n\nThe range selects the sole `occbin_constraints` keyword, rather than a constraint row. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E172", ExplainEntry {
@@ -472,7 +472,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E203", ExplainEntry {
         title: "ramsey_constraints without Ramsey",
-        body: "Dynare refuses: `A ramsey_constraints block requires the presence of a ramsey_model or ramsey_policy statement`.\n\n**Fix**\n\nAdd ``ramsey_model`` or ``ramsey_policy``, or drop ``ramsey_constraints``.",
+        body: "Dynare refuses: `A ramsey_constraints block requires the presence of a ramsey_model or ramsey_policy statement`.\n\n**Fix**\n\nAdd ``ramsey_model`` or ``ramsey_policy``, or drop ``ramsey_constraints``.\n\n**Range warrant**\n\nThe range selects the owning `ramsey_constraints` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E204", ExplainEntry {
@@ -497,7 +497,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E208", ExplainEntry {
         title: "[static] and [dynamic] equation counts differ",
-        body: "Dynare refuses: `the number of equations marked [static] must be equal to the number of equations marked [dynamic]`.\n\n**Fix**\n\nGive each ``[static]`` equation a matching ``[dynamic]`` equation, or drop the tags.",
+        body: "Dynare refuses: `the number of equations marked [static] must be equal to the number of equations marked [dynamic]`.\n\n**Fix**\n\nGive each ``[static]`` equation a matching ``[dynamic]`` equation, or drop the tags.\n\n**Range warrant**\n\nThe range selects the first safely mapped aggregate `model` keyword in execution order. The count still combines aggregate blocks. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E209", ExplainEntry {
@@ -522,7 +522,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E212", ExplainEntry {
         title: "Estimated parameter used in a shock expression",
-        body: "Dynare refuses: `some estimated parameters (…) also appear in the expressions defining the variance/covariance matrix of shocks; this is not allowed.`\n\nThis check uses the final symbol type after successful `change_type` statements, rather than the list where the name was declared.\n\n**Fix**\n\nUse a calibrated parameter in the shocks block, or drop that name from ``estimated_params``.",
+        body: "Dynare refuses: `some estimated parameters (…) also appear in the expressions defining the variance/covariance matrix of shocks; this is not allowed.`\n\nThis check uses the final symbol type after successful `change_type` statements, rather than the list where the name was declared.\n\n**Fix**\n\nUse a calibrated parameter in the shocks block, or drop that name from ``estimated_params``.\n\n**Range warrant**\n\nThe range selects the owning `estimated_params` keyword, or the existing `shocks` fallback when no estimated-parameters owner is available. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E213", ExplainEntry {
@@ -547,12 +547,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E217", ExplainEntry {
         title: "initval after endval",
-        body: "Dynare refuses: `an 'initval' block cannot appear after an 'endval' block`.\n\n**Fix**\n\nMove ``initval`` before ``endval``, or drop one of the blocks.",
+        body: "Dynare refuses: `an 'initval' block cannot appear after an 'endval' block`.\n\n**Fix**\n\nMove ``initval`` before ``endval``, or drop one of the blocks.\n\n**Range warrant**\n\nThe range selects the owning `initval` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E218", ExplainEntry {
         title: "initval/endval all_values_required is incomplete",
-        body: "``initval`` or ``endval`` was opened with ``all_values_required`` but some variables have no assignment. Dynare refuses: `You have not set the following endogenous variables in initval:`; `You have not set the following exogenous variables in initval:`; `You have not set the following endogenous variables in endval:`; `You have not set the following exogenous variables in endval:`.\n\n**Fix**\n\nAssign every endogenous and exogenous in that block, or drop ``all_values_required``.",
+        body: "``initval`` or ``endval`` was opened with ``all_values_required`` but some variables have no assignment. Dynare refuses: `You have not set the following endogenous variables in initval:`; `You have not set the following exogenous variables in initval:`; `You have not set the following endogenous variables in endval:`; `You have not set the following exogenous variables in endval:`.\n\n**Fix**\n\nAssign every endogenous and exogenous in that block, or drop ``all_values_required``.\n\n**Range warrant**\n\nThe range selects the owning `initval` or `endval` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E219", ExplainEntry {
@@ -677,7 +677,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E241", ExplainEntry {
         title: "histval completeness",
-        body: "``histval(all_values_required)`` is missing an assignment for an endogenous or exogenous variable. Dynare refuses: `You have not set the following endogenous variables in histval: {names}` / `You have not set the following exogenous variables in endval: {names}` (their exo line says ``endval``).\n\n**Fix**\n\nGive every endogenous and exogenous variable a ``histval`` assignment, or drop ``all_values_required``.",
+        body: "``histval(all_values_required)`` is missing an assignment for an endogenous or exogenous variable. Dynare refuses: `You have not set the following endogenous variables in histval: {names}` / `You have not set the following exogenous variables in endval: {names}` (their exo line says ``endval``).\n\n**Fix**\n\nGive every endogenous and exogenous variable a ``histval`` assignment, or drop ``all_values_required``.\n\n**Range warrant**\n\nThe range selects the owning `histval` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E242", ExplainEntry {
@@ -742,12 +742,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W203", ExplainEntry {
         title: "Several osr_params statements",
-        body: "The file has more than one ``osr_params`` statement. Dynare accepts and warns: `You have more than one osr_params statement in the .mod file.`\n\n**Fix**\n\nKeep a single ``osr_params`` statement.",
+        body: "The file has more than one ``osr_params`` statement. Dynare accepts and warns: `You have more than one osr_params statement in the .mod file.`\n\n**Fix**\n\nKeep a single ``osr_params`` statement.\n\n**Range warrant**\n\nThe range selects the later `osr_params` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E254", ExplainEntry {
         title: "osr_params_bounds before osr_params",
-        body: "``osr_params_bounds`` appears and there is no earlier ``osr_params`` statement. Dynare refuses: `you must have an osr_params statement before the osr_params_bounds block.`\n\n**Fix**\n\nPut ``osr_params`` above ``osr_params_bounds``.",
+        body: "``osr_params_bounds`` appears and there is no earlier ``osr_params`` statement. Dynare refuses: `you must have an osr_params statement before the osr_params_bounds block.`\n\n**Fix**\n\nPut ``osr_params`` above ``osr_params_bounds``.\n\n**Range warrant**\n\nThe range selects the owning `osr_params_bounds` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E255", ExplainEntry {
@@ -767,12 +767,12 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E258", ExplainEntry {
         title: "Several varobs statements",
-        body: "The file has more than one ``varobs`` statement. Dynare refuses: `varobs: you cannot have several 'varobs' statements in the same MOD file`.\n\n**Fix**\n\nKeep a single ``varobs`` statement.",
+        body: "The file has more than one ``varobs`` statement. Dynare refuses: `varobs: you cannot have several 'varobs' statements in the same MOD file`.\n\n**Fix**\n\nKeep a single ``varobs`` statement.\n\n**Range warrant**\n\nThe range selects the later `varobs` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E259", ExplainEntry {
         title: "Several varexobs statements",
-        body: "The file has more than one ``varexobs`` statement. Dynare refuses: `varexobs: you cannot have several 'varexobs' statements in the same MOD file`.\n\n**Fix**\n\nKeep a single ``varexobs`` statement.",
+        body: "The file has more than one ``varexobs`` statement. Dynare refuses: `varexobs: you cannot have several 'varexobs' statements in the same MOD file`.\n\n**Fix**\n\nKeep a single ``varexobs`` statement.\n\n**Range warrant**\n\nThe range selects the later `varexobs` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E260", ExplainEntry {
@@ -962,22 +962,22 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E297", ExplainEntry {
         title: "Several ramsey_model statements",
-        body: "The file has more than one ``ramsey_model`` statement. Dynare refuses: `Several 'ramsey_model' statements cannot appear in a given .mod file.`\n\n**Fix**\n\nKeep a single ``ramsey_model`` statement.",
+        body: "The file has more than one ``ramsey_model`` statement. Dynare refuses: `Several 'ramsey_model' statements cannot appear in a given .mod file.`\n\n**Fix**\n\nKeep a single ``ramsey_model`` statement.\n\n**Range warrant**\n\nThe range selects the offending `ramsey_model` or `ramsey_policy` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E298", ExplainEntry {
         title: "ramsey_model after ramsey_policy",
-        body: "A ``ramsey_model`` statement follows a ``ramsey_policy`` statement. Dynare refuses: `A 'ramsey_model' statement cannot follow a 'ramsey_policy' statement.`\n\n**Fix**\n\nKeep one of the two, in the intended order.",
+        body: "A ``ramsey_model`` statement follows a ``ramsey_policy`` statement. Dynare refuses: `A 'ramsey_model' statement cannot follow a 'ramsey_policy' statement.`\n\n**Fix**\n\nKeep one of the two, in the intended order.\n\n**Range warrant**\n\nThe range selects the offending `ramsey_model` or `ramsey_policy` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E299", ExplainEntry {
         title: "ramsey_policy after ramsey_model",
-        body: "A ``ramsey_policy`` statement follows a ``ramsey_model`` statement. Dynare refuses: `A 'ramsey_policy' statement cannot follow a 'ramsey_model' statement.`\n\n**Fix**\n\nKeep one of the two, in the intended order.",
+        body: "A ``ramsey_policy`` statement follows a ``ramsey_model`` statement. Dynare refuses: `A 'ramsey_policy' statement cannot follow a 'ramsey_model' statement.`\n\n**Fix**\n\nKeep one of the two, in the intended order.\n\n**Range warrant**\n\nThe range selects the offending `ramsey_model` or `ramsey_policy` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E300", ExplainEntry {
         title: "Several ramsey_policy statements",
-        body: "The file has more than one ``ramsey_policy`` statement. Dynare refuses: `Several 'ramsey_policy' statements cannot appear in a given .mod file.`\n\n**Fix**\n\nKeep a single ``ramsey_policy`` statement.",
+        body: "The file has more than one ``ramsey_policy`` statement. Dynare refuses: `Several 'ramsey_policy' statements cannot appear in a given .mod file.`\n\n**Fix**\n\nKeep a single ``ramsey_policy`` statement.\n\n**Range warrant**\n\nThe range selects the offending `ramsey_model` or `ramsey_policy` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E301", ExplainEntry {
@@ -1087,7 +1087,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E322", ExplainEntry {
         title: "external_function without a name option",
-        body: "An ``external_function`` statement has no ``name`` option. Dynare refuses: `The 'name' option must be passed to external_function().`\n\n**Warrant**\n\nFor an empty option list, an empty `name=` followed by `)`, or an unknown option word, Dynare stops at a generic syntax error. The editor keeps the existing missing-name sentence on these shapes to point at the required function name.\n\n**Fix**\n\nAdd ``name='myfunc'``.",
+        body: "An ``external_function`` statement has no ``name`` option. Dynare refuses: `The 'name' option must be passed to external_function().`\n\n**Warrant**\n\nFor an empty option list, an empty `name=` followed by `)`, or an unknown option word, Dynare stops at a generic syntax error. The editor keeps the existing missing-name sentence on these shapes to point at the required function name.\n\n**Fix**\n\nAdd ``name='myfunc'``.\n\n**Range warrant**\n\nThe missing-name branch selects the `external_function` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E323", ExplainEntry {
@@ -1181,7 +1181,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
 
 **Fix**
 
-Pass exactly one of the two: ``data(file='x.csv');`` or ``data(series=y);``.",
+Pass exactly one of the two: ``data(file='x.csv');`` or ``data(series=y);``.\n\n**Range warrant**\n\nThe missing-source branch selects the `data` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E339", ExplainEntry {
@@ -1208,7 +1208,7 @@ Pass a positive number of observations, or drop ``nobs``.",
 
 **Fix**
 
-Add ``no_create_init``, or pass both ``datafile`` and ``initial_year``.",
+Add ``no_create_init``, or pass both ``datafile`` and ``initial_year``.\n\n**Range warrant**\n\nMissing command requirements select the `ms_estimation` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E342", ExplainEntry {
@@ -1217,7 +1217,7 @@ Add ``no_create_init``, or pass both ``datafile`` and ``initial_year``.",
 
 **Fix**
 
-Pass ``parameter_set=calibration`` (or the prior or posterior set you intend).",
+Pass ``parameter_set=calibration`` (or the prior or posterior set you intend).\n\n**Range warrant**\n\nMissing command requirements select the `conditional_forecast` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E343", ExplainEntry {
@@ -1244,7 +1244,7 @@ Merge the two rows into one, or remove the duplicate.",
 
 **Fix**
 
-Pass the named option.",
+Pass the named option.\n\n**Range warrant**\n\nA missing chain, regime count, or duration selects the `markov_switching` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E346", ExplainEntry {
@@ -1345,7 +1345,7 @@ Lower the probabilities, or give the whole row and column.",
 
 **Fix**
 
-Merge the two blocks into one.",
+Merge the two blocks into one.\n\n**Range warrant**\n\nThe range selects the affected `svar_identification` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E357", ExplainEntry {
@@ -1354,7 +1354,7 @@ Merge the two blocks into one.",
 
 **Fix**
 
-Keep one of the two.",
+Keep one of the two.\n\n**Range warrant**\n\nThe range selects the affected `svar_identification` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E358", ExplainEntry {
@@ -1408,7 +1408,7 @@ Split the restriction into one statement per matrix.",
 
 **Fix**
 
-Pass ``coefficients`` or ``variances``.",
+Pass ``coefficients`` or ``variances``.\n\n**Range warrant**\n\nA missing required choice or chain selects the `svar` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E364", ExplainEntry {
@@ -1426,7 +1426,7 @@ Keep one of the two.",
 
 **Fix**
 
-Pass ``chain=N``; the number must name the matching ``markov_switching`` chain.",
+Pass ``chain=N``; the number must name the matching ``markov_switching`` chain.\n\n**Range warrant**\n\nA missing required choice or chain selects the `svar` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E366", ExplainEntry {
@@ -1489,7 +1489,7 @@ Keep one of the three.",
 
 **Fix**
 
-Pass ``shape=beta`` (or the distribution you intend).",
+Pass ``shape=beta`` (or the distribution you intend).\n\n**Range warrant**\n\nThe range selects the dotted statement's `prior` keyword, rather than the target name. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E373", ExplainEntry {
@@ -1498,7 +1498,7 @@ Pass ``shape=beta`` (or the distribution you intend).",
 
 **Fix**
 
-Pass ``mean=`` or ``mode=``.",
+Pass ``mean=`` or ``mode=``.\n\n**Range warrant**\n\nThe range selects the dotted statement's `prior` keyword, rather than the target name. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E374", ExplainEntry {
@@ -1507,7 +1507,7 @@ Pass ``mean=`` or ``mode=``.",
 
 **Fix**
 
-Pass exactly one of the two.",
+Pass exactly one of the two.\n\n**Range warrant**\n\nWhen neither variance option is present, the range selects the dotted statement's `prior` keyword. When both are present, it keeps the existing range. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E375", ExplainEntry {
@@ -1534,7 +1534,7 @@ Pass four values, such as ``domain=[0.1 0.2 0.3 0.4]``.",
 
 **Fix**
 
-Name two or more parameters, or use the single ``name.prior(…)`` form.",
+Name two or more parameters, or use the single ``name.prior(…)`` form.\n\n**Range warrant**\n\nThe range selects the joint statement's `prior` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E378", ExplainEntry {
@@ -1579,12 +1579,12 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E382", ExplainEntry {
         title: "method_of_moments without a method",
-        body: "A ``method_of_moments`` statement carries no ``mom_method`` option, so Dynare cannot tell GMM, SMM, and IRF matching apart. Dynare refuses: `The 'method_of_moments' statement requires a method to be supplied via the 'mom_method' option. Possible values are 'GMM', 'SMM', or 'IRF_MATCHING'.`\n\nThe option value must be one of those three bare words; a quoted or other word is a syntax error, reported as **E001**.\n\n**Fix**\n\nAdd ``mom_method=GMM``, ``mom_method=SMM``, or ``mom_method=IRF_MATCHING``.",
+        body: "A ``method_of_moments`` statement carries no ``mom_method`` option, so Dynare cannot tell GMM, SMM, and IRF matching apart. Dynare refuses: `The 'method_of_moments' statement requires a method to be supplied via the 'mom_method' option. Possible values are 'GMM', 'SMM', or 'IRF_MATCHING'.`\n\nThe option value must be one of those three bare words; a quoted or other word is a syntax error, reported as **E001**.\n\n**Fix**\n\nAdd ``mom_method=GMM``, ``mom_method=SMM``, or ``mom_method=IRF_MATCHING``.\n\n**Range warrant**\n\nThe missing requirement selects the `method_of_moments` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E383", ExplainEntry {
         title: "method_of_moments without a data file",
-        body: "A ``method_of_moments`` statement asks for ``GMM`` or ``SMM`` but names no ``datafile``. Both methods match moments against data, so the file is required. Dynare refuses: `The 'method_of_moments' statement requires a data file to be supplied via the 'datafile' option.`\n\n``IRF_MATCHING`` does not need one. The file itself need not exist yet at this step; a named one that is missing is **W160**.\n\n**Fix**\n\nAdd ``datafile='your_data.csv'``.",
+        body: "A ``method_of_moments`` statement asks for ``GMM`` or ``SMM`` but names no ``datafile``. Both methods match moments against data, so the file is required. Dynare refuses: `The 'method_of_moments' statement requires a data file to be supplied via the 'datafile' option.`\n\n``IRF_MATCHING`` does not need one. The file itself need not exist yet at this step; a named one that is missing is **W160**.\n\n**Fix**\n\nAdd ``datafile='your_data.csv'``.\n\n**Range warrant**\n\nThe missing requirement selects the `method_of_moments` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E384", ExplainEntry {
@@ -1859,12 +1859,12 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E438", ExplainEntry {
         title: "PAC target information is incomplete or inconsistent",
-        body: "A pac_target_info block lacks a target, nonstationary auxiliary name, component auxname or kind; gives growth to a stationary kind ll component; or has no kind dd/dl component. Dynare refuses at check with the matching field sentence.\n\n**Fix**\n\nComplete each component and include a nonstationary one.",
+        body: "A pac_target_info block lacks a target, nonstationary auxiliary name, component auxname or kind; gives growth to a stationary kind ll component; or has no kind dd/dl component. Dynare refuses at check with the matching field sentence.\n\n**Fix**\n\nComplete each component and include a nonstationary one.\n\n**Range warrant**\n\nMissing target, nonstationary auxiliary, or nonstationary-component summaries select `pac_target_info`. A component missing `auxname` or `kind` selects its own `component` keyword. A stationary component with a present growth row keeps its existing range. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E439", ExplainEntry {
         title: "Semi-structural command lacks a required option",
-        body: "A var_model, trend_component_model, var_expectation_model, or pac_model lacks one of its required options. Dynare refuses while parsing: `You must pass the 'OPTION' option to the 'COMMAND' statement.`\n\n**Fix**\n\nAdd the required option to that command.",
+        body: "A var_model, trend_component_model, var_expectation_model, or pac_model lacks one of its required options. Dynare refuses while parsing: `You must pass the 'OPTION' option to the 'COMMAND' statement.`\n\n**Fix**\n\nAdd the required option to that command.\n\n**Range warrant**\n\nA missing required option selects the owning `var_model`, `trend_component_model`, `var_expectation_model`, or `pac_model` keyword. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E440", ExplainEntry {
@@ -1874,7 +1874,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E441", ExplainEntry {
         title: "VAR expectation needs one expression source",
-        body: "var_expectation_model needs either variable or expression, and rejects both together. Dynare refuses while parsing with the corresponding `You must pass either` or `You can't pass both` sentence.\n\n**Fix**\n\nKeep exactly one of variable and expression.",
+        body: "var_expectation_model needs either variable or expression, and rejects both together. Dynare refuses while parsing with the corresponding `You must pass either` or `You can't pass both` sentence.\n\n**Fix**\n\nKeep exactly one of variable and expression.\n\n**Range warrant**\n\nWhen both `variable` and `expression` are absent, the range selects `var_expectation_model`. When both are present, it keeps the existing range. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E442", ExplainEntry {
@@ -1979,7 +1979,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E188", ExplainEntry {
         title: "Plain aggregate equation count mismatch",
-        body: "Dynare refuses before MATLAB: `There are 2 equations but 1 endogenous variables!`. Dygnosis emits E188 when the written aggregate count differs and the file has no helper-generating expression, model surgery, planner exemption, or incomplete expansion. Counts changed by Dynare's rewrite are outside this check; W013 remains guidance there. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nMatch counted model equations to distinct endogenous variables.",
+        body: "Dynare refuses before MATLAB: `There are 2 equations but 1 endogenous variables!`. Dygnosis emits E188 when the written aggregate count differs and the file has no helper-generating expression, model surgery, planner exemption, or incomplete expansion. Counts changed by Dynare's rewrite are outside this check; W013 remains guidance there. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nMatch counted model equations to distinct endogenous variables.\n\n**Range warrant**\n\nThe range selects the first safely mapped aggregate `model` keyword in execution order. The count still combines aggregate blocks. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E189", ExplainEntry {
@@ -2009,7 +2009,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E192", ExplainEntry {
         title: "Plain heterogeneous equation count mismatch",
-        body: "Dynare refuses before MATLAB: `There are 1 equations but 2 endogenous variables in the model for heterogeneity dimension 'h'!`. Dygnosis emits E192 for a written mismatch in a dimension whose equations cannot generate helpers. It sums multiple blocks of the same dimension. Counts changed by Dynare's rewrite remain outside this check; W208 remains guidance there. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nMatch counted equations to distinct endogenous names in that dimension.",
+        body: "Dynare refuses before MATLAB: `There are 1 equations but 2 endogenous variables in the model for heterogeneity dimension 'h'!`. Dygnosis emits E192 for a written mismatch in a dimension whose equations cannot generate helpers. It sums multiple blocks of the same dimension. Counts changed by Dynare's rewrite remain outside this check; W208 remains guidance there. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nMatch counted equations to distinct endogenous names in that dimension.\n\n**Range warrant**\n\nThe range selects the first safely mapped `model` keyword for the affected heterogeneity dimension. The count still combines that dimension's blocks. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E193", ExplainEntry {
@@ -2099,7 +2099,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E474", ExplainEntry {
         title: "Command not supported for heterogeneous models",
-        body: "A heterogeneity dimension is declared together with ``model(block)`` or a command Dynare 7.2 does not run on heterogeneous models. Dynare refuses, for example: `The 'check' command is not supported for heterogeneous models` or `the 'block' option of the 'model' block is not supported for heterogeneous models`.\n\n**Fix**\n\nRemove that command or option, or drop the heterogeneity dimension.",
+        body: "A heterogeneity dimension is declared together with ``model(block)`` or a command Dynare 7.2 does not run on heterogeneous models. Dynare refuses, for example: `The 'check' command is not supported for heterogeneous models` or `the 'block' option of the 'model' block is not supported for heterogeneous models`.\n\n**Fix**\n\nRemove that command or option, or drop the heterogeneity dimension.\n\n**Range warrant**\n\nThe unsupported `optim_weights` branch selects that keyword. Other branches retain their keyword or option ranges. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Shared,
     }),
     ("E475", ExplainEntry {
@@ -2134,7 +2134,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("W208", ExplainEntry {
         title: "Heterogeneity equation count does not match",
-        body: "The number of equations written in `model(heterogeneity=…)` does not equal the number of distinct endogenous names written in `var(heterogeneity=…)` for that heterogeneity dimension. `#` locals and `[static]` rows are not counted. A name written twice counts once here; the duplicate declaration is **W031**. This is the same written-count check as **W013** for the aggregate model.\n\nDynare's own refusal counts again after it adds helper variables for leads and lags. That later count stays silent here. A lead or a lag in an otherwise matching heterogeneity dimension does not warn. An unresolved include or macro expansion withholds the count, because the missing text may change it.\n\n**Fix**\n\nAdd or remove an equation in that heterogeneity dimension, or add or remove a `var(heterogeneity=…)` name, so the two written counts match.",
+        body: "The number of equations written in `model(heterogeneity=…)` does not equal the number of distinct endogenous names written in `var(heterogeneity=…)` for that heterogeneity dimension. `#` locals and `[static]` rows are not counted. A name written twice counts once here; the duplicate declaration is **W031**. This is the same written-count check as **W013** for the aggregate model.\n\nDynare's own refusal counts again after it adds helper variables for leads and lags. That later count stays silent here. A lead or a lag in an otherwise matching heterogeneity dimension does not warn. An unresolved include or macro expansion withholds the count, because the missing text may change it.\n\n**Fix**\n\nAdd or remove an equation in that heterogeneity dimension, or add or remove a `var(heterogeneity=…)` name, so the two written counts match.\n\n**Range warrant**\n\nThe range selects the first safely mapped `model` keyword for the affected heterogeneity dimension. The count still combines that dimension's blocks. The keyword excludes options, body, and `end`. If its written file or token cannot be verified, the previous mapped range remains.",
         kind: ExplainKind::Added,
     }),
     ("W211", ExplainEntry {
