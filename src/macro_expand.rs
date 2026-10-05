@@ -632,15 +632,22 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
             }
             continue;
         }
-        if tok.kind == TokenKind::MacroInterp {
+        if tok.kind == TokenKind::MacroInterp
+            || (tok.kind == TokenKind::String && tok.text(state.src).contains("@{"))
+        {
             if emitting(&stack) {
-                match subst_interp(state.src, tok, state.defines) {
+                let replacements = if tok.kind == TokenKind::String {
+                    subst_quoted(state.src, tok, state.defines).map(|token| vec![token])
+                } else {
+                    subst_interp(state.src, tok, state.defines).map_err(|error| (tok.span, error))
+                };
+                match replacements {
                     Ok(replacements) => {
                         for replacement in replacements {
                             emit(state, &mut out, &mut traces, replacement);
                         }
                     }
-                    Err(error) => {
+                    Err((span, error)) => {
                         if state.include_seen
                             && matches!(
                                 error,
@@ -648,14 +655,14 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                                     | MacroEvalError::UnknownFunction(_)
                             )
                         {
-                            state.incomplete.get_or_insert(tok.span);
+                            state.incomplete.get_or_insert(span);
                             emit(state, &mut out, &mut traces, tok.clone());
                         } else if let Some((code, message)) = error.diagnostic() {
-                            state.type_errors.push((tok.span, code, message));
-                            state.incomplete.get_or_insert(tok.span);
+                            state.type_errors.push((span, code, message));
+                            state.incomplete.get_or_insert(span);
                             emit(state, &mut out, &mut traces, tok.clone());
                         } else {
-                            state.incomplete.get_or_insert(tok.span);
+                            state.incomplete.get_or_insert(span);
                             emit(state, &mut out, &mut traces, tok.clone());
                         }
                     }
@@ -1005,6 +1012,65 @@ fn subst_interp(
             Ok(replacement)
         })
         .collect()
+}
+
+/// Substitute inside a quoted .mod value without changing its string boundary.
+/// Dynare expands before string lexing. A replacement that closes the quote or
+/// adds a line needs a surrounding-source lexer pass and stays incomplete here.
+fn subst_quoted(
+    src: &str,
+    tok: &Token,
+    defines: &HashMap<String, MacroVal>,
+) -> Result<Token, (Span, MacroEvalError)> {
+    let text = tok.text(src);
+    let delimiter = text
+        .chars()
+        .next()
+        .ok_or((tok.span, MacroEvalError::Unsupported))?;
+    if text.len() < 2 || !text.ends_with(delimiter) {
+        return Err((tok.span, MacroEvalError::Unsupported));
+    }
+    let mut output = String::new();
+    let mut cursor = 0;
+    let mut unsafe_span = None;
+    while let Some(relative) = text[cursor..].find("@{") {
+        let start = cursor + relative;
+        let body = start + 2;
+        let mut quoted = false;
+        let end = text[body..]
+            .char_indices()
+            .find_map(|(offset, character)| {
+                if character == '"' {
+                    quoted = !quoted;
+                }
+                (character == '}' && !quoted).then_some(body + offset)
+            })
+            .ok_or((tok.span, MacroEvalError::Unsupported))?;
+        let span = Span::new(
+            tok.span.start as usize + start,
+            tok.span.start as usize + end + 1,
+        );
+        output.push_str(&text[cursor..start]);
+        match eval_macro_expr(&text[body..end], defines, 0) {
+            Ok(value) => {
+                let replacement = value.display();
+                if replacement.contains([delimiter, '\r', '\n']) {
+                    unsafe_span.get_or_insert(span);
+                }
+                output.push_str(&replacement);
+            }
+            Err(MacroEvalError::Unsupported) => {
+                unsafe_span.get_or_insert(span);
+            }
+            Err(error) => return Err((span, error)),
+        }
+        cursor = end + 1;
+    }
+    if let Some(span) = unsafe_span {
+        return Err((span, MacroEvalError::Unsupported));
+    }
+    output.push_str(&text[cursor..]);
+    Ok(Token::with_lexeme(TokenKind::String, tok.span, output))
 }
 
 fn dir_kind(src: &str, tok: &Token) -> Dir {
