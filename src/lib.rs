@@ -75,6 +75,7 @@ mod shape_gate;
 pub(crate) mod shock_template;
 mod signature_help;
 pub mod span;
+pub mod timing;
 pub mod workspace;
 pub(crate) mod workspace_diagnose;
 

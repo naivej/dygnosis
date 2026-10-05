@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "7d31b56be5f39372165bcc9f17fdf7130cd2e3e0a6b27c726b590ba5534ba5e9",
+  "fingerprint": "1aed078372d23ed4f551730523675ad6542b37b8e33c78d8d5e6683603e76dfc",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -129,7 +129,7 @@
     },
     {
       "name": "dynare_equations",
-      "description": "List aggregate and per-dimension equations with text, identifiers and verified source locations. Lines and Unicode-scalar columns are one-based. Count gap and index filter apply to aggregate equations; name searches both kinds. Numbers are before transformation. Incomplete required includes, parsing, or macro expansion return incomplete with no equations and a null count gap.",
+      "description": "List aggregate and per-dimension written equations, identifiers and verified source locations. Identifier timing is the written offset; dynare_timing is the offset after the predetermined-variable convention conversion, not full Transform output. Use timing_class and model-info counts for classification. Older engines omit dynare_timing; do not infer it. Lines and Unicode-scalar columns are one-based. Count gap and index filter apply to aggregate equations; name searches both kinds. Equation numbers are before transformation. Incomplete required includes, parsing, or macro expansion return incomplete with no equations and a null count gap.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -389,7 +389,7 @@
     },
     {
       "name": "dynare_model_info",
-      "description": "Return aggregate and per-dimension names, counts, written timing and block flags. These are facts before equation transformation, not numerical results. Incomplete expansion withholds authoritative counts.",
+      "description": "Return aggregate and per-dimension names, counts, timing classes and block flags. Classes and timing counts use offsets after the predetermined-variable convention conversion, without other equation transformations or numerical results. Incomplete expansion withholds authoritative counts.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {

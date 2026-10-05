@@ -8,6 +8,10 @@
 - Help supports native **Find** in the open page. The header search still finds topics.
 - The equation CodeLens says **Jump to equation** or **Jump to N equations**. Its picker opens the written equation before transformation.
 - **Show effective model** starts statements on separate lines and indents block bodies. Copying the preview keeps the line breaks. Refresh and source jumps use the same readable layout.
+- Timing classes, model summaries, hovers, colors and Outline use Dynare's
+  end-of-period convention for valid `predetermined_variables` marks. Written
+  equations stay unchanged. MCP identifier `timing` remains the written offset;
+  the added `dynare_timing` gives the offset after this convention conversion.
 
 ## v0.11.7
 

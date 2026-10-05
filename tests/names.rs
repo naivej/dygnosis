@@ -136,6 +136,137 @@ async fn full(server: &Backend, document: &Url) -> Vec<SemanticToken> {
         _ => panic!("expected full"),
     }
 }
+
+#[tokio::test]
+async fn predetermined_timing_agrees_in_hover_tokens_outline_and_model_map() {
+    let document = uri("predetermined.mod");
+    let text = "var k f s m u;\npredetermined_variables k f s m;\nmodel;\nk(1)=k;\nf(2)=0;\ns(1)=0;\nm(1)=m+m(2);\nu=u(-1);\nend;";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    let legend = initialize(
+        server,
+        Some(&["variable"]),
+        &["declaration", "predetermined", "forwardLooking"],
+        false,
+        false,
+    )
+    .await;
+    open(server, &document, text).await;
+    let expected = [
+        ("k", "predetermined", vec![-1, 0]),
+        ("f", "forward-looking", vec![1]),
+        ("s", "static", vec![0]),
+        ("m", "mixed", vec![-1, 0, 1]),
+        ("u", "predetermined", vec![-1, 0]),
+    ];
+    for (name, class, offsets) in &expected {
+        let markdown = hover(server, position(&document, text, &format!("{name}("), 0)).await;
+        assert!(
+            markdown.contains(&format!("Timing: **{class}**")),
+            "{markdown}"
+        );
+        if *name == "u" {
+            assert!(markdown.contains("written offsets: t-1, t"), "{markdown}");
+            assert!(!markdown.contains("one period earlier"), "{markdown}");
+        } else {
+            assert!(
+                markdown.contains("Dynare end-of-period offsets:"),
+                "{markdown}"
+            );
+            assert!(
+                markdown.contains("one period earlier than written offsets"),
+                "{markdown}"
+            );
+        }
+        assert!(!markdown.contains("appears at"), "{markdown}");
+        for offset in offsets {
+            let display = match offset {
+                0 => "t".to_string(),
+                offset if *offset > 0 => format!("t+{offset}"),
+                offset => format!("t{offset}"),
+            };
+            assert!(markdown.contains(&display), "{markdown}");
+        }
+    }
+    let tokens = decode(&full(server, &document).await, &legend);
+    for (line, name, modifiers) in [
+        (3, "k", vec!["predetermined"]),
+        (4, "f", vec!["forwardLooking"]),
+        (5, "s", vec![]),
+        (6, "m", vec!["predetermined", "forwardLooking"]),
+    ] {
+        let occurrences: Vec<_> = tokens
+            .iter()
+            .filter(|token| {
+                token.0 == line
+                    && written_text(
+                        text,
+                        Range::new(
+                            Position::new(token.0, token.1),
+                            Position::new(token.0, token.1 + token.2),
+                        ),
+                    ) == name
+            })
+            .collect();
+        assert!(!occurrences.is_empty());
+        for token in occurrences {
+            for modifier in ["predetermined", "forwardLooking"] {
+                assert_eq!(
+                    token.4.iter().any(|value| value == modifier),
+                    modifiers.contains(&modifier),
+                    "{token:?}"
+                );
+            }
+        }
+    }
+    let response = server
+        .document_symbol(DocumentSymbolParams {
+            text_document: TextDocumentIdentifier {
+                uri: document.clone(),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let DocumentSymbolResponse::Nested(outline) = response else {
+        panic!("nested outline");
+    };
+    let declarations = outline
+        .iter()
+        .find(|row| row.name == "var")
+        .unwrap()
+        .children
+        .as_ref()
+        .unwrap();
+    for (name, class, _) in &expected {
+        let row = declarations.iter().find(|row| row.name == *name).unwrap();
+        assert!(row.detail.as_deref().unwrap().contains(class), "{row:?}");
+    }
+    let map = server
+        .execute_command(ExecuteCommandParams {
+            command: "dynare/modelInfo".into(),
+            arguments: vec![json!({"root_uri": document, "document_uri": document})],
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(map["predetermined"], json!(["k", "u"]));
+    assert_eq!(map["forward_looking"], json!(["f"]));
+    assert_eq!(map["mixed"], json!(["m"]));
+    assert_eq!(map["static"], json!(["s"]));
+    let declarations = map["declarations"].as_array().unwrap();
+    for (name, class, offsets) in &expected {
+        let row = declarations
+            .iter()
+            .find(|row| row["name"] == *name && row["written_kind"] == "var")
+            .unwrap();
+        assert_eq!(row["timing"]["class"], *class);
+        assert_eq!(row["timing"]["offsets"], json!(offsets));
+    }
+}
 fn decode(
     tokens: &[SemanticToken],
     legend: &SemanticTokensLegend,
@@ -173,6 +304,159 @@ fn decode(
         ));
     }
     decoded
+}
+
+#[tokio::test]
+async fn heterogeneous_uses_do_not_change_aggregate_timing_displays() {
+    let document = uri("separate-timing-scopes.mod");
+    let text = "var k;\npredetermined_variables k;\nheterogeneity_dimension d;\nvar(heterogeneity=d) h;\nmodel; k(1)=SUM(h); end;\nmodel(heterogeneity=d); h=k(-1); end;";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    let legend = initialize(
+        server,
+        Some(&["variable"]),
+        &["declaration", "predetermined", "forwardLooking"],
+        false,
+        false,
+    )
+    .await;
+    open(server, &document, text).await;
+    for needle in ["k;", "k(1)", "k(-1)"] {
+        let markdown = hover(server, position(&document, text, needle, 0)).await;
+        assert!(
+            markdown.contains("Timing: **static** · Dynare end-of-period offsets: t"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("one period earlier than written offsets"),
+            "{markdown}"
+        );
+        assert!(!markdown.contains("t-1"), "{markdown}");
+    }
+    let heterogeneous_hover = hover(server, position(&document, text, "h=k", 0)).await;
+    assert!(
+        heterogeneous_hover.contains("Timing: **static** · written offsets: t"),
+        "{heterogeneous_hover}"
+    );
+    assert!(
+        !heterogeneous_hover.contains("one period earlier"),
+        "{heterogeneous_hover}"
+    );
+    let tokens = decode(&full(server, &document).await, &legend);
+    let name_tokens: Vec<_> = tokens
+        .iter()
+        .filter(|token| {
+            let written = written_text(
+                text,
+                Range::new(
+                    Position::new(token.0, token.1),
+                    Position::new(token.0, token.1 + token.2),
+                ),
+            );
+            matches!(written, "k" | "h")
+        })
+        .collect();
+    assert!(!name_tokens.is_empty());
+    assert!(
+        name_tokens.iter().all(|token| !token
+            .4
+            .iter()
+            .any(|modifier| matches!(modifier.as_str(), "predetermined" | "forwardLooking"))),
+        "{name_tokens:?}"
+    );
+    let response = server
+        .document_symbol(DocumentSymbolParams {
+            text_document: TextDocumentIdentifier {
+                uri: document.clone(),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let DocumentSymbolResponse::Nested(outline) = response else {
+        panic!("nested outline");
+    };
+    fn declaration<'a>(rows: &'a [DocumentSymbol], name: &str) -> Option<&'a DocumentSymbol> {
+        rows.iter().find_map(|row| {
+            if row.name == name {
+                Some(row)
+            } else {
+                row.children
+                    .as_ref()
+                    .and_then(|children| declaration(children, name))
+            }
+        })
+    }
+    for name in ["k", "h"] {
+        assert!(
+            declaration(&outline, name)
+                .unwrap()
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("static"),
+            "{outline:?}"
+        );
+    }
+    let map = server
+        .execute_command(ExecuteCommandParams {
+            command: "dynare/modelInfo".into(),
+            arguments: vec![json!({"root_uri":document})],
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let mcp_info = dygnosis::dynare_model_info(text, None, None);
+    for info in [&map, &mcp_info] {
+        assert_eq!(info["static"], json!(["k"]));
+        assert_eq!(info["n_static"], 1);
+        assert_eq!(info["predetermined"], json!([]));
+        assert_eq!(info["forward_looking"], json!([]));
+    }
+    for name in ["k", "h"] {
+        let row = map["declarations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["name"] == name && row["written_kind"] == "var")
+            .unwrap();
+        assert_eq!(row["timing"]["class"], "static");
+        assert_eq!(row["timing"]["offsets"], json!([0]));
+    }
+    let equations = dygnosis::dynare_equations(text, None, None, None, None);
+    let aggregate = &equations["equations"][0]["idents"][0];
+    assert_eq!(
+        (
+            aggregate["timing"].as_i64(),
+            aggregate["dynare_timing"].as_i64()
+        ),
+        (Some(1), Some(0))
+    );
+    assert_eq!(aggregate["timing_class"], "static");
+    let heterogeneous = &equations["heterogeneous_equations"][0]["equations"][0]["idents"][1];
+    assert_eq!(heterogeneous["name"], "k");
+    assert_eq!(
+        (
+            heterogeneous["timing"].as_i64(),
+            heterogeneous["dynare_timing"].as_i64()
+        ),
+        (Some(-1), Some(-1))
+    );
+    assert_eq!(heterogeneous["timing_class"], "static");
+    let summary = dygnosis::structure_summary(&dygnosis::parse(text));
+    assert_eq!(
+        (
+            summary.static_vars,
+            summary.predetermined,
+            summary.forward_looking,
+            summary.max_lead,
+            summary.max_lag
+        ),
+        (1, 0, 0, 0, 0)
+    );
 }
 
 #[tokio::test]

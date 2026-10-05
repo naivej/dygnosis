@@ -4,170 +4,33 @@ use std::collections::{HashMap, HashSet};
 
 use crate::equations::count_gap;
 use crate::intern::Name;
-use crate::model::{Equation, Model};
+use crate::model::Model;
 use serde_json::{json, Value};
 
-/// Timing class from lead/lag offsets in model equations. No Blanchard-Kahn.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TimingClass {
-    Static,
-    Predetermined,
-    ForwardLooking,
-    Mixed,
-}
+use crate::timing::classify_aggregate_variable_timing;
+pub use crate::timing::{
+    classify_variable_timing, structure_summary, StructureSummary, TimingClass, TimingInfo,
+};
 
-impl TimingClass {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Static => "static",
-            Self::Predetermined => "predetermined",
-            Self::ForwardLooking => "forward-looking",
-            Self::Mixed => "mixed",
-        }
-    }
-}
-
-/// Per-endogenous timing from walking equation `ident_refs`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TimingInfo {
-    pub class: TimingClass,
-    pub offsets: Vec<i32>,
-}
-
-/// Classify each endogenous variable by its written aggregate and heterogeneous
-/// equation uses. Hover needs the timing of a heterogeneous variable in its
-/// own model block, even when it never appears in an aggregate equation.
-pub fn classify_variable_timing(model: &Model) -> HashMap<String, TimingInfo> {
-    classify_timing(model, true)
-}
-
-/// Aggregate-only timing for aggregate counts and the MCP summary.
-pub(crate) fn classify_aggregate_variable_timing(model: &Model) -> HashMap<String, TimingInfo> {
-    classify_timing(model, false)
-}
-
-fn classify_timing(model: &Model, include_heterogeneous: bool) -> HashMap<String, TimingInfo> {
-    let mut offsets: HashMap<String, HashSet<i32>> = HashMap::new();
-    for eq in &model.equations {
-        record_timing(model, eq, &mut offsets);
-    }
-    if include_heterogeneous {
-        for block in &model.heterogeneous_models {
-            for eq in &block.equations {
-                record_timing(model, eq, &mut offsets);
-            }
-        }
-    }
-    let mut out = HashMap::new();
-    for decl in model
-        .final_decls(&["var"])
-        .into_iter()
-        .filter(|decl| include_heterogeneous || model.final_heterogeneity(decl).is_none())
-    {
-        let name = model.name(decl.name).to_string();
-        let mut offs: Vec<i32> = offsets
-            .get(&name)
-            .map(|s| s.iter().copied().collect())
-            .unwrap_or_default();
-        offs.sort_unstable();
-        let has_lead = offs.iter().any(|&o| o > 0);
-        let has_lag = offs.iter().any(|&o| o < 0);
-        let class = if has_lead && has_lag {
-            TimingClass::Mixed
-        } else if has_lead {
-            TimingClass::ForwardLooking
-        } else if has_lag {
-            TimingClass::Predetermined
-        } else {
-            TimingClass::Static
-        };
-        if offs.is_empty() {
-            offs.push(0);
-        }
-        out.insert(
-            name,
-            TimingInfo {
-                class,
-                offsets: offs,
-            },
-        );
-    }
-    out
-}
-
-fn record_timing(model: &Model, eq: &Equation, offsets: &mut HashMap<String, HashSet<i32>>) {
-    for reference in model.ident_refs(eq) {
-        let name = model.name(reference.name).to_string();
-        offsets.entry(name).or_default().insert(reference.timing);
-    }
-}
-
-/// Hover line: `Timing: **{label}** · appears at {offsets}`.
+/// Hover line names the offset convention when the written uses were shifted.
 pub fn format_timing_line(info: &TimingInfo) -> String {
-    let appears = info
+    let offsets = info
         .offsets
         .iter()
         .map(|&o| format_time_offset(o))
         .collect::<Vec<_>>()
         .join(", ");
-    format!(
-        "Timing: **{}** · appears at {}",
-        info.class.label(),
-        appears
-    )
-}
-
-/// Aggregate endogenous, timing-class, and varexo counts. No BK; no Python labels.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StructureSummary {
-    pub endogenous: usize,
-    pub predetermined: usize,
-    pub forward_looking: usize,
-    pub static_vars: usize,
-    pub varexo: usize,
-    pub max_lead: i32,
-    pub max_lag: i32,
-}
-
-/// Predetermined / forward-looking / static counts for the aggregate model.
-pub fn structure_summary(model: &Model) -> StructureSummary {
-    let timing = classify_aggregate_variable_timing(model);
-    let mut predetermined = 0;
-    let mut forward_looking = 0;
-    let mut static_vars = 0;
-    let mut max_lead = 0;
-    let mut max_lag = 0;
-    for info in timing.values() {
-        match info.class {
-            TimingClass::Static => static_vars += 1,
-            TimingClass::Predetermined => predetermined += 1,
-            TimingClass::ForwardLooking => forward_looking += 1,
-            TimingClass::Mixed => {
-                predetermined += 1;
-                forward_looking += 1;
-            }
-        }
-        for &o in &info.offsets {
-            if o > max_lead {
-                max_lead = o;
-            }
-            if o < max_lag {
-                max_lag = o;
-            }
-        }
-    }
-    StructureSummary {
-        endogenous: model.final_endogenous().len(),
-        predetermined,
-        forward_looking,
-        static_vars,
-        varexo: model
-            .final_decls(&["varexo", "varexo_det"])
-            .into_iter()
-            .filter(|decl| model.final_heterogeneity(decl).is_none())
-            .count(),
-        max_lead,
-        max_lag,
+    if info.predetermined_conversion {
+        format!(
+            "Timing: **{}** · Dynare end-of-period offsets: {} (one period earlier than written offsets)",
+            info.class.label(), offsets
+        )
+    } else {
+        format!(
+            "Timing: **{}** · written offsets: {}",
+            info.class.label(),
+            offsets
+        )
     }
 }
 
