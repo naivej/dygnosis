@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use dygnosis::VERSION;
 
 #[derive(Parser)]
-#[command(name = "dygnosis", version = VERSION, about = "Dynare analysis (LSP / MCP)")]
+#[command(name = "dygnosis", version = VERSION, about = env!("CARGO_PKG_DESCRIPTION"))]
 struct Cli {
     /// Start LSP over TCP (debug only)
     #[arg(long)]

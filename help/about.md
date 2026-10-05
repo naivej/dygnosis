@@ -1,7 +1,7 @@
 # About Dygnosis
 
-Dygnosis is Dynare language tooling for people in an editor and agents through
-MCP. Its Rust engine shares parsing, diagnostics and references between LSP
+Dygnosis provides language support for Dynare, in an editor and for agents
+through MCP. Its Rust engine shares parsing, diagnostics and references between LSP
 and MCP. It stops before MATLAB or Octave and does not run the official Dynare
 preprocessor.
 

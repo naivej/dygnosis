@@ -1,6 +1,6 @@
 [package]
 name = "dygnosis"
-description = "Thin Dynare analysis core — LSP and MCP for .mod files"
+description = "Dynare analysis core — LSP and MCP for .mod files"
 version = "0.11.7"
 edition = "2021"
 license = "GPL-3.0-or-later"

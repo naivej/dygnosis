@@ -2,7 +2,7 @@
   "name": "dygnosis",
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
-  "description": "Dynare language tooling for VS Code",
+  "description": "Language support for Dynare",
   "version": "0.11.7",
   "publisher": "dygnosis",
   "private": true,
