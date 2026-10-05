@@ -50,7 +50,7 @@ async function build() {
   const registry = JSON.parse(await fs.readFile(path.join(source, 'topics.json'), 'utf8'));
   const reference = JSON.parse(await fs.readFile(path.join(source, 'reference.json'), 'utf8'));
   assert.equal(reference.version, manifest.version, 'Regenerate Help from the matching engine');
-  assert.equal(reference.fingerprint, await engineFingerprint(), 'Engine facts changed: run npm run help:generate');
+  assert.equal(reference.fingerprint, await engineFingerprint(), 'Engine source changed. Press F5 so the launch task rebuilds the engine and refreshes Help.');
   const ids = new Set(registry.map(topic => topic.id));
   assert.equal(ids.size, registry.length);
   const settings = Object.assign({}, ...manifest.contributes.configuration.map(group => group.properties));
