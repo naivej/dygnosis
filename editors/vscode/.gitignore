@@ -3,6 +3,7 @@
 /help/
 /.npm-cache/
 /.test-data/
+/.capture-data/
 /.vscode-test/
 /dist/
 /bin/

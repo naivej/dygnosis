@@ -5,11 +5,10 @@ Registration does not require an open model or a running language server.
 It provides the same fifteen analysis/editing tools as the standalone MCP
 transport. Model inputs and results remain engine data.
 
-![Project checks, model view and Dygnosis readiness in VS Code](assets/agents-mcp.png)
+![MCP server list showing the Dygnosis server](assets/agents-mcp.png)
 
-1. **Dynare model** and **Dynare project checks** stay available while you connect an agent.
-2. **Dynare project checks** shows background coverage for saved roots in the workspace folder.
-3. The status bar reports checked roots; use **MCP: List Servers** from the Command Palette to manage the Dygnosis server.
+1. **MCP: List Servers** opens Select an MCP Server.
+2. **Dygnosis** is the server the extension registers. It stays stopped until an agent starts it.
 
 Use the Command Palette's **MCP: List Servers** to manage the server and view
 its Output. In a chat that supports MCP, the tool picker controls which tools

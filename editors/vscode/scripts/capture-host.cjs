@@ -13,6 +13,10 @@ async function waitFor(predicate, description, attempts = 150) {
   throw new Error(`Timed out: ${description}`);
 }
 
+function clickAt(x, y) {
+  execFileSync("xdotool", ["mousemove", "--sync", String(x), String(y), "click", "1"], { stdio: "ignore" });
+}
+
 function shot(output, monitor = 1) {
   execFileSync("python3", ["-c", `
 import mss
@@ -53,6 +57,22 @@ async function openModel(service, workspace, text, name = "model.mod") {
   return document;
 }
 
+async function runCommand(command, ...args) {
+  try {
+    return await vscode.commands.executeCommand(command, ...args);
+  } catch (error) {
+    return { failed: command, error: String(error) };
+  }
+}
+
+async function quiet() {
+  await runCommand("notifications.clearAll");
+  await runCommand("notifications.hideToasts");
+  await runCommand("notifications.hideList");
+  await runCommand("workbench.action.closeAuxiliaryBar");
+  await settle(150);
+}
+
 async function focusExplorer() {
   await vscode.commands.executeCommand("workbench.view.explorer");
   await settle(300);
@@ -72,13 +92,18 @@ exports.run = async function run() {
   await fs.mkdir(originalsDir, { recursive: true });
   const manifest = [];
   const failures = [];
-  const capture = async (name, steps) => {
+  const notes = {};
+  const only = new Set((process.env.DYGNOSIS_CAPTURE_ONLY ?? "").split(",").map(item => item.trim()).filter(Boolean));
+  const capture = async (name, steps, keepFocus = false) => {
+    if (only.size && !only.has(name)) return;
     try {
-      await steps();
-      await settle(600);
+      const detail = await steps();
+      if (!keepFocus) await quiet();
+      await settle(keepFocus ? 200 : 350);
       const original = path.join(originalsDir, `${name}.png`);
       shot(original);
-      manifest.push({ name, original, capturedAt: new Date().toISOString(), status: "ok" });
+      notes[name] = detail ?? {};
+      manifest.push({ name, original, capturedAt: new Date().toISOString(), status: "ok", detail: notes[name] });
     } catch (error) {
       manifest.push({ name, status: "failed", error: String(error) });
       failures.push(name);
@@ -88,6 +113,8 @@ exports.run = async function run() {
   const extension = vscode.extensions.getExtension("dygnosis.dygnosis");
   assert.ok(extension, "Dygnosis extension missing");
   const service = await extension.activate();
+  await settle(800);
+  await quiet();
   const workspace = vscode.workspace.workspaceFolders[0].uri.fsPath;
 
   const fixtureModel = await fs.readFile(path.join(workspace, "model.mod"), "utf8");
@@ -95,64 +122,108 @@ exports.run = async function run() {
   const fixtureAfter = await fs.readFile(path.join(workspace, "after.mod"), "utf8");
 
   await capture("help-panel", async () => {
+    await runCommand("workbench.action.closeSidebar");
+    await runCommand("workbench.action.closePanel");
     await vscode.commands.executeCommand("dygnosis.openHelp", "reference");
     await waitFor(() => vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.label === "Dygnosis Help")), "Help panel");
-    await settle(800);
+    await settle(700);
   });
 
   await capture("get-started", async () => {
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+    await runCommand("workbench.action.closePanel");
     await focusExplorer();
+    await showView("dygnosis.model");
+    await settle(300);
+    clickAt(18, 748);
+    await settle(200);
+    clickAt(18, 778);
+    await settle(200);
+    await showView("dygnosis.project");
+    for (let i = 0; i < 5; ++i) await runCommand("list.expand");
   });
 
   const model = await openModel(service, workspace, fixtureModel);
+  await quiet();
   await capture("model-overview", async () => {
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
-    await vscode.window.showTextDocument(model.uri, { preview: false, viewColumn: vscode.ViewColumn.One });
+    await runCommand("workbench.action.closePanel");
+    await vscode.window.showTextDocument(model, { preview: false, viewColumn: vscode.ViewColumn.One });
     await focusExplorer();
     await showView("dygnosis.model");
+    for (let i = 0; i < 6; ++i) await runCommand("list.expand");
+    const editor = await vscode.window.showTextDocument(model, { preview: false, viewColumn: vscode.ViewColumn.One });
+    editor.revealRange(new vscode.Range(5, 0, 11, 0), vscode.TextEditorRevealType.InCenter);
+    await settle(600);
   });
 
   await capture("appearance", async () => {
-    await vscode.window.showTextDocument(model.uri, { preview: false, viewColumn: vscode.ViewColumn.One });
-    await vscode.commands.executeCommand("workbench.action.closeSidebar");
-    await settle(300);
+    await vscode.window.showTextDocument(model, { preview: false, viewColumn: vscode.ViewColumn.One });
+    await runCommand("workbench.action.closeSidebar");
+    await runCommand("workbench.action.closePanel");
+    const editor = vscode.window.activeTextEditor;
+    editor.revealRange(new vscode.Range(0, 0, 12, 0), vscode.TextEditorRevealType.AtTop);
   });
 
-  await capture("edit-assistance", async () => {
-    await vscode.window.showTextDocument(model.uri, { preview: false, viewColumn: vscode.ViewColumn.One });
+  await capture("edit-hover", async () => {
+    await vscode.window.showTextDocument(model, { preview: false, viewColumn: vscode.ViewColumn.One });
+    await runCommand("workbench.action.closeSidebar");
+    await runCommand("workbench.action.closePanel");
+    await quiet();
     const editor = vscode.window.activeTextEditor;
-    const position = new vscode.Position(2, 8);
+    const nameOffset = editor.document.getText().indexOf(", c ");
+    const position = editor.document.positionAt(nameOffset + 2);
     editor.selection = new vscode.Selection(position, position);
+    editor.revealRange(new vscode.Range(0, 0, 10, 0), vscode.TextEditorRevealType.AtTop);
     await vscode.commands.executeCommand("editor.action.showHover");
-    await settle(500);
-  });
+    await settle(700);
+  }, true);
+
+  await capture("edit-suggest", async () => {
+    await vscode.window.showTextDocument(model, { preview: false, viewColumn: vscode.ViewColumn.One });
+    await runCommand("workbench.action.closeSidebar");
+    await runCommand("workbench.action.closePanel");
+    await quiet();
+    const editor = vscode.window.activeTextEditor;
+    const token = editor.document.getText().indexOf("+ e");
+    const position = editor.document.positionAt(token + 2);
+    editor.selection = new vscode.Selection(position, position);
+    editor.revealRange(new vscode.Range(0, 0, 8, 0), vscode.TextEditorRevealType.AtTop);
+    await vscode.commands.executeCommand("editor.action.triggerSuggest");
+    await settle(700);
+  }, true);
 
   const problems = await openModel(service, workspace, fixtureProblems, "problems.mod");
   await capture("diagnostics", async () => {
-    await vscode.window.showTextDocument(problems.uri, { preview: false, viewColumn: vscode.ViewColumn.One });
+    await vscode.window.showTextDocument(problems, { preview: false, viewColumn: vscode.ViewColumn.One });
+    await runCommand("workbench.action.closeSidebar");
     await waitFor(() => vscode.languages.getDiagnostics(problems.uri).some(item => item.severity === vscode.DiagnosticSeverity.Error), "Problems diagnostics");
     await vscode.commands.executeCommand("workbench.actions.view.problems");
-    await settle(500);
+    vscode.window.activeTextEditor?.revealRange(new vscode.Range(0, 0, 8, 0), vscode.TextEditorRevealType.AtTop);
+    await settle(400);
   });
 
   await capture("navigate-code", async () => {
-    await vscode.window.showTextDocument(model.uri, { preview: false, viewColumn: vscode.ViewColumn.One });
-    await vscode.commands.executeCommand("workbench.action.closeSidebar");
+    await vscode.window.showTextDocument(model, { preview: false, viewColumn: vscode.ViewColumn.One });
+    await runCommand("workbench.action.closePanel");
     await vscode.commands.executeCommand("outline.focus");
-    await settle(500);
+    for (let i = 0; i < 8; ++i) await runCommand("list.expand");
+    await settle(400);
   });
 
   await capture("effective-model", async () => {
-    await vscode.window.showTextDocument(model.uri, { preview: false, viewColumn: vscode.ViewColumn.One });
+    await vscode.window.showTextDocument(model, { preview: false, viewColumn: vscode.ViewColumn.One });
+    await runCommand("workbench.action.closeSidebar");
+    await runCommand("workbench.action.closePanel");
     await vscode.commands.executeCommand("dygnosis.showEffectiveModel");
-    await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === "dygnosis-effective", "effective preview");
-    await settle(500);
+    await waitFor(() => vscode.window.visibleTextEditors.some(editor => editor.document.uri.scheme === "dygnosis-effective"), "effective preview");
+    await settle(600);
+    return { preview: vscode.window.visibleTextEditors.map(editor => editor.document.uri.toString()) };
   });
 
   await capture("structural-diff", async () => {
     const before = await openModel(service, workspace, fixtureModel, "before-diff.mod");
-    await vscode.window.showTextDocument(before.uri, { preview: false, viewColumn: vscode.ViewColumn.One });
+    await vscode.window.showTextDocument(before, { preview: false, viewColumn: vscode.ViewColumn.One });
     const afterPath = path.join(workspace, "after.mod");
     await writeModel(service, afterPath, fixtureAfter);
     const originalPicker = vscode.window.showOpenDialog;
@@ -162,35 +233,57 @@ exports.run = async function run() {
     } finally {
       vscode.window.showOpenDialog = originalPicker;
     }
-    await waitFor(async () => {
-      const tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
-      return tabs.find(tab => typeof tab.label === "string" && tab.label.includes("Diff"));
-    }, "structural diff view", 200);
-    await settle(1200);
+    await waitFor(async () => vscode.window.tabGroups.all.flatMap(group => group.tabs).some(tab => typeof tab.label === "string" && tab.label.includes("Diff")), "structural diff view", 200);
+    await settle(800);
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        if (typeof tab.label === "string" && !tab.label.includes("Diff")) await vscode.window.tabGroups.close(tab);
+      }
+    }
+    await runCommand("workbench.action.closeSidebar");
+    await runCommand("workbench.action.closePanel");
+    await settle(400);
   });
 
   await capture("project-checks", async () => {
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+    await runCommand("workbench.action.closePanel");
     await focusExplorer();
+    await waitFor(async () => (await service.execute("dynare/projectStatus"))?.complete, "project status");
+    await settle(300);
+    clickAt(18, 720);
+    await settle(150);
+    clickAt(18, 750);
+    await settle(150);
+    clickAt(18, 790);
+    await settle(200);
     await showView("dygnosis.project");
-    await waitFor(async () => {
-      const status = await service.execute("dynare/projectStatus");
-      return status?.complete;
-    }, "project status");
+    for (let i = 0; i < 6; ++i) await runCommand("list.expand");
+    await settle(300);
   });
 
   await capture("agents-mcp", async () => {
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
-    await focusExplorer();
-    const commands = ["workbench.mcp.listServer", "workbench.action.openMcpServersView", "mcp.listServers"];
-    for (const command of commands) {
-      try { await vscode.commands.executeCommand(command); break; } catch { /* try next */ }
-    }
-    await settle(800);
+    await runCommand("workbench.action.closePanel");
+    const opened = await runCommand("workbench.mcp.showInstalledServers");
+    await settle(900);
+    return { opened: opened ?? "workbench.mcp.showInstalledServers" };
   });
 
+  await capture("agents-mcp-picker", async () => {
+    await runCommand("workbench.action.closeQuickOpen");
+    await runCommand("workbench.action.closePanel");
+    await quiet();
+    const pending = vscode.commands.executeCommand("workbench.mcp.listServer");
+    await settle(900);
+    return { pending: typeof pending };
+  }, true);
+
   await capture("troubleshoot", async () => {
+    await runCommand("workbench.action.closeQuickOpen");
+    await runCommand("workbench.action.closeSidebar");
     await vscode.commands.executeCommand("dygnosis.showOutput");
+    await runCommand("workbench.action.toggleMaximizedPanel");
     await settle(500);
   });
 

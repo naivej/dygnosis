@@ -2,76 +2,11 @@
   "vscode": "1.140.0",
   "captures": [
     {
-      "name": "help-panel",
-      "original": "/workspace/dygnosis/help/assets/originals/help-panel.png",
-      "capturedAt": "2026-10-05T01:05:20.754Z",
-      "status": "ok"
-    },
-    {
-      "name": "get-started",
-      "original": "/workspace/dygnosis/help/assets/originals/get-started.png",
-      "capturedAt": "2026-10-05T01:05:21.761Z",
-      "status": "ok"
-    },
-    {
       "name": "model-overview",
       "original": "/workspace/dygnosis/help/assets/originals/model-overview.png",
-      "capturedAt": "2026-10-05T01:05:23.450Z",
-      "status": "ok"
-    },
-    {
-      "name": "appearance",
-      "original": "/workspace/dygnosis/help/assets/originals/appearance.png",
-      "capturedAt": "2026-10-05T01:05:24.478Z",
-      "status": "ok"
-    },
-    {
-      "name": "edit-assistance",
-      "original": "/workspace/dygnosis/help/assets/originals/edit-assistance.png",
-      "capturedAt": "2026-10-05T01:05:25.685Z",
-      "status": "ok"
-    },
-    {
-      "name": "diagnostics",
-      "original": "/workspace/dygnosis/help/assets/originals/diagnostics.png",
-      "capturedAt": "2026-10-05T01:05:27.088Z",
-      "status": "ok"
-    },
-    {
-      "name": "navigate-code",
-      "original": "/workspace/dygnosis/help/assets/originals/navigate-code.png",
-      "capturedAt": "2026-10-05T01:05:28.379Z",
-      "status": "ok"
-    },
-    {
-      "name": "effective-model",
-      "original": "/workspace/dygnosis/help/assets/originals/effective-model.png",
-      "capturedAt": "2026-10-05T01:05:29.646Z",
-      "status": "ok"
-    },
-    {
-      "name": "structural-diff",
-      "original": "/workspace/dygnosis/help/assets/originals/structural-diff.png",
-      "capturedAt": "2026-10-05T01:05:31.964Z",
-      "status": "ok"
-    },
-    {
-      "name": "project-checks",
-      "original": "/workspace/dygnosis/help/assets/originals/project-checks.png",
-      "capturedAt": "2026-10-05T01:05:33.427Z",
-      "status": "ok"
-    },
-    {
-      "name": "agents-mcp",
-      "original": "/workspace/dygnosis/help/assets/originals/agents-mcp.png",
-      "capturedAt": "2026-10-05T01:05:35.229Z",
-      "status": "ok"
-    },
-    {
-      "name": "troubleshoot",
-      "original": "/workspace/dygnosis/help/assets/originals/troubleshoot.png",
-      "capturedAt": "2026-10-05T01:05:36.432Z",
-      "status": "ok"
+      "capturedAt": "2026-10-05T01:58:01.708Z",
+      "status": "ok",
+      "detail": {}
     }
   ],
   "failures": [],

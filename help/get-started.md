@@ -25,7 +25,7 @@ the invitation does not remove these entrances.
 
 1. **Dynare model** shows a welcome row with **Open Dygnosis Help** before any model opens.
 2. **Dynare project checks** appears in every workspace folder and links to project-check topics.
-3. The first-install notification offers **Open Help** once; dismissal persists for later windows.
+3. The question-mark action on the Dynare project checks view title opens Help.
 
 Loose and untitled Dynare files receive ordinary editor analysis. Save a model
 to establish its disk base for includes. An `.inc` file needs a known model
