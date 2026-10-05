@@ -1,11 +1,14 @@
 //! Writing-preference summaries I208, I209, and I210.
 //!
-//! One note per code for the effective compilation unit. Not a Dynare refusal.
+//! I208/I209 notes retain the exact rows of their owning statement executions.
+//! I210 retains its compilation-unit scope. None is a Dynare refusal.
 
 use crate::expr::ExprKind;
 use crate::intern::Name;
 use crate::model::{Decl, Equation, Model};
 use crate::span::Span;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::diagnostic::{Diagnostic, Severity};
 
@@ -14,12 +17,8 @@ pub(crate) fn writing_summaries(model: &Model) -> Vec<Diagnostic> {
         return Vec::new();
     }
     let mut out = Vec::new();
-    if let Some(diag) = unnamed_equations(model) {
-        out.push(diag);
-    }
-    if let Some(diag) = missing_long_names(model) {
-        out.push(diag);
-    }
+    out.extend(unnamed_equations(model));
+    out.extend(missing_long_names(model));
     if let Some(diag) = literal_numbers(model) {
         out.push(diag);
     }
@@ -69,19 +68,92 @@ pub(crate) fn model_structure_incomplete(model: &Model) -> bool {
         || structure.e064
 }
 
-fn unnamed_equations(model: &Model) -> Option<Diagnostic> {
-    let sites = equation_sites(model, true);
-    let n = sites.len();
-    let span = sites.into_iter().next()?;
-    let message = if n == 1 {
-        "1 counted equation has no name tag.".to_string()
-    } else {
-        format!("{n} counted equations have no name tag.")
-    };
-    Some(note(span, "I208", message))
+/// Revision-bound ownership of one writing note. Row ids are expanded token
+/// positions, so repeated written spans remain distinct executions.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WritingContext {
+    pub root: String,
+    pub input_revision: String,
+    pub statement_ids: Vec<usize>,
+    pub rows: WritingRows,
 }
 
-fn missing_long_names(model: &Model) -> Option<Diagnostic> {
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "row_ids", rename_all = "snake_case")]
+pub enum WritingRows {
+    /// Starts of the surviving counted equations' token ranges.
+    Equations(Vec<usize>),
+    /// Declaration `parse_order` values, each assigned to its first statement.
+    Declarations(Vec<usize>),
+}
+
+impl WritingRows {
+    pub fn ids(&self) -> &[usize] {
+        match self {
+            Self::Equations(rows) | Self::Declarations(rows) => rows,
+        }
+    }
+
+    fn append(&mut self, other: &Self) {
+        match (self, other) {
+            (Self::Equations(rows), Self::Equations(more))
+            | (Self::Declarations(rows), Self::Declarations(more)) => rows.extend(more),
+            _ => unreachable!("one code has one writing row kind"),
+        }
+    }
+}
+
+fn scoped_note(
+    span: Span,
+    code: &str,
+    statement_id: Option<usize>,
+    rows: WritingRows,
+) -> Diagnostic {
+    let mut diagnostic = note(span, code, summary_message(code, rows.ids().len()));
+    diagnostic.writing = Some(WritingContext {
+        root: String::new(),
+        input_revision: String::new(),
+        statement_ids: statement_id.into_iter().collect(),
+        rows,
+    });
+    diagnostic
+}
+
+fn summary_message(code: &str, count: usize) -> String {
+    match (code, count) {
+        ("I208", 1) => "1 counted equation has no name tag.".to_string(),
+        ("I208", count) => format!("{count} counted equations have no name tag."),
+        ("I209", 1) => "1 symbol has no long_name.".to_string(),
+        ("I209", count) => format!("{count} symbols have no long_name."),
+        _ => unreachable!("only I208/I209 have per-statement summaries"),
+    }
+}
+
+fn unnamed_equations(model: &Model) -> Vec<Diagnostic> {
+    let active: HashSet<_> = equation_sites_full(model, true)
+        .into_iter()
+        .filter(|equation| !has_name(equation))
+        .map(|equation| equation.parse_order)
+        .collect();
+    let mut scopes: BTreeMap<usize, (Span, Vec<usize>)> = BTreeMap::new();
+    for written in &model.written_equations {
+        if active.contains(&written.token_range.start) {
+            scopes
+                .entry(written.statement_id)
+                .or_insert_with(|| (written.equation.span, Vec::new()))
+                .1
+                .push(written.token_range.start);
+        }
+    }
+    scopes
+        .into_iter()
+        .map(|(statement, (span, rows))| {
+            scoped_note(span, "I208", Some(statement), WritingRows::Equations(rows))
+        })
+        .collect()
+}
+
+fn missing_long_names(model: &Model) -> Vec<Diagnostic> {
     let mut rows = Vec::new();
     push_decls(&mut rows, &model.endogenous, DeclKind::Var);
     push_decls(
@@ -100,27 +172,103 @@ fn missing_long_names(model: &Model) -> Option<Diagnostic> {
         rows.push(decl_row(decl, DeclKind::Varexo));
     }
     push_decls(&mut rows, &model.parameters, DeclKind::Parameters);
-    rows.sort_by_key(|row| (row.span.start, row.span.end));
+    rows.sort_by_key(|row| row.parse_order);
 
     let mut seen = Vec::new();
-    let mut missing: Vec<Span> = Vec::new();
+    let mut scopes: BTreeMap<Option<usize>, (Span, Vec<usize>)> = BTreeMap::new();
     for row in rows {
         if seen.iter().any(|key| key == &row.key) {
             continue;
         }
         seen.push(row.key);
         if !row.long_name.as_ref().is_some_and(|text| !text.is_empty()) {
-            missing.push(row.span);
+            let statement_id = model
+                .written_declarations
+                .iter()
+                .find(|written| written.declaration.parse_order == row.parse_order)
+                .filter(|written| {
+                    matches!(
+                        written.written_kind.as_str(),
+                        "var" | "varexo" | "varexo_det" | "parameters"
+                    )
+                })
+                .map(|written| written.statement_id);
+            // Basic declarations and their change_type rehomes retain this
+            // record. A Model with missing ownership metadata keeps its prior
+            // range and count rather than inventing a declaration keyword.
+            scopes
+                .entry(statement_id)
+                .or_insert_with(|| (row.span, Vec::new()))
+                .1
+                .push(row.parse_order);
         }
     }
-    let n = missing.len();
-    let span = missing.into_iter().next()?;
-    let message = if n == 1 {
-        "1 symbol has no long_name.".to_string()
-    } else {
-        format!("{n} symbols have no long_name.")
-    };
-    Some(note(span, "I209", message))
+    scopes
+        .into_iter()
+        .map(|(statement, (span, rows))| {
+            scoped_note(span, "I209", statement, WritingRows::Declarations(rows))
+        })
+        .collect()
+}
+
+/// Group repeated executions of the same written opener after analysis.
+/// The mapping returns the written identity and whether the exact keyword is
+/// safe to display. An uncertain token keeps the original first-row range.
+pub(crate) fn group_summaries(
+    model: &Model,
+    diagnostics: &mut Vec<Diagnostic>,
+    mut keyword_site: impl FnMut(Span, &str) -> Option<(String, Span, bool)>,
+) {
+    let mut groups = HashMap::<(String, String, Span), usize>::new();
+    let mut grouped: Vec<Diagnostic> = Vec::new();
+    for mut diagnostic in std::mem::take(diagnostics) {
+        let site = diagnostic
+            .writing
+            .as_ref()
+            .and_then(|context| context.statement_ids.first())
+            .and_then(|id| model.statements.get(*id))
+            .and_then(|statement| {
+                let (file, span, safe) = keyword_site(statement.keyword_span, &statement.name)?;
+                if safe {
+                    diagnostic.span = statement.keyword_span;
+                }
+                Some((diagnostic.code.clone(), file, span))
+            });
+        if let Some(site) = site {
+            if let Some(&index) = groups.get(&site) {
+                let context = diagnostic.writing.as_ref().expect("writing scope");
+                let prior = &mut grouped[index];
+                let merged = prior.writing.as_mut().expect("writing scope");
+                merged.statement_ids.extend(&context.statement_ids);
+                merged.rows.append(&context.rows);
+                prior.message = summary_message(&prior.code, merged.rows.ids().len());
+                continue;
+            }
+            groups.insert(site, grouped.len());
+        }
+        grouped.push(diagnostic);
+    }
+    *diagnostics = grouped;
+}
+
+/// Actions must match a complete current note, including its exact row set.
+pub(crate) fn context_is_current(
+    workspace: &mut crate::workspace::Workspace,
+    root: &str,
+    code: &str,
+    context: &WritingContext,
+) -> bool {
+    if context.statement_ids.is_empty()
+        || context.rows.ids().is_empty()
+        || context.root != crate::include_resolver::normalize_uri(root)
+        || workspace.input_revision(root).as_deref() != Some(&context.input_revision)
+    {
+        return false;
+    }
+    crate::diagnostic::check_in_workspace_with_origins(workspace, root)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == code && diagnostic.writing.as_ref() == Some(context))
 }
 
 fn literal_numbers(model: &Model) -> Option<Diagnostic> {
@@ -170,14 +318,6 @@ fn collect_numbers(model: &Model, id: crate::expr::ExprId, out: &mut Vec<Span>) 
     }
 }
 
-fn equation_sites(model: &Model, counted_only: bool) -> Vec<Span> {
-    equation_sites_full(model, counted_only)
-        .into_iter()
-        .filter(|eq| !has_name(eq))
-        .map(|eq| eq.span)
-        .collect()
-}
-
 fn equation_sites_full(model: &Model, counted_only: bool) -> Vec<&Equation> {
     let mut rows: Vec<&Equation> = model
         .equations
@@ -222,6 +362,7 @@ enum DeclKind {
 }
 
 struct DeclRow {
+    parse_order: usize,
     key: (Name, Option<Name>, DeclKind),
     span: Span,
     long_name: Option<String>,
@@ -235,6 +376,7 @@ fn push_decls(out: &mut Vec<DeclRow>, decls: &[Decl], kind: DeclKind) {
 
 fn decl_row(decl: &Decl, kind: DeclKind) -> DeclRow {
     DeclRow {
+        parse_order: decl.parse_order,
         key: (decl.name, decl.heterogeneity.map(|(name, _)| name), kind),
         span: decl.span,
         long_name: decl.long_name.clone(),
@@ -267,6 +409,84 @@ mod tests {
         ];
         for src in cases {
             assert!(model_structure_incomplete(&parse(src)), "{src}");
+        }
+    }
+
+    #[test]
+    fn both_writing_contexts_validate_exact_rows_root_and_revision() {
+        let root = "C:/writing-context/current.mod";
+        let source = "var x y; model; x=x(-1); end; model; y=x; end;";
+        let mut workspace = crate::workspace::Workspace::new();
+        workspace.update_document(root, source);
+        let set = crate::diagnostic::check_in_workspace_with_origins(&mut workspace, root);
+        for code in ["I208", "I209"] {
+            let context = set
+                .diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == code)
+                .unwrap()
+                .writing
+                .as_ref()
+                .unwrap()
+                .clone();
+            assert!(super::context_is_current(
+                &mut workspace,
+                root,
+                code,
+                &context
+            ));
+            let mut forged = context.clone();
+            forged.statement_ids.push(999);
+            assert!(!super::context_is_current(
+                &mut workspace,
+                root,
+                code,
+                &forged
+            ));
+            let mut forged = context.clone();
+            forged.statement_ids.clear();
+            assert!(!super::context_is_current(
+                &mut workspace,
+                root,
+                code,
+                &forged
+            ));
+            let mut forged = context.clone();
+            match &mut forged.rows {
+                super::WritingRows::Equations(rows) | super::WritingRows::Declarations(rows) => {
+                    rows.push(999)
+                }
+            }
+            assert!(!super::context_is_current(
+                &mut workspace,
+                root,
+                code,
+                &forged
+            ));
+            let mut forged = context.clone();
+            forged.root = "C:/writing-context/other.mod".to_string();
+            assert!(!super::context_is_current(
+                &mut workspace,
+                root,
+                code,
+                &forged
+            ));
+            let mut forged = context.clone();
+            forged.input_revision = "stale".to_string();
+            assert!(!super::context_is_current(
+                &mut workspace,
+                root,
+                code,
+                &forged
+            ));
+            workspace.update_document(root, &format!("{source}\n// changed"));
+            assert!(!super::context_is_current(
+                &mut workspace,
+                root,
+                code,
+                &context
+            ));
+            workspace.update_document(root, source);
         }
     }
 }

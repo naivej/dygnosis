@@ -186,6 +186,207 @@ fn naming_actions(actions: &[CodeAction]) -> Vec<&CodeAction> {
         .collect()
 }
 
+async fn actions_for_note(
+    service: &LspService<dygnosis::server::Backend>,
+    uri: &Url,
+    note: &Diagnostic,
+) -> Vec<CodeAction> {
+    service
+        .inner()
+        .code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: note.range,
+            context: CodeActionContext {
+                diagnostics: vec![note.clone()],
+                ..CodeActionContext::default()
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|action| match action {
+            CodeActionOrCommand::CodeAction(action) => Some(action),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn every_note_edits_only_its_exact_equation_rows() {
+    let uri = Url::parse("file:///C:/writing-action/statements.mod").unwrap();
+    let text = "var x y;\n/*😀中*/model; x=x(-1); end;\n/*😀中*/model; y=x; end;";
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.into(), 1))
+        .await;
+    let notes: Vec<_> = items(&service, &uri)
+        .await
+        .into_iter()
+        .filter(|note| diag_code(note) == "I208")
+        .collect();
+    assert_eq!(notes.len(), 2);
+    for (note, kept, named) in [
+        (&notes[0], "y=x;", "x=x(-1);"),
+        (&notes[1], "x=x(-1);", "y=x;"),
+    ] {
+        let context: dygnosis::WritingContext =
+            serde_json::from_value(note.data.as_ref().unwrap()["writing_context"].clone()).unwrap();
+        assert_eq!(context.statement_ids.len(), 1);
+        assert_eq!(context.rows.ids().len(), 1);
+        assert!(matches!(context.rows, dygnosis::WritingRows::Equations(_)));
+        let actions = actions_for_note(&service, &uri, note).await;
+        let action = naming_actions(&actions);
+        assert_eq!(action.len(), 1);
+        let edits = edits_for(action[0], &uri);
+        assert_eq!(edits.len(), 1);
+        let edited = apply_edits(text, &edits);
+        assert!(edited.contains(kept), "{edited}");
+        assert!(edited.contains(&format!("'] {named}")), "{edited}");
+    }
+}
+
+#[tokio::test]
+async fn stale_forged_and_missing_note_contexts_cannot_select_other_rows() {
+    let uri = Url::parse("file:///C:/writing-action/context.mod").unwrap();
+    let text = "var x y; model; x=x(-1); end; model; y=x; end;";
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.into(), 1))
+        .await;
+    let old = items(&service, &uri)
+        .await
+        .into_iter()
+        .find(|note| diag_code(note) == "I208")
+        .unwrap();
+    service
+        .inner()
+        .did_change(change_params(uri.clone(), format!("{text}\n// changed"), 2))
+        .await;
+    assert!(naming_actions(&actions_for_note(&service, &uri, &old).await).is_empty());
+    let notes: Vec<_> = items(&service, &uri)
+        .await
+        .into_iter()
+        .filter(|note| diag_code(note) == "I208")
+        .collect();
+    for case in 0..4 {
+        let mut forged = notes[0].clone();
+        match case {
+            0 => {
+                forged.data.as_mut().unwrap()["writing_context"]["rows"] =
+                    notes[1].data.as_ref().unwrap()["writing_context"]["rows"].clone()
+            }
+            1 => {
+                forged.data.as_mut().unwrap()["writing_context"]["statement_ids"] =
+                    notes[1].data.as_ref().unwrap()["writing_context"]["statement_ids"].clone()
+            }
+            2 => {
+                forged.data.as_mut().unwrap()["root"] =
+                    serde_json::json!("file:///C:/writing-action/other.mod")
+            }
+            _ => forged.data = None,
+        }
+        assert!(
+            naming_actions(&actions_for_note(&service, &uri, &forged).await).is_empty(),
+            "forged case {case}"
+        );
+    }
+    assert_eq!(
+        naming_actions(&actions_for_note(&service, &uri, &notes[0]).await).len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn replacement_note_names_only_the_surviving_replacement_rows() {
+    let uri = Url::parse("file:///C:/writing-action/replacement.mod").unwrap();
+    let text =
+        "var x y;\nmodel; [name='old'] x=y(-1); y=y(-1); end;\nmodel_replace('old'); x=y; end;";
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.into(), 1))
+        .await;
+    let notes: Vec<_> = items(&service, &uri)
+        .await
+        .into_iter()
+        .filter(|note| diag_code(note) == "I208")
+        .collect();
+    assert_eq!(notes.len(), 2);
+    let replacement = notes
+        .iter()
+        .find(|note| note.range.start.line == 2)
+        .unwrap();
+    assert_eq!(replacement.range.end.character, 13);
+    let actions = actions_for_note(&service, &uri, replacement).await;
+    let naming = naming_actions(&actions);
+    assert_eq!(naming.len(), 1);
+    let edits = edits_for(naming[0], &uri);
+    assert_eq!(edits.len(), 1);
+    let edited = apply_edits(text, &edits);
+    assert!(edited.contains("[name='old'] x=y(-1); y=y(-1);"));
+    assert!(
+        edited.contains("model_replace('old'); [name='eq_2'] x=y;"),
+        "{edited}"
+    );
+}
+
+#[tokio::test]
+async fn shared_declaration_notes_publish_separate_explicit_root_contexts() {
+    let dir = std::env::temp_dir().join(format!(
+        "dygnosis-i209-roots-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let child = dir.join("decl.inc");
+    let a = dir.join("a.mod");
+    let b = dir.join("b.mod");
+    let text = "@#include \"decl.inc\"\nmodel; x=x(-1); end;";
+    fs::write(&child, "/*😀中*/var x;").unwrap();
+    fs::write(&a, text).unwrap();
+    fs::write(&b, text).unwrap();
+    let (service, _socket) = new_service();
+    for root in [&a, &b] {
+        service
+            .inner()
+            .did_open(open_params(file_url(root), text.into(), 1))
+            .await;
+    }
+    let notes: Vec<_> = items(&service, &file_url(&child))
+        .await
+        .into_iter()
+        .filter(|note| diag_code(note) == "I209")
+        .collect();
+    assert_eq!(notes.len(), 2);
+    let mut roots = BTreeSet::new();
+    for note in notes {
+        assert_eq!(
+            note.range,
+            Range::new(Position::new(0, 7), Position::new(0, 10))
+        );
+        let context: dygnosis::WritingContext =
+            serde_json::from_value(note.data.unwrap()["writing_context"].clone()).unwrap();
+        roots.insert(context.root);
+        assert!(!context.input_revision.is_empty());
+        assert_eq!(context.statement_ids.len(), 1);
+        assert!(matches!(
+            context.rows,
+            dygnosis::WritingRows::Declarations(_)
+        ));
+        assert_eq!(context.rows.ids().len(), 1);
+    }
+    assert_eq!(roots.len(), 2);
+    fs::remove_dir_all(dir).unwrap();
+}
+
 async fn naming_on_i208(
     service: &LspService<dygnosis::server::Backend>,
     uri: &Url,
@@ -234,32 +435,39 @@ async fn included_writing_notes_route_to_their_files_and_clear_after_edits() {
         .await;
 
     let root_notes = items(&service, &root_uri).await;
+    let unnamed = root_notes
+        .iter()
+        .find(|diag| diag_code(diag) == "I208")
+        .unwrap();
+    assert_eq!(
+        unnamed.range,
+        Range::new(Position::new(2, 0), Position::new(2, 5))
+    );
     assert!(root_notes
         .iter()
-        .all(|diag| !matches!(diag_code(diag).as_str(), "I208" | "I209" | "I210")));
+        .all(|diag| !matches!(diag_code(diag).as_str(), "I209" | "I210")));
     let declaration = items(&service, &decl_uri).await;
     let long_name = declaration
         .iter()
         .find(|diag| diag_code(diag) == "I209")
         .unwrap();
-    assert_eq!(long_name.range.start, Position::new(0, 10));
+    assert_eq!(
+        long_name.range,
+        Range::new(Position::new(0, 6), Position::new(0, 9))
+    );
     let equations = items(&service, &eq_uri).await;
-    let unnamed = equations
-        .iter()
-        .find(|diag| diag_code(diag) == "I208")
-        .unwrap();
+    assert!(equations.iter().all(|diag| diag_code(diag) != "I208"));
     let literal = equations
         .iter()
         .find(|diag| diag_code(diag) == "I210")
         .unwrap();
-    assert_eq!(unnamed.range.start, Position::new(0, 7));
     assert_eq!(literal.range.start, Position::new(0, 11));
 
     service
         .inner()
         .did_open(open_params(eq_uri.clone(), eq_text.into(), 1))
         .await;
-    let action = naming_on_i208(&service, &eq_uri)
+    let action = naming_on_i208(&service, &root_uri)
         .await
         .expect("included naming action");
     assert_eq!(action.title, "Name counted equations");
@@ -271,7 +479,7 @@ async fn included_writing_notes_route_to_their_files_and_clear_after_edits() {
         .inner()
         .did_change(change_params(eq_uri.clone(), without_literal.into(), 2))
         .await;
-    assert!(items(&service, &eq_uri)
+    assert!(items(&service, &root_uri)
         .await
         .iter()
         .all(|diag| diag_code(diag) != "I210"));
@@ -311,9 +519,9 @@ async fn shared_included_i208_offers_one_action_per_root() {
     let a = dir.join("a.mod");
     let b = dir.join("b.mod");
     let child = dir.join("shared.inc");
-    let a_text = "var y, a;\nmodel;\n@#include \"shared.inc\"\na = 0;\nend;\n";
-    let b_text = "var y, b;\nmodel;\n@#include \"shared.inc\"\nb = 0;\nend;\n";
-    let child_text = "y = 2;\n";
+    let a_text = "var y, a;\n@#include \"shared.inc\"\na = 0;\nend;\n";
+    let b_text = "var y, b;\n@#include \"shared.inc\"\nb = 0;\nend;\n";
+    let child_text = "model;\ny = 2;\n";
     fs::write(&a, a_text).unwrap();
     fs::write(&b, b_text).unwrap();
     fs::write(&child, child_text).unwrap();
@@ -474,7 +682,7 @@ async fn tags_are_kept_and_a_second_apply_does_nothing() {
 }
 
 #[tokio::test]
-async fn cross_scope_eq_1_gets_a_suffix() {
+async fn one_note_names_only_its_model_block() {
     let (uri, text) = read_fixture("collision.mod");
     let path = uri.to_file_path().unwrap();
     let (service, _socket) = new_service();
@@ -487,11 +695,14 @@ async fn cross_scope_eq_1_gets_a_suffix() {
     let edits = edits_for(&action, &uri);
     assert_eq!(
         edits.len(),
-        4,
-        "one workspace edit covers every safe equation"
+        1,
+        "the note owns only the aggregate model block"
     );
     let edited = apply_edits(&text, &edits);
-    assert_eq!(edited, expected("collision.named.mod"));
+    assert_eq!(
+        edited,
+        text.replacen("y = y(-1);", "[name='eq_1'] y = y(-1);", 1)
+    );
     assert_no_new_error(&text, &edited, &path.to_string_lossy());
 }
 
@@ -582,11 +793,11 @@ async fn a_shared_include_is_skipped_and_reported() {
         .inner()
         .did_open(open_params(root_uri.clone(), root_text.clone(), 1))
         .await;
-    assert!(items(&service, &root_uri)
+    assert!(items(&service, &inc_uri)
         .await
         .iter()
         .all(|diag| diag_code(diag) != "I208"));
-    let action = naming_on_i208(&service, &inc_uri)
+    let action = naming_on_i208(&service, &root_uri)
         .await
         .expect("naming action");
     assert_eq!(action.title, "Name counted equations (2 skipped)");
@@ -613,11 +824,11 @@ async fn a_unique_include_is_edited_in_that_file() {
         .did_open(open_params(root_uri.clone(), root_text.clone(), 1))
         .await;
     let before = items(&service, &root_uri).await;
-    assert!(items(&service, &root_uri)
+    assert!(items(&service, &inc_uri)
         .await
         .iter()
         .all(|diag| diag_code(diag) != "I208"));
-    let action = naming_on_i208(&service, &inc_uri)
+    let action = naming_on_i208(&service, &root_uri)
         .await
         .expect("naming action");
     assert_eq!(action.title, "Name counted equations");

@@ -2854,6 +2854,7 @@ impl Parser<'_> {
             ))
         };
         Some(Equation {
+            parse_order: start,
             text: join_lexemes(self.src, &self.tokens[start..end]),
             name: String::new(),
             span,
@@ -8710,6 +8711,7 @@ impl Parser<'_> {
                 start: stmt_start,
                 end: stmt_end,
             },
+            stmt_i,
         )?;
         eq.is_local = is_local;
         eq.model_local = is_local;
@@ -11557,7 +11559,7 @@ fn needs_space(prev: TokenKind, next: TokenKind) -> bool {
     !tight_right(prev) && !tight_left(next)
 }
 
-fn equation_from_statement(raw: &str, span: Span) -> Option<Equation> {
+fn equation_from_statement(raw: &str, span: Span, parse_order: usize) -> Option<Equation> {
     let (name, rest) = strip_leading_tags(raw);
     let text = collapse_ws(&rest);
     if text.is_empty() {
@@ -11571,6 +11573,7 @@ fn equation_from_statement(raw: &str, span: Span) -> Option<Equation> {
         None => (String::new(), String::new()),
     };
     Some(Equation {
+        parse_order,
         text,
         name,
         span,

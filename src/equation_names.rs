@@ -3,8 +3,9 @@
 //! The language server turns the plan into one workspace edit. This module
 //! does not write a file.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use crate::diagnostic::{WritingContext, WritingRows};
 use crate::equations::{equations, heterogeneous_equations, EquationRow};
 use crate::expand::{EquationOrigin, ExpandReport};
 use crate::model::Model;
@@ -22,7 +23,21 @@ pub(crate) struct NameTagPlan {
     pub edits: Vec<NameTagEdit>,
 }
 
-pub(crate) fn equation_name_plan(ws: &mut Workspace, uri: &str) -> Option<NameTagPlan> {
+pub(crate) fn equation_name_plan(
+    ws: &mut Workspace,
+    uri: &str,
+    context: &WritingContext,
+) -> Option<NameTagPlan> {
+    let WritingRows::Equations(rows) = &context.rows else {
+        return None;
+    };
+    if !crate::check_writing::context_is_current(ws, uri, "I208", context) {
+        return None;
+    }
+    equation_name_plan_rows(ws, uri, rows)
+}
+
+fn equation_name_plan_rows(ws: &mut Workspace, uri: &str, rows: &[usize]) -> Option<NameTagPlan> {
     let model = ws.get_effective_model(uri)?.clone();
     let report = ws.expand_report(uri)?.clone();
     let mut sources = BTreeMap::<String, String>::new();
@@ -37,15 +52,17 @@ pub(crate) fn equation_name_plan(ws: &mut Workspace, uri: &str) -> Option<NameTa
             sources.insert(file.to_string(), text.to_string());
         }
     }
-    plan_edits(&model, &report, &sources)
+    plan_edits(&model, &report, &sources, rows)
 }
 
 fn plan_edits(
     model: &Model,
     report: &ExpandReport,
     sources: &BTreeMap<String, String>,
+    row_ids: &[usize],
 ) -> Option<NameTagPlan> {
     let (aggregate, heterogeneous) = counted_rows(model, report)?;
+    let selected: HashSet<_> = row_ids.iter().copied().collect();
     let mut shared: HashMap<(String, u32, u32), usize> = HashMap::new();
     for row in aggregate.iter().chain(&heterogeneous) {
         *shared.entry(span_key(row.origin)).or_insert(0) += 1;
@@ -54,7 +71,7 @@ fn plan_edits(
     let mut edits = Vec::new();
     let mut skipped = 0usize;
     for row in aggregate.iter().chain(&heterogeneous) {
-        if !row.unnamed {
+        if !row.unnamed || !selected.contains(&row.id) {
             continue;
         }
         if !can_edit(row.origin, &shared) {
@@ -90,6 +107,7 @@ fn plan_edits(
 }
 
 struct Counted<'a> {
+    id: usize,
     number: usize,
     unnamed: bool,
     origin: &'a EquationOrigin,
@@ -106,7 +124,13 @@ fn counted_rows<'a>(
     let aggregate = aggregate_rows
         .iter()
         .zip(&report.aggregate_origins)
-        .map(|(row, origin)| counted(row, origin))
+        .zip(
+            model
+                .equations
+                .iter()
+                .filter(|equation| !equation.is_local && !equation.static_tag),
+        )
+        .map(|((row, origin), equation)| counted(row, origin, equation.parse_order))
         .collect();
 
     let blocks = heterogeneous_equations(model);
@@ -116,8 +140,16 @@ fn counted_rows<'a>(
         if origins.len() != block.equations.len() {
             return None;
         }
-        for (row, origin) in block.equations.iter().zip(origins) {
-            heterogeneous.push((block.dimension.clone(), counted(row, origin)));
+        for ((row, origin), equation) in block.equations.iter().zip(origins).zip(
+            model.heterogeneous_models[block.block_index]
+                .equations
+                .iter()
+                .filter(|equation| !equation.is_local && !equation.static_tag),
+        ) {
+            heterogeneous.push((
+                block.dimension.clone(),
+                counted(row, origin, equation.parse_order),
+            ));
         }
     }
     heterogeneous.sort_by(|left, right| {
@@ -129,8 +161,9 @@ fn counted_rows<'a>(
     Some((aggregate, heterogeneous))
 }
 
-fn counted<'a>(row: &EquationRow, origin: &'a EquationOrigin) -> Counted<'a> {
+fn counted<'a>(row: &EquationRow, origin: &'a EquationOrigin, id: usize) -> Counted<'a> {
     Counted {
+        id,
         number: origin.scope_index + 1,
         unnamed: is_unnamed(row),
         origin,
@@ -379,6 +412,24 @@ fn is_key_cont(byte: u8) -> bool {
 mod tests {
     use super::*;
 
+    // Allocator tests exercise all rows; the editor entry point always validates
+    // a single note's revision-bound scope before calling the row planner.
+    fn all_rows_plan(ws: &mut Workspace, uri: &str) -> Option<NameTagPlan> {
+        let model = ws.get_effective_model(uri)?;
+        let rows: Vec<_> = model
+            .equations
+            .iter()
+            .chain(
+                model
+                    .heterogeneous_models
+                    .iter()
+                    .flat_map(|block| &block.equations),
+            )
+            .map(|equation| equation.parse_order)
+            .collect();
+        equation_name_plan_rows(ws, uri, &rows)
+    }
+
     fn apply(source: &str, edits: &[(Span, &str)]) -> String {
         let mut ordered: Vec<(Span, &str)> = edits.to_vec();
         ordered.sort_by_key(|(span, _)| std::cmp::Reverse(span.start));
@@ -393,7 +444,7 @@ mod tests {
         let mut ws = Workspace::new();
         let uri = r"C:\dygnosis-equation-names\plan.mod";
         ws.update_document(uri, source);
-        let plan = equation_name_plan(&mut ws, uri)?;
+        let plan = all_rows_plan(&mut ws, uri)?;
         let edits: Vec<(Span, String)> = plan
             .edits
             .iter()
@@ -553,7 +604,7 @@ end;
         let root_uri = root.to_string_lossy();
         ws.update_document(&root_uri, &root_text);
         ws.update_document(&inc.to_string_lossy(), &inc_text);
-        let plan = equation_name_plan(&mut ws, &root_uri).expect("action");
+        let plan = all_rows_plan(&mut ws, &root_uri).expect("action");
         assert_eq!(plan.title, "Name counted equations (2 skipped)");
         assert_eq!(plan.edits.len(), 1);
         let edit = &plan.edits[0];
@@ -586,7 +637,7 @@ end;
         let inc_uri = inc.to_string_lossy();
         ws.update_document(&root_uri, &root_text);
         ws.update_document(&inc_uri, &inc_text);
-        let plan = equation_name_plan(&mut ws, &root_uri).expect("action");
+        let plan = all_rows_plan(&mut ws, &root_uri).expect("action");
         assert_eq!(plan.title, "Name counted equations");
         assert_eq!(plan.edits.len(), 1);
         let edit = &plan.edits[0];
@@ -614,7 +665,7 @@ end;
         let root_uri = root.to_string_lossy();
         ws.update_document(&root_uri, &root_text);
         ws.update_document(&inc.to_string_lossy(), &inc_text);
-        let plan = equation_name_plan(&mut ws, &root_uri).expect("action");
+        let plan = all_rows_plan(&mut ws, &root_uri).expect("action");
         assert_eq!(plan.title, "Name counted equations (1 skipped)");
         assert_eq!(plan.edits.len(), 1);
         let edit = &plan.edits[0];

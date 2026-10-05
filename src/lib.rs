@@ -112,7 +112,8 @@ pub use check_w160::{check_w160, quiet_i050};
 pub use companion::{CompanionKind, CompanionRecord};
 pub use diagnostic::{
     analyze, check_file, check_file_with_origins, format_check_lines,
-    format_check_lines_with_origins, Diagnostic, DiagnosticSet, Severity, TextEdit, WritingOrigin,
+    format_check_lines_with_origins, Diagnostic, DiagnosticSet, Severity, TextEdit, WritingContext,
+    WritingRows,
 };
 pub use e010::check_e010;
 pub use equations::{

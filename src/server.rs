@@ -2610,7 +2610,7 @@ fn library_to_lsp(text: &str, diags: &[crate::Diagnostic]) -> Vec<Diagnostic> {
                 message: d.message.clone(),
                 tags: lsp_tags(&d.tags),
                 related_information: diagnostic_related_information(d),
-                data: related_context(d),
+                data: diagnostic_context(d),
                 ..Diagnostic::default()
             }
         })
@@ -2745,6 +2745,16 @@ fn related_context(diagnostic: &crate::Diagnostic) -> Option<Value> {
     (!rows.is_empty()).then(|| json!({"related_context": rows}))
 }
 
+fn diagnostic_context(diagnostic: &crate::Diagnostic) -> Option<Value> {
+    let mut data = related_context(diagnostic).unwrap_or_else(|| json!({}));
+    if let Some(context) = &diagnostic.writing {
+        data["writing_context"] = json!(context);
+        data["root"] = json!(context.root);
+        data["input_revision"] = json!(context.input_revision);
+    }
+    (!data.as_object()?.is_empty()).then_some(data)
+}
+
 fn naming_code_actions(inner: &mut Inner, params: &CodeActionParams) -> Vec<CodeAction> {
     let requested = &params.text_document.uri;
     let mut notes: Vec<(Url, Diagnostic)> = inner
@@ -2765,17 +2775,26 @@ fn naming_code_actions(inner: &mut Inner, params: &CodeActionParams) -> Vec<Code
         })
         .collect();
     notes.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
-    notes.dedup_by(|a, b| a.0 == b.0);
-    let shared_site = notes.len() > 1;
-    let requested_roots: HashSet<Url> = params
+    notes.dedup_by(|a, b| a.0 == b.0 && a.1.data == b.1.data);
+    let shared_site = notes
+        .iter()
+        .map(|(root, _)| root)
+        .collect::<HashSet<_>>()
+        .len()
+        > 1;
+    let requested_notes: Vec<_> = params
         .context
         .diagnostics
         .iter()
         .filter(|diag| ranges_overlap(diag.range, params.range))
-        .filter_map(writing_root)
+        .filter(|diagnostic| matches!(&diagnostic.code, Some(NumberOrString::String(code)) if code == "I208"))
         .collect();
-    if !requested_roots.is_empty() {
-        notes.retain(|(root, _)| requested_roots.contains(root));
+    if !requested_notes.is_empty() {
+        notes.retain(|(_, note)| {
+            requested_notes
+                .iter()
+                .any(|supplied| supplied.range == note.range && supplied.data == note.data)
+        });
     }
     notes
         .into_iter()
@@ -2817,7 +2836,11 @@ fn naming_action_for_root(
     {
         return None;
     }
-    let plan = equation_name_plan(&mut inner.workspace, root.as_str())?;
+    let context = serde_json::from_value::<crate::diagnostic::WritingContext>(
+        note.data.as_ref()?.get("writing_context")?.clone(),
+    )
+    .ok()?;
+    let plan = equation_name_plan(&mut inner.workspace, root.as_str(), &context)?;
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
     for edit in plan.edits {
         let url = naming_edit_url(inner, &params.text_document.uri, &edit.file)?;

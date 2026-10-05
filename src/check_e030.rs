@@ -42,6 +42,7 @@ fn check_duplicate_declarations(model: &Model) -> Vec<Diagnostic> {
                 tags: Vec::new(),
                 model_dimension: None,
                 display_keyword: None,
+                writing: None,
             });
             continue;
         }
@@ -55,6 +56,7 @@ fn check_duplicate_declarations(model: &Model) -> Vec<Diagnostic> {
             tags: Vec::new(),
             model_dimension: None,
             display_keyword: None,
+            writing: None,
         });
     }
     diagnostics
@@ -97,6 +99,7 @@ fn check_model_local_dups(model: &Model) -> Vec<Diagnostic> {
                     tags: Vec::new(),
                     model_dimension: None,
                     display_keyword: None,
+                    writing: None,
                 });
             } else {
                 seen.insert(*name, (eq, *ident_span));

@@ -35,9 +35,9 @@ can remain available when you hide a diagnostic.
 
 The offered diagnostic fixes depend on the source: declare a missing name,
 correct a suggested identifier, remove a redundant declaration or repair
-statement syntax. The equation-name action on I208 proposes names across the
-selected model's verified source files. Review its edits, especially for shared
-includes.
+statement syntax. The equation-name action on I208 proposes names only for the
+equations counted by that note's model block. Its opener can be in the root
+while the equations are in an include. Review the proposed files and edits.
 
 **Insert stochastic shocks template** and **Insert deterministic shocks
 template** are independent refactors. They insert commented templates for the

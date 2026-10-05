@@ -177,6 +177,8 @@ pub struct SteadyStateTarget {
 
 #[derive(Clone, Debug)]
 pub struct Equation {
+    /// Expanded token position, retained through removal and replacement.
+    pub parse_order: usize,
     pub text: String,
     pub name: String,
     pub span: Span,

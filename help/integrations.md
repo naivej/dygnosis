@@ -135,6 +135,22 @@ Applicable duplicate diagnostics link to the first occurrence through LSP `relat
 
 Published fixes remain available for an unopened include when its checked source snapshot is current. Edits to open files carry their actual document versions; unopened files use an unversioned identifier. Stale source or root revisions withhold the action. W020 and W022 carry the standard LSP Unnecessary tag; E021 does not.
 
+I208 and I209 carry `data.writing_context` with `root`, `input_revision`,
+`statement_ids`, and `rows`. The normalized root path and opaque revision bind
+the note to one checked input. `statement_ids` lists its owning expanded
+statement occurrences. `rows` is `{ "kind": "equations", "row_ids": [...] }`
+for I208 or `{ "kind": "declarations", "row_ids": [...] }` for I209. Row ids
+are expanded token positions within that revision, not written offsets or
+displayed equation numbers. Repeated macro occurrences retain distinct ids
+even when their written keyword range is shared.
+
+Send the diagnostic's complete `data` back in a code-action request. The server
+requires a current matching note; missing, stale, or altered contexts cannot
+select another note's rows. I208 edits only safely mapped equations from its
+row set. Its keyword can be in the root while the edits belong to an include.
+I209 exposes the same ownership contract for declaration rows. A code or
+written range alone cannot identify either scope across roots or statements.
+
 ## Project diagnostics
 
 Project diagnostics check unopened saved `.mod` models beneath file-backed workspace folders. Discovery uses the recursive saved-model walk, including its generated `+` directory skip. Open `.dyn`, excluded models, loose files, and untitled documents retain ordinary editor diagnostics.
