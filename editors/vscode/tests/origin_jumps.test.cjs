@@ -378,6 +378,43 @@ test("older override preserves basic preview and refresh while origins remain un
   await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 0);
   env.service.value = { effective_text: "model;\ny = 2;\nend;" }; await env.run("refreshEffectiveModel");
   assert.ok(session.text.includes("y = 2")); assert.equal(env.service.logged.length, 0);
+  assert.deepEqual(env.service.requests[0].args, [main]);
+  assert.deepEqual(env.service.requests.at(-1).args, [{ root_uri: main }]);
+  env.registration.dispose(); env.previews.dispose();
+});
+
+test("readable preview open Refresh and both jump proofs use one layout and display the returned text", async () => {
+  const env = setup();
+  env.service.client.initializeResult.capabilities.experimental.dygnosis.effectivePreview.readable_layout = true;
+  const displayed = "model;\n    y = 1;\nend;", mapped = row({ effective_range: new Range(1, 4, 1, 9),
+    macro_frames: [{ kind: "for", variable: "i", value: "1", directive_locations: [target()], body_locations: [target()] }] });
+  env.service.executeHook = (_command, args) => {
+    assert.deepEqual(args, [{ root_uri: main, layout: "readable" }]);
+    return payload({ effective_text: displayed, navigation: [mapped] });
+  };
+  const session = await env.show();
+  assert.equal(session.document.getText(), displayed, "copyable virtual document uses the engine's line breaks");
+  env.host.editor.selection = new Range(1, 4);
+  await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 1);
+  env.activate(session); env.host.editor.selection = new Range(1, 4);
+  await env.run("showMacroOrigins"); assert.equal(env.service.jumps.length, 2);
+  env.activate(session); await env.run("refreshEffectiveModel");
+  assert.equal(session.document.getText(), displayed);
+  assert.ok(env.service.requests.length >= 8, "initial open, both guarded jumps, and Refresh reached the engine");
+  assert.equal(env.service.logged.length, 0);
+  env.registration.dispose(); env.previews.dispose();
+});
+
+test("a navigation-capable older server keeps its compact layout in open Refresh and source proofs", async () => {
+  const env = setup(), compact = "model; y = 1; end;";
+  env.service.value = payload({ effective_text: compact, navigation: [row({ effective_range: new Range(0, 7, 0, 12) })] });
+  const session = await env.show(); assert.equal(session.document.getText(), compact);
+  env.host.editor.selection = new Range(0, 7); await env.run("goToWrittenSource");
+  assert.equal(env.service.jumps.length, 1);
+  env.activate(session); await env.run("refreshEffectiveModel");
+  assert.equal(session.document.getText(), compact);
+  assert.deepEqual(env.service.requests[0].args, [main]);
+  for (const request of env.service.requests.slice(1)) assert.deepEqual(request.args, [{ root_uri: main }]);
   env.registration.dispose(); env.previews.dispose();
 });
 

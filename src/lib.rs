@@ -63,6 +63,7 @@ pub mod model_map;
 pub mod parser;
 mod pinned_options;
 pub mod preprocessor;
+mod preview_layout;
 mod preview_navigation;
 pub mod refs;
 pub mod server;

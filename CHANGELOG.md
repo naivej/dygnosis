@@ -7,6 +7,7 @@
 - The `dynare_equations` schema states that `index` starts at zero, matching the existing selector.
 - Help supports native **Find** in the open page. The header search still finds topics.
 - The equation CodeLens says **Jump to equation** or **Jump to N equations**. Its picker opens the written equation before transformation.
+- **Show effective model** starts statements on separate lines and indents block bodies. Copying the preview keeps the line breaks. Refresh and source jumps use the same readable layout.
 
 ## v0.11.7
 

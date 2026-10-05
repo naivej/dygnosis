@@ -671,6 +671,229 @@ async fn preview(backend: &Backend, root: &Url) -> Value {
         .unwrap()
 }
 
+async fn readable_preview(backend: &Backend, root: &Url) -> Value {
+    backend
+        .execute_command(ExecuteCommandParams {
+            command: "dynare/showEffectiveModel".into(),
+            arguments: vec![json!({"root_uri":root, "layout":"readable"})],
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+fn token_texts(text: &str) -> Vec<(dygnosis::lexer::TokenKind, String)> {
+    dygnosis::lexer::tokenize(text)
+        .iter()
+        .map(|token| (token.kind, token.text(text).to_string()))
+        .collect()
+}
+
+fn same_preview_facts(compact: &Value, readable: &Value) {
+    assert_eq!(
+        token_texts(compact["effective_text"].as_str().unwrap()),
+        token_texts(readable["effective_text"].as_str().unwrap())
+    );
+    let mut without_layout = readable.clone();
+    without_layout["effective_text"] = compact["effective_text"].clone();
+    for (display, old) in without_layout["navigation"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .zip(compact["navigation"].as_array().unwrap())
+    {
+        assert_eq!(
+            json_slice(
+                readable["effective_text"].as_str().unwrap(),
+                &display["effective_range"],
+                true
+            ),
+            json_slice(
+                compact["effective_text"].as_str().unwrap(),
+                &old["effective_range"],
+                true
+            ),
+        );
+        display["effective_range"] = old["effective_range"].clone();
+    }
+    assert_eq!(without_layout, *compact);
+}
+
+#[tokio::test]
+async fn readable_layout_separates_statements_tags_locals_and_blocks_without_changing_shared_output(
+) {
+    let source = "var y; parameters rho; rho=0.9; model; #k=1; [name='α😀'] y=\r\n rho*y(-1)+k; end; initval; y=1; end;";
+    let root = Url::parse("file:///C:/dygnosis-preview/readable.mod").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    let initialized = backend
+        .initialize(InitializeParams::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        initialized.capabilities.experimental.unwrap()["dygnosis"]["effectivePreview"]
+            ["readable_layout"],
+        true
+    );
+    open(backend, &root, source, 1).await;
+    let compact = preview(backend, &root).await;
+    let expanded = expand_report(source);
+    let mcp = dynare_expand(source, None, None);
+    let equations = dygnosis::dynare_equations(source, None, None, None, None);
+    let compare = dygnosis::dynare_compare_models(source, source, None, None, None, None, None);
+    let extract =
+        dygnosis::dynare_extract(source, None, None, &["α😀".into()], &HashMap::new(), None)
+            .unwrap();
+    let formatted = dygnosis::format_text(source, "  ");
+    let readable = readable_preview(backend, &root).await;
+    assert_eq!(readable["complete"], true);
+    assert_eq!(readable["effective_text"], "var y ;\nparameters rho ;\nrho = 0.9 ;\nmodel ;\n    #k = 1 ;\n    [name = 'α😀'] y = rho*y(-1)+k ;\nend ;\ninitval ;\n    y = 1 ;\nend ;");
+    same_preview_facts(&compact, &readable);
+    assert_eq!(
+        preview(backend, &root).await,
+        compact,
+        "readable request must not mutate cached expansion"
+    );
+    assert_eq!(expand_report(source), expanded);
+    assert_eq!(dynare_expand(source, None, None), mcp);
+    assert_eq!(
+        dygnosis::dynare_equations(source, None, None, None, None),
+        equations
+    );
+    assert_eq!(
+        dygnosis::dynare_compare_models(source, source, None, None, None, None, None),
+        compare
+    );
+    assert_eq!(
+        dygnosis::dynare_extract(source, None, None, &["α😀".into()], &HashMap::new(), None)
+            .unwrap(),
+        extract
+    );
+    assert_eq!(dygnosis::format_text(source, "  "), formatted);
+}
+
+#[tokio::test]
+async fn readable_layout_preserves_strings_native_text_and_matrix_contents() {
+    let source = "var y; verbatim; A=[1 2;3 4]; fprintf('a;b😀'); end; disp([1 2;3 4]); model; [name='a;b😀'] y=1; end;";
+    let root = Url::parse("file:///C:/dygnosis-preview/native.mod").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(backend, &root, source, 1).await;
+    let compact = preview(backend, &root).await;
+    let readable = readable_preview(backend, &root).await;
+    same_preview_facts(&compact, &readable);
+    let text = readable["effective_text"].as_str().unwrap();
+    assert!(
+        text.contains("    A =[1 2 ; 3 4] ; fprintf('a;b😀') ;\nend ;"),
+        "{text}"
+    );
+    assert!(text.contains("disp([1 2 ; 3 4]) ;"), "{text}");
+    assert!(text.contains("    [name = 'a;b😀'] y = 1 ;"), "{text}");
+    assert_eq!(readable["navigation"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn readable_layout_uses_original_statement_facts_after_native_line_boundaries() {
+    let root = Url::parse("file:///C:/dygnosis-preview/native-boundary.mod").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    for (block, expected) in [
+        (
+            "conditional_forecast_paths; var y; periods 1; values 1; end;",
+            "conditional_forecast_paths ;\n    var y ;\n    periods 1 ;\n    values 1 ;\nend ;",
+        ),
+        (
+            "svar_identification; upper_cholesky; end;",
+            "svar_identification ;\n    upper_cholesky ;\nend ;",
+        ),
+    ] {
+        for native in ["", "disp('x');\n", "disp([1 2;3 4]);\r\n"] {
+            let source = format!("{native}var y;\nmodel; y=1; end;\n{block}\n");
+            open(backend, &root, &source, 1).await;
+            let compact = preview(backend, &root).await;
+            let readable = readable_preview(backend, &root).await;
+            assert_eq!(readable["complete"], true, "{readable}");
+            assert!(
+                readable["effective_text"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with(expected),
+                "{readable}"
+            );
+            same_preview_facts(&compact, &readable);
+            assert_eq!(preview(backend, &root).await, compact);
+        }
+    }
+}
+
+#[tokio::test]
+async fn readable_include_macro_copies_have_separate_ranges_and_keep_written_targets_on_refresh() {
+    let source = "var y; model;\r\n@#include \"readable.inc\"\r\nend;";
+    let body = "@#for i in 1:2\r\n#k=@{i}; [name='😀'] y=k+\r\n@{i};\r\n@#endfor\r\n";
+    let root = Url::parse("file:///C:/dygnosis-preview/includes.mod").unwrap();
+    let include = Url::parse("file:///C:/dygnosis-preview/readable.inc").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(backend, &root, source, 1).await;
+    open(backend, &include, body, 1).await;
+    let compact = preview(backend, &root).await;
+    let first = readable_preview(backend, &root).await;
+    same_preview_facts(&compact, &first);
+    assert_eq!(first["complete"], true, "{first}");
+    assert_eq!(first["effective_text"], "var y ;\nmodel ;\n    #k = 1 ;\n    [name = '😀'] y = k+1 ;\n    #k = 2 ;\n    [name = '😀'] y = k+2 ;\nend ;");
+    let rows = first["navigation"].as_array().unwrap();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[1]["written_locations"], rows[3]["written_locations"]);
+    assert_ne!(rows[1]["effective_range"], rows[3]["effective_range"]);
+    assert_eq!(rows[1]["effective_range"]["start"]["line"], 3);
+    assert_eq!(rows[3]["effective_range"]["start"]["line"], 5);
+    for row in rows {
+        assert_eq!(row["written_locations"][0]["uri"], include.as_str());
+        assert_eq!(
+            row["macro_frames"][0]["directive_locations"][0]["uri"],
+            include.as_str()
+        );
+    }
+    assert_eq!(
+        readable_preview(backend, &root).await,
+        first,
+        "jump revalidation returns the same display copy"
+    );
+    open(backend, &include, &body.replace("k+", "k+1+"), 2).await;
+    let refreshed = readable_preview(backend, &root).await;
+    assert_ne!(refreshed["revision"], first["revision"]);
+    assert!(refreshed["effective_text"]
+        .as_str()
+        .unwrap()
+        .contains("    [name = '😀'] y = k+1+2 ;"));
+    same_preview_facts(&preview(backend, &root).await, &refreshed);
+}
+
+#[tokio::test]
+async fn readable_incomplete_previews_keep_partial_text_and_withhold_navigation() {
+    let root = Url::parse("file:///C:/dygnosis-preview/partial.mod").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    for source in [
+        "var y; model; y=1;",
+        "var y; model; y=@{missing}; end;",
+        "var y; model; y=1;\n@#include \"missing.inc\"\nend;",
+    ] {
+        open(backend, &root, source, 1).await;
+        let compact = preview(backend, &root).await;
+        let readable = readable_preview(backend, &root).await;
+        assert_eq!(readable["complete"], false, "{readable}");
+        assert_eq!(readable["status"], "incomplete");
+        assert_eq!(readable["navigation"], json!([]));
+        assert!(readable["effective_text"]
+            .as_str()
+            .unwrap()
+            .starts_with("var y ;\n"));
+        same_preview_facts(&compact, &readable);
+    }
+}
+
 #[tokio::test]
 async fn lsp_and_mcp_agree_on_utf16_scalar_ranges_and_written_source_versions() {
     let source = "var y; model;\r\n[name='😀'] y=1;\rend;";

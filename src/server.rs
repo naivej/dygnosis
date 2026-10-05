@@ -1815,6 +1815,18 @@ impl Backend {
         let Some(report) = inner.workspace.expand_report(uri.as_str()).cloned() else {
             return json!({"success": false, "message": "Document not available"});
         };
+        let layout = arguments
+            .first()
+            .and_then(|arg| arg.get("layout"))
+            .and_then(Value::as_str)
+            .filter(|layout| *layout == "readable")
+            .and_then(|_| inner.workspace.get_effective_model(uri.as_str()))
+            .and_then(|model| crate::preview_layout::readable(&report, model));
+        let effective_text = layout
+            .as_ref()
+            .map_or(report.effective_text.as_str(), |layout| {
+                layout.text.as_str()
+            });
         let complete =
             report.navigation_complete && inner.workspace.includes_complete(uri.as_str());
         let has_heterogeneous = !report.heterogeneous_origins.is_empty();
@@ -1832,14 +1844,19 @@ impl Backend {
             "navigation_schema_version": crate::preview_navigation::NAVIGATION_SCHEMA_VERSION,
             "dependency_candidates": inner.workspace.input_candidate_paths(uri.as_str())
                 .iter().filter_map(|path| Url::from_file_path(path).ok()).collect::<Vec<_>>(),
-            "effective_text": report.effective_text,
+            "effective_text": effective_text,
             "origins": origins,
         });
         result["navigation"] = if complete {
-            let index = LineIndex::new(&report.effective_text);
+            let index = LineIndex::new(effective_text);
+            let mut rows = 0;
             crate::preview_navigation::navigation_json(
                 &report,
-                |span| json!(span_range(&index, &report.effective_text, span)),
+                |span| {
+                    let display_span = layout.as_ref().map_or(span, |layout| layout.ranges[rows]);
+                    rows += 1;
+                    json!(span_range(&index, effective_text, display_span))
+                },
                 |segment| preview_written_location(&inner, &uri, segment),
             )
         } else {
@@ -2573,7 +2590,7 @@ pub fn initialize_result() -> InitializeResult {
                 "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true},
                 "modelInfoChanged": true,
                 "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1},
-                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true},
+                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
                 ,"projectDiagnostics": {"schema_version":project::SCHEMA_VERSION,"status_command":"dynare/projectStatus","recheck_command":"dynare/recheckProject","cancel_command":"dynare/cancelProject","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/projectStatusChanged","typing_pause_ms":250}
             }})),

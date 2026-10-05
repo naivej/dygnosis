@@ -3,6 +3,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const vscode = require("vscode");
 const { probeNativeMcp } = require("../scripts/native-mcp-host.cjs");
+const { effectivePreviewArguments } = require("../out/preview");
 
 async function waitFor(predicate, description) {
   for (let i = 0; i < 100; ++i) {
@@ -114,7 +115,8 @@ exports.run = async function run() {
     assert.equal(vscode.window.activeTextEditor.document.languageId, "dynare");
     evidence.checks.push("read-only colored effective preview excluded from analysis");
     const previewEditor = vscode.window.activeTextEditor;
-    const previewResult = await service.execute("dynare/showEffectiveModel", [document.uri.toString()]);
+    const previewResult = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, document.uri));
+    assert.equal(previewEditor.document.getText(), previewResult.effective_text);
     const previewRow = previewResult.navigation.find(row => row.kind === "equation");
     assert.ok(previewRow?.written_locations.length);
     const previewPoint = new vscode.Position(previewRow.effective_range.start.line, previewRow.effective_range.start.character + 1);
@@ -135,7 +137,7 @@ exports.run = async function run() {
     await currentSnapshot(service, previewRoot, () => service.modelInfo(previewRoot.uri), "preview include root snapshot");
     await vscode.commands.executeCommand("dygnosis.showEffectiveModel");
     const includePreview = vscode.window.activeTextEditor;
-    const includeExpansion = await service.execute("dynare/showEffectiveModel", [previewRoot.uri.toString()]);
+    const includeExpansion = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, previewRoot.uri));
     const includedRow = includeExpansion.navigation.find(row => row.written_locations.some(target => target.uri.endsWith("preview-body.inc")));
     assert.ok(includedRow); assert.equal(includedRow.written_locations[0].document_version, null);
     const includedPoint = new vscode.Position(includedRow.effective_range.start.line, includedRow.effective_range.start.character + 1);
