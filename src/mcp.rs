@@ -1706,7 +1706,7 @@ struct EquationsParams {
     /// Optional equation-name filter. Searches aggregate and heterogeneous equations.
     #[serde(default)]
     name: Option<String>,
-    /// Optional aggregate equation number, starting at one. The index filter applies to aggregate equations.
+    /// Optional aggregate equation index, starting at zero. The index filter applies to aggregate equations.
     #[serde(default)]
     index: Option<u32>,
 }
@@ -2103,6 +2103,15 @@ impl ServerHandler for DygnosisMcp {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn equation_index_schema_starts_at_zero() {
+        let schema = mcp_input_schema::<EquationsParams>();
+        assert!(schema["properties"]["index"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("starting at zero"));
+    }
 
     #[test]
     fn input_schemas_use_the_offline_compatible_draft() {

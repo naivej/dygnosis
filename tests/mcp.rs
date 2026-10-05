@@ -1823,6 +1823,11 @@ fn dynare_equations_reader_filters() {
     assert_eq!(by_index["count_gap"]["n_equations"], 2);
     assert!(by_index.get("message").is_none());
 
+    let second = dynare_equations(&text, None, None, None, Some(1));
+    assert_eq!(second["equations"].as_array().unwrap().len(), 1);
+    assert_eq!(second["equations"][0]["index"], 1);
+    assert_eq!(second["equations"][0]["text"], eqs[1]["text"]);
+
     let by_name = dynare_equations(&text, None, None, Some("euler"), None);
     let name_rows = by_name["equations"].as_array().expect("name equations");
     assert_eq!(name_rows.len(), 1);

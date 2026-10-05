@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "aeda21577d66761bc42505f0e088c3c724dc438fa679a99d1168f070a76ce4ff",
+  "fingerprint": "9df9c50ed7052cea0131163ad1ca2eb61eaeb600959e09edc25771e027170639",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -162,7 +162,7 @@
           },
           "index": {
             "default": null,
-            "description": "Optional aggregate equation number, starting at one. The index filter applies to aggregate equations.",
+            "description": "Optional aggregate equation index, starting at zero. The index filter applies to aggregate equations.",
             "format": "uint32",
             "minimum": 0,
             "type": [
