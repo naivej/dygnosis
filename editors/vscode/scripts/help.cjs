@@ -95,7 +95,9 @@ async function build() {
   // The Marketplace introduction is generated from the short product README.
   // This file is editors/vscode/README.md. Two levels up reaches product help/.
   // vsce joins the link onto .../editors/vscode; the client then resolves "..".
-  const readme = await fs.readFile(path.join(productRoot, 'README.md'), 'utf8');
+  // The listing already shows the extension icon, so the README omits the logo.
+  const readme = (await fs.readFile(path.join(productRoot, 'README.md'), 'utf8'))
+    .replace(/!\[[^\]]*\]\([^)]*logo[^)]*\)\s*/g, '');
   await fs.writeFile(path.join(extensionRoot, 'README.md'), readme
     .replace(/\]\((help\/[^)]+\.md(?:#[^)]*)?|help\/assets\/[^)]+|LICENSE|CHANGELOG\.md)\)/g, '](../../$1)'));
   console.log(`Help: ${topics.length} topics, ${reference.codes.length} checks, ${reference.tools.length} tools, ${Object.keys(settingsTopics).length} native settings`);

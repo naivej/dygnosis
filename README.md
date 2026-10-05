@@ -1,6 +1,6 @@
-# Dygnosis
+![Dygnosis](media/logo_s.png) 
 
-![Dygnosis](media/logo_s.png) provides language support for Dynare, acting as a second preprocessor that is deeply integrated into the editor and agent workflow via LSP and MCP.
+Dygnosis provides language support for Dynare, acting as a second preprocessor that is deeply integrated into the editor and agent workflow via LSP and MCP.
 
 - Edit with live diagnostics, hover, completion, document or selection formatting, fixes, and commented shock templates.
 - Navigate with references and rename across known includes, plus outline, workspace symbols, folding, syntax colors, and links to related files.
