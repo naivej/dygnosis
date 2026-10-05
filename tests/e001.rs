@@ -910,6 +910,80 @@ stoch_simul(order=1, irf=0, nograph);
     );
 }
 
+#[test]
+fn empty_aggregate_model_refuses_on_end_without_transform_or_writing_notes() {
+    for source in [
+        "var y c; varexo e; model; end;",
+        "var y; model(linear); /* empty */\r\nend;",
+        "var y; model; y=0; end; model; end;",
+    ] {
+        let diagnostics = analyze(&parse(source));
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|diag| diag.code == "E001")
+            .collect();
+        assert_eq!(errors.len(), 1, "{source}: {diagnostics:?}");
+        assert_eq!(errors[0].message, "syntax error, unexpected END");
+        assert_eq!(errors[0].severity, Severity::Error);
+        assert_eq!(errors[0].span.start as usize, source.rfind("end").unwrap());
+        assert_eq!(
+            &source[errors[0].span.start as usize..errors[0].span.end as usize],
+            "end"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diag| !matches!(diag.code.as_str(), "E186" | "I209")),
+            "{diagnostics:?}"
+        );
+    }
+    for source in [
+        "var y;",
+        "var y; model; y=0; end;",
+        "model; # local=1; end;",
+    ] {
+        assert!(
+            rust_e001(source).is_empty(),
+            "{source}: {:?}",
+            rust_e001(source)
+        );
+    }
+}
+
+#[test]
+fn empty_aggregate_model_agrees_with_pinned_parse_refusal() {
+    let pp = PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    if !pp.is_file() {
+        eprintln!("skipping honesty: Dynare 7.2 is absent");
+        return;
+    }
+    for source in [
+        "var y c; varexo e; model; end;",
+        "var y; model(linear); /* empty */\r\nend;",
+        "var y; model; y=0; end; model; end;",
+    ] {
+        let official = dygnosis::run_preprocessor(
+            source,
+            &pp,
+            None,
+            std::time::Duration::from_secs(30),
+            dygnosis::JsonStage::Check,
+        );
+        assert!(
+            !official.success,
+            "{source}: {}{}",
+            official.raw_stdout, official.raw_stderr
+        );
+        assert!(
+            format!("{}{}", official.raw_stdout, official.raw_stderr)
+                .contains("syntax error, unexpected END"),
+            "{source}: {}{}",
+            official.raw_stdout,
+            official.raw_stderr
+        );
+    }
+}
+
 /// `end` inside an equation is the closer token. 7.1: `syntax error, unexpected END`.
 #[test]
 fn end_inside_an_equation_is_unexpected_end() {

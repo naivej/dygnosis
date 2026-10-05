@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Complete files without a `model` block receive the applicable unused-parameter,
+  unused-exogenous and unused-endogenous checks on their written declarations.
+  An earlier Check error suppresses the later Transform refusal.
+- An empty aggregate `model; end;` reports `syntax error, unexpected END` on
+  `end`, before later unused-variable checks or writing summaries.
 - Incomplete required includes, parsing, or macro expansion withhold MCP equation counts. Model comparison waits for both inputs to be complete.
 - MCP tools reject a nonempty file map with a missing or invalid active root using an explicit invalid-parameters error. A matching root still permits an empty text overlay.
 - The `dynare_equations` schema states that `index` starts at zero, matching the existing selector.

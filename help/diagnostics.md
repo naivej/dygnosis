@@ -2,6 +2,8 @@
 
 Dygnosis diagnostics appear in the editor and Problems panel. Related locations appear beneath a diagnostic and open the earlier declaration or include site. The extension checks open model roots and their includes. It also checks unopened saved `.mod` roots in workspace folders; see [project checks](project-checks.md). [About Dygnosis](about.md) explains Error, Warning and Information.
 
+Complete files without a `model` block receive the applicable unused-parameter (W022), unused-exogenous (E021), and unused-endogenous (E186) checks. E021 stops the later E186 check. A declaration in an include keeps its diagnostic in that file. An empty aggregate `model; end;` instead reports E001, `syntax error, unexpected END`, on `end`; it receives no later unused-endogenous check or writing summary.
+
 ![Live diagnostics in the editor and Problems panel](assets/diagnostics.png)
 
 1. The editor marks the diagnostic range while you edit or after save.

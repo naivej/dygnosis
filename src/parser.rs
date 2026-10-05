@@ -1852,6 +1852,12 @@ impl Parser<'_> {
         }
         self.in_equation_body = false;
         if self.at_block_end() {
+            if self.i == body_i {
+                self.record_issue(ParseIssue {
+                    kind: ParseIssueKind::UnexpectedEnd,
+                    span: self.tokens[self.i].span,
+                });
+            }
             self.record_missing_final("model", body_i, self.i);
         }
         let end = self.finish_block_named("model", opener_span, body_i);
