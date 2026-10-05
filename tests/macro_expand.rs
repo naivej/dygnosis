@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use dygnosis::diagnostic::analyze;
 use dygnosis::expand::expand_report;
@@ -301,7 +300,7 @@ fn valid_unsupported_macro_stays_explicitly_incomplete() {
 }
 
 #[test]
-fn incomplete_macro_analysis_is_visible_in_cli_and_mcp_diagnosis() {
+fn incomplete_macro_analysis_is_visible_in_formatted_lines_and_mcp_diagnosis() {
     let src = action_fixture("unsupported_builtin");
     let path = "tests/fixtures/macro_action/unsupported_builtin.mod";
     let set = dygnosis::check_file_with_origins(&src, path);
@@ -311,9 +310,9 @@ fn incomplete_macro_analysis_is_visible_in_cli_and_mcp_diagnosis() {
         .find(|diag| diag.code == "I211")
         .expect("incomplete-analysis Information");
     assert_eq!(note.span.start, src.find("@#define").unwrap() as u32);
-    let cli = dygnosis::format_check_lines_with_origins(path, &set, &src);
-    assert!(cli.contains("INFO [I211]"), "{cli}");
-    assert!(!cli.contains("No issues found"), "{cli}");
+    let printed = dygnosis::format_check_lines_with_origins(path, &set, &src);
+    assert!(printed.contains("INFO [I211]"), "{printed}");
+    assert!(!printed.contains("No issues found"), "{printed}");
     let mcp = dygnosis::mcp::dynare_diagnose(&src, None, None);
     let item = mcp
         .iter()
@@ -341,13 +340,22 @@ fn incomplete_macro_with_load_file_withholds_untrusted_workspace_facts() {
     let incomplete = "@#define n = length([1])\nparameters p_@{n};\nvar y;\nmodel; y=p_@{n}*y(-1); end;\nload_params_and_steady_state('values.txt');\n";
     let complete = "parameters p_1; p_1=0.5;\nvar y;\nmodel; y=p_1*y(-1); end;\nload_params_and_steady_state('values.txt');\n";
 
-    let cli = |source: &str| {
+    let disk_codes = |source: &str| {
         std::fs::write(&root, source).expect("write model");
-        Command::new(env!("CARGO_BIN_EXE_dygnosis"))
-            .arg("check")
-            .arg(&root)
-            .output()
-            .expect("run CLI check")
+        let body = dygnosis::dynare_workspace_diagnose(None, None, Some(&[root_key.clone()]))
+            .expect("path diagnosis");
+        let codes = body["roots"][0]["diagnostics"]
+            .as_array()
+            .expect("diagnostics")
+            .iter()
+            .map(|diag| {
+                (
+                    diag["code"].as_str().unwrap().to_string(),
+                    diag["message"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect::<Vec<_>>();
+        (body["summary"]["errors"].as_u64().unwrap(), codes)
     };
     let mapped = |source: &str, companion: Option<&str>| {
         let mut files = std::collections::HashMap::from([(root_key.clone(), source.to_string())]);
@@ -358,11 +366,16 @@ fn incomplete_macro_with_load_file_withholds_untrusted_workspace_facts() {
     };
 
     std::fs::write(&values, "p_1 0.5\n").expect("write parameter values");
-    let result = cli(incomplete);
-    let text = String::from_utf8_lossy(&result.stdout);
-    assert!(result.status.success(), "{text}");
-    assert!(text.contains("INFO [I211]"), "{text}");
-    assert!(!text.contains("W204"), "{text}");
+    let (incomplete_errors, incomplete_codes) = disk_codes(incomplete);
+    assert_eq!(incomplete_errors, 0, "{incomplete_codes:?}");
+    assert!(
+        incomplete_codes.iter().any(|(code, _)| code == "I211"),
+        "{incomplete_codes:?}"
+    );
+    assert!(
+        incomplete_codes.iter().all(|(code, _)| code != "W204"),
+        "{incomplete_codes:?}"
+    );
     let mapped_incomplete = mapped(incomplete, Some("p_1 0.5\n"));
     assert_eq!(mapped_incomplete.len(), 1, "{mapped_incomplete:?}");
     assert_eq!(mapped_incomplete[0].code, "I211");
@@ -370,32 +383,39 @@ fn incomplete_macro_with_load_file_withholds_untrusted_workspace_facts() {
     // The pinned preprocessor skips this false branch. Until `length` can be
     // evaluated here, the workspace must not claim its file is missing.
     let uncertain_branch = "@#if length([])\nload_params_and_steady_state('missing_values.txt');\n@#endif\nvar y; model; y=0; end;\n";
-    let result = cli(uncertain_branch);
-    let text = String::from_utf8_lossy(&result.stdout);
-    assert!(result.status.success(), "{text}");
-    assert!(text.contains("INFO [I211]"), "{text}");
-    assert!(!text.contains("E306"), "{text}");
+    let (branch_errors, branch_codes) = disk_codes(uncertain_branch);
+    assert_eq!(branch_errors, 0, "{branch_codes:?}");
+    assert!(
+        branch_codes.iter().any(|(code, _)| code == "I211"),
+        "{branch_codes:?}"
+    );
+    assert!(
+        branch_codes.iter().all(|(code, _)| code != "E306"),
+        "{branch_codes:?}"
+    );
     let mapped_branch = mapped(uncertain_branch, None);
     assert_eq!(mapped_branch.len(), 1, "{mapped_branch:?}");
     assert_eq!(mapped_branch[0].code, "I211");
 
     std::fs::write(&values, "ghost 0.5\n").expect("write unknown name");
-    let result = cli(complete);
-    let text = String::from_utf8_lossy(&result.stdout);
+    let (_ghost_errors, ghost_codes) = disk_codes(complete);
     assert!(
-        text.contains("WARNING [W204] Unknown symbol ghost"),
-        "{text}"
+        ghost_codes
+            .iter()
+            .any(|(code, message)| code == "W204" && message.contains("Unknown symbol ghost")),
+        "{ghost_codes:?}"
     );
     assert!(mapped(complete, Some("ghost 0.5\n"))
         .iter()
         .any(|item| item.code == "W204"));
 
     let missing = complete.replace("values.txt", "missing_values.txt");
-    let result = cli(&missing);
-    let text = String::from_utf8_lossy(&result.stdout);
+    let (_missing_errors, missing_codes) = disk_codes(&missing);
     assert!(
-        text.contains("ERROR [E306] Can't open missing_values.txt"),
-        "{text}"
+        missing_codes.iter().any(|(code, message)| {
+            code == "E306" && message.contains("Can't open missing_values.txt")
+        }),
+        "{missing_codes:?}"
     );
     assert!(mapped(&missing, None)
         .iter()

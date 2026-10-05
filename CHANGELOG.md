@@ -7,6 +7,8 @@
 - Settings explain their controls; feature guides link to relevant settings. UI and recovery text use consistent action names. Equation pickers show source context and macro values without opaque internal IDs.
 - Parameter hovers and check explanations distinguish written values from unavailable calibration and numerical results. The checks keep their existing conditions and severity.
 - MCP input descriptions state how supplied text, include maps, active roots and disk paths work. The Marketplace is the main installation route; GitHub binaries support MCP without VS Code.
+- The previous user guides are removed. **Dygnosis Help** is the product reference.
+- The `check` and `explain` commands are removed. Open models use editor diagnostics. Unopened saved models use project checks or `dynare_workspace_diagnose`. Explanations use Help or `dynare_explain`. The executable still starts the language server with no arguments and MCP with `mcp`.
 
 ## v0.11.6
 
@@ -59,7 +61,7 @@ Language server and agent tools.
 - Workspace folders and loose files keep separate include paths and cached inputs. A settings change sends the full configuration. Clients can opt in to `dynare/modelInfoChanged` when the model should refresh.
 - Adds `dynare/modelInfo`. Counts and timing match `dynare_model_info`. The response also has written statements, declarations, counted equations, block categories, related files, and source segments. Outline and folding stay in the file on screen. Incomplete expansion withholds counts and equation numbers. Equation numbers describe the written model before Dynare rewrites it.
 - Hover and completion show the written `long_name` and TeX name. Each can be hidden. Completion uses separate icons for endogenous variables, exogenous variables, and parameters, and offers empty block skeletons. Highlights mark declarations and assignment targets as writes, and other uses as reads.
-- Semantic tokens negotiate `dynareEndogenous`, `dynareExogenous`, `dynareParameter`, and `dynareModelLocal`. A client that does not support a role receives `variable`. Full and range responses use that legend. Existing Dynare-specific color rules need the [selector migration](docs/editor-settings.md#semantic-token-migration).
+- Semantic tokens negotiate `dynareEndogenous`, `dynareExogenous`, `dynareParameter`, and `dynareModelLocal`. A client that does not support a role receives `variable`. Full and range responses use that legend. Existing Dynare-specific color rules need the [selector migration](help/integrations.md#semantic-token-migration).
 - Duplicate and include-cycle diagnostics link to the earlier written location in the editor and in MCP results. A fix in an unopened include uses the current source. An edit to an open file uses that file's version. W020 and W022 carry LSP Unnecessary. E021 does not.
 - Expression-value hints return for an assignment whose right side is not a plain number. The hint is the value at that assignment when the arithmetic is finite and known. Plain numbers stay quiet. Unknown execution, and macro copies that do not share one value, withhold the hint. Hover values and comparison values stay as they were.
 

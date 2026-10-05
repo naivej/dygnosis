@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::Duration;
 
 use dygnosis::server::diagnostics_for;
@@ -170,13 +169,11 @@ fn w060_resolved_include_maps_selected_span_to_active_file() {
         &source[warning.span.start as usize..warning.span.end as usize],
         "e"
     );
-    let output = Command::new(env!("CARGO_BIN_EXE_dygnosis"))
-        .arg("check")
-        .arg(&path)
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("main.mod:2:25: WARNING [W060]"), "{stdout}");
+    let printed = dygnosis::format_check_lines(path.to_str().unwrap(), &diags, &source);
+    assert!(
+        printed.contains("main.mod:2:25: WARNING [W060]"),
+        "{printed}"
+    );
     let included_path = path.with_file_name("included_request.mod");
     let included_source = std::fs::read_to_string(&included_path).unwrap();
     let included_diags = check_file(&included_source, included_path.to_str().unwrap());

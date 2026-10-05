@@ -1,5 +1,5 @@
 [
-  {"id":"get-started","title":"Get started","keywords":["install","Marketplace","GitHub","first model","language mode"]},
+  {"id":"get-started","title":"Get started","keywords":["install","Marketplace","GitHub","first model","language mode","executable","mcp","version","tcp"]},
   {"id":"edit-models","title":"Edit a model","keywords":["completion","hover","snippets","signature","format","fix","selection"]},
   {"id":"navigate-code","title":"Navigate code","keywords":["definition","Peek","references","rename","Outline","folding","call hierarchy"]},
   {"id":"diagnostics","title":"Understand checks","keywords":["Problems","Error","Warning","Information","Explain","ignore","restore"]},

@@ -1,7 +1,7 @@
 //! Byte offsets inside the library. Callers convert at the edge.
 //!
 //! [`LineIndex::position`] and [`LineIndex::offset`] count Unicode scalars.
-//! The command line and MCP use those. The language server uses
+//! Formatted diagnostic lines and MCP use those. The language server uses
 //! [`LineIndex::position_utf16`] and [`LineIndex::offset_utf16`], which count
 //! UTF-16 code units.
 

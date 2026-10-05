@@ -117,7 +117,7 @@ pub(crate) fn diagnose_paths(
     })
 }
 
-/// One disk root, resolved the same way as `dygnosis check`.
+/// One disk root.
 ///
 /// Includes use the real search, including a parent `@#includepath`. A shared
 /// basename in another directory is not a match.

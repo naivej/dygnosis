@@ -1,11 +1,11 @@
-//! Directory walk shared by `dygnosis check` and path-mode workspace diagnose.
+//! Directory walk for path-mode workspace diagnosis.
 //! Recurse `*.mod`, skip directories whose names start with `+`.
 
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// Absolute path the CLI uses for one file: join a relative path to the
-/// current directory. Does not canonicalize.
+/// Absolute path for one file: join a relative path to the current directory.
+/// Does not canonicalize.
 pub fn absolute_path(path: &str) -> PathBuf {
     let path = Path::new(path);
     if path.is_absolute() {

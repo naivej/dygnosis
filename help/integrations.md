@@ -1,6 +1,6 @@
 # Connect an LSP client
 
-Configure an LSP client to launch `dygnosis` over stdio, without arguments. The VS Code extension adds native Settings, a [count bar](model-and-includes.md), [model view](model-and-includes.md), [colors](appearance.md), [CodeLens](model-and-includes.md), [diagnostic controls](diagnostics.md), [model Diff](structural-diff.md), [origin navigation](effective-model.md), and [project checks](project-checks.md). See [distribution](get-started.md) for host packages and runtime requirements.
+Configure an LSP client to launch `dygnosis` over stdio, without arguments. The [executable](get-started.md#executable) section lists every launch. The VS Code extension adds native Settings, a [count bar](model-and-includes.md), [model view](model-and-includes.md), [colors](appearance.md), [CodeLens](model-and-includes.md), [diagnostic controls](diagnostics.md), [model Diff](structural-diff.md), [origin navigation](effective-model.md), and [project checks](project-checks.md). See [distribution](get-started.md) for host packages and runtime requirements.
 
 ## LSP configuration messages
 

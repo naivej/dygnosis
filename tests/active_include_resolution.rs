@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dygnosis::{dynare_diagnose, dynare_model_info, Workspace};
@@ -608,15 +607,13 @@ fn dormant_disk_files_are_not_loaded_or_registered_as_dependencies() {
         revision,
         "dormant input changed the root revision"
     );
-    let result = Command::new(env!("CARGO_BIN_EXE_dygnosis"))
-        .arg("check")
-        .arg(directory.0.join("root.mod"))
-        .output()
-        .unwrap();
+    let text = std::fs::read_to_string(directory.0.join("root.mod")).unwrap();
+    let diags = dygnosis::check_file(&text, &root);
     assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stdout)
+        diags
+            .iter()
+            .all(|diag| diag.severity != dygnosis::Severity::Error),
+        "{diags:?}"
     );
 }
 

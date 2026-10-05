@@ -81,10 +81,21 @@ Configure your MCP client with separate executable and argument fields:
 
 Use the extracted executable's absolute path on the host running the agent.
 The configuration format above is `.mcp.json`; other clients have their own
-format. Reconnect the server after replacing the binary. `--version` identifies
-it. The binary serves LSP without arguments and MCP with `mcp`.
+format. Reconnect the server after replacing the binary.
 File checks use editor diagnostics, project checks or `dynare_workspace_diagnose`;
 diagnostic explanations use Help or `dynare_explain`.
+
+## Executable
+
+| Launch | Result |
+|---|---|
+| No arguments | Language server over standard input and output |
+| `mcp` | MCP over standard input and output |
+| `--version`, `-V` | Print the version and exit |
+| `--help`, `-h` | Print the command usage and exit |
+| `--tcp` | Language server over TCP for debugging. The listener accepts one connection. |
+
+`--host` sets the TCP address. The default is `127.0.0.1`. `--port` sets the TCP port. The default is `2087`. When the `mcp` argument is present, the program starts MCP and leaves the TCP port closed.
 
 [Connect an agent](agents.md) covers VS Code's native MCP provider and reviewed
 project setup. [Troubleshooting](troubleshoot.md) covers an executable override,

@@ -1,8 +1,7 @@
 use std::path::PathBuf;
-use std::process::Command;
 
 use dygnosis::explain::{explain, known_codes, render_markdown, ExplainKind};
-use dygnosis::{analyze, check_file, parse};
+use dygnosis::{analyze, check_file, dynare_explain, dynare_list_diagnostic_codes, parse};
 
 const RUST_CODES: &[&str] = &[
     "E001", "E020", "E021", "E023", "E024", "E025", "E026", "E027", "E028", "E030", "E058", "E059",
@@ -143,24 +142,6 @@ fn expected_markdown(name: &str) -> String {
         .join(name);
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("expected markdown missing at {}: {e}", path.display()))
-        .replace("\r\n", "\n")
-}
-
-fn dygnosis() -> Command {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_dygnosis"));
-    cmd.env("RUST_LOG", "off");
-    cmd
-}
-
-fn stdout_text(output: &std::process::Output) -> String {
-    String::from_utf8(output.stdout.clone())
-        .unwrap()
-        .replace("\r\n", "\n")
-}
-
-fn stderr_text(output: &std::process::Output) -> String {
-    String::from_utf8(output.stderr.clone())
-        .unwrap()
         .replace("\r\n", "\n")
 }
 
@@ -347,103 +328,42 @@ fn skip_keys_are_not_emitted_on_trend_rbc_gov_inv() {
 }
 
 #[test]
-fn cli_explain_known_code() {
-    let output = dygnosis().args(["explain", "W013"]).output().unwrap();
-    assert_eq!(output.status.code(), Some(0));
-    let stdout = stdout_text(&output);
-    assert_eq!(stdout, render_markdown("W013").unwrap() + "\n");
-    assert_eq!(stdout, expected_markdown("W013.md") + "\n");
-}
-
-#[test]
-fn cli_explain_unknown_code() {
+fn mcp_explain_matches_rendered_markdown() {
+    assert_eq!(dynare_explain("W013"), render_markdown("W013").unwrap());
+    assert_eq!(dynare_explain("W013"), expected_markdown("W013.md"));
     for code in ["E040", "DYNR", "W071", "E010", "P001"] {
-        let output = dygnosis().args(["explain", code]).output().unwrap();
-        assert_eq!(output.status.code(), Some(1), "{code}");
-        let stderr = stderr_text(&output);
+        let text = dynare_explain(code);
         assert!(
-            stderr.contains(&format!(
-                "No documentation found for diagnostic code '{code}'. Run `dygnosis explain --list` to see known codes."
-            )),
-            "{code} stderr: {stderr:?}"
+            text.starts_with(&format!("No documentation found for code '{code}'.")),
+            "{code}: {text}"
         );
-        assert!(
-            !stderr.contains("python_dynare_lsp"),
-            "{code} stderr names the Python module"
-        );
+        assert!(!text.contains("python_dynare_lsp"), "{code}");
     }
 }
 
 #[test]
-fn cli_explain_list() {
-    let output = dygnosis().args(["explain", "--list"]).output().unwrap();
-    assert_eq!(output.status.code(), Some(0));
-    let stdout = stdout_text(&output);
-    let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines[0], "Diagnostic codes and their relation to Dynare:");
-
-    let mut entries = Vec::new();
-    let mut i = 1;
-    while i < lines.len() && !lines[i].is_empty() {
-        let line = lines[i];
-        assert!(line.starts_with("  "), "{line:?}");
-        let rest = &line[2..];
-        assert!(
-            rest.len() >= 17,
-            "list line too short for column layout: {line:?}"
-        );
-        let code = rest[..6].trim_end();
-        assert_eq!(&rest[6..8], "  ", "column gap mismatch: {line:?}");
-        let kind = rest[8..15].trim_end();
-        assert_eq!(&rest[15..17], "  ", "kind column gap mismatch: {line:?}");
-        let title = &rest[17..];
-        assert!(
-            matches!(kind, "shared" | "skipped" | "added"),
-            "kind token must be shared/skipped/added: {line:?}"
-        );
-        entries.push((code, kind, title));
-        i += 1;
-    }
+fn mcp_code_list_matches_known_codes() {
+    let entries = dynare_list_diagnostic_codes();
     assert_eq!(entries.len(), 384);
     assert_eq!(
-        entries.iter().map(|(c, _, _)| *c).collect::<Vec<_>>(),
+        entries
+            .iter()
+            .map(|item| item.code.as_str())
+            .collect::<Vec<_>>(),
         RUST_CODES
     );
     for code in OUT.iter().chain(VACATED) {
-        assert!(
-            entries.iter().all(|(c, _, _)| c != code),
-            "{code} present in --list"
-        );
+        assert!(entries.iter().all(|item| item.code != *code), "{code}");
     }
-    let w013 = entries.iter().find(|(c, _, _)| *c == "W013").unwrap();
-    assert_eq!(w013.1, "added");
-    assert_eq!(w013.2, explain("W013").unwrap().title);
-    let e001 = entries.iter().find(|(c, _, _)| *c == "E001").unwrap();
-    assert_eq!(e001.1, "shared");
-    let e186 = entries.iter().find(|(c, _, _)| *c == "E186").unwrap();
-    assert_eq!(e186.1, "shared");
-    assert_eq!(e186.2, "Unused written endogenous variable");
-    let i050 = entries.iter().find(|(c, _, _)| *c == "I050").unwrap();
-    assert_eq!(i050.1, "added");
-    assert_eq!(i050.2, "No initval or steady_state_model block");
-    let e192 = entries.iter().find(|(c, _, _)| *c == "E192").unwrap();
-    assert_eq!(e192.1, "shared");
-    let w186 = entries.iter().find(|(c, _, _)| *c == "W186").unwrap();
-    assert_eq!(w186.1, "shared");
-    assert_eq!(w186.2, "Possible auxiliary name in a symbol list");
-    assert_eq!(
-        lines.get(i).copied(),
-        Some(""),
-        "expected blank line before footer"
-    );
-    assert_eq!(
-        lines.get(i + 1).copied(),
-        Some("384 codes. Run `dygnosis explain <CODE>` for details.")
-    );
-    assert!(!stdout.contains("python_dynare_lsp"));
-    assert!(!stdout.contains("DYNR"));
-    assert!(!stdout.contains("P000"));
-    assert!(!stdout.contains("omit"));
+    let w013 = entries.iter().find(|item| item.code == "W013").unwrap();
+    assert_eq!(w013.kind, "added");
+    assert_eq!(w013.title, explain("W013").unwrap().title);
+    let e186 = entries.iter().find(|item| item.code == "E186").unwrap();
+    assert_eq!(e186.kind, "shared");
+    assert_eq!(e186.title, "Unused written endogenous variable");
+    let i050 = entries.iter().find(|item| item.code == "I050").unwrap();
+    assert_eq!(i050.kind, "added");
+    assert_eq!(i050.title, "No initval or steady_state_model block");
 }
 
 #[test]
@@ -475,13 +395,4 @@ fn warrant_heading_only_on_warrant_codes() {
             "{code} skip markdown must not have a Warrant heading"
         );
     }
-}
-
-#[test]
-fn cli_explain_missing_code_lists() {
-    let listed = dygnosis().args(["explain", "--list"]).output().unwrap();
-    let missing = dygnosis().args(["explain"]).output().unwrap();
-    assert_eq!(listed.status.code(), Some(0));
-    assert_eq!(missing.status.code(), Some(0));
-    assert_eq!(listed.stdout, missing.stdout);
 }

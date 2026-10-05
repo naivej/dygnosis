@@ -47,10 +47,13 @@ async function main() {
   await fs.copyFile(binary, path.join(extensionRoot, "bin", binaryName(target)));
   if (info.platform !== "win32") await fs.chmod(path.join(extensionRoot, "bin", binaryName(target)), 0o755);
   for (const file of ["LICENSE", "CHANGELOG.md"]) await fs.copyFile(path.join(productRoot, file), path.join(extensionRoot, file));
-  // CHANGELOG originates at the product root; README originates in this folder.
+  // CHANGELOG originates at the product root. vsce joins relative links onto editors/vscode.
+  // A help/ link must be absolute, or the listing resolves it under editors/vscode/help/.
+  // Remaining docs/ links stay on the v0.11.6 tree.
   const changelog = path.join(extensionRoot, "CHANGELOG.md");
   await fs.writeFile(changelog, (await fs.readFile(changelog, "utf8"))
-    .replace(/\]\((docs\/[^)]+)\)/g, '](https://github.com/naivej/dygnosis/blob/v0.11.6/$1)'));
+    .replace(/\]\((docs\/[^)]+)\)/g, '](https://github.com/naivej/dygnosis/blob/v0.11.6/$1)')
+    .replace(/\]\((help\/[^)]+)\)/g, `](https://github.com/naivej/dygnosis/blob/${commit}/$1)`));
   const runtimeFiles = await vsce.listFiles({ cwd: extensionRoot, packageManager: vsce.PackageManager.Npm });
   const notices = await collectLicenses(info.rust, runtimeFiles);
   const cargoLock = await sourceFileHashes(productRoot, commit, "Cargo.lock");

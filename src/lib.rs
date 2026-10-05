@@ -1,4 +1,4 @@
-//! Thin Dynare analysis library.
+//! Dynare analysis library.
 //!
 //! Shared analysis of written `.mod` source for LSP and MCP.
 //! Dynare compute (steady state, BK, identification, MATLAB) stays out.

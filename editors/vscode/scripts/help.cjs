@@ -88,11 +88,16 @@ async function build() {
   const assets = path.join(target, 'assets');
   assert.equal(path.dirname(path.dirname(assets)), extensionRoot);
   await fs.rm(assets, { recursive: true, force: true });
-  await fs.cp(path.join(source, 'assets'), assets, { recursive: true });
+  await fs.cp(path.join(source, 'assets'), assets, {
+    recursive: true,
+    filter: (src) => path.basename(src) !== 'originals' && !src.split(path.sep).includes('originals'),
+  });
   // The Marketplace introduction is generated from the short product README.
+  // This file is editors/vscode/README.md. Two levels up reaches product help/.
+  // vsce joins the link onto .../editors/vscode; the client then resolves "..".
   const readme = await fs.readFile(path.join(productRoot, 'README.md'), 'utf8');
   await fs.writeFile(path.join(extensionRoot, 'README.md'), readme
-    .replace(/\]\((help\/[^)]+\.md(?:#[^)]*)?|LICENSE|CHANGELOG\.md)\)/g, '](../../$1)'));
+    .replace(/\]\((help\/[^)]+\.md(?:#[^)]*)?|help\/assets\/[^)]+|LICENSE|CHANGELOG\.md)\)/g, '](../../$1)'));
   console.log(`Help: ${topics.length} topics, ${reference.codes.length} checks, ${reference.tools.length} tools, ${Object.keys(settingsTopics).length} native settings`);
 }
 
