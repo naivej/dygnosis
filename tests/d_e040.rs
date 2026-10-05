@@ -339,6 +339,72 @@ fn shape_w051_varexo_in_initval() {
 }
 
 #[test]
+fn perfect_foresight_commands_keep_exogenous_initial_values_without_w051() {
+    let base = "var y; varexo e; model; y=e; end; initval; y=1; e=1; end;";
+    for command in [
+        "simul;",
+        "perfect_foresight_setup(periods=10);",
+        "perfect_foresight_solver;",
+        "perfect_foresight_with_expectation_errors_setup(periods=10);",
+        "perfect_foresight_with_expectation_errors_solver;",
+        "perfect_foresight_controlled_paths; exogenize y; periods 1; values 1; endogenize e; end;",
+    ] {
+        let text = format!("{base}\n{command}");
+        let model = parse(&text);
+        assert!(
+            model.parse_issues.is_empty(),
+            "{text}: {:?}",
+            model.parse_issues
+        );
+        assert_eq!(model.initval.len(), 2);
+        assert_eq!(model.initval[1].expression.trim(), "1");
+        assert!(analyze(&model).iter().all(|d| d.code != "W051"), "{text}");
+    }
+    for tail in [
+        "",
+        "stoch_simul;",
+        "// perfect_foresight_solver;",
+        "/* perfect_foresight_setup; */",
+        "parameters p(long_name='perfect_foresight_solver');",
+        "verbatim;\ndisp('perfect_foresight_solver');\nend;",
+        "@#if 0\nperfect_foresight_solver;\n@#endif",
+    ] {
+        let text = format!("{base}\n{tail}");
+        let ours = analyze(&parse(&text));
+        let warnings: Vec<_> = ours.iter().filter(|d| d.code == "W051").collect();
+        assert_eq!(warnings.len(), 1, "{text}: {ours:?}");
+        assert_eq!(warnings[0].message, "Exogenous variable 'e' is assigned in initval. Check that this initial value is intended for your simulation.");
+    }
+}
+
+#[test]
+fn manual_permanent_shock_initval_is_retained_without_w051() {
+    let text = include_str!("fixtures/shape/w051_permanent_shock.mod");
+    let model = parse(text);
+    assert!(model.parse_issues.is_empty(), "{:?}", model.parse_issues);
+    let exogenous = model
+        .initval
+        .iter()
+        .find(|a| model.name(a.name) == "x")
+        .expect("initial x");
+    assert_eq!(exogenous.expression.trim(), "1");
+    assert!(analyze(&model).iter().all(|d| d.code != "W051"));
+    let pp = std::path::PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    if pp.is_file() {
+        let check = dygnosis::run_preprocessor(
+            text,
+            &pp,
+            None,
+            std::time::Duration::from_secs(30),
+            dygnosis::JsonStage::Check,
+        );
+        assert!(check.success, "{}{}", check.raw_stdout, check.raw_stderr);
+    } else {
+        eprintln!("skipping honesty: Dynare 7.2 is absent");
+    }
+}
+
+#[test]
 fn shape_w052_missing_initval() {
     let text = check_mod("shape/w052_partial.mod");
     let got = rust_family(&text);

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Plain comparison equations participate in the preprocessor equation count check.
+- Exogenous assignments in `initval` stay quiet in perfect-foresight workflows, including permanent shocks.
+
 - Incomplete required includes, parsing, or macro expansion withhold MCP equation counts. Model comparison waits for both inputs to be complete.
 - MCP tools reject a nonempty file map with a missing or invalid active root using an explicit invalid-parameters error. A matching root still permits an empty text overlay.
 - The `dynare_equations` schema states that `index` starts at zero, matching the existing selector.

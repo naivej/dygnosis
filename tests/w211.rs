@@ -64,6 +64,7 @@ fn excluded_contexts_stay_quiet() {
         model("varexo e;", "y = e(+1);", "simul;"),
         model("varexo e;", "y = e(+1);", "perfect_foresight_setup;"),
         model("varexo e;", "y = e(+1);", "perfect_foresight_solver;"),
+        model("varexo e;", "y = e(+1);", "perfect_foresight_controlled_paths; exogenize y; periods 1; values 1; endogenize e; end;"),
         model(
             "varexo e;",
             "y = e(+1);",

@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "1aed078372d23ed4f551730523675ad6542b37b8e33c78d8d5e6683603e76dfc",
+  "fingerprint": "9417ca14233880c07c2cb36bdafdd20a3aebc9dc0b5defad970891aa9f52e66e",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -829,7 +829,7 @@
       "code": "E188",
       "kind": "shared",
       "title": "Plain aggregate equation count mismatch",
-      "markdown": "### E188: Plain aggregate equation count mismatch\n\nDynare refuses before MATLAB: `There are 2 equations but 1 endogenous variables!`. Dygnosis emits E188 when the written aggregate count differs and the file has no helper-generating expression, model surgery, planner exemption, or incomplete expansion. Counts changed by Dynare's rewrite are outside this check; W013 remains guidance there. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nMatch counted model equations to distinct endogenous variables.\n"
+      "markdown": "### E188: Plain aggregate equation count mismatch\n\nDynare refuses before MATLAB: `There are 2 equations but 1 endogenous variables!`. Dygnosis emits E188 when the written aggregate count differs and the file has no helper-generating expression, model surgery, planner exemption, or incomplete expansion. A complete comparison such as `a >= b;` counts as one equation, with an implicit zero right-hand side. Counts changed by Dynare's rewrite are outside this check; W013 remains guidance there. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nMatch counted model equations to distinct endogenous variables.\n"
     },
     {
       "code": "E189",
@@ -2641,7 +2641,7 @@
       "code": "W051",
       "kind": "added",
       "title": "Exogenous variable set in initval",
-      "markdown": "### W051: Exogenous variable set in initval\n\nA variable declared with `varexo` is assigned in `initval`. This can be intentional in a perfect foresight model: a following `steady` command computes the steady state conditional on the exogenous values in `initval`. In a stochastic model, exogenous innovations use zero as their initial value.\n\n**Next step**\n\nCheck whether the assignment matches the intended simulation. This Warning does not compute a steady state.\n"
+      "markdown": "### W051: Exogenous variable set in initval\n\nA variable declared with `varexo` is assigned in `initval`, and the file has no perfect-foresight command. In a stochastic model, exogenous innovations use zero as their initial value. The Warning stays quiet when a parsed `simul`, `perfect_foresight_setup`, `perfect_foresight_solver`, either expectation-errors command, or `perfect_foresight_controlled_paths` is present. Those workflows can use exogenous initial values, including permanent shocks.\n\n**Next step**\n\nCheck whether the assignment matches the intended simulation. This Warning does not compute a steady state.\n"
     },
     {
       "code": "W052",

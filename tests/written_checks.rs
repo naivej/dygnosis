@@ -150,6 +150,85 @@ fn rewrite_and_local_boundaries_remain_quiet() {
 }
 
 #[test]
+fn plain_comparisons_count_as_equations_without_a_display_equality() {
+    let pp = std::path::PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    if !pp.is_file() {
+        eprintln!("skipping honesty: Dynare 7.2 is absent");
+    }
+    for operator in [">=", "<=", "==", "!=", ">", "<"] {
+        let text = format!("var a b; model; a {operator} b; end;");
+        let ours = own(&text);
+        let count = ours.iter().find(|d| d.code == "E188").expect("count error");
+        assert_eq!(
+            count.message,
+            "There are 1 equations but 2 endogenous variables!"
+        );
+        assert!(
+            ours.iter().all(|d| d.code != "W013" && d.code != "W200"),
+            "{text}: {ours:?}"
+        );
+        let square = format!("var a; model; a {operator} 0; end;");
+        assert!(
+            own(&square)
+                .iter()
+                .all(|d| d.code != "E188" && d.code != "W013"),
+            "{square}"
+        );
+        let stochastic = format!("{text} stoch_simul;");
+        assert!(
+            own(&stochastic).iter().any(|d| d.code == "W200"),
+            "{stochastic}"
+        );
+
+        if pp.is_file() {
+            let check =
+                run_preprocessor(&text, &pp, None, Duration::from_secs(30), JsonStage::Check);
+            assert!(
+                check.success,
+                "{text}: {}{}",
+                check.raw_stdout, check.raw_stderr
+            );
+            let transform = run_preprocessor(
+                &text,
+                &pp,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Transform,
+            );
+            assert!(!transform.success, "{text}");
+            assert!(
+                format!("{}{}", transform.raw_stdout, transform.raw_stderr)
+                    .contains(&count.message),
+                "{text}: {}{}",
+                transform.raw_stdout,
+                transform.raw_stderr
+            );
+            let quiet = run_preprocessor(
+                &square,
+                &pp,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Transform,
+            );
+            assert!(
+                quiet.success,
+                "{square}: {}{}",
+                quiet.raw_stdout, quiet.raw_stderr
+            );
+        }
+    }
+    for equation in [
+        "a(+2) >= b",
+        "a >= e(-1)+b",
+        "a >= exp(b)",
+        "[static] a >= b",
+    ] {
+        let text = format!("var a b; varexo e; model; {equation}; end;");
+        assert!(own(&text).iter().all(|d| d.code != "E188"), "{text}");
+    }
+}
+
+#[test]
 fn repeated_same_kind_declaration_does_not_invent_a_count_gap() {
     let text = "var y; var y; model; y=0; end;";
     let model = parse(text);

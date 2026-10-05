@@ -222,7 +222,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("W051", ExplainEntry {
         title: "Exogenous variable set in initval",
-        body: "A variable declared with `varexo` is assigned in `initval`. This can be intentional in a perfect foresight model: a following `steady` command computes the steady state conditional on the exogenous values in `initval`. In a stochastic model, exogenous innovations use zero as their initial value.\n\n**Next step**\n\nCheck whether the assignment matches the intended simulation. This Warning does not compute a steady state.",
+        body: "A variable declared with `varexo` is assigned in `initval`, and the file has no perfect-foresight command. In a stochastic model, exogenous innovations use zero as their initial value. The Warning stays quiet when a parsed `simul`, `perfect_foresight_setup`, `perfect_foresight_solver`, either expectation-errors command, or `perfect_foresight_controlled_paths` is present. Those workflows can use exogenous initial values, including permanent shocks.\n\n**Next step**\n\nCheck whether the assignment matches the intended simulation. This Warning does not compute a steady state.",
         kind: ExplainKind::Added,
     }),
     ("W052", ExplainEntry {
@@ -1979,7 +1979,7 @@ Move the call out of the ``steady_state(…)`` operator.",
     }),
     ("E188", ExplainEntry {
         title: "Plain aggregate equation count mismatch",
-        body: "Dynare refuses before MATLAB: `There are 2 equations but 1 endogenous variables!`. Dygnosis emits E188 when the written aggregate count differs and the file has no helper-generating expression, model surgery, planner exemption, or incomplete expansion. Counts changed by Dynare's rewrite are outside this check; W013 remains guidance there. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nMatch counted model equations to distinct endogenous variables.",
+        body: "Dynare refuses before MATLAB: `There are 2 equations but 1 endogenous variables!`. Dygnosis emits E188 when the written aggregate count differs and the file has no helper-generating expression, model surgery, planner exemption, or incomplete expansion. A complete comparison such as `a >= b;` counts as one equation, with an implicit zero right-hand side. Counts changed by Dynare's rewrite are outside this check; W013 remains guidance there. The `ERROR:` prefix is omitted because the transport already labels Errors.\n\n**Fix**\n\nMatch counted model equations to distinct endogenous variables.",
         kind: ExplainKind::Shared,
     }),
     ("E189", ExplainEntry {

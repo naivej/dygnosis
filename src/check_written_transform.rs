@@ -388,10 +388,12 @@ fn plain_equation(model: &Model, eq: &Equation) -> bool {
         || eq.tag_map.contains_key("bind")
         || eq.tag_map.contains_key("relax")
         || eq.lhs_expr.is_none()
-        || (eq.rhs_expr.is_none() && !eq.rhs.trim().is_empty())
     {
         return false;
     }
+    // A complete expression without a written equality is an equation with
+    // zero on the right in Dynare. The display slices split comparison `=`
+    // characters too, so only the parsed expression trees prove this shape.
     [eq.lhs_expr, eq.rhs_expr]
         .into_iter()
         .flatten()
