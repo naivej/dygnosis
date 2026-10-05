@@ -2,8 +2,7 @@
   "model_id": "US_FM95",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_FM95/US_FM95_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_FM95/US_FM95_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_FM95/US_FM95_derivation.md",
     "mmb-paper-derivations/derivations/US_FM95/source_manifest.json",
     "mmb-paper-derivations/derivations/US_FM95/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_FM95/worker_report.json"
@@ -53,9 +52,8 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number counts match",
       "status": "passed",
-      "details": "English references 55; Chinese references 55; unique equation labels 24."
+      "details": "English references 55; unique equation labels 24."
     }
   ],
   "unresolved_issues": [

@@ -1,16 +1,16 @@
 // ============================================================
-// 含政府投资的趋势 RBC 模型
+// Trend RBC with government investment
 // Trend RBC with public capital externality
 //
-// 机制：政府投资 → 公共资本存量 → 生产外部性（Aschauer 1989）
-//       趋势增长率 gam（劳动增强型技术进步，季度）
-//       所有量值变量已对技术水平 A_t 去趋势
+// Mechanism: government investment -> public capital -> a production externality (Aschauer 1989)
+//       trend growth rate gam (labor-augmenting technical progress, quarterly)
+//       quantity variables are detrended by the technology level A_t
 //
-// 参考：Aschauer (1989, JME), Barro (1990, JPE),
+// References: Aschauer (1989, JME), Barro (1990, JPE),
 //       King-Plosser-Rebelo (1988, QJE)
 // ============================================================
 
-// ---------- 内生变量（16 个，全为去趋势量）-------------------
+// ---------- endogenous variables (16, all detrended) -------------------
 var y        ${y}$          (long_name='output, detrended')
     c        ${c}$          (long_name='consumption, detrended')
     k        ${k}$          (long_name='private capital, detrended')
@@ -28,11 +28,11 @@ var y        ${y}$          (long_name='output, detrended')
     log_ig   (long_name='log government investment')
     log_n    (long_name='log labor');
 
-// ---------- 外生变量（仅冲击创新项，R3）-----------------------
+// ---------- exogenous variables (innovations only, R3) -----------------------
 varexo eps_z   ${\varepsilon_z}$   (long_name='TFP innovation')
        eps_ig  ${\varepsilon_g}$   (long_name='government investment innovation');
 
-// ---------- 参数 ----------------------------------------------
+// ---------- parameters ----------------------------------------------
 parameters betta    ${\beta}$        (long_name='household discount factor')
            gam      ${\gamma}$       (long_name='quarterly trend growth rate')
            delta    ${\delta}$       (long_name='private capital depreciation')
@@ -46,89 +46,89 @@ parameters betta    ${\beta}$        (long_name='household discount factor')
            gy       ${g_y}$          (long_name='steady-state gov investment / output ratio')
            ig_ss    ${i_g^{ss}}$     (long_name='steady-state gov investment, back-solved');
 
-// ---------- 参数校准 ------------------------------------------
-// 标准 RBC 校准（季度数据）
-betta   = 0.99;     // 季度贴现因子 → 年化约 4%
-gam     = 0.005;    // 季度趋势增长率 → 年化 2%
-delta   = 0.025;    // 私人资本折旧 → 年化 10%
-deltag  = 0.05;     // 公共资本折旧 → 年化 20%（基础设施）
+// ---------- parameter calibration ------------------------------------------
+// Standard RBC calibration (quarterly)
+betta   = 0.99;     // quarterly discount factor -> about 4% annual
+gam     = 0.005;    // quarterly trend growth -> 2% annual
+delta   = 0.025;    // private-capital depreciation -> 10% annual
+deltag  = 0.05;     // public-capital depreciation -> 20% annual (infrastructure)
 
-// 生产函数弹性
-alppha  = 0.33;     // 私人资本份额
-alphag  = 0.10;     // 公共资本外部性弹性（Aschauer 1989）
+// Production-function elasticities
+alppha  = 0.33;     // private-capital share
+alphag  = 0.10;     // public-capital externality elasticity (Aschauer 1989)
 
-// 家庭偏好
-phhi    = 1.0;      // Frisch 弹性倒数（= 1，标准设定）
-// psi 在 steady_state_model 中反解，命中 n = 1/3
+// Household preferences
+phhi    = 1.0;      // inverse Frisch elasticity (= 1, the standard setting)
+// psi is reverse-solved in steady_state_model to hit n = 1/3
 
-// 冲击过程
-rhoz    = 0.95;     // TFP 持续性
-rho_ig  = 0.80;     // 政府投资持续性
+// Shock processes
+rhoz    = 0.95;     // TFP persistence
+rho_ig  = 0.80;     // government-investment persistence
 
-// 财政结构
-gy      = 0.05;     // 政府投资 / 产出稳态比 = 5%
-// ig_ss 在 steady_state_model 中反解，命中 gy 目标
+// Fiscal structure
+gy      = 0.05;     // steady-state government investment / output = 5%
+// ig_ss is reverse-solved in steady_state_model to hit the gy target
 
 // ============================================================
-// 模型方程（16 条，对应 16 个内生变量，R4 ✓）
-// 时序：k、kg、ig 为状态变量（期末存量，R2 ✓）
-//       y, c, n, invest, w, rk 为控制变量（当期跳跃）
+// Model equations (16, one per endogenous variable, R4)
+// Timing: k, kg and ig are state variables (stock at the end of the period, R2)
+//       y, c, n, invest, w and rk are control variables (they jump in the current period)
 // ============================================================
 model;
 
-// --- 生产技术 ---
+// --- production ---
 
-// (1) 生产函数（对数效用，去趋势坐标；公共资本为外部性，用 kg(-1)，R2）
+// (1) production function (log utility, detrended; public capital is an externality, so kg(-1), R2)
 [name='production function']
 y = exp(z) * kg(-1)^alphag * k(-1)^alppha * n^(1-alppha-alphag);
 
-// (2) 劳动需求 FOC（厂商，F3）
+// (2) labor-demand first-order condition (firm, F3)
 [name='labor demand FOC']
 w = (1-alppha-alphag) * y / n;
 
-// (3) 资本租金率 FOC（厂商，F4）
+// (3) rental-rate first-order condition (firm, F4)
 [name='capital rental rate FOC']
 rk = alppha * y / k(-1);
 
-// --- 家庭最优化 ---
+// --- household ---
 
-// (4) 消费欧拉方程（对数效用，去趋势后有效贴现因子 = betta/(1+gam)，F1）
+// (4) consumption Euler equation (log utility; detrended discount factor = betta/(1+gam), F1)
 [name='consumption Euler equation']
 c^(-1) = (betta/(1+gam)) * c(+1)^(-1) * (rk(+1) + 1 - delta);
 
-// (5) 劳动供给 FOC（F2）
+// (5) labor-supply first-order condition (F2)
 [name='labor supply FOC']
 psi * n^phhi * c = w;
 
-// --- 资本积累 ---
+// --- capital accumulation ---
 
-// (6) 私人资本积累（去趋势，R2：k 为期末存量）
+// (6) private capital accumulation (detrended, R2: k is the stock at the end of the period)
 [name='private capital law of motion']
 (1+gam) * k = (1-delta) * k(-1) + invest;
 
-// (7) 公共资本积累（去趋势，R2：kg 为期末存量）
+// (7) public capital accumulation (detrended, R2: kg is the stock at the end of the period)
 [name='public capital law of motion']
 (1+gam) * kg = (1-deltag) * kg(-1) + ig;
 
-// --- 市场出清 ---
+// --- market clearing ---
 
-// (8) 资源约束（商品市场出清；Walras 定律：家庭预算约束冗余）
+// (8) resource constraint (goods-market clearing; Walras: the household budget constraint is redundant)
 [name='resource constraint']
 y = c + invest + ig;
 
-// --- 外生过程 ---
+// --- exogenous processes ---
 
-// (9) TFP 冲击（E1；AR(1)，z 为内生，eps_z 为创新，R3）
+// (9) TFP shock (E1; AR(1), z endogenous, eps_z the innovation, R3)
 [name='TFP process']
 z = rhoz * z(-1) + eps_z;
 
-// (10) 政府投资过程（E2；对数 AR(1)，ig_ss 为稳态水平参数）
+// (10) government-investment process (E2; log AR(1), ig_ss is the steady-state level)
 [name='government investment process']
 log(ig) = (1-rho_ig)*log(ig_ss) + rho_ig*log(ig(-1)) + eps_ig;
 
-// --- 对数辅助变量（IRF 用，方便解读百分比偏离）---
+// --- log-level helper variables (for IRFs, so a deviation reads as a percent) ---
 
-// (11)-(16) 各量的对数水平
+// (11)-(16) log level of each quantity
 [name='log output']
 log_y = log(y);
 
@@ -150,44 +150,44 @@ log_n = log(n);
 end;
 
 // ============================================================
-// 解析稳态（steady_state_model，顺序求值，见推导第6节）
-// psi 和 ig_ss 在此反解，覆盖 parameters 区的缺省值
+// Closed-form steady state (steady_state_model, in order; derivation note section 6)
+// psi and ig_ss are reverse-solved here, replacing the placeholders in parameters
 // ============================================================
 steady_state_model;
     z = 0;
 
-    // 步骤1：资本租金率（欧拉方程稳态）
+    // step 1: rental rate on capital (steady state of the Euler equation)
     rk = (1+gam)/betta - (1-delta);
 
-    // 步骤2：关键比率
-    ky  = alppha / rk;                   // 私人资本/产出比
-    kgy = gy / (gam + deltag);           // 公共资本/产出比
+    // step 2: key ratios
+    ky  = alppha / rk;                   // private capital / output
+    kgy = gy / (gam + deltag);           // public capital / output
 
-    // 步骤3：稳态劳动归一化目标
+    // step 3: steady-state labor normalization
     n_ss = 1/3;
 
-    // 步骤4：稳态产出（由生产函数 + 比率推出）
+    // step 4: steady-state output (from the production function and the ratios)
     // y = (kgy*y)^alphag * (ky*y)^alppha * n^(1-alppha-alphag)
     // => y^(1-alppha-alphag) = kgy^alphag * ky^alppha * n^(1-alppha-alphag)
     // => y = (kgy^alphag * ky^alppha)^(1/(1-alppha-alphag)) * n
     y = (kgy^alphag * ky^alppha)^(1/(1-alppha-alphag)) * n_ss;
 
-    // 步骤5：其他量值变量
+    // step 5: the other quantity variables
     k      = ky * y;
     kg     = kgy * y;
     invest = (gam + delta) * k;
-    ig_ss  = gy * y;                     // 反解参数 ig_ss
+    ig_ss  = gy * y;                     // reverse-solve the parameter ig_ss
     ig     = ig_ss;
     c      = y - invest - ig;
     w      = (1-alppha-alphag) * y / n_ss;
-    rk_chk = alppha * y / k;             // 核对用（应等于 rk）
+    rk_chk = alppha * y / k;             // check (must equal rk)
 
-    // 步骤6：反解劳动负效用权重 psi（命中 n = 1/3）
+    // step 6: reverse-solve the labor-disutility weight psi (hit n = 1/3)
     psi = w / (n_ss^phhi * c);
 
     n = n_ss;
 
-    // 对数辅助变量稳态
+    // steady state of the log-level helper variables
     log_y  = log(y);
     log_c  = log(c);
     log_k  = log(k);
@@ -197,21 +197,21 @@ steady_state_model;
 end;
 
 // ============================================================
-// 验证：残差、稳态、BK 条件
+// Check: residuals, steady state, Blanchard-Kahn conditions
 // ============================================================
 resid;
 steady;
 check;
 
 // ============================================================
-// 随机模拟：冲击设定与 stoch_simul
+// Stochastic simulation: shocks and stoch_simul
 // ============================================================
 shocks;
-    var eps_z;   stderr 0.01;    // TFP 冲击标准差 = 1%
-    var eps_ig;  stderr 0.02;    // 政府投资冲击标准差 = 2%
+    var eps_z;   stderr 0.01;    // TFP shock standard deviation = 1%
+    var eps_ig;  stderr 0.02;    // government-investment shock standard deviation = 2%
 end;
 
-// 一阶近似；输出 IRF 40 期；nograph（由 plot_irfs_pub.m 出图）
+// First-order approximation; IRFs for 40 periods; nograph (figures from plot_irfs_pub.m)
 stoch_simul(order=1, irf=40, nograph, hp_filter=1600)
     y c invest ig kg n w rk
     log_y log_c log_k log_kg log_ig log_n;

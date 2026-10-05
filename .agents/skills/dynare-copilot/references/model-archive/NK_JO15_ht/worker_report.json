@@ -4,8 +4,7 @@
   "completed_at": "2026-06-17",
   "owned_scope": "mmb-paper-derivations/derivations/NK_JO15_ht/",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_JO15_ht/NK_JO15_ht_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_JO15_ht/NK_JO15_ht_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_JO15_ht/NK_JO15_ht_derivation.md",
     "mmb-paper-derivations/derivations/NK_JO15_ht/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_JO15_ht/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_JO15_ht/worker_report.json"

@@ -1,226 +1,422 @@
-# 运行 Dynare 与排错（MCP 闭环核心）
+# Running Dynare and debugging
 
-> **何时读**：① 交付前自查（最终检查清单）；② MCP 运行报错时（报错→病因→修法表）。**本文件回答**：BK/稳态/奇异雅可比/语法/估计类报错的诊断与修复、诊断命令。
+Read this when you run a model in Dynare, when Dynare or MATLAB reports an error, when results look
+wrong without an error, or before you deliver a model (final checklist).
 
-本文件服务于"写 `.mod` → 通过 MATLAB MCP 运行 → 读报错 → 修复 → 重跑"的闭环。
-交付前先过一遍"最终检查清单"，遇到用户反馈的报错时查"报错→病因→修法"表。
+This file owns the "Run-and-fix loop". It also holds the final checklist, the error table (error, cause,
+fix), the section on wrong numbers without an error, and the diagnostic commands.
 
-## bug 处理协议（先查后补，让排错库随用随长）
+Keep two kinds of evidence apart. Dygnosis (tools `dynare_*`, see `references/dygnosis-workflow.md`)
+decides what the source alone decides: parse errors, declarations, written timing, equation counts, and
+the refusals Dynare prints before MATLAB runs. Only a Dynare run decides steady state, Blanchard-Kahn
+conditions, determinacy, IRFs, moments and estimation results. Never infer the second kind from the
+first.
 
-遇到任何 Dynare/MATLAB 报错，按固定次序处理，**不要一上来就从头推**——skill 里很多坑是别人
-（或你上次）已经踩平、写下修法的，重新诊断一遍是纯浪费：
+## Before you diagnose
 
-1. **先查 skill 内已编码的排错知识**（命中就直接照修法改，别重新发明）：
-   - **`references/known-issues.md`「已知坑与修法」——实战踩坑日志，先扫这里**（按现象快速命中具体坑）；
-   - 本文件「报错 → 病因 → 修法」表（语法/BK/稳态/奇异雅可比/估计/MATLAB 层等结构性报错）；
-   - 任务相关 reference 的"常见报错与陷阱"节——尤其 `heterogeneity.md`（HANK 框架 varexo 顺序崩溃、
-     IRF 取数）、`steady-state.md`、`perfect-foresight.md`、`occbin.md`、`estimation.md`；
-   - 「最终检查清单」（很多 BK/奇异雅可比问题其实是清单某条没过）。
-   **这是硬性优先级**：skill 里写过的坑，不要再踩着从头推一遍。
+Look for an existing fix first, in this order. If one matches, apply it; do not derive it again.
 
-2. **没查到 → 自己定位**：用诊断命令（`model_diagnostics;`、`model_info;`、`resid;`、`check;`）+
-   对照官方示例（SKILL.md §2.5 / `examples-code/`）缩小范围，按"每轮只改一处、最小化修复"找根因。
+1. `references/known-issues.md`: specific problems with tested workarounds (read-only).
+2. The error table below: syntax, equation count, Blanchard-Kahn, steady state, singular Jacobian,
+   estimation, MATLAB-level errors.
+3. The pitfalls section of the reference for the task, especially `references/heterogeneity.md`,
+   `references/steady-state.md`, `references/perfect-foresight.md`, `references/occbin.md` and
+   `references/estimation.md`.
+4. The final checklist below. Many Blanchard-Kahn and singular-Jacobian failures are a failed item.
 
-3. **解决后回写 skill（关键，这就是"写新功能"）**：凡是 skill 里**没有**、你自己新定位到的报错，
-   **解决的当下立即往 TodoList 追加一条** `回写 known-issues.md：<一句话现象>`——别等收尾再回忆。
-   原因很实在：bug 一修好，注意力立刻转回主任务，到交付时这条经验已模糊、或被"任务完成"的压力
-   挤掉，**这正是排错库长不起来、同一个坑被反复重踩的根因**。交付前把该 TodoList 条目落地：追加
-   一条到 **`references/known-issues.md`**（沿用其条目格式：现象 → 根因 → 修法 + 正/反例代码 → 详见）；
-   框架特异的坑同时在对应 reference 的"常见报错与陷阱"节补一份。这样同一个坑下次直接命中第 1 步，
-   skill 的排错库随用随长。判定 novel：第 1 步各处都查不到对应条目；**拿不准就补，重复比遗漏代价小**。
-   （SKILL.md §3 已把"回写 known-issues.md"列为建模任务的固定收尾 TodoList 项，与归档询问并列。）
+If nothing matches, find the cause yourself. Collect the static facts with Dygnosis (`dynare_diagnose`,
+`dynare_model_info`, `dynare_equations`, `dynare_expand`), then run the Dynare diagnostic commands
+(`resid;`, `check;`, `model_diagnostics;`, `model_info;`). Compare with an official example in
+`<dynare-root>/examples/` or with `references/examples-code/`. Change one thing per round.
 
-> 即"消费"与"生产"并行：第 1 步消费已有排错知识，第 3 步把新知识生产回 `known-issues.md`。两步都做，skill 才会越用越强。
+When you solve a problem that none of these sources covers, put the symptom, the cause and the fix in
+the report to the user (SKILL.md "Report"). Do not edit `known-issues.md` or any other skill file.
 
-## 通过 MATLAB MCP 运行的标准步骤
+## Run-and-fix loop
 
-1. **定位 MCP 工具**：在工具列表找 MATLAB MCP 提供的"执行 MATLAB 命令/脚本""读工作区"
-   "捕获输出"等工具（不同 MCP 服务器工具名不同，按实际可用的来）。
-2. **准备环境**（路径按用户实际安装填写）：
-   ```matlab
-   addpath('<dynare安装目录>/matlab');   % 仅当 Dynare 不在路径上
-   cd('<.mod所在目录>');
-   ```
-3. **运行并捕获全部输出**：
-   ```matlab
-   dynare <文件名不带扩展名> noclearall
-   ```
-   调试期建议加 `noclearall`（保留工作区）；想跳过画图加 `nograph`。
-4. **判读输出**：见下方对照表。
-5. **最小化修复后重跑**：每轮只改一处并说明改了什么，避免来回震荡。
-6. **干净跑通后验证**（用 MCP 读工作区）：
-   ```matlab
-   oo_.dr.eigval        % 特征值 / BK
-   oo_.steady_state     % 稳态向量（无 NaN、经济合理）
-   oo_.mean, oo_.var    % 理论矩
-   M_.endo_names        % 变量顺序
-   ```
-7. **收敛纪律**：自动迭代有上限；反复无法收敛时停下，向用户说明卡点、已试方案、所需
-   信息（更好的初猜、正确的校准目标、数据文件等）。
+Use this loop for every Dynare run: from Stage 4 (steady state) on, and at Stage 3 (model block) if you
+want Dynare's own equation count.
 
-调试期常追加运行的诊断命令：`resid;`、`model_diagnostics;`、`model_info;`、`check;`。
+### 1. Static check first
 
-## 最终检查清单（每个文件；括号内为 SKILL.md 硬规则编号）
+Before the first numerical run, run `dynare_diagnose` on the root file. Pass its includes and companion
+files (`dynare_related_files` finds them). Fix every Error: Dynare would refuse the file before MATLAB.
+Read the Warnings and decide on each one. Information diagnostics are metadata notes (R1).
+`dynare_auto_fix` applies the stored fixes for some codes. Details: `references/dygnosis-workflow.md`.
 
-1. **方程数 = 内生变量数**（R4；例外：`ramsey_model`/`discretionary_policy` 少一个）。
-2. **时序约定**（R2）：状态变量当期带滞后（生产里 `k(-1)`）；运动律左边是期末存量
-   （`k = invest + (1-delta)*k(-1)`）；控制变量自身无超前。没有把 `k(-1)` 误写成 `k`。
-3. **外生仅为创新项**（R3）：所有持续过程（AR 等）是**内生**变量，只有其创新项进 `varexo`。
-4. **无禁用命名**（R5）：不用 `i`、`inv`、`e`、`E`，不与 Dynare 命令/MATLAB 函数同名；用稳态
-   文件时还避开 `alpha`/`beta`/`gamma`（写 `alppha`/`betta`/`gam`）。
-5. **参数先赋值后使用**（R7）——尤其在 `steady_state_model`（自上而下求值）之前。
-6. **冲击块匹配情形**：随机用 `stderr`/`var =`/`corr`；完全预见用 `periods`/`values`。
-7. **稳态存在且一致**：`steady_state_model`（首选）或给每个内生变量 `initval` 初猜；后接
-   `resid; steady; check;`。
-8. **随机情形无 `max`/`min`/`abs`/`sign`/比较算子**（R6）。
-9. **每条语句以 `;` 结尾、每个块以 `end;` 结尾**（R7）；一行一条语句（未知行首会被当原生 MATLAB）。
-10. **注释用 §0 选定语言 [LANG]、注释以外英文/ASCII**（R1）：`long_name='...'`、`[name='...']`、
-    标识符等非注释内容全英文，否则预处理器报错；注释要充分、用 [LANG] 写。
-11. **形式正确**（R8）：默认原始非线性方程组；仅 `discretionary_policy` 或用户要线性版/
-    论文只给线性系统时才写线性化并用 `model(linear);` 声明；
-    非线性模型冲击标准差按小数（1% = `stderr 0.01`）。
-12. **实验已指定**（`stoch_simul`/`perfect_foresight_*`/`estimation`/`ramsey_*`/`osr` 之一）
-    且选项合理。
-13. **Walras 定律冗余方程已剔出**（多主体模型必查）：在含家庭预算约束、商品市场出清、
-    资产市场出清等多条均衡条件的模型中，其中一条由其余条件线性组合推出，是冗余的——
-    应当在推导 md 第4节注明该方程冗余，并确认 model 块**没有**把它写进去。
-    表面方程数=变量数但实际少一条独立方程 → 静态雅可比奇异、BK 失败；
-    用 `model_diagnostics;` 可辅助定位奇异来源。
+If Dygnosis is not connected, follow `references/dygnosis-setup.md`. If setup is blocked, say in the
+report that the static check was not run, and continue.
 
-## 阶段3：如何核对方程数 = 变量数
+### 2. Find the environment (once per session)
 
-增量构建阶段3（只有声明+模型，还没写稳态/实验）跑 Dynare 时：
+Find each item. Do not assume a path.
 
-- 预处理器在解析模型时会校验方程数与内生变量数。**数目不符**会直接报错，类似
-  `ERROR: ... The number of equations (N) doesn't match the number of endogenous
-  variables (M)`——按提示增删方程或变量声明。
-- Dynare 能直接处理只含 var/varexo/parameters/model 的半成品文件，无需临时加 initval 占位。
-  此阶段不追求算出稳态，只确认结构（方程数、语法、命名、时序笔误）正确。
-- 数目对上、无语法/命名错后，进入阶段4 写真正的稳态求解。
+| Item | How to find it |
+|---|---|
+| `<dynare-root>`: the Dynare folder that contains `matlab/` and `examples/` | Ask the user, or read an existing `addpath` in the project (`run_*.m`, `startup.m`). Typical install locations: Windows `C:/dynare/<x.y>`, macOS `/Applications/Dynare/<x.y>`, Linux packages `/usr/lib/dynare` (manual, "Installation and configuration"). If several versions are installed, use the one the user or the project names; otherwise use the newest and say which. |
+| Dynare version | After `addpath`, run `disp(dynare_version)`. Dygnosis checks against Dynare 7.2; report the version you ran. |
+| MATLAB or Octave | `matlab` or `octave` on the PATH (`where matlab` on Windows, `which matlab` elsewhere), or ask the user. Dynare 7.2 supports MATLAB R2020a to R2026a and Octave 8.4.0 to 11.3.0 with the `statistics` and `datatypes` packages; for another Dynare version, check the manual of that version. |
+| Execution route | See below. |
+| Working folder | The folder of the `.mod` file. |
 
-## 报错 → 病因 → 修法
+Execution routes, in order of preference:
 
-**`Blanchard-Kahn conditions are not satisfied`（特征值数量不匹配）**
-- 爆炸根多于跳跃变量 → 无稳定解；少于 → 不确定性（indeterminacy）。
-- 常见原因：符号或系数错（如违反泰勒原则 `phi_pi<1`）、时序错把状态变成跳跃变量（或反之）、
-  方程缺失或多余。**先查时序**。用 `model_info;` 看哪些是状态/跳跃变量是否符合预期。
+- **MATLAB MCP server.** Tool names differ between servers. Use the tool that evaluates MATLAB code and
+  returns its output. The workspace stays alive between calls.
+- **Terminal MATLAB.** `matlab -batch "…"` runs the statements and exits. A MATLAB error gives a nonzero
+  exit code. The workspace is lost at exit.
+- **Terminal Octave.** `octave --eval "…"` (on some installations `octave-cli --eval "…"`). Under
+  Octave the `.mod` file must not have the name of an Octave or Dynare command, for example `test.mod`
+  or `example.mod` (manual, "Running Dynare").
+- **No route.** Do not guess numbers. In the report, say which runs were not done and give the user the
+  exact commands of steps 3 and 4.
 
-**`Impossible to find the steady state ...`（稳态求不出）**
-- 数值 `initval`：改进初猜；用 `resid;` 看哪条方程残差大；试 `homotopy_setup`；换 `solve_algo`。
-- `steady_state_model`：是代数 bug——逐行手验，或临时换成数值 `initval` 定位不一致处。
-- 真单位根模型：用 `[static]`/`[dynamic]` 标注 + `steady(nocheck)`。
+### 3. Initialize
 
-**`STEADY: convergence problems` / 静态雅可比奇异**
-- 两条方程线性相关（如资源约束以不同形式写了两遍）、某变量实际未出现、或函数形式错。
-- 跑 `model_diagnostics;`——它会标出奇异雅可比、缺失变量、稳态问题。
+In a session that stays open (MATLAB MCP route):
 
-**完全预见：求解器失败 / 堆叠雅可比奇异**
-- 某方程替换后只剩超前或只剩滞后（常因拉格朗日乘子辅助变量）。改写以保留一个 `t` 期项
-  （见 `references/perfect-foresight.md`）。
-- 或终端条件不可达：加大 `periods`，或用 `endval_steady` / homotopy。
+```matlab
+addpath('<dynare-root>/matlab');   % the matlab subfolder only, not its subfolders
+cd('<folder of the .mod>');
+```
 
-**`syntax error ... line ...` / 非 ASCII 相关报错**
-- 文件用了回车符（旧 Mac 行尾）；转成换行符（LF）。
-- 注释以外的地方出现了非 ASCII（如 `long_name='产出'`、`[name='欧拉方程']`）——
-  改成英文；非英文只放注释里（注释本身用 [LANG]）。
-- 或缺 `;`，或在 `verbatim`/原生 MATLAB 区用了 `//`（那里要用 `%`）。
+In a terminal route, put the initialization and the run in one call:
 
-**估计：`The variance-covariance matrix ... is not positive definite` / 随机奇异性**
-- 冲击 + 测量误差数少于可观测变量数。加冲击/测量误差或减少可观测变量。
+```text
+matlab -batch "addpath('<dynare-root>/matlab'); cd('<model-dir>'); dynare <model> noclearall nointeractive nograph"
+octave --eval "addpath('<dynare-root>/matlab'); cd('<model-dir>'); dynare <model> noclearall nointeractive nograph"
+```
 
-**估计：众数找不到 / 后验古怪**
-- 多半是稳态或观测方程不匹配（数据没映射到正确模型变量、均值/趋势不一致、
-  `loglinear` 与 `logdata` 不配套）。先在先验均值处跑一次模拟核对设定。
+### 4. Loop (round n = 1, at most 5 rounds)
 
-**`Error using ... / Undefined function or variable`（MATLAB 层面）**
-- 变量/参数名与 MATLAB 函数冲突（如 `gamma`、`beta`）。改名（`gam`、`betta`）。
-- 或 Dynare 不在路径上：`addpath('<dynare>/matlab')`。
+1. **Run** `dynare <model> noclearall` (file name without `.mod`). Add `nograph` while you debug. In a
+   terminal route also add `nointeractive`, so that Dynare does not wait for input.
+2. **Read the output and branch:**
+   - Preprocessor `ERROR: <model>.mod: line A, col B: …`: use the error table. Run `dynare_diagnose`
+     again; most preprocessor refusals are Dygnosis Errors too.
+   - `Blanchard & Kahn conditions are not satisfied: …`: check R2 (timing), signs and R4 first. Run
+     `model_info;`.
+   - Steady state with NaN, or large residuals: read `references/steady-state.md`. Run `resid;` to find
+     the equation.
+   - A MATLAB error inside Dynare's code: look in `references/known-issues.md`, then the error table.
+   - Clean run: the stage passes. After Stage 5 (experiment), verify (step 5).
+3. **Fix one thing per round.** Say what you changed and why. Record round n in the task list.
+4. **Stop** after round 5, or when the same error appears in two rounds. Report the blocker, what you
+   tried, and what you need (better initial values, the correct calibration target, a data file, the
+   missing source). Do not retry without new information.
 
-**实战中踩过的具体坑（lagged varexo 的 `subst_auxvar` 崩溃、`oo_.irf` vs `oo_.irfs` 字段名、`range()` 工具箱依赖、纯 varexo 稳态取 0、异质性 varexo 顺序崩溃等）**
-- 这些「现象 → 根因 → 现成修法」统一收在 **`references/known-issues.md`「已知坑与修法」**（实战
-  踩坑日志，随用随长）——遇报错先扫那里、命中直接改。本表只保留通用/结构性报错的诊断。
+### 5. Verify (after Stage 5 runs clean)
 
-## 数值结果可疑但无报错（静默错误，最危险）
+Read the results and summarize them for the user:
 
-模型干净跑完、却得到**经济上不合理的数**（平衡预算政府支出乘数 ≈ 0.01、IRF 差 ~100 倍或符号反、
-稳态比率离谱），全程无任何报错——这类**静默错误**比崩溃更危险，因为它不会自己暴露。固定动作：
-**与解析基准对一眼再信结果**。
+```matlab
+oo_.dr.eigval           % eigenvalues computed by check (Blanchard-Kahn conditions)
+oo_.steady_state        % steady state in declaration order: no NaN, plausible ratios
+oo_.mean, oo_.var       % moments after stoch_simul (theoretical without the periods option)
+oo_.irfs                % IRFs after stoch_simul: oo_.irfs.<var>_<shock>
+oo_.endo_simul          % paths after perfect_foresight_solver
+oo_.heterogeneity.dr.G  % sequence-space Jacobians after heterogeneity_solve
+M_.endo_names           % order of the endogenous variables
+```
 
-- 凡有**已知解析/极限结果**（平衡预算 G 乘数 ≈ 1、李嘉图等价下转移乘数 = 0、长期货币中性、
-  稳态大比率 `C/Y`、`I/Y`、`K/Y` 的合理区间），求解后先 `fprintf` 把它打出来与基准比。**偏离一个
-  数量级 → 几乎必是后处理口径错**，最常见：归一化漏乘稳态份额 `1/g_y`、把百分比 IRF 当成绝对量
-  之比、字段名 `oo_.irf` 误当 `oo_.irfs`、`Scale` 多除了 100、冲击符号/口径反。
-- 解析基准从哪来、为什么这一步几乎零成本却能在出图前拦住缩放/符号 bug，见
-  `references/matlab-workflow.md`「拿解析基准即时校验」。
-- 若与时序/稳态有关（静默给错 IRF 而非崩溃），回到本文件「最终检查清单」R2/R3 条与
-  `references/steady-state.md`。
+In a terminal route the workspace ends with the call. Print what you need in the same call, or load the
+file that Dynare writes: `M_`, `oo_` and `options_` are in `<model>/Output/<model>_results.mat`
+(manual, "Running Dynare", Output).
 
-## 快速 sanity 工具（可建议用户或自己通过 MCP 跑）
+You can run the diagnostic commands `resid;`, `model_diagnostics;`, `model_info;` and `check;` at any
+time in the session. For slow solves and repeated plotting, see `references/matlab-workflow.md`.
 
-- `resid;`——当前值下的静态残差（调试稳态初猜）。
-- `check;`——特征值 / Blanchard-Kahn。
-- `model_diagnostics;`——模型与稳态的健全性检查。
-- `model_info;`——列出状态、跳跃、静态变量与块结构。
-- `steady;` 打印值——目测比率是否经济合理。
+## Final checklist
 
-## 交付呈现
+Apply it to each file (rule IDs: SKILL.md "Writing rules"). "Static" names the Dygnosis check;
+"Numerical" needs a Dynare run; "Review" means no tool decides it.
 
-说明模型与所跑实验；标注任一存量变量的时序选择；告诉用户运行方式与预期输出（`stoch_simul`
-得政策函数+矩+IRF；完全预见得过渡路径；估计得后验）。若稳态是数值求解的，提醒确认 `resid;`
-接近 0、`check;` 通过后再信任结果。MCP 已跑通时，直接把 BK/稳态/矩的关键结论汇报给用户。
+1. **Equation count (R4).** A plain model has as many equations as endogenous variables. With
+   `ramsey_model` or `discretionary_policy`: one equation fewer for each policy instrument.
+   Heterogeneous models: count each heterogeneity dimension separately. Static: `dynare_equations`
+   `count_gap`; E188 or W013 (heterogeneous: E192, W208).
+2. **Timing (R2).** State variables enter with a lag (`k(-1)` in production). The law of motion has the
+   end-of-period stock on the left (`k = invest + (1-delta)*k(-1)`). Control variables have no lead in
+   their own definition. Check that no `k` stands where `k(-1)` is meant. Static: `dynare_model_info`
+   and the `idents` of `dynare_equations` show the written timing. Review: compare it with the
+   derivation note; no tool knows the intended timing.
+3. **Exogenous processes (R3).** With stochastic commands, every persistent process (AR and similar) is
+   an endogenous variable; only its innovation is in `varexo`. Static: W211 (exogenous variable with a
+   lead).
+4. **Names (R5).** No `i`, `inv`, `e`, `E`; no name of a Dynare command or built-in function; with a
+   user-written steady-state file, no `alpha`, `beta`, `gamma` (write `alppha`, `betta`, `gam`).
+   Review: the Dynare 7.2 preprocessor accepts these names and Dygnosis does not report them.
+5. **Parameters assigned before use (R7),** especially before `steady_state_model`, which is evaluated
+   from top to bottom. Static: W010 (never assigned), E130 (used before assignment in
+   `steady_state_model`).
+6. **Shocks block matches the experiment.** Stochastic: `stderr`, `var … = …`, `corr`. Perfect
+   foresight: `periods` and `values`. Static: E205 (perfect foresight and stochastic commands in one
+   file), W120 (stochastic command without a stochastic exogenous variable), W060 (IRF without a written
+   shock size).
+7. **Steady state exists and is consistent.** Prefer `steady_state_model`; otherwise give an `initval`
+   guess for every endogenous variable. Then `steady; resid; check;`. Static (presence only): I050,
+   W042, W052. Numerical: existence and residuals.
+8. **No nonsmooth functions under perturbation (R6):** no `max`, `min`, `abs`, `sign` or comparison
+   operators on endogenous variables with `stoch_simul`, `estimation` and similar. Static: W200; in
+   `model(linear)` E210 and E211.
+9. **Statement syntax (R7).** End each statement with `;` and each block with `end;`; one statement per
+   line. The preprocessor passes an unrecognized top-level line to MATLAB unchanged. Static: E001
+   (parse error), W012 (assignment to an undeclared name), W057 (equation outside the model block).
+10. **Labels and comments (R1).** Comments follow the user's language. Identifiers, `long_name` values,
+    equation tags and TeX names are English ASCII (house style). Dynare 7.2 accepts non-ASCII text in
+    comments, `long_name`, TeX names and `[name=…]` tags; it refuses a non-ASCII character in an
+    identifier, an equation or a shock statement (E001, `character unrecognized by lexer`). Static:
+    I208, I209, I210 find missing tags, missing `long_name` and numbers written in equations
+    (Information, not Dynare refusals).
+11. **Form (R8).** Write the original nonlinear equations by default. Use `model(linear);` only when the
+    user asks for a linear model or the source gives only a linearized system. In a nonlinear model,
+    give shock standard deviations as decimals (1% is `stderr 0.01`). Static: W140 (nonlinear operator
+    in a linear model).
+12. **Experiment set,** one family: `stoch_simul`, `perfect_foresight_setup` with
+    `perfect_foresight_solver`, `estimation`, `method_of_moments`, `ramsey_model`,
+    `discretionary_policy`, `osr`, or the `heterogeneity_*` commands. Static: `dynare_list_options`
+    lists the valid options of a command.
+13. **Redundant equation by Walras' law removed** (check every model with several agents). If the model
+    has a household budget constraint, goods market clearing and asset market clearing, one of them is a
+    linear combination of the others. Mark it as redundant in section 4 of the derivation note and do
+    not write it in the model block. Otherwise the count looks right but one independent equation is
+    missing: the static Jacobian is singular and the Blanchard-Kahn conditions fail. Review; Dygnosis
+    W054 finds only an exact duplicate equation. Numerical: `model_diagnostics;` lists the collinear
+    equations.
+
+## Check the equation count at Stage 3
+
+At Stage 3 the file has declarations, parameter values and the model block, but no steady state and no
+experiment yet.
+
+- Dygnosis decides the written count without a run: `dynare_equations` `count_gap` (`delta` 0 means
+  equal; `unreferenced_endogenous` lists declared variables that no equation uses). E188 means Dynare
+  would refuse. W013 is guidance where Dynare's rewrite can change the count (for example an expression
+  that makes Dynare add auxiliary variables, or equation surgery). E186 and W020 report an endogenous
+  variable that no equation uses.
+- Dynare's own refusal, printed before MATLAB: `ERROR: There are N equations but M endogenous
+  variables!`. Dynare does not apply this test with `ramsey_model`, `ramsey_policy` or
+  `discretionary_policy`.
+- Dynare accepts a file with only declarations, parameter values and the model block. Do not add a
+  placeholder `initval`. Dygnosis I050 (no `initval` or `steady_state_model`) is expected at this
+  stage.
+- When the count, syntax, names and timing are correct, go to Stage 4 (steady state).
+
+## Error table (error, cause, fix)
+
+"Static" names the Dygnosis code that reports the problem before a run. "Numerical" means only a Dynare
+run shows it.
+
+**Preprocessor `ERROR: <model>.mod: line A, col B: syntax error, unexpected …`** (Static: E001)
+- A missing `;` at the end of the previous statement. The parser reports the next line (see "Reading
+  preprocessor errors" below).
+- A `//` comment inside `verbatim` or native MATLAB code. Dynare passes that text to MATLAB unchanged;
+  use `%` there.
+- Old Mac line endings (CR only). Dynare's macro processor ends a line only at LF. Convert to LF or
+  CRLF.
+
+**Preprocessor `character unrecognized by lexer`** (Static: E001)
+- A non-ASCII character in an identifier, an equation or a shock statement (`var café;`). Rename with
+  ASCII (R1).
+- A double-quoted string in Dynare syntax. Use single quotes.
+- Non-ASCII text in comments, `long_name`, TeX names and `[name=…]` tags is accepted by Dynare 7.2; it
+  is not the cause.
+
+**`Unknown symbol: <name>`** (Static: E020)
+- A name in the model block that is not declared, often a typo. Declare it or correct it.
+
+**`ERROR: There are N equations but M endogenous variables!`** (Static: E188, W013)
+- A missing or extra equation, or a missing or extra declaration. See "Check the equation count at
+  Stage 3".
+
+**`Namespace-qualified symbol pp.x not allowed in this context`** (Static: E275)
+- A MATLAB struct field used as a value in the `.mod`. Fix: `references/known-issues.md`.
+
+**`Blanchard & Kahn conditions are not satisfied: no stable equilibrium.` / `…: indeterminacy.` /
+`…: indeterminacy due to rank failure.`** (Numerical)
+- `check;` prints "There are N eigenvalue(s) larger than 1 in modulus for M forward-looking
+  variable(s)". More explosive eigenvalues than forward-looking variables: no stable solution. Fewer:
+  indeterminacy. Equal numbers but `The rank condition is NOT verified.`: rank failure.
+- Common causes: a wrong sign or coefficient (for example a Taylor rule with `phi_pi < 1`); a timing
+  error that makes a state variable forward-looking, or the reverse; a missing or extra equation.
+  **Check timing first.** `dynare_model_info` lists the written timing classes; the Dynare command
+  `model_info;` lists the state, forward-looking and static variables as Dynare classifies them.
+
+**`Impossible to find the steady state (the sum of squared residuals of the static equations is …)`**
+(Numerical)
+- Numerical `initval`: improve the initial values; run `resid;` to see which equation has a large
+  residual; try `homotopy_setup`; try another `solve_algo`.
+- `steady_state_model`: an algebra error. Check each line by hand, or replace the block temporarily
+  with `initval` guesses to find the inconsistent equation. Static part: E130 (use before assignment),
+  W131 (variable assigned twice), W042 (endogenous variable missing from the block).
+- A model with a true unit root: tag the equations `[static]`/`[dynamic]` and use `steady(nocheck)`
+  (manual, "Steady state": `nocheck` option and `[static]` equations).
+
+**Singular static Jacobian** (Numerical)
+- Two equations are linearly dependent (for example the resource constraint written twice in two forms,
+  or the redundant equation by Walras' law), a variable does not actually appear, or a functional form
+  is wrong.
+- Run `model_diagnostics;`. It reports endogenous variables missing at the current period, a steady
+  state with NaN or Inf, and a singular static Jacobian with the collinear variables and equations
+  (named by their `name` tags). Static part: W054 (exact duplicate equation), E186 and W020 (unused
+  endogenous variable).
+
+**Perfect foresight: the solver fails, or the stacked Jacobian is singular** (Numerical)
+- After substitution, an equation keeps only leads or only lags, often when a Lagrange multiplier or a
+  discount factor is written as a helper variable. Rewrite the equation so that it keeps a period-t
+  term (`references/perfect-foresight.md`).
+- The terminal condition is out of reach: increase `periods`, use the `endval_steady` option of
+  `perfect_foresight_setup`, or use homotopy.
+- A forward-looking pricing equation that also has `x(-1)`: `references/known-issues.md`.
+
+**Estimation: stochastic singularity** (Numerical; Dygnosis W092 is only a static count)
+- Dynare 7.2 stops with `initial_estimation_checks:: Estimation can't take place because there are
+  less declared shocks than observed variables!`, or reports `Kalman filter: F is singular in
+  stationary period. Stochastic singularity detected.`
+- Cause: fewer shocks and measurement errors than observed variables, or observed variables tied by an
+  exact identity. Fix: add shocks or measurement errors, or remove observed variables. W092 counts the
+  names; it does not evaluate the covariance matrix.
+
+**Estimation: the mode is not found, or the posterior looks wrong** (Numerical)
+- Usually the steady state or the observation equations do not match the data: data mapped to the
+  wrong model variable, means or trends inconsistent, `loglinear` and `logdata` not used together
+  correctly. First simulate the model at the prior mean to check the setup. Static part: E090 (observed
+  variable is not endogenous), E227 (no data file).
+
+**MATLAB level: `Undefined function or variable …`, `Unrecognized function or variable …`,
+`Error using …`**
+- A variable or parameter name that clashes with a MATLAB function (`gamma`, `beta`), typically with a
+  user-written steady-state file. Rename (`gam`, `betta`; R5). Dygnosis does not report this.
+- Dynare is not on the path: `addpath('<dynare-root>/matlab')`.
+- A misspelled name at top level became native MATLAB code (R7). Look at `+<model>/driver.m`. Static:
+  W012.
+
+**Specific crashes and traps seen in practice** (a lagged exogenous variable that crashes
+`subst_auxvar` or `heterogeneity_solve`, `oo_.irf` instead of `oo_.irfs`, the toolbox function
+`range`, the steady state of a pure exogenous variable, and others): `references/known-issues.md`.
+This table keeps only general and structural errors.
+
+## Wrong numbers without an error
+
+A model can run clean and still give economically implausible numbers: a balanced-budget government
+spending multiplier of about 0.01, IRFs off by a factor of about 100 or with the wrong sign, implausible
+steady-state ratios. No tool reports these silent numerical errors. Compare with an analytical
+benchmark before you trust a result.
+
+- When a known analytical or limiting result exists (balanced-budget government spending multiplier
+  about 1, transfer multiplier 0 under Ricardian equivalence, long-run money neutrality, plausible
+  ranges of `C/Y`, `I/Y`, `K/Y`), print it with `fprintf` after the solve and compare.
+- An error of an order of magnitude is almost always in post-processing: a normalization without the
+  steady-state share `1/g_y`, a percentage IRF used as a ratio of levels, `oo_.irf` used instead of
+  `oo_.irfs`, `Scale` divided by 100 once too often, the wrong sign or size of the shock.
+- Where benchmarks come from, and why this nearly free step catches scaling and sign errors before you
+  plot: `references/matlab-workflow.md`, "Check against analytical benchmarks".
+- If timing or the steady state may be the cause (wrong IRFs without a crash), go back to items 2 and 3
+  of the final checklist and to `references/steady-state.md`.
+
+## Diagnostic commands
+
+Static, with Dygnosis (no run):
+
+- `dynare_diagnose`: diagnostics with codes.
+- `dynare_model_info`: symbol lists, written timing classes, counts.
+- `dynare_equations`: equations with tags, identifiers, source locations and `count_gap`.
+- `dynare_expand`: the text after `@#include` and macro expansion.
+
+Numerical, Dynare commands in the `.mod` or the session:
+
+- `resid;`: static residuals at the current values (debug steady-state guesses).
+- `check;`: eigenvalues and Blanchard-Kahn conditions.
+- `model_diagnostics;`: sanity checks of the model and the steady state.
+- `model_info;`: state, forward-looking and static variables, and the block structure. This is the
+  Dynare command, not the Dygnosis tool `dynare_model_info`.
+- `steady;`: prints the steady state; check that the ratios are plausible.
+
+Report the results as SKILL.md "Report" describes. For a numerically solved steady state, say that
+`resid;` is close to zero and that `check;` passed.
 
 ---
 
-# 手册增补（Dynare 7.1 §3 + §4.11）
+# Dynare 7.2 manual notes
 
-## 预处理器产物与排错入口
+Sources: `running-dynare.rst` ("Running Dynare", "Understanding Preprocessor Error Messages") and
+`the-model-file.rst` ("Variable declarations", `model_info`) of the Dynare 7.2 manual.
 
-`dynare FILENAME` 先跑预处理器，在 `+FILENAME/` 下生成：
-- `driver.m`——变量声明+计算任务（**未被识别的行会被当原生 MATLAB 直接塞进这里**；拼写错的
-  变量/参数名最常在此暴露——排错先看 driver.m）。
-- `dynamic.m`——动态方程残差与雅可比；列序由 `M_.lead_lag_incidence` 给（行 = t-1/t/t+1，
-  列 = 声明序内生，0 表示该期不出现，非零值=该变量在雅可比中的列号）。
-- `static.m`——静态（稳态）方程残差与雅可比。
-报错涉及某方程时，对照这三个文件定位。
+## Preprocessor output: where to look
 
-## `model_info` 的块类型（BK/时序排错）
+`dynare FILENAME` runs the preprocessor first. By default (without the `use_dll` option) it writes in
+`+FILENAME/`:
 
-`model_info;` 给状态/跳跃/静态变量清单；加 `block_dynamic`/`block_static`/`incidence` 看块分解。
-五种块：`EVALUATE FORWARD/BACKWARD`（可直接求值）、`SOLVE FORWARD/BACKWARD x`、
-`SOLVE TWO BOUNDARIES x`（含前后向，`x`=SIMPLE 单方程/COMPLETE 多方程）。BK 不满足时先用它确认
-哪些变量被当成了状态/跳跃，是否与预期一致。
+- `driver.m`: declarations and computing tasks. A line that the parser does not recognize goes here
+  unchanged as native MATLAB code. Misspelled variable or parameter names often show up here, so read
+  `driver.m` first.
+- `dynamic.m`: residuals and Jacobian of the dynamic equations; Dynare may add auxiliary variables and
+  equations. The column order is in `M_.lead_lag_incidence`: rows are t-1, t, t+1; columns are the
+  endogenous variables in declaration order; 0 means the variable does not appear in that period; a
+  nonzero value is the column of that variable in the Jacobian.
+- `static.m`: residuals and Jacobian of the static (steady-state) equations.
 
-## `dynare` 调用选项（闭环里按需加）
+When an error at the simulation stage names an equation, locate it in these files. To rerun the
+computing tasks without the preprocessor, type `FILENAME.driver`. To see the text after macro expansion
+without a run, use Dygnosis `dynare_expand` (or the Dynare option `savemacro`).
 
-| 选项 | 用途 |
-|------|------|
-| `noclearall` | 不清工作区（调试期保留 M_/oo_）——本 skill 闭环默认加 |
-| `nograph` | 不画图，提速 |
-| `console` / `nodisplay` / `nointeractive` | 无 GUI / 不弹窗 / 不等输入 |
-| `savemacro[=f]` | 存宏展开后的 .mod（查 `@#` 展开结果） |
-| `onlymacro` / `onlymodel` | 只跑宏 / 只输出模型信息不算 |
-| `nostrict` | 容忍：方程多于内生、initval 出现未声明符号、model 里未声明符号自动设外生、声明未用外生 |
-| `warn_uninit` | 对每个未初始化变量/参数报警 |
-| `exclude_eqs=[name1,name2]` / `include_eqs=...` | 按 name 标签增删方程跑（做变体很方便） |
-| `transform_unary_ops` | 把 exp/log/sin… 转成辅助变量（有时帮收敛/可读性） |
-| `json=parse\|check\|transform\|compute` | 输出 JSON 版模型（程序化分析） |
-| `output=first\|second\|third` | 强制输出到指定阶导数（调稳态时 first 提速） |
-| `language=matlab\|julia`、`use_dll`、`fast` | 目标语言 / 编译 DLL 提速 / 复用未变产物 |
+## Block types of `model_info`
 
-选项也可写在 .mod 首行注释：`// --+ options: savemacro, json=compute +--`。
+`model_info;` lists the state, forward-looking and purely static variables. With `block_dynamic` or
+`block_static` it prints the block decomposition; `incidence` adds the incidence matrices and needs one
+of these two options. Block types:
 
-## 看懂预处理器报错（行号陷阱）
+- `EVALUATE FORWARD` and `EVALUATE BACKWARD`: the block can be evaluated directly.
+- `SOLVE FORWARD x` and `SOLVE BACKWARD x`.
+- `SOLVE TWO BOUNDARIES x`: the block has both leads and lags.
 
-报错形如 `ERROR: file.mod: line A, col B: <msg>`。**最常见误导=漏分号**：
+`x` is `SIMPLE` for a block with one equation and `COMPLETE` for several. When the Blanchard-Kahn
+conditions fail, use `model_info;` to check which variables Dynare treats as state and forward-looking
+variables, and compare with what you intended.
+
+## Options of the `dynare` command (add as needed in the loop)
+
+| Option | Use |
+|---|---|
+| `noclearall` | Do not clear the global variables (keeps `M_`, `oo_` between runs). Default in this skill's loop. |
+| `nograph` | No graphs; faster. |
+| `console` | Console mode: no graph windows (like the `nodisplay` option of the computing commands) and no graphical wait bars. |
+| `nointeractive` | Do not request user input. |
+| `savemacro[=FILENAME]` | Save the file after macro expansion (default `FILENAME_macroexp.mod`). |
+| `onlymacro` | Run the macro processor only. |
+| `onlymodel` | Write only the model information in the driver; no computing tasks (shocks and parameter values are still written). |
+| `nostrict` | Warn and continue when there are more endogenous variables than equations, an undeclared symbol is assigned in `initval` or `endval`, an undeclared symbol is in the model block (it becomes exogenous), or a declared exogenous variable is not used in the model block. |
+| `warn_uninit` | Warn for each variable or parameter that is not initialized. |
+| `exclude_eqs=[name1, name2]` / `include_eqs=…` | Exclude or keep equations by their `name` tag; useful for variants. |
+| `transform_unary_ops` | Replace `exp`, `log`, `sin`, … in the model block with auxiliary variables. |
+| `json=parse\|check\|transform\|compute` | Write a JSON version of the model to `<model>/model/json/`. |
+| `output=first\|second\|third` | Write derivatives at least up to this order; `first` is faster while you debug the steady state. |
+| `language=matlab\|julia`, `use_dll`, `fast` | Target language; compile the model into a DLL; do not rewrite unchanged output files. |
+
+`nodisplay` is an option of the computing commands (for example `stoch_simul(nodisplay)`), not of the
+`dynare` command. Options can also go in the first line of the `.mod` file, as a one-line comment:
+`// --+ options: savemacro, json=compute +--`. Write `json=compute`, not `json = compute`.
+
+## Reading preprocessor errors (line numbers)
+
+Errors have the form `ERROR: file.mod: line A, col B: <message>` (also `cols B-C`, or
+`line A, col B - line C, col D`). The most common misleading case is a missing semicolon:
+
 ```
-varexo a, b           // ← 这里漏了 ;
+varexo a, b           // the ; is missing here
 parameters c, ...;
 ```
-解析器要等读到第2行 `parameters` 才发现意外，于是报在第2行 `unexpected PARAMETERS`——
-真正的修法是给**第1行**补 `;`。记住：任何不违反语法但 Dynare 不认得的行都被当原生 MATLAB。
 
-## 命名禁忌的官方理由（R5 背书）
+A statement can span several lines, so the parser finds the problem only when it reaches `parameters`
+on line 2 and reports `line 2, cols 0-9: syntax error, unexpected PARAMETERS`. The fix is a `;` at the
+end of **line 1**. Also remember: code that does not violate Dynare syntax but that the parser does not
+recognize is passed to `driver.m` as native MATLAB code.
 
-不区分大小写；变量/参数不得与 Dynare 命令或内置函数同名（如 `Ln`、`shocks`）；用稳态文件时避开
-与 MATLAB 函数同名的希腊词（`alpha`/`beta`/`gamma`→`alppha`/`betta`/`gam`）；**不要命名 `i`**
-（与虚数单位、循环索引冲突），投资用 `invest`；`inv` 也不宜（已是求逆）。
+## Naming advice of the manual (R5)
+
+Dynare is not case-sensitive here. Variables and parameters must not have the name of a Dynare command
+or built-in function (for example `Ln`, `shocks`). With a user-written steady-state file, avoid names of
+MATLAB functions, in particular correctly spelled Greek letters (`alpha`, `beta`, `gamma`; write
+`alppha`, `betta`, `gam`). Do not name a variable or parameter `i` (imaginary unit, loop index); name
+investment `invest`. Do not use `inv` either: it is the inverse operator. The 7.2 preprocessor accepts
+all of these names, so the advice protects against MATLAB-side conflicts, not against a refusal.

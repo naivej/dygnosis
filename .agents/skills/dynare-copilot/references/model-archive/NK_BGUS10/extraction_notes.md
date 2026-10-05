@@ -30,8 +30,3 @@
 - `needs_review`: confirm whether future archive entries should include the optimal-policy FOCs (paper equations (38)-(39)) or keep the MMB simulation entry focused on the optimized simple rule.
 - Runtime validation, Dynare residual checks, BK checks, and IRF replication were not performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English derivation.
-- English and Chinese files both contain 15 unique `(F#)` equation numbers.

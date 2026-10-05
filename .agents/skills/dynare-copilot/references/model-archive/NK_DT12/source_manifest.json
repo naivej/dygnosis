@@ -41,15 +41,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_DT12/NK_DT12_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_DT12/NK_DT12_derivation.md",
       "exists": true,
       "sha256": "a1faa98bf071f051a90413d179329f1b947aafe56e40764387625b0e16a989a6"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_DT12/NK_DT12_derivation.zh.md",
-      "exists": true,
-      "sha256": "d2b37314f1652397c0122dd42ebf731af4534f9d3ac89732b48744ea1b76a548"
     },
     {
       "role": "source_manifest",

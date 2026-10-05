@@ -2,8 +2,7 @@
   "model_id": "EA_CKL09",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_CKL09/EA_CKL09_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_CKL09/EA_CKL09_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_CKL09/EA_CKL09_derivation.md",
     "mmb-paper-derivations/derivations/EA_CKL09/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_CKL09/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_CKL09/worker_report.json"
@@ -38,8 +37,7 @@
     "passed: git diff --check -- mmb-paper-derivations/derivations/EA_CKL09",
     "passed: python3 -m json.tool source_manifest.json",
     "passed: python3 -m json.tool worker_report.json",
-    "passed: English eight-section check",
-    "passed: English/Chinese F-number count match (106 occurrences each; unique F1-F37)"
+    "passed: English eight-section check"
   ],
   "unresolved_issues": [
     "Appendix A wage-surplus and derivative equations contain OCR noise and remain needs_review.",

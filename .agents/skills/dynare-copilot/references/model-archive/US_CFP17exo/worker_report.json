@@ -2,8 +2,7 @@
   "model_id": "US_CFP17exo",
   "status": "needs_review",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_CFP17exo/US_CFP17exo_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_CFP17exo/US_CFP17exo_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_CFP17exo/US_CFP17exo_derivation.md",
     "mmb-paper-derivations/derivations/US_CFP17exo/source_manifest.json",
     "mmb-paper-derivations/derivations/US_CFP17exo/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_CFP17exo/worker_report.json"

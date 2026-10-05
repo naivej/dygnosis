@@ -1,8 +1,7 @@
 {
   "model_id": "US_CFOP14",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_CFOP14/US_CFOP14_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_CFOP14/US_CFOP14_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_CFOP14/US_CFOP14_derivation.md",
     "mmb-paper-derivations/derivations/US_CFOP14/source_manifest.json",
     "mmb-paper-derivations/derivations/US_CFOP14/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_CFOP14/worker_report.json"

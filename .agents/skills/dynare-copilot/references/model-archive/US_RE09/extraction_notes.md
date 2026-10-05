@@ -35,8 +35,3 @@
 - Source-level check the intertemporal elasticity notation around the Euler equation and the implementation's `theta` usage.
 - Runtime validation, BK checks, steady-state checks, and IRF checks are deferred by instruction.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English derivation second.
-- Equation numbers `(F1)` through `(F20)`, file paths, model IDs, DOI values, and `needs_review` markers were preserved.

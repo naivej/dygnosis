@@ -3,8 +3,7 @@
   "owned_directory": "mmb-paper-derivations/derivations/NK_CFP10",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_CFP10/NK_CFP10_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_CFP10/NK_CFP10_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_CFP10/NK_CFP10_derivation.md",
     "mmb-paper-derivations/derivations/NK_CFP10/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_CFP10/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_CFP10/worker_report.json"

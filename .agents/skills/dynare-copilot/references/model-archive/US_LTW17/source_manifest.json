@@ -56,15 +56,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/US_LTW17/US_LTW17_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/US_LTW17/US_LTW17_derivation.md",
       "exists": true,
       "sha256": "fcdaccbf1dc11cd00a87e3f3c414266552d69934d98285f4f9f7ff923825f957"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/US_LTW17/US_LTW17_derivation.zh.md",
-      "exists": true,
-      "sha256": "1e0ce6d623c8b429e19aec3624c299b18ae73c5dc58afe56e428df0a39be3c4b"
     },
     {
       "role": "source_manifest",

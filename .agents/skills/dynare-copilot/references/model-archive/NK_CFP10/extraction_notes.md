@@ -32,8 +32,3 @@
 - The CSV appendix mapping is summarized only for calibration and interpretation; full CSV contract equations are not included in the main F-numbered system.
 - The paper's nonlinear household budget constraint is not explicitly printed in the model section; the archive records the source-reported household optimality conditions instead.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English artifact.
-- F-number counts match: 26 in English and 26 in Chinese.

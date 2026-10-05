@@ -30,7 +30,3 @@
 - The flexible-price block is currently recorded as implementation_cross_check rather than paper-side derivation because the paper defines the policy output objective verbally.
 - Runtime validation, BK checks, residual checks, and IRF reproduction are deferred.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese translation drafted from the English version with identical section order and matching `(F#)` numbering.

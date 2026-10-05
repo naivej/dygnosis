@@ -31,7 +31,3 @@
 - Confirm whether the stochastic-trend and trend-stationary cases require separate archive variants for fixed-cost treatment.
 - Decide whether equations for fundamental inflation, measurement equations, and ZLB/forward-guidance solution matrices should become separate analysis appendices in a later archive pass.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English derivation with matching section order and matching `(F#)` coverage.

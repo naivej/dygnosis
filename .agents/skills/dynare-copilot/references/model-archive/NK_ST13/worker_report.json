@@ -1,8 +1,7 @@
 {
   "model_id": "NK_ST13",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/NK_ST13/NK_ST13_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_ST13/NK_ST13_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_ST13/NK_ST13_derivation.md",
     "mmb-paper-derivations/derivations/NK_ST13/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_ST13/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_ST13/worker_report.json"

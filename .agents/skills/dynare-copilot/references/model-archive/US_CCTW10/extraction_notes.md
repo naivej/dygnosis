@@ -11,7 +11,6 @@
 
 - CCTW Appendix A directly provides the rule-of-thumb household consumption equation, aggregate consumption equation, government budget constraint, log-linearized versions A.4-A.6, and fiscal rule A.7.
 - The paper explicitly says the remaining Smets-Wouters model equations are not repeated and refers the reader to Smets and Wouters (2007).
-- For this reason, the full Smets-Wouters core in the English and Chinese derivations is marked `implementation_cross_check` and `needs_review` rather than source-complete.
 - MinerU OCR quality is adequate for Appendix A formulas, but it renders the Greek omega in prose as `o` in a few places. The derivation normalizes this to `\omega` based on the printed equations and Table A1.
 
 ## Implementation Cross-Check
@@ -33,8 +32,3 @@
 - The MMB file does not use an explicit `model(linear)` declaration, even though equations are in log-linear/deviation form. Runtime form should be reviewed before promotion.
 - Runtime validation, Dynare residual checks, steady-state checks, BK checks, and IRF replication were not performed by instruction.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English derivation with the same eight sections and the same `(F#)` numbering.
-- Formula numbering count matched during validation.

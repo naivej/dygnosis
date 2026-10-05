@@ -2,8 +2,7 @@
   "model_id": "NK_GM07",
   "status": "completed_needs_review",
   "owned_paths": [
-    "mmb-paper-derivations/derivations/NK_GM07/NK_GM07_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_GM07/NK_GM07_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_GM07/NK_GM07_derivation.md",
     "mmb-paper-derivations/derivations/NK_GM07/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_GM07/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_GM07/worker_report.json"

@@ -54,8 +54,7 @@
     }
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/G2_SIGMA08/G2_SIGMA08_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/G2_SIGMA08/G2_SIGMA08_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/G2_SIGMA08/G2_SIGMA08_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/G2_SIGMA08/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/G2_SIGMA08/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/G2_SIGMA08/worker_report.json"
@@ -121,15 +120,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/G2_SIGMA08/G2_SIGMA08_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/G2_SIGMA08/G2_SIGMA08_derivation.md",
       "exists": true,
       "sha256": "a9d9a7d41ebfce1052f0ec6917423511bde50ec125317bcca73529a8c0b3ff2c"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/G2_SIGMA08/G2_SIGMA08_derivation.zh.md",
-      "exists": true,
-      "sha256": "d2ecf6a29793f2d5efe88f282d9f46bb161dbaeb084357afe101cdf610c13e6c"
     },
     {
       "role": "source_manifest",

@@ -1,51 +1,61 @@
 function fig = plot_irfs_pub(vars, shocks, varargin)
-%PLOT_IRFS_PUB  从 Dynare 的 oo_/M_ 输出绘制顶刊级别的脉冲响应(IRF)图。
+%PLOT_IRFS_PUB  Plot publication-quality impulse responses (IRFs) from Dynare's oo_/M_.
 %
-%   读取 stoch_simul 写入的 oo_.irfs.<变量>_<冲击>，按"变量=子图、情景/冲击=同图叠线"
-%   的方式排版。默认风格对标 AER/JME/Econometrica：tiledlayout 紧排、零线、无边框、
-%   极淡或无网格、配色与线型同时变化（保证黑白打印下可区分）、矢量 PDF 导出。
+%   Reads oo_.irfs.<var>_<shock>, written by stoch_simul, and lays out one panel per
+%   variable with one line per scenario or shock. The default style follows figures in
+%   AER/JME/Econometrica: compact tiledlayout, zero line, no box, faint or no grid,
+%   color and line style both vary (lines stay distinct in black-and-white print),
+%   vector PDF export.
 %
-%   用法（最简）：跑完 stoch_simul 后，oo_/M_ 已在基础工作区，直接：
+%   Simplest use: after stoch_simul, oo_/M_ are in the base workspace:
 %       plot_irfs_pub({'y','c','invest','l'}, 'eps_z');
 %
-%   多情景对比（同一组变量、同一冲击，叠加多条线）：
+%   Compare scenarios (same variables, same shock, one line per scenario):
 %       plot_irfs_pub({'y','pi','r'}, 'eps_a', ...
 %           'Scenarios',     {oo_base, oo_alt}, ...
 %           'ScenarioNames', {'Baseline','Sticky wages'}, ...
 %           'Save', 'fig_irf_techshock');
 %
-%   多冲击叠加在同一张图（每个子图里按冲击着色）：
+%   Overlay several shocks in one figure (one color per shock in each panel):
 %       plot_irfs_pub({'y','c'}, {'eps_a','eps_g'}, 'OverlayShocks', true);
 %
-%   不带参数运行会用合成数据画一张演示图，便于即时检查风格：
+%   Run without arguments to draw a demo figure from synthetic data and check the style:
 %       plot_irfs_pub
 %
-% 主要参数（名-值对）：
-%   'oo_' / 'M_'      Dynare 结构体；缺省从基础工作区读取。
-%   'Scenarios'       cell，{oo_1, oo_2, ...}，多模型/多设定对比（每个一条线）。
-%   'ScenarioNames'   cell，对应图例名称。
-%   'OverlayShocks'   true 时把多个冲击叠在同一张图（互斥于 Scenarios）。默认 false。
-%   'Bands'           置信带，仅单情景单冲击时生效。{lower, upper}，各为 H×nv 或
-%                     struct，字段名 <var>_<shock>。两段时给嵌套 cell：
-%                     {{l68,u68},{l90,u90}}（外宽内窄，深浅两层灰）。
-%   'Scale'           IRF 乘子，默认 100（小数偏离 → 百分比）。levels 变量设为 1。
-%   'Horizon'         画多少期，默认全长。
-%   'Layout'          [nrows ncols]，默认按变量数自动接近正方形。
-%   'Titles'          cell，自定义子图标题；缺省用 long_name / LaTeX 名。
-%   'YLabel'/'XLabel' 默认 'Percent dev. from SS' / 'Quarters'。
-%   'Save'            文件名(无后缀)；'Formats' 默认 {'pdf'}，可加 'eps'/'png'。
-%   'Font'/'FontSize' 默认 'Helvetica' / 9。
-%   'Grid'/'ZeroLine' 默认 false / true。
-%   'Colors'/'LineStyles'/'LineWidth'  覆盖默认样式。
-%   'FigSize'         [宽 高]（厘米），缺省按 Layout 估算。
+% Main options (name-value pairs):
+%   'oo_' / 'M_'      Dynare structures; default: read from the base workspace.
+%   'Scenarios'       cell {oo_1, oo_2, ...}: compare models or settings (one line each).
+%                     When given, it replaces 'oo_'.
+%   'ScenarioNames'   cell of legend names, one per scenario.
+%   'OverlayShocks'   true: overlay all shocks in one figure (not with Scenarios). Default false.
+%   'Bands'           shaded bands, drawn only with one scenario and OverlayShocks false.
+%                     {lower, upper}, each a struct with fields <var>_<shock> (for example
+%                     oo_.PosteriorIRF.dsge.HPDinf and .HPDsup) or a numeric vector that is
+%                     drawn in every panel (an H x nv matrix is not split by column).
+%                     Two bands: nested cell {{l90,u90},{l68,u68}} (wide band first, light
+%                     grey; narrow band second, darker grey).
+%   'Scale'           IRF multiplier, default 100 (deviation of a log variable -> percent).
+%                     Use 1 for variables in levels.
+%   'Horizon'         number of periods to plot; default: full length.
+%   'Layout'          [nrows ncols]; default: near-square grid for the number of variables.
+%   'Titles'          cell of panel titles; default: TeX name, then long_name, then name.
+%   'Interpreter'     title interpreter: 'auto' (default) | 'latex' | 'tex' | 'none'.
+%   'YLabel'/'XLabel' default 'Percent dev. from SS' / 'Quarters'.
+%   'Save'            file name without extension; 'Formats' default {'pdf'}, add 'eps'/'png'.
+%   'Font'/'FontSize' default 'Helvetica' / 9.
+%   'Grid'/'ZeroLine' default false / true.
+%   'Colors'/'LineStyles'/'LineWidth'  override the default style.
+%   'FigSize'         [width height] in centimeters; default: estimated from Layout.
 %
-% 返回：figure 句柄（OverlayShocks 或单冲击为单图；多冲击分图时返回最后一张）。
+% Returns: figure handle (one figure with OverlayShocks or one shock; with several shocks
+% in separate figures, the last figure).
 %
-% 兼容性：tiledlayout/exportgraphics/yline 需 MATLAB R2020a+。更老版本自动回退到
-% subplot + print + 手画零线（风格略降级但可用）。
+% Compatibility: tiledlayout/exportgraphics/yline need MATLAB R2020a or later. Older
+% releases fall back to subplot + print + a drawn zero line (plainer style, still usable).
+% Not tested under Octave.
 
 % ----------------------------------------------------------------------
-% 0. 无参演示
+% 0. Demo without arguments
 % ----------------------------------------------------------------------
 if nargin == 0
     [vars, shocks, oo1, oo2, demo_M] = local_demo_data();
@@ -55,7 +65,7 @@ if nargin == 0
 end
 
 % ----------------------------------------------------------------------
-% 1. 参数解析
+% 1. Parse arguments
 % ----------------------------------------------------------------------
 if nargin < 2 || isempty(shocks), shocks = {}; end
 if ischar(vars) || isstring(vars),   vars   = cellstr(vars);   end
@@ -88,7 +98,7 @@ p.addParameter('FigSize',       []);
 p.parse(varargin{:});
 o = p.Results;
 
-% oo_ / M_ 缺省从基础工作区取（带容错）
+% Default oo_ / M_: read from the base workspace (a missing M_ becomes an empty struct)
 if isempty(o.oo_) && isempty(o.Scenarios)
     o.oo_ = evalin('base','oo_');
 end
@@ -96,11 +106,11 @@ if isempty(o.M_)
     try, o.M_ = evalin('base','M_'); catch, o.M_ = struct(); end
 end
 M_ = o.M_;
-% M_ 不全时补默认字段，标题回退到变量名/冲击名
+% Fill missing M_ fields; titles then fall back to variable and shock names
 if ~isfield(M_,'endo_names'), M_.endo_names = {}; end
 if ~isfield(M_,'exo_names'),  M_.exo_names  = {}; end
 
-% 多情景：把主 oo_ 也纳入情景列表
+% Scenario list: Scenarios when given (oo_ is not added), else the single oo_
 if ~isempty(o.Scenarios)
     scen = o.Scenarios;
 else
@@ -108,7 +118,7 @@ else
 end
 nScen = numel(scen);
 
-% 变量/冲击缺省推断
+% Infer variables and shocks when not given
 if isempty(vars) || isempty(shocks)
     [iv, ish] = local_infer(scen{1}, M_);
     if isempty(vars),   vars   = iv;  end
@@ -116,23 +126,24 @@ if isempty(vars) || isempty(shocks)
 end
 nv = numel(vars);
 
-% 默认配色：深→浅、冷暖交替，色盲友好且黑白可辨（配合线型）
+% Default colors: dark to light, cool and warm alternate; colorblind-friendly and,
+% with the line styles, distinct in black and white
 if isempty(o.Colors)
-    o.Colors = [0.12 0.24 0.45;    % 海军蓝
-                0.80 0.22 0.18;    % 砖红
-                0.20 0.55 0.35;    % 墨绿
-                0.50 0.38 0.66;    % 紫
-                0.85 0.55 0.10;    % 琥珀
-                0.35 0.35 0.35];   % 灰
+    o.Colors = [0.12 0.24 0.45;    % navy
+                0.80 0.22 0.18;    % brick red
+                0.20 0.55 0.35;    % dark green
+                0.50 0.38 0.66;    % purple
+                0.85 0.55 0.10;    % amber
+                0.35 0.35 0.35];   % grey
 end
 
 % ----------------------------------------------------------------------
-% 2. 决定"图"与"叠线"的维度
+% 2. Choose what varies across figures and across lines
 % ----------------------------------------------------------------------
-% 叠线维度(series)：OverlayShocks 时为各冲击；否则为各情景。
-% 分图维度(figures)：OverlayShocks 时单图；否则每个冲击一张图。
+% Lines (series): the shocks with OverlayShocks; otherwise the scenarios.
+% Figures: one figure with OverlayShocks; otherwise one figure per shock.
 if o.OverlayShocks
-    figLoop  = {[]};            % 单图
+    figLoop  = {[]};            % one figure
     seriesNm = shocks;
     seriesGet = @(k, sh, vr) local_get(scen{1}, vr, shocks{k});
     nSeries  = numel(shocks);
@@ -149,7 +160,7 @@ else
     nSeries  = nScen;
 end
 
-% 子图网格
+% Panel grid
 if isempty(o.Layout)
     nc = ceil(sqrt(nv)); nr = ceil(nv/nc);
 else
@@ -160,7 +171,7 @@ useTiles = exist('tiledlayout','file')==2;
 fig = [];
 
 % ----------------------------------------------------------------------
-% 3. 逐图绘制
+% 3. Draw each figure
 % ----------------------------------------------------------------------
 for f = 1:numel(figLoop)
     sh = figLoop{f};
@@ -178,18 +189,18 @@ for f = 1:numel(figLoop)
         tl = tiledlayout(fig, nr, nc, 'TileSpacing','compact','Padding','compact');
     end
 
-    hLeg = gobjects(1, nSeries);   % 收集首个子图的句柄做共享图例
+    hLeg = gobjects(1, nSeries);   % line handles of the first panel, for the shared legend
 
     for i = 1:nv
         if useTiles, ax = nexttile(tl); else, ax = subplot(nr,nc,i,'Parent',fig); end
         hold(ax,'on');
 
-        % --- 置信带（仅单情景单冲击）---
+        % --- Bands (one scenario, OverlayShocks off) ---
         if ~isempty(o.Bands) && nSeries==1 && ~o.OverlayShocks
             local_draw_bands(ax, o.Bands, vars{i}, sh, o.Scale, o.Horizon);
         end
 
-        % --- 零线 ---
+        % --- Zero line ---
         if o.ZeroLine
             if exist('yline','file')==2
                 yl = yline(ax, 0, '-'); yl.Color = [0.6 0.6 0.6]; yl.LineWidth = 0.5;
@@ -200,7 +211,7 @@ for f = 1:numel(figLoop)
             end
         end
 
-        % --- 各 series 曲线 ---
+        % --- One line per series ---
         for k = 1:nSeries
             y = seriesGet(k, sh, vars{i});
             H = o.Horizon; if isempty(H), H = numel(y); end
@@ -214,7 +225,7 @@ for f = 1:numel(figLoop)
             if i==1, hLeg(k) = hl; end
         end
 
-        % --- 子图样式 ---
+        % --- Panel style ---
         local_style_axis(ax, o);
         if isempty(o.Horizon)
             Hax = local_irflen(scen{1}, vars{i}, local_anyshock(sh, shocks));
@@ -223,13 +234,13 @@ for f = 1:numel(figLoop)
         end
         xlim(ax, [1, max(2, Hax)]);
 
-        % 标题
+        % Title
         ttl = local_title(M_, vars{i}, o, i);
         [tstr, tint] = ttl{:};
         title(ax, tstr, 'Interpreter',tint, 'FontWeight','normal', ...
               'FontName',o.Font, 'FontSize',o.FontSize+1);
 
-        % 轴标签：仅左列加 Y、仅末行加 X，减少冗余
+        % Axis labels: Y only on the left column, X only on the bottom row
         isLeftCol   = mod(i-1, nc)==0;
         isBottomRow = (i > nv-nc);
         if isLeftCol,   ylabel(ax, o.YLabel, 'FontName',o.Font,'FontSize',o.FontSize); end
@@ -238,7 +249,7 @@ for f = 1:numel(figLoop)
         hold(ax,'off');
     end
 
-    % --- 共享图例 ---
+    % --- Shared legend ---
     if nSeries > 1 && any(~cellfun(@isempty, seriesNm))
         if useTiles && exist('OCTAVE_VERSION','builtin')==0
             lgd = legend(hLeg, seriesNm, 'Orientation','horizontal', ...
@@ -250,7 +261,7 @@ for f = 1:numel(figLoop)
         end
     end
 
-    % --- 顶部冲击标题（多图、各图一冲击时）---
+    % --- Shock title on top (several figures, one shock each) ---
     if ~o.OverlayShocks && ~isempty(sh) && numel(shocks) > 1
         shttl = local_shock_title(M_, sh);
         if useTiles
@@ -261,21 +272,23 @@ for f = 1:numel(figLoop)
         end
     end
 
-    % --- 导出 ---
+    % --- Export ---
     if ~isempty(o.Save)
         base = o.Save;
         if ~o.OverlayShocks && numel(shocks) > 1, base = [base '_' sh]; end %#ok<AGROW>
         local_export(fig, base, o.Formats);
     end
 end
-end % ===== 主函数结束 =====
+end % ===== end of main function =====
 
 
 % ======================================================================
-% 子函数
+% Local functions
 % ======================================================================
 function y = local_get(oo, var, shock)
-% 取 oo_.irfs.<var>_<shock>；缺失(响应被阈值滤掉或未请求)返回空。
+% Return oo_.irfs.<var>_<shock>, or empty when Dynare did not store it: the variable is
+% not in the stoch_simul list, or the shock is not in irf_shocks or has zero variance.
+% irf_plot_threshold only hides Dynare's own plots; the field is still stored.
 y = [];
 if isempty(shock), return; end
 fn = [var '_' shock];
@@ -286,7 +299,7 @@ end
 
 % ----------------------------------------------------------------------
 function L = local_irflen(oo, var, shock)
-% 推断 IRF 长度，给 xlim 用。
+% IRF length, for xlim.
 y = local_get(oo, var, shock);
 if isempty(y), L = 40; else, L = numel(y); end
 end
@@ -297,12 +310,13 @@ end
 
 % ----------------------------------------------------------------------
 function [vars, shocks] = local_infer(oo, M_)
-% 从 oo_.irfs 字段名结合 M_.exo_names 反推变量与冲击集合。
+% Recover the sets of variables and shocks from the oo_.irfs field names and M_.exo_names.
 vars = {}; shocks = {};
 if ~isfield(oo,'irfs'), return; end
 fns = fieldnames(oo.irfs);
 exol = cellstr(M_.exo_names);
-% 按长度降序匹配最长后缀，避免短冲击名误匹配
+% Match the longest suffix first (shock names by descending length), so a short
+% shock name does not match by mistake
 [~, ord] = sort(cellfun(@numel, exol), 'descend');
 exol = exol(ord);
 for j = 1:numel(fns)
@@ -322,7 +336,9 @@ end
 
 % ----------------------------------------------------------------------
 function out = local_title(M_, var, o, i)
-% 返回 {字符串, interpreter}。优先自定义 Titles，其次 LaTeX 名，再 long_name，最后变量名。
+% Return {string, interpreter}. Order: custom Titles, TeX name, long_name, variable name.
+% Dynare fills a TeX name for every variable (default: the name), so long_name is
+% reached only when M_ has no TeX names.
 if ~isempty(o.Titles) && numel(o.Titles) >= i && ~isempty(o.Titles{i})
     out = {o.Titles{i}, local_pick_interp(o.Interpreter,'none')}; return;
 end
@@ -352,7 +368,8 @@ end
 
 % ----------------------------------------------------------------------
 function s = local_shock_title(M_, shock)
-% 冲击的 long_name 做图标题；无则用冲击名。
+% Figure title: the long_name of the shock; the shock name when long_name is missing
+% or equal to the name.
 s = shock;
 names = cellstr(M_.exo_names);
 idx = find(strcmp(names, shock), 1);
@@ -365,10 +382,11 @@ end
 
 % ----------------------------------------------------------------------
 function local_draw_bands(ax, Bands, var, shock, scale, H)
-% 画置信带(灰色阴影)。Bands 可为 {lower,upper} 或 {{l1,u1},{l2,u2}}（两段宽窄）。
+% Draw bands (grey shading). Bands is {lower,upper} or {{l1,u1},{l2,u2}} (wide band
+% first, then narrow band).
 if isempty(Bands), return; end
-if ~iscell(Bands{1}), Bands = {Bands}; end   % 统一成段的列表
-greys = [0.78 0.78 0.78; 0.62 0.62 0.62];     % 外宽浅、内窄深
+if ~iscell(Bands{1}), Bands = {Bands}; end   % make it a list of bands
+greys = [0.78 0.78 0.78; 0.62 0.62 0.62];     % wide outer band light, narrow inner band dark
 for b = 1:numel(Bands)
     seg = Bands{b};
     lo = local_band_series(seg{1}, var, shock);
@@ -385,7 +403,8 @@ end
 end
 
 function v = local_band_series(B, var, shock)
-% 带数据可为 struct(字段 <var>_<shock>) 或直接向量。
+% Band data: a struct with fields <var>_<shock>, or a numeric array read as one
+% vector (B(:)) in every panel.
 v = [];
 if isstruct(B)
     fn = [var '_' shock];
@@ -426,16 +445,16 @@ for k = 1:numel(formats)
                 case 'png', print(fig, base, '-dpng', '-r300');
             end
         end
-        fprintf('[plot_irfs_pub] 已导出 %s\n', fn);
+        fprintf('[plot_irfs_pub] Exported %s\n', fn);
     catch ME
-        warning('plot_irfs_pub:export', '导出 %s 失败：%s', fn, ME.message);
+        warning('plot_irfs_pub:export', 'Export of %s failed: %s', fn, ME.message);
     end
 end
 end
 
 % ----------------------------------------------------------------------
 function [vars, shocks, oo1, oo2, M] = local_demo_data()
-% 合成两情景、一冲击的 RBC 风格 IRF，用于无参演示。
+% Synthetic RBC-style IRFs (two scenarios, one shock) for the demo without arguments.
 H = 20; t = (0:H-1)';
 vars = {'y','c','invest','l'}; shocks = {'eps_z'};
 shape = @(a,b,p) a*exp(-t/p) .* (1 + b*sin(t/3));
@@ -443,8 +462,8 @@ mk = @(s,p0) struct('y_eps_z',      s*shape(1.0,0.0,6*p0), ...
                     'c_eps_z',      s*shape(0.5,0.0,9*p0), ...
                     'invest_eps_z', s*shape(3.0,0.2,4*p0), ...
                     'l_eps_z',      s*shape(0.4,0.1,5*p0));
-oo1 = struct('irfs', mk(1.00, 1.0));    % 基准
-oo2 = struct('irfs', mk(0.95, 0.6));    % 低持续性对比
+oo1 = struct('irfs', mk(1.00, 1.0));    % baseline
+oo2 = struct('irfs', mk(0.95, 0.6));    % lower persistence
 M = struct();
 M.endo_names      = {'y';'c';'invest';'l'};
 M.endo_names_tex  = {'y';'c';'i';'\ell'};

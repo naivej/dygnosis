@@ -51,8 +51,7 @@
     ]
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_CET15/US_CET15_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_CET15/US_CET15_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_CET15/US_CET15_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_CET15/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_CET15/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_CET15/worker_report.json"

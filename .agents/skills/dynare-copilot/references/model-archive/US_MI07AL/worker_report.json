@@ -2,8 +2,7 @@
   "model_id": "US_MI07AL",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_MI07AL/US_MI07AL_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_MI07AL/US_MI07AL_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_MI07AL/US_MI07AL_derivation.md",
     "mmb-paper-derivations/derivations/US_MI07AL/source_manifest.json",
     "mmb-paper-derivations/derivations/US_MI07AL/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_MI07AL/worker_report.json"
@@ -52,7 +51,6 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number occurrence counts match",
       "status": "passed",
       "english_f_count": 62,
       "chinese_f_count": 62,

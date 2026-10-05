@@ -2,8 +2,7 @@
   "model_id": "NK_CGG02",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_CGG02/NK_CGG02_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_CGG02/NK_CGG02_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_CGG02/NK_CGG02_derivation.md",
     "mmb-paper-derivations/derivations/NK_CGG02/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_CGG02/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_CGG02/worker_report.json"
@@ -52,7 +51,6 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number counts match",
       "status": "passed",
       "details": {
         "english_f_count": 79,

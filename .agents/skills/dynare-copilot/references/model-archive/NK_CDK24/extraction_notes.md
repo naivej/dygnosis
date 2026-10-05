@@ -34,8 +34,3 @@
 - Source-check the wage block against Appendix A.2 if a runnable `.mod` implementation is later produced.
 - Runtime validation, residual checks, Blanchard-Kahn checks, and IRF replication were not performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English core.
-- Equation numbers `(F1)` through `(F35)` are preserved in both files.

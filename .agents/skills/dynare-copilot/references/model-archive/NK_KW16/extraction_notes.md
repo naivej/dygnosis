@@ -34,8 +34,3 @@
 - The Taylor rule in the derivation records both paper-side net-rate notation and implementation-side gross-rate notation; this should be source-checked against the supplementary appendix.
 - No shared `catalog.csv` or `status.csv` rows were edited by request.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English artifact.
-- F-number counts match: 40 in English and 40 in Chinese.

@@ -29,7 +29,3 @@
 - The paper DOI field in local metadata is `10.3386/w8870`, an NBER working-paper DOI, while the citation is the 2002 Journal of Monetary Economics article.
 - Equation-to-variable counts in the archive derivation are intentionally broader than the compact MMB `model(linear)` block because the derivation preserves paper-side household/firm conditions and market identities as provenance.
 
-## Translation Status
-
-- `NK_CGG02_derivation.zh.md` is a direct translation of the checked English draft.
-- Equation numbers, model IDs, DOI values, file paths, and status markers are preserved.

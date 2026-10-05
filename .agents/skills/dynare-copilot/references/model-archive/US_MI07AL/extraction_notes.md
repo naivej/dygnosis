@@ -31,7 +31,3 @@
 - Decide how to present the MMB policy-rule substitution relative to the paper's simple Taylor rule in a future reviewed archive pass.
 - Confirm initial learning beliefs and pre-sample initialization if this entry is extended from derivation extraction to replication.
 
-## Translation Status
-
-- English derivation was written first.
-- Chinese derivation is a direct translation of the English core and preserves `(F#)` numbering, paths, DOI values, model id, and `needs_review` markers.

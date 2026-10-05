@@ -30,7 +30,3 @@
 - Runtime validation, Blanchard-Kahn checks, steady-state checks, and IRF comparison were not performed.
 - The first-pass archive status should remain `needs_review`.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation is a translation of the English derivation and preserves the same eight section headings and `(F#)` numbering.

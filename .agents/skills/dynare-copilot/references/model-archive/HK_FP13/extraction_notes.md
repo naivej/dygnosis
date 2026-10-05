@@ -37,8 +37,3 @@
 - Runtime validation was not performed: no Dynare `steady`, `check`, or simulation run was executed for this archive entry.
 - A future implementation phase should verify the equation count against a runnable `.mod` replication and reconcile all OCR `needs_review` formulas.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English derivation.
-- Both files preserve the same eight required section headings and 29 F-numbered conditions.

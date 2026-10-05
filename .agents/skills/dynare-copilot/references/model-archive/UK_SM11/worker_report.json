@@ -1,8 +1,7 @@
 {
   "model_id": "UK_SM11",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/UK_SM11/UK_SM11_derivation.en.md",
-    "mmb-paper-derivations/derivations/UK_SM11/UK_SM11_derivation.zh.md",
+    "mmb-paper-derivations/derivations/UK_SM11/UK_SM11_derivation.md",
     "mmb-paper-derivations/derivations/UK_SM11/source_manifest.json",
     "mmb-paper-derivations/derivations/UK_SM11/extraction_notes.md",
     "mmb-paper-derivations/derivations/UK_SM11/worker_report.json"

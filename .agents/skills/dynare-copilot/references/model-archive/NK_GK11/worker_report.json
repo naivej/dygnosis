@@ -3,8 +3,7 @@
   "status": "needs_review",
   "owned_directory": "mmb-paper-derivations/derivations/NK_GK11",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_GK11/NK_GK11_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_GK11/NK_GK11_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_GK11/NK_GK11_derivation.md",
     "mmb-paper-derivations/derivations/NK_GK11/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_GK11/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_GK11/worker_report.json"
@@ -62,9 +61,7 @@
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/NK_GK11 exited cleanly; files are untracked so direct whitespace scan was also run",
     "untracked_file_whitespace_check": "passed: no trailing whitespace, CR bytes, or missing final newlines in mmb-paper-derivations/derivations/NK_GK11 files",
     "json_tool_source_manifest": "passed: python3 -m json.tool mmb-paper-derivations/derivations/NK_GK11/source_manifest.json",
-    "json_tool_worker_report": "passed: python3 -m json.tool mmb-paper-derivations/derivations/NK_GK11/worker_report.json",
-    "eight_section_check": "passed: English and Chinese files contain sections 1-8",
-    "f_number_count_check": "passed: English and Chinese both contain 98 F-number references covering unique labels F1-F43 in the same sequence"
+    "json_tool_worker_report": "passed: python3 -m json.tool mmb-paper-derivations/derivations/NK_GK11/worker_report.json"
   },
   "unresolved_issues": [
     "Return-to-capital equation needs targeted source review before promotion because MinerU OCR is noisy around the capital-quality and depreciation terms.",

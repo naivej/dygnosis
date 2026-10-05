@@ -30,8 +30,3 @@
 - The optional banking-distress variant $`\sigma_t=\sigma+\omega_t-\omega`$ is recorded but not treated as the baseline model.
 - Runtime validation, steady-state residual checks, BK checks, and IRF comparison are deferred by instruction.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English draft.
-- Equation numbering `(F1)` through `(F31)` is preserved across both files.

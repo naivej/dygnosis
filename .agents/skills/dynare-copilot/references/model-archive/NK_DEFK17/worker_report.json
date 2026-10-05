@@ -2,8 +2,7 @@
   "model_id": "NK_DEFK17",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_DEFK17/NK_DEFK17_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_DEFK17/NK_DEFK17_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_DEFK17/NK_DEFK17_derivation.md",
     "mmb-paper-derivations/derivations/NK_DEFK17/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_DEFK17/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_DEFK17/worker_report.json"

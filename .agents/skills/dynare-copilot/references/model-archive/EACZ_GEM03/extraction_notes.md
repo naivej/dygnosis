@@ -37,8 +37,3 @@
 - Confirm whether the archive should use the model-index title singular "Monetary rule..." or the observed paper title plural "Monetary rules...".
 - Runtime validation was intentionally not performed.
 
-## Translation Status
-
-- `EACZ_GEM03_derivation.zh.md` was created as a translation of the checked English draft.
-- Equation labels and LaTeX formulas were preserved.
-- English and Chinese F-number counts should match before merging.

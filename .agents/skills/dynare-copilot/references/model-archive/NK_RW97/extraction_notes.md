@@ -12,7 +12,6 @@
 ## Extraction Scope
 
 - English derivation was drafted first using the required eight-section structure.
-- Chinese derivation is a direct translation of the English core and preserves `(F#)` numbering, file paths, DOI values, model ID, and `needs_review` markers.
 - The paper-side extraction focuses on equations (2.1), (3.1)-(3.18), and (5.1)-(5.5): the policy rule, household problem, CES price index, intertemporal budget, decision-lag IS equation, Calvo reset-pricing block, and shock-reconstruction equations.
 - The `.mod` file `.agents/skills/dynare-copilot/references/examples/NK_RW97_rep.mod` was read only as `implementation_cross_check`.
 - Shared `catalog.csv` and `status.csv` were not edited. Proposed rows are recorded in `worker_report.json`.
@@ -41,8 +40,3 @@
 - The MMB implementation does not include a monetary-policy shock innovation; future validation should decide whether to preserve the Rep-MMB two-shock specification or add the paper's policy-shock process in a separate replication.
 - Runtime validation, residual checks, BK checks, IRF checks, and promotion to the runnable skill archive were not performed.
 
-## Translation Status
-
-- English derivation completed first.
-- Chinese translation completed second.
-- English and Chinese `(F#)` counts match in validation.

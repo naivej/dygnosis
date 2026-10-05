@@ -26,8 +26,3 @@
 - No Dynare runtime validation, BK check, moments, or IRF validation was performed.
 - A future review should compare the source PDF equations only if the Markdown OCR is judged insufficient for the hybrid Section 6 and policy-rule Section 7 mapping.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation is a direct translation of the English core.
-- Section headings and `(F#)` equation labels were preserved with matching counts.

@@ -34,8 +34,3 @@
 - The natural-rate block behind $`Y_t^n`$ should be reviewed if this derivation is promoted into a runnable model archive entry.
 - Shared `catalog.csv` and `status.csv` were intentionally not edited because this task restricted ownership to `mmb-paper-derivations/derivations/NK_KM16/`.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was produced as a translation of the English derivation.
-- Equation labels `(F1)` through `(F26)` are intended to match exactly between English and Chinese files.

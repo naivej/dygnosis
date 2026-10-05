@@ -30,7 +30,3 @@
 - `needs_review`: confirm whether the archive should represent the optimal-policy commitment/discretion system, the MMB simple-rule simulation system, or both as separate variants.
 - `needs_review`: formulas involving the fiscal share `gamma_t` and demand shock `u_t` should be source-level checked against the PDF before promotion beyond draft.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English version and preserves the same `(F#)` numbering and eight-section structure.

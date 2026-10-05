@@ -1,120 +1,158 @@
-# MATLAB 侧迭代工作流（求解/分析解耦、缓存 oo_、多模型对比）
+# MATLAB-side workflow: solve once, analyze many times
 
-> **何时读**：模型**求解慢**（异质性时间迭代、二/三阶、估计、大型模型），且你要**反复**
-> 改图、改归一化、调分析口径；或要**组织多模型/多情景对比**（HANK vs RANK、基线 vs 反事实）；
-> 或想把 `.mod` 的运行包成**可复跑脚本**。**本文件回答**：MATLAB 侧的驱动脚本怎么组织，
-> 让"贵的求解只跑一次、便宜且要反复试的分析随便改"，并用解析基准即时抓 bug。
->
-> 这是 workflow-detail.md §4.1「运行与纠错闭环」的补充：闭环讲"怎么把 .mod 跑通"，本文件讲"跑通之后
-> 怎么高效地反复分析、出图、对比，不每改一处就重解一遍模型"。
+Read this when a solve is slow (heterogeneous agents with time iteration, order 2 or 3, estimation,
+large models) and you must change plots, normalizations or comparisons many times; when you compare
+several models or scenarios (HANK against RANK, baseline against counterfactual); or when you package a
+run as a script that can run again.
 
-## 一句话原则：求解贵、分析便宜且要反复试 → 两者拆开，中间用 .mat 缓存 oo_ 衔接
+This file answers one question: how to organize the MATLAB or Octave scripts so that the expensive solve
+runs once and the cheap analysis can change freely, and how to catch errors with analytical benchmarks.
+It complements the "Run-and-fix loop" in `references/debugging.md`: the loop makes the `.mod` run; this
+file covers what you do after it runs.
 
-最常见也最隐蔽的时间浪费：把 `dynare <model>` 和绘图/分析代码写在**同一个脚本**里，于是每次
-改一个图例、调一次归一化系数、修一个标签，都要把**整个模型重解一遍**。异质性 HANK 一次时间
-迭代就要 ~30 秒，调十次图 = 白等 5 分钟，且每次都刷屏几千行迭代日志。
+## Execution routes
 
-正确的形态是两段独立脚本，用一个 `.mat` 文件衔接：
+The scripts below run in MATLAB or Octave. A MATLAB MCP server is one route, not a requirement.
+
+| Route | Run a script | Workspace after the call |
+|---|---|---|
+| MATLAB MCP server | the server tool that evaluates MATLAB code: `run_<model>` | kept |
+| Terminal MATLAB | `matlab -batch "cd('<project>'); run_<model>"` | lost |
+| Terminal Octave | `octave --eval "cd('<project>'); run_<model>"` | lost |
+
+How to find `<dynare-root>`, the executable and the route: `references/debugging.md`, "Run-and-fix
+loop". In a terminal route a `.mat` cache is the only way to keep results from one call to the next,
+which makes the split below more important. If no route exists, deliver the scripts and give the user
+the commands.
+
+## Principle: the solve is expensive, the analysis is cheap and changes often
+
+Keep them apart and connect them with a `.mat` cache of `oo_`. The most common, and least visible,
+waste of time is to put `dynare <model>` and the plotting or analysis code in **one** script. Then
+each change of a legend, a normalization coefficient or a label solves the **whole model** again. One
+time iteration of a heterogeneous HANK model can take about 30 seconds; ten plot adjustments cost five
+minutes of waiting, and each run prints thousands of lines of iteration output.
+
+Write two scripts connected by one `.mat` file:
 
 ```matlab
-% ===== run_<model>.m —— 只负责求解，跑一次 =====
-cd('<工作目录>');
+% ===== run_<model>.m: solve only, run once =====
+cd('<working folder>');
 dynare <model> noclearall nointeractive
-save('<model>_oo.mat', 'oo_', 'M_', 'options_');   % 把结果冻存
+save('<model>_oo.mat', 'oo_', 'M_', 'options_');   % freeze the results
 
-% ===== analyze_<model>.m —— 只负责分析/出图，随便改、秒级重跑 =====
-cd('<工作目录>');
-S = load('<model>_oo.mat');           % 不重解，直接读冻存的结果
+% ===== analyze_<model>.m: analysis and plots only; change freely, reruns in seconds =====
+cd('<working folder>');
+S = load('<model>_oo.mat');           % no new solve: read the frozen results
 oo_ = S.oo_;  M_ = S.M_;
-% ... 在这里改归一化、改子图、改标签、改对比口径，反复跑都不碰求解 ...
+% ... change normalizations, subplots, labels and comparisons here; reruns never touch the solve ...
 ```
 
-判据：**只要求解一次能产出的东西被你跑了第二次，就该缓存。** 改图、改 `Scale`、改横轴期数、
-换对比变量，全都属于"分析"，不该触发重解。
+Rule: **if you run something a second time that one solve already produced, cache it.** Plots, `Scale`,
+the horizon, the compared variables are all analysis; they must not trigger a new solve.
 
-## 项目目录与运行脚本（多文件项目的标准骨架）
+Dynare also saves `M_`, `oo_` and `options_` in `<model>/Output/<model>_results.mat` after each run.
+The next run overwrites that file, so keep your own named cache when you compare runs.
 
-> 运行脚本 `run_<model>.m` 是**默认交付物**（不是可选项），它怎么写——自包含开箱即用、按实验类型
-> 选产出、**自动调用绘图/产出代码**、有 `main` 的项目怎么接入——见 `references/run-script.md`。
-> 本节只讲**多文件项目**里它与 `analyze_*.m`、`.mat` 缓存怎么配合，不重复 run 脚本的完整骨架。
+## Project folder and run script
 
-凡涉及**多模型对比、外部稳态、反复出图**，按下面组织，自己和用户都不易乱：
+How to write the run script `run_<model>.m` (self-contained, output chosen by experiment type, calls
+the plotting code, fits into an existing `main`): `references/run-script.md`. Write it for a new model
+or a replication with a numerical experiment; skip it for a small edit, a pure check, or when the user
+declines. This section covers only how it works with `analyze_*.m` and the `.mat` cache in a project
+with several files.
+
+For model comparisons, external steady-state files or repeated plotting, use this layout:
 
 ```
 <project>/
-├── <model>.mod                 # 模型本体
-├── <model>_derivation.md       # 推导（阶段1 产出）
-├── run_<model>.m               # 求解驱动：cd + dynare + save oo.mat
-├── analyze_<model>.m           # 分析/出图：load oo.mat + plot_irfs_pub
-├── plot_irfs_pub.m             # skill 自带绘图函数（从 references/ 拷入）
-└── <model>_oo.mat              # 冻存的求解结果（中间产物，可重生成）
+├── <model>.mod                 # the model
+├── <model>_derivation.md       # derivation note (Stage 1)
+├── run_<model>.m               # solve driver: cd + dynare + save oo.mat
+├── analyze_<model>.m           # analysis and plots: load oo.mat + plot_irfs_pub
+├── plot_irfs_pub.m             # plotting function of this skill (copy from references/)
+└── <model>_oo.mat              # frozen solve results (intermediate file, can be regenerated)
 ```
 
-**求解段（`run_<model>.m`）的最小核**——多文件项目里它只负责"求解 + 冻存"，出图交给 `analyze_*.m`；
-单文件项目则把出图也并进 run 脚本（完整五环节骨架见 `references/run-script.md`）：
+**Minimal core of the solve script (`run_<model>.m`).** In a project with several files it only solves
+and freezes; `analyze_*.m` makes the plots. In a project with one file, put the plots in the run script
+too (full skeleton: `references/run-script.md`).
 
 ```matlab
-addpath('C:\dynare\7.1\matlab');         % 自包含：干净 MATLAB 也找得到 Dynare（按本机改）
-cd(fileparts(mfilename('fullpath')));    % 切到脚本自身目录，避免会话工作目录漂移
-dynare <model> noclearall nointeractive  % noclearall 保留 oo_；nointeractive 不弹窗等输入
+addpath('<dynare-root>/matlab');         % self-contained: a clean MATLAB or Octave finds Dynare
+cd(fileparts(mfilename('fullpath')));    % go to the folder of this script; avoids a wrong working folder
+dynare <model> noclearall nointeractive  % noclearall keeps oo_; nointeractive does not wait for input
 save('<model>_oo.mat', 'oo_', 'M_', 'options_');
 ```
 
-`<model>_oo.mat` 是可重生成的中间产物，收尾按 SKILL.md §6 白名单清理；`run_*.m`/`analyze_*.m`
-是你和用户的成果脚本，**不删**（与 `plot_irfs_pub.m` 同级别）。
+`<model>_oo.mat` is an intermediate file that can be regenerated; remove it at cleanup (lists in
+`references/workflow-detail.md`, see SKILL.md "Report"). `run_*.m` and `analyze_*.m` are deliverables
+for you and the user: **do not delete them** (the same as `plot_irfs_pub.m`).
 
-## 多模型 / 多情景对比的组织
+## Comparing several models or scenarios
 
-对比 HANK vs RANK、基线 vs 反事实时，**每个模型各自求解、各自冻存，最后在一个分析脚本里一起读**：
+For HANK against RANK, or baseline against counterfactual, **solve and freeze each model separately,
+then read them together in one analysis script**:
 
 ```matlab
-% run_all.m —— 依次求解两个模型，各自冻存
+% run_all.m: solve the two models one after the other, freeze each
 cd('<dir>'); dynare rank_model noclearall nointeractive; oo_rank = oo_; save('rank_oo.mat','oo_rank');
 cd('<dir>'); dynare hank_model noclearall nointeractive; oo_hank = oo_; save('hank_oo.mat','oo_hank');
 
-% compare.m —— 只读冻存结果做对比图，反复改口径不重解
+% compare.m: comparison plots from the frozen results only; change freely without a new solve
 R = load('rank_oo.mat'); H = load('hank_oo.mat');
 plot_irfs_pub({'Y','C'}, 'eps_g', ...
     'Scenarios',     {R.oo_rank, H.oo_hank}, ...
     'ScenarioNames', {'RANK','HANK'}, ...
-    'Save', 'fig_g_multiplier');     % 多情景叠线见 publication-plots.md
+    'Save', 'fig_g_multiplier');     % overlaid scenarios: see publication-plots.md
 ```
 
-要点：**先各自跑通存盘，再统一对比**。别在对比脚本里嵌两个 `dynare` 调用——那样每调一次对比
-图就重解两个模型。
+Key point: **run and save each model first, then compare.** Do not put two `dynare` calls in the
+comparison script; each new comparison plot would then solve both models again.
 
-### 异质性（HANK）IRF 不在 oo_.irfs，取数见 heterogeneity.md
+### Heterogeneous (HANK) models store IRFs elsewhere
 
-标准 `stoch_simul` 的 IRF 在 `oo_.irfs.<var>_<shock>`（`plot_irfs_pub` 直接吃）。**异质性框架不同**：
-`heterogeneity_solve` 把 IRF 放在序列空间雅可比 `oo_.heterogeneity.dr` 里，取数方式与维度都不一样，
-对比 HANK vs RANK 前**务必先读 `references/heterogeneity.md`「IRF 取数」节**，否则会对着错的字段画图。
+`stoch_simul` stores IRFs in `oo_.irfs.<var>_<shock>`, which `plot_irfs_pub` reads directly.
+`heterogeneity_solve` stores sequence-space Jacobians in `oo_.heterogeneity.dr.G.<var>.<shock>`, with a
+different shape. In Dynare 7.2, `heterogeneity_simulate` also writes IRFs to `oo_.irfs`. Before you
+compare HANK against RANK, **read the IRF section of `references/heterogeneity.md`**; otherwise you
+plot the wrong field.
 
-## 拿解析基准即时校验（图会骗人，数字不会）
+## Check against analytical benchmarks
 
-图形掩盖量级错误：一条形状对、但**整体差了 100 倍或符号反了**的曲线，肉眼常看不出。凡模型里
-存在**已知解析结果**，求解后立刻 `fprintf` 打出来、和基准对一眼，再去信图：
+A plot hides errors of size: a curve with the right shape but **100 times too large or with the wrong
+sign** often looks fine. When the model has a **known analytical result**, print it with `fprintf` after
+the solve and compare before you trust the plot:
 
-| 场景 | 解析基准 | 抓什么 bug |
-|------|----------|-----------|
-| RANK 平衡预算政府支出 | 产出乘数 = 1（精确） | 归一化/`Scale` 写错（如多除了 100） |
-| RANK 一次总付转移 | 产出效应 = 0（李嘉图等价） | 冲击口径错、符号反 |
-| 稳态大比率 | `C/Y`、`I/Y`、`K/Y` 落在合理区间 | 校准或稳态代数错 |
-| 货币冲击 | 紧缩使产出/通胀同向下行 | Taylor 规则符号、时序错 |
+| Case | Analytical benchmark | Error it catches |
+|---|---|---|
+| RANK balanced-budget government spending | output multiplier = 1 (exact) | wrong normalization or `Scale` (for example divided by 100 once too often) |
+| RANK lump-sum transfer | output effect = 0 (Ricardian equivalence) | wrong shock definition, wrong sign |
+| Steady-state ratios | `C/Y`, `I/Y`, `K/Y` in plausible ranges | calibration or steady-state algebra error |
+| Monetary policy shock | a contraction lowers output and inflation | wrong sign in the Taylor rule, timing error |
 
-例：政府支出乘数本应 ≈ 1，脚本却打印 0.01——立刻暴露归一化多除了 100。**有锚点时先打印再信图**，
-这一步几乎零成本却能在出图前拦住缩放/符号类错误。基准从哪来：解析稳态、教科书极限情形（李嘉图
-等价、长期中性）、或同结构 RANK 基线的闭式解。
+Example: the government spending multiplier should be about 1, but the script prints 0.01. This shows
+at once that the normalization divides by 100 once too often. **When a benchmark exists, print first,
+then trust the plot.** This step costs almost nothing and catches scaling and sign errors before you
+make figures. Sources of benchmarks: the analytical steady state, textbook limiting cases (Ricardian
+equivalence, long-run neutrality), or the closed-form solution of a RANK baseline with the same
+structure.
 
-## 调通后关掉求解器逐步打印
+## Silence iteration output after convergence
 
-时间迭代、HANK 校准、homotopy 等迭代求解器默认逐步刷 `||Δpolicy||`、残差范数等，**几百上千行**。
-调试期看收敛轨迹有用；**一旦稳定收敛，就关掉**——既让输出（和你的上下文）干净可读，也省 MCP
-回传成本。具体怎么静默随求解器/选项而异（部分支持 `verbose`/`quiet` 开关或 `options_` 字段），
-确认跑通后顺手关掉，别让满屏迭代日志淹没真正要看的稳态残差与 BK 结论。
+Time iteration, HANK calibration, homotopy and other iterative solvers print `||Δpolicy||`, residual
+norms and similar at each step, often hundreds or thousands of lines. That trace helps while you debug.
+**When the solver converges reliably, turn it off.** The output (and your context) stays readable, and
+less text comes back through the execution route. How to silence it depends on the solver and its
+options (some have a `verbose` or `quiet` switch or an `options_` field). Do not let iteration logs
+hide the steady-state residuals and the Blanchard-Kahn result that you need to read.
 
-## 与既有参考的分工
+## Division of work with other references
 
-- **怎么把 .mod 跑通、报错怎么修** → workflow-detail.md §4.1「运行与纠错闭环」+ `references/debugging.md`（本文件不重复）。
-- **画图函数 `plot_irfs_pub` 的参数/多情景/置信带** → `references/publication-plots.md`。
-- **异质性框架、HANK IRF 取数** → `references/heterogeneity.md`。
-- **本文件**只回答"驱动脚本怎么组织，让贵的求解只跑一次、便宜的分析随便改"。
+- Making the `.mod` run, fixing errors: "Run-and-fix loop" and the error table in
+  `references/debugging.md` (not repeated here).
+- Parameters, scenarios and confidence bands of `plot_irfs_pub`: `references/publication-plots.md`.
+- Heterogeneous models, HANK IRFs: `references/heterogeneity.md`.
+- The run script: `references/run-script.md`.
+- **This file** only answers how to organize the driver scripts so that the expensive solve runs once
+  and the cheap analysis changes freely.

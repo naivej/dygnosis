@@ -51,8 +51,3 @@ Not used for:
 - Equation-variable count equality is not asserted because the MMB implementation duplicates the economy into `R` and `F` blocks for information-set handling.
 - Runtime validation, Dynare residual checks, Blanchard-Kahn checks, and IRF checks were not performed.
 
-## Translation Status
-
-- English draft was written first.
-- Chinese draft is a translation of the English draft.
-- Equation numbers `(F1)` through `(F49)` are preserved in both files.

@@ -47,8 +47,7 @@
     }
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_KW16/NK_KW16_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_KW16/NK_KW16_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_KW16/NK_KW16_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_KW16/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_KW16/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_KW16/worker_report.json"
@@ -72,7 +71,7 @@
   },
   "copyright_boundary": "Derived notes and equations only; no long prose copied from paper.",
   "paper_title": "Fiscal deficits, financial fragility, and the effectiveness of government policies",
-  "authors": "Kirchner, Markus; van Wijnbergen, Sweder ",
+  "authors": "Kirchner, Markus; van Wijnbergen, Sweder",
   "year": "2016",
   "journal_or_series": "Journal of Monetary Economics 80, 51-68",
   "doi": "10.1016/j.jmoneco.2016.04.007",
@@ -81,7 +80,7 @@
   "model_index_row_normalized": {
     "model_id": "NK_KW16",
     "paper_title": "Fiscal deficits, financial fragility, and the effectiveness of government policies",
-    "authors": "Kirchner, Markus; van Wijnbergen, Sweder ",
+    "authors": "Kirchner, Markus; van Wijnbergen, Sweder",
     "year": "2016",
     "journal_or_series": "Journal of Monetary Economics 80, 51-68",
     "doi": "10.1016/j.jmoneco.2016.04.007",
@@ -112,15 +111,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_KW16/NK_KW16_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_KW16/NK_KW16_derivation.md",
       "exists": true,
       "sha256": "15d5b273b6c2a60222281fe89ef35cbadd4466394d35d870ed8e59481b954943"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_KW16/NK_KW16_derivation.zh.md",
-      "exists": true,
-      "sha256": "28ddab13764453079998ea69160064270b026f8e1b28aca23652f8e006472e87"
     },
     {
       "role": "source_manifest",

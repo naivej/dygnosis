@@ -2,8 +2,7 @@
   "model_id": "US_FMS134",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_FMS134/US_FMS134_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_FMS134/US_FMS134_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_FMS134/US_FMS134_derivation.md",
     "mmb-paper-derivations/derivations/US_FMS134/source_manifest.json",
     "mmb-paper-derivations/derivations/US_FMS134/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_FMS134/worker_report.json"

@@ -421,4 +421,4 @@ g_t=\rho_g g_{t-1}+\varepsilon_t^g.
 | $`\rho`$ parameters | persistence/ARMA coefficients for shocks | estimated |
 | `CBDB`, `CSDS`, `BHCB`, `CBC`, `CSC`, `DBD`, `DSD` | steady-state ratios and aggregation weights | implementation cross-check constants |
 
-**Equation count**: 29 numbered conditions, (F1)-(F29). The Chinese translation must preserve the same count.
+**Equation count**: 29 numbered conditions, (F1)-(F29).

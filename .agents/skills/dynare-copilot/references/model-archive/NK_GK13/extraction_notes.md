@@ -17,7 +17,6 @@
 
 - Overall formula quality: `needs_review`.
 - The main household, bank, central-bank, production, policy, and market-clearing equations are visible in the Markdown.
-- OCR/source ambiguity: around the LSAP purchase rules, the Markdown prints both purchase fractions as `\varphi_{st}`. The English and Chinese derivations use `\varphi_{st}` for private securities and `\varphi_{bt}` for bonds, consistent with the surrounding text and the MMB implementation cross-check.
 - OCR/source ambiguity: the resource-cost expression prints `\tau_g` for the government-bond purchase cost, while the government budget and text use a bond-intermediation cost. The derivations use `\tau_b` and mark the issue.
 - Long-term yield equations (paper equations 26-28 and 46-47) were not included as core equilibrium F-equations because they are reporting/yield-construction equations; the OCR around equation 26 is visibly noisy.
 
@@ -37,8 +36,3 @@
 - The steady-state section is a source-backed solve order plus calibration targets, not a verified numeric steady-state reconstruction.
 - The derivation does not attempt to reproduce the MMB linearized 67-equation implementation; it extracts the paper-side structural model and records implementation-only conveniences separately.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English derivation after the English structure was checked.
-- Equation numbers `(F1)` through `(F47)` are intended to match exactly across English and Chinese files.

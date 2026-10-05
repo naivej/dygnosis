@@ -34,7 +34,3 @@ Status: `needs_review`
 - A complete nonlinear steady-state derivation is deferred; the paper provides calibrated ratios and the implementation uses `model(linear)`.
 - Runtime validation, BK checks, and equation-count checks against a runnable `.mod` are deferred to a future phase.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated second and preserves the same section order, equation numbers, file paths, DOI, and `needs_review` markers.

@@ -29,8 +29,3 @@
 - Decide later whether `NK_RW06` and `NK_RW06AL` should share a paper-side derivation with variant-specific implementation appendices, or remain separate archive entries.
 - Validate adaptive-learning policy-rule behavior in a future runtime-validation phase if that becomes in scope.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English version with the same eight-section structure and same equation numbering.
-- English and Chinese F-number counts should be kept synchronized during review.

@@ -29,7 +29,3 @@
 - Runtime validation, Blanchard-Kahn checks, residual checks, and IRF reproduction were not assigned and were not run.
 - No promotion was made to `.agents/skills/dynare-copilot/references/model-archive/`.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English draft with the same eight-section structure and matching `(F#)` numbering.

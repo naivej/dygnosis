@@ -29,8 +29,3 @@
 - The wage Phillips curve and sectoral price-setting system are fuller in the paper than in the compact MMB implementation; future work should decide whether archive promotion tracks the paper's full system or the MMB reduction.
 - Runtime validation, Dynare residual checks, steady-state code, BK checks, and IRF comparison were not performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English derivation.
-- Equation numbering parity was validated: both files contain `(F1)` through `(F50)`.

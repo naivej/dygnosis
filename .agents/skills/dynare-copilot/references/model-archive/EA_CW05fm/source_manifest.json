@@ -64,8 +64,7 @@
     }
   },
   "archive_files": {
-    "derivation_en": "mmb-paper-derivations/derivations/EA_CW05fm/EA_CW05fm_derivation.en.md",
-    "derivation_zh": "mmb-paper-derivations/derivations/EA_CW05fm/EA_CW05fm_derivation.zh.md",
+    "derivation_en": "mmb-paper-derivations/derivations/EA_CW05fm/EA_CW05fm_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/EA_CW05fm/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/EA_CW05fm/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/EA_CW05fm/worker_report.json"

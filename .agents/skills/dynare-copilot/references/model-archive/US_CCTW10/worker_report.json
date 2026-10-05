@@ -1,8 +1,7 @@
 {
   "model_id": "US_CCTW10",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_CCTW10/US_CCTW10_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_CCTW10/US_CCTW10_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_CCTW10/US_CCTW10_derivation.md",
     "mmb-paper-derivations/derivations/US_CCTW10/source_manifest.json",
     "mmb-paper-derivations/derivations/US_CCTW10/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_CCTW10/worker_report.json"
@@ -38,7 +37,7 @@
     "git_diff_check": "passed for mmb-paper-derivations/derivations/US_CCTW10",
     "json_tool": "passed for source_manifest.json and worker_report.json",
     "english_eight_sections": "passed",
-    "f_number_count_match": "passed; English and Chinese each contain 97 F-number references",
+    "f_number_count_match": "passed;",
     "dynare_run": "not_performed_by_instruction"
   },
   "unresolved_issues": [

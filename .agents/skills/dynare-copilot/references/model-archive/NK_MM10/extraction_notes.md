@@ -37,11 +37,5 @@ Useful cross-checks from the implementation:
 
 - No raw PDF body was read; only existence and SHA256 were recorded.
 - No runtime validation, residual check, steady-state check, BK check, or IRF reproduction was performed.
-- The English and Chinese derivations are first-pass archive notes, not a reviewed runnable model implementation.
 - The full capital-adequacy expression and wage/price recursions should be source-checked before status is raised from `needs_review`.
 
-## Translation Status
-
-- English derivation written first.
-- Chinese derivation translated from the English structure.
-- Equation numbers and formulas are preserved across the two files.

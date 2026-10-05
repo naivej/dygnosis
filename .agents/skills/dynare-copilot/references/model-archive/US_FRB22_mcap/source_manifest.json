@@ -78,8 +78,7 @@
     }
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_FRB22_mcap/US_FRB22_mcap_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_FRB22_mcap/US_FRB22_mcap_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_FRB22_mcap/US_FRB22_mcap_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_FRB22_mcap/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_FRB22_mcap/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_FRB22_mcap/worker_report.json"

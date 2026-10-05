@@ -32,8 +32,3 @@
 - Runtime validation was intentionally not performed; no Dynare commands were run.
 - Shared `catalog.csv` and `status.csv` were intentionally not edited for this task; proposed rows are in `worker_report.json`.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation is a direct translation of the English draft.
-- Equation numbers `(F1)` through `(F39)` are preserved in both versions.

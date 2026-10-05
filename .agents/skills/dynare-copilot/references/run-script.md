@@ -1,101 +1,177 @@
-# 运行脚本 `run_<model>.m`（把零件接成一键复跑的总装脚本）
+# Run script `run_<model>.m`
 
-> **何时读**：交付一个可让用户在自己 MATLAB 里**一键复跑**模型的驱动脚本时（§3 阶段5c 默认产出）；
-> 或用户问"怎么运行""给我个跑的脚本""图怎么自动出来"。**本文件回答**：怎么写这个 `.m`，
-> 让它把已生成的零件（`.mod` + 稳态 `.m` + 绘图/产出代码 + 自检打印）**接成一条龙自动跑完**，
-> 而不是又丢一个孤立、还得用户手动配路径、手动调画图的半成品。
+Read this when you deliver a script that reruns the model in one step, as Stage 5c (run script) of a
+new model or a replication, or when the user asks how to run the model, wants a script that runs it,
+or asks how to get the figures automatically.
 
-## 核心定位：run 脚本是"总装"，不是又一个孤立文件
+## What the run script does
 
-到了交付，工作目录里通常已经躺着几个零件：模型本体 `<model>.mod`、（可能的）外部稳态文件
-`<model>_steadystate.m`、绘图函数 `plot_irfs_pub.m`。**它们各自不会自己跑起来**——尤其绘图代码，
-过去最常见的疏漏就是：脚本拷过去了，但没有任何一行调用它，于是用户跑完 `dynare` 只看到 Dynare
-自带的粗糙图，发表级图根本没生成。run 脚本的唯一职责，就是**按正确顺序把这些零件串起来、并真正
-调用它们**，让用户改一行路径就能从求解一路自动跑到出图、出数。
+At delivery the project folder usually holds several parts: the model `<model>.mod`, perhaps a
+hand-written steady-state file `<model>_steadystate.m`, and the plot functions `plot_irfs_pub.m` /
+`plot_series_pub.m`. None of them runs by itself. The most common gap is a plot function that was
+copied but that no line calls. The user then runs `dynare`, sees only Dynare's own graphs, and the
+paper figures never appear.
 
-因此判据很简单：**run 脚本跑完，用户该看到的产出（图/数）是否都自动出现了？** 缺哪个就是漏接了哪个零件。
+The run script has one job: call these parts in the correct order. One run then goes from the
+solution to the figures and numbers, and the user needs to change at most the Dynare path.
 
-## 每个项目结构不同——这是写法指引，不是死模板
+Test: when the run script finishes, do all the outputs the user expects (figures, numbers) exist?
+Each missing output is a part that is not connected.
 
-不同任务的 run 脚本长得不一样：单文件 RBC 三行就够；带外部稳态文件的要确保稳态 `.m` 在路径上；
-多模型对比要依次求解各自冻存；有些既有项目本就有一个 `main`/总控脚本，这时**把新模型的求解与出图
-接进那个 main，而不是另起炉灶**。所以下面给的是**五个固定环节 + 按实验类型选产出**的拼装法，
-照具体项目填充，不要原样照搬变量名与路径。
+## When to write one
 
-## 五个固定环节（骨架）
+Stage 5c (run script) is the default for a new model or a replication that produces IRFs or
+simulated paths. Do not write one for a small edit or a pure check, or when the user declines. If
+the project already has a main script, extend it instead (see "Project variants").
+
+## Adapt it to the project
+
+This is guidance, not a fixed template. A single-file RBC model needs a few lines. A model with a
+hand-written steady-state file needs that file next to the `.mod`. A comparison of several models
+solves and saves each model in turn. Build the script from the five steps below. Choose the outputs
+by experiment type. Use the project's own names and paths, not the example names.
+
+To find the parts, use Dygnosis (see dygnosis-workflow.md). `dynare_related_files` lists the includes
+and the steady-state and helper files of a `.mod`. `dynare_model_info` gives the exact variable and
+shock names for the plot calls.
+
+## The five steps
 
 ```matlab
 % =====================================================================
-%  run_<model>.m  —  <一句话：本脚本求解 X 模型并产出 Y>
-%  用法：在 MATLAB 中直接运行（双击 / F5），无需手动配路径或切目录。
+%  run_<model>.m  -  <one line: this script solves model X and produces Y>
+%  Usage: run the file (F5, run('run_<model>.m') or matlab -batch).
+%  No manual path setup or change of folder is needed.
 % =====================================================================
 clear; close all; clc;
+isOctave = exist('OCTAVE_VERSION', 'builtin') ~= 0;
 
-% ---- 1. 环境：自包含，开箱即用 ----
-%   addpath 让干净的 MATLAB 也找得到 Dynare；cd 到脚本自身目录，避免 MCP/会话工作目录漂移
-DYNARE_PATH = 'C:\dynare\7.1\matlab';      % 按本机改这一行
-addpath(DYNARE_PATH);
-cd(fileparts(mfilename('fullpath')));
+% ---- 1. Environment: self-contained ----
+if isempty(which('dynare'))
+    addpath('<dynare-root>/matlab');   % Dynare install path on this machine
+end
+here = fileparts(mfilename('fullpath'));   % folder of this script
+if ~isempty(here), cd(here); end
 
-% ---- 2. 求解：dynare 会自动调用同名 <model>_steadystate.m（若存在）----
-dynare <model> noclearall nointeractive    % noclearall 保留 oo_ 供后续取用
+% ---- 2. Solve: dynare calls <model>_steadystate.m if it exists ----
+dynare <model> noclearall nointeractive
 
-% ---- 3. 关键结果自检：数字不会骗人，先打印再信图（见 matlab-workflow.md）----
-ss = @(v) oo_.steady_state(strcmp(M_.endo_names, v));   % 按变量名取稳态值
+% ---- 3. Check key numbers before you trust figures (see matlab-workflow.md) ----
+ys = oo_.steady_state;                                  % set by steady; (else initval values)
+if isfield(oo_, 'dr') && isfield(oo_.dr, 'ys') && ~isempty(oo_.dr.ys)
+    ys = oo_.dr.ys;                                     % steady state used by stoch_simul
+end
+ss = @(v) ys(strcmp(M_.endo_names, v));                 % steady-state value by name
 fprintf('\n===== steady-state check =====\n');
 fprintf('C/Y = %.4f   I/Y = %.4f\n', ss('c')/ss('y'), ss('invest')/ss('y'));
 
-% ---- 4. 产出/出图：按实验类型选（见下表），并**真正调用**产出代码 ----
-plot_irfs_pub({'y','c','invest','l'}, 'eps_z', 'Save', 'fig_irf');
+% ---- 4. Outputs: choose by experiment type (table below) and call the code ----
+if ~isOctave   % the plot functions need MATLAB
+    plot_irfs_pub({'y','c','invest','l'}, 'eps_z', 'Save', 'fig_irf');
+end
 
-% ---- 5. 冻存结果：供 analyze_<model>.m 反复改图时复用，不重解 ----
+% ---- 5. Save the results for analyze_<model>.m, so figures change without a new solve ----
 save('<model>_oo.mat', 'oo_', 'M_', 'options_');
 ```
 
-第1、2、5 环节几乎所有任务通用；**第3、4 环节按模型与实验填**。注释一律用 §0 选定的 `[LANG]`
-（R1：`.mod` 与 `.m` 同规则——注释随 [LANG]，标识符/字符串一律英文 ASCII）。
+Steps 1, 2 and 5 fit almost every task. Fill steps 3 and 4 for the model and the experiment.
 
-## 第4环节按实验类型选产出（产出不一定是 IRF）
+- **Step 1, Dynare path.** Do not copy a fixed install path from another machine. Find the path on
+  the machine that runs the script and write it into the placeholder `<dynare-root>/matlab`. For
+  example, run `which dynare` in that MATLAB or Octave session, or find the folder that contains
+  `matlab/dynare.m`. Say in the report which path you wrote. If Dynare is already on the path, the
+  `addpath` line is skipped.
+- **Step 1, folder.** `mfilename('fullpath')` is empty when the code is pasted into a session instead
+  of run as a file. In that case, `cd` to the project folder first.
+- **Step 2, options.** With `noclearall`, `dynare` does not delete the global variables and the
+  functions that use persistent variables before the run. With `nointeractive`, Dynare does not
+  request user input (running-dynare.rst).
+- **Step 3.** A figure can hide an error of scale or sign, so print key numbers first. Where an
+  analytical benchmark exists, print it next to the result (matlab-workflow.md). Read the steady
+  state from the right field. `steady;` fills `oo_.steady_state`. `stoch_simul` without `steady;`
+  puts the steady state in `oo_.dr.ys` and leaves `oo_.steady_state` at the `initval` values (zero
+  for variables without `initval`), so a ratio such as `C/Y` prints `NaN` (checked with Dynare 7.2).
+- **Step 4.** The plot functions need MATLAB (publication-plots.md, "Compatibility and cleanup").
+  The `isOctave` guard lets the other steps run under Octave. Under Octave, report that no figures
+  were made.
+- **Step 5.** Dynare already saves `M_`, `oo_` and `options_` in
+  `<model>/Output/<model>_results.mat` (running-dynare.rst, *Output*). The next run of the same
+  `.mod` overwrites that file. The named copy keeps the results of this run when one `.mod` runs
+  several experiments or calibrations, and it is the file that `analyze_<model>.m` loads.
+- **Language (R1).** Comments and printed messages follow the user's language. Identifiers, file
+  names and labels in figures stay English ASCII. The same rule holds for the `.mod` and the `.m`
+  files.
 
-run 脚本最容易写死成"画 IRF"，但本 skill 的实验类型很多，产出从哪取、怎么呈现各不相同。
-**先看本任务的实验命令，再选对应产出代码接进第4环节**：
+## Step 4: choose the output by experiment type
 
-| 实验（命令）                              | 产出在哪                                   | 第4环节怎么写                                                                 |
-| ----------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------- |
-| 随机模拟·IRF（`stoch_simul(irf=N)`）     | `oo_.irfs.<var>_<shock>`                  | 调**绘图脚本** `plot_irfs_pub({...}, 'eps_x', 'Save','fig_irf');`（见 publication-plots.md） |
-| 随机模拟·模拟序列（`stoch_simul(periods=T)`） | `oo_.endo_simul`                        | 调**绘图脚本** `plot_series_pub({'y','c'}, 'Save','fig_sim');`（看偏离加 `'Center','ss'`） |
-| 随机模拟·理论矩（`periods=0`）           | `oo_.mean`/`oo_.var`/`oo_.autocorr`     | 无图，`fprintf` 打印矩表（均值/标准差/自相关/相关阵关键项）                   |
-| 完全预见过渡路径（`perfect_foresight_solver`） | `oo_.endo_simul`（各期路径）             | 调**绘图脚本** `plot_series_pub({'y','c','k'}, 'Save','fig_transition');`     |
-| 估计·后验 IRF（`estimation`）            | `oo_.PosteriorIRF` / 后验图              | `plot_irfs_pub` 吃后验 IRF + 置信带（`'Bands',{{lo,hi}}`，见 publication-plots.md） |
-| 预测/条件预测（`forecast`）              | `oo_.forecast`                            | 扇形图（自带 `_forecast` 图或自画分位带）                                     |
-| 冲击分解（`shock_decomposition`）        | `oo_.shock_decomposition`                 | 堆叠柱状图（见 shock-decomposition.md）                                       |
+Run scripts are easy to hard-code as "plot the IRFs". But the experiment types of this skill put
+their output in different places and need different presentations. Look at the experiment command of
+the task first, then put the matching output code into step 4.
 
-要点：**第4环节必须真的调用绘图脚本并核对它生成了文件/图**——这是过去最常漏的一环。本 skill
-**两个绘图脚本各管一类产出，都是现成的、直接调用、不要内联手写 `plot`**：
-- `plot_irfs_pub.m`——IRF（脉冲响应），见 publication-plots.md；
-- `plot_series_pub.m`——时间序列：模拟序列、完全预见过渡路径（`oo_.endo_simul`），接口与风格同上。
+| Experiment (command) | Output in | Step 4 code |
+|---|---|---|
+| Stochastic simulation, IRFs (`stoch_simul(irf=N)`) | `oo_.irfs.<var>_<shock>` | `plot_irfs_pub({...}, 'eps_x', 'Save','fig_irf');` (publication-plots.md) |
+| Stochastic simulation, simulated series (`stoch_simul(periods=T)`) | `oo_.endo_simul` | `plot_series_pub({'y','c'}, 'Save','fig_sim');` (add `'Center','ss'` for deviations) |
+| Stochastic simulation, theoretical moments (`periods=0`, the default) | `oo_.mean`, `oo_.var`, `oo_.autocorr` | no figure; print a table of key moments (means, standard deviations, autocorrelations, key correlations) with `fprintf` |
+| Perfect foresight transition path (`perfect_foresight_solver`) | `oo_.endo_simul` (all periods, with initial and terminal columns) | `plot_series_pub({'y','c','k'}, 'Save','fig_transition');` (perfect-foresight.md) |
+| Estimation, posterior IRFs (`estimation(..., bayesian_irf)`) | `oo_.PosteriorIRF.dsge.<Mean, Median, HPDinf, HPDsup, …>.<var>_<shock>` | `plot_irfs_pub` with the posterior mean as `oo_` and the HPD interval as `Bands` (publication-plots.md, "Posterior IRFs") |
+| Forecasting (`forecast`) | `oo_.forecast` | fan chart: Dynare's own forecast graphs, or your own bands (forecasting.md) |
+| Shock decomposition (`shock_decomposition`) | `oo_.shock_decomposition` | stacked bar chart (shock-decomposition.md) |
+| Heterogeneous-agent model (`heterogeneity_simulate`) | `oo_.irfs`, and `oo_.endo_simul` when `periods > 0` | the same plot functions (heterogeneity.md) |
 
-两者都要先拷进工作目录（属 skill 资产、收尾不删）。若一次任务同时产出多种（如又出 IRF 又出模拟序列），
-就在第4环节顺次调多段、各自落地。`plot_series_pub` 用法：`plot_series_pub({'y','c'}, 'Save','fig_sim')`，
-看对稳态的偏离加 `'Center','ss'`（配 `'Scale',100` 看百分比），多情景叠线用 `'Scenarios',{ooA,ooB}`。
+Step 4 must call the plot function and check that the files were written. This is the step that was
+missed most often. Each plot function covers one kind of output. Call it; do not write inline `plot`
+code:
 
-## 项目特异变体
+- `plot_irfs_pub.m` plots IRFs (publication-plots.md).
+- `plot_series_pub.m` plots time series in `oo_.endo_simul`: simulated series and perfect foresight
+  transition paths. Same interface and style.
 
-**① 项目已有 `main`/总控脚本**：不要另起 `run_<model>.m`，把第2、4环节（求解 + 出图）接进既有
-`main` 的相应位置，沿用它的路径/目录约定。交付时说明"已接入现有 main 的第 N 步"。
+Copy both into the project folder first. They are deliverables, so do not delete them during
+cleanup. If one task produces several outputs (for example IRFs and a simulated series), call each
+in turn in step 4. Short `plot_series_pub` use: `plot_series_pub({'y','c'}, 'Save','fig_sim')`. Add
+`'Center','ss'` for deviations from the steady state (with `'Scale',100` for percent deviations of
+log variables). Use `'Scenarios',{ooA,ooB}` to compare scenarios.
 
-**② 外部数值稳态文件**：`dynare <model>` 会**自动**探测并调用同目录的 `<model>_steadystate.m`，
-无需在 run 脚本里手动 `run` 它——只要确保它与 `.mod` 同名、同目录、在路径上即可。
+## Project variants
 
-**③ 多模型/多情景对比**：各模型**各自求解、各自冻存**，最后统一读 `.mat` 出对比图，别在对比段里
-嵌多个 `dynare`（否则每改一次图重解所有模型）。完整骨架见 matlab-workflow.md「多模型对比」。
+1. **The project has a main script.** Do not create a separate `run_<model>.m`. Put steps 2 and 4
+   (solve and plot) at the matching place in the existing main script, and keep its path and folder
+   conventions. In the report, say which step of the main script now runs the model.
+2. **Hand-written steady-state file.** `dynare <model>` finds and calls `<model>_steadystate.m`
+   itself. The manual (Steady state) requires the name `FILENAME_steadystate.m` for `FILENAME.mod`.
+   Do not `run` the file from the run script. Keep it next to the `.mod`, with exactly that name.
+   A `steady_state_model` block makes Dynare generate `+<model>/steadystate.m` instead
+   (steady-state.md).
+3. **Several models or scenarios.** Solve and save each model separately. Then load the saved
+   results and plot the comparison. Do not put several `dynare` calls in the comparison step: each
+   change to a figure would solve all models again. Full skeleton: matlab-workflow.md (comparison of
+   several models).
+4. **Expensive solve (heterogeneous-agent models, estimation, third order).** Split the work into
+   `run_<model>.m` (solve and save only) and `analyze_<model>.m` (load the `.mat` and plot), so that
+   the expensive solve runs once. Reasons and skeleton: matlab-workflow.md.
 
-**④ 求解很贵（HANK/估计/三阶）**：把"求解"与"分析/出图"拆成 `run_<model>.m`（只求解 + 冻存）
-与 `analyze_<model>.m`（读 `.mat` + 出图），贵的求解只跑一次。理由与骨架见 matlab-workflow.md。
+## Run it
 
-## 与既有参考的分工
+Run the script through the route that SKILL.md "Numerical runs" finds: a MATLAB MCP server, a
+terminal `matlab -batch`, or `octave --eval`. If no route exists, say what was not run and give the
+user the commands:
 
-- **绘图脚本 `plot_irfs_pub`（IRF）与 `plot_series_pub`（时间序列/过渡路径）的参数/多情景/置信带** → publication-plots.md（本文件只管"在 run 脚本里调用它们"）。
-- **求解/分析解耦、缓存 oo_、多模型组织、解析基准自检** → matlab-workflow.md。
-- **怎么把 `.mod` 跑通、报错怎么修** → workflow-detail.md §4.1 +  debugging.md。
-- **本文件**只回答"怎么写那个把零件串起来、一键复跑且自动出产出的 `.m`"。
+```text
+matlab -batch "run('<project>/run_<model>.m')"
+octave --eval "run('<project>/run_<model>.m')"
+```
+
+Only a run gives the steady state, the Blanchard-Kahn conditions and the IRFs. Do not infer them from
+static checks.
+
+## Related files
+
+- Plot function options, scenarios, bands: publication-plots.md. This file only covers how the run
+  script calls them.
+- Separate solve and analysis, cached `oo_`, several models, analytical benchmarks:
+  matlab-workflow.md.
+- Getting the `.mod` to run and fixing errors: debugging.md "Run-and-fix loop".
+- Static checks before the first run (`dynare_diagnose`): dygnosis-workflow.md.
+- This file: how to write the `.m` that connects the parts, reruns in one step and produces the
+  outputs.

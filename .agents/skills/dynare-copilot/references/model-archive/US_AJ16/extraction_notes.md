@@ -31,8 +31,3 @@
 - The wedge notation difference between paper text and MMB `.mod` should be reconciled.
 - OCR introduced some malformed symbols in the household Euler equations; the extracted archive equations preserve the core structure but should be checked against PDF/appendix formulas.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English core.
-- Equation numbers `(F1)` through `(F62)` are preserved in both versions.

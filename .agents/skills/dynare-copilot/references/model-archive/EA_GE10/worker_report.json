@@ -2,8 +2,7 @@
   "model_id": "EA_GE10",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_GE10/EA_GE10_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_GE10/EA_GE10_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_GE10/EA_GE10_derivation.md",
     "mmb-paper-derivations/derivations/EA_GE10/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_GE10/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_GE10/worker_report.json"

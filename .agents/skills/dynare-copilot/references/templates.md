@@ -1,36 +1,65 @@
-# 模板库（可直接套用的规范骨架）
+# Templates (starting skeletons for `.mod` files)
 
-> **何时读**：需要现成骨架起步时。**本文件回答**：RBC/NK/完全预见三个规范模板（英文标签+[LANG] 注释）、宏处理器变体写法、LaTeX 输出命令、DSGE_mod 论文对照表。
+Read this when you need a ready skeleton to start a model: basic RBC, three-equation New Keynesian,
+perfect foresight transition, macro-processor variants, LaTeX output.
 
-以下骨架提炼自 Johannes Pfeifer 的 DSGE_mod，体现规范写法：文件头注释块、变量/参数
-`long_name`+LaTeX 名、`[name=]` 方程标注、`steady_state_model` 反解校准、`log_*` 辅助
-变量、`resid;steady;check;` 流程。**按用户的具体模型修改，不要原样照搬数字。**
+The skeletons follow Johannes Pfeifer's DSGE_mod house style: a header comment block, a TeX name and
+`long_name` on every declaration, a `name` tag on every equation, a closed-form steady state with
+back-solved calibration in `steady_state_model`, `log_*` helper variables for plots, and the
+`resid; steady; check;` sequence. Adapt them to the user's model. Do not copy the numbers unchanged.
 
-接近某篇论文时，优先去 DSGE_mod 取对应文件作起点：RBC 类→`RBC_baseline`、`Hansen_1985`；
-NK 类→`Gali_2015_chapter_3`；中型估计→`Smets_Wouters_2007`；开放经济→`SGU_2003`、
-`GarciaCicco_et_al_2010`；最优政策→`Gali_2015_chapter_5_*`；偶尔约束→
-`Guerrieri_Iacoviello_2015`。
+## Labels, comments and names
 
-> 注意：`.mod` 文件里只有注释能用 §0 选定语言（中文/英文/日语）；`long_name='...'`、`[name='...']` 等一律英文，否则
-> 预处理器报错。下方模板已遵循（标签英文、注释中文；实际使用时注释改为 [LANG]）。
+- **R1.** Comments follow the user's language. Identifiers, `long_name` values, equation tags and TeX
+  names stay English ASCII. This is house style, not a Dynare rule: Dynare 7.2 accepts UTF-8 in comments
+  and quoted strings, but ASCII labels keep MATLAB/Octave output, TeX and plots portable. The templates
+  use English comments. Dygnosis reports missing metadata as Information: I208 (equation without a
+  `name` tag), I209 (declaration without `long_name`), I210 (number written in an equation). None of
+  them is a Dynare refusal.
+- **R5.** The templates use `betta`, `alppha`, `gam` and `invest`. `psi` and `pi` are also MATLAB
+  function names. They are safe with `steady_state_model`; rename them if you move the steady state to a
+  user-written steady-state file (`<model>_steadystate.m`).
+- Helper variables such as `log_y = log(y);` are ordinary endogenous variables that you write. Do not
+  call them auxiliary variables: in Dynare, auxiliary variables are the `AUX_*` variables that Dynare
+  creates.
 
-## 模板 1：基础 RBC（随机模拟）
+## Starting points in the local libraries
+
+When the user's model is close to a known paper, start from the matching DSGE_mod file in
+`references/examples-code/<Folder>/<CodeID>.mod` (lookup: `references/catalog-lookup.md`):
+
+| Model family | Local file (Folder/CodeID) |
+|---|---|
+| RBC | `RBC_baseline/RBC_baseline`, `Hansen_1985/Hansen_1985` |
+| Basic NK | `Gali_2015/Gali_2015_chapter_3` (linear), `Gali_2015/Gali_2015_chapter_3_nonlinear` |
+| Medium-scale estimation | `Smets_Wouters_2007/Smets_Wouters_2007_45` |
+| Open economy | `SGU_2003/SGU_2003`, `Gali_Monacelli_2005/Gali_Monacelli_2005` |
+| Optimal policy | `Gali_2015/Gali_2015_chapter_5_commitment`, `Gali_2015/Gali_2015_chapter_5_discretion` |
+| Occasionally binding constraints | `Dynare_Course/Chapter_12_OccBin/NK_occbin` |
+
+DSGE_mod files that are not in the local library (for example `GarciaCicco_et_al_2010`,
+`Guerrieri_Iacoviello_2015`) are at [github.com/JohannesPfeifer/DSGE_mod](https://github.com/JohannesPfeifer/DSGE_mod).
+
+## Template 1: basic RBC (stochastic simulation)
 
 ```dynare
 /*
- * 基础 RBC 模型（含 TFP 冲击），随机模拟。
- * 时序：期末存量约定，资本以 k(-1) 进入当期生产。
- * 稳态解析求解，并固定稳态劳动 l=1/3 反解 psi。
+ * Basic RBC model with a TFP shock, stochastic simulation.
+ * Timing: "stock at the end of the period" convention; capital enters production as k(-1).
+ * Closed-form steady state; steady-state labor is fixed at l = 1/3 and psi is back-solved.
  */
 
-//==================== 变量声明 ====================
-var y      ${y}$       (long_name='output')
-    c      ${c}$       (long_name='consumption')
-    k      ${k}$       (long_name='capital')
-    l      ${l}$       (long_name='labor')
-    invest ${i}$       (long_name='investment')
-    z      ${z}$       (long_name='TFP')
-    log_y log_c log_k log_l ;
+//==================== Declarations ====================
+var y      ${y}$      (long_name='output')
+    c      ${c}$      (long_name='consumption')
+    k      ${k}$      (long_name='capital')
+    l      ${l}$      (long_name='labor')
+    invest ${i}$      (long_name='investment')
+    z      ${z}$      (long_name='log TFP')
+    log_y  ${\log y}$ (long_name='log output')
+    log_c  ${\log c}$ (long_name='log consumption')
+    log_k  ${\log k}$ (long_name='log capital')
+    log_l  ${\log l}$ (long_name='log labor') ;
 varexo eps_z ${\varepsilon_z}$ (long_name='TFP shock') ;
 parameters
     betta  ${\beta}$   (long_name='discount factor')
@@ -40,32 +69,32 @@ parameters
     rhoz   ${\rho_z}$  (long_name='TFP persistence')
     psi    ${\psi}$    (long_name='labor disutility') ;
 
-//==================== 参数校准 ====================
+//==================== Calibration ====================
 betta  = 0.99;
 sigma  = 1;
 alppha = 0.33;
 delta  = 0.025;
 rhoz   = 0.95;
-// psi 在 steady_state_model 中反解
+// psi is back-solved in steady_state_model
 
-//==================== 模型方程 ====================
+//==================== Model ====================
 model;
-// 欧拉方程：跨期消费选择
+// Euler equation: intertemporal consumption choice
 [name='Euler equation']
 c^(-sigma) = betta*c(+1)^(-sigma)*(alppha*exp(z(+1))*k^(alppha-1)*l(+1)^(1-alppha) + 1 - delta);
-// 劳动 FOC：消费-闲暇权衡
+// Labor FOC: consumption-leisure trade-off
 [name='labor FOC']
 psi*c^sigma/(1-l) = (1-alppha)*exp(z)*k(-1)^alppha*l^(-alppha);
-// 资本运动律（期末存量在左边）
+// Law of motion of capital (end-of-period stock on the left)
 [name='law of motion of capital']
 k = invest + (1-delta)*k(-1);
-// 资源约束
+// Resource constraint
 [name='resource constraint']
 y = c + invest;
-// 生产函数（资本预定，故 k(-1)）
+// Production function (capital is predetermined, hence k(-1))
 [name='production function']
 y = exp(z)*k(-1)^alppha*l^(1-alppha);
-// TFP 过程（z 内生，仅 eps_z 外生）
+// TFP process (z is endogenous; only eps_z is exogenous)
 [name='TFP process']
 z = rhoz*z(-1) + eps_z;
 [name='log output'] log_y = log(y);
@@ -74,50 +103,50 @@ z = rhoz*z(-1) + eps_z;
 [name='log labor'] log_l = log(l);
 end;
 
-//==================== 稳态（解析 + 反解校准）====================
+//==================== Steady state (closed form + back-solved calibration) ====================
 steady_state_model;
     z = 0;
-    l  = 1/3;                                           // 校准目标
-    kl = ((1/betta - 1 + delta)/alppha)^(1/(alppha-1)); // 资本-劳动比
+    l  = 1/3;                                           // calibration target
+    kl = ((1/betta - 1 + delta)/alppha)^(1/(alppha-1)); // capital-labor ratio
     k  = kl*l;
     invest = delta*k;
     y  = kl^alppha*l;
     c  = y - invest;
-    psi = (1-alppha)*kl^alppha*(1-l)/c^sigma;           // 反解 psi 命中 l=1/3
+    psi = (1-alppha)*kl^alppha*(1-l)/c^sigma;           // back-solve psi to hit l = 1/3
     log_y = log(y); log_c = log(c); log_k = log(k); log_l = log(l);
 end;
 
-//==================== 检查 ====================
+//==================== Checks ====================
 resid;
 steady;
 check;
 
-//==================== 冲击 ====================
+//==================== Shocks ====================
 shocks;
     var eps_z; stderr 0.007;
 end;
 
-//==================== 实验 ====================
+//==================== Experiment ====================
 stoch_simul(order=1, irf=40, hp_filter=1600) log_y log_c log_k log_l z;
 ```
 
-## 模板 2：三方程新凯恩斯（缺口形式，随机模拟）
+## Template 2: three-equation New Keynesian model (gap form, stochastic simulation)
 
 ```dynare
 /*
- * 基础三方程新凯恩斯模型（Galí 缺口形式）。
- * 所有变量为对零通胀稳态的对数线性偏离，故稳态全为 0。
- * 本模型属 R8 例外②（论文/教科书本身以线性化形式定义），故用 model(linear) 声明；
- *（例外① 是 discretionary_policy 的 Dynare 技术要求，与此无关）
- * 若需要非线性版（可做二阶福利分析），参考 DSGE_mod 的 Gali_2015_chapter_3_nonlinear。
+ * Basic three-equation New Keynesian model (Gali gap form).
+ * All variables are log deviations from the zero-inflation steady state, so the steady state is all zeros.
+ * The source defines the model in linearized form, so this file uses model(linear) (R8).
+ * For a nonlinear version (needed, for example, for second-order welfare analysis),
+ * start from DSGE_mod Gali_2015_chapter_3_nonlinear.
  */
 
-//==================== 变量声明 ====================
-var x  ${x}$   (long_name='output gap')
-    pi ${\pi}$ (long_name='inflation')
-    i  ${i}$   (long_name='nominal interest rate')
-    rn ${r^n}$ (long_name='natural rate of interest (AR(1) demand process)')
-    v  ${v}$   (long_name='monetary policy shock process') ;
+//==================== Declarations ====================
+var x    ${x}$   (long_name='output gap')
+    pi   ${\pi}$ (long_name='inflation')
+    inom ${i}$   (long_name='nominal interest rate')
+    rn   ${r^n}$ (long_name='natural rate of interest (AR(1) demand process)')
+    v    ${v}$   (long_name='monetary policy shock process') ;
 varexo eps_a ${\varepsilon_a}$ (long_name='demand / natural-rate innovation')
        eps_v ${\varepsilon_v}$ (long_name='monetary policy innovation') ;
 parameters
@@ -129,75 +158,87 @@ parameters
     rho_a  ${\rho_a}$   (long_name='demand process persistence')
     rho_v  ${\rho_v}$   (long_name='monetary shock persistence') ;
 
-//==================== 参数校准 ====================
+//==================== Calibration ====================
 betta  = 0.99;  sigma = 1;   kappa = 0.13;
 phi_pi = 1.5;   phi_x = 0.125;
 rho_a  = 0.90;  rho_v = 0.50;
 
-//==================== 模型方程 ====================
+//==================== Model ====================
 model(linear);
-// 动态 IS 曲线（欧拉方程缺口形式）
+// Dynamic IS curve (Euler equation in gap form)
 [name='Dynamic IS curve']
-x = x(+1) - (1/sigma)*(i - pi(+1) - rn);
-// 新凯恩斯菲利普斯曲线
+x = x(+1) - (1/sigma)*(inom - pi(+1) - rn);
+// New Keynesian Phillips curve
 [name='New Keynesian Phillips Curve']
 pi = betta*pi(+1) + kappa*x;
-// 泰勒规则（货币政策）
+// Taylor rule (monetary policy)
 [name='Taylor rule']
-i = phi_pi*pi + phi_x*x + v;
-// 需求/自然利率过程（rn 内生，仅 eps_a 外生）
+inom = phi_pi*pi + phi_x*x + v;
+// Demand / natural-rate process (rn is endogenous; only eps_a is exogenous)
 [name='demand / natural-rate process']
 rn = rho_a*rn(-1) + eps_a;
-// 货币政策过程（v 内生，仅 eps_v 外生）
+// Monetary policy process (v is endogenous; only eps_v is exogenous)
 [name='monetary policy process']
 v = rho_v*v(-1) + eps_v;
 end;
 
-//==================== 稳态（全为 0）====================
+//==================== Steady state (all zeros) ====================
 steady_state_model;
-    x = 0; pi = 0; i = 0; rn = 0; v = 0;
+    x = 0; pi = 0; inom = 0; rn = 0; v = 0;
 end;
 
-//==================== 检查 ====================
+//==================== Checks ====================
 resid;
 steady;
-check;     // BK 需泰勒原则 phi_pi > 1
+check;     // determinacy here needs roughly phi_pi > 1 (Taylor principle); check decides
 
-//==================== 冲击 ====================
+//==================== Shocks ====================
 shocks;
     var eps_a; stderr 0.01;
     var eps_v; stderr 0.0025;
 end;
 
-//==================== 实验 ====================
-stoch_simul(order=1, irf=20) x pi i rn;
+//==================== Experiment ====================
+stoch_simul(order=1, irf=20) x pi inom rn;
 ```
 
-## 模板 3：完全预见（永久冲击过渡路径，骨架）
+The interest rate is `inom`, not `i`: the manual asks users not to name a variable `i` (R5). Galí's
+files and other examples use `i`; rename it when you copy from them.
+
+## Template 3: perfect foresight (transition after a permanent shock, skeleton)
 
 ```dynare
-var c k ;
-varexo x ;
-parameters alppha betta delta gam ;
+/*
+ * Perfect foresight transition after a permanent TFP increase (x from 1 to 1.1).
+ * x is an exogenous variable that carries the path itself (R3); x(+1) is fine because the path is known.
+ */
+var c ${c}$ (long_name='consumption')
+    k ${k}$ (long_name='capital') ;
+varexo x ${x}$ (long_name='TFP level') ;
+parameters
+    alppha ${\alpha}$ (long_name='capital share')
+    betta  ${\beta}$  (long_name='discount factor')
+    delta  ${\delta}$ (long_name='depreciation rate')
+    gam    ${\gamma}$ (long_name='risk aversion') ;
 alppha = 0.33; betta = 0.99; delta = 0.025; gam = 1;
 
 model;
-// 资源约束（齐次式，省略 = 0）
+// Resource constraint (homogeneous form; "= 0" omitted)
 [name='resource constraint']
 c + k - x*k(-1)^alppha - (1-delta)*k(-1);
-// 欧拉方程
+// Euler equation
 [name='Euler equation']
 c^(-gam) - betta*(alppha*x(+1)*k^(alppha-1) + 1 - delta)*c(+1)^(-gam);
 end;
 
-initval;                       // 初始稳态（x 在旧水平）
+initval;                       // initial steady state (x at its old level)
    x = 1;
    k = ((1/betta - 1 + delta)/(alppha*x))^(1/(alppha-1));
    c = x*k^alppha - delta*k;
 end;
 steady;
 
-endval;                        // 终端稳态（x 永久升至 1.1）
+endval;                        // terminal steady state (x permanently rises to 1.1)
    x = 1.1;
 end;
 steady;
@@ -208,19 +249,22 @@ perfect_foresight_solver;
 rplot c; rplot k;
 ```
 
-## 宏处理器：一份文件维护多个变体
+Dygnosis warns (W051) that `x` is assigned in `initval`. Here the assignment is intended: an exogenous
+variable missing from `initval` starts at zero, and TFP must not be zero. Keep `x = 1;`.
+
+## Macro processor: several variants in one file
 
 ```dynare
-@#define rule_type = 1     // 1 = 泰勒规则；0 = 货币增长规则
+@#define rule_type = 1     // 1 = Taylor rule; 0 = money growth rule
 
 model;
    ...
 @#if rule_type == 1
-   // 泰勒规则
+   // Taylor rule
    [name='Taylor rule']
-   i = phi_pi*pi + phi_x*x + v;
+   inom = phi_pi*pi + phi_x*x + v;
 @#else
-   // 货币增长规则
+   // Money growth rule
    [name='money growth rule']
    ...
 @#endif
@@ -228,41 +272,60 @@ model;
 end;
 ```
 
-> 宏处理器还支持 `@#for` 循环（多国/多部门模型）、`@#include` 模块化、内生化参数
-> （variable flipping）等——完整语法、运算符、推导式和典型用法见 `references/macro-processor.md`。
+The macro processor also supports `@#for` loops (multi-country or multi-sector models), `@#include` for
+modular files, and more. Full syntax, operators, comprehensions and typical uses:
+`references/macro-processor.md`. To see the text after macro expansion, use the Dygnosis tool
+`dynare_expand` (`references/dygnosis-workflow.md`).
 
-## 输出 LaTeX 文档（可选，便于核对）
+## LaTeX output (optional, for checking the model)
 
 ```dynare
-write_latex_definitions;             // 变量/参数符号表
-write_latex_original_model;          // 原始模型方程
-write_latex_dynamic_model;           // Dynare 内部动态模型
-write_latex_steady_state_model;      // 稳态模型
-// 估计：write_latex_prior_table;
+write_latex_definitions;                         // names, TeX names and long names of the variables
+write_latex_parameter_table;                     // parameter table; call it after steady
+write_latex_original_model(write_equation_tags); // equations as written, with name tags
+write_latex_dynamic_model;                       // dynamic model after Dynare's transformations
+write_latex_static_model;                        // static version of the model block
+write_latex_steady_state_model;                  // contents of steady_state_model
+// estimation: write_latex_prior_table;          // after estimated_params
 ```
+
+- `write_latex_dynamic_model` and `write_latex_static_model` show the model after Dynare's transformations:
+  `predetermined_variables` timing changed to the default convention, and `EXPECTATION`, leads and lags
+  of two or more, and leads and lags of exogenous variables replaced by auxiliary variables.
+- `write_equation_tags` is an option of `write_latex_original_model`, `write_latex_dynamic_model` and
+  `write_latex_static_model`, not of `write_latex_steady_state_model`.
+- `write_latex_steady_state_model` needs a `steady_state_model` block; without one Dynare refuses the file.
+- LaTeX packages: `geometry`, `fullpage`, `breqn` for the model files; `longtable` for
+  `write_latex_definitions`; `longtable`, `booktabs` for the parameter and prior tables.
+- `write_latex_definitions`, `write_latex_parameter_table` and `write_latex_prior_table` are MATLAB/Octave
+  commands; Dynare passes them to MATLAB/Octave unchanged.
 
 ---
 
-# 手册增补（Dynare 7.1 §4.3/4.5）
+## Manual notes (Dynare 7.2 manual: "Expressions", "Model declaration")
 
-## `external_function`（模型里调用自定义 MATLAB 函数）
+### `external_function` (call your own MATLAB/Octave function in the model)
 
-模型块里用到外部 MATLAB/Octave 函数（标量返回）须先声明：
+A function used in the model block must return a scalar and must be declared before the model block:
+
 ```dynare
-external_function(name=funcname);                          // nargs 默认 1
+external_function(name=funcname);                          // nargs defaults to 1
 external_function(name=g, nargs=2, first_deriv_provided, second_deriv_provided);
 external_function(name=h, nargs=3, first_deriv_provided=h_deriv);
 ```
-不提供导数则 Dynare 用有限差分近似。`steady_state_model` 块外（EXPRESSION 处）用外部函数无需声明。
 
-## 模型局部变量与两个算子（集中备查）
+- Without `first_deriv_provided` / `second_deriv_provided`, Dynare uses finite differences.
+- `second_deriv_provided` needs `first_deriv_provided` in the same statement.
+- No declaration is needed for an external function used in an expression outside the `model` and
+  `steady_state_model` blocks (for example in a parameter assignment). Inside `steady_state_model` the
+  declaration is needed.
 
-- `#z = MODEL_EXPR;`——跨方程共享子表达式，作用域仅 model 块；带超前/滞后会整体平移。
-- `STEADY_STATE(x)`——取稳态值（泰勒规则/产出缺口常用；外生不可入内）。
-- `EXPECTATION(-1)(x(+1))`——用上一期信息集的预期（内部转辅助变量 `AUX_EXPECT_*`）。
+### Model-local variables and two operators
 
-## LaTeX 输出命令（核对模型）
-
-`write_latex_original_model;`（原始）、`write_latex_dynamic_model;`（Dynare 内部动态，含辅助变量
-替换）、`write_latex_static_model;`（静态）、`write_latex_steady_state_model;`（steady_state_model
-块）。需 LaTeX 包 `geometry fullpage breqn`。加 `(write_equation_tags)` 把 `[name=]` 也写进去。
+- `#z = MODEL_EXPR;` is a model-local variable: it shares a subexpression between equations. Its scope is
+  the model block. With a lead or lag (`z(+1)`), Dynare shifts the whole expression. Do not declare it in
+  `var`; `model_local_variable` can give it a TeX name.
+- `STEADY_STATE(x)` takes the steady-state value (common in Taylor rules and output gaps). Exogenous and
+  deterministic exogenous variables may not appear inside it.
+- `EXPECTATION(-1)(x(+1))` takes the expectation with the previous period's information set. Dynare
+  replaces it by an auxiliary variable (`AUX_EXPECT_LAG_1`) and a new equation.

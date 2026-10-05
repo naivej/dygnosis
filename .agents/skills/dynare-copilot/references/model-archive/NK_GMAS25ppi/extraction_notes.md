@@ -35,9 +35,3 @@
 - Runtime validation was not performed: no Dynare run, residual check, steady-state check, BK check, or IRF comparison.
 - The archive entry keeps first-pass status as `needs_review` until formula-level PDF review and implementation cross-check are completed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English core.
-- Equation labels `(F1)` through `(F32)` are preserved with matching unique F-number counts.
-- File paths, model id, DOI, and status markers are preserved.

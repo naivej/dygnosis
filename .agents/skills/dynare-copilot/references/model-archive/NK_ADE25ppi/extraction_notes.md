@@ -32,12 +32,6 @@
 - The steady-state solution sequence for the full quantitative model is incomplete until Appendix C formulas are reviewed.
 - No Dynare run, residual check, BK check, IRF comparison, or runtime validation was performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English version.
-- Equation labels `(F1)` through `(F23)` are preserved in both files.
-
 ## Proposed Shared Index Rows
 
 These rows are proposed only for the main agent. I did not edit `catalog.csv` or `status.csv`.

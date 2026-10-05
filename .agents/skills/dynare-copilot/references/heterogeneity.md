@@ -1,154 +1,281 @@
-# 异质性 / 异质主体（HANK / Krusell-Smith）
+# Heterogeneous-agent models (HANK, Krusell-Smith)
 
-> **何时读**：任务含"异质主体""HANK""Krusell-Smith""连续分布的家庭/财富分布影响个体选择""一/两
-> 资产 HANK""序列空间雅可比(SSJ)"，命令族 `heterogeneity_dimension` / `var(heterogeneity=...)` /
-> `heterogeneous`/`aggregate` 块 / `heterogeneity_*` 命令。**本文件回答**：Dynare 7.0 起新增的异质性
-> 框架怎么组织、声明与块结构、求解/模拟命令、稳态从哪来。**重要**：这是 Dynare **较新且仍在演进**的
-> 功能；动笔前**务必对照 `examples/` 的 `krusell_smith_1998.mod`、`hank_one_asset.mod`、`hank_two_assets.mod`
-> 与手册 §4.26 核对块内精确语法**，不要凭记忆硬写块内细节。
+Read this when the task involves heterogeneous agents, HANK, Krusell-Smith, a wealth distribution that
+affects individual choices, one- or two-asset HANK, or the sequence-space Jacobian, or uses
+`heterogeneity_dimension`, `var(heterogeneity=…)`, `model(heterogeneity=…)`, `SUM()` or a
+`heterogeneity_*` command.
 
-Dynare 7.0 引入统一的**异质性（heterogeneity）**框架，处理"一个连续分布的主体、其分布影响个体选择、
-且与总量动态双向耦合"的模型（HANK 是其特例）。动态解法融合 Bhandari-Bourany-Evans-Golosov (2023) 与
-Auclert-Bardóczy-Rognlie-Straub (2021, 序列空间雅可比) 的思想。模型分两层：**异质（个体）层** 与
-**总量（aggregate）层**，用聚合算子 `SUM()` 把个体加总到总量。
+This file covers how Dynare organizes a heterogeneous-agent model: declarations and blocks, the
+steady-state, solve and simulate commands, and where the results go. The framework is recent and still
+changes between releases. Before you write block contents, compare with the official examples in
+`<dynare-root>/examples/heterogeneity/` and the manual section "Heterogeneity" of the installed Dynare
+version. Do not write block details from memory.
 
-## 核心声明与算子
+Dynare solves models with a continuum of agents that differ in wealth, income or employment status.
+Aggregate dynamics come from the interaction of individual decisions with the distribution of agents'
+states; HANK is one case. The solution method combines Bhandari-Bourany-Evans-Golosov (2023) and
+Auclert-Bardóczy-Rognlie-Straub (2021, sequence-space Jacobian); Rion (2026) documents the algorithms
+(manual, "Heterogeneity"). A model has two layers: the **heterogeneous (individual) layer** and the
+**aggregate layer**. The aggregation operator `SUM()` links them.
 
-- `heterogeneity_dimension`：声明一个异质性维度（如按财富/生产率离散化的家庭分布）。Dynare 7.2 的求稳态流程目前只支持一个维度；预处理通过两个不同维度不代表模型能运行。
-- `var(heterogeneity=NAME) ...;` / `varexo(heterogeneity=NAME) ...;`：声明属于该维度的**异质变量/冲击**
-  （每个体一份，随分布变化）。
-- `model(heterogeneity=NAME); ... end;`：**异质主体模型块**，写个体的最优化一阶条件/预算约束（如家庭的
-  欧拉方程、资产积累），方程在该维度上对每个体成立。
-- `shocks(heterogeneity=NAME); ... end;`：**异质冲击块**（个体特异冲击的分布/离散化）。
-- `SUM(a)`：**聚合算子**，把一个当期异质内生变量按分布加总成总量（如 `SUM(a)` = 总资产）。参数、外生变量、带超前或滞后的变量，以及 `SUM(a+b)` 都不是它的参数形式。
+## Declarations and operators
 
-总量层用**普通的 `var/varexo/model`**（不带 heterogeneity=），写总量恒等式/市场出清/政策规则，并通过
-`SUM(...)` 引用个体加总。手册 §4.26 把声明拆成：异质性维度 → 异质变量声明 → 异质主体模型块 →
-异质冲击块 → 总量变量声明 → 总量冲击块 → 总量模型块。
+- `heterogeneity_dimension NAME;` declares a heterogeneity dimension (for example households
+  distributed over wealth and productivity). It must come before every declaration that uses it.
+  Dynare 7.2 supports **one** dimension per model. The preprocessor accepts a second distinct dimension,
+  but the steady-state routines refuse it (Dygnosis W207). A repeated name is E460; an option that names
+  an undeclared dimension is E459.
+- `var(heterogeneity=NAME) …;` / `varexo(heterogeneity=NAME) …;` declare heterogeneous endogenous and
+  exogenous variables (one value per agent).
+- `model(heterogeneity=NAME); … end;` is the **heterogeneous agent model block**. It holds the
+  individual first-order conditions and constraints (Euler equation, budget constraint). Each equation
+  holds for every agent in that dimension. Restrictions (manual, "Heterogeneous Agent Model Block"):
+  - A heterogeneous exogenous variable appears only at time t: a lag is E469, a lead is E470.
+  - A heterogeneous endogenous variable appears only at t-1, t and t+1: E471 (lag beyond -1),
+    E472 (lead beyond +1).
+  - An expression that combines leads (≥ 1) with lagged states (-1) must be separable (E473):
+    `+`, `-`, `=` are always separable; `*` is separable if one factor holds all the leads; `/` only
+    when the numerator holds the leads (`c(+1)/a(-1)` passes, `a(-1)/c(+1)` fails); a unary function
+    whose argument holds both fails (`log(k(-1) + c(+1))`); `^` and other nonlinear binary operators
+    fail when the operands span both.
+  - `SUM` is not allowed inside this block (E475).
+  - Complementarity conditions use `⟂` (U+27C2) or ASCII `_|_` after the equation, with the same
+    conventions as the perfect-foresight option `lmmcp` (R6):
+    `c^(-1/eis)-beta*Va(+1)=0 ⟂ a>=0;`. An `[mcp=…]` tag is refused here (E479).
+- `shocks(heterogeneity=NAME); var eps_e; stderr 0.01; end;` is the **heterogeneous shocks block**
+  (variances of heterogeneous exogenous variables). A variance, standard error, covariance or
+  correlation on any other name is refused (E465–E468).
+- `SUM(x)` in the aggregate model block integrates a heterogeneous endogenous variable over the
+  stationary distribution (`SUM(a)` = aggregate assets). The argument must be one variable (E476),
+  without a lead or lag (E477), and a heterogeneous endogenous variable (E478). Parameters, exogenous
+  variables and `SUM(a+b)` are not valid arguments; write `SUM(a) + SUM(b)`.
+- A heterogeneous symbol cannot appear outside the model blocks (E463), in `planner_objective` (E461),
+  in `occbin_constraints` (E462) or in `epilogue` (E464).
+
+The aggregate layer uses ordinary `var`, `varexo`, `shocks` and `model` (without `heterogeneity=`) for
+aggregate identities, market clearing and policy rules. It reaches individual values only through
+`SUM(...)`.
+
+The manual documents the parts in this order: heterogeneity dimension, heterogeneous variables,
+heterogeneous agent model block, heterogeneous shocks block, aggregate variables, aggregate shocks block,
+aggregate model block. That is the order of the manual sections, not a file order. In the file, declare
+every symbol before the first block that uses it; the official examples put all declarations first.
+Dynare 7.2 refuses a heterogeneous block that uses an aggregate variable declared later
+(`Unknown symbol: r`; Dygnosis E020).
 
 ```dynare
-// —— 概念骨架（精确块内语法请对照 example mods）——
-heterogeneity_dimension hh;                 // 家庭维度
+// Conceptual skeleton: check the exact block contents against the official examples
+heterogeneity_dimension hh;                 // household dimension
 
-var(heterogeneity=hh) a c;                  // 个体资产、消费（随分布）
-varexo(heterogeneity=hh) idio_e;            // 个体特异生产率状态
+var(heterogeneity=hh) a c;                  // individual assets, consumption (vary across agents)
+varexo(heterogeneity=hh) idio_e;            // idiosyncratic productivity state
+
+var K r w;                                  // aggregate variables, declared before any model block
 
 parameters bet gam r_ss ...;
 
-model(heterogeneity=hh);                    // 个体问题（每个体成立）
-   c^(-gam) = bet*(1+r)*c(+1)^(-gam);       // 欧拉方程
-   a = (1+r)*a(-1) + w*idio_e - c;          // 个体预算/资产积累
+model(heterogeneity=hh);                    // individual problem (holds for each agent)
+   c^(-gam) = bet*(1+r)*c(+1)^(-gam);       // Euler equation; the examples add a borrowing limit: ... ⟂ a >= 0;
+   a = (1+r)*a(-1) + w*idio_e - c;          // individual budget / asset accumulation
 end;
 
-var K r w;                                  // 总量变量
-model;                                      // 总量层
-   K = SUM(a);                              // 总资本 = 个体资产加总
-   r = alpha*(K(-1))^(alpha-1) - delta;     // 要素价格
+model;                                      // aggregate layer
+   K = SUM(a);                              // aggregate capital = sum of individual assets
+   r = alpha*(K(-1))^(alpha-1) - delta;     // factor prices
    w = (1-alpha)*(K(-1))^alpha;
 end;
 ```
 
-## 求解与模拟命令
+## Equation count (R4)
 
-异质模型的稳态是**个体策略函数 + 离散化冲击 + 平稳分布**，两条路获取：
+Count each layer separately: aggregate `model` equations against aggregate `var` names, and, for each
+dimension, `model(heterogeneity=…)` equations against that dimension's `var(heterogeneity=…)` names.
+`#` model-local variables and `[static]` rows do not count. Dynare refuses a mismatch:
+`There are 1 equations but 2 endogenous variables in the model for heterogeneity dimension 'hh'!`
+(verified with the 7.2 preprocessor). Dynare counts again after it adds auxiliary variables for some
+leads, so its numbers can differ from the written counts.
 
-1. **载入外部稳态** `heterogeneity_load_steady_state`：从 MAT 文件读入预先算好的策略函数/离散化/平稳分布
-   （例如用 SSJ/外部代码算的稳态）。
-   ```dynare
-   heterogeneity_load_steady_state(... 'steady_state.mat' ...);
-   ```
-2. **Dynare 内算稳态** `heterogeneity_compute_steady_state`：用**时间迭代（time iteration）**在 Dynare 内
-   数值求个体策略与平稳分布（可带参数校准，如校准到某目标资产/利率）。
-   ```dynare
-   heterogeneity_compute_steady_state(... 校准选项 ...);
-   ```
+Check the written counts with Dygnosis `dynare_model_info` (per-dimension names and counts) and
+`dynare_equations` (`count_gap`); Dygnosis reports a heterogeneous mismatch as E192 or W208, and an
+aggregate mismatch as E188 or W013. See `references/dygnosis-workflow.md`.
 
-得到稳态后：
-- `heterogeneity_solve`：求解**总量动态**（围绕稳态的线性化/序列空间雅可比）。
-- `heterogeneity_simulate`：算 **IRF 与随机模拟**，支持**未预期冲击**与**预期到的 news 冲击序列**。
-- 还有若干 **helper functions**（手册 §4.26.2.3）辅助构造/检视分布与策略。
+## Commands Dynare refuses on heterogeneous models
+
+When a heterogeneity dimension is declared, Dynare 7.2 refuses `check`, `steady`, `stoch_simul`,
+`estimation`, the perfect-foresight solvers, `extended_path`, `osr` / `osr_params` / `optim_weights`,
+`ramsey_model` / `ramsey_policy`, `discretionary_policy`, identification, sensitivity analysis,
+`method_of_moments`, `occbin_constraints` and the `block` option of `model`
+(`The 'check' command is not supported for heterogeneous models`; Dygnosis E474). Use only the
+`heterogeneity_*` commands below for the steady state, the solution and simulation. The usual
+`steady;` / `check;` steps of debugging.md do not apply.
+
+## Steady state, solution and simulation
+
+The steady state of a heterogeneous model is the set of policy functions, the discretized idiosyncratic
+shocks, the stationary distribution and the aggregate values. Dynare gets it in one of two ways.
+
+1. **Load a precomputed steady state**: `heterogeneity_load_steady_state(filename = FILE);` reads a
+   steady-state structure from a MAT file, or from a workspace variable with `variable = NAME`
+   (default `'steady_state'`; useful when a `verbatim` block builds it). It checks the residuals of the
+   aggregate equations up to `tolf` (default `1e-6`). It does **not** check the heterogeneous equations;
+   you are responsible for them. Structure fields:
+   - `steady_state.agg`: scalar steady-state value of each aggregate `var` (Dynare computes its own
+     aggregate auxiliary variables).
+   - `steady_state.pol.grids` (state grids, column vectors), `steady_state.pol.values` (policy
+     arrays for every `var(heterogeneity=…)` variable), `steady_state.pol.order` (dimension order,
+     shocks first, then states, e.g. `{'e', 'a'}`).
+   - `steady_state.shocks.grids` and `steady_state.shocks.Pi` (Markov transition matrices, rows sum
+     to 1) for every `varexo(heterogeneity=…)` variable. The helper `rouwenhorst` builds both
+     (manual, "Helper functions").
+   - `steady_state.d.hist` (stationary histogram, sums to 1), optional `steady_state.d.grids` and
+     `steady_state.d.order`.
+2. **Compute it in Dynare**: `heterogeneity_compute_steady_state(variable = initial_guess);` takes an
+   initial guess with the same fields (`d.hist` is ignored) plus optional
+   `steady_state.free_parameters.<name>.initial_guess` / `.lower_bound` / `.upper_bound`. Each
+   residual evaluation runs time iteration for the policy functions (complementarity conditions are
+   handled with a Fischer-Burmeister function), forward iteration for the distribution, and aggregation
+   of the `SUM` terms; a Broyden solver moves the free parameters until the target equations hold.
+   - Target equations default to the aggregate equations that contain `SUM`. Override with
+     `calibration_target_equations=['name', …]`; use `name` tags rather than indices (R1). The number of
+     targets must equal the number of free parameters.
+   - The command takes the aggregate endogenous values as given. Supply aggregate values that give a
+     zero residual on the non-target aggregate equations.
+   - Options: `calibration_tolf` (1e-4), `calibration_max_iter` (50), `calibration_verbosity`,
+     `time_iteration_max_iter` (1000), `time_iteration_tol` (1e-8), `time_iteration_learning_rate` (1),
+     `time_iteration_early_stopping` (3), `time_iteration_verbosity`, `time_iteration_solver_tolf` and
+     `time_iteration_solver_tolx` (1e-10), `time_iteration_solver_factor` (100),
+     `time_iteration_solver_max_iter` (1000), `time_iteration_solver_stop_on_error`,
+     `forward_max_iter` (10000), `forward_tol` (1e-10), `forward_check_every` (100),
+     `forward_verbosity` (1). Dygnosis `dynare_list_options` lists the valid options of the installed
+     version.
+   - It updates `M_.params` with the calibrated values.
+
+After the steady state:
+
+- `heterogeneity_solve(truncation_horizon = 300);` computes the linearized solution of the aggregate
+  dynamics (sequence-space Jacobians). `truncation_horizon` defaults to 300.
+- `heterogeneity_simulate(OPTIONS…) [VARIABLE_NAME…];` computes IRFs and stochastic simulations of
+  unanticipated shocks drawn from the aggregate `shocks` block (`periods > 0` adds simulated paths). If
+  the `shocks` block uses `periods` and `values`, it switches to **news shock sequence** mode: agents
+  learn at t=0 about the whole sequence of future shocks. Options: `irf` (40), `periods` (0),
+  `irf_shocks`, `relative_irf`, `nograph`, `nodisplay`, `graph_format`, `tex`, `irf_plot_threshold`,
+  `print`, `noprint`. News shock mode does not accept `irf`, `periods`, `irf_shocks` or `relative_irf`.
 
 ```dynare
-heterogeneity_compute_steady_state(...);
-heterogeneity_solve;
-heterogeneity_simulate(...);     // IRF / 随机模拟；可给 news 冲击序列
+heterogeneity_compute_steady_state(variable = initial_guess);   // or heterogeneity_load_steady_state(filename = FILE);
+heterogeneity_solve(truncation_horizon = 300);
+heterogeneity_simulate(irf = 80);   // IRFs and simulation; news shock mode when the shocks block has periods/values
 ```
 
-## 自带示例（强烈建议照抄起步）
+## Official examples (start from these)
 
-Dynare `examples/` 提供（与 shade-econ/sequence-jacobian 同模型）：
-- `krusell_smith_1998.mod`——Krusell-Smith (1998)，演示 `heterogeneity_compute_steady_state` 数值稳态 + 模拟；
-- `hank_one_asset.mod`——单资产 HANK，演示 `heterogeneity_load_steady_state` 载入稳态 + `heterogeneity_solve`
-  + `heterogeneity_simulate` 随机模拟；另有用 `compute_steady_state`（含参数校准）的变体；
-- `hank_two_assets.mod`——双资产（流动/非流动）HANK，演示载入稳态 + news 冲击模拟，及多参数校准变体。
+`<dynare-root>/examples/heterogeneity/` in Dynare 7.2 (models and calibration as in the
+sequence-jacobian toolkit of Auclert et al. 2021):
 
-## 实操要点 / 取舍
+| File | Shows |
+| --- | --- |
+| `krusell_smith_1998.mod` | Krusell-Smith (1998); `heterogeneity_load_steady_state(filename = krusell_smith_1998)`, `heterogeneity_solve(truncation_horizon = 400)`, `heterogeneity_simulate(irf = 80)` |
+| `krusell_smith_1998_steady_state.mod` | same model; initial guess built in `verbatim`, then `heterogeneity_compute_steady_state(variable = initial_guess)` |
+| `hank_one_asset.mod` | one-asset HANK; loads `hank_one_asset.mat`, solves, `heterogeneity_simulate(periods = 1000)` |
+| `hank_one_asset_steady_state.mod` | one-asset HANK; compute with calibration (`calibration_target_equations=['Asset market clearing', 'Labor market clearing']`) |
+| `hank_two_assets.mod` | two-asset (liquid / illiquid) HANK; loads the steady state; news shock sequence (`shocks` with `periods` / `values`, then `heterogeneity_simulate;`) |
+| `hank_two_assets_steady_state.mod` | two-asset HANK; compute with three calibration targets and tightened time-iteration options |
 
-- **稳态是难点**：能用外部成熟代码（SSJ 等）算好稳态再 `load`，通常比纯靠 Dynare `compute` 稳。两条路按
-  模型复杂度选。
-- 个体层只写**个体一阶条件/约束**。总量层要对异质内生变量做分布加总时写 `SUM(a)`；直接写 `a` 不表示加总。异质外生变量或参数也不能作为 `SUM()` 的参数，应按官方示例明确它们如何进入总量方程。
-- 核对方程时分别数总量 `var` 与普通 `model` 的方程，以及每个维度的异质 `var` 与其 `model(heterogeneity=...)` 方程。`#` 局部定义不算模型方程；变换后 Dynare 还可能增加辅助方程。
-- 普通 `varexo` 的创新项规则不套用到 `varexo(heterogeneity=...)`：后者可表示离散化的个体冲击状态。
-- 该框架新、API 仍可能调整：**以你所装 Dynare 版本的 example mods + 手册 §4.26 为准**，本文件给的是框架与
-  命令清单，块内精确关键字以官方示例为权威。
-- 与"含几类异质家庭"的有限异质（TANK/多代理）不同：这里是**连续分布**、分布本身是状态。少数离散类型用
-  普通 .mod + 宏处理器循环即可（见 macro-processor.md），不必动用本框架。
+## Practical points
 
-## MATLAB MCP 运行注意
+- **The steady state is the hard part.** A steady state from mature external code (for example the
+  sequence-jacobian toolkit) loaded with `heterogeneity_load_steady_state` is often more robust than
+  `heterogeneity_compute_steady_state`. Choose by model complexity. Manual advice for `compute`: grid
+  homotopy (solve on a coarse grid, save `oo_.heterogeneity.steady_state` from a `verbatim` block,
+  interpolate onto a finer grid, solve again); a coarse `pol.grids` with a denser `d.grids`; lower
+  `time_iteration_learning_rate` (0.5–0.8) when time iteration oscillates; keep `calibration_tolf`
+  looser than `time_iteration_tol`. Numerical convergence does not prove the solution is economically
+  meaningful.
+- The individual layer holds only individual first-order conditions and constraints. Where an aggregate
+  equation needs the cross-sectional total of a heterogeneous endogenous variable, write `SUM(a)`;
+  writing `a` does not aggregate. A heterogeneous exogenous variable or a parameter cannot be a `SUM()`
+  argument; follow the official examples for how they enter aggregate equations.
+- R3 does not apply to `varexo(heterogeneity=…)`: such a variable is a discretized idiosyncratic state
+  (grid and transition matrix in `steady_state.shocks`) and appears only at time t.
+- This framework is for a **continuous distribution** whose shape is itself a state. A model with a few
+  discrete household types (TANK, a small number of agent types) does not need it: write an ordinary
+  `.mod` and generate the types with macro-processor loops (macro-processor.md).
+- The framework and its options can change between releases. The example files and the manual of the
+  installed Dynare version are the authority for exact keywords; this file gives the structure and the
+  command list.
 
-- 先确认 Dynare ≥ 7.0 且含 heterogeneity 组件（预处理器为 heterogeneity-aware 版本）。
-- 调试：先跑通自带 example（krusell_smith_1998 / hank_one_asset）确认环境，再改成自己的模型。
-- 稳态载入时核对 MAT 文件字段（策略函数、冲击离散化、平稳分布）与模型维度一致。
+## Running
 
-## 常见报错与陷阱（Dynare 7.1，实测）
+- Use a Dynare version that includes the heterogeneity framework; Dygnosis follows Dynare 7.2.
+- Run official Dynare under MATLAB or Octave through the route the host offers (a MATLAB MCP server,
+  `matlab -batch "…"`, `octave --eval "…"`). If no route exists, say what could not be run and give the
+  commands to the user.
+- Run an official example first (`krusell_smith_1998.mod`, `hank_one_asset.mod`) to confirm the
+  installation, then adapt it to your model.
+- When you load a steady state, check that the MAT-file fields (policy functions, shock discretization,
+  stationary distribution) match the model's variables and grid dimensions.
+- Static checks (Dygnosis) say nothing about convergence of the steady state or the solution; only the
+  Dynare run does.
 
-**`heterogeneity_solve` 崩在 `eq` 未定义 / `process_jacobian_block`——病因是 varexo 声明顺序**
+## Pitfalls
 
-总量层若有**只带滞后出现**的 varexo（典型：泰勒规则带实施滞后 `rstar(-1)`，或 `pi(-1)` 之外
-再引 `g(-1)`），Dynare 会为它建一条辅助方程 `aux(+1) = rstar`，该辅助方程的行号 **大于**
-`M_.orig_endo_nbr`。`heterogeneity_solve` 内部用 `find()` 遍历雅可比块，而 MATLAB 的 `find()`
-**按列优先**返回——若这个 lag-only varexo 在 `varexo` 块里**声明在前**，它的辅助行就排在常规
-方程项之前被先遇到，循环里 `eq` 还没被赋值就被引用 → 崩溃。
+**`heterogeneity_solve` fails with `eq` undefined in `process_jacobian_block` (cause: `varexo` order)**
 
-**修法：把任何"只带滞后出现"的 varexo 声明在 `varexo` 块的最后。** 这样常规方程项先被遍历、
-先给 `eq` 赋值，辅助行随后才出现。官方示例 `hank_one_asset_steady_state.mod` 正是这么做的
-（`varexo G markup rstar;`，`rstar` 殿后）。
+Observed with Dynare 7.1; not re-tested with 7.2. The aggregate layer has a `varexo` that appears only
+with a lag (typical: a Taylor rule with an implementation lag `rstar(-1)`). Dynare creates an auxiliary
+equation `aux(+1) = rstar` for it, whose row index is **greater** than `M_.orig_endo_nbr`.
+`heterogeneity_solve` walks the Jacobian blocks with `find()`, and MATLAB's `find()` returns entries in
+**column-major** order. If the lag-only `varexo` is declared **first** in the `varexo` statement, its
+auxiliary row is visited before the regular equation entries, so `eq` is used before it is assigned.
+
+**Fix: declare every lag-only `varexo` last in the `varexo` statement.** The regular entries are then
+visited first and assign `eq`. The Dynare 7.2 examples `hank_one_asset.mod` and
+`hank_one_asset_steady_state.mod` follow this order (`varexo G markup rstar;` with `rstar(-1)` in the
+Taylor rule).
 
 ```dynare
-// ✅ 正确：lag-only 的 rstar 殿后
-varexo G TR markup rstar;     // rstar(-1) 进泰勒规则 → 必须最后声明
-// ❌ 触发崩溃：varexo rstar G TR markup;
+// Correct: the lag-only rstar is declared last
+varexo G TR markup rstar;     // rstar(-1) enters the Taylor rule, so declare it last
+// Wrong (triggers the failure): varexo rstar G TR markup;
 ```
 
-> 这是 heterogeneity 框架特有的表现。**非异质**模型里同样的 lag-only varexo 会在 `disp_dr` 阶段
-> 触发另一个 `subst_auxvar` 崩溃（"索引生成 2 个值"）——那种情形改用 AR(1) 内生变量替代 lagged
-> varexo，见 `references/known-issues.md`「非异质模型 disp_dr / subst_auxvar 崩」。
+In a **non-heterogeneous** model, the same lag-only `varexo` caused a different failure in `disp_dr`
+(`subst_auxvar`, "index produces 2 values") with Dynare 7.1. There, replace the lagged `varexo` with an
+AR(1) endogenous process driven by an innovation (R3); see the entry "Plain model: `disp_dr` /
+`subst_auxvar` crash with a lag-only exogenous variable" in `references/known-issues.md`.
 
-**稳态：纯 varexo 在稳态取 0**
+**A pure `varexo` is 0 in the steady state**
 
-`G`、`TR` 等作为纯 varexo（非 AR 内生过程）时，稳态值就是 0。政府预算等稳态方程里**不要**把它们
-当正值代入：若 `Tax = r*B + G + TR`，稳态应为 `Tax_ss = r_ss*B`（`G=TR=0`），写成
-`r_ss*B + G_ss + TR_ss` 会让稳态残差不为零。
+When `G`, `TR` and similar are pure `varexo` (not AR endogenous processes), their steady-state value is
+0. Do not substitute them as positive values in steady-state equations such as the government budget: if
+`Tax = r*B + G + TR`, the steady state is `Tax_ss = r_ss*B` (`G = TR = 0`). Writing
+`r_ss*B + G_ss + TR_ss` leaves a nonzero steady-state residual. The official `hank_two_assets.mod` writes
+the level as a parameter plus the shock: `(r * Bg + G_ss + G) / w / N - tax;`.
 
-## IRF 取数（heterogeneity_solve 后）
+## IRFs and other results
 
-异质性框架的 IRF **不在 `oo_.irfs`**（那是 `stoch_simul` 的产物）。`heterogeneity_solve` 把总量
-动态存成**序列空间雅可比** `oo_.heterogeneity.dr`：
-
-- `oo_.heterogeneity.dr.G.<var>.<shock>` 是一个 **T×T 矩阵**（T = `truncation_horizon`），第 `(t,s)`
-  元 = 变量 `var` 在 `t` 期对"`s` 期发生一单位 `shock`"的响应。
-- **对一次性冲击（t=1 发生）的 IRF = 该矩阵的第一列**：`oo_.heterogeneity.dr.G.Y.G(:,1)`
-  就是 Y 对单位 G 冲击的脉冲响应路径。
-- 这是**每单位冲击**的响应；要对应某个冲击大小（如 1%），乘以冲击幅度即可。
-- 没单独存的总量（如总消费 C）走 Walras 恒等式从已有变量反推（如商品市场 `C = Y - G`）。
+- `heterogeneity_simulate` stores IRFs in `oo_.irfs` (fields `<var>_<shock>`), simulated endogenous
+  paths in `oo_.endo_simul` (when `periods > 0`, or in news shock mode) and news shock paths in
+  `oo_.exo_simul` (manual, "Simulating").
+- `heterogeneity_solve` stores the sequence-space Jacobians in `oo_.heterogeneity.dr.G`;
+  `oo_.heterogeneity.steady_state` holds the steady state (`agg`, `pol`, `shocks`, `d`).
+- `oo_.heterogeneity.dr.G.<var>.<shock>` is a **T×T matrix** (T = `truncation_horizon`). Entry `(t,s)` is
+  the linear response of `<var>` in period t to a unit deviation of `<shock>` in period s, known at
+  time 0.
+- The IRF to a one-time shock in the first period is the **first column**:
+  `oo_.heterogeneity.dr.G.Y.G(:,1)` is the response of Y to a unit G shock.
+- These are responses **per unit of shock**; multiply by the shock size (for example 1%).
+- For an aggregate that the model does not store (for example aggregate consumption C), derive it from
+  an identity of stored variables (goods market: `C = Y - G`).
 
 ```matlab
-% Y 对单位 G 冲击的 IRF（前 20 期），再缩放到 1% 冲击
+% IRF of Y to a unit G shock (first 20 periods), scaled to a 1% shock
 irf_Y_G = oo_.heterogeneity.dr.G.Y.G(1:20, 1) * 0.01;
 ```
 
-要和 RANK（`oo_.irfs`）并排对比、或反复改图，**先把 `oo_` 冻存再分析**，别每改一次图就重跑
-30 秒的 HANK 求解——见 `references/matlab-workflow.md`。
+To compare with a representative-agent model (`oo_.irfs` from `stoch_simul`) or to iterate on plots,
+save `oo_` to a MAT file once and analyze the saved copy; do not rerun the HANK solution (tens of
+seconds) for every plot change. See `references/matlab-workflow.md`.
 
-参考：Dynare 7.0 发布说明（heterogeneity 框架）；手册 §4.26；example mods（与 SSJ 同模型）；
-Auclert-Bardóczy-Rognlie-Straub (2021)、Bhandari-Bourany-Evans-Golosov (2023)。
+References: Dynare manual, "Heterogeneity"; the official examples above; Auclert, Bardóczy, Rognlie and
+Straub (2021); Bhandari, Bourany, Evans and Golosov (2023); Rion (2026).

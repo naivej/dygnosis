@@ -2,8 +2,7 @@
   "model_id": "NK_LWW03",
   "status": "needs_review",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/NK_LWW03/NK_LWW03_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_LWW03/NK_LWW03_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_LWW03/NK_LWW03_derivation.md",
     "mmb-paper-derivations/derivations/NK_LWW03/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_LWW03/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_LWW03/worker_report.json"

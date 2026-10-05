@@ -2,8 +2,7 @@
   "model_id": "US_PM08",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_PM08/US_PM08_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_PM08/US_PM08_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_PM08/US_PM08_derivation.md",
     "mmb-paper-derivations/derivations/US_PM08/source_manifest.json",
     "mmb-paper-derivations/derivations/US_PM08/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_PM08/worker_report.json"
@@ -53,9 +52,8 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number counts match",
       "status": "passed",
-      "details": "English count 68, Chinese count 68; 21 unique equation labels."
+      "details": "21 unique equation labels."
     },
     {
       "check": "Explicit whitespace scan of new untracked files",

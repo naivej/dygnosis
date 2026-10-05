@@ -51,8 +51,7 @@
     "source_status": "implementation_cross_check_only"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/EA_VI16gk/EA_VI16gk_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/EA_VI16gk/EA_VI16gk_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/EA_VI16gk/EA_VI16gk_derivation.md",
     "extraction_notes": "mmb-paper-derivations/derivations/EA_VI16gk/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/EA_VI16gk/worker_report.json"
   },
@@ -107,15 +106,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/EA_VI16gk/EA_VI16gk_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/EA_VI16gk/EA_VI16gk_derivation.md",
       "exists": true,
       "sha256": "f0ad4ac774ca57c9aad7f7baaffc7f4409fcd0b6b2ed5b66284dd7632e6637ec"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/EA_VI16gk/EA_VI16gk_derivation.zh.md",
-      "exists": true,
-      "sha256": "89cf9fbf0b0afbdd862616fa632249534aaa4993f4bbfcedab3765b2f625de2a"
     },
     {
       "role": "source_manifest",

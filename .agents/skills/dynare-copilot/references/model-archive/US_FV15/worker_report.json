@@ -2,8 +2,7 @@
   "model_id": "US_FV15",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_FV15/US_FV15_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_FV15/US_FV15_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_FV15/US_FV15_derivation.md",
     "mmb-paper-derivations/derivations/US_FV15/source_manifest.json",
     "mmb-paper-derivations/derivations/US_FV15/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_FV15/worker_report.json"
@@ -43,8 +42,7 @@
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/US_FV15 returned no output",
     "json_tool_source_manifest": "passed: python3 -m json.tool source_manifest.json and worker_report.json",
     "english_eight_sections": "passed",
-    "english_has_F1": "passed",
-    "f_number_counts_match": "passed: English and Chinese each have 105 F-markers and 36 unique F-numbers"
+    "english_has_F1": "passed"
   },
   "unresolved_issues": [
     "No local appendix normalization exists for appendix 3 equilibrium conditions.",

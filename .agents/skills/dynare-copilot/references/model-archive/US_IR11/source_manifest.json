@@ -53,8 +53,7 @@
     "not_used_as": "paper_side_mathematical_source"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_IR11/US_IR11_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_IR11/US_IR11_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_IR11/US_IR11_derivation.md",
     "extraction_notes": "mmb-paper-derivations/derivations/US_IR11/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_IR11/worker_report.json"
   },

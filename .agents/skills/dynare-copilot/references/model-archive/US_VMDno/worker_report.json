@@ -2,8 +2,7 @@
   "model_id": "US_VMDno",
   "worker_status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_VMDno/US_VMDno_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_VMDno/US_VMDno_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_VMDno/US_VMDno_derivation.md",
     "mmb-paper-derivations/derivations/US_VMDno/source_manifest.json",
     "mmb-paper-derivations/derivations/US_VMDno/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_VMDno/worker_report.json"
@@ -37,8 +36,7 @@
   "validation": {
     "git_diff_check": "passed; untracked files also checked with git diff --check --no-index",
     "json_tool_source_manifest": "passed",
-    "english_eight_sections": "passed",
-    "f_number_count_match": "passed (English count 71, Chinese count 71, counting all references)"
+    "english_eight_sections": "passed"
   },
   "unresolved_formula_issues": [
     "Published paper defers full standard CMR/SW equations to Verona, Martins, and Drumond (2012), Appendix A, not present in this MinerU source.",

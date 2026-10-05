@@ -337,7 +337,7 @@ with a target annual spread of 150 basis points. The Rep-MMB US implementation c
 
 ## 7. Timing & Form Conventions
 
-- **Form**: `model(linear)`; hatted variables are deviations from steady state. The Chinese and English derivations keep the same equation numbering.
+- **Form**: `model(linear)`; hatted variables are deviations from steady state.
 - **Capital timing**: The paper states capital bought at the end of period $`t`$ is $`K_{t+1}`$ and is used in $`t+1`$. The Rep-MMB implementation notes that equation 19b was changed from forward-looking capital to a static `k` convention.
 - **Capital return timing**: Rep-MMB note 1 says equation 13 is shifted one period backward, consistent with Gertler-Karadi notation.
 - **Leverage timing**: Rep-MMB note 2 says equation 18b is shifted one period forward to guarantee determinacy; the original contemporaneous equation is left commented in the implementation.

@@ -39,8 +39,3 @@
 - Review equation count and endogenous-variable coverage before using the derivation as a runnable `.mod` build contract.
 - Runtime validation, BK checks, steady-state checks, and IRF checks are deferred by instruction.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English derivation second.
-- Equation numbers `(F1)` through `(F29)`, file paths, model IDs, DOI values, and `needs_review` markers were preserved.

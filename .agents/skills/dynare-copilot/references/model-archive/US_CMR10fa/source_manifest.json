@@ -51,8 +51,7 @@
     "notes": "Used only to compare active variables, shock names, and the reduced financial-accelerator variant; not used as paper-side mathematical evidence."
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_CMR10fa/US_CMR10fa_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_CMR10fa/US_CMR10fa_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_CMR10fa/US_CMR10fa_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_CMR10fa/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_CMR10fa/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_CMR10fa/worker_report.json"
@@ -133,8 +132,7 @@
     }
   },
   "archive_files": {
-    "derivation_en": "mmb-paper-derivations/derivations/US_CMR10fa/US_CMR10fa_derivation.en.md",
-    "derivation_zh": "mmb-paper-derivations/derivations/US_CMR10fa/US_CMR10fa_derivation.zh.md",
+    "derivation_en": "mmb-paper-derivations/derivations/US_CMR10fa/US_CMR10fa_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_CMR10fa/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_CMR10fa/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_CMR10fa/worker_report.json"

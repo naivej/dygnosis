@@ -1,8 +1,7 @@
 {
   "model_id": "US_CPS10",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_CPS10/US_CPS10_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_CPS10/US_CPS10_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_CPS10/US_CPS10_derivation.md",
     "mmb-paper-derivations/derivations/US_CPS10/source_manifest.json",
     "mmb-paper-derivations/derivations/US_CPS10/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_CPS10/worker_report.json"
@@ -37,7 +36,6 @@
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/US_CPS10",
     "json_tool": "passed: source_manifest.json and worker_report.json",
     "english_sections": "passed: sections 1-8 present",
-    "f_number_count_match": "passed: English and Chinese F-number occurrence counts match",
     "dynare_run": "not_performed"
   },
   "status": "needs_review",

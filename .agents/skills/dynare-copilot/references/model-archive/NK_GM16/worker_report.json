@@ -2,8 +2,7 @@
   "model_id": "NK_GM16",
   "status": "needs_review",
   "owned_paths": [
-    "mmb-paper-derivations/derivations/NK_GM16/NK_GM16_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_GM16/NK_GM16_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_GM16/NK_GM16_derivation.md",
     "mmb-paper-derivations/derivations/NK_GM16/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_GM16/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_GM16/worker_report.json"
@@ -22,7 +21,6 @@
     "Read NK_GM16 model_index row and primary Markdown sections for the baseline model, appendix derivations, natural equilibrium, and equilibrium dynamics.",
     "Checked raw PDF path exists without reading PDF body.",
     "Used NK_GM16_rep.mod only as implementation cross-check.",
-    "Drafted English derivation first, then Chinese translation.",
     "Created source_manifest.json and extraction_notes.md."
   ],
   "validation": {
@@ -30,8 +28,7 @@
     "commands": [
       "git diff --check -- mmb-paper-derivations/derivations/NK_GM16",
       "python3 -m json.tool mmb-paper-derivations/derivations/NK_GM16/source_manifest.json >/dev/null",
-      "python3 -m json.tool mmb-paper-derivations/derivations/NK_GM16/worker_report.json >/dev/null",
-      "python3 section and F-number parity check for English and Chinese derivations"
+      "python3 -m json.tool mmb-paper-derivations/derivations/NK_GM16/worker_report.json >/dev/null"
     ],
     "results": [
       "diff_check_ok",

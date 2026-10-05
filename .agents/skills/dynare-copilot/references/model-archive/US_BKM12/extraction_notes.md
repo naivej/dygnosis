@@ -56,8 +56,3 @@ Information from the `.mod` file is used only to flag coverage and naming issues
 - Equation count is not ready for runtime validation because the model includes flexible-economy counterparts, measurement equations, and MA auxiliaries beyond the paper's prose exposition.
 - The reset-inflation formulas are source-stated, but their simulation implementation is not reconstructed here.
 
-## Translation
-
-- English derivation added at `US_BKM12_derivation.en.md`.
-- Chinese translation added at `US_BKM12_derivation.zh.md`.
-- The Chinese version preserves section order and F-numbering.

@@ -34,7 +34,3 @@
 - Confirm whether the shared catalog should describe the model as "without financial frictions" despite `sigw`/spread observables appearing in the implementation file with zero variance.
 - Runtime validation, Dynare equation count, steady-state residuals, BK checks, and IRF checks were not performed.
 
-## Translation Status
-
-- `US_DNGS15_SWpi_derivation.zh.md` is a translation of the English draft.
-- Equation numbers `(F1)` through `(F38)` and LaTeX formulas were preserved.

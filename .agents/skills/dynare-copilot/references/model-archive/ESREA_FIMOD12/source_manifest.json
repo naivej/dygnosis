@@ -49,15 +49,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/ESREA_FIMOD12/ESREA_FIMOD12_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/ESREA_FIMOD12/ESREA_FIMOD12_derivation.md",
       "exists": true,
       "sha256": "f9f2efaed885004d1aa158a6ef258c9a9377383e1d7a52f3e7d847eb8c2c341b"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/ESREA_FIMOD12/ESREA_FIMOD12_derivation.zh.md",
-      "exists": true,
-      "sha256": "9e4e1559bb88205c060da6f33f173324b7bc70aceb70b9f846fca278f8f2c5bb"
     },
     {
       "role": "source_manifest",

@@ -30,8 +30,3 @@
 - Decide whether the commitment-policy equations (F16)-(F26) should be part of the runnable model target or treated as policy-analysis reference equations.
 - Runtime validation was not performed; no Dynare `model(linear)` file was created or run.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English core.
-- Section headings and equation numbers were preserved with matching `(F1)` through `(F32)` counts.

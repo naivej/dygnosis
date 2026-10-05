@@ -1,46 +1,54 @@
-# 本地模型库检索（两套 catalog + examples）
+# Local model libraries: catalog lookup
 
-建模/复制类任务**落笔前**，先在这里找相近的现成实现作参照。两套目录服务于两个不同问题，
-分开检索、互不替代，通常组合使用。
+Read this in SKILL.md "New model", step "Sources", before you write any equation of a modeling or
+replication task.
 
----
-
-## 两套目录的分工
-
-| 问题                                                              | 用哪套                          | 查哪个文件                        | 读哪个文件夹                     |
-| ----------------------------------------------------------------- | ------------------------------- | --------------------------------- | -------------------------------- |
-| **经济学结构怎么设？** FOC、机制设计、校准、时序约定            | **模型参考库**（MMB）            | `references/catalog.csv`          | `references/examples/`           |
-| **Dynare 块怎么写？** 命令选项、块格式、特定功能怎么用          | **编程逻辑库**（Pfeifer DSGE_mod）| `references/catalog-code.csv`   | `references/examples-code/`      |
-
-> **重要**：两套都有命中时，先从编程逻辑库取块格式/语法样板，再从模型参考库对齐经济结构——
-> 别把两者混淆，也别只查一套就动笔。
+The skill ships two libraries, each with its own catalog. They answer different questions. Search them
+separately; usually you need both. The model archive (end of this file) is a third, read-only reference.
 
 ---
 
-## 一、模型参考库（catalog.csv + examples/）
+## Which library answers which question
 
-### 这是什么
+| Question | Library | Catalog | Folder |
+| -------- | ------- | ------- | ------ |
+| **How is the economics set up?** FOCs, mechanism design, calibration, timing convention | **Model reference library** (MMB) | `references/catalog.csv` | `references/examples/` |
+| **How is the Dynare block written?** Command options, block format, how a feature is used | **Programming library** (Pfeifer DSGE_mod + Dynare course) | `references/catalog-code.csv` | `references/examples-code/` |
 
-- `references/catalog.csv`：149 篇可复制宏观模型的索引，来自 Macroeconomic Model Database（MMB）
-  的 **rep-mmb 复制档**（macromodelbase.com/rep-mmb；上游仓库 IMFS-MMB/mmb-rep）。
-- `references/examples/<ModelID>.mod`：每篇论文对应、可直接跑的 Dynare 复制 mod，
-  **文件名 = catalog 里的 ModelID**（如 `references/examples/EA_GNSS10_rep.mod`）。
-- 这些 `_rep` 文件是**复现原论文**版，已剥去 MMB 的公共政策接口，是干净、论文忠实的参照。
+> When both have hits, take the block format and syntax from the programming library first, then align
+> the economic structure with the model reference library. Do not mix them up, and do not start writing
+> after searching only one.
 
-### catalog.csv 的列
+---
+
+## 1. Model reference library (`catalog.csv` + `examples/`)
+
+### What it is
+
+- `references/catalog.csv`: an index of 149 replicable macroeconomic models from the **rep-mmb
+  replication archive** of the Macroeconomic Model Database (MMB) (macromodelbase.com/rep-mmb; upstream
+  repository IMFS-MMB/mmb-rep).
+- `references/examples/<ModelID>.mod`: one Dynare replication `.mod` per paper. **The file name is the
+  `ModelID`** (for example `references/examples/EA_GNSS10_rep.mod`).
+- These `_rep` files reproduce the original paper without MMB's common policy interface: clean,
+  paper-faithful references.
+
+### Columns of `catalog.csv`
 
 `ModelID, Paper, Authors, Year, Journal, ModelType, Economy, Category, KeyFeatures`
 
-- **ModelID** = `examples/` 里的文件名（去掉 `.mod`）。
-- **ModelType** = 模型族 + **是否线性化**（关键，见下「照搬警示」）。
-- **Category** = 14 个主题桶（粗筛索引，见下）。
-- **KeyFeatures** = 自由文本机制标签（`financial accelerator` / `search-and-matching` /
-  `two-country` / `housing` / `Bayesian estimation` …），是 grep 的主要落点。
+- **ModelID** = the file name in `examples/` without `.mod`.
+- **Year** is text and can carry notes (for example `2008 (Working Paper; published 2011 …)`); grep it,
+  do not compare it as a number.
+- **ModelType** = model family and **whether it is linearized** (important; see "Copy warnings").
+- **Category** = one of 14 topic buckets (coarse filter, below).
+- **KeyFeatures** = free-text mechanism tags (`financial accelerator`, `search-and-matching`,
+  `two-country`, `housing`, `Bayesian estimation`, …): the main grep target.
 
-### 14 类索引（先按桶粗筛，再 grep 机制）
+### The 14 categories (filter by bucket first, then grep the mechanism)
 
-| Category | 篇数 |
-|----------|------|
+| Category | Models |
+|----------|--------|
 | 1. Baseline NK / Monetary Policy Rules | 14 |
 | 2. Estimated DSGE Benchmarks (Smets-Wouters Type) | 17 |
 | 3. Financial Accelerator / BGG-type Credit Frictions | 22 |
@@ -56,126 +64,159 @@
 | 13. Macroprudential Policy | 4 |
 | 14. Large Official Policy Models | 13 |
 
-### 检索步骤（模型参考库）
+### Lookup steps (model reference library)
 
-1. **提炼特征**：模型类型 + 核心机制 + 经济体。
-2. **grep**（149 行，优先 grep 省上下文）：
-   - 按机制：`grep -i "financial accelerator\|BGG" references/catalog.csv`
-   - 按经济体：`grep -i "Euro Area" references/catalog.csv`
-   - 按类别：先确定 Category 桶，再在桶内按 KeyFeatures 筛。
-3. **报候选**：选 3–5 个最相近的，向用户报一句"找到这几篇相近：`<ID>`（论文 / 机制）"。
-4. **读参照**：读 1–3 个 `references/examples/<ModelID>.mod`，抽取——变量/方程写法、
-   时序约定、参数校准、冲击设定、稳态处理。读命中的文件、抽相关块即可，**别整份 mod 无脑灌进上下文**。
+1. **Extract the features**: model type, core mechanism, economy.
+2. **grep** (149 rows; grep saves context; `rg -i` works the same way):
+   - By mechanism: `grep -iE "financial accelerator|BGG" references/catalog.csv`
+   - By economy: `grep -i "Euro Area" references/catalog.csv`
+   - By category: pick the Category bucket, then filter by KeyFeatures inside it.
+3. **Report candidates**: pick the 3–5 closest and tell the user in one line, for example "Close
+   models: `<ID>` (paper / mechanism)".
+4. **Read the references**: read 1–3 `references/examples/<ModelID>.mod` files and extract variable and
+   equation forms, timing convention, calibration, shock setup and steady-state handling. Read the
+   relevant blocks only; do not load whole files into context.
 
 ---
 
-## 二、编程逻辑库（catalog-code.csv + examples-code/）
+## 2. Programming library (`catalog-code.csv` + `examples-code/`)
 
-### 这是什么
+### What it is
 
-- `references/catalog-code.csv`：89 个 Dynare 编程逻辑示例的索引，两套来源：
-  - **DSGE_mod**（41 个）：来自 Johannes Pfeifer 的 DSGE_mod 仓库（github.com/JohannesPfeifer/DSGE_mod），
-    每个示范某命令/模块在一篇论文复制件里的实战写法。
-  - **Dynare Course**（48 个，Folder 以 `Dynare_Course/` 开头）：来自 Pfeifer《Advanced Dynare》课程，
-    **按 Dynare 功能逐章组织**的教学示例——同一个 RBC/NK 贯穿多章，"怎么用某个命令/选项"讲得最干净，
-    抄命令写法时**优先看这套**。
-  两套目标一致：展示 Dynare **最佳实践**和命令/模块的标准写法，而非复制某篇论文的经济结构。
-- `references/examples-code/<Folder>/<CodeID>.mod`：对应的 .mod 文件（及关键 .m/.inc/.mat 辅助文件），
-  **文件夹名 = catalog-code 里的 Folder 列**（课程示例形如 `Dynare_Course/Chapter_10_forecasting`）。
+- `references/catalog-code.csv`: an index of 89 Dynare programming examples from two sources:
+  - **DSGE_mod** (41 rows): Johannes Pfeifer's DSGE_mod repository
+    ([github.com/JohannesPfeifer/DSGE_mod](https://github.com/JohannesPfeifer/DSGE_mod)). Each file shows
+    how a command or module is used in a paper replication.
+  - **Dynare course** (48 rows; `Folder` starts with `Dynare_Course/`): teaching examples from Pfeifer's
+    "Advanced Dynare" course, **organized by Dynare feature**, chapter by chapter. The same RBC/NK model
+    runs through several chapters, so these show most cleanly how to use a command or option. Prefer them
+    when you copy command syntax.
 
-### 课程示例按功能定位（chapter → 功能 .md，请求某功能时这里直达对应 code）
+  Both sources show Dynare best practice and the standard way to write commands and modules, not the
+  economic structure of a paper.
+- `references/examples-code/<Folder>/<CodeID>.mod`: the `.mod` file (plus key `.m`, `.inc` and `.mat`
+  helper files). **The folder name is the `Folder` column** (course examples look like
+  `Dynare_Course/Chapter_10_forecasting`).
 
-> 每个功能 reference 的末尾都有「课程示例」小节，列出该功能对应的课程 .mod 路径与各自教学点。
-> 路由时：先按 §2 读功能 .md，其末尾即指向这些可跑示例；或直接 grep `catalog-code.csv` 的 DynareFeatures。
+### Course chapters by feature (chapter → reference file)
 
-| 课程章 | 功能 .md | 课程文件夹 `Dynare_Course/` | 代表命令 |
-| ------ | -------- | --------------------------- | -------- |
-| Ch1 入门 | stochastic-simulation.md | `Chapter_01_Dynare` | `model(linear)`, `stoch_simul(tex)` |
-| Ch2/3 预/宏处理器 | macro-processor.md | （内联，实例见 Ch9/11/13） | `@#include`, `@#if` |
-| Ch4 随机模拟 | stochastic-simulation.md | `Chapter_04_stoch_simul` | `stoch_simul`, `hp_filter`, `conditional_variance_decomposition` |
-| Ch5 Kalman/ML | estimation.md | `Chapter_05_Kalman_ML` | `calib_smoother` |
-| Ch6 贝叶斯 | estimation.md | `Chapter_06_Bayesian` | `estimation`, `mh_jscale`（接受率调参） |
-| Ch7 识别 | identification.md | `Chapter_07_Identification` | `identification`, `no_identification_*` |
-| Ch8 高阶 | higher-order.md | `Chapter_08_Higher_order` | `stoch_simul(order=2/3)`, 风险溢价 |
-| Ch9 矩方法 | moments-method.md | `Chapter_09_Method_of_Moments` | `method_of_moments`(GMM/SMM/irf_matching) |
-| Ch10 预测 | forecasting.md | `Chapter_10_forecasting` | `forecast`, `conditional_forecast`, `smoother2histval` |
-| Ch11 完全预见 | perfect-foresight.md | `Chapter_11_perfect_foresight` | `perfect_foresight_*`, `endval`, `extended_path`, `lmmcp` |
-| Ch12 OccBin | occbin.md | `Chapter_12_OccBin` | `occbin_constraints/setup/solver`, `lmmcp` |
-| Ch13 最优政策 | optimal-policy.md | `Chapter_13_optimal_policy` | `ramsey_model`, `discretionary_policy`, `osr` |
+Each feature reference ends with a course-examples section that lists the course `.mod` paths and what
+each one teaches. When you route a request (SKILL.md "Route the task"), read the feature reference; its
+last section points to these runnable examples. You can also grep the `DynareFeatures` column of
+`catalog-code.csv` directly.
 
-### catalog-code.csv 的列
+| Course chapter | Feature reference | Course folder `Dynare_Course/` | Representative commands |
+| -------------- | ----------------- | ------------------------------ | ----------------------- |
+| Ch1 Introduction | stochastic-simulation.md | `Chapter_01_Dynare` | `model(linear)`, `stoch_simul(tex)` |
+| Ch2/3 Preprocessor and macro processor | macro-processor.md | (no folder; macro directives appear in Ch9 and Ch11 examples) | `@#include`, `@#if` |
+| Ch4 Stochastic simulation | stochastic-simulation.md | `Chapter_04_stoch_simul` | `stoch_simul`, `hp_filter`, `conditional_variance_decomposition` |
+| Ch5 Kalman filter / maximum likelihood | estimation.md | `Chapter_05_Kalman_ML` | `calib_smoother` |
+| Ch6 Bayesian estimation | estimation.md | `Chapter_06_Bayesian` | `estimation`, `mh_jscale` (acceptance-rate tuning) |
+| Ch7 Identification analysis | identification.md | `Chapter_07_Identification` | `identification`, `no_identification_*` |
+| Ch8 Higher-order perturbation | higher-order.md | `Chapter_08_Higher_order` | `stoch_simul(order=2/3)`, risk premia |
+| Ch9 Method of moments | moments-method.md | `Chapter_09_Method_of_Moments` | `method_of_moments` (`mom_method` = GMM, SMM, IRF_MATCHING) |
+| Ch10 Forecasting | forecasting.md | `Chapter_10_forecasting` | `forecast`, `conditional_forecast`, `smoother2histval` |
+| Ch11 Perfect foresight | perfect-foresight.md | `Chapter_11_perfect_foresight` | `perfect_foresight_*`, `endval`, `extended_path`, `lmmcp` |
+| Ch12 OccBin | occbin.md | `Chapter_12_OccBin` | `occbin_constraints`, `occbin_setup`, `occbin_solver`, `lmmcp` |
+| Ch13 Optimal policy | optimal-policy.md | `Chapter_13_optimal_policy` | `ramsey_model`, `discretionary_policy`, `osr` |
+
+### Columns of `catalog-code.csv`
 
 `CodeID, Folder, Paper, Authors, Year, ModelType, Economy, DynareFeatures, Category`
 
-- **CodeID** = .mod 文件名（去掉 `.mod`）；用作读文件的精确路径。
-- **Folder** = `examples-code/` 下的子文件夹名。
-- **DynareFeatures** = 该文件最能示范的 Dynare 编程特性（是 grep 的主要落点）。
-- **Category** = 11 个功能桶（粗筛用）：
+- **CodeID** = the `.mod` file name without `.mod`. A CodeID is not unique across folders
+  (`RBC_baseline` is in `RBC_baseline/` and in `Dynare_Course/Chapter_04_stoch_simul/`), so always use
+  `Folder` + `CodeID` to build the path.
+- **Folder** = the subfolder under `examples-code/`.
+- **DynareFeatures** = the Dynare programming features the file shows best: the main grep target.
+- **Category** = one of 11 feature buckets (coarse filter):
 
-| Category | 代表示例 |
-|----------|----------|
+| Category | Example CodeIDs |
+|----------|-----------------|
 | 1. RBC / NK Basics | RBC_baseline, Born_Pfeifer_2018_MP |
 | 2. NK Linearized | Gali_2015_chapter_3, Gali_2008_chapter_3 |
 | 3. NK Nonlinear | Gali_2015_chapter_3_nonlinear |
 | 4. TANK / Heterogeneous | Gali_2010, Gali_2010_calib_target |
 | 5. Estimation (ML/Bayesian) | Smets_Wouters_2007_45, Ireland_2004, RBC_baseline_first_diff_bayesian |
-| 6. Optimal Policy | Gali_2015_chapter_5_commitment, *_discretion, *_ZLB |
+| 6. Optimal Policy | Gali_2015_chapter_5_commitment, Gali_2015_chapter_5_discretion, Ramsey_Example_* |
 | 7. Higher-Order Methods | Basu_Bundick_2017, SGU_2004, Caldara_et_al_2012 |
-| 8. Perfect Foresight | Gali_2015_chapter_5_commitment_ZLB, Solow_* |
+| 8. Perfect Foresight | Gali_2015_chapter_5_commitment_ZLB, Gali_2015_chapter_5_discretion_ZLB, Solow_* |
 | 9. Open Economy | Gali_Monacelli_2005, SGU_2003, Aguiar_Gopinath_2007 |
 | 10. Welfare Analysis | RBC_baseline_welfare, Born_Pfeifer_2018_welfare |
 | 11. Special Methods | RBC_news_shock_model, NK_linear_forward_guidance, Ascari_Sbordone_2014 |
 
-### 检索步骤（编程逻辑库）
+### Lookup steps (programming library)
 
-1. **确认要解决的编程问题**：找对应的 Dynare 特性关键词（如 `discretionary_policy`、
-   `lmmcp`、`steadystate.m`、`ramsey_model`、`loglinear`、`news shock`、`welfare`…）。
-2. **grep DynareFeatures 列**（89 行，速度很快）：
-   - 找特定命令：`grep -i "ramsey_model\|discretionary" references/catalog-code.csv`
-   - 找块/接口：`grep -i "steadystate.m" references/catalog-code.csv`
-   - 找功能：`grep -i "lmmcp\|ZLB\|zero lower bound" references/catalog-code.csv`
-   - 找特定模型类：`grep -i "TANK\|hand-to-mouth" references/catalog-code.csv`
-3. **读参照**：读 `references/examples-code/<Folder>/<CodeID>.mod`，
-   只抽相关块（命令选项写法、块格式、辅助函数接口）即可，不要全灌上下文。
-4. **同时需要经济结构参照？**→ 再查模型参考库（catalog.csv）补充机制/时序约定。
-
----
-
-## 照搬警示
-
-**模型参考库**：
-- ModelType 含 `(linearized)` → 该 mod 是线性化版；只取方程**内容/机制/时序/校准**，
-  不要照抄线性化形式——按 R8 自己写非线性。
-- 参照不替代阶段1 推导。
-
-**编程逻辑库**：
-- 很多示例本身是线性化写法（Galí 2008/2015 等）；只抽语法样板，
-  经济结构仍以推导为准，按 R8 写非线性版。
-- 辅助 .m 文件（steadystate.m、IRF_matching_objective.m 等）可直接改写复用。
+1. **Name the programming problem**: find the Dynare feature keyword (for example
+   `discretionary_policy`, `lmmcp`, `steadystate.m`, `ramsey_model`, `loglinear`, `news shock`,
+   `welfare`).
+2. **grep the DynareFeatures column** (89 rows, fast):
+   - A command: `grep -iE "ramsey_model|discretionary" references/catalog-code.csv`
+   - A block or interface: `grep -i "steadystate.m" references/catalog-code.csv`
+   - A feature: `grep -iE "lmmcp|ZLB|zero lower bound" references/catalog-code.csv`
+   - A model class: `grep -iE "TANK|hand-to-mouth" references/catalog-code.csv`
+3. **Read the reference**: read `references/examples-code/<Folder>/<CodeID>.mod` and extract only the
+   relevant blocks (command options, block format, helper-function interface). Do not load whole files.
+4. **Need the economic structure too?** Search the model reference library (`catalog.csv`) for the
+   mechanism and the timing convention.
 
 ---
 
-## 与主流程的衔接
+## Copy warnings
 
-- **§3 第1.3步**：先 grep `catalog.csv`（模型结构），再 grep `catalog-code.csv`（编程逻辑），
-  两套均无命中才上 web。
-- **第3步 web 检索降级**：两套库均命中时，web 只补论文精确校准来源或某条推导细节。
-- **DSGE_mod 已本地化**：不再需要上网找 DSGE_mod（github.com/JohannesPfeifer/DSGE_mod），
-  其全部关键 .mod 文件已在 `references/examples-code/` 中，直接读即可。
+**Model reference library:**
+- `ModelType` contains `(linearized)` (21 rows): that `.mod` is a linearized version. Take the equation
+  content, mechanism, timing and calibration; do not copy the linearized form. Write the nonlinear model
+  (R8), unless the user asks for a linear model or the source gives only the linearized system.
+- A reference does not replace Stage 1 (derivation note).
 
-## 用户模型存档库（model-archive-catalog.csv + model-archive/<ModelID>/）
+**Programming library:**
+- Many examples are written in linearized form (Galí 2008/2015 and others). Take only the syntax pattern;
+  the economic structure comes from your derivation, written nonlinear (R8).
+- Helper `.m` files (`*_steadystate.m`, `IRF_matching_objective.m`, …) can be adapted and reused.
+- Names in the examples do not always follow R5 (for example `beta` and `i` in the Galí files). Rename
+  them when you copy into a new model.
+- `Dynare_Course/Chapter_11_perfect_foresight/rbcii.mod` uses the obsolete `[mcp='…']` equation tag.
+  Write the complementarity condition with `⟂` (ASCII `_|_`) instead (R6; Dygnosis W170).
+- `Dynare_Course/Chapter_11_perfect_foresight/nk3_zlb_stoch.mod` uses `max` under `stoch_simul` on
+  purpose, to show why perturbation cannot handle the ZLB. Do not copy that pattern (R6; Dygnosis W200).
 
-`references/model-archive-catalog.csv` 是积累型的第三层索引，优先级低于两套主库。
-**每个模型在 `references/model-archive/<ModelID>/` 有独立子文件夹**。索引含 `Status` 列，区分两类条目：
+**Both libraries:** run `dynare_diagnose` on any block you copy (`references/dygnosis-workflow.md`); it
+reports deprecated commands and options (W150) and model-block names that your file does not declare
+(E020).
 
-- **`runnable`**：历次任务沉淀的可复跑模型，子文件夹装齐复跑所需文件
-  （`.mod`、推导 md、外部 `steadystate.m`、求解 driver、helper、params include 等）。
-- **`derivation-only (needs_review)`**：161 篇 MMB 论文推导（由原 MMB 推导归档整合而来），
-  子文件夹**只有推导 md**（`<ID>_derivation.en.md` / `.zh.md` + 抽取说明/来源 manifest），
-  **没有 `.mod`、没有稳态/运行文件**，且多为 OCR 首过、`needs_review`——当推导参照读、勿当可运行实现，
-  其方程在落进 Dynare 前需对照论文核对。
+---
 
-检索时**两条路都走**：grep `model-archive-catalog.csv` 的机制标签（含 `Status` 区分），
-同时 `ls model-archive/` 扫子文件夹名（下划线开头的目录如 `_mmb-provenance/` 不是模型，跳过）。
-命中后先看该行 `Status`：`runnable` 可整夹复制/直接跑，`derivation-only` 只读推导取经济结构。
-检索方式、字段格式、存档流程详见 `references/model-archive.md`。
+## How this fits the main flow
+
+- **SKILL.md "New model", step "Sources"**: grep `catalog.csv` (model structure) first, then
+  `catalog-code.csv` (programming). Go to the web only if neither has a hit.
+- **Web search when both libraries hit**: use the web only for the paper's exact calibration source or a
+  specific derivation detail.
+- **DSGE_mod is local**: the key DSGE_mod `.mod` files are in `references/examples-code/`. Read them there;
+  do not search the web for DSGE_mod.
+
+## Model archive (`model-archive-catalog.csv` + `model-archive/<ModelID>/`)
+
+`references/model-archive-catalog.csv` is a third index, with lower priority than the two libraries. Each
+entry has its own folder `references/model-archive/<ModelID>/`. The `Status` column separates two kinds
+of entry:
+
+- **`runnable`** (8 entries): models from earlier tasks. The folder holds what a rerun needs (`.mod`,
+  derivation note, and where used an external steady-state file, run script, helper functions or
+  parameter include).
+- **`derivation-only (needs_review)`** (161 entries): MMB paper derivations. The folder has only the
+  derivation note (`<ModelID>_derivation.md`) plus
+  extraction notes and a source manifest. There is **no `.mod`** and no steady-state or run file. Most are
+  first-pass extractions marked `needs_review`: use them as derivation references, not as runnable
+  implementations, and check their equations against the paper before they go into Dynare.
+
+Search both ways: grep `model-archive-catalog.csv` for mechanism tags (note `Status`), and list the
+folder names in `model-archive/` (skip folders that start with `_`, such as `_mmb-provenance/`; they are
+not models). On a hit, read `Status` first: a `runnable` entry can be read and run as a whole folder; a
+`derivation-only` entry gives the economic structure only. For a derivation-only `<ModelID>`, also check
+`catalog.csv` for `<ModelID>_rep`: 138 of the 161 have a runnable MMB replication in
+`references/examples/`.
+
+The archive is read-only. Do not write new entries into the installed skill. Archive a model only when
+the user asks, in a location the user chooses (`references/model-archive.md`).

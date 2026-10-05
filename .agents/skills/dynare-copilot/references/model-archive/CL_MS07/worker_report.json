@@ -2,8 +2,7 @@
   "model_id": "CL_MS07",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/CL_MS07/CL_MS07_derivation.en.md",
-    "mmb-paper-derivations/derivations/CL_MS07/CL_MS07_derivation.zh.md",
+    "mmb-paper-derivations/derivations/CL_MS07/CL_MS07_derivation.md",
     "mmb-paper-derivations/derivations/CL_MS07/source_manifest.json",
     "mmb-paper-derivations/derivations/CL_MS07/extraction_notes.md",
     "mmb-paper-derivations/derivations/CL_MS07/worker_report.json"
@@ -46,7 +45,7 @@
     {
       "check": "english_chinese_f_number_counts_match",
       "result": "passed",
-      "details": "English and Chinese files each contain 115 F-number references; unique numbering reaches F40."
+      "details": "unique numbering reaches F40."
     },
     {
       "check": "json_validity",

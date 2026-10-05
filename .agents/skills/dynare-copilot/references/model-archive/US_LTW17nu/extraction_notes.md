@@ -33,8 +33,3 @@
 - Confirm whether catalog/status merge should treat `US_LTW17nu` as a separate variant row with `alphag=0`, `thet=0.8`, and inactive non-savers.
 - Runtime validation, BK checks, and steady-state validation are deferred by task instruction.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was produced second as a translation of the English core.
-- F-number counts match between English and Chinese derivations.

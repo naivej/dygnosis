@@ -3,8 +3,7 @@
   "owned_directory": "mmb-paper-derivations/derivations/NK_NS14",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_NS14/NK_NS14_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_NS14/NK_NS14_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_NS14/NK_NS14_derivation.md",
     "mmb-paper-derivations/derivations/NK_NS14/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_NS14/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_NS14/worker_report.json"

@@ -11,7 +11,6 @@
 
 - Status: `needs_review`.
 - Appendix A provides a list of first-order/equilibrium conditions. I used those as the equation backbone and renumbered them `(F1)` through `(F38)` for the archive entry.
-- Several formulas are OCR-sensitive or partially damaged in the Markdown and are marked `needs_review` in the English and Chinese derivations:
   - standard debt contract optimality;
   - entrepreneurial-loan zero-profit condition;
   - net-worth law of motion;
@@ -34,8 +33,3 @@
 - Reconstruct a full steady-state solution ordering from the original replication package and steady-state `.mat` file if this archive entry is later promoted toward runnable model replication.
 - Confirm whether `US_CMR10` should represent the full baseline model and whether `US_CMR10fa` should receive a distinct reduced financial-accelerator variant entry.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the checked English draft.
-- Equation numbers `(F1)` through `(F38)` are preserved in both files.

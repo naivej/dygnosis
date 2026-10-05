@@ -50,8 +50,7 @@
     "used_as_paper_source": false
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_ACELm/US_ACELm_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_ACELm/US_ACELm_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_ACELm/US_ACELm_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_ACELm/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_ACELm/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_ACELm/worker_report.json"

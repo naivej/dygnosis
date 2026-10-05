@@ -54,8 +54,7 @@
     "primary_run_id": "cb4ea347-a70e-40fd-a719-d1719b049a32"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_GM07/NK_GM07_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_GM07/NK_GM07_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_GM07/NK_GM07_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_GM07/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_GM07/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_GM07/worker_report.json"
@@ -119,15 +118,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_GM07/NK_GM07_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_GM07/NK_GM07_derivation.md",
       "exists": true,
       "sha256": "86faa492d1bda288d4d8819369442b4cd50e0388511e8b3a52c2bdc416bbaf2f"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_GM07/NK_GM07_derivation.zh.md",
-      "exists": true,
-      "sha256": "b67558d0c8894a0c64390a6acd107a5bb5321c8fdb3fb8b082b3838f97ebe45f"
     },
     {
       "role": "source_manifest",

@@ -40,8 +40,3 @@
 - Runtime validation is deferred. Dynare was not run.
 - Shared `catalog.csv` and `status.csv` were not edited by this worker; proposed row values are in `worker_report.json`.
 
-## Translation Status
-
-- English derivation was drafted first in `US_PV15_derivation.en.md`.
-- Chinese translation was then written in `US_PV15_derivation.zh.md`.
-- F-number counts match between English and Chinese versions.

@@ -32,8 +32,3 @@
 - Confirm whether the resource constraint's utilization term should be retained exactly as in the paper's log-linear equation or transformed if a nonlinear runnable model is later built.
 - Runtime validation, residual checks, BK checks, and IRF checks were not performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation is a direct translation of the English draft.
-- Equation numbers `(F1)` through `(F15)` are preserved in both versions.

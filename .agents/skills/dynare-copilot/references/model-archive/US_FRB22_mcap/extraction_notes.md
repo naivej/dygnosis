@@ -37,8 +37,3 @@ No Dynare run was performed.
 - Policy-rule formulas with ELB and threshold constraints need targeted checking against the PDF/package because OCR has placeholder characters.
 - Variant-specific differences among `US_FRB22_mcap`, `US_FRB22_mcapwp`, `US_FRB22_mceall`, and `US_FRB22_var` should be reconciled against official Modelbase/LINVER documentation before review promotion.
 
-## Translation Status
-
-- English derivation written first.
-- Chinese derivation translated second from the English core.
-- F-number counts were kept aligned.

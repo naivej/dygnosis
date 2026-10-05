@@ -11,7 +11,6 @@
 ## Extraction Scope
 
 - English derivation was drafted first using the eight required sections.
-- Chinese derivation is a translation of the English draft and preserves every `(F#)` marker.
 - The entry targets `US_CMR14noFA`, the no-financial-frictions CEE-style variant described in the paper, not the baseline CMR14 model with risk shocks and BGG financial accelerator.
 - The `.mod` file `.agents/skills/dynare-copilot/references/examples/US_CMR14noFA_rep.mod` was read only as `implementation_cross_check`.
 - Dynare was not run.
@@ -38,7 +37,3 @@
 - Equation count reconciliation should be repeated when building a runnable `.mod`, especially because the implementation uses auxiliary definitions and companion flexible-price variables.
 - Runtime validation, Blanchard-Kahn checks, residual checks, and IRF checks were not performed.
 
-## Translation Status
-
-- Chinese translation completed after the English draft.
-- English and Chinese `(F#)` counts match in validation.

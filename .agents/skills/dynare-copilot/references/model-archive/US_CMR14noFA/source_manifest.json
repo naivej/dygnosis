@@ -82,8 +82,7 @@
     }
   ],
   "archive_files": {
-    "derivation_en": "mmb-paper-derivations/derivations/US_CMR14noFA/US_CMR14noFA_derivation.en.md",
-    "derivation_zh": "mmb-paper-derivations/derivations/US_CMR14noFA/US_CMR14noFA_derivation.zh.md",
+    "derivation_en": "mmb-paper-derivations/derivations/US_CMR14noFA/US_CMR14noFA_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_CMR14noFA/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_CMR14noFA/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_CMR14noFA/worker_report.json"

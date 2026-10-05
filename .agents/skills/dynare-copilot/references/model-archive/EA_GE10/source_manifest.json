@@ -50,8 +50,7 @@
     }
   },
   "archive_files": {
-    "derivation_en": "mmb-paper-derivations/derivations/EA_GE10/EA_GE10_derivation.en.md",
-    "derivation_zh": "mmb-paper-derivations/derivations/EA_GE10/EA_GE10_derivation.zh.md",
+    "derivation_en": "mmb-paper-derivations/derivations/EA_GE10/EA_GE10_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/EA_GE10/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/EA_GE10/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/EA_GE10/worker_report.json"

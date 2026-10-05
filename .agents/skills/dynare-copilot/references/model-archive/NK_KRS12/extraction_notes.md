@@ -25,11 +25,5 @@
 ## Deferred Issues
 
 - Source-level review should compare the OCR-damaged appendix equations against the raw PDF, especially the durable Phillips curve and the Taylor rule factorization.
-- The English and Chinese derivations preserve the same equation numbering, but the entry should remain `needs_review` until a targeted PDF formula check is completed.
 - Runtime validation, residual checks, BK checks, and IRF replication are deferred.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation created as a translation of the English core.
-- Equation numbering `(F1)` through `(F29)` is preserved in both versions.

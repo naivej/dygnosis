@@ -38,7 +38,3 @@ Status: `needs_review`.
 - Dynare was not run.
 - No derivation was promoted into `.agents/skills/dynare-copilot/references/model-archive/`.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English core and preserves the eight-section structure and `(F#)` numbering.

@@ -11,7 +11,6 @@
 ## Extraction Scope
 
 - English derivation was drafted first from the `primary_full_md_path`.
-- Chinese derivation was translated from the English derivation, preserving equation labels `(F1)` through `(F43)` and all formulas.
 - Shared indexes `mmb-paper-derivations/derivations/catalog.csv` and `mmb-paper-derivations/derivations/status.csv` were not edited.
 
 ## Formula Quality
@@ -35,7 +34,3 @@
 - The steady-state calibration target solution for `lambda`, `omega`, and `chi` is not fully closed-form in the paper and should remain `needs_review`.
 - Runtime validation, BK checks, impulse-response checks, and promotion to the runnable skill archive are deferred.
 
-## Translation Status
-
-- Chinese translation completed after the English derivation.
-- English and Chinese derivations preserve matching section order and F-number labels.

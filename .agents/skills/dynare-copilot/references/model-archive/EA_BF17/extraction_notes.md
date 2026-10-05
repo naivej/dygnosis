@@ -39,8 +39,3 @@
 - Confirm whether `r` is best described as the short-term nominal interest rate or a detrended policy-rate variable in the MMB implementation.
 - Runtime validation was intentionally not performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English core.
-- Equation numbering `(F1)` through `(F11)` is preserved in both files.

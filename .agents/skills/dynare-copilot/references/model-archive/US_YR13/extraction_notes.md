@@ -28,7 +28,3 @@
 - Rebuild a full steady-state ordering if a runnable archive entry is later required.
 - Runtime validation, Blanchard-Kahn checks, and promotion to `.agents/skills/dynare-copilot/references/model-archive/` are deferred.
 
-## Translation Status
-
-- English derivation was written first.
-- Chinese derivation preserves the same eight-section structure and the same equation numbering `(F1)` through `(F35)`.

@@ -18,7 +18,6 @@
   - B.6 rendered `theta_t, phi`; the main-text equation (9) was used instead.
   - B.28 and B.42 include likely OCR denominator/case artifacts and remain `needs_review`.
   - The inflation-response coefficient sometimes appears as `gamma_II`; it was normalized to `gamma_\Pi`.
-- Equations are numbered continuously as `(F1)` through `(F25)` in both English and Chinese drafts.
 
 ## Implementation Cross-Check
 
@@ -36,8 +35,3 @@
 - Runtime validation, residual checks, Blanchard-Kahn checks, and IRF replication were not performed.
 - Shared `catalog.csv` and `status.csv` were intentionally not updated per user scope restriction.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English derivation.
-- Equation numbers and formulas were preserved across translations.

@@ -2,8 +2,7 @@
   "model_id": "EA_DKR11",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_DKR11/EA_DKR11_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_DKR11/EA_DKR11_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_DKR11/EA_DKR11_derivation.md",
     "mmb-paper-derivations/derivations/EA_DKR11/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_DKR11/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_DKR11/worker_report.json"
@@ -50,11 +49,6 @@
     {
       "command": "check English has all eight required sections",
       "status": "passed"
-    },
-    {
-      "command": "check English and Chinese F-number counts match",
-      "status": "passed",
-      "details": "116 total F-number references in each file; 42 unique equation numbers, F1-F42"
     }
   ],
   "unresolved_issues": [

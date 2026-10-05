@@ -76,8 +76,7 @@
     "exists": false
   },
   "archive_outputs": [
-    "mmb-paper-derivations/derivations/US_FGKR15/US_FGKR15_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_FGKR15/US_FGKR15_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_FGKR15/US_FGKR15_derivation.md",
     "mmb-paper-derivations/derivations/US_FGKR15/source_manifest.json",
     "mmb-paper-derivations/derivations/US_FGKR15/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_FGKR15/worker_report.json"

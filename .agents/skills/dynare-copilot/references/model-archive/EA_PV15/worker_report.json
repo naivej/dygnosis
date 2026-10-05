@@ -2,8 +2,7 @@
   "model_id": "EA_PV15",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_PV15/EA_PV15_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_PV15/EA_PV15_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_PV15/EA_PV15_derivation.md",
     "mmb-paper-derivations/derivations/EA_PV15/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_PV15/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_PV15/worker_report.json"
@@ -48,7 +47,6 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number reference counts match",
       "status": "passed",
       "details": "109 F-number references in each file; 50 unique F-numbers."
     },

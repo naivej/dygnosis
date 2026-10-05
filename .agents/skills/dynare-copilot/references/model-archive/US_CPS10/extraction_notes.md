@@ -30,8 +30,3 @@
 - A targeted PDF check may be useful for equation (21) if the archive later needs a clean source-level correction of the inflation-target lag.
 - Runtime validation, determinacy, equation-count checks in Dynare, and IRF reproduction are deferred.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English version.
-- Equation numbers `(F1)` through `(F16)` are preserved in both files.

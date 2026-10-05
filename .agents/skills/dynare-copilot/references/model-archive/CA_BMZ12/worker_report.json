@@ -2,8 +2,7 @@
   "model_id": "CA_BMZ12",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/CA_BMZ12/CA_BMZ12_derivation.en.md",
-    "mmb-paper-derivations/derivations/CA_BMZ12/CA_BMZ12_derivation.zh.md",
+    "mmb-paper-derivations/derivations/CA_BMZ12/CA_BMZ12_derivation.md",
     "mmb-paper-derivations/derivations/CA_BMZ12/source_manifest.json",
     "mmb-paper-derivations/derivations/CA_BMZ12/extraction_notes.md",
     "mmb-paper-derivations/derivations/CA_BMZ12/worker_report.json"

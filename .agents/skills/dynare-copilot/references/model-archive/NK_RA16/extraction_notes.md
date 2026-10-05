@@ -11,7 +11,6 @@
 ## Extraction Scope
 
 - English derivation was drafted first from the `primary_full_md_path`.
-- Chinese derivation was translated from the English derivation, preserving equation labels `(F1)` through `(F52)` and all formulas.
 - Shared indexes `mmb-paper-derivations/derivations/catalog.csv` and `mmb-paper-derivations/derivations/status.csv` were not edited.
 - The raw PDF body was not opened because the Markdown contained the main text and Appendix A FOCs.
 
@@ -39,7 +38,3 @@
 - The flexible-price duplicate block used for `outputgap` is an implementation device and was not expanded into a second derivation.
 - Runtime validation, BK checks, impulse-response checks, and promotion to the runnable skill archive are deferred.
 
-## Translation Status
-
-- Chinese translation completed after the English derivation.
-- English and Chinese derivations preserve matching section order and F-number labels.

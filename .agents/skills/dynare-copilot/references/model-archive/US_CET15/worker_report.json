@@ -2,8 +2,7 @@
   "model_id": "US_CET15",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_CET15/US_CET15_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_CET15/US_CET15_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_CET15/US_CET15_derivation.md",
     "mmb-paper-derivations/derivations/US_CET15/source_manifest.json",
     "mmb-paper-derivations/derivations/US_CET15/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_CET15/worker_report.json"
@@ -49,8 +48,7 @@
     },
     {
       "check": "english_chinese_f_number_counts_match",
-      "status": "passed",
-      "details": "English and Chinese each contain 112 F-number references and 49 unique F-numbers."
+      "status": "passed"
     },
     {
       "check": "git_diff_check",

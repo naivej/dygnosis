@@ -14,7 +14,6 @@ Status: `needs_review`
 
 - Formula quality is `needs_review`.
 - The source paper is an overview of LINVER construction, expectations cases, stochastic simulations, ELB solution routines, and fiscal-stabilization options. It does not list the complete FRB/US/LINVER equation system.
-- Source-stated formulas retained in the English and Chinese derivations:
   - generic inertial federal-funds-rate rule;
   - ECFS fiscal process, `FISCAL_t = 0.97 FISCAL_{t-1} + epsilon_t`;
   - linearization/baseline conventions.
@@ -40,8 +39,3 @@ Status: `needs_review`
 - Do not promote this entry to the runnable dynare-copilot model archive until a separate implementation and runtime-validation phase is assigned.
 - Dynare was not run.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was created second as a translation of the English core.
-- The Chinese file preserves section order, equation numbers `(F1)` through `(F18)`, file paths, model ID, DOI, and status markers.

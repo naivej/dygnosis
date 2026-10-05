@@ -2,8 +2,7 @@
   "model_id": "EA_CW05ta",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_CW05ta/EA_CW05ta_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_CW05ta/EA_CW05ta_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_CW05ta/EA_CW05ta_derivation.md",
     "mmb-paper-derivations/derivations/EA_CW05ta/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_CW05ta/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_CW05ta/worker_report.json"
@@ -52,8 +51,7 @@
     },
     {
       "check": "english_chinese_f_number_count_match",
-      "status": "passed",
-      "notes": "English and Chinese derivations each contain 34 F-number references."
+      "status": "passed"
     }
   ],
   "unresolved_issues": [

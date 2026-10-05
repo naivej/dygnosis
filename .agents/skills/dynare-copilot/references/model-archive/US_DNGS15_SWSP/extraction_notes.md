@@ -24,10 +24,5 @@
 
 - Recovering primitive household, investment, Calvo wage/price, and entrepreneur/bank Lagrangians would require importing external CEE/SW/BGG/CMR derivations.
 - The compact paper Taylor rule differs from the MMB implementation's model-base policy-rule interface; this entry records the paper rule and notes the implementation variant.
-- The flexible-price/wage block is summarized as a counterpart system rather than fully duplicating every equation in the English and Chinese derivations.
 - Runtime validation, equation-count validation against Dynare, and BK checks are deferred.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English version with matching section structure and F-numbering.

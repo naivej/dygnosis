@@ -30,7 +30,3 @@
 - A future validation pass should compare equation count and variable count after deciding whether measurement equations and SPF-conditioning equations belong in the runnable model block or only in the estimation/state-space layer.
 - The paper's SPF news/noise forecasting layer should be separated from the benchmark structural model when building a `.mod` implementation.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English derivation with the same eight-section structure and preserved `(F#)` numbering.

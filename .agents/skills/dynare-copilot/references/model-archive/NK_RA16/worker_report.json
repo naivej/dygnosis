@@ -3,8 +3,7 @@
   "status": "needs_review",
   "owned_directory": "mmb-paper-derivations/derivations/NK_RA16",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_RA16/NK_RA16_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_RA16/NK_RA16_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_RA16/NK_RA16_derivation.md",
     "mmb-paper-derivations/derivations/NK_RA16/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_RA16/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_RA16/worker_report.json"
@@ -62,9 +61,7 @@
   "validation": {
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/NK_RA16 exited cleanly",
     "json_tool_source_manifest": "passed: python3 -m json.tool mmb-paper-derivations/derivations/NK_RA16/source_manifest.json",
-    "json_tool_worker_report": "passed: python3 -m json.tool mmb-paper-derivations/derivations/NK_RA16/worker_report.json",
-    "eight_section_check": "passed: English and Chinese files contain sections 1-8",
-    "f_number_count_check": "passed: English and Chinese both contain 125 F-number references covering unique labels F1-F52"
+    "json_tool_worker_report": "passed: python3 -m json.tool mmb-paper-derivations/derivations/NK_RA16/worker_report.json"
   },
   "unresolved_issues": [
     "Entrepreneur payoff and loan-return integrals need targeted source review because MinerU OCR around Appendix A.4 is fragile.",

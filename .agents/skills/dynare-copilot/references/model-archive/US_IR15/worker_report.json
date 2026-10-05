@@ -2,8 +2,7 @@
   "model_id": "US_IR15",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_IR15/US_IR15_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_IR15/US_IR15_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_IR15/US_IR15_derivation.md",
     "mmb-paper-derivations/derivations/US_IR15/source_manifest.json",
     "mmb-paper-derivations/derivations/US_IR15/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_IR15/worker_report.json"
@@ -43,8 +42,7 @@
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/US_IR15 returned no output",
     "json_tool_source_manifest": "passed: python3 -m json.tool source_manifest.json",
     "english_eight_sections": "passed",
-    "english_has_F1": "passed",
-    "f_number_counts_match": "passed: English and Chinese each have 75 F-markers and 23 unique F-numbers"
+    "english_has_F1": "passed"
   },
   "unresolved_issues": [
     "Supplementary appendix formulas for matrix construction and yield steady-state matching were not available locally.",

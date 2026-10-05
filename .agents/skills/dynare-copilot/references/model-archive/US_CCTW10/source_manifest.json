@@ -55,8 +55,7 @@
     "not_used_as_paper_source": true
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_CCTW10/US_CCTW10_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_CCTW10/US_CCTW10_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_CCTW10/US_CCTW10_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_CCTW10/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_CCTW10/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_CCTW10/worker_report.json"

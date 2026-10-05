@@ -43,8 +43,7 @@
     }
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_BR13/US_BR13_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_BR13/US_BR13_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_BR13/US_BR13_derivation.md",
     "extraction_notes": "mmb-paper-derivations/derivations/US_BR13/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_BR13/worker_report.json"
   },

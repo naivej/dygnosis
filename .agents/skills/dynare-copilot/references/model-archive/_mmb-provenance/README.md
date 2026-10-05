@@ -4,7 +4,7 @@ This folder stores source-backed MMB derivation Markdown exported from the priva
 
 ## Contents
 
-- `derivations/<MODEL_ID>/`: English and Chinese formula/derivation Markdown for each model entry, plus extraction notes and machine-readable source manifests.
+- `derivations/<MODEL_ID>/`: the English derivation note for each model, plus extraction notes and source manifests.
 - `metadata/model_metadata.csv`: one row per archived model derivation.
 - `metadata/source_metadata.csv`: one row per deduplicated MinerU paper Markdown source.
 - `metadata/excluded_or_missing.csv`: MMB rows not archived here and why.

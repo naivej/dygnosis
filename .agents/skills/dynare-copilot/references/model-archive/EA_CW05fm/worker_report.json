@@ -2,8 +2,7 @@
   "model_id": "EA_CW05fm",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_CW05fm/EA_CW05fm_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_CW05fm/EA_CW05fm_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_CW05fm/EA_CW05fm_derivation.md",
     "mmb-paper-derivations/derivations/EA_CW05fm/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_CW05fm/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_CW05fm/worker_report.json"
@@ -48,7 +47,6 @@
       "status": "passed"
     },
     {
-      "name": "English/Chinese F-number counts match",
       "status": "passed"
     }
   ],

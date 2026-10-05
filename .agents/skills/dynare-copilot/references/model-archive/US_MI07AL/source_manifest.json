@@ -62,8 +62,7 @@
     "notes": "First page/first 80 Markdown lines match the expected paper title and author."
   },
   "archive_files": {
-    "derivation_en": "mmb-paper-derivations/derivations/US_MI07AL/US_MI07AL_derivation.en.md",
-    "derivation_zh": "mmb-paper-derivations/derivations/US_MI07AL/US_MI07AL_derivation.zh.md",
+    "derivation_en": "mmb-paper-derivations/derivations/US_MI07AL/US_MI07AL_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_MI07AL/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_MI07AL/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_MI07AL/worker_report.json"

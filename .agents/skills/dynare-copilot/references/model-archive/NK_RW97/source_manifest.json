@@ -86,8 +86,7 @@
     }
   ],
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_RW97/NK_RW97_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_RW97/NK_RW97_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_RW97/NK_RW97_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_RW97/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_RW97/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_RW97/worker_report.json"
@@ -147,15 +146,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_RW97/NK_RW97_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_RW97/NK_RW97_derivation.md",
       "exists": true,
       "sha256": "762399f35c5b383858d7a48ea594f08f3e38cc69a3523e239ebf82696eb34a3f"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_RW97/NK_RW97_derivation.zh.md",
-      "exists": true,
-      "sha256": "8ffd0d28a64771d51c3b94d5edcf82a2abf5ac0f493d149805195fb0f9da9f54"
     },
     {
       "role": "source_manifest",

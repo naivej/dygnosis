@@ -37,7 +37,3 @@ Status: `needs_review`
 - A future implementation pass should re-derive the exact transformation from paper notation $`(p_t,x_t,v_t,q_t)`$ to the Rep-MMB linear auxiliary system.
 - A future runtime pass should run Dynare and record steady-state/model diagnostics.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation is a translation of the English core and preserves all `(F#)` equation numbers.

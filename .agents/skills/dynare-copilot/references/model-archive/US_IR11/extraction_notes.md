@@ -13,7 +13,6 @@
 
 - Status: `needs_review`.
 - The primary Markdown includes the model section and paper equations (1)-(30). The linear equations (21)-(30) are legible enough for first-pass extraction.
-- The Rotemberg pricing first-order condition from paper equation (13) is long and OCR-sensitive; it is included in the English and Chinese derivations with a `needs_review` marker.
 - The cost-push shock renormalization from the markup shock to `e` is described in the Markdown after paper equation (30); it is included but marked `needs_review` because the sign and scaling should be PDF-checked before review promotion.
 - The paper's equation (22) was split across two Markdown display equations; it was recombined in the derivation.
 
@@ -33,9 +32,3 @@
 - Runtime validation, BK checks, impulse response checks, and reproduction of estimation/filtering results were not performed and remain deferred.
 - Shared `catalog.csv` and `status.csv` were intentionally not edited per task ownership.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was produced second as a translation of the English derivation.
-- Equation numbering `(F1)` through `(F18)` is preserved in both files.
-- LaTeX formulas, paths, model ID, DOI, and status markers are preserved.

@@ -4,8 +4,7 @@
   "archive_status": "draft_extracted",
   "write_scope": "mmb-paper-derivations/derivations/EA_SW03/",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_SW03/EA_SW03_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_SW03/EA_SW03_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_SW03/EA_SW03_derivation.md",
     "mmb-paper-derivations/derivations/EA_SW03/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_SW03/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_SW03/worker_report.json"

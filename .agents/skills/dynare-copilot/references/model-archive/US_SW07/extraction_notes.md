@@ -54,7 +54,3 @@ Information from the `.mod` file is used only to flag coverage and naming issues
 - The measurement equations are included for archive completeness but not yet tied to an estimation data manifest.
 - Equation count is not ready for runtime validation because the `.mod` implementation carries auxiliary MA variables and observable equations beyond the published 14-equation exposition.
 
-## Translation
-
-- English translation added at `US_SW07_derivation.en.md`.
-- The English version preserves the same section structure and F-numbering as `US_SW07_derivation.md`.

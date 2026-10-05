@@ -11,7 +11,6 @@
 ## Extraction Scope
 
 - English derivation was drafted first using the eight required sections.
-- Chinese derivation is a translation of the English draft and preserves every `(F#)` marker.
 - The entry targets the paper's baseline risk-shock model with BGG financial frictions and risk-news signals.
 - The `.mod` file `.agents/skills/dynare-copilot/references/examples/US_CMR14_rep.mod` was read only as `implementation_cross_check`.
 - Shared `catalog.csv` and `status.csv` were not edited, per user instruction.
@@ -41,7 +40,3 @@
 - The active equation count should be reviewed when a runnable `.mod` is built.
 - Runtime validation, residual checks, Blanchard-Kahn checks, and IRF checks were not performed.
 
-## Translation Status
-
-- Chinese translation completed after the English draft.
-- English and Chinese `(F#)` counts match in validation.

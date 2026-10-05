@@ -34,8 +34,3 @@
 - Cross-correlated shocks are documented from the paper, but the stationarized Rep-MMB `.mod` excerpt does not encode the full covariance structure.
 - Dynare runtime validation was intentionally not performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated second from the English core.
-- Equation numbers `(F1)` through `(F18)`, formulas, file paths, model ID, DOI, and `needs_review` markers were preserved.

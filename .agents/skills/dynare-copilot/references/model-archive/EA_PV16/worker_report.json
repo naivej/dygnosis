@@ -2,8 +2,7 @@
   "model_id": "EA_PV16",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_PV16/EA_PV16_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_PV16/EA_PV16_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_PV16/EA_PV16_derivation.md",
     "mmb-paper-derivations/derivations/EA_PV16/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_PV16/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_PV16/worker_report.json"

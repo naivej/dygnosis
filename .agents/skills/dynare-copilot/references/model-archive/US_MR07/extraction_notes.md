@@ -31,12 +31,6 @@
 - Confirm whether the archive should record both paper notation `\nu` and implementation notation `mu` for goods substitutability in any future shared catalog merge.
 - Runtime validation, equation count against Dynare internals, and simulation behavior are deferred.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was created second as a translation of the English core.
-- Equation numbering `(F1)` through `(F13)` is preserved in both files.
-
 ## Proposed Status
 
 - `status`: `needs_review`

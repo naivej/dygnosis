@@ -4,8 +4,7 @@
   "secondary_status": "draft_extracted",
   "owned_output_dir": "mmb-paper-derivations/derivations/EA_SWW14",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_SWW14/EA_SWW14_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_SWW14/EA_SWW14_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_SWW14/EA_SWW14_derivation.md",
     "mmb-paper-derivations/derivations/EA_SWW14/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_SWW14/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_SWW14/worker_report.json"
@@ -39,8 +38,7 @@
   "validations_requested": [
     "git diff --check",
     "python3 -m json.tool mmb-paper-derivations/derivations/EA_SWW14/source_manifest.json >/dev/null",
-    "English derivation has all eight sections",
-    "English and Chinese F-number counts match"
+    "English derivation has all eight sections"
   ],
   "runtime_validation": {
     "performed": false,

@@ -2,8 +2,7 @@
   "model_id": "EA_QUEST3",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_QUEST3/EA_QUEST3_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_QUEST3/EA_QUEST3_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_QUEST3/EA_QUEST3_derivation.md",
     "mmb-paper-derivations/derivations/EA_QUEST3/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_QUEST3/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_QUEST3/worker_report.json"

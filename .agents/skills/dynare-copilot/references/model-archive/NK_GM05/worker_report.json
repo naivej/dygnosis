@@ -3,8 +3,7 @@
   "status": "completed_first_pass_needs_review",
   "owned_scope": "mmb-paper-derivations/derivations/NK_GM05/",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_GM05/NK_GM05_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_GM05/NK_GM05_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_GM05/NK_GM05_derivation.md",
     "mmb-paper-derivations/derivations/NK_GM05/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_GM05/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_GM05/worker_report.json"
@@ -20,7 +19,6 @@
   },
   "outputs": {
     "english_derivation": true,
-    "chinese_derivation": true,
     "source_manifest_json": true,
     "extraction_notes_md": true
   },

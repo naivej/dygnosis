@@ -2,8 +2,7 @@
   "model_id": "US_LTW17rot",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_LTW17rot/US_LTW17rot_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_LTW17rot/US_LTW17rot_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_LTW17rot/US_LTW17rot_derivation.md",
     "mmb-paper-derivations/derivations/US_LTW17rot/source_manifest.json",
     "mmb-paper-derivations/derivations/US_LTW17rot/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_LTW17rot/worker_report.json"
@@ -39,8 +38,7 @@
     "commands": [
       "git diff --check -- mmb-paper-derivations/derivations/US_LTW17rot",
       "python3 -m json.tool mmb-paper-derivations/derivations/US_LTW17rot/source_manifest.json >/dev/null",
-      "python3 -m json.tool mmb-paper-derivations/derivations/US_LTW17rot/worker_report.json >/dev/null",
-      "python3 inline check for required English sections and English/Chinese F-number parity"
+      "python3 -m json.tool mmb-paper-derivations/derivations/US_LTW17rot/worker_report.json >/dev/null"
     ],
     "results": [
       "diff_check_ok",

@@ -2,8 +2,7 @@
   "model_id": "EA_GNSS10",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_GNSS10/EA_GNSS10_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_GNSS10/EA_GNSS10_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_GNSS10/EA_GNSS10_derivation.md",
     "mmb-paper-derivations/derivations/EA_GNSS10/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_GNSS10/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_GNSS10/worker_report.json"
@@ -46,11 +45,6 @@
     {
       "command": "check English has all eight required sections",
       "status": "passed"
-    },
-    {
-      "command": "check English and Chinese F-number counts match",
-      "status": "passed",
-      "details": "81 total F-number references in each file; 27 unique equation numbers, F1-F27"
     },
     {
       "command": "git diff --check -- mmb-paper-derivations/derivations/EA_GNSS10",

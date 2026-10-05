@@ -2,8 +2,7 @@
   "model_id": "NK_FLMF18",
   "status": "completed_with_needs_review",
   "owned_paths": [
-    "mmb-paper-derivations/derivations/NK_FLMF18/NK_FLMF18_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_FLMF18/NK_FLMF18_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_FLMF18/NK_FLMF18_derivation.md",
     "mmb-paper-derivations/derivations/NK_FLMF18/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_FLMF18/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_FLMF18/worker_report.json"

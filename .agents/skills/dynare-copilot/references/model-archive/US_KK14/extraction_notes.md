@@ -29,8 +29,3 @@
 - Confirm whether the MMB implementation's `R` variable should be documented as the nominal policy-rate deviation throughout, because the Euler equation and government budget combine it with inflation in real-return expressions.
 - Runtime validation, Blanchard-Kahn checks, residual checks, and IRF checks were not performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation is a direct translation of the English draft.
-- Equation numbers `(F1)` through `(F37)`, paths, DOI values, model id, and `needs_review` markers are preserved.

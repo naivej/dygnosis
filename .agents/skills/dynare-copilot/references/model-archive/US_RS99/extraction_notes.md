@@ -33,8 +33,3 @@ Status: `needs_review`
 - The paper allows a covariance between inflation and output shocks in its general setup, but the MMB implementation specifies only separate variances. This was recorded as an implementation-specific simplification.
 - Dynare/runtime validation was not performed by request.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated second from the English file.
-- Equation numbering `(F1)` through `(F7)` and file paths/model IDs/status markers were preserved.

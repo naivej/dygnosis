@@ -56,8 +56,7 @@
     "notes": "Read only to compare variable names, shock names, linear model form, contract-weight calibration, output-gap equation shape, and Rep-MMB policy-rule replacement. Not treated as paper-side mathematical evidence and not executed."
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_FM95/US_FM95_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_FM95/US_FM95_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_FM95/US_FM95_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_FM95/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_FM95/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_FM95/worker_report.json"

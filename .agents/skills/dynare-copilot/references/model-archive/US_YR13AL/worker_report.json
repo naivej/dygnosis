@@ -3,8 +3,7 @@
   "worker_status": "draft_extracted",
   "recommended_archive_status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_YR13AL/US_YR13AL_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_YR13AL/US_YR13AL_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_YR13AL/US_YR13AL_derivation.md",
     "mmb-paper-derivations/derivations/US_YR13AL/source_manifest.json",
     "mmb-paper-derivations/derivations/US_YR13AL/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_YR13AL/worker_report.json"

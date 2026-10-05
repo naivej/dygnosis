@@ -29,7 +29,3 @@
 - Decide whether robustness variants should be represented as separate variant derivations or only as notes under `US_BR13`.
 - If implementing in Dynare later, choose a clear state/control set because several equations are identities used to map theoretical variables to observed IRFs rather than a minimal model block.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English derivation with matching (F1)-(F18) numbering and preserved paths/status markers.

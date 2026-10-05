@@ -30,8 +30,3 @@
 - The strict inflation-targeting alternative `\pi_{H,t}=0` is included as a paper regime, but not as the active MMB policy equation.
 - Targeted PDF checks may be useful for constants in the natural equilibrium and for the exact printed policy-rule notation in the robustness section.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation preserves the same eight section headings, all file paths, status markers, DOI, model ID, and all F-number labels `(F1)` through `(F40)`.
-- LaTeX formulas were kept identical across the English and Chinese files except for surrounding translated prose.

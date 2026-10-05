@@ -30,12 +30,6 @@
 - Review the implementation's duplicated `r2` asset-return equations, one for investment-bond price `qi` and one for long government-bond price `q`, before using the `.mod` as a complete equation-count reference.
 - The current archive entry does not update shared `catalog.csv` or `status.csv` per model ownership instructions.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English draft.
-- F-numbering is intended to match exactly across English and Chinese versions.
-
 ## Validation
 
 - Runtime validation: not performed by request.

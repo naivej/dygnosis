@@ -2,7 +2,7 @@
   "model_id": "NK_RW06AL",
   "status": "completed_needs_review",
   "paper_title": "Optimal monetary policy with the cost channel",
-  "authors": "Ravenna, Frederico; Walsh, Carl ",
+  "authors": "Ravenna, Frederico; Walsh, Carl",
   "year": "2006",
   "journal_or_series": "Journal of Monetary Economics 53(2), pp. 199-216",
   "doi": "10.1016/j.jmoneco.2005.01.004",
@@ -53,15 +53,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_RW06AL/NK_RW06AL_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_RW06AL/NK_RW06AL_derivation.md",
       "exists": true,
       "sha256": "9b0ddfacc0adc4d02de052a19eb92f88f3a46ad405a9ba486ed615fe821fad39"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_RW06AL/NK_RW06AL_derivation.zh.md",
-      "exists": true,
-      "sha256": "ef95976af53f52c170d427cbf14edac3a86954c4368359da33b02721983c0bb1"
     },
     {
       "role": "source_manifest",
@@ -107,7 +101,7 @@
   "model_index_row_normalized": {
     "model_id": "NK_RW06AL",
     "paper_title": "Optimal monetary policy with the cost channel",
-    "authors": "Ravenna, Frederico; Walsh, Carl ",
+    "authors": "Ravenna, Frederico; Walsh, Carl",
     "year": "2006",
     "journal_or_series": "Journal of Monetary Economics 53(2), pp. 199-216",
     "doi": "10.1016/j.jmoneco.2005.01.004",

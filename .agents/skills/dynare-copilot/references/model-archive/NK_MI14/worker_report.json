@@ -2,8 +2,7 @@
   "model_id": "NK_MI14",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_MI14/NK_MI14_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_MI14/NK_MI14_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_MI14/NK_MI14_derivation.md",
     "mmb-paper-derivations/derivations/NK_MI14/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_MI14/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_MI14/worker_report.json"
@@ -53,8 +52,7 @@
     },
     {
       "check": "english_chinese_f_number_counts_match",
-      "status": "passed",
-      "details": "English and Chinese each contain 68 F-number references, with 35 unique equation numbers."
+      "status": "passed"
     }
   ],
   "unresolved_issues": [

@@ -5,8 +5,7 @@
   "archive_status": "needs_review",
   "write_scope": "mmb-paper-derivations/derivations/US_KK14/",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_KK14/US_KK14_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_KK14/US_KK14_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_KK14/US_KK14_derivation.md",
     "mmb-paper-derivations/derivations/US_KK14/source_manifest.json",
     "mmb-paper-derivations/derivations/US_KK14/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_KK14/worker_report.json"
@@ -55,15 +54,6 @@
     {
       "command": "python3 -m json.tool mmb-paper-derivations/derivations/US_KK14/worker_report.json >/dev/null",
       "status": "passed"
-    },
-    {
-      "command": "check English and Chinese derivations have all eight required sections",
-      "status": "passed"
-    },
-    {
-      "command": "check English and Chinese F-number counts match",
-      "status": "passed",
-      "details": "English count 133, Chinese count 133; 37 unique equation labels, F1-F37."
     },
     {
       "command": "path-specific trailing-whitespace check for mmb-paper-derivations/derivations/US_KK14/*",

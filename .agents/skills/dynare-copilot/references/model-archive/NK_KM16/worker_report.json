@@ -3,8 +3,7 @@
   "status": "needs_review",
   "write_scope": "mmb-paper-derivations/derivations/NK_KM16/",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_KM16/NK_KM16_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_KM16/NK_KM16_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_KM16/NK_KM16_derivation.md",
     "mmb-paper-derivations/derivations/NK_KM16/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_KM16/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_KM16/worker_report.json"
@@ -37,7 +36,7 @@
     "json_tool_source_manifest": "passed: python3 -m json.tool source_manifest.json",
     "json_tool_worker_report": "passed: python3 -m json.tool worker_report.json",
     "eight_sections_english": "passed: ## 1. through ## 8. present and (F1) found",
-    "f_number_parity": "passed: English and Chinese F-number sequences match; 83 total references and 26 unique labels in each file"
+    "f_number_parity": "83 total references and 26 unique labels in each file"
   },
   "unresolved_issues": [
     "Long-term bond Euler equation should be PDF-checked before review status is upgraded.",

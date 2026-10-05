@@ -44,8 +44,7 @@
     }
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_PSV16/NK_PSV16_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_PSV16/NK_PSV16_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_PSV16/NK_PSV16_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_PSV16/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_PSV16/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_PSV16/worker_report.json"
@@ -130,15 +129,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_PSV16/NK_PSV16_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_PSV16/NK_PSV16_derivation.md",
       "exists": true,
       "sha256": "c7f9a97fc8486279902546e35061aae87b4d01e64feb18f6807c630e17e5c554"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_PSV16/NK_PSV16_derivation.zh.md",
-      "exists": true,
-      "sha256": "d6e933ada9187c4e7731c4bd2790ca44ecb4ba3d1a02d439bb851b4e618ce32a"
     },
     {
       "role": "source_manifest",

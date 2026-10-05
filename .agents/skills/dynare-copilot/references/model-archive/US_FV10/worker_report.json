@@ -2,8 +2,7 @@
   "model_id": "US_FV10",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_FV10/US_FV10_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_FV10/US_FV10_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_FV10/US_FV10_derivation.md",
     "mmb-paper-derivations/derivations/US_FV10/source_manifest.json",
     "mmb-paper-derivations/derivations/US_FV10/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_FV10/worker_report.json"
@@ -50,7 +49,6 @@
     "git_diff_check": "passed: git diff --check --no-index found no whitespace errors in new US_FV10 files",
     "json_tool_source_manifest": "passed: python3 -m json.tool source_manifest.json",
     "eight_section_check": "passed: English derivation contains sections 1 through 8",
-    "f_number_count_match": "passed: English and Chinese derivations both contain 33 unique F-numbers",
     "dynare_runtime": "not_performed"
   },
   "unresolved_issues": [

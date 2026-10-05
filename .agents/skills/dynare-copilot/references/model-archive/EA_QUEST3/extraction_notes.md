@@ -37,8 +37,3 @@ Status: `needs_review`
 - The paper-side model is nonlinear with stochastic trends and stationary ratios, while the MMB implementation is linearized/log-growth; future work should explicitly map these forms before runnable archive promotion.
 - Dynare runtime validation was not performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English version second.
-- Equation numbers `(F1)` through `(F50)` are preserved in both files.

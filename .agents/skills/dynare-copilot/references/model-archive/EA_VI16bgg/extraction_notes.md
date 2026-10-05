@@ -33,8 +33,3 @@
 - `needs_review`: the full online appendix mentioned by the paper was not available in the required local source set and was not fetched.
 - Runtime validation was not performed; no Dynare run, BK check, or IRF reproduction was attempted.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated second.
-- Both files preserve the same eight required sections and 35 `(F#)` markers.

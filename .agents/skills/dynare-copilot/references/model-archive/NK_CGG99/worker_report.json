@@ -3,8 +3,7 @@
   "owned_directory": "mmb-paper-derivations/derivations/NK_CGG99",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_CGG99/NK_CGG99_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_CGG99/NK_CGG99_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_CGG99/NK_CGG99_derivation.md",
     "mmb-paper-derivations/derivations/NK_CGG99/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_CGG99/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_CGG99/worker_report.json"
@@ -44,9 +43,7 @@
   },
   "validation": {
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/NK_CGG99",
-    "json_validation": "passed: source_manifest.json and worker_report.json parse with python3 -m json.tool",
-    "eight_section_check": "passed: English and Chinese derivations contain sections 1 through 8",
-    "f_number_count_check": "passed: English and Chinese both contain unique F1-F6 and 15 total F-number occurrences"
+    "json_validation": "passed: source_manifest.json and worker_report.json parse with python3 -m json.tool"
   },
   "unresolved_issues": [
     "Confirm source status of theta=0.44 and phi=0.48 calibration values.",

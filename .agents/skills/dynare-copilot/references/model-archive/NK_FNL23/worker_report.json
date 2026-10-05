@@ -2,8 +2,7 @@
   "model_id": "NK_FNL23",
   "status": "completed_needs_review",
   "owned_paths": [
-    "mmb-paper-derivations/derivations/NK_FNL23/NK_FNL23_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_FNL23/NK_FNL23_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_FNL23/NK_FNL23_derivation.md",
     "mmb-paper-derivations/derivations/NK_FNL23/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_FNL23/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_FNL23/worker_report.json"
@@ -19,7 +18,6 @@
   },
   "artifacts": {
     "english_derivation": "drafted",
-    "chinese_derivation": "drafted",
     "source_manifest": "drafted",
     "extraction_notes": "drafted"
   },
@@ -28,7 +26,7 @@
     "json_tool": "passed",
     "eight_sections": "passed",
     "f_number_parity": "passed",
-    "notes": "Both English and Chinese derivations define exactly F1 through F31. A naive all-reference count includes prose cross-references in the steady-state section, so parity was checked on equation-definition bullets."
+    "notes": "A naive all-reference count includes prose cross-references in the steady-state section, so parity was checked on equation-definition bullets."
   },
   "unresolved_issues": [
     "Appendix OCR needs targeted review for the central-bank balance-sheet equation.",

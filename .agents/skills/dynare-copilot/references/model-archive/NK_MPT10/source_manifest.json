@@ -53,8 +53,7 @@
     "not_used_for": "paper-side mathematical source"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_MPT10/NK_MPT10_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_MPT10/NK_MPT10_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_MPT10/NK_MPT10_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_MPT10/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_MPT10/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_MPT10/worker_report.json"
@@ -119,15 +118,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_MPT10/NK_MPT10_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_MPT10/NK_MPT10_derivation.md",
       "exists": true,
       "sha256": "100a523a30d38a99bf293a23dad2583fa5f7e08ca0d337927e410a407146caea"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_MPT10/NK_MPT10_derivation.zh.md",
-      "exists": true,
-      "sha256": "a5d1b9e29620aad2d5718ef2879d9e99827a2acc5efeb68040b654535d1f78e3"
     },
     {
       "role": "source_manifest",

@@ -38,8 +38,3 @@
 - `deferred_runtime_validation`: No Dynare execution, residual check, BK check, or IRF validation was performed.
 - `deferred_catalog_merge`: Shared `catalog.csv` and `status.csv` were not edited by instruction. Proposed row values are in `source_manifest.json` and `worker_report.json`.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English core, with the same eight-section order and translated section headings.
-- F-number counts match between English and Chinese derivations: 9.

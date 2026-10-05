@@ -2,8 +2,7 @@
   "model_id": "CA_LS07",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/CA_LS07/CA_LS07_derivation.en.md",
-    "mmb-paper-derivations/derivations/CA_LS07/CA_LS07_derivation.zh.md",
+    "mmb-paper-derivations/derivations/CA_LS07/CA_LS07_derivation.md",
     "mmb-paper-derivations/derivations/CA_LS07/source_manifest.json",
     "mmb-paper-derivations/derivations/CA_LS07/extraction_notes.md",
     "mmb-paper-derivations/derivations/CA_LS07/worker_report.json"
@@ -52,7 +51,6 @@
       "result": "passed"
     },
     {
-      "check": "English/Chinese F-number count parity",
       "result": "passed; both files contain 32 F-number references and unique equations F1-F12"
     }
   ],

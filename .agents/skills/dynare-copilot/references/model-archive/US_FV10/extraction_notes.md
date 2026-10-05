@@ -30,8 +30,3 @@ Status: `needs_review`.
 - The archive needs a later implementation-validation phase before any promotion into the runnable Dynare skill archive.
 - Dynare runtime validation was not performed, by instruction.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated second from the English core.
-- Equation numbers `(F1)` through `(F33)` are preserved in both versions.

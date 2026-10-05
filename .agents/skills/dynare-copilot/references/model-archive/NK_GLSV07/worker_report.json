@@ -5,8 +5,7 @@
     "mmb-paper-derivations/derivations/NK_GLSV07/"
   ],
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_GLSV07/NK_GLSV07_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_GLSV07/NK_GLSV07_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_GLSV07/NK_GLSV07_derivation.md",
     "mmb-paper-derivations/derivations/NK_GLSV07/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_GLSV07/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_GLSV07/worker_report.json"
@@ -21,7 +20,6 @@
   },
   "outputs": {
     "english_derivation": "written",
-    "chinese_derivation": "written",
     "source_manifest": "written",
     "extraction_notes": "written"
   },

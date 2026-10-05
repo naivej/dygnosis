@@ -2,8 +2,7 @@
   "model_id": "EAUS_NAWMctww",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EAUS_NAWMctww/EAUS_NAWMctww_derivation.en.md",
-    "mmb-paper-derivations/derivations/EAUS_NAWMctww/EAUS_NAWMctww_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EAUS_NAWMctww/EAUS_NAWMctww_derivation.md",
     "mmb-paper-derivations/derivations/EAUS_NAWMctww/source_manifest.json",
     "mmb-paper-derivations/derivations/EAUS_NAWMctww/extraction_notes.md",
     "mmb-paper-derivations/derivations/EAUS_NAWMctww/worker_report.json"

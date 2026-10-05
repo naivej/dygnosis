@@ -3,8 +3,7 @@
   "status": "needs_review",
   "owned_directory": "mmb-paper-derivations/derivations/EA_VI16bgg/",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_VI16bgg/EA_VI16bgg_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_VI16bgg/EA_VI16bgg_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_VI16bgg/EA_VI16bgg_derivation.md",
     "mmb-paper-derivations/derivations/EA_VI16bgg/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_VI16bgg/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_VI16bgg/worker_report.json"
@@ -13,7 +12,9 @@
   "commit_or_push_performed": false,
   "source_summary": {
     "paper_title": "Financial frictions in the Euro Area and the United States: a Bayesian assessment",
-    "authors": ["Stefania Villa"],
+    "authors": [
+      "Stefania Villa"
+    ],
     "year": 2016,
     "doi": "10.1017/s1365100514000881",
     "primary_full_md_path": "raw/mmb_mineru/runs/ea_vi16bgg_ea_vi16gk_us_vi16bgg_us_vi16gk__financial_frictions_in_the_euro_area_and_the_united_states_a_bayesian_as__ed2f2b1d/full.md",

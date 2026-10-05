@@ -12,7 +12,6 @@ Status: `needs_review`
 ## Formula Quality
 
 - Appendix B gives the main extraction spine as equations (B1)-(B36), plus balanced-growth equations in Section I.E and shock laws in the main text.
-- First-pass uncertainty is marked directly in the English and Chinese derivations as `needs_review`.
 - The patient budget constraint in Appendix B appears to show `q_l h_t`; the main-text budget constraint and context indicate house price `q_t h_t`. The draft uses `q_t h_t` and marks this for review.
 - The wage Phillips-curve slope definitions after (B29)-(B32) contain inconsistent OCR/notation around `theta_wc`, `theta_wh`, and prime notation. The draft keeps the intended four-sector/type wage equations but marks the issue.
 - The adjustment-cost expression for `phi_t` is vulnerable to OCR line-break ambiguity. Before implementation, verify the multiplication by lagged capital and trend scaling against the PDF.
@@ -32,8 +31,3 @@ Status: `needs_review`
 - Decide in a later implementation phase whether to archive the full sticky-price/wage system only or include the flexible-price/flexible-wage auxiliary block used for output-gap construction.
 - Runtime validation, residual checks, steady-state checks, BK checks, and IRF comparisons are deferred.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated second from the English draft.
-- Equation numbering and formulas are intended to match exactly between English and Chinese versions.

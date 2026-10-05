@@ -43,15 +43,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/EA_SR07/EA_SR07_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/EA_SR07/EA_SR07_derivation.md",
       "exists": true,
       "sha256": "5cd51f052ef1ce41f48b96e2bf1446ddf758edbb345dab84e905957849a57a7d"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/EA_SR07/EA_SR07_derivation.zh.md",
-      "exists": true,
-      "sha256": "ce1b82c1f9210ba76a1aee688595a5e33cb3e1ed0940778ad2dec7104efbe101"
     },
     {
       "role": "source_manifest",

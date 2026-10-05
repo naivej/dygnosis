@@ -3,8 +3,7 @@
   "owned_directory": "mmb-paper-derivations/derivations/NK_MM10",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_MM10/NK_MM10_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_MM10/NK_MM10_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_MM10/NK_MM10_derivation.md",
     "mmb-paper-derivations/derivations/NK_MM10/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_MM10/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_MM10/worker_report.json"
@@ -45,8 +44,7 @@
     "json_tool_source_manifest": "passed: python3 -m json.tool source_manifest.json",
     "json_tool_worker_report": "passed: python3 -m json.tool worker_report.json",
     "english_eight_sections": "passed",
-    "english_has_F1": "passed",
-    "f_number_counts_match": "passed: English and Chinese each have 140 F-marker occurrences and 54 unique F-numbers, F1-F54"
+    "english_has_F1": "passed"
   },
   "unresolved_issues": [
     "Source-level PDF formula review is still needed for OCR-corrupted production, price/wage-setting, and capital-adequacy equations.",

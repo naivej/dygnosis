@@ -70,8 +70,7 @@
     "notes": "Used only to confirm this is the US SWGK model(linear) implementation, variable names, flexible-price counterpart variables, shock names, estimated US parameter values, and Rep-MMB timing notes. Not used as paper-side mathematical evidence."
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_VI16gk/US_VI16gk_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_VI16gk/US_VI16gk_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_VI16gk/US_VI16gk_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_VI16gk/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_VI16gk/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_VI16gk/worker_report.json"
@@ -127,15 +126,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/US_VI16gk/US_VI16gk_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/US_VI16gk/US_VI16gk_derivation.md",
       "exists": true,
       "sha256": "2e9b15ff6db9073d4bff89540ace3204554a3233c86b8613a1c6afcdbfb92b6d"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/US_VI16gk/US_VI16gk_derivation.zh.md",
-      "exists": true,
-      "sha256": "4a5536bf75849791b8df50389e149dfc9b768c0c0f93ed6c76076b01f972e4b7"
     },
     {
       "role": "source_manifest",

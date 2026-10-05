@@ -28,7 +28,3 @@ Status: `needs_review`
 - Source-level formula audit against the PDF was not performed.
 - Runtime validation was not performed.
 
-## Translation Status
-
-- English derivation was written first.
-- Chinese derivation was translated from the English version and preserves equation numbers, file paths, model ID, DOI, and `needs_review` markers.

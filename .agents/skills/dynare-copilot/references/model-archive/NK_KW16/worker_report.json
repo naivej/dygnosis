@@ -3,8 +3,7 @@
   "owned_directory": "mmb-paper-derivations/derivations/NK_KW16",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_KW16/NK_KW16_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_KW16/NK_KW16_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_KW16/NK_KW16_derivation.md",
     "mmb-paper-derivations/derivations/NK_KW16/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_KW16/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_KW16/worker_report.json"

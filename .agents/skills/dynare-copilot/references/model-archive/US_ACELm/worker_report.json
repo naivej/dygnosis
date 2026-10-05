@@ -1,8 +1,7 @@
 {
   "model_id": "US_ACELm",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_ACELm/US_ACELm_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_ACELm/US_ACELm_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_ACELm/US_ACELm_derivation.md",
     "mmb-paper-derivations/derivations/US_ACELm/source_manifest.json",
     "mmb-paper-derivations/derivations/US_ACELm/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_ACELm/worker_report.json"
@@ -45,7 +44,7 @@
     "json_tool": "passed",
     "english_eight_sections": "passed",
     "f_number_counts_match": "passed",
-    "details": "archive_entry_checks_ok; English and Chinese each have 104 F-number mentions and 35 unique F-numbers."
+    "details": "archive_entry_checks_ok;"
   },
   "unresolved_issues": [
     "Full technical appendix not present in source paths.",

@@ -2,8 +2,7 @@
   "model_id": "US_CMR14noFA",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_CMR14noFA/US_CMR14noFA_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_CMR14noFA/US_CMR14noFA_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_CMR14noFA/US_CMR14noFA_derivation.md",
     "mmb-paper-derivations/derivations/US_CMR14noFA/source_manifest.json",
     "mmb-paper-derivations/derivations/US_CMR14noFA/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_CMR14noFA/worker_report.json"
@@ -52,7 +51,6 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number counts match",
       "status": "passed",
       "details": {
         "english_f_count": 76,

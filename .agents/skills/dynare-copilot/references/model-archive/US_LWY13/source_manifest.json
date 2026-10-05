@@ -57,8 +57,7 @@
     "paper_slug": "us_lwy13__fiscal_foresight_and_information_flows"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_LWY13/US_LWY13_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_LWY13/US_LWY13_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_LWY13/US_LWY13_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_LWY13/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_LWY13/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_LWY13/worker_report.json"

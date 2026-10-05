@@ -3,8 +3,7 @@
   "status": "needs_review",
   "owned_directory": "mmb-paper-derivations/derivations/NK_ADE25ppi",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_ADE25ppi/NK_ADE25ppi_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_ADE25ppi/NK_ADE25ppi_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_ADE25ppi/NK_ADE25ppi_derivation.md",
     "mmb-paper-derivations/derivations/NK_ADE25ppi/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_ADE25ppi/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_ADE25ppi/worker_report.json"
@@ -48,9 +47,7 @@
   },
   "validation": {
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/NK_ADE25ppi",
-    "json_validation": "passed: source_manifest.json and worker_report.json parse with python3 -m json.tool",
-    "eight_section_check": "passed: English and Chinese derivations contain sections 1 through 8",
-    "f_number_count_check": "passed: English and Chinese both mention 90 F-number references and have unique labels F1 through F23"
+    "json_validation": "passed: source_manifest.json and worker_report.json parse with python3 -m json.tool"
   },
   "unresolved_issues": [
     "Full Online Appendix C equations (C40)-(C48) need source-level extraction from the author-site appendix PDF or a normalized appendix Markdown.",

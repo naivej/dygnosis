@@ -32,7 +32,3 @@
 - The derivation records both nonlinear source equations and the linear Rep-MMB system; a future reviewer should decide whether the reviewed archive entry should privilege only the paper's optimal-policy linear system or the Rep-MMB simple-rule closure.
 - The alternative liquidity-requirement instrument equations (43)-(46) were noted but not included in the baseline Rep-MMB equation count.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English file while preserving section order, equation numbers, file paths, DOI, model id, and status markers.

@@ -62,8 +62,3 @@ The `.mod` was not treated as paper-side mathematical evidence and Dynare was no
 - The MMB row lacks a year value even though the catalog reference records 2019 publication metadata; this entry records year `2019` in the manifest and worker report.
 - Runtime validation, equation-count validation against Dynare, BK checks, and IRF/shock-decomposition replication are deferred.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated second.
-- F-number counts were checked to match between English and Chinese files.

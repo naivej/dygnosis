@@ -3,8 +3,7 @@
   "owned_directory": "mmb-paper-derivations/derivations/NK_GN25",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_GN25/NK_GN25_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_GN25/NK_GN25_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_GN25/NK_GN25_derivation.md",
     "mmb-paper-derivations/derivations/NK_GN25/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_GN25/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_GN25/worker_report.json"

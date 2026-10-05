@@ -28,8 +28,7 @@
     "notes": "Primary and alternate MinerU runs point to the 2008 U.S. SQPM paper; implementation cross-check identifies GPM6_IMF13 as a 2013 six-region GPM. Source-index repair needed before review."
   },
   "changed_files": [
-    "mmb-paper-derivations/derivations/GPM6_IMF13/GPM6_IMF13_derivation.en.md",
-    "mmb-paper-derivations/derivations/GPM6_IMF13/GPM6_IMF13_derivation.zh.md",
+    "mmb-paper-derivations/derivations/GPM6_IMF13/GPM6_IMF13_derivation.md",
     "mmb-paper-derivations/derivations/GPM6_IMF13/source_manifest.json",
     "mmb-paper-derivations/derivations/GPM6_IMF13/extraction_notes.md",
     "mmb-paper-derivations/derivations/GPM6_IMF13/worker_report.json"

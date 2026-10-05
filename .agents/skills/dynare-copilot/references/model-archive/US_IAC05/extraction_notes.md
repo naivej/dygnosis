@@ -25,13 +25,6 @@
 - The `.mod` confirms exogenous innovations: `ejhat`, `euhat`, `eAhat`, `eRhat`.
 - The `.mod` was not copied as a source of paper mathematics and was not executed.
 
-## Translation Status
-
-- English derivation was written first.
-- Chinese derivation was then translated from the English artifact.
-- Equation numbers `(F1)` through `(F18)` are preserved in both versions.
-- File paths, model ID, DOI, and `needs_review` markers were preserved.
-
 ## Deferred Issues
 
 - Runtime validation is deferred; Dynare was not run.

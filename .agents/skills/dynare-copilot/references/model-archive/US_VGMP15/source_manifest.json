@@ -62,8 +62,7 @@
     "paper_slug": "us_vgmp15__the_effects_of_oil_price_shocks_in_a_new_keynesian_framework_with_capita"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_VGMP15/US_VGMP15_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_VGMP15/US_VGMP15_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_VGMP15/US_VGMP15_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_VGMP15/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_VGMP15/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_VGMP15/worker_report.json"
@@ -129,15 +128,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/US_VGMP15/US_VGMP15_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/US_VGMP15/US_VGMP15_derivation.md",
       "exists": true,
       "sha256": "85279c082708596b3df332154d32630af30bcb6c84df6ed6e2169327d8870313"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/US_VGMP15/US_VGMP15_derivation.zh.md",
-      "exists": true,
-      "sha256": "62d2b4377c7161a28ae4c52e6b3fe19aab1cc442b3d1b51e426adf05ca1f3d47"
     },
     {
       "role": "source_manifest",

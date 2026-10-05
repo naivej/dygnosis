@@ -32,7 +32,3 @@
 - Add a local appendix normalization or source-backed steady-state appendix if the technical appendix becomes available.
 - Runtime validation, Dynare equation count, steady-state residuals, BK checks, and IRF checks were not performed.
 
-## Translation Status
-
-- `US_DNGS15_SW_derivation.zh.md` is a translation of the English draft.
-- Equation numbers `(F1)` through `(F28)` and LaTeX formulas were preserved.

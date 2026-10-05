@@ -1,8 +1,7 @@
 {
   "model_id": "US_DNGS15_SWSP",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_DNGS15_SWSP/US_DNGS15_SWSP_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_DNGS15_SWSP/US_DNGS15_SWSP_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_DNGS15_SWSP/US_DNGS15_SWSP_derivation.md",
     "mmb-paper-derivations/derivations/US_DNGS15_SWSP/source_manifest.json",
     "mmb-paper-derivations/derivations/US_DNGS15_SWSP/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_DNGS15_SWSP/worker_report.json"
@@ -38,7 +37,6 @@
     "git_diff_check": "passed",
     "json_tool": "passed",
     "english_sections": "passed",
-    "f_number_match": "passed: English and Chinese each have 104 F-number references and 28 unique F-numbers",
     "dynare_run": "not_performed"
   }
 }

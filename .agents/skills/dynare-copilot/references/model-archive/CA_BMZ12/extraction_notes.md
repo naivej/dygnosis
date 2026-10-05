@@ -31,7 +31,3 @@
 - Confirm whether the DOI/year in `model_index.csv` should be represented as the working-paper year 2012, the article year 2015, or both in shared catalog rows.
 - Runtime validation, Dynare equation count, steady-state residuals, BK checks, and IRF checks were not performed.
 
-## Translation Status
-
-- `CA_BMZ12_derivation.zh.md` is a translation of the checked English draft.
-- Equation numbers `(F1)` through `(F37)` and LaTeX formulas were preserved.

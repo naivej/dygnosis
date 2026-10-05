@@ -45,8 +45,3 @@
 - Check exact wage-setting FOC and price Phillips/Rotemberg FOC against a source-side equation summary.
 - Do not run Dynare during this first-pass archive extraction; runtime validation remains deferred.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation is a translation of the checked English draft.
-- Equation labels and LaTeX formulas are intended to be preserved exactly across English and Chinese versions.

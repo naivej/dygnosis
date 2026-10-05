@@ -29,8 +29,3 @@
 - Reconcile the extra transitory neutral technology shock in the MMB file with the original ACEL source package.
 - Do not promote this derivation to the runnable skill archive until source-level formula review and runtime validation are separately assigned.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English version.
-- Equation numbers `(F1)` through `(F53)` are preserved in both files.

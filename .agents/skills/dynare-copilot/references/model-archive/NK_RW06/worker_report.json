@@ -2,8 +2,7 @@
   "model_id": "NK_RW06",
   "status": "needs_review",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/NK_RW06/NK_RW06_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_RW06/NK_RW06_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_RW06/NK_RW06_derivation.md",
     "mmb-paper-derivations/derivations/NK_RW06/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_RW06/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_RW06/worker_report.json"
@@ -38,7 +37,6 @@
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/NK_RW06",
     "json_tool": "passed: source_manifest.json and worker_report.json",
     "eight_sections_en": "passed",
-    "f_number_count_match": "passed: English and Chinese each contain 45 F-number references and 24 unique F-number labels",
     "dynare_run": "not_performed"
   }
 }

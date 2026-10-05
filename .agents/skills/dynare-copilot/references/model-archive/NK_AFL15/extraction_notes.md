@@ -32,7 +32,3 @@
 - Confirm resource-cost term $`\Omega_t`$ against the PDF if a later source-level formula audit is required.
 - Runtime validation, Dynare residual checks, BK checks, and IRF checks were not performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English version with the same eight sections and the same `(F1)` through `(F24)` equation numbers.

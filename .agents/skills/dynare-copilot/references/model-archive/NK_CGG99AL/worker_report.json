@@ -3,8 +3,7 @@
   "worker_status": "completed_first_pass",
   "archive_status": "needs_review",
   "owned_files_written": [
-    "mmb-paper-derivations/derivations/NK_CGG99AL/NK_CGG99AL_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_CGG99AL/NK_CGG99AL_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_CGG99AL/NK_CGG99AL_derivation.md",
     "mmb-paper-derivations/derivations/NK_CGG99AL/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_CGG99AL/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_CGG99AL/worker_report.json"

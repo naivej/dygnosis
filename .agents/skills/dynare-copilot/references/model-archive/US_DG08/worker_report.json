@@ -2,8 +2,7 @@
   "model_id": "US_DG08",
   "status": "needs_review",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_DG08/US_DG08_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_DG08/US_DG08_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_DG08/US_DG08_derivation.md",
     "mmb-paper-derivations/derivations/US_DG08/source_manifest.json",
     "mmb-paper-derivations/derivations/US_DG08/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_DG08/worker_report.json"

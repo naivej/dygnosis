@@ -38,8 +38,3 @@
 - The flexible-price/wage reference economy should be expanded if the archive entry later needs one equation per implementation variable.
 - Dynare runtime validation was explicitly not performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English draft.
-- Equation numbers `(F1)` through `(F32)` are preserved in both files.

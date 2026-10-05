@@ -49,8 +49,7 @@
     "primary_run_id": "85a7350a-a6d9-40e9-8065-b8a924aa1887"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_GSSZ17/NK_GSSZ17_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_GSSZ17/NK_GSSZ17_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_GSSZ17/NK_GSSZ17_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_GSSZ17/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_GSSZ17/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_GSSZ17/worker_report.json"
@@ -99,15 +98,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_GSSZ17/NK_GSSZ17_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_GSSZ17/NK_GSSZ17_derivation.md",
       "exists": true,
       "sha256": "00aeee259edc826d3854d11032784697b50d11a698ec5f1cc0d9fc9eb3962145"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_GSSZ17/NK_GSSZ17_derivation.zh.md",
-      "exists": true,
-      "sha256": "0c5c2f944286bd981a3ff553f367a92af17a763980fe0ed688553c8187b57ac4"
     },
     {
       "role": "source_manifest",

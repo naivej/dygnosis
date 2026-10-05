@@ -3,8 +3,7 @@
   "status": "needs_review",
   "owned_directory": "mmb-paper-derivations/derivations/NK_CW09",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_CW09/NK_CW09_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_CW09/NK_CW09_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_CW09/NK_CW09_derivation.md",
     "mmb-paper-derivations/derivations/NK_CW09/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_CW09/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_CW09/worker_report.json"
@@ -51,9 +50,7 @@
   "validation": {
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/NK_CW09",
     "json_tool_source_manifest": "passed: python3 -m json.tool mmb-paper-derivations/derivations/NK_CW09/source_manifest.json",
-    "json_tool_worker_report": "passed: python3 -m json.tool mmb-paper-derivations/derivations/NK_CW09/worker_report.json",
-    "eight_section_check": "passed: English and Chinese files contain sections 1-8",
-    "f_number_count_check": "passed: English and Chinese both contain 85 F-number references covering F1-F20"
+    "json_tool_worker_report": "passed: python3 -m json.tool mmb-paper-derivations/derivations/NK_CW09/worker_report.json"
   },
   "unresolved_issues": [
     "Appendix-defined Calvo functions and debt-recursion function B(.) were not fully expanded in the extracted Markdown.",

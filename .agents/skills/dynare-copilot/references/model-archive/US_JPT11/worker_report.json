@@ -2,8 +2,7 @@
   "model_id": "US_JPT11",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_JPT11/US_JPT11_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_JPT11/US_JPT11_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_JPT11/US_JPT11_derivation.md",
     "mmb-paper-derivations/derivations/US_JPT11/source_manifest.json",
     "mmb-paper-derivations/derivations/US_JPT11/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_JPT11/worker_report.json"
