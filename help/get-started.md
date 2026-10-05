@@ -21,6 +21,12 @@ action on either Dygnosis Explorer view opens it. The first-install invitation
 and native **Get started with Dygnosis** walkthrough lead here too. Dismissing
 the invitation does not remove these entrances.
 
+![Dygnosis Explorer views before a model is open](assets/get-started.png)
+
+1. **Dynare model** shows a welcome row with **Open Dygnosis Help** before any model opens.
+2. **Dynare project checks** appears in every workspace folder and links to project-check topics.
+3. The first-install notification offers **Open Help** once; dismissal persists for later windows.
+
 Loose and untitled Dynare files receive ordinary editor analysis. Save a model
 to establish its disk base for includes. An `.inc` file needs a known model
 owner; open its root first. A folder also starts [project checks](project-checks.md)

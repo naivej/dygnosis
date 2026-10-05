@@ -21,3 +21,10 @@ opens the feature that uses it; the feature links to the native control.
 Examples have a **Copy** action. Put a settings example in the destination
 named beside it. Select an image to enlarge it. Each numbered callout has a
 text explanation, so the image is not required to understand the task.
+
+![Dygnosis Help panel with contents, search and topic navigation](assets/help-panel.png)
+
+1. **Contents** lists every task topic. Select one to open it in the reading pane.
+2. **Search** accepts task words, command names, setting keys, diagnostic codes and MCP tool names.
+3. **Back**, **Forward** and the breadcrumb keep your reading position while you follow links.
+4. **Copy topic link** copies a permalink that opens this topic in VS Code.

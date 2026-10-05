@@ -2,6 +2,12 @@
 
 Show effective model opens include and macro expansion in a read-only editor. The preview shows the model before Dynare transforms equations. Edit the written files, then use Refresh effective model to update the preview.
 
+![Written source beside the read-only effective preview](assets/effective-model.png)
+
+1. The written `.mod` file stays editable in the primary editor column.
+2. The **effective model** preview shows expanded include and macro text read-only beside it.
+3. Native preview commands refresh the text and jump back to verified written locations.
+
 Place the cursor in a mapped model row, or select part of one row. Go to written source opens its verified written portion beside the preview. A row assembled from several files offers a file picker. The picker identifies the model scope and expansion occurrence; repeated macro copies keep their own identity. A selection crossing several rows has no unambiguous jump. Text outside mapped rows has no source action.
 
 Show macro origins offers the row's verified macro directive and body sites. Labels identify the directive kind, file, frame order, and loop variable/value when available. Choosing an item opens that written site. These locations come from the engine's trace; the extension does not infer them from equation numbers or expanded text.

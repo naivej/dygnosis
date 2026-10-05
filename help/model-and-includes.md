@@ -12,6 +12,12 @@ no equation use also has no lead or lag. The labels do not give a solver result.
 Aggregate counts cover the aggregate model; each heterogeneity dimension has
 its own declarations, equations and timing lists.
 
+![Dynare model view, model counts and equation CodeLens](assets/model-overview.png)
+
+1. **Dynare model** lists aggregate counts, timing classes, dimensions and related files for the selected model.
+2. **Browse N equations** and **Show effective model** CodeLens actions appear above mapped model openers.
+3. The status bar shows endogenous, exogenous and equation counts for the active `.mod` or `.dyn` file.
+
 Use the view's native title menu to hide or move it. Use
 **Dygnosis: Open Settings** and search for `modelView.sections` to choose its
 content. The resource-scoped [model view sections](settings:dynare.modelView.sections) control selects the visible sections.

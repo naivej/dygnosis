@@ -4,6 +4,11 @@ Open a `.mod` or `.dyn` file and set its language mode to **Dynare**. Dygnosis
 checks text as you edit. Open includes through their model root to retain that
 model's context. See [model roots and includes](model-and-includes.md).
 
+![Name hover, completion and signature help in the editor](assets/edit-assistance.png)
+
+1. **Hover** shows a declared name's kind, written metadata and proven values where available.
+2. **Trigger Suggest** completes names, commands and recognized options with role icons and documentation.
+
 ## Names and commands
 
 Hover over a declared name to see its kind and available written metadata.

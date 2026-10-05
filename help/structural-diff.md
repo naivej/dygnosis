@@ -6,6 +6,12 @@ The active model root is **Before**; the selected model is **After**. The view
 shows the engine's structural changes, including current unsaved text and each
 model's own include-path settings.
 
+![Structural Diff with Before/After models and section filters](assets/structural-diff.png)
+
+1. **Before** and **After** name the compared model roots at the top of the view.
+2. **Search**, **Scope**, **Layout** and **Expansion** narrow the displayed rows.
+3. **Change kinds** and **Sections** choose which structural differences appear.
+
 The view separates symbols, parameter values, aggregate equations, equations by
 heterogeneity dimension, shock setup, and shock analysis setup. The engine's
 paired changes retain Before and After values. Unpaired rows stay separate;

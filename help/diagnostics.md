@@ -2,6 +2,11 @@
 
 Dygnosis diagnostics appear in the editor and Problems panel. Related locations appear beneath a diagnostic and open the earlier declaration or include site. The extension checks open model roots and their includes. It also checks unopened saved `.mod` roots in workspace folders; see [project checks](project-checks.md). [About Dygnosis](about.md) explains Error, Warning and Information.
 
+![Live diagnostics in the editor and Problems panel](assets/diagnostics.png)
+
+1. The editor marks the diagnostic range while you edit or after save.
+2. **Problems** lists every Dygnosis check with its code, message and source location.
+
 Use the lightbulb or **Quick Fix** on a Dygnosis diagnostic to choose:
 
 - **Ignore this check (code)** hides every diagnostic with that code in this window, including Errors, Warnings, and Information. It also hides fixes attached only to that check. Independent refactors stay available.

@@ -5,6 +5,11 @@ known includes provide the analysis context. Open the root first when an
 include has no known owner; [choose an owner](model-and-includes.md) when it
 belongs to several models.
 
+![Outline structure and document navigation for the current file](assets/navigate-code.png)
+
+1. **Outline** lists declarations, blocks, commands, dimensions and equations for the written file.
+2. The editor keeps the current model open while you browse structure and jump to a selected row.
+
 ## Names and uses
 
 **Go to Definition**, **Go to Declaration**, **Go to Type Definition** and

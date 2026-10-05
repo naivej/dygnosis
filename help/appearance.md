@@ -5,6 +5,12 @@ follow your theme. `dynare.blockTint.enabled` is the main switch; turning it off
 clears backgrounds immediately. Each recognized block category has its own
 Off, Subtle, or Model-strength dropdown. Settings reset restores those defaults without restarting the server.
 
+![Block tints, semantic name roles and expression value hints](assets/appearance.png)
+
+1. **Block tints** color complete written blocks by category and heterogeneity dimension.
+2. **Semantic tokens** distinguish endogenous, exogenous, parameter and model-local names.
+3. **Expression value hints** show proven top-level assignments such as `beta = 1 / 1.04`.
+
 These settings have resource scope, so a workspace or folder can override your
 defaults. An included file uses its own presentation settings and its chosen
 model owner. Use **Dygnosis: Choose model owner** when an include has several

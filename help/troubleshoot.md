@@ -3,6 +3,11 @@
 Open [Dygnosis Output](action:output) for the failure details. Help remains
 available without an open model or a working engine.
 
+![Dygnosis Output channel and project status while recovering](assets/troubleshoot.png)
+
+1. **Dygnosis** Output records startup, engine selection and recovery messages.
+2. The **Dynare project** status item stays visible while you restart the language server or clear an override.
+
 ## The engine does not start
 
 The extension includes the native engine for its workspace host. Reinstall the
