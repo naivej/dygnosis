@@ -137,7 +137,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E063", ExplainEntry {
         title: "Undefined macro name",
-        body: "An active macro expression or definition uses an undefined variable or function. Dynare refuses during macro processing: `Unknown variable NAME` or `Unknown function NAME`. The diagnostic points to the directive or interpolation that uses the name.\n\n**Fix**\n\nDefine the variable or function with `@#define` before it is used, or correct its name. A valid expression that Dygnosis cannot evaluate instead leaves expansion incomplete; it is not this Error.",
+        body: "An active macro expression or definition uses an undefined variable or function. This includes interpolation inside a quoted equation tag, declaration label, or option value. Dynare refuses during macro processing: `Unknown variable NAME` or `Unknown function NAME`. The diagnostic points to the directive or interpolation that uses the name.\n\n**Fix**\n\nDefine the variable or function with `@#define` before it is used, or correct its name. A valid expression that Dygnosis cannot evaluate instead leaves expansion incomplete; it is not this Error.",
         kind: ExplainKind::Shared,
     }),
     ("E064", ExplainEntry {
@@ -177,7 +177,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("I211", ExplainEntry {
         title: "Macro expansion incomplete",
-        body: "Dygnosis could not finish expanding this macro directive or interpolation. The source may be valid Dynare syntax; this Information is not a Dynare refusal. Model checks that need the expanded text were withheld, and the effective-model view is marked incomplete.\n\n**Next step**\n\nInspect the macro expression or run the official Dynare preprocessor for its full expansion.",
+        body: "Dygnosis could not finish expanding this macro directive or interpolation. This includes a quoted replacement that closes its surrounding quote or adds a line break. The source may be valid Dynare syntax; this Information is not a Dynare refusal. Model checks that need the expanded text were withheld, and the effective-model view is marked incomplete.\n\n**Next step**\n\nInspect the macro expression or run the official Dynare preprocessor for its full expansion.",
         kind: ExplainKind::Added,
     }),
     ("W010", ExplainEntry {

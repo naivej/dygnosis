@@ -4,6 +4,8 @@ Show effective model opens include and macro expansion in a read-only editor. Th
 
 With the bundled engine or an engine that supports readable layout, statements start on separate lines, with indented block bodies. Equation tags stay with their equation, and model-local definitions have their own lines. Copying the preview keeps these line breaks. Strings, native text, and matrix contents keep their existing text. Older engines keep the compact preview.
 
+Macro interpolation also expands inside quoted values. For example, a loop over `j` with `[name='eq@{j}']` and `long_name='Output @{j}'` produces `eq1`, `eq2`, and their corresponding labels. Each repeated equation keeps its own source and macro origins. A replacement that closes its surrounding quote or adds a line break keeps expansion incomplete; run the official Dynare preprocessor for that case.
+
 ![Written source beside the read-only effective preview](assets/effective-model.png)
 
 1. The written `.mod` file stays editable in the primary editor column.

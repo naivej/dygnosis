@@ -2013,7 +2013,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_expand",
         input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "Return model text after include and macro expansion, before equation transformation, with verified written source and macro locations. Lines and Unicode-scalar columns are one-based. complete=false means expansion is incomplete and authoritative equation counts or source jumps are withheld."
+        description = "Return model text after include and macro expansion, before equation transformation, with verified written source and macro locations. Interpolation inside quoted tags, declaration labels and options expands when the replacement preserves the surrounding quote and line. Lines and Unicode-scalar columns are one-based. complete=false means expansion is incomplete and authoritative equation counts or source jumps are withheld."
     )]
     fn expand_tool(
         &self,

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Macro interpolation expands inside quoted equation tags, `long_name` labels, and other quoted values. Repeated copies retain their written source and macro origins. Replacements that close the surrounding quote or add a line break keep expansion incomplete.
 - Incomplete required includes, parsing, or macro expansion withhold MCP equation counts. Model comparison waits for both inputs to be complete.
 - MCP tools reject a nonempty file map with a missing or invalid active root using an explicit invalid-parameters error. A matching root still permits an empty text overlay.
 - The `dynare_equations` schema states that `index` starts at zero, matching the existing selector.
