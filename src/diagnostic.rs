@@ -456,8 +456,10 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
     // longer contains the directive, so `model_structure_incomplete` cannot see them.
     let expansion_blocked = !records.unresolved.is_empty() || !records.cycles.is_empty();
     if expansion_blocked {
+        let no_model = model.model_block.is_none() && model.heterogeneous_models.is_empty();
         diags.retain(|d| {
-            d.code != "W060"
+            !(no_model && matches!(d.code.as_str(), "E021" | "W022"))
+                && d.code != "W060"
                 && d.code != "W208"
                 && d.code != "W211"
                 && !matches!(d.code.as_str(), "E186" | "E188" | "E189" | "E190" | "E192")

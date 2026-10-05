@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "d424543214cdc1f15781cdaf59fa41960021d6f83bd07dec53ca8165ae849655",
+  "fingerprint": "90bb7489e6fc1ef21ece4ad3c2a7c759a8f244c900a901f35856fea0da778e37",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -184,7 +184,7 @@
     },
     {
       "name": "dynare_expand",
-      "description": "Return model text after include and macro expansion, before equation transformation, with verified written source and macro locations. Interpolation inside quoted tags, declaration labels and options expands when the replacement preserves the surrounding quote and line. Lines and Unicode-scalar columns are one-based. complete=false means expansion is incomplete and authoritative equation counts or source jumps are withheld.",
+      "description": "Return model text after include and macro expansion, before equation transformation, with verified written source and macro locations. Lines and Unicode-scalar columns are one-based. complete=false means expansion is incomplete and authoritative equation counts or source jumps are withheld.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -559,7 +559,7 @@
       "code": "E001",
       "kind": "shared",
       "title": "Parse error",
-      "markdown": "### E001: Parse error\n\nThe Dynare parser could not interpret the source. The diagnostic range points at the offending token or the nearest recoverable position. Dynare refuses with a generic bison `ERROR` at a location, or with `character unrecognized by lexer` when active Dynare syntax holds a double-quoted string or a non-ASCII character.\n\n**Warrant**\n\nThe editor names the missing construct and points at a usable range; Dynare's bison location is often the next token, and its lexer note names no range at all. A non-ASCII character in active Dynare syntax keeps the sentence `character unrecognized by lexer` and the range is that character run. That covers declarations, equations, and shock statements. Comments, quoted labels, TeX names, verbatim text, the complementarity sign, native MATLAB text, and discarded macro branches are not flagged. For command-qualified option membership, value, or missing-comma errors, the editor names the offending option and command instead of reconstructing a Flex token enum. For a reserved block token (`dsge_prior_weight`), the message names the symbol and block context instead of Dynare's bare `unexpected DSGE_PRIOR_WEIGHT`. Ordinary statement expressions retain the identifier; declarations and the allowed estimated-parameter name slots remain legal. A function registered by a non-model call still needs an explicit external_function declaration before a model expression uses it. The existing missing-declaration E001 family keeps Dynare's Before using NAME() sentence on that shape. Qualified external calls in model expressions retain the complete callee identity and the official missing-declaration, derivative-only, or argument-count sentence. Their range points at the written callee instead of the complete call. Unqualified external calls keep the official declaration, derivative-role and argument-count sentences on the complete written call. A variable given several arguments retains the official refusal on the complete call. Malformed argument lists retain the official syntax sentence on the offending token.\n\n**Common causes**\n\n- Missing semicolon at the end of a declaration or equation\n- A timed or parenthesized target in ``steady_state_model``; write an untimed name before ``=``. ``histval`` and ``filter_initial_state`` use their separate lag syntax.\n- Unbalanced parentheses, braces, or block keywords\n- A reserved keyword used as an identifier\n- A reserved preprocessor symbol used where an expression is expected\n- A non-ASCII character in a name, such as `var café;`, `y = café;`, or `var café;` inside `shocks`. Comments, `long_name`, TeX, equation-name strings, verbatim text, native MATLAB, and an inactive `@#if`, `@#elseif`, `@#else`, `@#ifdef`, or `@#ifndef` branch may contain accents. Rename an active name to ASCII letters, digits, and underscores.\n\n**Fix**\n\nInspect the line cited and the line immediately preceding it. Dynare's preprocessor frequently flags the *next* line after a missing semicolon.\n"
+      "markdown": "### E001: Parse error\n\nThe Dynare parser could not interpret the source. The diagnostic range points at the offending token or the nearest recoverable position. Dynare refuses with a generic bison `ERROR` at a location, or with `character unrecognized by lexer` when active Dynare syntax holds a double-quoted string or a non-ASCII character.\n\n**Warrant**\n\nThe editor names the missing construct and points at a usable range; Dynare's bison location is often the next token, and its lexer note names no range at all. A non-ASCII character in active Dynare syntax keeps the sentence `character unrecognized by lexer` and the range is that character run. That covers declarations, equations, and shock statements. Comments, quoted labels, TeX names, verbatim text, the complementarity sign, native MATLAB text, and discarded macro branches are not flagged. For command-qualified option membership, value, or missing-comma errors, the editor names the offending option and command instead of reconstructing a Flex token enum. For a reserved block token (`dsge_prior_weight`), the message names the symbol and block context instead of Dynare's bare `unexpected DSGE_PRIOR_WEIGHT`. Ordinary statement expressions retain the identifier; declarations and the allowed estimated-parameter name slots remain legal. A function registered by a non-model call still needs an explicit external_function declaration before a model expression uses it. The existing missing-declaration E001 family keeps Dynare's Before using NAME() sentence on that shape. Qualified external calls in model expressions retain the complete callee identity and the official missing-declaration, derivative-only, or argument-count sentence. Their range points at the written callee instead of the complete call. Unqualified external calls keep the official declaration, derivative-role and argument-count sentences on the complete written call. A variable given several arguments retains the official refusal on the complete call. Malformed argument lists retain the official syntax sentence on the offending token.\n\n**Common causes**\n\n- An empty aggregate `model; end;`; Dynare refuses with `syntax error, unexpected END` on `end`. Later unused-endogenous checks and writing summaries are withheld.\n- Missing semicolon at the end of a declaration or equation\n- A timed or parenthesized target in ``steady_state_model``; write an untimed name before ``=``. ``histval`` and ``filter_initial_state`` use their separate lag syntax.\n- Unbalanced parentheses, braces, or block keywords\n- A reserved keyword used as an identifier\n- A reserved preprocessor symbol used where an expression is expected\n- A non-ASCII character in a name, such as `var café;`, `y = café;`, or `var café;` inside `shocks`. Comments, `long_name`, TeX, equation-name strings, verbatim text, native MATLAB, and an inactive `@#if`, `@#elseif`, `@#else`, `@#ifdef`, or `@#ifndef` branch may contain accents. Rename an active name to ASCII letters, digits, and underscores.\n\n**Fix**\n\nInspect the line cited and the line immediately preceding it. Dynare's preprocessor frequently flags the *next* line after a missing semicolon.\n"
     },
     {
       "code": "E020",
@@ -571,7 +571,7 @@
       "code": "E021",
       "kind": "shared",
       "title": "Exogenous variable never referenced in model",
-      "markdown": "### E021: Exogenous variable never referenced in model\n\nA shock declared in `varexo` does not appear in any equation. Dynare refuses: `unused_exo not used in model block. To bypass this error, use the nostrict option. This may lead to crashes or unexpected behavior.` A `varexo_det` declaration does not count — 7.1 accepts one that is never used.\n"
+      "markdown": "### E021: Exogenous variable never referenced in model\n\nA shock declared in `varexo` does not appear in any equation. Dynare refuses: `unused_exo not used in model block. To bypass this error, use the nostrict option. This may lead to crashes or unexpected behavior.` The check also applies to a complete file without a `model` block. An E021 Error stops the later unused-endogenous E186 check. A `varexo_det` declaration does not count — Dynare accepts one that is never used.\n"
     },
     {
       "code": "E023",
@@ -643,7 +643,7 @@
       "code": "E063",
       "kind": "shared",
       "title": "Undefined macro name",
-      "markdown": "### E063: Undefined macro name\n\nAn active macro expression or definition uses an undefined variable or function. This includes interpolation inside a quoted equation tag, declaration label, or option value. Dynare refuses during macro processing: `Unknown variable NAME` or `Unknown function NAME`. The diagnostic points to the directive or interpolation that uses the name.\n\n**Fix**\n\nDefine the variable or function with `@#define` before it is used, or correct its name. A valid expression that Dygnosis cannot evaluate instead leaves expansion incomplete; it is not this Error.\n"
+      "markdown": "### E063: Undefined macro name\n\nAn active macro expression or definition uses an undefined variable or function. Dynare refuses during macro processing: `Unknown variable NAME` or `Unknown function NAME`. The diagnostic points to the directive or interpolation that uses the name.\n\n**Fix**\n\nDefine the variable or function with `@#define` before it is used, or correct its name. A valid expression that Dygnosis cannot evaluate instead leaves expansion incomplete; it is not this Error.\n"
     },
     {
       "code": "E064",
@@ -817,7 +817,7 @@
       "code": "E186",
       "kind": "shared",
       "title": "Unused written endogenous variable",
-      "markdown": "### E186: Unused written endogenous variable\n\nDynare refuses before MATLAB: `Error: x not used in the model block`. Dygnosis emits E186 on the declaration when x has no written use in aggregate or heterogeneous equations and no local, surgery, planner, or BVAR exception can change that result. A use lost only after rewriting is outside this check. The severity prefix is omitted from our message because the transport already labels Errors.\n\n**Fix**\n\nUse x in a model equation or remove its declaration.\n"
+      "markdown": "### E186: Unused written endogenous variable\n\nDynare refuses before MATLAB: `Error: x not used in the model block`. Dygnosis emits E186 on the declaration when x has no written use in aggregate or heterogeneous equations and no local, surgery, planner, or BVAR exception can change that result. A complete file without a `model` block is also checked, after Check has passed. An earlier Check Error such as E021 stops this later Transform check. A use lost only after rewriting is outside this check. The severity prefix is omitted from our message because the transport already labels Errors.\n\n**Fix**\n\nUse x in a model equation or remove its declaration.\n"
     },
     {
       "code": "E187",
@@ -2587,7 +2587,7 @@
       "code": "I211",
       "kind": "added",
       "title": "Macro expansion incomplete",
-      "markdown": "### I211: Macro expansion incomplete\n\nDygnosis could not finish expanding this macro directive or interpolation. This includes a quoted replacement that closes its surrounding quote or adds a line break. The source may be valid Dynare syntax; this Information is not a Dynare refusal. Model checks that need the expanded text were withheld, and the effective-model view is marked incomplete.\n\n**Next step**\n\nInspect the macro expression or run the official Dynare preprocessor for its full expansion.\n"
+      "markdown": "### I211: Macro expansion incomplete\n\nDygnosis could not finish expanding this macro directive or interpolation. The source may be valid Dynare syntax; this Information is not a Dynare refusal. Model checks that need the expanded text were withheld, and the effective-model view is marked incomplete.\n\n**Next step**\n\nInspect the macro expression or run the official Dynare preprocessor for its full expansion.\n"
     },
     {
       "code": "W010",
@@ -2623,7 +2623,7 @@
       "code": "W022",
       "kind": "shared",
       "title": "Parameter declared but never referenced in model equations",
-      "markdown": "### W022: Parameter declared but never referenced in model equations\n\nA parameter is declared and assigned but does not appear in any model equation. Dynare warns: `Parameter(s) unused_p not used in the model`.\n"
+      "markdown": "### W022: Parameter declared but never referenced in model equations\n\nA parameter is declared and assigned but does not appear in any model equation. Dynare warns: `Parameter(s) unused_p not used in the model`. The check also applies to a complete file without a `model` block. An included declaration keeps the warning in that file, once for each requested root analysis.\n"
     },
     {
       "code": "W031",

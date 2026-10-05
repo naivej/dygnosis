@@ -150,7 +150,7 @@ pub fn check_w020(model: &Model) -> Vec<Diagnostic> {
 }
 
 pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
-    if !has_written_model(model) {
+    if !has_usage_model_or_complete_root(model) {
         return Vec::new();
     }
     // The official unused-exogenous check counts a heterogeneous body as a use
@@ -250,7 +250,7 @@ fn exclusion_still_final(model: &Model, name: Name) -> bool {
 }
 
 pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
-    if !has_written_model(model) {
+    if !has_usage_model_or_complete_root(model) {
         return Vec::new();
     }
     let mut referenced = model_and_het_eq_refs(model);
@@ -444,6 +444,15 @@ fn model_and_het_eq_refs(model: &Model) -> HashSet<Name> {
 
 fn has_written_model(model: &Model) -> bool {
     written_model_equations(model).next().is_some()
+}
+
+/// CheckPass also examines complete roots with no model block. An unfinished
+/// include or macro may still supply the equations, so that extension is quiet.
+fn has_usage_model_or_complete_root(model: &Model) -> bool {
+    has_written_model(model)
+        || (model.model_block.is_none()
+            && model.heterogeneous_models.is_empty()
+            && !crate::check_writing::model_structure_incomplete(model))
 }
 
 fn written_model_equations(model: &Model) -> impl Iterator<Item = &Equation> {

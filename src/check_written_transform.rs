@@ -38,7 +38,7 @@ fn direct_unused_endogenous(model: &Model) -> Vec<Diagnostic> {
     // The official pass substitutes # locals before this check and excludes
     // aggregate names used by heterogeneous bodies. Read those written uses,
     // and keep unresolved rewrites, surgery, and standalone BVAR out.
-    if model.model_block.is_none()
+    if (model.model_block.is_none() && !model.heterogeneous_models.is_empty())
         || model.bvar_present
         || !model.policy_commands.is_empty()
         || !model.planner_objective_spans.is_empty()

@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use dygnosis::mcp::dynare_diagnose;
+use dygnosis::mcp::{dynare_diagnose, dynare_workspace_diagnose};
 use dygnosis::{check_file_with_origins, format_check_lines_with_origins};
 
 fn scratch(label: &str) -> PathBuf {
@@ -63,6 +63,106 @@ fn mcp_names_child_for_included_unknown_symbol() {
         .expect("E020");
     assert_eq!(e020.file.as_deref(), Some(child), "{result:?}");
     assert_eq!((e020.line, e020.column), (1, 17));
+}
+
+#[test]
+fn included_declaration_warning_has_one_owner_and_explicit_roots_stay_separate() {
+    let root = "audit/root.mod";
+    let child = "audit/child.mod";
+    let root_text = "@#include \"child.mod\"\nmodel; y=0; end;\n";
+    let child_text = "parameters unused; var y; unused=.5;\n";
+    let files = HashMap::from([
+        (root.to_string(), root_text.to_string()),
+        (child.to_string(), child_text.to_string()),
+    ]);
+    let result = dynare_diagnose(root_text, Some(root), Some(&files));
+    let warnings: Vec<_> = result.iter().filter(|diag| diag.code == "W022").collect();
+    assert_eq!(warnings.len(), 1, "{result:?}");
+    assert_eq!(warnings[0].file.as_deref(), Some(child));
+    assert_eq!((warnings[0].line, warnings[0].column), (1, 12));
+    assert!(result.iter().all(|diag| diag.code != "E186"), "{result:?}");
+
+    let report = dynare_workspace_diagnose(
+        Some(&files),
+        Some(&[root.to_string(), child.to_string()]),
+        None,
+    )
+    .unwrap();
+    let roots = report["roots"].as_array().unwrap();
+    assert_eq!(roots.len(), 2, "{report}");
+    for name in [root, child] {
+        let row = roots.iter().find(|row| row["root"] == name).unwrap();
+        let diagnostics = row["diagnostics"].as_array().unwrap();
+        let warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|diag| diag["code"] == "W022")
+            .collect();
+        assert_eq!(warnings.len(), 1, "{row}");
+        assert_eq!(warnings[0]["file"], child);
+        assert_eq!(warnings[0]["line"], 1);
+        assert_eq!(warnings[0]["column"], 12);
+        assert_eq!(
+            diagnostics.iter().any(|diag| diag["code"] == "E186"),
+            name == child,
+            "{row}"
+        );
+    }
+}
+
+#[test]
+fn incomplete_include_graph_withholds_no_model_unused_name_extension() {
+    let root = "audit/root.mod";
+    let source = "var y; varexo eps_z; parameters alppha;\n@#include \"child.inc\"\n";
+    for files in [
+        HashMap::from([(root.to_string(), source.to_string())]),
+        HashMap::from([
+            (root.to_string(), source.to_string()),
+            (
+                "audit/child.inc".to_string(),
+                "@#include \"root.mod\"\n".to_string(),
+            ),
+        ]),
+    ] {
+        let result = dynare_diagnose(source, Some(root), Some(&files));
+        assert!(
+            result
+                .iter()
+                .all(|diag| !matches!(diag.code.as_str(), "E021" | "W022" | "E186" | "I209")),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn empty_aggregate_model_refusal_points_at_included_end() {
+    let root = "audit/root.mod";
+    let child = "audit/empty.inc";
+    let root_text = "var y c; varexo e;\n@#include \"empty.inc\"\n";
+    let child_text = "model;\nend;\n";
+    let files = HashMap::from([
+        (root.to_string(), root_text.to_string()),
+        (child.to_string(), child_text.to_string()),
+    ]);
+    let result = dynare_diagnose(root_text, Some(root), Some(&files));
+    let errors: Vec<_> = result.iter().filter(|diag| diag.code == "E001").collect();
+    assert_eq!(errors.len(), 1, "{result:?}");
+    assert_eq!(errors[0].message, "syntax error, unexpected END");
+    assert_eq!(errors[0].file.as_deref(), Some(child));
+    assert_eq!(
+        (
+            errors[0].line,
+            errors[0].column,
+            errors[0].end_line,
+            errors[0].end_column
+        ),
+        (2, 1, 2, 4)
+    );
+    assert!(
+        result
+            .iter()
+            .all(|diag| !matches!(diag.code.as_str(), "E186" | "I209")),
+        "{result:?}"
+    );
 }
 
 #[test]

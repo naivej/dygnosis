@@ -54,6 +54,155 @@ fn own(text: &str) -> Vec<dygnosis::Diagnostic> {
 }
 
 #[test]
+fn complete_no_model_roots_keep_check_before_transform_and_writing_information() {
+    for (source, has_exogenous) in [
+        (
+            "var y c; varexo eps_z; parameters alppha; alppha=.33;",
+            true,
+        ),
+        ("var y c; parameters alppha; alppha=.33;", false),
+    ] {
+        let diagnostics = own(source);
+        let warning = diagnostics
+            .iter()
+            .find(|diag| diag.code == "W022")
+            .expect("unused parameter warning");
+        assert_eq!(warning.severity, dygnosis::Severity::Warning);
+        assert_eq!(warning.message, "Parameter(s) alppha not used in the model");
+        assert_eq!(
+            &source[warning.span.start as usize..warning.span.end as usize],
+            "alppha"
+        );
+        assert!(diagnostics.iter().any(|diag| diag.code == "I209"));
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|diag| diag.severity == dygnosis::Severity::Error)
+            .collect();
+        if has_exogenous {
+            assert_eq!(errors.len(), 1, "{diagnostics:?}");
+            assert_eq!(errors[0].code, "E021");
+            assert_eq!(errors[0].message, "eps_z not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior.");
+            assert_eq!(
+                &source[errors[0].span.start as usize..errors[0].span.end as usize],
+                "eps_z"
+            );
+        } else {
+            assert_eq!(errors.len(), 2, "{diagnostics:?}");
+            for (diag, name) in errors.iter().zip(["y", "c"]) {
+                assert_eq!(diag.code, "E186");
+                assert_eq!(diag.message, format!("{name} not used in the model block"));
+                assert_eq!(
+                    &source[diag.span.start as usize..diag.span.end as usize],
+                    name
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn complete_no_model_roots_agree_with_pinned_stage_order() {
+    let pp = std::path::PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    if !pp.is_file() {
+        eprintln!("skipping honesty: Dynare 7.2 is absent");
+        return;
+    }
+    for (source, has_exogenous) in [
+        (
+            "var y c; varexo eps_z; parameters alppha; alppha=.33;",
+            true,
+        ),
+        ("var y c; parameters alppha; alppha=.33;", false),
+    ] {
+        for stage in [JsonStage::Check, JsonStage::Transform] {
+            let official = run_preprocessor(source, &pp, None, Duration::from_secs(30), stage);
+            let output = format!("{}{}", official.raw_stdout, official.raw_stderr);
+            let normalized = output.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                normalized.contains("Parameter(s) alppha not used in the model"),
+                "{output}"
+            );
+            assert_eq!(
+                official.success,
+                !has_exogenous && stage == JsonStage::Check,
+                "{stage:?}: {output}"
+            );
+            if has_exogenous {
+                assert!(output.contains("eps_z not used in model block"), "{output}");
+                assert!(!output.contains("Error: y not used"), "{output}");
+            } else if stage == JsonStage::Transform {
+                for name in ["y", "c"] {
+                    assert!(
+                        output.contains(&format!("Error: {name} not used in the model block")),
+                        "{output}"
+                    );
+                }
+            }
+        }
+    }
+    // The no-model extension does not turn deterministic exogenous names or
+    // the existing standalone BVAR exception into an unused-name Error.
+    for source in ["varexo_det e;", "var y; bvar_density 1;"] {
+        let official = run_preprocessor(
+            source,
+            &pp,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Transform,
+        );
+        assert!(
+            official.success,
+            "{source}: {}{}",
+            official.raw_stdout, official.raw_stderr
+        );
+        assert!(
+            own(source)
+                .iter()
+                .all(|diag| !matches!(diag.code.as_str(), "E021" | "E186")),
+            "{source}: {:?}",
+            own(source)
+        );
+    }
+}
+
+#[test]
+fn no_model_extension_preserves_transform_exclusions_and_incomplete_inputs() {
+    for source in [
+        "var y; bvar_density 1;",
+        "var y; planner_objective y^2; ramsey_model;",
+        "var y; model_local_variable loc;",
+        "var y; var_remove y;",
+        "var y; model_remove('missing');",
+        "var y;\n@#include \"missing.inc\"\n",
+        "var y;\n@#define n = rand(1)\n",
+        "var y; model; # loc=1; y=loc; end;",
+        "var y z; model; y=z; z=0; end;",
+    ] {
+        let diagnostics = own(source);
+        assert!(
+            diagnostics.iter().all(|diag| diag.code != "E186"),
+            "{source}: {diagnostics:?}"
+        );
+    }
+    for source in [
+        "var y; varexo eps_z; parameters alppha;\n@#include \"missing.inc\"\n",
+        "var y; varexo eps_z; parameters alppha;\n@#define n = rand(1)\n",
+    ] {
+        for diagnostics in [
+            own(source),
+            check_file(source, "C:/dygnosis-no-model-incomplete/root.mod"),
+        ] {
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|diag| !matches!(diag.code.as_str(), "E021" | "W022" | "E186" | "I209")),
+                "{source}: {diagnostics:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn bounded_written_fires_and_quiet_neighbors() {
     for pair in PAIRS {
         let fire = own(pair.fire);
