@@ -171,7 +171,7 @@ fn codes_of(diags: &[Diagnostic]) -> Vec<&str> {
 }
 
 fn assert_fire(check: &[Diagnostic], analyze_diags: &[Diagnostic], text: &str, fire: &Fire) {
-    for diags in [check, analyze_diags] {
+    for (diags, display) in [(check, false), (analyze_diags, true)] {
         let d = find_code(diags, fire.code);
         assert_eq!(d.severity, fire.severity, "{} severity", fire.code);
         assert!(
@@ -182,7 +182,12 @@ fn assert_fire(check: &[Diagnostic], analyze_diags: &[Diagnostic], text: &str, f
             fire.message
         );
         assert!(d.fix.is_none(), "{} fix should be None", fire.code);
-        assert_needle(text, d, fire.needle);
+        let needle = if display && fire.code == "E171" {
+            "occbin_constraints"
+        } else {
+            fire.needle
+        };
+        assert_needle(text, d, needle);
     }
 }
 

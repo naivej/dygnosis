@@ -145,6 +145,95 @@ async fn block_openers_match_mcp_ownership_with_utf16_and_split_includes() {
 }
 
 #[tokio::test]
+async fn first_child_openers_match_mcp_owners_when_the_child_is_in_an_include() {
+    let dir = scratch("first-child-openers");
+    let declaration = "var y;\n/*😀中*/varexo_det\n@#include \"det.inc\"\n;\nmodel; y=y(-1)+tau; end; initval; y=0; tau=0; end; simul;\n";
+    let occbin = include_str!("fixtures/occbin/e171_three.mod").replace("\r\n", "\n");
+    let (before, rest) = occbin.split_once("occbin_constraints;\n").unwrap();
+    let (constraints, after) = rest.split_once("end;").unwrap();
+    let occbin =
+        format!("{before}/*😀中*/occbin_constraints;\n@#include \"constraints.inc\"\nend;{after}");
+    let cases = [
+        ("a.mod", declaration.to_string(), "E026", "varexo_det"),
+        (
+            "b.mod",
+            declaration.replace(
+                "simul;",
+                "planner_objective y; ramsey_model(instruments=(y));",
+            ),
+            "E027",
+            "varexo_det",
+        ),
+        ("occbin.mod", occbin, "E171", "occbin_constraints"),
+        (
+            "tags.mod",
+            "var y;\n/*😀中*/model; y=y(-1); end;\nmodel;\n@#include \"tags.inc\"\nend;\n"
+                .to_string(),
+            "E208",
+            "model",
+        ),
+    ];
+    for (name, text) in [
+        ("det.inc", "/*😀中*/tau"),
+        ("constraints.inc", constraints),
+        ("tags.inc", "/*😀中*/[dynamic] y=y(-1);\n"),
+    ] {
+        fs::write(dir.join(name), text).unwrap();
+    }
+    for (name, text, code, keyword) in cases {
+        let root = dir.join(name);
+        fs::write(&root, &text).unwrap();
+        let mut files =
+            std::collections::HashMap::from([(root.to_string_lossy().to_string(), text.clone())]);
+        for name in ["det.inc", "constraints.inc", "tags.inc"] {
+            let child = dir.join(name);
+            files.insert(
+                child.to_string_lossy().to_string(),
+                fs::read_to_string(child).unwrap(),
+            );
+        }
+        let mcp = dygnosis::dynare_diagnose(&text, Some(&root.to_string_lossy()), Some(&files));
+        let wire = mcp
+            .iter()
+            .find(|diagnostic| diagnostic.code == code)
+            .unwrap();
+        assert_eq!(wire.file, None, "{code} belongs to the root opener");
+        let start =
+            text.find(&format!("/*😀中*/{keyword}")).unwrap() as u32 + "/*😀中*/".len() as u32;
+        let end = start + keyword.len() as u32;
+        let index = dygnosis::span::LineIndex::new(&text);
+        let scalar_start = index.position(&text, start);
+        let scalar_end = index.position(&text, end);
+        assert_eq!(
+            (wire.line, wire.column, wire.end_line, wire.end_column),
+            (
+                scalar_start.line + 1,
+                scalar_start.character + 1,
+                scalar_end.line + 1,
+                scalar_end.character + 1
+            )
+        );
+        let (service, _socket) = new_service();
+        service.inner().did_open(open(uri(&root), &text)).await;
+        let lsp = items(service.inner().diagnostic(pull(uri(&root))).await.unwrap());
+        let diagnostic = lsp
+            .iter()
+            .find(|diagnostic| diagnostic.code == Some(NumberOrString::String(code.into())))
+            .unwrap();
+        let utf16_start = index.position_utf16(&text, start);
+        let utf16_end = index.position_utf16(&text, end);
+        assert_eq!(
+            diagnostic.range,
+            Range::new(
+                Position::new(utf16_start.line, utf16_start.character),
+                Position::new(utf16_end.line, utf16_end.character)
+            )
+        );
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn included_error_is_published_on_child_uri() {
     let dir = scratch("diagnostic");
     let root = dir.join("root.mod");
