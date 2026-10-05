@@ -295,6 +295,7 @@ struct CalibRow {
     expression: String,
     span: Span,
     value: Option<f64>,
+    namespace_refused: bool,
 }
 
 fn unevaluable_subjects(model: &Model, param_names: &HashSet<Name>) -> Vec<CalibRow> {
@@ -317,6 +318,7 @@ fn unevaluable_subjects(model: &Model, param_names: &HashSet<Name>) -> Vec<Calib
                 expression: a.expression.trim().to_string(),
                 span: a.span,
                 value,
+                namespace_refused: a.expr.is_some_and(|id| namespace_refused(model, id)),
             });
         }
     }
@@ -342,6 +344,7 @@ fn unevaluable_subjects(model: &Model, param_names: &HashSet<Name>) -> Vec<Calib
                 expression: eq.rhs.trim().to_string(),
                 span: eq.span,
                 value,
+                namespace_refused: eq.rhs_expr.is_some_and(|id| namespace_refused(model, id)),
             });
         }
     }
@@ -359,13 +362,29 @@ fn bind(known: &mut HashMap<Name, f64>, name: Name, value: Option<f64>) {
     }
 }
 
+fn namespace_refused(model: &Model, id: ExprId) -> bool {
+    if model.namespace_qualified_exprs.contains(&id) {
+        return true;
+    }
+    match &model.exprs.get(id).kind {
+        ExprKind::Unary { arg, .. }
+        | ExprKind::SteadyState { arg }
+        | ExprKind::Expectation { arg, .. } => namespace_refused(model, *arg),
+        ExprKind::Binary { lhs, rhs, .. } => {
+            namespace_refused(model, *lhs) || namespace_refused(model, *rhs)
+        }
+        ExprKind::Call { args, .. } => args.iter().any(|id| namespace_refused(model, *id)),
+        ExprKind::Number | ExprKind::String | ExprKind::Ident { .. } | ExprKind::Error => false,
+    }
+}
+
 fn push_w011(
     diagnostics: &mut Vec<Diagnostic>,
     reported: &mut HashSet<(Name, u32)>,
     model: &Model,
     row: &CalibRow,
 ) {
-    if row.value.is_some() {
+    if row.value.is_some() || row.namespace_refused {
         return;
     }
     if !reported.insert((row.name, row.span.start)) {

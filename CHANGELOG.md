@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A refused namespace-qualified assignment reports E275 without the duplicate assignment-evaluation warning.
+
 - Incomplete required includes, parsing, or macro expansion withhold MCP equation counts. Model comparison waits for both inputs to be complete.
 - MCP tools reject a nonempty file map with a missing or invalid active root using an explicit invalid-parameters error. A matching root still permits an empty text overlay.
 - The `dynare_equations` schema states that `index` starts at zero, matching the existing selector.

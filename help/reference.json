@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "1aed078372d23ed4f551730523675ad6542b37b8e33c78d8d5e6683603e76dfc",
+  "fingerprint": "71f43a90d854345c849d113fa548ae12e9cd6dda38a1f8b2863835118e5b66a1",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -1321,7 +1321,7 @@
       "code": "E275",
       "kind": "shared",
       "title": "Namespace-qualified symbol",
-      "markdown": "### E275: Namespace-qualified symbol\n\nAn expression uses a bare namespace-qualified value such as `pkg.foo` where that variable form is not allowed. Dynare refuses: `Namespace-qualified symbol {ns}.{name} not allowed in this context`. A qualified function call such as `pkg.foo(1)` is a different form and is allowed in a steady-state RHS.\n\n**Fix**\n\nUse a declared value without a namespace prefix, or supply the intended function arguments.\n"
+      "markdown": "### E275: Namespace-qualified symbol\n\nAn expression uses a bare namespace-qualified value such as `pkg.foo` where that variable form is not allowed. Dynare refuses: `Namespace-qualified symbol {ns}.{name} not allowed in this context`. A qualified function call such as `pkg.foo(1)` is a different form and is allowed in a steady-state RHS. An assignment with this refusal does not also emit W011 for the same expression.\n\n**Fix**\n\nUse a declared value without a namespace prefix, or supply the intended function arguments.\n"
     },
     {
       "code": "E276",
