@@ -148,8 +148,8 @@ export function registerLenses(service: DygnosisClient): vscode.Disposable {
         };
         const models = modelLensGroups(info, document);
         if (preferences.modelEquations) for (const group of models) add("modelEquations", group.anchor,
-          group.statements.map(row => row.id), group.count !== null ? `Browse ${String(group.count)} ${group.count === 1 ? "equation" : "equations"}`
-            : `Browse equations (${String(group.statements.length)} occurrences)`, "dygnosis.browseLensEquations");
+          group.statements.map(row => row.id), group.count !== null ? group.count === 1 ? "Jump to equation" : `Jump to ${String(group.count)} equations`
+            : `Jump to equation (${String(group.statements.length)} occurrences)`, "dygnosis.browseLensEquations");
         if (preferences.declarationReferences) for (const group of declarationLensGroups(info, document))
           add("declarationReferences", group.anchor, group.declarations.map(row => row.id), "Find references", "dygnosis.findLensReferences");
         if (preferences.effectiveModel && safeAnchor(info.first_model_anchor, document)) {

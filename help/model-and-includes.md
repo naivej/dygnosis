@@ -15,7 +15,7 @@ its own declarations, equations and timing lists.
 ![Dynare model view, model counts and equation CodeLens](assets/model-overview.png)
 
 1. **Dynare model** lists aggregate counts, timing classes, dimensions and related files for the selected model.
-2. **Browse N equations** and **Show effective model** CodeLens actions appear above mapped model openers.
+2. **Jump to equation** (or **Jump to N equations**) and **Show effective model** CodeLens actions appear above mapped model openers.
 3. The status bar shows endogenous, exogenous and equation counts for the active `.mod` or `.dyn` file.
 
 Use the view's native title menu to hide or move it. Use
@@ -116,11 +116,11 @@ To keep only equations, put this in User or Workspace settings:
 
 ## CodeLens in VS Code
 
-**Browse N equations** appears above each safely mapped `model` opener. Choose an equation to open its written source, including equations in an included file. The list shows its name, aggregate or heterogeneity dimension, source file, and Dygnosis equation number before transformation.
+**Jump to equation** appears above a safely mapped `model` opener with one counted equation. Other known counts use **Jump to N equations**, including zero. Choose an equation to open its written source, including equations in an included file. The picker says **Jump to an equation before transformation**. The list shows its name, aggregate or heterogeneity dimension, source file, and Dygnosis equation number before transformation.
 
 The count covers surviving counted equations in that block. Model locals, static-only rows, and removed equations have no active counted number. Replacement equations use their surviving numbers. These counts and numbers describe the written model before Dynare transformation; later transformations can change MATLAB runtime numbering.
 
-Repeated macro executions at one written opener share one lens. **Browse equations (N occurrences)** first asks which block occurrence to use, showing the dimension, macro values, and each occurrence's count. It then lists that occurrence's equations. An incomplete expansion or unsafe source mapping withholds a counted browser. Open an include's model root first; when several known roots own the include, use **Dygnosis: Choose model owner** to choose its context.
+Repeated macro executions at one written opener share one lens. **Jump to equation (N occurrences)** first asks which block occurrence to use, showing the dimension, macro values, and each occurrence's count. It then lists that occurrence's equations. An incomplete expansion or unsafe source mapping withholds a counted picker. Open an include's model root first; when several known roots own the include, use **Dygnosis: Choose model owner** to choose its context.
 
 Two optional actions are available:
 

@@ -197,11 +197,12 @@ test("resource controls use approved defaults and native visibility with safe in
 });
 test("default actionable model lens reuses the cache facts and creates no reference scan or solver command", async () => {
   const env = setup(); const lenses = await env.provide();
-  assert.equal(lenses.length, 1); assert.equal(lenses[0].command.title, "Browse 1 equation");
+  assert.equal(lenses.length, 1); assert.equal(lenses[0].command.title, "Jump to equation");
+  assert.equal(lenses[0].command.command, "dygnosis.browseLensEquations");
   assert.deepEqual(lenses[0].range, new Range(3, 0, 3, 5)); assert.equal(env.service.requests.length, 1);
   assert.equal(env.host.references.length, 0); assert.equal(env.service.engineRequests.length, 0);
   env.host.answers.push(items => items[0]); await env.run(lenses[0]);
-  assert.equal(env.host.picks.length, 1); assert.match(env.host.picks[0].options.placeHolder, /before transformation/);
+  assert.equal(env.host.picks.length, 1); assert.equal(env.host.picks[0].options.placeHolder, "Jump to an equation before transformation");
   assert.deepEqual(env.service.jumps, [{ target: location(undefined, 5), root: env.doc.uri.toString() }]); env.registration.dispose();
 });
 test("aggregate, heterogeneous and multiple model blocks keep their separate surviving rows", async () => {
@@ -210,7 +211,7 @@ test("aggregate, heterogeneous and multiple model blocks keep their separate sur
   const rows = [equation(), equation("e2", { block_id: "s2", scope: "dimension", dimension: "households", location: location("file:///project/hank.inc", 2) }),
     equation("e3", { block_id: "s2", scope: "dimension", dimension: "households", number: 2 })];
   env.service.info = () => facts(env.doc, { statements: blocks, equations: rows });
-  const lenses = await env.provide(); assert.deepEqual(lenses.map(row => row.command.title), ["Browse 1 equation", "Browse 2 equations", "Browse 0 equations"]);
+  const lenses = await env.provide(); assert.deepEqual(lenses.map(row => row.command.title), ["Jump to equation", "Jump to 2 equations", "Jump to 0 equations"]);
   env.host.answers.push(items => items[0]); await env.run(lenses[1]);
   assert.equal(env.host.picks[0].items.length, 2); assert.ok(env.host.picks[0].items.every(row => /households/.test(row.description)));
   assert.equal(env.service.jumps[0].target.uri, "file:///project/hank.inc");
@@ -225,7 +226,7 @@ test("repeated macro openers group once, omit ambiguous count and choose occurre
   const rows = [equation(), equation("e2", { block_id: "s2", scope: "dimension", dimension: "firms", number: 1 }),
     equation("e3", { block_id: "s2", scope: "dimension", dimension: "firms", number: 2 })];
   env.service.info = () => facts(env.doc, { statements: blocks, equations: rows });
-  const lenses = await env.provide(); assert.equal(lenses.length, 1); assert.equal(lenses[0].command.title, "Browse equations (2 occurrences)");
+  const lenses = await env.provide(); assert.equal(lenses.length, 1); assert.equal(lenses[0].command.title, "Jump to equation (2 occurrences)");
   env.host.answers.push(items => items[1], items => items[1]); await env.run(lenses[0]);
   assert.deepEqual(env.host.picks[0].items.map(row => row.label), ["Aggregate", "Dimension firms"]);
   assert.match(env.host.picks[0].items[0].detail, /i=1.*Expansion 1/); assert.match(env.host.picks[0].items[1].detail, /i=2.*Expansion 2/);
@@ -237,7 +238,7 @@ test("removal/replacement counts only server surviving rows, without adding repl
   const env = setup(); env.service.info = () => facts(env.doc, { statements: [statement("s1", { equation_count: 0 }),
     statement("replacement", { name: "model_replace", equation_count: null, lens_anchor: null })],
     equations: [equation("replacement:e", { block_id: "replacement" })] });
-  assert.deepEqual((await env.provide()).map(row => row.command.title), ["Browse 0 equations"]); env.registration.dispose();
+  assert.deepEqual((await env.provide()).map(row => row.command.title), ["Jump to 0 equations"]); env.registration.dispose();
 });
 test("incomplete, partial, ambiguous mapping and unsafe anchors expose no authoritative lenses", () => {
   const env = setup();

@@ -195,7 +195,7 @@ export async function browseModelEquations(service: DygnosisClient, context: Mod
     { placeHolder: "Choose the equation scope" }))?.scope;
   if (!scope || !await validateNavigationContext(service, context)) return;
   const pick = await vscode.window.showQuickPick(equationPicks(scope.equations),
-    { placeHolder: "Browse equations before transformation", matchOnDescription: true, matchOnDetail: true });
+    { placeHolder: "Jump to an equation before transformation", matchOnDescription: true, matchOnDetail: true });
   if (pick) await jumpEquation(service, context, pick.equation, message);
 }
 

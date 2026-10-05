@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The equation CodeLens says **Jump to equation** or **Jump to N equations**. Its picker opens the written equation before transformation.
+
 ## v0.11.7
 
 - **Dygnosis: Open Help** opens one offline reference with search, reading history, topic links, examples and feature guides. Help is available before a model opens and when the engine is unavailable. First-use guidance and persistent Explorer actions make it easy to find.

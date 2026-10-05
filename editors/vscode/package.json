@@ -554,7 +554,7 @@
             "type": "boolean",
             "default": true,
             "scope": "resource",
-            "description": "Browse surviving equations at each safely mapped model opener. Numbers are before transformation. Also respects editor.codeLens."
+            "description": "Jump to a surviving equation from each safely mapped model opener. Equation numbers are before transformation. Also respects editor.codeLens."
           },
           "dynare.codeLens.declarationReferences": {
             "type": "boolean",

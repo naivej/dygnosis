@@ -95,6 +95,20 @@ exports.run = async function run() {
     const symbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri);
     assert.ok(symbols.length > 0);
     evidence.checks.push("real engine counts/native symbols");
+    let equationLens;
+    await waitFor(async () => {
+      const lenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", document.uri);
+      equationLens = lenses?.find(lens => lens.command?.command === "dygnosis.browseLensEquations");
+      return equationLens?.command?.title === "Jump to equation";
+    }, "equation CodeLens shows the jump title");
+    const equationJump = vscode.commands.executeCommand(equationLens.command.command, ...equationLens.command.arguments);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem");
+    await equationJump;
+    assert.equal(vscode.window.activeTextEditor.document.uri.toString(), document.uri.toString());
+    const writtenEquation = info.equations[0].location;
+    assert.deepEqual(vscode.window.activeTextEditor.selection.start, new vscode.Position(writtenEquation.range.start.line, writtenEquation.range.start.character));
+    evidence.checks.push("native equation CodeLens picker jumps to the exact written equation");
     await vscode.commands.executeCommand("dygnosis.showEffectiveModel");
     assert.equal(vscode.window.activeTextEditor.document.uri.scheme, "dygnosis-effective");
     assert.equal(vscode.window.activeTextEditor.document.languageId, "dynare");
