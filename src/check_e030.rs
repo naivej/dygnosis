@@ -41,6 +41,7 @@ fn check_duplicate_declarations(model: &Model) -> Vec<Diagnostic> {
                 related: vec![RelatedDiagnostic::type_event(first_span, first_index)],
                 tags: Vec::new(),
                 model_dimension: None,
+                display_keyword: None,
             });
             continue;
         }
@@ -53,6 +54,7 @@ fn check_duplicate_declarations(model: &Model) -> Vec<Diagnostic> {
             related: vec![RelatedDiagnostic::type_event(first_span, first_index)],
             tags: Vec::new(),
             model_dimension: None,
+            display_keyword: None,
         });
     }
     diagnostics
@@ -94,6 +96,7 @@ fn check_model_local_dups(model: &Model) -> Vec<Diagnostic> {
                     )],
                     tags: Vec::new(),
                     model_dimension: None,
+                    display_keyword: None,
                 });
             } else {
                 seen.insert(*name, (eq, *ident_span));

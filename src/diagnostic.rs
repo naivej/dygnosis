@@ -42,6 +42,8 @@ pub struct Diagnostic {
     /// Heterogeneous count scope supplied by its producer. Macro executions
     /// can share a written span while belonging to different dimensions.
     pub model_dimension: Option<String>,
+    /// Producer-selected keyword used only after analysis and safe mapping.
+    pub display_keyword: Option<(Span, &'static str)>,
 }
 
 impl Diagnostic {
@@ -66,6 +68,7 @@ impl Diagnostic {
             related: Vec::new(),
             tags,
             model_dimension: None,
+            display_keyword: None,
         }
     }
 
@@ -76,6 +79,11 @@ impl Diagnostic {
 
     pub fn with_model_dimension(mut self, dimension: impl Into<String>) -> Self {
         self.model_dimension = Some(dimension.into());
+        self
+    }
+
+    pub(crate) fn with_display_keyword(mut self, span: Span, keyword: &'static str) -> Self {
+        self.display_keyword = Some((span, keyword));
         self
     }
 }

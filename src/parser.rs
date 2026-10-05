@@ -6010,6 +6010,7 @@ impl Parser<'_> {
             .dotted_head_at()
             .expect("caller checked the dotted head");
         let start = self.tokens[self.i].span.start;
+        let keyword_span = self.tokens[self.i + body_at].span;
         let open = body_at + 1;
         let has_body = self.kind_at(open) == Some(TokenKind::LParen);
         let copy_source = if self.kind_at(open) == Some(TokenKind::Eq) {
@@ -6103,6 +6104,7 @@ impl Parser<'_> {
         self.model.dotted_statements.push(DottedStatement {
             symbol_type_context: self.model.symbol_context(),
             kind,
+            keyword_span,
             head,
             span: Span { start, end },
             has_body,

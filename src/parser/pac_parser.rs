@@ -470,7 +470,7 @@ impl Parser<'_> {
                 }
                 self.pac_finish_row(body_end_i);
             } else if self.at_ident_ci("component") {
-                let component_start = self.bump().span.start;
+                let keyword_span = self.bump().span;
                 let component = self.read_pac_expression();
                 self.pac_finish_row(body_end_i);
                 let mut component_rows = Vec::new();
@@ -501,10 +501,11 @@ impl Parser<'_> {
                 if let Some(component) = component {
                     let component_end = self.tokens[self.i.saturating_sub(1)].span.end;
                     rows.push(PacTargetInfoRow::Component(PacTargetComponent {
+                        keyword_span,
                         component,
                         rows: component_rows,
                         span: Span {
-                            start: component_start,
+                            start: keyword_span.start,
                             end: component_end,
                         },
                     }));

@@ -208,6 +208,7 @@ fn e001(span: Span, message: String, fix: Option<TextEdit>) -> Diagnostic {
         related: Vec::new(),
         tags: Vec::new(),
         model_dimension: None,
+        display_keyword: None,
     }
 }
 

@@ -1934,11 +1934,14 @@ fn check_prior_body(model: &Model, stmt: &DottedStatement, out: &mut Vec<Diagnos
     }
     if let DottedHead::Vec { names } = &stmt.head {
         if names.len() < 2 {
-            push(
-                out,
-                stmt.span,
-                "E377",
-                "you must pass at least two parameters to the joint prior statement",
+            out.push(
+                Diagnostic::new(
+                    stmt.span,
+                    Severity::Error,
+                    "E377",
+                    "you must pass at least two parameters to the joint prior statement",
+                )
+                .with_display_keyword(stmt.keyword_span, "prior"),
             );
             return true;
         }
@@ -1994,20 +1997,26 @@ fn head_refused_while_parsing(model: &Model, stmt: &DottedStatement) -> bool {
 /// `mean` / `mode` and its four-value `domain`.
 fn prior_shape_refusal(stmt: &DottedStatement, joint: bool, out: &mut Vec<Diagnostic>) -> bool {
     if option_of(&stmt.options, "shape").is_none() {
-        push(
-            out,
-            stmt.span,
-            "E372",
-            "You must pass the shape option to the prior statement.",
+        out.push(
+            Diagnostic::new(
+                stmt.span,
+                Severity::Error,
+                "E372",
+                "You must pass the shape option to the prior statement.",
+            )
+            .with_display_keyword(stmt.keyword_span, "prior"),
         );
         return true;
     }
     if option_of(&stmt.options, "mean").is_none() && option_of(&stmt.options, "mode").is_none() {
-        push(
-            out,
-            stmt.span,
-            "E373",
-            "You must pass at least one of mean and mode to the prior statement.",
+        out.push(
+            Diagnostic::new(
+                stmt.span,
+                Severity::Error,
+                "E373",
+                "You must pass at least one of mean and mode to the prior statement.",
+            )
+            .with_display_keyword(stmt.keyword_span, "prior"),
         );
         return true;
     }
@@ -2015,12 +2024,16 @@ fn prior_shape_refusal(stmt: &DottedStatement, joint: bool, out: &mut Vec<Diagno
         let stdev = option_of(&stmt.options, "stdev").is_some();
         let variance = option_of(&stmt.options, "variance").is_some();
         if stdev == variance {
-            push(
-                out,
+            let mut diagnostic = Diagnostic::new(
                 stmt.span,
+                Severity::Error,
                 "E374",
                 "You must pass exactly one of stdev and variance to the prior statement.",
             );
+            if !stdev {
+                diagnostic = diagnostic.with_display_keyword(stmt.keyword_span, "prior");
+            }
+            out.push(diagnostic);
             return true;
         }
     }

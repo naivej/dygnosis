@@ -400,10 +400,6 @@ fn retained_mixed_branches_keep_their_present_field_or_component_range() {
     assert_eq!(range.len(), 1);
     assert!(range[0].contains("variable="));
     assert!(range[0].contains("expression="));
-    let component = include_str!("fixtures/d_pac/e438_pac_missing_auxname.mod");
-    let range = selected(component, "E438");
-    assert!(range[0].starts_with("component"));
-    assert!(range[0].contains("kind dd"));
     let growth = include_str!("fixtures/d_pac/e438_pac_stationary_growth.mod");
     assert!(selected(growth, "E438")[0].contains("growth y"));
     let option = include_str!("fixtures/d_hank/e474_block.mod");
@@ -484,8 +480,7 @@ fn repeated_initialization_blocks_keep_existing_owner_and_summary_scope() {
         let owner = model
             .statements
             .iter()
-            .filter(|statement| statement.name == keyword)
-            .last()
+            .rfind(|statement| statement.name == keyword)
             .unwrap();
         let hits: Vec<_> = diagnostics
             .iter()
@@ -711,6 +706,166 @@ fn earlier_tag_count_still_suppresses_later_shock_path_refusal() {
         .any(|diagnostic| diagnostic.code == "E420"));
     assert_eq!(
         selected(&source.replace("[dynamic]", ""), "E420"),
+        ["self.e"]
+    );
+}
+
+#[test]
+fn nested_and_dotted_matrix_keeps_baseline_messages_severity_and_multiplicity() {
+    for (source, code, keyword, message) in [
+        (
+            include_str!("fixtures/d_pac/e438_pac_missing_auxname.mod"),
+            "E438",
+            "component",
+            "the block 'pac_target_info(q)' is missing the 'auxname' statement in some 'component'",
+        ),
+        (
+            include_str!("fixtures/d_pac/e438_pac_missing_kind.mod"),
+            "E438",
+            "component",
+            "the block 'pac_target_info(q)' is missing the 'kind' statement in some 'component'",
+        ),
+        (
+            include_str!("fixtures/d_ms/e372_prior_no_shape.mod"),
+            "E372",
+            "prior",
+            "You must pass the shape option to the prior statement.",
+        ),
+        (
+            include_str!("fixtures/d_ms/e373_prior_no_mean_or_mode.mod"),
+            "E373",
+            "prior",
+            "You must pass at least one of mean and mode to the prior statement.",
+        ),
+        (
+            "parameters alpha; /*😀中*/alpha.prior(shape=normal,mean=.5);",
+            "E374",
+            "prior",
+            "You must pass exactly one of stdev and variance to the prior statement.",
+        ),
+        (
+            include_str!("fixtures/d_ms/e377_joint_prior_one_name.mod"),
+            "E377",
+            "prior",
+            "you must pass at least two parameters to the joint prior statement",
+        ),
+    ] {
+        let model = parse(source);
+        let diagnostics = analyze(&model);
+        let hits: Vec<_> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == code)
+            .collect();
+        assert_eq!(hits.len(), 1, "{code}: {diagnostics:?}");
+        assert_eq!(hits[0].severity, dygnosis::Severity::Error);
+        assert_eq!(hits[0].message, message);
+        assert_eq!(selected(source, code), [keyword]);
+    }
+}
+
+#[test]
+fn nested_analysis_spans_and_present_field_branches_stay_full() {
+    let source = include_str!("fixtures/d_pac/e438_pac_missing_auxname.mod");
+    let model = parse(source);
+    let component = model.pac_target_info[0]
+        .rows
+        .iter()
+        .find_map(|row| match row {
+            dygnosis::model::PacTargetInfoRow::Component(component) => Some(component),
+            _ => None,
+        })
+        .unwrap();
+    let analysis = dygnosis::check_d_pac::check_check(&model);
+    assert_eq!(analysis[0].span, component.span);
+    assert_eq!(
+        analysis[0].display_keyword,
+        Some((component.keyword_span, "component"))
+    );
+    assert!(
+        model.source[component.span.start as usize..component.span.end as usize]
+            .contains("kind dd")
+    );
+    assert_eq!(selected(source, "E438"), ["component"]);
+    for (source, code) in [
+        (
+            include_str!("fixtures/d_pac/e438_pac_stationary_growth.mod"),
+            "E438",
+        ),
+        (
+            include_str!("fixtures/d_ms/e374_prior_stdev_and_variance.mod"),
+            "E374",
+        ),
+    ] {
+        let model = parse(source);
+        let analysis = if code == "E438" {
+            dygnosis::check_d_pac::check_check(&model)
+        } else {
+            dygnosis::check_d_ms::check_d_ms(&model)
+        };
+        let original = analysis
+            .iter()
+            .find(|diagnostic| diagnostic.code == code)
+            .unwrap();
+        let display = analyze(&model)
+            .into_iter()
+            .find(|diagnostic| diagnostic.code == code)
+            .unwrap();
+        assert_eq!(original.display_keyword, None);
+        assert_eq!(display.span, original.span);
+    }
+    let source = "parameters alpha; alpha.prior(shape=normal,mean=.5);";
+    let model = parse(source);
+    let statement = &model.dotted_statements[0];
+    let analysis = dygnosis::check_d_ms::check_d_ms(&model);
+    assert_eq!(analysis[0].span, statement.span);
+    assert_eq!(
+        analysis[0].display_keyword,
+        Some((statement.keyword_span, "prior"))
+    );
+    assert_eq!(
+        &model.source[statement.span.start as usize..statement.span.end as usize],
+        "alpha.prior(shape=normal,mean=.5);"
+    );
+}
+
+#[test]
+fn nested_macro_occurrences_and_synthetic_keywords_keep_their_owner_or_fallback() {
+    let pac = "var y z; varexo e e2; parameters b; b=.8; model; [name='Y'] y=b*y(-1)+e; [name='Z'] z=z(-1)+e2; end; pac_model(model_name=q,discount=b); pac_target_info(q); target y; auxname_target_nonstationary yns;\ncomponent y; auxname yaux; kind dd;\n";
+    let source = format!("{pac}@#for i in 1:2\n/*😀中*/component z; kind dd;\n@#endfor\nend;");
+    let model = parse(&source);
+    let hit = analyze(&model)
+        .into_iter()
+        .find(|diagnostic| diagnostic.code == "E438")
+        .unwrap();
+    assert_eq!(
+        hit.span.start as usize,
+        source.find("component z;").unwrap()
+    );
+    assert_eq!(selected(&source, "E438"), ["component"]);
+    let source = format!("@#define k=\"component\"\n{pac}@{{k}} z; kind dd; end;");
+    assert_eq!(selected(&source, "E438"), ["@{k} z; kind dd;"]);
+    let source = "parameters alpha; alpha.prior(shape=normal,mean=.5,stdev=.1);\n@#for i in 1:2\n/*😀中*/alpha.prior(mean=.5,stdev=.1);\n@#endfor\n";
+    let model = parse(source);
+    let hit = analyze(&model)
+        .into_iter()
+        .find(|diagnostic| diagnostic.code == "E372")
+        .unwrap();
+    assert_eq!(hit.span, model.dotted_statements[1].keyword_span);
+    assert_eq!(selected(source, "E372"), ["prior"]);
+    let source = "@#define k=\"prior\"\nparameters alpha; alpha.@{k}(mean=.5,stdev=.1);";
+    assert_eq!(selected(source, "E372"), ["alpha.@{k}(mean=.5,stdev=.1);"]);
+}
+
+#[test]
+fn earlier_dotted_prior_still_suppresses_later_shock_path_refusal() {
+    let source = "var y; varexo e; parameters alpha; alpha=1; model; y=alpha*y(-1)+e; end; alpha.prior(mean=.5,stdev=.1); shock_paths; var e; periods 1; values self.e; end;";
+    assert_eq!(selected(source, "E372"), ["prior"]);
+    assert!(selected(source, "E420").is_empty());
+    assert_eq!(
+        selected(
+            &source.replace("alpha.prior(mean=.5,stdev=.1);", ""),
+            "E420"
+        ),
         ["self.e"]
     );
 }
