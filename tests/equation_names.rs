@@ -182,7 +182,7 @@ async fn actions_for(
 fn naming_actions(actions: &[CodeAction]) -> Vec<&CodeAction> {
     actions
         .iter()
-        .filter(|action| action.title.starts_with("Name counted equations"))
+        .filter(|action| action.title.starts_with("Add equation tags"))
         .collect()
 }
 
@@ -330,7 +330,7 @@ async fn replacement_note_names_only_the_surviving_replacement_rows() {
     let edited = apply_edits(text, &edits);
     assert!(edited.contains("[name='old'] x=y(-1); y=y(-1);"));
     assert!(
-        edited.contains("model_replace('old'); [name='eq_2'] x=y;"),
+        edited.contains("model_replace('old'); [name='eq1'] x=y;"),
         "{edited}"
     );
 }
@@ -470,7 +470,7 @@ async fn included_writing_notes_route_to_their_files_and_clear_after_edits() {
     let action = naming_on_i208(&service, &root_uri)
         .await
         .expect("included naming action");
-    assert_eq!(action.title, "Name counted equations");
+    assert_eq!(action.title, "Add equation tags");
     assert_eq!(edits_for(&action, &eq_uri).len(), 1);
     assert!(edits_for(&action, &root_uri).is_empty());
 
@@ -603,7 +603,7 @@ async fn shared_included_i208_offers_one_action_per_root() {
         .into_iter()
         .filter_map(|item| match item {
             CodeActionOrCommand::CodeAction(action)
-                if action.title.starts_with("Name counted equations") =>
+                if action.title.starts_with("Add equation tags") =>
             {
                 Some(action)
             }
@@ -637,7 +637,7 @@ async fn shared_included_i208_offers_one_action_per_root() {
         .cloned()
         .collect::<Vec<_>>();
     assert_eq!(single.len(), 1);
-    assert_eq!(single[0].title, "Name counted equations");
+    assert_eq!(single[0].title, "Add equation tags");
     assert_eq!(edits_for(&single[0], &b_uri).len(), 1);
     fs::remove_dir_all(&dir).unwrap();
 }
@@ -668,7 +668,7 @@ async fn tags_are_kept_and_a_second_apply_does_nothing() {
         .did_open(open_params(uri.clone(), text.clone(), 1))
         .await;
     let action = naming_on_i208(&service, &uri).await.expect("naming action");
-    assert_eq!(action.title, "Name counted equations");
+    assert_eq!(action.title, "Add equation tags");
     let edited = apply_edits(&text, &edits_for(&action, &uri));
     assert_eq!(edited, expected("tags.named.mod"));
     assert_no_new_error(&text, &edited, &path);
@@ -691,7 +691,7 @@ async fn one_note_names_only_its_model_block() {
         .did_open(open_params(uri.clone(), text.clone(), 1))
         .await;
     let action = naming_on_i208(&service, &uri).await.expect("naming action");
-    assert_eq!(action.title, "Name counted equations");
+    assert_eq!(action.title, "Add equation tags");
     let edits = edits_for(&action, &uri);
     assert_eq!(
         edits.len(),
@@ -701,7 +701,7 @@ async fn one_note_names_only_its_model_block() {
     let edited = apply_edits(&text, &edits);
     assert_eq!(
         edited,
-        text.replacen("y = y(-1);", "[name='eq_1'] y = y(-1);", 1)
+        text.replacen("y = y(-1);", "[name='eq1'] y = y(-1);", 1)
     );
     assert_no_new_error(&text, &edited, &path.to_string_lossy());
 }
@@ -716,7 +716,7 @@ async fn a_for_copy_is_skipped_and_reported() {
         .did_open(open_params(uri.clone(), text.clone(), 1))
         .await;
     let action = naming_on_i208(&service, &uri).await.expect("naming action");
-    assert_eq!(action.title, "Name counted equations (2 skipped)");
+    assert_eq!(action.title, "Add equation tags (2 skipped)");
     let edited = apply_edits(&text, &edits_for(&action, &uri));
     assert_eq!(edited, expected("for_copy.named.mod"));
     assert_no_new_error(&text, &edited, &path.to_string_lossy());
@@ -773,7 +773,7 @@ async fn a_name_on_a_skipped_copy_is_still_taken() {
         .did_open(open_params(uri.clone(), text.clone(), 1))
         .await;
     let action = naming_on_i208(&service, &uri).await.expect("naming action");
-    assert_eq!(action.title, "Name counted equations");
+    assert_eq!(action.title, "Add equation tags");
     let edited = apply_edits(&text, &edits_for(&action, &uri));
     assert_eq!(edited, expected("taken.named.mod"));
     assert_no_new_error(&text, &edited, &path.to_string_lossy());
@@ -800,7 +800,7 @@ async fn a_shared_include_is_skipped_and_reported() {
     let action = naming_on_i208(&service, &root_uri)
         .await
         .expect("naming action");
-    assert_eq!(action.title, "Name counted equations (2 skipped)");
+    assert_eq!(action.title, "Add equation tags (2 skipped)");
     assert!(
         edits_for(&action, &inc_uri).is_empty(),
         "the include is not edited"
@@ -831,7 +831,7 @@ async fn a_unique_include_is_edited_in_that_file() {
     let action = naming_on_i208(&service, &root_uri)
         .await
         .expect("naming action");
-    assert_eq!(action.title, "Name counted equations");
+    assert_eq!(action.title, "Add equation tags");
     assert!(
         edits_for(&action, &root_uri).is_empty(),
         "the root is not edited"
@@ -862,6 +862,551 @@ fn error_set(diags: &[Diagnostic]) -> BTreeSet<String> {
         .collect()
 }
 
+async fn metadata_at(
+    service: &LspService<dygnosis::server::Backend>,
+    uri: &Url,
+    text: &str,
+    byte: usize,
+) -> Option<CompletionItem> {
+    let position = LineIndex::new(text).position_utf16(text, byte as u32);
+    let response = service
+        .inner()
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(position.line, position.character),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        })
+        .await
+        .unwrap()?;
+    let items = match response {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    items.into_iter().find(|item| {
+        matches!(item.label.as_str(), "name" | "long_name") && item.text_edit.is_some()
+    })
+}
+
+fn completion_edit(item: &CompletionItem) -> TextEdit {
+    match item.text_edit.as_ref().unwrap() {
+        CompletionTextEdit::Edit(edit) => edit.clone(),
+        _ => panic!("expected replacement"),
+    }
+}
+
+#[tokio::test]
+async fn metadata_completions_repair_only_the_typed_group_and_select_the_whole_value() {
+    for snippets in [false, true] {
+        for (marked, label, expected) in [
+            ("var y; model; |y=0; end;", "name", "[name='eq1'] y=0"),
+            ("var y; model; [na|] y=0; end;", "name", "[name='eq1'] y=0"),
+            (
+                "var y; model; [name=|] y=0; end;",
+                "name",
+                "[name='eq1'] y=0",
+            ),
+            (
+                "var y; model; [name=  |] y=0; end;",
+                "name",
+                "[name=  'eq1'] y=0",
+            ),
+            (
+                "var y; model; [name=''|] y=0; end;",
+                "name",
+                "[name='eq1'] y=0",
+            ),
+            (
+                "var y; model; [name='|'] y=0; end;",
+                "name",
+                "[name='eq1'] y=0",
+            ),
+            (
+                "var y; model; [name='|\ny=0; end;",
+                "name",
+                "[name='eq1']\ny=0",
+            ),
+            (
+                "var y|; model; y=0; end;",
+                "long_name",
+                "y (long_name='y');",
+            ),
+            ("var y|", "long_name", "var y (long_name='y')"),
+            (
+                "var y|; parameters p(long_name='__dygnosis_metadata_site__');",
+                "long_name",
+                "var y (long_name='y');",
+            ),
+            (
+                "parameters p(long_name='__dygnosis_metadata_site__'); var y|;",
+                "long_name",
+                "var y (long_name='y');",
+            ),
+            (
+                "parameters p(long_name='__dygnosis_metadata_site__'); var y|",
+                "long_name",
+                "var y (long_name='y')",
+            ),
+            (
+                "var y| z(long_name='__dygnosis_metadata_site__')",
+                "long_name",
+                "var y (long_name='y') z(long_name='__dygnosis_metadata_site__')",
+            ),
+            ("var y (long_name=|", "long_name", "var y (long_name='y')"),
+            (
+                "var y (long_n|); model; y=0; end;",
+                "long_name",
+                "y (long_name='y');",
+            ),
+            (
+                "var y (long_name=|); model; y=0; end;",
+                "long_name",
+                "y (long_name='y');",
+            ),
+            (
+                "var y (long_name='|'); model; y=0; end;",
+                "long_name",
+                "y (long_name='y');",
+            ),
+            (
+                "var y (country='US', long_name=|); model; y=0; end;",
+                "long_name",
+                "country='US', long_name='y'",
+            ),
+        ] {
+            let uri = Url::parse("file:///C:/metadata/completion.mod").unwrap();
+            let byte = marked.find('|').unwrap();
+            let text = marked.replacen('|', "", 1);
+            let (service, _socket) = new_service();
+            service
+                .inner()
+                .initialize(InitializeParams {
+                    capabilities: ClientCapabilities {
+                        text_document: Some(TextDocumentClientCapabilities {
+                            completion: Some(CompletionClientCapabilities {
+                                completion_item: Some(CompletionItemCapability {
+                                    snippet_support: Some(snippets),
+                                    ..Default::default()
+                                }),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            service
+                .inner()
+                .did_open(open_params(uri.clone(), text.clone(), 1))
+                .await;
+            let item = metadata_at(&service, &uri, &text, byte)
+                .await
+                .unwrap_or_else(|| panic!("missing completion: {marked}"));
+            assert_eq!(item.label, label, "{marked}");
+            let mut edit = completion_edit(&item);
+            let value = if label == "name" { "eq1" } else { "y" };
+            if snippets {
+                let placeholder = format!("${{1:{value}}}");
+                assert!(edit.new_text.contains(&placeholder), "{marked}: {edit:?}");
+                edit.new_text = edit.new_text.replace(&placeholder, value);
+            } else {
+                assert!(!edit.new_text.contains("${"));
+            }
+            let edited = apply_edits(&text, &[edit]);
+            assert!(edited.contains(expected), "{marked}: {edited}");
+            assert_no_new_error(&text, &edited, "completion.mod");
+            service
+                .inner()
+                .did_change(change_params(uri.clone(), edited.clone(), 2))
+                .await;
+            let value_at = edited.find(&format!("'{value}'")).unwrap() + 1;
+            assert!(
+                metadata_at(&service, &uri, &edited, value_at)
+                    .await
+                    .is_none(),
+                "existing value: {edited}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn metadata_completion_withholds_unsafe_or_unrelated_sites() {
+    for marked in [
+        "var y; model; y=|0; end;",
+        "var y; model; y(|-1)=0; end;",
+        "var y; model; /* [name=|] */ y=0; end;",
+        "var y; model; // [name=|]\ny=0; end;",
+        "var y; model; [name='law|'] y=0; end;",
+        "var y; model; [name='law'] |y=0; end;",
+        "var y; model; [group=|] y=0; end;",
+        "var y (long_name='Kept')|; model; y=0; end;",
+        "var y (country='|'); model; y=0; end;",
+        "var y; model; y=0; end; stoch_simul(order=|);",
+        "var y| $Y$; model; y=0; end;",
+        "@#define EMPTY=\"\"\nvar y (long_name='@{EMPTY}|'); model; y=0; end;",
+        "@#define EMPTY=\"\"\nvar y; model; [name='@{EMPTY}|'] y=0; end;",
+        "var y; model; @#for i in 1:1\n|y=0;\n@#endfor\nend;",
+        "var y; model; @#if 0\n|y=0;\n@#endif\ny=0; end;",
+        "@#include \"missing.inc\"\nvar y; model; |y=0; end;",
+        "var y; model; [name=|] y=0\nend;", // Unrelated missing equation semicolon.
+        "var y|; parameters p",             // Another declaration owns the EOF recovery.
+        "var y|; parameters p(long_name='__dygnosis_metadata_site__')",
+        "var y|; model; y=0;", // A missing block end is not metadata recovery.
+    ] {
+        let uri = Url::parse("file:///C:/metadata/unsafe.mod").unwrap();
+        let byte = marked.find('|').unwrap();
+        let text = marked.replacen('|', "", 1);
+        let (service, _socket) = new_service();
+        service
+            .inner()
+            .did_open(open_params(uri.clone(), text.clone(), 1))
+            .await;
+        assert!(
+            metadata_at(&service, &uri, &text, byte).await.is_none(),
+            "unsafe completion: {marked}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_partial_action_reserves_untouched_lhs_defaults_and_does_not_renumber_tags() {
+    let uri = Url::parse("file:///C:/metadata/defaults.mod").unwrap();
+    let text = "var y eq1 x; model; y=eq1; end; model; [name='3'] x=y; eq1=x; end;";
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.into(), 1))
+        .await;
+    let action = naming_on_i208(&service, &uri).await.unwrap();
+    let edited = apply_edits(text, &edits_for(&action, &uri));
+    assert!(edited.contains("[name='eq2'] y=eq1;"), "{edited}");
+    assert_no_new_error(text, &edited, "defaults.mod");
+    let pp = PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    if pp.is_file() {
+        let bad = text.replacen("y=eq1;", "[name='eq1'] y=eq1;", 1);
+        for (source, accepted) in [(text, true), (bad.as_str(), false), (edited.as_str(), true)] {
+            let result = dygnosis::run_preprocessor(
+                source,
+                &pp,
+                None,
+                std::time::Duration::from_secs(30),
+                dygnosis::JsonStage::Transform,
+            );
+            assert_eq!(
+                result.success, accepted,
+                "{}{}",
+                result.raw_stdout, result.raw_stderr
+            );
+            if !accepted {
+                assert!(format!("{}{}", result.raw_stdout, result.raw_stderr)
+                    .contains("number 3 because it is already in use"));
+            }
+        }
+    } else {
+        eprintln!("Dynare 7.2 absent: partial metadata collision probes skipped");
+    }
+    service
+        .inner()
+        .did_change(change_params(uri.clone(), edited.clone(), 2))
+        .await;
+    let reordered = edited.replace(
+        "model; [name='eq2'] y=eq1; end; model; [name='3'] x=y; eq1=x; end;",
+        "model; [name='3'] x=y; end; model; [name='eq2'] y=eq1; eq1=x; end;",
+    );
+    service
+        .inner()
+        .did_change(change_params(uri.clone(), reordered.clone(), 3))
+        .await;
+    let actions = actions_for(&service, &uri, full_range(&reordered)).await;
+    for action in naming_actions(&actions) {
+        let next = apply_edits(&reordered, &edits_for(action, &uri));
+        assert!(next.contains("[name='eq2'] y=eq1;"), "{next}");
+    }
+    // Undo restores the original scope and the same safe allocation.
+    service
+        .inner()
+        .did_change(change_params(uri.clone(), text.into(), 4))
+        .await;
+    let action = naming_on_i208(&service, &uri).await.unwrap();
+    assert_eq!(apply_edits(text, &edits_for(&action, &uri)), edited);
+}
+
+#[tokio::test]
+async fn long_name_actions_keep_tex_partitions_comments_and_nonempty_values() {
+    let uri = Url::parse("file:///C:/metadata/long.mod").unwrap();
+    let text = "/*😀中*/var(log) y $Y$ (country='US', /*keep*/ long_name='') z $Z$ q (long_name='Kept');\nvarexo e; varexo_det d; parameters p; model; [group='g', /*keep ]*/ name=''] y=z+q+e+d+p; z=0; q=0; end;";
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.into(), 7))
+        .await;
+    let equation_action = naming_on_i208(&service, &uri).await.unwrap();
+    let tagged = apply_edits(text, &edits_for(&equation_action, &uri));
+    assert!(
+        tagged.contains("[group='g', /*keep ]*/ name='eq1'] y=z+q+e+d+p;"),
+        "{tagged}"
+    );
+    assert_no_new_error(text, &tagged, "long.mod");
+    let notes: Vec<_> = items(&service, &uri)
+        .await
+        .into_iter()
+        .filter(|note| diag_code(note) == "I209")
+        .collect();
+    assert_eq!(notes.len(), 4);
+    let mut all_edits = Vec::new();
+    for note in &notes {
+        let actions = actions_for_note(&service, &uri, note).await;
+        let action = actions
+            .iter()
+            .find(|action| action.title == "Add long names")
+            .unwrap();
+        let Some(DocumentChanges::Edits(changes)) =
+            action.edit.as_ref().unwrap().document_changes.as_ref()
+        else {
+            panic!("versioned")
+        };
+        assert_eq!(changes[0].text_document.version, Some(7));
+        all_edits.extend(edits_for(action, &uri));
+    }
+    let edited = apply_edits(text, &all_edits);
+    assert!(edited.contains("y $Y$ (country='US', /*keep*/ long_name='y') z $Z$ (long_name='z') q (long_name='Kept')"), "{edited}");
+    for name in ["e", "d", "p"] {
+        assert!(
+            edited.contains(&format!("{name} (long_name='{name}')")),
+            "{edited}"
+        );
+    }
+    assert_no_new_error(text, &edited, "long.mod");
+    service
+        .inner()
+        .did_change(change_params(uri.clone(), edited.clone(), 8))
+        .await;
+    assert!(items(&service, &uri)
+        .await
+        .iter()
+        .all(|note| diag_code(note) != "I209"));
+    assert!(actions_for(&service, &uri, full_range(&edited))
+        .await
+        .iter()
+        .all(|action| !action.title.starts_with("Add long names")));
+    assert!(actions_for_note(&service, &uri, &notes[0])
+        .await
+        .iter()
+        .all(|action| !action.title.starts_with("Add long names")));
+}
+
+#[tokio::test]
+async fn repeated_declarations_need_one_literal_edit_and_macro_values_stay_written() {
+    let uri = Url::parse("file:///C:/metadata/repeated.mod").unwrap();
+    let text = "@#define EMPTY=\"\"\n@#for j in 1:2\nvar literal generated@{j} (long_name='@{EMPTY}');\n@#endfor\nmodel; literal=0; generated1=0; generated2=0; end;";
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.into(), 1))
+        .await;
+    let note = items(&service, &uri)
+        .await
+        .into_iter()
+        .find(|note| diag_code(note) == "I209")
+        .unwrap();
+    let actions = actions_for_note(&service, &uri, &note).await;
+    let action = actions
+        .iter()
+        .find(|action| action.title.starts_with("Add long names"))
+        .unwrap();
+    assert_eq!(action.title, "Add long names (2 skipped)");
+    let edits = edits_for(action, &uri);
+    assert_eq!(edits.len(), 1);
+    let edited = apply_edits(text, &edits);
+    assert!(
+        edited.contains("var literal (long_name='literal') generated@{j} (long_name='@{EMPTY}')"),
+        "{edited}"
+    );
+    service
+        .inner()
+        .did_change(change_params(uri.clone(), edited.clone(), 2))
+        .await;
+    let notes: Vec<_> = items(&service, &uri)
+        .await
+        .into_iter()
+        .filter(|note| diag_code(note) == "I209")
+        .collect();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].message, "2 symbols have no long_name.");
+    assert!(actions_for_note(&service, &uri, &notes[0])
+        .await
+        .iter()
+        .all(|action| !action.title.starts_with("Add long names")));
+}
+
+#[tokio::test]
+async fn included_completions_require_owner_agreement_and_long_name_actions_keep_root_contexts() {
+    let dir = std::env::temp_dir().join(format!(
+        "dygnosis-metadata-roots-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let child = dir.join("shared.inc");
+    let a = dir.join("a.mod");
+    let b = dir.join("b.mod");
+    let child_text = "var y; model; [name=''] y=0;";
+    let a_text = "@#include \"shared.inc\"\n[name='eq1'] y=1; end;";
+    let b_text = "@#include \"shared.inc\"\ny=1; end;";
+    fs::write(&child, child_text).unwrap();
+    fs::write(&a, a_text).unwrap();
+    fs::write(&b, b_text).unwrap();
+    let child_uri = file_url(&child);
+    let a_uri = file_url(&a);
+    let b_uri = file_url(&b);
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(child_uri.clone(), child_text.into(), 4))
+        .await;
+    service
+        .inner()
+        .did_open(open_params(a_uri.clone(), a_text.into(), 1))
+        .await;
+    service
+        .inner()
+        .did_open(open_params(b_uri.clone(), b_text.into(), 1))
+        .await;
+    let notes: Vec<_> = items(&service, &child_uri)
+        .await
+        .into_iter()
+        .filter(|note| diag_code(note) == "I209")
+        .collect();
+    assert_eq!(notes.len(), 2);
+    for note in &notes {
+        let actions = actions_for_note(&service, &child_uri, note).await;
+        let actions: Vec<_> = actions
+            .iter()
+            .filter(|action| action.title.starts_with("Add long names"))
+            .collect();
+        assert_eq!(actions.len(), 1);
+        assert!(actions[0].title.contains(" in "), "{}", actions[0].title);
+        let edits = edits_for(actions[0], &child_uri);
+        assert_eq!(edits.len(), 1);
+        assert!(apply_edits(child_text, &edits).contains("var y (long_name='y');"));
+    }
+    let at = child_text.find("name=''").unwrap() + "name='".len();
+    assert!(
+        metadata_at(&service, &child_uri, child_text, at)
+            .await
+            .is_none(),
+        "owners allocate eq2 and eq1"
+    );
+    let decl_at = child_text.find("var y").unwrap() + "var y".len();
+    assert!(
+        metadata_at(&service, &child_uri, child_text, decl_at)
+            .await
+            .is_some(),
+        "identical long names across roots"
+    );
+    service
+        .inner()
+        .did_change(change_params(
+            a_uri.clone(),
+            a_text.replace("eq1", "kept"),
+            2,
+        ))
+        .await;
+    let item = metadata_at(&service, &child_uri, child_text, at)
+        .await
+        .unwrap();
+    assert_eq!(completion_edit(&item).new_text, "eq1");
+    let incomplete = "var y; model; [na y=0;";
+    service
+        .inner()
+        .did_change(change_params(child_uri.clone(), incomplete.into(), 5))
+        .await;
+    let cursor = incomplete.find("[na").unwrap() + 3;
+    let item = metadata_at(&service, &child_uri, incomplete, cursor)
+        .await
+        .unwrap();
+    let edited = apply_edits(incomplete, &[completion_edit(&item)]);
+    assert!(edited.contains("[name='eq1'] y=0"), "{edited}");
+    assert!(actions_for_note(&service, &child_uri, &notes[1])
+        .await
+        .iter()
+        .all(|action| !action.title.starts_with("Add long names")));
+    // Literal labels equal to the proof marker do not identify the selected
+    // site, including when several roots own that same written declaration.
+    let include_only = "@#include \"shared.inc\"\n";
+    service
+        .inner()
+        .did_change(change_params(a_uri, include_only.into(), 3))
+        .await;
+    service
+        .inner()
+        .did_change(change_params(b_uri, include_only.into(), 2))
+        .await;
+    for (version, marked, expected) in [
+        (
+            6,
+            "parameters p(long_name='__dygnosis_metadata_site__'); var y|;",
+            true,
+        ),
+        (
+            7,
+            "var y|; parameters p(long_name='__dygnosis_metadata_site__')",
+            false,
+        ),
+        (
+            8,
+            "parameters p(long_name='__dygnosis_metadata_site__'); var y|",
+            true,
+        ),
+    ] {
+        let cursor = marked.find('|').unwrap();
+        let text = marked.replacen('|', "", 1);
+        service
+            .inner()
+            .did_change(change_params(child_uri.clone(), text.clone(), version))
+            .await;
+        let item = metadata_at(&service, &child_uri, &text, cursor).await;
+        assert_eq!(item.is_some(), expected, "shared owners: {marked}");
+        if let Some(item) = item {
+            assert_eq!(completion_edit(&item).new_text, " (long_name='y')");
+        }
+    }
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[tokio::test]
+async fn quoted_macro_names_are_reserved_and_empty_macro_values_are_skipped() {
+    let uri = Url::parse("file:///C:/metadata/quoted.mod").unwrap();
+    let text = "@#define EMPTY=\"\"\nvar y z; model;\n@#for j in 1:2\n[name='eq@{j}'] y=0;\n@#endfor\n[name='@{EMPTY}'] z=0; y=z; end;";
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.into(), 1))
+        .await;
+    let action = naming_on_i208(&service, &uri).await.unwrap();
+    assert_eq!(action.title, "Add equation tags (1 skipped)");
+    let edited = apply_edits(text, &edits_for(&action, &uri));
+    assert!(edited.contains("[name='eq@{j}'] y=0;"));
+    assert!(
+        edited.contains("[name='@{EMPTY}'] z=0; [name='eq3'] y=z;"),
+        "{edited}"
+    );
+    let cursor = text.rfind("y=z;").unwrap();
+    let item = metadata_at(&service, &uri, text, cursor).await.unwrap();
+    assert_eq!(completion_edit(&item).new_text, "[name='eq3'] ");
+    assert_no_new_error(text, &edited, "quoted.mod");
+}
+
 #[tokio::test]
 async fn the_edit_uses_a_utf16_column() {
     let (uri, text) = read_fixture("utf16.mod");
@@ -885,7 +1430,7 @@ async fn the_edit_uses_a_utf16_column() {
     assert_eq!(edit[0].range.start.character, utf16.character);
     assert_eq!(edit[0].range.start, edit[0].range.end);
     let edited = apply_edits(&text, &edit);
-    assert!(edited.contains("/*😀*/[name='eq_1'] y = y(-1);"));
+    assert!(edited.contains("/*😀*/[name='eq1'] y = y(-1);"));
     assert_no_new_error(
         &text,
         &edited,

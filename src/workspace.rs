@@ -123,6 +123,11 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    /// Isolated editor snapshot that preserves this root's include settings.
+    pub(crate) fn snapshot_with_root_settings(&self, uri: &str) -> Self {
+        self.snapshot_for_root(uri, self.root_paths(&normalize_uri(uri)).to_vec())
+    }
+
     /// Owned editor snapshot. Parsed overlays and joined source are immutable
     /// and shared; disk IO and root analysis happen on the receiving worker.
     pub(crate) fn snapshot_for_root(&self, uri: &str, search_paths: Vec<PathBuf>) -> Self {

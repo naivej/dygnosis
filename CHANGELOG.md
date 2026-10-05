@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Trigger Suggest** completes the lowest unused positive `eqN` equation tag
+  and adds a symbol's own `long_name`. **Add equation tags** and **Add long
+  names** fill missing metadata counted by I208 and I209, including in included
+  files. Existing values stay unchanged.
 - Macro interpolation expands inside quoted equation tags, `long_name` labels, and other quoted values. Repeated copies retain their written source and macro origins. Replacements that close the surrounding quote or add a line break keep expansion incomplete.
 - Complete files without a `model` block receive the applicable unused-parameter,
   unused-exogenous and unused-endogenous checks on their written declarations.

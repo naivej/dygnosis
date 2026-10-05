@@ -40,6 +40,41 @@ fn ar1() -> &'static str {
     "var y; varexo e; parameters rho; rho = 0.9; model; y = rho*y(-1)+e; end;"
 }
 
+#[test]
+fn explicit_empty_name_prevents_the_implicit_default_collision() {
+    let fire = "var y z; model; [name='2'] y=z; y+z=0; end;";
+    let quiet_text = "var y z; model; [name='2'] y=z; [name=''] y+z=0; end;";
+    let fire_diags = analyze(&parse(fire));
+    assert!(find(&fire_diags, "E257")
+        .message
+        .ends_with("number 2 because it is already in use"));
+    quiet(&analyze(&parse(quiet_text)), "E257");
+    let pp = std::path::PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    if !pp.is_file() {
+        eprintln!("Dynare 7.2 absent: E257 pair skipped");
+        return;
+    }
+    for (source, refuses) in [(fire, true), (quiet_text, false)] {
+        let result = run_preprocessor(
+            source,
+            &pp,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Transform,
+        );
+        assert_eq!(
+            !result.success, refuses,
+            "{}{}",
+            result.raw_stdout, result.raw_stderr
+        );
+        assert_eq!(
+            format!("{}{}", result.raw_stdout, result.raw_stderr)
+                .contains("Error creating default equation tag"),
+            refuses
+        );
+    }
+}
+
 const E241_EXO: &str = "You have not set the following exogenous variables in endval: e";
 const E241_ENDO: &str = "You have not set the following endogenous variables in histval: y";
 const E242_MSG: &str = "histval: the lag on y should be less than or equal to 0";

@@ -26,6 +26,23 @@ use native snippet placeholders. Press Tab to move between placeholders.
 **Trigger Parameter Hints** shows the recognized function or command signature
 and the active argument when the engine can identify it.
 
+Use **Trigger Suggest** before an equation or at its incomplete or empty
+`name` tag to insert an editable name such as `[name='eq1']`. Dygnosis chooses
+the lowest unused positive `eqN`; the number does not depend on equation
+position, and existing names do not change when equations move. Typed prefixes
+such as `[name=` and empty values such as `[name='']` are replaced without
+adding another key or quote. Editors that support snippet placeholders select
+the whole name for immediate replacement. Other clients receive plain text.
+
+After a declared symbol, or in its incomplete or empty `long_name` option,
+**Trigger Suggest** can insert that symbol's own name. For example, `var y;`
+becomes `var y (long_name='y');`. A typed prefix such as
+`y (long_name=...)` or an empty value such as `y (long_name='')` can be
+completed in place. If a name cannot be chosen safely for the active model,
+the suggestion is withheld. At the end of a final declaration, you can accept
+the completion before typing `;`; the edit adds only the metadata, so type the
+semicolon yourself.
+
 ## Fixes and refactors
 
 Place the cursor on a diagnostic and open **Quick Fix**. Apply only an action
@@ -35,9 +52,21 @@ can remain available when you hide a diagnostic.
 
 The offered diagnostic fixes depend on the source: declare a missing name,
 correct a suggested identifier, remove a redundant declaration or repair
-statement syntax. The equation-name action on I208 proposes names only for the
-equations counted by that note's model block. Its opener can be in the root
-while the equations are in an include. Review the proposed files and edits.
+statement syntax. **Add equation tags** on I208 proposes names only for the
+equations counted by that note's model block. **Add long names** on I209 edits
+only the symbols counted by that declaration note. A model opener can be in the
+root while its equations are in an include. Review the proposed files and edits.
+
+Both metadata actions fill empty literal values and keep nonempty values. They
+preserve other equation tags, declaration options, TeX, partition options,
+comments, and macro text. Each action changes only the equations or symbols
+counted by its I208 or I209 note, including those in an included file. When an
+include belongs to several model files, the action title identifies the model
+file. If some rows cannot be edited safely, the title ends with `(N skipped)`
+and gives the number. Repeated macro text is edited only when one literal
+change works for all affected copies; otherwise it stays as written. After the
+text or model inputs change, request the action again. Applying it again leaves
+existing metadata unchanged.
 
 **Insert stochastic shocks template** and **Insert deterministic shocks
 template** are independent refactors. They insert commented templates for the

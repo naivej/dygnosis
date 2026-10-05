@@ -310,7 +310,12 @@ fn explain_calls_them_writing_preferences() {
         let entry = explain(code).unwrap();
         assert_eq!(entry.kind, ExplainKind::Added);
         assert!(entry.body.contains("writing preference"));
-        assert!(entry.body.contains("not a Dynare refusal"));
+        let refusal_text = if code == "I210" {
+            "not a Dynare refusal"
+        } else {
+            "does not mean Dynare will refuse the model"
+        };
+        assert!(entry.body.contains(refusal_text));
     }
 }
 
