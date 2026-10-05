@@ -349,7 +349,7 @@ fn plain_heterogeneous_count(model: &Model) -> Option<Diagnostic> {
                 Severity::Error,
                 "E192",
                 format!("There are {n_eq} equations but {n_endo} endogenous variables in the model for heterogeneity dimension '{name}'!"),
-            ));
+            ).with_model_dimension(name));
         }
     }
     None

@@ -1478,6 +1478,7 @@ impl Parser<'_> {
             name,
             token_range: from..self.i,
             opener_range: from..opener_end,
+            keyword_span: self.tokens[from].span,
             span: self.covering_tokens(from..self.i),
             complete,
             category,

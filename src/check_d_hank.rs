@@ -167,7 +167,7 @@ pub fn check_square(model: &Model) -> Vec<Diagnostic> {
             format!(
                 "Equation count mismatch: {n_eq} equation(s) but {n_endo} endogenous variable(s) in heterogeneity dimension '{name}'."
             ),
-        ));
+        ).with_model_dimension(name));
     }
     out
 }

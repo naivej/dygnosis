@@ -66,6 +66,85 @@ fn count_code(items: &[Diagnostic], code: &str) -> usize {
 }
 
 #[tokio::test]
+async fn block_openers_match_mcp_ownership_with_utf16_and_split_includes() {
+    let dir = scratch("block-openers");
+    let root = dir.join("root.mod");
+    let opener = dir.join("opener.inc");
+    let body = dir.join("body.inc");
+    let root_text = "var x y z;\n@#include \"opener.inc\"\n";
+    let opener_text =
+        "/*😀中*/model;\n@#include \"body.inc\"\nend;\n/*😀中*/steady_state_model; x=0; end;\n";
+    let body_text = "#p = 1;\nx = y(-1);\ny = x;\n";
+    for (file, text) in [
+        (&root, root_text),
+        (&opener, opener_text),
+        (&body, body_text),
+    ] {
+        fs::write(file, text).unwrap();
+    }
+    let files = std::collections::HashMap::from([
+        (root.to_string_lossy().to_string(), root_text.to_string()),
+        (
+            opener.to_string_lossy().to_string(),
+            opener_text.to_string(),
+        ),
+        (body.to_string_lossy().to_string(), body_text.to_string()),
+    ]);
+    let mcp = dygnosis::dynare_diagnose(root_text, Some(&root.to_string_lossy()), Some(&files));
+    let (service, _socket) = new_service();
+    service.inner().did_open(open(uri(&root), root_text)).await;
+    let root_rows = items(service.inner().diagnostic(pull(uri(&root))).await.unwrap());
+    let opener_rows = items(
+        service
+            .inner()
+            .diagnostic(pull(uri(&opener)))
+            .await
+            .unwrap(),
+    );
+    for (code, keyword, line, count) in [
+        ("W013", "model", 0, 1),
+        ("W042", "steady_state_model", 3, 2),
+    ] {
+        assert!(!has_code(&root_rows, code));
+        let wire: Vec<_> = mcp
+            .iter()
+            .filter(|diagnostic| diagnostic.code == code)
+            .collect();
+        let lsp: Vec<_> = opener_rows
+            .iter()
+            .filter(|diagnostic| diagnostic.code == Some(NumberOrString::String(code.into())))
+            .collect();
+        assert_eq!(wire.len(), count);
+        assert_eq!(lsp.len(), count);
+        for diagnostic in wire {
+            assert_eq!(
+                diagnostic.file.as_deref(),
+                Some(opener.to_string_lossy().as_ref())
+            );
+            assert_eq!(
+                (
+                    diagnostic.line,
+                    diagnostic.column,
+                    diagnostic.end_line,
+                    diagnostic.end_column
+                ),
+                (line + 1, 7, line + 1, 7 + keyword.len() as u32)
+            );
+        }
+        for diagnostic in lsp {
+            assert_eq!(
+                diagnostic.range,
+                Range::new(
+                    Position::new(line, 7),
+                    Position::new(line, 7 + keyword.len() as u32)
+                )
+            );
+        }
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn included_error_is_published_on_child_uri() {
     let dir = scratch("diagnostic");
     let root = dir.join("root.mod");

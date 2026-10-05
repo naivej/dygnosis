@@ -24,7 +24,7 @@ const FIRES: &[Fire] = &[
         code: "E170",
         severity: Severity::Error,
         message: "Multiple 'occbin_constraints' blocks are not allowed",
-        needle: "name 'INEG'",
+        needle: "occbin_constraints",
     },
     Fire {
         rel: "occbin/e171_three.mod",
