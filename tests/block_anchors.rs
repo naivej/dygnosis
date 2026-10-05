@@ -627,3 +627,90 @@ fn shared_macro_count_owner_uses_the_correct_file_for_each_root() {
         }
     }
 }
+
+#[test]
+fn first_child_matrix_keeps_baseline_messages_severity_and_multiplicity() {
+    assert_fixture("clash/e026_varexo_det_simul.mod", "E026", "varexo_det", 0, &[(1, "A .mod file cannot contain both one of {perfect_foresight_solver, simul, perfect_foresight_with_expectation_errors_solver} and varexo_det declaration (all exogenous variables are deterministic in this case)")]);
+    assert_fixture("clash/e027_ramsey_varexo_det.mod", "E027", "varexo_det", 0, &[(1, "ramsey_model and ramsey_policy are incompatible with deterministic exogenous variables")]);
+    assert_fixture(
+        "occbin/e171_three.mod",
+        "E171",
+        "occbin_constraints",
+        0,
+        &[(
+            1,
+            "only up to two constraints are supported in 'occbin_constraints' block",
+        )],
+    );
+    assert_fixture("w120/w121_dynamic.mod", "E208", "model", 0, &[(1, "the number of equations marked [static] must be equal to the number of equations marked [dynamic]")]);
+}
+
+#[test]
+fn declaration_clashes_keep_first_statement_ownership_and_macro_fallback() {
+    let source = "var y;\n@#for i in 1:2\nvarexo_det tau@{i};\n@#endfor\nvarexo_det later;\nmodel; y=tau1+tau2+later; end; simul;";
+    let model = parse(source);
+    let diagnostic = analyze(&model)
+        .into_iter()
+        .find(|diagnostic| diagnostic.code == "E026")
+        .unwrap();
+    let first = model
+        .statements
+        .iter()
+        .find(|statement| statement.name == "varexo_det")
+        .unwrap();
+    assert_eq!(diagnostic.span, first.keyword_span);
+    assert_eq!(
+        diagnostic.span.start as usize,
+        source.find("varexo_det tau@").unwrap()
+    );
+    let source = "@#define kind=\"varexo_det\"\nvar y;\n@{kind} tau;\nmodel; y=tau; end; simul;";
+    assert_eq!(selected(source, "E026"), ["tau"]);
+}
+
+#[test]
+fn tag_counts_use_the_first_safe_aggregate_opener_and_keep_other_row_ranges() {
+    let source =
+        "var y; model; y=y(-1); end;\n@#for i in 1:2\nmodel; [dynamic] y=y(-1); end;\n@#endfor\n";
+    let model = parse(source);
+    let diagnostics = analyze(&model);
+    let count = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E208")
+        .unwrap();
+    assert_eq!(count.span.start as usize, source.find("model;").unwrap());
+    let duplicate = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "W054")
+        .unwrap();
+    assert!(
+        model.source[duplicate.span.start as usize..duplicate.span.end as usize]
+            .contains("[dynamic]")
+    );
+    let source = "@#define kind=\"model\"\nvar y;\n@{kind}; [dynamic] y=y(-1); end;";
+    assert_eq!(selected(source, "E208"), ["[dynamic] y=y(-1)"]);
+    let source =
+        "@#define kind=\"model\"\nvar y;\n@{kind}; y=y(-1); end;\nmodel; [dynamic] y=y(-1); end;";
+    let model = parse(source);
+    let count = analyze(&model)
+        .into_iter()
+        .find(|diagnostic| diagnostic.code == "E208")
+        .unwrap();
+    assert_eq!(
+        count.span.start as usize,
+        source.find("model; [dynamic]").unwrap()
+    );
+}
+
+#[test]
+fn earlier_tag_count_still_suppresses_later_shock_path_refusal() {
+    let source = "var y; varexo e; model; [dynamic] y=e; end; shock_paths; var e; periods 1; values self.e; end;";
+    let diagnostics = analyze(&parse(source));
+    assert_eq!(selected(source, "E208"), ["model"]);
+    assert!(!diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E420"));
+    assert_eq!(
+        selected(&source.replace("[dynamic]", ""), "E420"),
+        ["self.e"]
+    );
+}

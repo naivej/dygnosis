@@ -24,8 +24,30 @@ pub(crate) fn apply(
 }
 
 fn owns_summary(model: &Model, diagnostic: &Diagnostic, statement: &Statement) -> bool {
-    if matches!(diagnostic.code.as_str(), "E188" | "W013") {
+    if matches!(diagnostic.code.as_str(), "E188" | "W013" | "E208") {
         return statement.name == "model" && statement.dimension.is_none();
+    }
+    if matches!(diagnostic.code.as_str(), "E026" | "E027") {
+        // Use the same first written declaration as the clash producer. Its
+        // token execution position identifies the statement across includes
+        // and repeated macro spans; the child's source span does not.
+        return model
+            .deterministic_exogenous
+            .first()
+            .and_then(|declaration| {
+                model.written_declarations.iter().find(|written| {
+                    written.written_kind == "varexo_det"
+                        && written.declaration.parse_order == declaration.parse_order
+                })
+            })
+            .is_some_and(|written| {
+                statement.id == written.statement_id && statement.name == "varexo_det"
+            });
+    }
+    if diagnostic.code == "E171" {
+        return model.occbin_constraints_blocks.len() == 1
+            && statement.name == "occbin_constraints"
+            && model.occbin_constraints_blocks[0].start == statement.span.start;
     }
     if matches!(diagnostic.code.as_str(), "E192" | "W208") {
         // The producer retains the checked dimension independently of the
