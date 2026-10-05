@@ -1356,6 +1356,9 @@ pub struct Model {
     pub option_twice: Vec<(String, Span)>,
     /// `ident.ident` in a parsed expression (`"self.y"`).
     pub namespace_qualified: Vec<(String, Span)>,
+    /// Refused bare namespace expression nodes. Identity distinguishes macro
+    /// occurrences that have the same written span.
+    pub namespace_qualified_exprs: HashSet<ExprId>,
     /// Interned-0 fold errors while building (span, code, 7.1 message).
     pub const_fold_errors: Vec<(Span, &'static str, String)>,
     /// `external_function(name=…)` identifiers (command body otherwise skipped).

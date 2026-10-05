@@ -852,7 +852,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E275", ExplainEntry {
         title: "Namespace-qualified symbol",
-        body: "An expression uses a bare namespace-qualified value such as `pkg.foo` where that variable form is not allowed. Dynare refuses: `Namespace-qualified symbol {ns}.{name} not allowed in this context`. A qualified function call such as `pkg.foo(1)` is a different form and is allowed in a steady-state RHS.\n\n**Fix**\n\nUse a declared value without a namespace prefix, or supply the intended function arguments.",
+        body: "An expression uses a bare namespace-qualified value such as `pkg.foo` where that variable form is not allowed. Dynare refuses: `Namespace-qualified symbol {ns}.{name} not allowed in this context`. A qualified function call such as `pkg.foo(1)` is a different form and is allowed in a steady-state RHS. An assignment with this refusal does not also emit W011 for the same expression.\n\n**Fix**\n\nUse a declared value without a namespace prefix, or supply the intended function arguments.",
         kind: ExplainKind::Shared,
     }),
     ("E276", ExplainEntry {

@@ -722,6 +722,70 @@ fn e275_namespace() {
 }
 
 #[test]
+fn qualified_assignment_reports_the_refusal_without_its_w011() {
+    let pp = std::path::PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    if !pp.is_file() {
+        eprintln!("skipping honesty: Dynare 7.2 is absent");
+    }
+    for rhs in ["pp.rho", "1 + pp.rho", "-(pp.rho)"] {
+        let source = format!("var y; parameters rho q u; rho = {rhs}; q=u; model; y=rho+q; end;");
+        let diags = analyze(&parse(&source));
+        assert_eq!(
+            find(&diags, "E275").message,
+            "Namespace-qualified symbol pp.rho not allowed in this context"
+        );
+        let warnings: Vec<_> = diags.iter().filter(|d| d.code == "W011").collect();
+        assert_eq!(warnings.len(), 1, "{source}: {diags:?}");
+        assert!(warnings[0].message.contains("Parameter 'q' assignment"));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "W010" && d.message.contains("'u'")),
+            "{diags:?}"
+        );
+        if pp.is_file() {
+            let check = run_preprocessor(
+                &source,
+                &pp,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Check,
+            );
+            assert!(!check.success);
+            assert!(format!("{}{}", check.raw_stdout, check.raw_stderr)
+                .contains(&find(&diags, "E275").message));
+        }
+    }
+    let source =
+        "var y; parameters rho; model; y=rho; end; steady_state_model; rho=pp.rho; y=1; end;";
+    let ours = analyze(&parse(source));
+    assert!(ours.iter().any(|d| d.code == "E275"));
+    assert!(ours.iter().all(|d| d.code != "W011"), "{ours:?}");
+}
+
+#[test]
+fn shared_macro_assignment_spans_keep_the_unrelated_w011() {
+    let source = "parameters p1 p2 u;\n@#for j in 1:2\n@#if j == 1\n@#define R = \"pp.rho\"\n@#else\n@#define R = \"u\"\n@#endif\np@{j} = @{R};\n@#endfor\n";
+    let model = parse(source);
+    assert_eq!(model.param_assignments.len(), 2);
+    assert_eq!(
+        model.param_assignments[0].span,
+        model.param_assignments[1].span
+    );
+    let diags = analyze(&model);
+    assert_eq!(
+        find(&diags, "E275").message,
+        "Namespace-qualified symbol pp.rho not allowed in this context"
+    );
+    let warnings: Vec<_> = diags.iter().filter(|d| d.code == "W011").collect();
+    assert_eq!(warnings.len(), 1, "{diags:?}");
+    assert!(
+        warnings[0].message.contains("Parameter 'p2' assignment"),
+        "{diags:?}"
+    );
+}
+
+#[test]
 fn e276_log_zero() {
     let diags = analyze(&parse(
         "var y; varexo e; parameters rho; rho = 0.9; model; y = log(0)+e; end;",

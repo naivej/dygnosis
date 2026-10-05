@@ -9615,7 +9615,9 @@ impl Parser<'_> {
                     return self.alloc(ExprKind::Error, span);
                 }
                 self.model.namespace_qualified.push((qualified, span));
-                return self.alloc(ExprKind::Error, span);
+                let expr = self.alloc(ExprKind::Error, span);
+                self.model.namespace_qualified_exprs.insert(expr);
+                return expr;
             }
             self.bump();
             let rhs = self.bump();
@@ -9627,7 +9629,9 @@ impl Parser<'_> {
             self.model
                 .namespace_qualified
                 .push((format!("{lexeme}.{rhs_lex}"), span));
-            return self.alloc(ExprKind::Error, span);
+            let expr = self.alloc(ExprKind::Error, span);
+            self.model.namespace_qualified_exprs.insert(expr);
+            return expr;
         }
         let becoming_call = self.at(TokenKind::LParen)
             && (!self.looks_like_timing()
