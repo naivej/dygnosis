@@ -19,7 +19,7 @@ const vscode = {
     executeCommand: (name, ...args) => { host.executed.push([name, ...args]); return Promise.resolve(); },
   },
   window: {
-    createWebviewPanel: () => { const panel = makePanel(); host.panels.push(panel); return panel; },
+    createWebviewPanel: (viewType, title, column, options) => { const panel = makePanel(); panel.options = options; host.panels.push(panel); return panel; },
     registerWebviewPanelSerializer: (_name, serializer) => { host.serializer = serializer; return new Disposable(); },
     registerUriHandler: handler => { host.links = handler; return new Disposable(); },
     showInformationMessage: () => { ++host.invitations; return Promise.resolve(undefined); },
@@ -49,9 +49,12 @@ test('Help starts with no engine, persists invitation dismissal and restores a p
   const env = setup(); await new Promise(resolve => setImmediate(resolve));
   assert.equal(env.host.invitations, 1); assert.equal(env.state.get('helpInvitationShown'), true);
   env.open('diagnostics'); const panel = env.host.panels[0];
+  assert.equal(panel.options.enableFindWidget, true);
   assert.match(panel.webview.html, /default-src 'none'/); assert.match(panel.webview.html, /Copy topic link/);
   await panel.receive({ type: 'ready' });
   assert.equal(panel.messages[0].type, 'bundle'); assert.equal(panel.messages[1].destination, 'diagnostics');
+  env.open('get-started'); assert.equal(env.host.panels.length, 1);
+  assert.equal(panel.messages.at(-1).destination, 'get-started');
   assert.deepEqual(env.host.executed, []);
   panel.dispose(); const restored = makePanel(); await env.host.serializer.deserializeWebviewPanel(restored);
   await restored.receive({ type: 'ready' }); assert.equal(restored.messages[0].type, 'bundle');

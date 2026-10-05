@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Help supports native **Find** in the open page. The header search still finds topics.
 - The equation CodeLens says **Jump to equation** or **Jump to N equations**. Its picker opens the written equation before transformation.
 
 ## v0.11.7

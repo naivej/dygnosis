@@ -21,6 +21,10 @@ action on either Dygnosis Explorer view opens it. The first-install invitation
 and native **Get started with Dygnosis** walkthrough lead here too. Dismissing
 the invitation does not remove these entrances.
 
+The header search box searches Help topics. With Help focused, **Find** searches
+the rendered open page: Ctrl+F on Windows/Linux or Cmd+F on macOS. A Help panel
+opened before this update can need closing and reopening to enable Find.
+
 ![Dygnosis Explorer views before a model is open](assets/get-started.png)
 
 1. **Dynare model** shows a welcome row with **Open Dygnosis Help** before any model opens.

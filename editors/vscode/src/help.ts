@@ -81,7 +81,7 @@ export function registerHelp(context: vscode.ExtensionContext): vscode.Disposabl
       markdown: typeof argument.markdown === "string" ? argument.markdown : undefined,
       engineVersion: typeof argument.engineVersion === "string" ? argument.engineVersion : undefined,
     } : { topic: vscode.window.activeTextEditor?.document.uri.scheme === "dygnosis-effective" ? "effective-model" : "get-started" };
-    if (!panel) attach(vscode.window.createWebviewPanel("dygnosis.help", "Dygnosis Help", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [root, media] }));
+    if (!panel) attach(vscode.window.createWebviewPanel("dygnosis.help", "Dygnosis Help", vscode.ViewColumn.Active, { enableFindWidget: true, enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [root, media] }));
     panel?.reveal(); send(request);
   });
   const serializer = vscode.window.registerWebviewPanelSerializer("dygnosis.help", { deserializeWebviewPanel: next => { attach(next); return Promise.resolve(); } });
