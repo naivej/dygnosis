@@ -54,6 +54,7 @@ fn check_e050(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
                 related: vec![RelatedDiagnostic::equation(model, first_equation, first_span)],
                 tags: Vec::new(),
                 model_dimension: None,
+                display_keyword: None,
             });
         } else {
             let line = index.position(&model.source, eq.span.start).line + 1;
@@ -127,6 +128,7 @@ fn check_e051(model: &Model) -> Vec<Diagnostic> {
                     related: Vec::new(),
                     tags: Vec::new(),
                     model_dimension: None,
+                    display_keyword: None,
                 });
                 continue;
             }
@@ -146,6 +148,7 @@ fn check_e051(model: &Model) -> Vec<Diagnostic> {
                     related: Vec::new(),
                     tags: Vec::new(),
                     model_dimension: None,
+                    display_keyword: None,
                 });
             }
         }
@@ -219,6 +222,7 @@ fn check_e052(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
                         related: Vec::new(),
                         tags: Vec::new(),
                         model_dimension: None,
+                        display_keyword: None,
                     });
                 }
             }
@@ -429,6 +433,7 @@ fn flush_e053_line(
         related: Vec::new(),
         tags: Vec::new(),
         model_dimension: None,
+        display_keyword: None,
     });
 }
 
@@ -505,6 +510,7 @@ fn check_w042(model: &Model) -> Vec<Diagnostic> {
             related: Vec::new(),
             tags: Vec::new(),
             model_dimension: None,
+            display_keyword: None,
         })
         .collect()
 }
@@ -549,6 +555,7 @@ fn check_i050(model: &Model) -> Vec<Diagnostic> {
         related: Vec::new(),
         tags: Vec::new(),
         model_dimension: None,
+        display_keyword: None,
     }]
 }
 
@@ -651,6 +658,7 @@ fn check_prior_head_not_endo_or_exo(model: &Model) -> Vec<Diagnostic> {
                 related: Vec::new(),
                 tags: Vec::new(),
                 model_dimension: None,
+                display_keyword: None,
             });
             break;
         }
@@ -693,6 +701,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
                     related: Vec::new(),
                     tags: Vec::new(),
                     model_dimension: None,
+                    display_keyword: None,
                 });
                 continue;
             }
@@ -706,6 +715,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
                     related: Vec::new(),
                     tags: Vec::new(),
                     model_dimension: None,
+                    display_keyword: None,
                 });
             }
         }
@@ -723,6 +733,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
                 related: Vec::new(),
                 tags: Vec::new(),
                 model_dimension: None,
+                display_keyword: None,
             });
             continue;
         }
@@ -736,6 +747,7 @@ fn check_w050_w053(model: &Model) -> Vec<Diagnostic> {
                 related: Vec::new(),
                 tags: Vec::new(),
                 model_dimension: None,
+                display_keyword: None,
             });
         }
     }
@@ -769,6 +781,7 @@ fn check_w051(model: &Model) -> Vec<Diagnostic> {
                 related: Vec::new(),
                 tags: Vec::new(),
                 model_dimension: None,
+                display_keyword: None,
             });
         }
     }
@@ -813,6 +826,7 @@ fn check_w052(model: &Model) -> Vec<Diagnostic> {
         related: Vec::new(),
         tags: Vec::new(),
         model_dimension: None,
+        display_keyword: None,
     }]
 }
 

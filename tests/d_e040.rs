@@ -163,19 +163,12 @@ fn assert_i050_forbidden(message: &str) {
     }
 }
 
-fn assert_i050_model_block(text: &str, d: &Diag) {
+fn assert_i050_model_keyword(text: &str, d: &Diag) {
     assert_eq!(d.code, "I050");
     assert_eq!(d.severity, 3);
     assert_eq!(d.message, I050_MESSAGE);
     let slice = underlined(text, d);
-    assert!(
-        slice.starts_with("model"),
-        "I050 underline should start with model, got {slice:?}"
-    );
-    assert!(
-        slice.ends_with("end;"),
-        "I050 underline should end with end;, got {slice:?}"
-    );
+    assert_eq!(slice, "model", "I050 underline should select the keyword");
 }
 
 #[test]
@@ -189,7 +182,7 @@ fn shape_clean_sims_wu_2019() {
     let text = read_mod("sims_wu_2019");
     let got = rust_family(&text);
     assert_eq!(got.len(), 1, "sims_wu_2019: {got:?}");
-    assert_i050_model_block(&text, &got[0]);
+    assert_i050_model_keyword(&text, &got[0]);
 }
 
 #[test]
@@ -206,7 +199,7 @@ fn shape_clean_lk2024() {
     let text = read_mod("lk2024");
     let got = rust_family(&text);
     assert_eq!(got.len(), 1, "lk2024: {got:?}");
-    assert_i050_model_block(&text, &got[0]);
+    assert_i050_model_keyword(&text, &got[0]);
 }
 
 #[test]
@@ -295,7 +288,12 @@ fn shape_w042_missing_ss_coverage() {
     assert!(got[0]
         .message
         .contains("variable 'c' is not assigned a value"));
-    assert_span(&text, &got[0], "steady_state_model;\ny = 0;\nend;");
+    assert_span_in(
+        &text,
+        &got[0],
+        "steady_state_model;\ny = 0;\nend;",
+        "steady_state_model",
+    );
 }
 
 #[test]
@@ -315,7 +313,7 @@ fn shape_w050_undeclared_initval() {
         .message
         .contains("2 endogenous variable(s) missing from initval"));
     assert!(w052.message.contains("c, y"));
-    assert_span(&text, w052, "initval; undeclared_zzz = 1; end;");
+    assert_span_in(&text, w052, "initval; undeclared_zzz = 1; end;", "initval");
 }
 
 #[test]
@@ -335,7 +333,7 @@ fn shape_w051_varexo_in_initval() {
         .message
         .contains("2 endogenous variable(s) missing from initval"));
     assert!(w052.message.contains("c, y"));
-    assert_span(&text, w052, "initval; e = 0.1; end;");
+    assert_span_in(&text, w052, "initval; e = 0.1; end;", "initval");
 }
 
 #[test]
@@ -349,7 +347,7 @@ fn shape_w052_missing_initval() {
         .message
         .contains("1 endogenous variable(s) missing from initval"));
     assert!(got[0].message.contains(": c"));
-    assert_span(&text, &got[0], "initval; y = 1; end;");
+    assert_span_in(&text, &got[0], "initval; y = 1; end;", "initval");
 }
 
 #[test]
@@ -369,7 +367,7 @@ fn shape_w053_param_in_initval() {
         .message
         .contains("2 endogenous variable(s) missing from initval"));
     assert!(w052.message.contains("c, y"));
-    assert_span(&text, w052, "initval; betta = 0.5; end;");
+    assert_span_in(&text, w052, "initval; betta = 0.5; end;", "initval");
 }
 
 #[test]
@@ -381,7 +379,12 @@ fn shape_i050_missing_ss_recorded_message() {
     assert_eq!(got[0].severity, 3);
     assert_eq!(got[0].message, I050_MESSAGE);
     assert_i050_forbidden(&got[0].message);
-    assert_span(&text, &got[0], "model;\ny = rho * y(-1) + e;\nend;");
+    assert_span_in(
+        &text,
+        &got[0],
+        "model;\ny = rho * y(-1) + e;\nend;",
+        "model",
+    );
 }
 
 #[test]

@@ -296,6 +296,8 @@ pub enum PacTargetInfoRow {
 
 #[derive(Clone, Debug)]
 pub struct PacTargetComponent {
+    /// Retained `component` token; the full span remains the analysis range.
+    pub keyword_span: Span,
     pub component: WrittenExpression,
     pub rows: Vec<PacTargetComponentRow>,
     pub span: Span,
@@ -1617,6 +1619,8 @@ pub fn mod_file_local_in_model_message(name: &str) -> String {
 pub struct DottedStatement {
     pub symbol_type_context: SymbolContext,
     pub kind: DottedKind,
+    /// Retained `prior`, `options`, or `subsamples` token after the head.
+    pub keyword_span: Span,
     /// The head the statement is keyed on.
     pub head: DottedHead,
     /// Head through the terminating `;`.

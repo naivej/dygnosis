@@ -234,6 +234,140 @@ async fn first_child_openers_match_mcp_owners_when_the_child_is_in_an_include() 
 }
 
 #[tokio::test]
+async fn nested_and_dotted_keywords_match_mcp_owners_across_two_roots() {
+    let dir = scratch("nested-dotted");
+    let first = dir.join("a.mod");
+    let second = dir.join("b.mod");
+    let keyword_file = dir.join("keyword.inc");
+    let rows_file = dir.join("rows.inc");
+    let pac = "var y z; varexo e e2; parameters b; b=.8; model; [name='Y'] y=b*y(-1)+e; [name='Z'] z=z(-1)+e2; end; pac_model(model_name=q,discount=b); pac_target_info(q); target y; auxname_target_nonstationary yns;\n@#include \"keyword.inc\"\nend;";
+    let cases = [
+        (
+            "E438",
+            "component",
+            pac,
+            "/*😀中*/component z;\n@#include \"rows.inc\"\n",
+            "kind dd;",
+        ),
+        (
+            "E438",
+            "component",
+            pac,
+            "/*😀中*/component z;\n@#include \"rows.inc\"\n",
+            "auxname zaux;",
+        ),
+        (
+            "E372",
+            "prior",
+            "parameters alpha; alpha.\n@#include \"keyword.inc\"\n",
+            "/*😀中*/prior(\n@#include \"rows.inc\"\n);",
+            "mean=.5,stdev=.1",
+        ),
+        (
+            "E373",
+            "prior",
+            "parameters alpha; alpha.\n@#include \"keyword.inc\"\n",
+            "/*😀中*/prior(\n@#include \"rows.inc\"\n);",
+            "shape=normal,stdev=.1",
+        ),
+        (
+            "E374",
+            "prior",
+            "parameters alpha; alpha.\n@#include \"keyword.inc\"\n",
+            "/*😀中*/prior(\n@#include \"rows.inc\"\n);",
+            "shape=normal,mean=.5",
+        ),
+        (
+            "E377",
+            "prior",
+            "parameters alpha; [alpha].\n@#include \"keyword.inc\"\n",
+            "/*😀中*/prior(\n@#include \"rows.inc\"\n);",
+            "shape=beta,mean=[.5],stdev=.1",
+        ),
+    ];
+    for (code, keyword, root_text, keyword_text, rows_text) in cases {
+        let files = std::collections::HashMap::from([
+            (first.to_string_lossy().to_string(), root_text.to_string()),
+            (second.to_string_lossy().to_string(), root_text.to_string()),
+            (
+                keyword_file.to_string_lossy().to_string(),
+                keyword_text.to_string(),
+            ),
+            (
+                rows_file.to_string_lossy().to_string(),
+                rows_text.to_string(),
+            ),
+        ]);
+        for (path, text) in &files {
+            fs::write(path, text).unwrap();
+        }
+        let (service, _socket) = new_service();
+        for root in [&first, &second] {
+            let mcp =
+                dygnosis::dynare_diagnose(root_text, Some(&root.to_string_lossy()), Some(&files));
+            let wire: Vec<_> = mcp
+                .iter()
+                .filter(|diagnostic| diagnostic.code == code)
+                .collect();
+            assert_eq!(wire.len(), 1, "{code}: {mcp:?}");
+            assert_eq!(
+                wire[0].file.as_deref(),
+                Some(keyword_file.to_string_lossy().as_ref())
+            );
+            assert_eq!(
+                (
+                    wire[0].line,
+                    wire[0].column,
+                    wire[0].end_line,
+                    wire[0].end_column
+                ),
+                (1, 7, 1, 7 + keyword.len() as u32)
+            );
+            service.inner().did_open(open(uri(root), root_text)).await;
+            let root_rows = items(service.inner().diagnostic(pull(uri(root))).await.unwrap());
+            assert!(!has_code(&root_rows, code));
+        }
+        let published = items(
+            service
+                .inner()
+                .diagnostic(pull(uri(&keyword_file)))
+                .await
+                .unwrap(),
+        );
+        let hits: Vec<_> = published
+            .iter()
+            .filter(|diagnostic| diagnostic.code == Some(NumberOrString::String(code.into())))
+            .collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "equal presentations keep the per-root maximum"
+        );
+        let index = dygnosis::span::LineIndex::new(keyword_text);
+        let start = "/*😀中*/".len() as u32;
+        let end = start + keyword.len() as u32;
+        let utf16_start = index.position_utf16(keyword_text, start);
+        let utf16_end = index.position_utf16(keyword_text, end);
+        assert_eq!(
+            hits[0].range,
+            Range::new(
+                Position::new(utf16_start.line, utf16_start.character),
+                Position::new(utf16_end.line, utf16_end.character)
+            )
+        );
+        let body = items(
+            service
+                .inner()
+                .diagnostic(pull(uri(&rows_file)))
+                .await
+                .unwrap(),
+        );
+        assert!(!has_code(&body, code));
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn included_error_is_published_on_child_uri() {
     let dir = scratch("diagnostic");
     let root = dir.join("root.mod");

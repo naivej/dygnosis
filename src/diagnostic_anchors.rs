@@ -11,12 +11,19 @@ pub(crate) fn apply(
     mut safely_mapped: impl FnMut(Span, &str) -> bool,
 ) {
     for diagnostic in diagnostics {
+        if let Some((span, keyword)) = diagnostic.display_keyword {
+            if written_keyword(model, span, keyword) && safely_mapped(span, keyword) {
+                diagnostic.span = span;
+            }
+            continue;
+        }
         let mut owners = model
             .statements
             .iter()
             .filter(|statement| owns_summary(model, diagnostic, statement));
         if let Some(owner) = owners.find(|owner| {
-            written_keyword(model, owner) && safely_mapped(owner.keyword_span, &owner.name)
+            written_keyword(model, owner.keyword_span, &owner.name)
+                && safely_mapped(owner.keyword_span, &owner.name)
         }) {
             diagnostic.span = owner.keyword_span;
         }
@@ -136,9 +143,9 @@ fn empty_moment_block(model: &Model, statement: &Statement) -> bool {
     }
 }
 
-fn written_keyword(model: &Model, statement: &Statement) -> bool {
+fn written_keyword(model: &Model, span: Span, keyword: &str) -> bool {
     model
         .source
-        .get(statement.keyword_span.start as usize..statement.keyword_span.end as usize)
-        .is_some_and(|text| text.eq_ignore_ascii_case(&statement.name))
+        .get(span.start as usize..span.end as usize)
+        .is_some_and(|text| text.eq_ignore_ascii_case(keyword))
 }

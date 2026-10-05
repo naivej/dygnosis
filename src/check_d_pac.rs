@@ -367,14 +367,14 @@ pub fn check_check(model: &Model) -> Vec<Diagnostic> {
                     component.span,
                     "E438",
                     format!("the block 'pac_target_info({name})' is missing the 'auxname' statement in some 'component'"),
-                )];
+                ).with_display_keyword(component.keyword_span, "component")];
             }
             let Some(kind) = kind else {
                 return vec![error(
                     component.span,
                     "E438",
                     format!("the block 'pac_target_info({name})' is missing the 'kind' statement in some 'component'"),
-                )];
+                ).with_display_keyword(component.keyword_span, "component")];
             };
             if kind.eq_ignore_ascii_case("ll") && growth {
                 return vec![error(
