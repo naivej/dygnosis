@@ -85,13 +85,20 @@ fn written_text(text: &str, range: Range) -> &str {
     &text[start as usize..end as usize]
 }
 async fn completion(server: &Backend, document: &Url) -> Vec<CompletionItem> {
+    completion_at(server, document, Position::new(0, 0)).await
+}
+async fn completion_at(
+    server: &Backend,
+    document: &Url,
+    position: Position,
+) -> Vec<CompletionItem> {
     let result = server
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
                     uri: document.clone(),
                 },
-                position: Position::new(0, 0),
+                position,
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
@@ -793,7 +800,10 @@ async fn displayed_include_preferences_are_independent_of_its_owner() {
         !included.contains("Discount") && included.contains("`p_t`"),
         "{included}"
     );
-    let child_items = completion(server, &child).await;
+    let metadata_items = completion(server, &child).await;
+    assert_eq!(metadata_items.len(), 1);
+    assert_eq!(metadata_items[0].label, "name");
+    let child_items = completion_at(server, &child, position(&child, body, "p", 0).position).await;
     let p = child_items.iter().find(|item| item.label == "p").unwrap();
     assert_eq!(p.insert_text.as_deref(), Some("p"));
     assert!(p.label_details.is_none() && p.documentation.is_some());
