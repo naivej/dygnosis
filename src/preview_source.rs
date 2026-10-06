@@ -2,7 +2,7 @@
 
 use crate::expand::ExpandReport;
 use crate::lexer::{tokenize, Token, TokenKind};
-use crate::macro_expand::{expand_macros_with_source_layout, SourceFragment};
+use crate::macro_expand::{expand_macros_with_source_layout, SourceFragment, SourceLayoutGap};
 use crate::model::Model;
 use crate::parser::join_lexemes_recorded;
 use crate::span::Span;
@@ -25,10 +25,17 @@ pub(crate) struct SourcePreview {
 
 /// Build the source-layout preview. `None` only when the stored expansion
 /// cannot be reproduced from `model.source`.
-pub(crate) fn source(report: &ExpandReport, model: &Model) -> Option<SourcePreview> {
+///
+/// `gaps` comes from the include splice: leftover directive indent and line
+/// endings that must not appear as written display text.
+pub(crate) fn source(
+    report: &ExpandReport,
+    model: &Model,
+    gaps: &[SourceLayoutGap],
+) -> Option<SourcePreview> {
     let original = &report.effective_text;
     let (tokens, _, _, layout) =
-        expand_macros_with_source_layout(&model.source, tokenize(&model.source));
+        expand_macros_with_source_layout(&model.source, tokenize(&model.source), gaps);
     let copy = join_lexemes_recorded(&model.source, &tokens, |_, _| {});
     if copy != *original {
         return None;
@@ -113,11 +120,24 @@ mod tests {
     use super::*;
     use crate::expand::expand_report;
     use crate::parser::parse;
+    use crate::workspace::Workspace;
 
     fn preview(text: &str) -> SourcePreview {
         let report = expand_report(text);
         let model = parse(text);
-        source(&report, &model).expect("source layout")
+        source(&report, &model, &[]).expect("source layout")
+    }
+
+    fn preview_with_includes(root: &str, root_text: &str, files: &[(&str, &str)]) -> SourcePreview {
+        let mut ws = Workspace::default();
+        for (path, text) in files {
+            ws.update_document(path, *text);
+        }
+        ws.update_document(root, root_text);
+        let model = ws.get_effective_model(root).unwrap().clone();
+        let report = ws.expand_report(root).unwrap().clone();
+        let gaps = ws.source_layout_gaps(root);
+        source(&report, &model, &gaps).expect("source layout")
     }
 
     #[test]
@@ -149,6 +169,18 @@ mod tests {
     }
 
     #[test]
+    fn quoted_interpolation_keeps_surrounding_quotes() {
+        let layout = preview("@#define j=2\nvar y;\nmodel;\n[name='eq@{j}'] y=1;\nend;\n");
+        assert!(layout.proven, "{}", layout.text);
+        assert!(
+            layout.text.contains("name='eq2'"),
+            "expected quoted name, got {}",
+            layout.text
+        );
+        assert!(!layout.text.contains("@{"), "{}", layout.text);
+    }
+
+    #[test]
     fn discards_inactive_branch_text() {
         let src = "var y;\n@#if 0\nbad=1;\n@#else\ny=c;\n@#endif\nmodel;\ny=1;\nend;\n";
         let layout = preview(src);
@@ -177,11 +209,87 @@ mod tests {
     }
 
     #[test]
+    fn empty_for_leaves_no_directive_line() {
+        let layout = preview("var y;\nmodel;\n@#for i in []\ny=1;\n@#endfor\nend;\n");
+        assert_eq!(layout.text, "var y;\nmodel;\nend;\n");
+        assert!(layout.proven, "{layout:?}");
+    }
+
+    #[test]
+    fn nested_for_repeats_written_body_spacing() {
+        let layout = preview("var y;\nmodel;\n@#for i in 1:2\n  y=@{i};\n@#endfor\nend;\n");
+        assert_eq!(layout.text, "var y;\nmodel;\n  y=1;\n  y=2;\nend;\n");
+        assert!(layout.proven, "{layout:?}");
+    }
+
+    #[test]
+    fn indented_active_include_drops_directive_indent() {
+        let layout = preview_with_includes(
+            "C:/probe/root.mod",
+            "model;\n  @#include \"inner.mod\"\nend;\n",
+            &[("C:/probe/inner.mod", "y=1;\n")],
+        );
+        assert_eq!(layout.text, "model;\ny=1;\nend;\n");
+        assert!(layout.proven, "{layout:?}");
+    }
+
+    #[test]
+    fn include_without_final_newline_keeps_unwritten_separator() {
+        let layout = preview_with_includes(
+            "C:/probe/root.mod",
+            "model;\n@#include \"inner.mod\"\nend;\n",
+            &[("C:/probe/inner.mod", "y=1;")],
+        );
+        assert_eq!(layout.text, "model;\ny=1;\nend;\n");
+        assert!(layout.proven, "{layout:?}");
+        let separator = layout
+            .fragments
+            .iter()
+            .find(|fragment| {
+                fragment.written.is_none()
+                    && &layout.text
+                        [fragment.display.start as usize..fragment.display.end as usize]
+                        == "\n"
+            })
+            .expect("boundary newline fragment");
+        assert_eq!(
+            &layout.text[separator.display.start as usize..separator.display.end as usize],
+            "\n"
+        );
+        // The unwritten separator sits between the include body and `end`.
+        assert!(layout.text[..separator.display.start as usize].ends_with("y=1;"));
+        assert!(layout.text[separator.display.end as usize..].starts_with("end;"));
+    }
+
+    #[test]
+    fn dormant_include_contributes_no_text() {
+        let layout = preview_with_includes(
+            "C:/probe/root.mod",
+            "var y;\n@#if 0\n  @#include \"inner.mod\"\n@#endif\nmodel;\ny=1;\nend;\n",
+            &[("C:/probe/inner.mod", "  leaked=1;\n")],
+        );
+        assert_eq!(layout.text, "var y;\nmodel;\ny=1;\nend;\n");
+        assert!(!layout.text.contains("leaked"), "{}", layout.text);
+        assert!(layout.proven, "{layout:?}");
+    }
+
+    #[test]
+    fn included_file_leading_spaces_stay() {
+        let layout = preview_with_includes(
+            "C:/probe/root.mod",
+            "model;\n  @#include \"inner.mod\"\nend;\n",
+            &[("C:/probe/inner.mod", "  y=1;\n")],
+        );
+        assert_eq!(layout.text, "model;\n  y=1;\nend;\n");
+        assert!(layout.proven, "{layout:?}");
+    }
+
+    #[test]
     fn fewer_ranges_than_rows_keep_preview_unproven() {
         let text = "var y;\nmodel;\ny=1;\nend;\n";
         let mut report = expand_report(text);
         let model = parse(text);
-        let ok = source(&report, &model).expect("source layout");
+        let ok = source(&report, &model, &[]).expect("source layout");
         assert!(!report.navigation.is_empty());
         assert!(ok.proven, "{ok:?}");
         assert_eq!(ok.ranges.len(), report.navigation.len());
@@ -189,7 +297,7 @@ mod tests {
         // keeps an empty range list and clears proven so showEffectiveModel
         // returns incomplete with empty navigation instead of indexing past it.
         report.navigation[0].effective_span = Span::new(usize::MAX / 2, usize::MAX / 2 + 1);
-        let short = source(&report, &model).expect("source layout");
+        let short = source(&report, &model, &[]).expect("source layout");
         assert!(
             short.ranges.len() < report.navigation.len(),
             "{:?} vs {}",

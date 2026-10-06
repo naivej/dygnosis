@@ -994,6 +994,57 @@ async fn source_incomplete_previews_withhold_navigation() {
 }
 
 #[tokio::test]
+async fn source_layout_drops_include_directive_indent_and_keeps_file_spacing() {
+    let root = Url::parse("file:///C:/dygnosis-preview/include-indent.mod").unwrap();
+    let include = Url::parse("file:///C:/dygnosis-preview/include-indent-body.inc").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(backend, &root, "model;\n  @#include \"include-indent-body.inc\"\nend;\n", 1).await;
+    open(backend, &include, "y=1;\n", 1).await;
+    let source_view = source_preview(backend, &root).await;
+    assert_eq!(source_view["complete"], true, "{source_view}");
+    assert_eq!(source_view["effective_text"], "model;\ny=1;\nend;\n");
+    same_preview_facts(&preview(backend, &root).await, &source_view);
+}
+
+#[tokio::test]
+async fn source_layout_include_without_final_newline_keeps_line_separator() {
+    let root = Url::parse("file:///C:/dygnosis-preview/include-nonew.mod").unwrap();
+    let include = Url::parse("file:///C:/dygnosis-preview/include-nonew-body.inc").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(backend, &root, "model;\n@#include \"include-nonew-body.inc\"\nend;\n", 1).await;
+    open(backend, &include, "y=1;", 1).await;
+    let source_view = source_preview(backend, &root).await;
+    assert_eq!(source_view["complete"], true, "{source_view}");
+    assert_eq!(source_view["effective_text"], "model;\ny=1;\nend;\n");
+    same_preview_facts(&preview(backend, &root).await, &source_view);
+}
+
+#[tokio::test]
+async fn source_layout_dormant_include_emits_no_text() {
+    let root = Url::parse("file:///C:/dygnosis-preview/include-dormant.mod").unwrap();
+    let include = Url::parse("file:///C:/dygnosis-preview/include-dormant-body.inc").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(
+        backend,
+        &root,
+        "var y;\n@#if 0\n  @#include \"include-dormant-body.inc\"\n@#endif\nmodel;\ny=1;\nend;\n",
+        1,
+    )
+    .await;
+    open(backend, &include, "  leaked=1;\n", 1).await;
+    let source_view = source_preview(backend, &root).await;
+    assert_eq!(source_view["complete"], true, "{source_view}");
+    assert_eq!(source_view["effective_text"], "var y;\nmodel;\ny=1;\nend;\n");
+    assert!(!source_view["effective_text"]
+        .as_str()
+        .unwrap()
+        .contains("leaked"));
+}
+
+#[tokio::test]
 async fn lsp_and_mcp_agree_on_utf16_scalar_ranges_and_written_source_versions() {
     let source = "var y; model;\r\n[name='😀'] y=1;\rend;";
     let root = Url::parse("file:///C:/dygnosis-preview/root.mod").unwrap();

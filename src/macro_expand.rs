@@ -274,6 +274,38 @@ pub(crate) enum SourceFragmentKind {
     Substitution,
 }
 
+/// Leftover bytes from an include directive line in the spliced expander source.
+///
+/// The splice keeps the written indent and the directive's trailing newline so
+/// the token stream stays unchanged. Source layout omits the indent, and either
+/// omits the newline (body already ended a line) or emits it with no written
+/// target (body has no final newline).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SourceLayoutGap {
+    Omit(Span),
+    SyntheticNewline(Span),
+}
+
+impl SourceLayoutGap {
+    pub(crate) fn span(self) -> Span {
+        match self {
+            Self::Omit(span) | Self::SyntheticNewline(span) => span,
+        }
+    }
+
+    pub(crate) fn shift(self, offset: u32) -> Self {
+        let span = self.span();
+        let shifted = Span {
+            start: span.start + offset,
+            end: span.end + offset,
+        };
+        match self {
+            Self::Omit(_) => Self::Omit(shifted),
+            Self::SyntheticNewline(_) => Self::SyntheticNewline(shifted),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct SourceLayoutBuild {
     pub text: String,
@@ -286,16 +318,18 @@ struct SourceRecorder<'a> {
     fragments: Vec<SourceFragment>,
     cursor: u32,
     suppress: bool,
+    gaps: &'a [SourceLayoutGap],
 }
 
 impl<'a> SourceRecorder<'a> {
-    fn new(src: &'a str) -> Self {
+    fn new(src: &'a str, gaps: &'a [SourceLayoutGap]) -> Self {
         Self {
             src,
             text: String::with_capacity(src.len()),
             fragments: Vec::new(),
             cursor: 0,
             suppress: false,
+            gaps,
         }
     }
 
@@ -346,6 +380,47 @@ impl<'a> SourceRecorder<'a> {
         if end <= start || (end as usize) > self.src.len() {
             return;
         }
+        let mut pos = start;
+        while pos < end {
+            if let Some(gap) = self.gaps.iter().find(|gap| gap.span().start == pos) {
+                match gap {
+                    SourceLayoutGap::Omit(span) => {
+                        pos = span.end.min(end);
+                    }
+                    SourceLayoutGap::SyntheticNewline(span) => {
+                        let display_start = self.text.len() as u32;
+                        self.text.push('\n');
+                        self.fragments.push(SourceFragment {
+                            display: Span {
+                                start: display_start,
+                                end: self.text.len() as u32,
+                            },
+                            written: None,
+                            kind: SourceFragmentKind::Copy,
+                            macro_active,
+                        });
+                        pos = span.end.min(end);
+                    }
+                }
+                continue;
+            }
+            let next_gap = self
+                .gaps
+                .iter()
+                .map(|gap| gap.span().start)
+                .filter(|&gap_start| gap_start > pos && gap_start < end)
+                .min()
+                .unwrap_or(end);
+            self.copy_range_plain(pos, next_gap, macro_active);
+            pos = next_gap;
+        }
+        self.cursor = end;
+    }
+
+    fn copy_range_plain(&mut self, start: u32, end: u32, macro_active: bool) {
+        if end <= start || (end as usize) > self.src.len() {
+            return;
+        }
         let piece = &self.src[start as usize..end as usize];
         if piece.is_empty() {
             return;
@@ -353,7 +428,6 @@ impl<'a> SourceRecorder<'a> {
         // Preview buffers use `\n` only; keep the written span on the raw bytes.
         let normalized = piece.replace("\r\n", "\n").replace('\r', "\n");
         if normalized.is_empty() {
-            self.cursor = end;
             return;
         }
         let display_start = self.text.len() as u32;
@@ -367,7 +441,6 @@ impl<'a> SourceRecorder<'a> {
             kind: SourceFragmentKind::Copy,
             macro_active,
         });
-        self.cursor = end;
     }
 
     fn begin_loop_body(&mut self, body_start: u32) {
@@ -382,7 +455,7 @@ impl<'a> SourceRecorder<'a> {
 }
 
 /// Line occupied by a macro directive: indent, directive text, and trailing `\n`.
-fn directive_line_extent(src: &str, dir: Span) -> Span {
+pub(crate) fn directive_line_extent(src: &str, dir: Span) -> Span {
     let mut start = dir.start as usize;
     while start > 0 && matches!(src.as_bytes()[start - 1], b' ' | b'\t') {
         start -= 1;
@@ -593,16 +666,20 @@ pub(crate) fn expand_macros_traced_with_status(
 
 /// Expand while recording a source-layout display copy. The token stream matches
 /// ordinary expansion; fragments are a side structure for the editor preview.
+///
+/// `gaps` marks leftover include-directive indent and line endings in an
+/// already spliced `src`. Pass an empty slice when there are no active includes.
 pub(crate) fn expand_macros_with_source_layout(
     src: &str,
     tokens: Vec<Token>,
+    gaps: &[SourceLayoutGap],
 ) -> (
     Vec<Token>,
     Vec<MacroTypeError>,
     Option<Span>,
     SourceLayoutBuild,
 ) {
-    let mut recorder = SourceRecorder::new(src);
+    let mut recorder = SourceRecorder::new(src, gaps);
     let (out, type_errors, incomplete) = {
         let mut defines = HashMap::new();
         let mut arena = Vec::new();

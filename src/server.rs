@@ -1834,6 +1834,9 @@ impl Backend {
             .first()
             .and_then(|arg| arg.get("layout"))
             .and_then(Value::as_str);
+        let source_gaps = matches!(requested, Some("source"))
+            .then(|| inner.workspace.source_layout_gaps(uri.as_str()))
+            .unwrap_or_default();
         let model = matches!(requested, Some("readable") | Some("source"))
             .then(|| inner.workspace.get_effective_model(uri.as_str()))
             .flatten();
@@ -1845,9 +1848,8 @@ impl Backend {
             Some("readable") => {
                 crate::preview_layout::readable(&report, model).map(DisplayLayout::Readable)
             }
-            Some("source") => {
-                crate::preview_source::source(&report, model).map(DisplayLayout::Source)
-            }
+            Some("source") => crate::preview_source::source(&report, model, &source_gaps)
+                .map(DisplayLayout::Source),
             _ => None,
         });
         let source_unproven = matches!(

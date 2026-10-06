@@ -76,6 +76,8 @@ struct Doc {
 struct SplicedSource {
     text: String,
     segments: Vec<SpliceSegment>,
+    /// Leftover include-directive indent / line endings for source layout.
+    gaps: Vec<crate::macro_expand::SourceLayoutGap>,
     includes_complete: bool,
     navigation: NavigationSource,
     include_search: Vec<PathBuf>,
@@ -1194,7 +1196,8 @@ impl Workspace {
             targets,
             search: include_search,
         } = self.walk_graph(key);
-        let (text, segments) = self.splice_with_map(key, &proof.sites, &targets, &mut Vec::new());
+        let (text, segments, gaps) =
+            self.splice_with_map(key, &proof.sites, &targets, &mut Vec::new());
         let targets_complete = targets.values().all(Option::is_some);
         let navigation = if proof.complete && targets_complete {
             NavigationSource::Mapped {
@@ -1214,6 +1217,7 @@ impl Workspace {
         let source = Arc::new(SplicedSource {
             text,
             segments,
+            gaps,
             includes_complete,
             navigation,
             include_search,
@@ -1221,6 +1225,17 @@ impl Workspace {
         self.records.insert(key.to_string(), records);
         self.spliced.insert(key.to_string(), Arc::clone(&source));
         source
+    }
+
+    /// Leftover include-directive ranges for the source-layout preview.
+    pub(crate) fn source_layout_gaps(
+        &mut self,
+        uri: &str,
+    ) -> Vec<crate::macro_expand::SourceLayoutGap> {
+        let Some(key) = self.ensure_loaded(uri) else {
+            return Vec::new();
+        };
+        self.spliced_source(&key).gaps.clone()
     }
 
     /// Splice only executed sites, using the targets selected in execution order.
@@ -1231,24 +1246,28 @@ impl Workspace {
         sites: &HashSet<(String, Span)>,
         targets: &IncludeTargets,
         stack: &mut Vec<String>,
-    ) -> (String, Vec<SpliceSegment>) {
+    ) -> (
+        String,
+        Vec<SpliceSegment>,
+        Vec<crate::macro_expand::SourceLayoutGap>,
+    ) {
         if stack.iter().any(|file| file == key) {
-            return (String::new(), Vec::new());
+            return (String::new(), Vec::new(), Vec::new());
         }
         let Some(document) = self.docs.get(key) else {
-            return (String::new(), Vec::new());
+            return (String::new(), Vec::new(), Vec::new());
         };
         stack.push(key.to_string());
         let mut replacements = Vec::new();
         for directive in &document.model.includes {
             let site = (key.to_string(), directive.span);
             if sites.contains(&site) {
-                let (body, segments) = targets
+                let (body, segments, gaps) = targets
                     .get(&site)
                     .and_then(Option::as_deref)
                     .map(|target| self.splice_with_map(target, sites, targets, stack))
                     .unwrap_or_default();
-                replacements.push((directive.span, body, segments));
+                replacements.push((directive.span, body, segments, gaps));
             }
         }
         stack.pop();
@@ -1258,20 +1277,33 @@ impl Workspace {
 
 fn apply_replacements_mapped(
     source: &str,
-    replacements: &[(Span, String, Vec<SpliceSegment>)],
+    replacements: &[(
+        Span,
+        String,
+        Vec<SpliceSegment>,
+        Vec<crate::macro_expand::SourceLayoutGap>,
+    )],
     file: Option<String>,
-) -> (String, Vec<SpliceSegment>) {
+) -> (
+    String,
+    Vec<SpliceSegment>,
+    Vec<crate::macro_expand::SourceLayoutGap>,
+) {
     let mut out = String::with_capacity(source.len());
     let mut last = 0usize;
     let mut ordered = replacements.to_vec();
-    ordered.sort_by_key(|(span, _, _)| span.start);
+    ordered.sort_by_key(|(span, _, _, _)| span.start);
     let mut segments = Vec::new();
-    for (span, body, nested) in ordered {
+    let mut gaps = Vec::new();
+    // Directive trailing newlines land at these spliced offsets once copied.
+    let mut newline_marks: Vec<(u32, bool)> = Vec::new();
+    for (span, body, nested, nested_gaps) in ordered {
         let start = span.start as usize;
         let end = span.end as usize;
         if start < last || end > source.len() || start > source.len() {
             continue;
         }
+        let line = crate::macro_expand::directive_line_extent(source, span);
         push_root_piece(
             &mut out,
             &mut segments,
@@ -1280,6 +1312,15 @@ fn apply_replacements_mapped(
             start,
             file.as_deref(),
         );
+        let indent_from = (line.start as usize).max(last);
+        if indent_from < start {
+            let indent_len = (start - indent_from) as u32;
+            let indent_end = out.len() as u32;
+            gaps.push(crate::macro_expand::SourceLayoutGap::Omit(Span {
+                start: indent_end - indent_len,
+                end: indent_end,
+            }));
+        }
         let offset = out.len() as u32;
         for mut seg in nested {
             seg.spliced.start += offset;
@@ -1288,7 +1329,14 @@ fn apply_replacements_mapped(
                 segments.push(seg);
             }
         }
+        for gap in nested_gaps {
+            gaps.push(gap.shift(offset));
+        }
         out.push_str(&body);
+        if end < source.len() && source.as_bytes()[end] == b'\n' {
+            let synthetic = !body.is_empty() && !body.ends_with('\n') && !body.ends_with('\r');
+            newline_marks.push((out.len() as u32, synthetic));
+        }
         last = end;
     }
     push_root_piece(
@@ -1299,7 +1347,21 @@ fn apply_replacements_mapped(
         source.len(),
         file.as_deref(),
     );
-    (out, segments)
+    for (at, synthetic) in newline_marks {
+        if (at as usize) < out.len() && out.as_bytes()[at as usize] == b'\n' {
+            let span = Span {
+                start: at,
+                end: at + 1,
+            };
+            gaps.push(if synthetic {
+                crate::macro_expand::SourceLayoutGap::SyntheticNewline(span)
+            } else {
+                crate::macro_expand::SourceLayoutGap::Omit(span)
+            });
+        }
+    }
+    gaps.sort_by_key(|gap| gap.span().start);
+    (out, segments, gaps)
 }
 
 fn push_root_piece(
