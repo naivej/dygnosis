@@ -6,7 +6,7 @@ A complete working model is **not** here. Use `.agents/skills/dynare-copilot/ref
 
 ## Which folder
 
-Folders follow the diagnostic code. File names start with the same code (`w070_betta.mod`). The first line is `// inventory: …` and lists every trigger that file covers. To find a code, search [`inventory.json`](inventory.json) and open the `fixture` path.
+Folders follow the diagnostic code. File names start with the same code (`w010_unref.mod`). The first line is `// inventory: …` and lists every trigger that file covers. To find a code, search [`inventory.json`](inventory.json) and open the `fixture` path.
 
 | Folder | Open this when you want |
 |--------|--------------------------|
@@ -17,7 +17,6 @@ Folders follow the diagnostic code. File names start with the same code (`w070_b
 | `shape/` | equation or block shape: duplicate equations, missing `initval`, no steady-state block (`W054`–`W057`, `W042`, `E058`, `W051`, `W052`, `E059`, `I050`) |
 | `e060/` | `@#include` and `@#if` / `@#for` mistakes. Cycle is extra Warning `W062`. Some cases are a **directory** of files (`cycle/`, `missing/`, `nested/`, `w061_*`), not one `.mod`. |
 | `w010/` | unused or never-assigned parameters and variables |
-| `w070/` | a parameter value that looks wrong (discount, depreciation, …) |
 | `w090/` | estimation and observed variables |
 | `w100/` | Ramsey, OSR, planner objective |
 | `w110/` | shock standard errors and correlations |

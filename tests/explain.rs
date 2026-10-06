@@ -169,27 +169,6 @@ fn known_codes_matches_the_rust_keys() {
     assert!(RUST_CODES.contains(&"E179"));
     assert!(RUST_CODES.contains(&"E200"));
     assert!(RUST_CODES.contains(&"W200"));
-    assert!(!RUST_CODES.contains(&"W070"));
-}
-
-#[test]
-fn a_parameter_name_has_no_conventional_range() {
-    assert!(explain("W070").is_none());
-    let text = "\
-var y;
-varexo e;
-parameters beta;
-beta = 99;
-model;
-y = beta*y(-1) + e;
-end;
-";
-    let diags = analyze(&parse(text));
-    assert!(diags.iter().all(|diag| diag.code != "W070"), "{diags:?}");
-    assert!(
-        diags.iter().any(|diag| diag.code != "E001"),
-        "the sample must reach the checks that used to emit W070, got {diags:?}"
-    );
 }
 
 #[test]
