@@ -25,7 +25,6 @@ pub mod check_occbin;
 pub mod check_parse;
 pub mod check_symbol_list;
 pub mod check_w010;
-pub mod check_w070;
 pub mod check_w090;
 pub mod check_w100;
 pub mod check_w110;
@@ -104,7 +103,6 @@ pub use check_symbol_list::check_symbol_list;
 pub use check_w010::{
     check_w010, check_w010_family, check_w011, check_w012, check_w020, check_w021, check_w022,
 };
-pub use check_w070::check_w070;
 pub use check_w090::check_w090;
 pub use check_w100::check_w100;
 pub use check_w110::check_w110;

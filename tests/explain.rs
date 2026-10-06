@@ -33,9 +33,9 @@ const RUST_CODES: &[&str] = &[
     "E460", "E461", "E462", "E463", "E464", "E465", "E466", "E467", "E468", "E469", "E470", "E471",
     "E472", "E473", "E474", "E475", "E476", "E477", "E478", "E479", "E481", "E999", "I050", "I208",
     "I209", "I210", "I211", "W010", "W011", "W012", "W013", "W020", "W022", "W031", "W042", "W051",
-    "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094",
-    "W102", "W110", "W112", "W120", "W121", "W122", "W131", "W140", "W150", "W160", "W170", "W186",
-    "W187", "W200", "W201", "W202", "W203", "W204", "W205", "W206", "W207", "W208", "W211", "W212",
+    "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W062", "W091", "W092", "W094", "W102",
+    "W110", "W112", "W120", "W121", "W122", "W131", "W140", "W150", "W160", "W170", "W186", "W187",
+    "W200", "W201", "W202", "W203", "W204", "W205", "W206", "W207", "W208", "W211", "W212",
 ];
 
 const THIN_CODES: &[&str] = &[
@@ -68,9 +68,9 @@ const THIN_CODES: &[&str] = &[
     "E463", "E464", "E465", "E466", "E467", "E468", "E469", "E470", "E471", "E472", "E473", "E474",
     "E475", "E476", "E477", "E478", "E479", "E481", "E999", "I050", "I208", "I209", "I210", "I211",
     "W010", "W011", "W012", "W013", "W020", "W022", "W031", "W042", "W051", "W052", "W054", "W055",
-    "W056", "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094", "W102", "W110", "W112",
-    "W120", "W121", "W122", "W131", "W140", "W150", "W160", "W170", "W186", "W200", "W201", "W202",
-    "W203", "W204", "W205", "W206", "W207", "W208", "W211", "W212",
+    "W056", "W057", "W060", "W061", "W062", "W091", "W092", "W094", "W102", "W110", "W112", "W120",
+    "W121", "W122", "W131", "W140", "W150", "W160", "W170", "W186", "W200", "W201", "W202", "W203",
+    "W204", "W205", "W206", "W207", "W208", "W211", "W212",
 ];
 
 const SHARED: &[&str] = &[
@@ -107,8 +107,8 @@ const SHARED: &[&str] = &[
 
 const ADDED: &[&str] = &[
     "E999", "I050", "I208", "I209", "I210", "I211", "W010", "W011", "W012", "W013", "W020", "W051",
-    "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W062", "W070", "W091", "W092", "W094",
-    "W102", "W110", "W112", "W120", "W122", "W140", "W160", "W207", "W208", "W211", "W212",
+    "W052", "W054", "W055", "W056", "W057", "W060", "W061", "W062", "W091", "W092", "W094", "W102",
+    "W110", "W112", "W120", "W122", "W140", "W160", "W207", "W208", "W211", "W212",
 ];
 
 const SKIP_KEYS: &[&str] = &["E187", "E191", "E194", "W187"];
@@ -161,14 +161,35 @@ fn read_mod(archive_dir: &str) -> String {
 
 #[test]
 fn known_codes_matches_the_rust_keys() {
-    assert_eq!(RUST_CODES.len(), 384);
+    assert_eq!(RUST_CODES.len(), 383);
     assert_eq!(known_codes(), RUST_CODES);
-    assert_eq!(known_codes().len(), 384);
+    assert_eq!(known_codes().len(), 383);
     assert!(!RUST_CODES.contains(&"P000"));
     assert!(RUST_CODES.contains(&"E178"));
     assert!(RUST_CODES.contains(&"E179"));
     assert!(RUST_CODES.contains(&"E200"));
     assert!(RUST_CODES.contains(&"W200"));
+    assert!(!RUST_CODES.contains(&"W070"));
+}
+
+#[test]
+fn a_parameter_name_has_no_conventional_range() {
+    assert!(explain("W070").is_none());
+    let text = "\
+var y;
+varexo e;
+parameters beta;
+beta = 99;
+model;
+y = beta*y(-1) + e;
+end;
+";
+    let diags = analyze(&parse(text));
+    assert!(diags.iter().all(|diag| diag.code != "W070"), "{diags:?}");
+    assert!(
+        diags.iter().any(|diag| diag.code != "E001"),
+        "the sample must reach the checks that used to emit W070, got {diags:?}"
+    );
 }
 
 #[test]
@@ -344,7 +365,7 @@ fn mcp_explain_matches_rendered_markdown() {
 #[test]
 fn mcp_code_list_matches_known_codes() {
     let entries = dynare_list_diagnostic_codes();
-    assert_eq!(entries.len(), 384);
+    assert_eq!(entries.len(), 383);
     assert_eq!(
         entries
             .iter()

@@ -245,11 +245,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         body: "The active include file is reachable from more than one parent model, so the editor cannot tell which parent's declarations apply.\n\n**Fix**\n\nOpen the intended parent `.mod` file.",
         kind: ExplainKind::Added,
     }),
-    ("W070", ExplainEntry {
-        title: "Parameter outside its conventional range",
-        body: "A parameter's name matches a conventional meaning in Dygnosis's range table, and its value is outside that range. The name alone does not establish what the parameter means in your model.\n\n**Next step**\n\nCheck the meaning, units and sign. For example, `beta = 99` may mean that `0.99` was intended. Keep the value and hide this Warning if your model uses a different meaning or an intentional calibration.",
-        kind: ExplainKind::Added,
-    }),
     ("E090", ExplainEntry {
         title: "Observed variable is not a declared endogenous variable",
         body: "A name listed in ``varobs`` is not a declared endogenous variable. Dynare refuses: `e is not endogenous.`\n\n**Warrant**\n\nThe editor names the ``varobs`` role and, when the name is already declared as something else, says so; Dynare's string is only `N is not endogenous.`\n\nThe name must have the required type when this row, head, or option is read. Earlier successful `change_type` statements count; later declarations or type changes do not. Repeated macro copies use their own parser context.\n\n**Fix**\n\nDeclare the variable in ``var``, or remove it from ``varobs`` if it was a typo or an exogenous/parameter name.",

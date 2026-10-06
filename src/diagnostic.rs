@@ -115,7 +115,7 @@ pub struct DiagnosticSet {
 /// When `check_parse` is nonempty, later families are skipped (cascade).
 /// Thin families for one parsed model. If `check_parse` is nonempty, return
 /// those E001 rows only (cascade). Otherwise concatenate equation-count (W013), E020, E030,
-/// OccBin, written clash, estimation, shape, W010, E062–E065, W070, W090, W100, W110 (includes W060), W120, W130, symbol lists, D-block.
+/// OccBin, written clash, estimation, shape, W010, E062–E065, W090, W100, W110 (includes W060), W120, W130, symbol lists, D-block.
 /// W062 / E061 / W061 / W160 and I050 quiet are workspace-only (`check_file`), not here.
 pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = analyze_positions(model);
@@ -257,7 +257,6 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     out.extend(shape_diags);
     out.extend(crate::check_w010::check_w010_family(model));
     out.extend(crate::check_e060::check_e060_family_on_model(model));
-    out.extend(crate::check_w070::check_w070(model));
     out.extend(observed_diags);
     out.extend(crate::check_estimated_params::check_estimated_params(model));
     out.extend(crate::check_w100::check_w100(model));

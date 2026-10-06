@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A parameter name no longer gets a conventional-range warning. `beta`, `rho`, and the other former table names can mean whatever the model uses.
 - **Trigger Suggest** completes the lowest unused positive `eqN` equation tag
   and adds a symbol's own `long_name`. **Add equation tags** and **Add long
   names** fill missing metadata counted by I208 and I209, including in included

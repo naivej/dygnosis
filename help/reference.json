@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "bc4e91b96088e3b15675fb1323f6fb7deda56b1fd151d176c624ab87b934484c",
+  "fingerprint": "a84c400180dd2af2575b0fea4fc7bda1f59759b318e03982fdefa1ac6dc261f7",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -2690,12 +2690,6 @@
       "kind": "added",
       "title": "Circular @#include detected",
       "markdown": "### W062: Circular @#include detected\n\nTwo or more files include each other in a loop. The message names the chain, for example `a.mod -> b.mod -> a.mod`.\n\n**Common causes**\n\n- A submodel was refactored and now includes its parent\n- Two helper files cross-include each other for shared\n  parameters or steady-state definitions\n- A copy-paste mistake duplicated the include in the wrong\n  direction\n\n**Fix**\n\nBreak the cycle by removing one `@#include` along the chain. If both files genuinely need a shared block, extract that block into a third file and have both parents include it.\n"
-    },
-    {
-      "code": "W070",
-      "kind": "added",
-      "title": "Parameter outside its conventional range",
-      "markdown": "### W070: Parameter outside its conventional range\n\nA parameter's name matches a conventional meaning in Dygnosis's range table, and its value is outside that range. The name alone does not establish what the parameter means in your model.\n\n**Next step**\n\nCheck the meaning, units and sign. For example, `beta = 99` may mean that `0.99` was intended. Keep the value and hide this Warning if your model uses a different meaning or an intentional calibration.\n"
     },
     {
       "code": "W091",
