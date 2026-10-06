@@ -87,7 +87,7 @@ export function safeExplanation(markdown: string): string {
   return serialize(Lexer.lex(markdown));
 }
 
-/** Register before startup so both LSP diagnostic transports share the window's filter. */
+/** Register before startup so push paint and Ignore share one window filter; pull stays empty here. */
 export function registerDiagnosticActions(service: DygnosisClient): vscode.Disposable {
   const hiddenCodes = new Set<string>();
   const pushed = new Map<string, RawSet>();
@@ -123,8 +123,7 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     syncInstance();
     for (const raw of pushed.values()) {
       // Never replay locations recorded before an edit. The live server will replace them.
-      const latest = currentRaw(raw.uri) ?? raw;
-      if (latest.version === versionFor(raw.uri)) raw.next?.(raw.uri, visible(latest.items));
+      if (raw.version === versionFor(raw.uri)) raw.next?.(raw.uri, visible(raw.items));
     }
     const feature = service.client?.getFeature(DocumentDiagnosticRequest.method);
     const providers = new Set(vscode.workspace.textDocuments.filter(isAnalysisDocument)
@@ -132,22 +131,25 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     for (const provider of providers) provider.onDidChangeDiagnosticsEmitter.fire();
     updateStatus();
   };
-  const currentRaw = (uri: vscode.Uri): RawSet | undefined => pulled.get(uri.toString()) ?? pushed.get(uri.toString());
+  // Actions and Show replay the current push only. Pull facts stay in a separate cache.
+  const currentRaw = (uri: vscode.Uri): RawSet | undefined => pushed.get(uri.toString());
   const acceptFull = (uri: vscode.Uri, items: vscode.Diagnostic[], resultId: string | undefined, version: number | null): void => {
-    pulled.set(uri.toString(), { uri, items, resultId, version });
+    if (items.length === 0) pulled.delete(uri.toString());
+    else pulled.set(uri.toString(), { uri, items, resultId, version });
   };
+  const emptyDisplay = (report: vsdiag.DocumentDiagnosticReport, relatedDocuments?: vsdiag.DocumentDiagnosticReport["relatedDocuments"]): vsdiag.DocumentDiagnosticReport => ({
+    kind: vsdiag.DocumentDiagnosticReportKind.full, resultId: report.resultId, items: [],
+    ...(relatedDocuments ? { relatedDocuments } : {}),
+  });
   const fullReport = (uri: vscode.Uri, report: vsdiag.DocumentDiagnosticReport, version: number | null): vsdiag.DocumentDiagnosticReport => {
     if (report.kind === vsdiag.DocumentDiagnosticReportKind.full) acceptFull(uri, report.items, report.resultId, version);
-    const raw = pulled.get(uri.toString());
-    const items = report.kind === vsdiag.DocumentDiagnosticReportKind.full ? report.items : raw?.version === version ? raw.items : undefined;
     const relatedDocuments: NonNullable<vsdiag.DocumentDiagnosticReport["relatedDocuments"]> = {};
     for (const [key, related] of Object.entries(report.relatedDocuments ?? {})) {
       relatedDocuments[key] = fullReport(vscode.Uri.parse(key), related, versionFor(vscode.Uri.parse(key)));
     }
-    // A fresh full result also clears VS Code's cached filtered set after Show.
-    if (items) return { kind: vsdiag.DocumentDiagnosticReportKind.full, resultId: report.resultId, items: visible(items),
-      ...(report.relatedDocuments ? { relatedDocuments } : {}) };
-    return { ...report, ...(report.relatedDocuments ? { relatedDocuments } : {}) };
+    // This editor paints push only. Keep the raw pull cache; return an empty display report.
+    // Unchanged keeps that cache and still returns a full empty row so result IDs update.
+    return emptyDisplay(report, report.relatedDocuments ? relatedDocuments : undefined);
   };
   const workspaceReport = (report: vsdiag.WorkspaceDiagnosticReport): vsdiag.WorkspaceDiagnosticReport => ({
     items: report.items.map(row => ({ ...row, ...fullReport(row.uri, row, row.version ?? versionFor(row.uri)) })),
@@ -158,7 +160,6 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     syncInstance();
     const retain: PushNext = (target, items) => {
       pushed.set(target.toString(), { uri: target, items, version: versionFor(target), next });
-      pulled.delete(target.toString());
       next(target, visible(items));
     };
     if (previousPush) previousPush(uri, diagnostics, retain); else retain(uri, diagnostics);

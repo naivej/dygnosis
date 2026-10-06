@@ -168,21 +168,31 @@ test("actions retain engine fixes and raw root/data context, hiding only diagnos
   registration.dispose();
 });
 
-test("pull full/unchanged and related document reports retain raw facts and refresh on restore", async () => {
+test("pull full/unchanged and related document reports keep a raw cache and empty every display path", async () => {
   const service = reset(), registration = registerDiagnosticActions(service), doc = document(), child = document("child.inc"), diagnostic = note();
-  push(service, doc, [diagnostic]); await hide(service, doc, diagnostic);
+  const displayed = push(service, doc, [diagnostic]); await hide(service, doc, diagnostic);
   const raw = note("W010"), related = note("W010", doc.uri.toString());
   const report = await service.middleware.provideDiagnostics(doc, undefined, token, () => ({ kind: "full", resultId: "two", items: [raw], relatedDocuments: { [child.uri.toString()]: { kind: "full", resultId: "child", items: [related] } } }));
+  assert.equal(report.kind, "full"); assert.equal(report.resultId, "two");
   assert.deepEqual(report.items, []); assert.deepEqual(report.relatedDocuments[child.uri.toString()].items, []);
+  assert.equal(report.relatedDocuments[child.uri.toString()].resultId, "child");
+  // Show replays the push collection, not the pull cache.
   command("dygnosis.showAllDiagnostics"); assert.equal(host.refreshes, 2);
-  const restored = await service.middleware.provideDiagnostics(doc, "two", token, () => ({ kind: "unChanged", resultId: "two", relatedDocuments: { [child.uri.toString()]: { kind: "unChanged", resultId: "child" } } }));
-  assert.equal(restored.kind, "full"); assert.equal(restored.items[0], raw);
-  assert.equal(restored.relatedDocuments[child.uri.toString()].items[0], related);
-  assert.deepEqual(c2p.asDiagnostic(restored.items[0]), wire());
+  assert.equal(displayed.at(-1)[0], diagnostic);
+  const unchanged = await service.middleware.provideDiagnostics(doc, "two", token, () => ({ kind: "unChanged", resultId: "two", relatedDocuments: { [child.uri.toString()]: { kind: "unChanged", resultId: "child" } } }));
+  assert.equal(unchanged.kind, "full"); assert.equal(unchanged.resultId, "two");
+  assert.deepEqual(unchanged.items, []);
+  assert.deepEqual(unchanged.relatedDocuments[child.uri.toString()].items, []);
+  assert.equal(unchanged.relatedDocuments[child.uri.toString()].resultId, "child");
+  // Empty full withdrawal clears the pull cache; a later unchanged still paints nothing.
+  const cleared = await service.middleware.provideDiagnostics(doc, "two", token, () => ({ kind: "full", resultId: "three", items: [] }));
+  assert.deepEqual(cleared.items, []); assert.equal(cleared.resultId, "three");
+  const afterClear = await service.middleware.provideDiagnostics(doc, "three", token, () => ({ kind: "unChanged", resultId: "three" }));
+  assert.equal(afterClear.kind, "full"); assert.deepEqual(afterClear.items, []);
   registration.dispose();
 });
 
-test("workspace pull filters real protocol-converted partial and final reports and frees progress", async () => {
+test("workspace pull empties partial and final rows, keeps result IDs, and frees progress", async () => {
   const service = reset(), registration = registerDiagnosticActions(service), doc = document();
   const diagnostic = note(); push(service, doc, [diagnostic]); await hide(service, doc, diagnostic);
   host.workspaceRequest = params => {
@@ -208,13 +218,51 @@ test("workspace pull filters real protocol-converted partial and final reports a
   assert.equal(chunks.length, 2, "one partial and one final delivery");
   assert.deepEqual(collection.get(doc.uri.toString()), []);
   assert.deepEqual(collection.get("file:///project/unopened.mod"), []);
+  assert.equal(resultIds.get(doc.uri.toString()), "partial");
   assert.equal(resultIds.get("file:///project/unopened.mod"), "final");
   assert.equal(host.progress.size, 0);
   command("dygnosis.showAllDiagnostics");
   host.workspaceRequest = () => Promise.resolve({ items: [{ uri: "file:///project/unopened.mod", version: null, kind: "unchanged", resultId: "final" }] });
   await consume([]);
   assert.equal(chunks.length, 3, "unchanged final is delivered once");
-  assert.deepEqual(c2p.asDiagnostic(collection.get("file:///project/unopened.mod")[0]), wire());
+  assert.equal(chunks.at(-1).items[0].kind, "full");
+  assert.deepEqual(collection.get("file:///project/unopened.mod"), []);
+  assert.equal(resultIds.get("file:///project/unopened.mod"), "final");
+  registration.dispose();
+});
+
+test("push then pull and pull then push keep one painted list and push-owned actions", async () => {
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document();
+  const first = note(), delayed = note("E001", undefined, 1);
+  // Push first: pull returns empty and cannot replace action context.
+  const painted = push(service, doc, [first]);
+  assert.equal(painted.at(-1)[0], first);
+  const afterPush = await service.middleware.provideDiagnostics(doc, undefined, token, () => ({ kind: "full", resultId: "pull-1", items: [delayed] }));
+  assert.deepEqual(afterPush.items, []);
+  const actions = await offers(service, doc, [first]);
+  assert.equal(host.actionContext.diagnostics[0], first);
+  assert.equal((await c2p.asCodeActionContext(host.actionContext)).diagnostics[0].data.root, "file:///project/a.mod");
+  assert.ok(actions.some(action => action.command?.command === "dygnosis.ignoreDiagnostic"));
+  assert.ok(actions.some(action => action.command?.command === "dygnosis.explainDiagnostic"));
+  // Pull first at the same version creates no painted list; the later push owns display and actions.
+  const other = document("order.mod");
+  const pullFirst = note("W010", other.uri.toString());
+  const beforePush = await service.middleware.provideDiagnostics(other, undefined, token, () => ({ kind: "full", resultId: "early", items: [pullFirst] }));
+  assert.deepEqual(beforePush.items, []);
+  assert.deepEqual(await offers(service, other, []), []);
+  const later = note("I208", other.uri.toString(), 3);
+  const secondPaint = push(service, other, [later]);
+  assert.equal(secondPaint.at(-1)[0], later);
+  const latePull = await service.middleware.provideDiagnostics(other, "early", token, () => ({ kind: "full", resultId: "late", items: [pullFirst] }));
+  assert.deepEqual(latePull.items, []);
+  await offers(service, other, [later]);
+  assert.equal(host.actionContext.diagnostics[0], later);
+  assert.equal((await c2p.asCodeActionContext(host.actionContext)).diagnostics[0].data, later.data);
+  // Empty push withdrawal is authoritative for Show replay.
+  const withdrawn = push(service, doc, []);
+  assert.deepEqual(withdrawn.at(-1), []);
+  command("dygnosis.showAllDiagnostics");
+  assert.deepEqual(withdrawn.at(-1), []);
   registration.dispose();
 });
 
