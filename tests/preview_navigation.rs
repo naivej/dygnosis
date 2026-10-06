@@ -717,6 +717,7 @@ fn same_preview_facts(compact: &Value, layout: &Value) {
         .as_object_mut()
         .unwrap()
         .remove("source_navigation");
+    without_layout.as_object_mut().unwrap().remove("macro_ranges");
     for (display, old) in without_layout["navigation"]
         .as_array_mut()
         .unwrap()
@@ -758,6 +759,10 @@ async fn readable_layout_separates_statements_tags_locals_and_blocks_without_cha
     );
     assert_eq!(
         experimental["dygnosis"]["effectivePreview"]["source_layout"],
+        true
+    );
+    assert_eq!(
+        experimental["dygnosis"]["effectivePreview"]["macro_ranges"],
         true
     );
     open(backend, &root, source, 1).await;
@@ -1347,7 +1352,52 @@ async fn source_navigation_nested_name_and_incomplete_are_empty() {
     assert_eq!(incomplete["complete"], false, "{incomplete}");
     assert_eq!(incomplete["source_navigation_schema_version"], 1);
     assert_eq!(incomplete["source_navigation"], json!([]));
+    assert_eq!(incomplete["macro_ranges"], json!([]));
     assert_eq!(incomplete["navigation"], json!([]));
+}
+
+#[tokio::test]
+async fn source_layout_macro_ranges_shade_bodies_includes_and_identifiers() {
+    let root = Url::parse("file:///C:/dygnosis-preview/macro-tint.mod").unwrap();
+    let include = Url::parse("file:///C:/dygnosis-preview/macro-tint-body.inc").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(
+        backend,
+        &root,
+        "@#define j=2\nparameters beta_@{j};\nvar y;\n@#for i in 1:1\nparameters gamma_@{i};\n@#endfor\nmodel;\n@#include \"macro-tint-body.inc\"\ny=1;\nend;\n",
+        1,
+    )
+    .await;
+    open(backend, &include, "z=1;\n", 1).await;
+    let source_view = source_preview(backend, &root).await;
+    let readable = readable_preview(backend, &root).await;
+    let compact = preview(backend, &root).await;
+    assert!(source_view.get("macro_ranges").is_some(), "{source_view}");
+    assert!(readable.get("macro_ranges").is_none(), "{readable}");
+    assert!(compact.get("macro_ranges").is_none(), "{compact}");
+    assert_eq!(source_view["complete"], true, "{source_view}");
+    let text = source_view["effective_text"].as_str().unwrap();
+    let ranges = source_view["macro_ranges"].as_array().unwrap();
+    assert!(!ranges.is_empty(), "{source_view}");
+    let shaded: Vec<_> = ranges
+        .iter()
+        .map(|range| json_slice(text, range, true))
+        .collect();
+    let joined = shaded.join("|");
+    assert!(joined.contains("beta_2"), "{joined}");
+    assert!(joined.contains("parameters gamma_1;"), "{joined}");
+    assert!(joined.contains("z=1;"), "{joined}");
+    assert!(!joined.contains("var y"), "{joined}");
+    assert!(!joined.contains("y=1;"), "{joined}");
+    // Adjacent/overlapping ranges are already merged server-side.
+    assert!(ranges.windows(2).all(|pair| {
+        let end = &pair[0]["end"];
+        let start = &pair[1]["start"];
+        end["line"].as_u64().unwrap() < start["line"].as_u64().unwrap()
+            || (end["line"] == start["line"]
+                && end["character"].as_u64().unwrap() < start["character"].as_u64().unwrap())
+    }));
 }
 
 #[tokio::test]

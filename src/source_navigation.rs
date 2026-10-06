@@ -62,6 +62,91 @@ pub(crate) fn source_navigation_json(
     )
 }
 
+/// Sorted, non-overlapping display spans for macro-expanded text tinting.
+///
+/// A fragment is shaded when it has a written span and either `macro_active` is
+/// set, its kind is `Substitution`, or its written span lies inside an included
+/// splice segment. Synthetic fragments (`written: None`) are never shaded. A
+/// macro-built identifier is shaded across its whole display span when any of
+/// its fragments is shaded.
+pub(crate) fn macro_display_ranges(
+    display: &str,
+    fragments: &[SourceFragment],
+    file_cuts: &[u32],
+    include_spans: &[Span],
+) -> Vec<Span> {
+    let split = split_copies_at_files(display, fragments, file_cuts);
+    let identifiers = identifier_covers(display, &split, file_cuts);
+    let shaded_fragment = |fragment: &SourceFragment| -> bool {
+        let Some(written) = fragment.written else {
+            return false;
+        };
+        if written.is_empty() || fragment.display.is_empty() {
+            return false;
+        }
+        fragment.macro_active
+            || fragment.kind == SourceFragmentKind::Substitution
+            || include_spans.iter().any(|segment| {
+                !segment.is_empty()
+                    && written.start >= segment.start
+                    && written.end <= segment.end
+            })
+    };
+    let mut shaded = Vec::new();
+    for (id_display, _) in &identifiers {
+        let any = split.iter().any(|fragment| {
+            let start = fragment.display.start.max(id_display.start);
+            let end = fragment.display.end.min(id_display.end);
+            start < end && shaded_fragment(fragment)
+        });
+        if any {
+            shaded.push(*id_display);
+        }
+    }
+    for fragment in &split {
+        if !shaded_fragment(fragment) {
+            continue;
+        }
+        for gap in subtract_spans(fragment.display, &identifiers) {
+            if !gap.is_empty() {
+                shaded.push(gap);
+            }
+        }
+    }
+    merge_shaded_ranges(shaded)
+}
+
+pub(crate) fn macro_ranges_json(
+    display: &str,
+    fragments: &[SourceFragment],
+    file_cuts: &[u32],
+    include_spans: &[Span],
+    effective_range: impl FnMut(Span) -> Value,
+) -> Value {
+    Value::Array(
+        macro_display_ranges(display, fragments, file_cuts, include_spans)
+            .into_iter()
+            .map(effective_range)
+            .collect(),
+    )
+}
+
+fn merge_shaded_ranges(mut ranges: Vec<Span>) -> Vec<Span> {
+    ranges.retain(|span| !span.is_empty());
+    ranges.sort_by_key(|span| (span.start, span.end));
+    let mut out: Vec<Span> = Vec::new();
+    for span in ranges {
+        if let Some(prev) = out.last_mut() {
+            if span.start <= prev.end {
+                prev.end = prev.end.max(span.end);
+                continue;
+            }
+        }
+        out.push(span);
+    }
+    out
+}
+
 fn build_regions(display: &str, fragments: &[SourceFragment], file_cuts: &[u32]) -> Vec<Region> {
     let split = split_copies_at_files(display, fragments, file_cuts);
     let identifiers = identifier_covers(display, &split, file_cuts);
@@ -354,6 +439,7 @@ mod tests {
     use crate::expand::expand_report;
     use crate::parser::parse;
     use crate::preview_source::source;
+    use crate::workspace::Workspace;
 
     fn regions(text: &str) -> (String, Vec<Region>) {
         let report = expand_report(text);
@@ -363,8 +449,58 @@ mod tests {
         (layout.text, built)
     }
 
+    fn tint(text: &str) -> (String, Vec<Span>) {
+        let report = expand_report(text);
+        let model = parse(text);
+        let layout = source(&report, &model, &[]).expect("source layout");
+        let ranges = macro_display_ranges(&layout.text, &layout.fragments, &[], &[]);
+        (layout.text, ranges)
+    }
+
+    fn tint_includes(
+        root: &str,
+        root_text: &str,
+        files: &[(&str, &str)],
+    ) -> (String, Vec<Span>, Vec<Span>) {
+        let mut ws = Workspace::default();
+        for (path, text) in files {
+            ws.update_document(path, *text);
+        }
+        ws.update_document(root, root_text);
+        let model = ws.get_effective_model(root).unwrap().clone();
+        let report = ws.expand_report(root).unwrap().clone();
+        let gaps = ws.source_layout_gaps(root);
+        let cuts = ws.source_file_cuts(root);
+        let includes = ws.source_include_spans(root);
+        let layout = source(&report, &model, &gaps).expect("source layout");
+        let ranges = macro_display_ranges(&layout.text, &layout.fragments, &cuts, &includes);
+        (layout.text, ranges, includes)
+    }
+
     fn slice<'a>(text: &'a str, span: Span) -> &'a str {
         &text[span.start as usize..span.end as usize]
+    }
+
+    fn shaded_text(display: &str, ranges: &[Span]) -> String {
+        ranges
+            .iter()
+            .map(|span| slice(display, *span))
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+
+    fn covers(display: &str, ranges: &[Span], needle: &str) -> bool {
+        ranges
+            .iter()
+            .any(|span| slice(display, *span).contains(needle))
+    }
+
+    fn fully_shaded(display: &str, ranges: &[Span], needle: &str) -> bool {
+        let start = display.find(needle).expect(needle);
+        let span = Span::new(start, start + needle.len());
+        ranges
+            .iter()
+            .any(|range| range.start <= span.start && span.end <= range.end)
     }
 
     #[test]
@@ -392,5 +528,173 @@ mod tests {
             .expect("identifier");
         assert_eq!(slice(&display, id.display), "beta_1_2");
         assert_eq!(slice(src, id.written), "beta_@{i}_@{j}");
+    }
+
+    #[test]
+    fn for_body_is_shaded_including_whitespace() {
+        let (display, ranges) = tint(
+            "var y;\n@#for j in 1:2\nparameters beta_@{j};\n@#endfor\nmodel;\ny=1;\nend;\n",
+        );
+        assert!(fully_shaded(&display, &ranges, "parameters beta_1;"));
+        assert!(fully_shaded(&display, &ranges, "parameters beta_2;"));
+        assert!(!covers(&display, &ranges, "var y"));
+        assert!(!covers(&display, &ranges, "model;"));
+        assert!(display.contains("parameters beta_1;\nparameters beta_2;\n"));
+    }
+
+    #[test]
+    fn conditional_forms_shade_selected_bodies() {
+        for src in [
+            "var y;\n@#if 1\ny=c;\n@#endif\nmodel;\ny=1;\nend;\n",
+            "var y;\n@#if 0\nbad=1;\n@#else\ny=c;\n@#endif\nmodel;\ny=1;\nend;\n",
+            "var y;\n@#if 0\nbad=1;\n@#elseif 1\ny=c;\n@#endif\nmodel;\ny=1;\nend;\n",
+            "var y;\n@#define FLAG 1\n@#ifdef FLAG\ny=c;\n@#endif\nmodel;\ny=1;\nend;\n",
+            "var y;\n@#ifndef FLAG\ny=c;\n@#endif\nmodel;\ny=1;\nend;\n",
+        ] {
+            let (display, ranges) = tint(src);
+            assert!(
+                fully_shaded(&display, &ranges, "y=c;"),
+                "src={src}\ntext={display}\nshaded={}",
+                shaded_text(&display, &ranges)
+            );
+            assert!(!covers(&display, &ranges, "bad"), "{display}");
+            assert!(!covers(&display, &ranges, "var y"), "{display}");
+        }
+    }
+
+    #[test]
+    fn nested_ops_use_one_merged_shade() {
+        let (display, ranges) = tint(
+            "var y;\n@#for i in 1:1\n@#if 1\n  z=@{i};\n@#endif\n@#endfor\nmodel;\ny=1;\nend;\n",
+        );
+        assert!(fully_shaded(&display, &ranges, "  z=1;\n"), "{display}");
+        assert_eq!(
+            ranges
+                .iter()
+                .filter(|span| slice(&display, **span).contains("z=1"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn executed_include_is_shaded_and_dormant_is_not() {
+        let (display, ranges, includes) = tint_includes(
+            "C:/probe/root.mod",
+            "model;\n@#include \"inner.mod\"\nend;\n",
+            &[("C:/probe/inner.mod", "y=1;\n")],
+        );
+        assert!(!includes.is_empty(), "{includes:?}");
+        assert!(fully_shaded(&display, &ranges, "y=1;\n"), "{display}");
+        assert!(!covers(&display, &ranges, "model;"), "{display}");
+        assert!(!covers(&display, &ranges, "end;"), "{display}");
+
+        let (dormant, dormant_ranges, _) = tint_includes(
+            "C:/probe/root.mod",
+            "var y;\n@#if 0\n@#include \"inner.mod\"\n@#endif\nmodel;\ny=1;\nend;\n",
+            &[("C:/probe/inner.mod", "leaked=1;\n")],
+        );
+        assert!(!dormant.contains("leaked"), "{dormant}");
+        assert!(!covers(&dormant, &dormant_ranges, "leaked"));
+        assert!(!covers(&dormant, &dormant_ranges, "y=1"), "{dormant}");
+    }
+
+    #[test]
+    fn standalone_and_quoted_interpolation_are_shaded() {
+        let (display, ranges) = tint("@#define x=99\nvar y;\nmodel;\ny=@{x};\nend;\n");
+        assert!(fully_shaded(&display, &ranges, "99"), "{display}");
+        assert!(!fully_shaded(&display, &ranges, "y="), "{display}");
+
+        let (quoted, quoted_ranges) =
+            tint("@#define j=2\nvar y;\nmodel;\n[name='eq@{j}'] y=1;\nend;\n");
+        assert!(covers(&quoted, &quoted_ranges, "eq2"), "{quoted}");
+        assert!(fully_shaded(&quoted, &quoted_ranges, "'eq2'"), "{quoted}");
+    }
+
+    #[test]
+    fn beta_identifier_outside_body_shades_whole_name_not_neighbors() {
+        let (display, ranges) =
+            tint("@#define j=2\nparameters beta_@{j};\nvar y;\nmodel;\ny=1;\nend;\n");
+        assert!(fully_shaded(&display, &ranges, "beta_2"), "{display}");
+        assert!(!fully_shaded(&display, &ranges, "parameters "), "{display}");
+        let beta_at = display.find("beta_2").unwrap();
+        let params = display.find("parameters").unwrap();
+        assert!(ranges.iter().any(|span| span.start == beta_at as u32
+            && span.end == (beta_at + "beta_2".len()) as u32));
+        assert!(!ranges
+            .iter()
+            .any(|span| span.start <= params as u32 && (params + 10) as u32 <= span.end));
+    }
+
+    #[test]
+    fn loop_body_shades_whole_parameters_line() {
+        let (display, ranges) =
+            tint("@#for j in 1:1\nparameters beta_@{j};\n@#endfor\nvar y;\nmodel;\ny=1;\nend;\n");
+        assert!(
+            fully_shaded(&display, &ranges, "parameters beta_1;"),
+            "{display}"
+        );
+    }
+
+    #[test]
+    fn several_interpolations_unicode_and_crlf_shade() {
+        let (display, ranges) = tint(
+            "@#for i in 1:1\n@#for j in 2:2\nparameters beta_@{i}_@{j};\n@#endfor\n@#endfor\nvar y;\nmodel;\ny=1;\nend;\n",
+        );
+        assert!(
+            fully_shaded(&display, &ranges, "parameters beta_1_2;"),
+            "{display}"
+        );
+
+        let (unicode, unicode_ranges) =
+            tint("@#define j=1\nvar y;\nmodel;\n[name='😀@{j}'] y=1;\nend;\n");
+        assert!(covers(&unicode, &unicode_ranges, "😀1"), "{unicode}");
+
+        let (crlf, crlf_ranges) = tint(
+            "@#for j in 1:1\r\nparameters beta_@{j};\r\n@#endfor\r\nvar y;\r\nmodel;\r\ny=1;\r\nend;\r\n",
+        );
+        assert!(!crlf.contains('\r'), "{crlf:?}");
+        assert!(
+            fully_shaded(&crlf, &crlf_ranges, "parameters beta_1;"),
+            "{crlf}"
+        );
+    }
+
+    #[test]
+    fn adjacent_shaded_ranges_merge_without_crossing_root() {
+        let (display, ranges) =
+            tint("@#define a=1\n@#define b=2\nvar y;\nmodel;\ny=@{a}@{b};\nend;\n");
+        assert!(
+            covers(&display, &ranges, "12") || fully_shaded(&display, &ranges, "1"),
+            "{display}"
+        );
+        let ones: Vec<_> = ranges
+            .iter()
+            .filter(|span| {
+                let text = slice(&display, **span);
+                text.contains('1') || text.contains('2')
+            })
+            .collect();
+        assert!(!ones.is_empty(), "{}", shaded_text(&display, &ranges));
+        assert!(!fully_shaded(&display, &ranges, "y="), "{display}");
+    }
+
+    #[test]
+    fn synthetic_include_separator_is_unshaded() {
+        let (display, ranges, _) = tint_includes(
+            "C:/probe/root.mod",
+            "model;\n@#include \"inner.mod\"\nend;\n",
+            &[("C:/probe/inner.mod", "y=1;")],
+        );
+        assert_eq!(display, "model;\ny=1;\nend;\n");
+        assert!(fully_shaded(&display, &ranges, "y=1;"), "{display}");
+        let sep = display.find("y=1;\n").unwrap() + "y=1;".len();
+        assert!(
+            !ranges
+                .iter()
+                .any(|span| span.start == sep as u32 && span.end == (sep + 1) as u32),
+            "{}",
+            shaded_text(&display, &ranges)
+        );
     }
 }

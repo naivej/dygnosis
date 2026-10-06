@@ -1244,6 +1244,26 @@ impl Workspace {
         cuts
     }
 
+    /// Spliced spans owned by executed includes, not the root file.
+    pub(crate) fn source_include_spans(&mut self, uri: &str) -> Vec<crate::span::Span> {
+        let Some(key) = self.ensure_loaded(uri) else {
+            return Vec::new();
+        };
+        let spliced = self.spliced_source(&key);
+        spliced
+            .segments
+            .iter()
+            .filter(|segment| {
+                !segment.spliced.is_empty()
+                    && segment
+                        .file
+                        .as_deref()
+                        .is_some_and(|file| file != key.as_str())
+            })
+            .map(|segment| segment.spliced)
+            .collect()
+    }
+
     /// Leftover include-directive ranges for the source-layout preview.
     pub(crate) fn source_layout_gaps(
         &mut self,

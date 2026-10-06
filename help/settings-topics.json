@@ -11,6 +11,7 @@
   "dynare.nameDetails.tex": "appearance",
   "dynare.parameterValueHints": "appearance",
   "dynare.editorActions": "effective-model",
+  "dynare.effectiveModel.macroTint": "effective-model",
   "dynare.codeLens.modelEquations": "model-and-includes",
   "dynare.codeLens.declarationReferences": "model-and-includes",
   "dynare.codeLens.effectiveModel": "model-and-includes",

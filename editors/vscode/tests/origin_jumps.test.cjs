@@ -47,6 +47,8 @@ let host;
 class TabInputText { constructor(uri) { this.uri = uri; } }
 const vscode = {
   Disposable, EventEmitter: Emitter, CancellationTokenSource, Range, TreeItem: class {}, TabInputText, ViewColumn: { Beside: 2, One: 1 },
+  DecorationRangeBehavior: { ClosedClosed: 1 },
+  ThemeColor: class ThemeColor { constructor(id) { this.id = id; } },
   RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
   Uri: { parse: uri, file: value => uri(`file://${value.startsWith("/") ? "" : "/"}${value.replaceAll("\\", "/")}`),
     from: value => uri(`${value.scheme}:${value.path}`) },
@@ -63,15 +65,17 @@ const vscode = {
     get visibleTextEditors() { return host.visibleEditors ?? (host.editor ? [host.editor] : []); },
     tabGroups: { get all() { return host.tabGroups ?? []; } },
     onDidChangeActiveTextEditor: listener => host.active.event(listener),
+    onDidChangeVisibleTextEditors: listener => (host.visible ?? host.active).event(listener),
     onDidChangeTextEditorSelection: listener => host.selection.event(listener),
     showQuickPick: async (items, options) => { host.picks.push({ items, options }); return host.pick ? host.pick(items) : items[0]; },
     showInformationMessage: async message => { host.messages.push(message); },
     createOutputChannel: () => ({ appendLine: message => host.clientLogs.push(message), append() {}, show() {}, dispose() {} }),
     showErrorMessage: async message => { host.messages.push(message); },
     showTextDocument: async (document, options) => {
-      host.shown.push({ document, options }); host.editor = { document, selection: new Range(1, 0), viewColumn: options?.viewColumn };
+      host.shown.push({ document, options }); host.editor = { document, selection: new Range(1, 0), viewColumn: options?.viewColumn, setDecorations() {} };
       host.active.fire(host.editor); return host.editor;
     },
+    createTextEditorDecorationType: () => ({ dispose() {}, key: "macro" }),
   },
   workspace: {
     get textDocuments() { return [...host.documents.values()]; },
@@ -122,7 +126,7 @@ Module._load = function(id, ...args) {
   return originalLoad.call(this, id, ...args);
 };
 const { registerEffectivePreview } = require("../out/preview");
-const { registerOriginJumps, parsePreviewNavigation, previewRowAt, previewRegionAt, writtenSourcePicks, projectRegionTarget } = require("../out/origin_jumps");
+const { registerOriginJumps, parsePreviewNavigation, previewRowAt, previewRegionAt, writtenSourcePicks, projectRegionTarget, macroTintRanges } = require("../out/origin_jumps");
 const contributed = require("../package.json").contributes;
 const originCommands = ["dygnosis.goToWrittenSource", "dygnosis.refreshEffectiveModel"];
 const originJumpContributions = { commands: contributed.commands.filter(item => originCommands.includes(item.command)),
@@ -146,7 +150,7 @@ function setup(options = {}) {
     picks: [], messages: [], clientLogs: [], settings: {}, visibleEditors: undefined, tabGroups: [],
     active: new Emitter(), selection: new Emitter(), edited: new Emitter(), closed: new Emitter(), configured: new Emitter(),
     opened: new Emitter(), foldersChanged: new Emitter() };
-  const rootDocument = doc(main); host.documents.set(main, rootDocument); host.editor = { document: rootDocument, selection: new Range(1, 0), viewColumn: 1 };
+  const rootDocument = doc(main); host.documents.set(main, rootDocument); host.editor = { document: rootDocument, selection: new Range(1, 0), viewColumn: 1, setDecorations() {} };
   const changed = new Emitter(), presentation = new Emitter();
   const service = { currentInstance: 1, changed, presentation, onDidChange: presentation.event, onDidInvalidate: changed.event,
     logged: [], requests: [], validations: [], jumps: [],
@@ -178,7 +182,7 @@ function setup(options = {}) {
   const previews = registerEffectivePreview(service), registration = registerOriginJumps(service, previews);
   const run = id => host.commands.get(`dygnosis.${id}`)();
   const show = async () => { await run("showEffectiveModel"); await flush(); return previews.sessions().at(-1); };
-  const activate = session => { host.editor = { document: session.document, selection: new Range(1, 0) }; host.active.fire(host.editor); };
+  const activate = session => { host.editor = { document: session.document, selection: new Range(1, 0), setDecorations() {} }; host.active.fire(host.editor); };
   const edit = (document = rootDocument) => { ++document.version; host.edited.fire({ document, contentChanges: [{ text: "changed" }] }); };
   const close = session => { session.document.isClosed = true; host.documents.delete(session.uri.toString()); host.closed.fire(session.document); };
   return { host, rootDocument, service, previews, registration, run, show, activate, edit, close };
@@ -213,7 +217,7 @@ async function realClientSetup() {
   });
   await service.ensureStarted();
   const previews = registerEffectivePreview(service), registration = registerOriginJumps(service, previews);
-  const show = async () => { base.host.editor = { document: base.rootDocument, selection: new Range(1, 0) }; await base.run("showEffectiveModel"); await flush(); return previews.sessions().at(-1); };
+  const show = async () => { base.host.editor = { document: base.rootDocument, selection: new Range(1, 0), setDecorations() {} }; await base.run("showEffectiveModel"); await flush(); return previews.sessions().at(-1); };
   return { ...base, engine, service, previews, registration, show,
     dispose: async () => { registration.dispose(); previews.dispose(); await service.shutdown(); } };
 }
@@ -338,7 +342,7 @@ test("settings and server invalidation withhold origins and obey action placemen
 test("several previews retain independent roots and refresh an unopened root", async () => {
   const env = setup(), first = await env.show();
   const other = "file:///project/other.dyn", otherDocument = doc(other);
-  env.host.documents.set(other, otherDocument); env.host.editor = { document: otherDocument, selection: new Range(1, 0) };
+  env.host.documents.set(other, otherDocument); env.host.editor = { document: otherDocument, selection: new Range(1, 0), setDecorations() {} };
   env.service.value = payload({ root_uri: other, navigation: [row({ written_locations: [target(other)] })], dependency_candidates: [other] });
   const second = await env.show(); assert.equal(env.previews.sessions().length, 2);
   env.host.documents.delete(main); env.rootDocument.isClosed = true;
@@ -447,7 +451,7 @@ test("picker cancellation, cursor movement, and input invalidation cannot open o
       if (kind === "cancel") return undefined;
       if (kind === "cursor") env.host.editor.selection = new Range(0, 0);
       if (kind === "edit") env.edit();
-      if (kind === "root") env.host.editor = { document: env.rootDocument, selection: new Range(1, 0) };
+      if (kind === "root") env.host.editor = { document: env.rootDocument, selection: new Range(1, 0), setDecorations() {} };
       return items[0];
     };
     await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 0, kind);
@@ -531,7 +535,7 @@ test("closing a preview cancels work and disposes its subscriptions and dependen
 });
 
 test("commands outside a registered virtual preview do no model work", async () => {
-  const env = setup(); await env.show(); env.host.editor = { document: env.rootDocument, selection: new Range(1, 0) }; env.host.active.fire();
+  const env = setup(); await env.show(); env.host.editor = { document: env.rootDocument, selection: new Range(1, 0), setDecorations() {} }; env.host.active.fire();
   const calls = env.service.requests.length;
   for (const id of ["goToWrittenSource", "refreshEffectiveModel"]) await env.run(id);
   assert.equal(env.service.requests.length, calls); assert.equal(env.host.contexts.get("dygnosis.effectivePreview"), false);
@@ -542,7 +546,7 @@ test("owner presentation updates do not stale previews and root invalidations st
   const env = setup(), first = await env.show();
   env.service.presentation.fire(); assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
   const other = "file:///project/second.mod", otherDocument = doc(other);
-  env.host.documents.set(other, otherDocument); env.host.editor = { document: otherDocument, selection: new Range(1, 0) };
+  env.host.documents.set(other, otherDocument); env.host.editor = { document: otherDocument, selection: new Range(1, 0), setDecorations() {} };
   env.service.value = payload({ root_uri: other, navigation: [row({ written_locations: [target(other)] })], dependency_candidates: [other] });
   const second = await env.show(); env.service.changed.fire({ root: other, reason: "input" });
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
@@ -1011,4 +1015,29 @@ test("the final guard decision rejects late loaded-version, closed and dirty cha
       assert.equal(env.host.editor.document, session.document, change);
     } finally { await env.dispose(); }
   }
+});
+
+test("macro tint uses complete source ranges and skips a stale incomplete label", () => {
+  const range = { start: { line: 1, character: 0 }, end: { line: 1, character: 4 } };
+  const text = "var y;\nbeta\n";
+  const parsed = parsePreviewNavigation({
+    effective_text: text,
+    navigation_schema_version: 1,
+    root_uri: main,
+    revision: "abc",
+    document_version: 1,
+    complete: true,
+    navigation: [],
+    dependency_candidates: [main],
+    macro_ranges: [range],
+  }, vscode.Uri.parse(main));
+  const document = { getText: () => text, lineCount: 3 };
+  const applied = macroTintRanges(parsed, document, text);
+  assert.equal(applied.length, 1);
+  assert.deepEqual(applied[0], new Range(1, 0, 1, 4));
+  const labelled = "// INCOMPLETE EXPANSION — this preview is partial.\n" + text;
+  const shifted = macroTintRanges(parsed, { getText: () => labelled, lineCount: 4 }, labelled);
+  assert.equal(shifted[0].start.line, 2);
+  assert.deepEqual(macroTintRanges({ ...parsed, complete: false }, document, text), []);
+  assert.deepEqual(macroTintRanges(parsed, document, "stale"), []);
 });

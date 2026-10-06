@@ -546,6 +546,12 @@
             "default": false,
             "scope": "resource",
             "description": "Offer Show effective model at the first safely mapped model opener. Also respects editor.codeLens."
+          },
+          "dynare.effectiveModel.macroTint": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "Shade macro-expanded text in the effective-model preview with a faint background. Resolved against the preview's chosen root."
           }
         }
       },
@@ -1476,6 +1482,16 @@
         "defaults": {
           "dark": "#569CD608",
           "light": "#007ACC06",
+          "highContrast": "#00000000",
+          "highContrastLight": "#00000000"
+        }
+      },
+      {
+        "id": "dynare.effectiveModel.macroBackground",
+        "description": "Character-range background for macro-expanded text in the effective-model preview. Supports transparency.",
+        "defaults": {
+          "dark": "#D7BA7D14",
+          "light": "#795E2612",
           "highContrast": "#00000000",
           "highContrastLight": "#00000000"
         }

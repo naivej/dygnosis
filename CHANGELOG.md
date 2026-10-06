@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Show effective model** shades macro-expanded text with a faint background. Turn off `dynare.effectiveModel.macroTint` to remove it.
 - **Go to written source** opens the editor that already has the file, and it works on any written text in the preview, including a macro-built name such as `beta_1`, which selects `beta_@{j}`. Show macro origins is removed.
 - When expansion is incomplete, the status item names the missing symbol, file, or expression, and the same words appear on that place in the file.
 - **Show effective model** keeps the spacing of the `.mod` file. Macro substitution and includes still expand. An older engine keeps the indented preview.

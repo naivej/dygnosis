@@ -5,7 +5,7 @@ import type { EffectivePreviewRegistry, EffectivePreviewSession } from "./previe
 import { effectivePreviewArguments } from "./preview";
 import { location, record } from "./protocol";
 import type { Location, Position, Range } from "./protocol";
-import { listSetting } from "./settings";
+import { booleanSetting, listSetting } from "./settings";
 
 /** The input-only event and native placement option are integrated with 0.11.2. */
 export interface OriginJumpClient extends Pick<DygnosisClient, "client" | "currentInstance" | "log" | "failure" | "revalidate" | "execute"> {
@@ -30,6 +30,7 @@ export interface PreviewNavigation {
   effective_text: string; navigation_schema_version: 1; root_uri: string; revision: string;
   document_version: number | null; complete: boolean; navigation: PreviewRow[]; dependency_candidates: string[];
   source_navigation_schema_version?: 1; source_navigation?: SourceRegion[];
+  macro_ranges?: Range[];
 }
 function natural(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
 function version(value: unknown): boolean { return value === null || natural(value); }
@@ -70,6 +71,15 @@ function parseSourceRegions(value: unknown, lines: string[]): SourceRegion[] | u
   }
   return regions;
 }
+function parseMacroRanges(value: unknown, lines: string[]): Range[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const ranges: Range[] = [];
+  for (const row of value) {
+    if (!boundedRange(row, lines)) return undefined;
+    ranges.push(row as Range);
+  }
+  return ranges;
+}
 /** Malformed supported data is a feature failure; old engines keep their text preview. */
 export function parsePreviewNavigation(value: unknown, root: vscode.Uri): PreviewNavigation {
   const bad = (): never => { throw new Error("Unsupported or invalid effective-model navigation. Update dynare.serverPath or use the bundled binary."); };
@@ -88,13 +98,18 @@ export function parsePreviewNavigation(value: unknown, root: vscode.Uri): Previe
     ids.add(row.id);
   }
   if (!value.complete && value.navigation.length) return bad();
+  let macro_ranges: Range[] | undefined;
+  if (value.macro_ranges !== undefined) {
+    macro_ranges = parseMacroRanges(value.macro_ranges, lines);
+    if (!macro_ranges || (!value.complete && macro_ranges.length)) return bad();
+  }
   if (value.source_navigation_schema_version !== undefined || value.source_navigation !== undefined) {
     if (value.source_navigation_schema_version !== 1) return bad();
     const regions = parseSourceRegions(value.source_navigation, lines);
     if (!regions || (!value.complete && regions.length)) return bad();
-    return { ...(value as unknown as PreviewNavigation), source_navigation_schema_version: 1, source_navigation: regions };
+    return { ...(value as unknown as PreviewNavigation), source_navigation_schema_version: 1, source_navigation: regions, macro_ranges };
   }
-  return value as unknown as PreviewNavigation;
+  return { ...(value as unknown as PreviewNavigation), macro_ranges };
 }
 /** A selection crossing several mapped rows has no unambiguous source action. */
 export function previewRowAt(rows: PreviewRow[], selection: Range): PreviewRow | undefined {
@@ -117,6 +132,24 @@ function supportsNavigation(service: OriginJumpClient): boolean {
   return record(experimental) && record(experimental.dygnosis) && record(experimental.dygnosis.effectivePreview) &&
     experimental.dygnosis.effectivePreview.command === "dynare/showEffectiveModel" &&
     experimental.dygnosis.effectivePreview.navigation_schema_version === 1 && experimental.dygnosis.effectivePreview.dependency_candidates === true;
+}
+function supportsMacroRanges(service: OriginJumpClient): boolean {
+  const experimental: unknown = service.client?.initializeResult?.capabilities.experimental;
+  return supportsNavigation(service) && record(experimental) && record(experimental.dygnosis) &&
+    record(experimental.dygnosis.effectivePreview) && experimental.dygnosis.effectivePreview.macro_ranges === true;
+}
+/** Map validated payload ranges onto the preview document, skipping the incomplete label. */
+export function macroTintRanges(payload: PreviewNavigation, document: vscode.TextDocument, sessionText: string): vscode.Range[] {
+  if (!payload.complete || !payload.macro_ranges?.length || document.getText() !== sessionText) return [];
+  const label = "// INCOMPLETE EXPANSION — this preview is partial.\n";
+  const offset = sessionText.startsWith(label) ? label.split("\n").length - 1 : 0;
+  // Complete source-layout payloads never carry the incomplete label; keep the
+  // offset path so a mismatched stale session cannot tint the label line.
+  return payload.macro_ranges.flatMap(range => {
+    const startLine = range.start.line + offset, endLine = range.end.line + offset;
+    if (startLine >= document.lineCount || endLine >= document.lineCount) return [];
+    return [new vscode.Range(startLine, range.start.character, endLine, range.end.character)];
+  });
 }
 function loadedVersion(uri: string): number | null {
   return vscode.workspace.textDocuments.find(document => sameUri(document.uri.toString(), uri))?.version ?? null;
@@ -177,6 +210,12 @@ interface State {
 export function registerOriginJumps(service: OriginJumpClient, previews: EffectivePreviewRegistry): vscode.Disposable {
   const states = new Map<EffectivePreviewSession, State>();
   let disposed = false;
+  const hoverMessage = "Macro-expanded text. Go to written source opens the written text that produced it.";
+  const macroDecoration = vscode.window.createTextEditorDecorationType({
+    isWholeLine: false,
+    rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
+    backgroundColor: new vscode.ThemeColor("dynare.effectiveModel.macroBackground"),
+  });
   const activeState = (): State | undefined => {
     const document = vscode.window.activeTextEditor?.document;
     const session = document && previews.get(document.uri);
@@ -185,6 +224,24 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
   const usable = (state: State): boolean => !disposed && !state.closed && !state.stale && state.payload?.complete === true &&
     state.instance === service.currentInstance && supportsNavigation(service) && !state.session.document.isClosed &&
     state.session.document.getText() === state.session.text;
+  const clearMacroTint = (state: State): void => {
+    for (const editor of vscode.window.visibleTextEditors) {
+      if (editor.document === state.session.document) editor.setDecorations(macroDecoration, []);
+    }
+  };
+  const applyMacroTint = (state: State): void => {
+    if (disposed || state.closed) { clearMacroTint(state); return; }
+    const enabled = booleanSetting("effectiveModel.macroTint", state.session.root, true, service.log);
+    const payload = state.payload;
+    const canTint = enabled && !state.stale && payload?.complete === true && supportsMacroRanges(service) &&
+      Array.isArray(payload.macro_ranges) && state.instance === service.currentInstance &&
+      !state.session.document.isClosed && state.session.document.getText() === state.session.text;
+    const ranges = canTint ? macroTintRanges(payload!, state.session.document, state.session.text) : [];
+    const decorations = ranges.map(range => ({ range, hoverMessage }));
+    for (const editor of vscode.window.visibleTextEditors) {
+      if (editor.document === state.session.document) editor.setDecorations(macroDecoration, decorations);
+    }
+  };
   const updateContext = (): void => {
     const state = activeState(), editor = vscode.window.activeTextEditor;
     const actions = listSetting("editorActions", state?.session.root, ["toolbar", "contextMenu"], ["toolbar", "contextMenu"], service.log);
@@ -194,12 +251,13 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     for (const [key, value] of Object.entries({ effectivePreview: !!state, previewWrittenSource: !!(region || row?.written_locations.length),
       previewToolbarActions: actions.includes("toolbar"), previewContextActions: actions.includes("contextMenu") }))
       void vscode.commands.executeCommand("setContext", `dygnosis.${key}`, value);
+    for (const candidate of states.values()) applyMacroTint(candidate);
   };
   const cancel = (state: State): void => {
     ++state.operation; state.cancellation?.cancel(); state.cancellation?.dispose(); state.cancellation = undefined;
     state.loadingOperation = undefined; state.pendingFile = false;
   };
-  const stale = (state: State): void => { state.stale = true; ++state.epoch; cancel(state); updateContext(); };
+  const stale = (state: State): void => { state.stale = true; ++state.epoch; cancel(state); clearMacroTint(state); updateContext(); };
   const observeFile = (state: State, target: string): void => {
     if (!(state.payload?.dependency_candidates ?? [state.session.root.toString()]).some(candidate => sameUri(candidate, target))) return;
     ++state.fileEpoch;
@@ -254,7 +312,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
   const detach = (session: EffectivePreviewSession): void => {
     const state = states.get(session);
     if (!state) return;
-    state.closed = true; cancel(state);
+    state.closed = true; cancel(state); clearMacroTint(state);
     for (const subscription of [...state.subscriptions, ...state.watchers]) subscription.dispose();
     states.delete(session); updateContext();
   };
@@ -447,13 +505,17 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     vscode.commands.registerCommand("dygnosis.goToWrittenSource", () => navigate()),
     vscode.commands.registerCommand("dygnosis.refreshEffectiveModel", refresh),
     vscode.window.onDidChangeActiveTextEditor(updateContext), vscode.window.onDidChangeTextEditorSelection(updateContext),
-    vscode.workspace.onDidChangeConfiguration(updateContext)];
+    vscode.window.onDidChangeVisibleTextEditors(updateContext),
+    vscode.workspace.onDidChangeConfiguration(event => {
+      if (event.affectsConfiguration("dynare.effectiveModel.macroTint") || event.affectsConfiguration("dynare")) updateContext();
+    })];
   for (const session of previews.sessions()) attach(session);
   updateContext();
   return new vscode.Disposable(() => {
     disposed = true;
     for (const session of [...states.keys()]) detach(session);
     for (const subscription of subscriptions) subscription.dispose();
+    macroDecoration.dispose();
     updateContext();
   });
 }

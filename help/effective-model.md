@@ -12,6 +12,8 @@ Macro interpolation also expands inside quoted values. For example, a loop over 
 2. The **effective model** preview shows expanded include and macro text read-only beside it.
 3. Native preview commands refresh the text and jump back to verified written locations.
 
+Macro-expanded text has a faint background: loop and branch bodies, included text, substitutions, and a complete macro-built name such as `beta_1`. Unchanged root text stays unshaded. Nested macros use that same background. [Macro tint](settings:dynare.effectiveModel.macroTint) turns the background off. An older engine does not shade the preview. Incomplete expansion has no background.
+
 Place the cursor on written text in the preview, or select part of one written region. Go to written source opens the editor that already has that file when it is open, and moves the selection to the written range. It opens another editor only when that file is not open. A macro-built name such as `beta_1` or `beta_2` selects the complete written name `beta_@{j}`. A selection that crosses several written regions has no jump. Text with no verified written location has no source action. An older engine without source navigation still jumps from mapped model equation rows only.
 
 The commands appear in the Command Palette while a preview is active. [Editor actions](settings:dynare.editorActions) controls preview title and context menus. Default keyboard shortcuts apply only in a preview editor:

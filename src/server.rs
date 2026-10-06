@@ -1930,6 +1930,24 @@ impl Backend {
             } else {
                 json!([])
             };
+            result["macro_ranges"] = if complete {
+                if let Some(DisplayLayout::Source(preview)) = &layout {
+                    let index = LineIndex::new(effective_text);
+                    let file_cuts = inner.workspace.source_file_cuts(uri.as_str());
+                    let include_spans = inner.workspace.source_include_spans(uri.as_str());
+                    crate::source_navigation::macro_ranges_json(
+                        &preview.text,
+                        &preview.fragments,
+                        &file_cuts,
+                        &include_spans,
+                        |span| json!(span_range(&index, effective_text, span)),
+                    )
+                } else {
+                    json!([])
+                }
+            } else {
+                json!([])
+            };
         }
         if !complete {
             result["status"] = json!("incomplete");
@@ -2659,7 +2677,7 @@ pub fn initialize_result() -> InitializeResult {
                 "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true},
                 "modelInfoChanged": true,
                 "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1},
-                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true},
+                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
                 ,"projectDiagnostics": {"schema_version":project::SCHEMA_VERSION,"status_command":"dynare/projectStatus","recheck_command":"dynare/recheckProject","cancel_command":"dynare/cancelProject","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/projectStatusChanged","typing_pause_ms":250}
             }})),
