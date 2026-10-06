@@ -29,12 +29,6 @@
 - The model's steady state is straightforward for the linearized gap system, but the adaptive-learning state initialization remains deferred.
 - Runtime validation, BK checks, AL simulation checks, and IRF checks are deferred to a later implementation-validation phase.
 
-## Translation Status
-
-- English derivation drafted first at `mmb-paper-derivations/derivations/NK_LWW03AL/NK_LWW03AL_derivation.en.md`.
-- Chinese translation drafted second at `mmb-paper-derivations/derivations/NK_LWW03AL/NK_LWW03AL_derivation.zh.md`.
-- The Chinese translation preserves the eight-section order, equation numbering, paths, DOI, model ID, and status markers.
-
 ## Shared Indexes
 
 - `mmb-paper-derivations/derivations/catalog.csv` was not edited by instruction.

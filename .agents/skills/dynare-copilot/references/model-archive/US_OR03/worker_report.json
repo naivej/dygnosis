@@ -2,8 +2,7 @@
   "model_id": "US_OR03",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_OR03/US_OR03_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_OR03/US_OR03_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_OR03/US_OR03_derivation.md",
     "mmb-paper-derivations/derivations/US_OR03/source_manifest.json",
     "mmb-paper-derivations/derivations/US_OR03/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_OR03/worker_report.json"
@@ -51,11 +50,6 @@
     {
       "command": "check English derivation has all eight required sections",
       "status": "passed"
-    },
-    {
-      "command": "check English and Chinese F-number counts match",
-      "status": "passed",
-      "details": "14 unique equation numbers, F1-F14; 32 F-number references in each file."
     },
     {
       "command": "direct trailing-whitespace check over mmb-paper-derivations/derivations/US_OR03",

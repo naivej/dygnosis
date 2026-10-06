@@ -3,8 +3,7 @@
   "owned_directory": "mmb-paper-derivations/derivations/NK_BGUS10",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_BGUS10/NK_BGUS10_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_BGUS10/NK_BGUS10_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_BGUS10/NK_BGUS10_derivation.md",
     "mmb-paper-derivations/derivations/NK_BGUS10/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_BGUS10/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_BGUS10/worker_report.json"
@@ -37,9 +36,7 @@
   },
   "validation": {
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/NK_BGUS10",
-    "json_validation": "passed: python3 -m json.tool source_manifest.json and worker_report.json",
-    "eight_section_check": "passed: English and Chinese derivations contain sections 1 through 8",
-    "f_number_count_check": "passed: English and Chinese derivations each contain unique F1-F15"
+    "json_validation": "passed: python3 -m json.tool source_manifest.json and worker_report.json"
   },
   "unresolved_issues": [
     "F2 marginal-cost equation normalized from split OCR display needs PDF-level review.",

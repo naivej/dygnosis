@@ -49,8 +49,7 @@
     }
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_ST13/NK_ST13_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_ST13/NK_ST13_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_ST13/NK_ST13_derivation.md",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_ST13/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_ST13/worker_report.json"
   },
@@ -108,15 +107,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_ST13/NK_ST13_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_ST13/NK_ST13_derivation.md",
       "exists": true,
       "sha256": "6e275544f14041b8d4789a57f4e44f6f558d1ad3f05b43b65973ba2b81b466f9"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_ST13/NK_ST13_derivation.zh.md",
-      "exists": true,
-      "sha256": "731ed05d3a4f844ab480b1bbeb64cf94004ab0c258b6cd32ed2e167ed41ccd61"
     },
     {
       "role": "source_manifest",

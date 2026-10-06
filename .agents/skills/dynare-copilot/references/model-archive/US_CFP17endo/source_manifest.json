@@ -89,8 +89,7 @@
     }
   ],
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_CFP17endo/US_CFP17endo_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_CFP17endo/US_CFP17endo_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_CFP17endo/US_CFP17endo_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_CFP17endo/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_CFP17endo/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_CFP17endo/worker_report.json"

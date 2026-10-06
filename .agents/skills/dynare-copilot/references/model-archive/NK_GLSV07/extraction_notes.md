@@ -14,7 +14,6 @@
 
 - Main model extraction used the paper's Section 3 and Appendix C.
 - The operative `NK_GLSV07` archive derivation is based on the imperfectly competitive labor market reduced system because `.agents/skills/dynare-copilot/references/examples/NK_GLSV07_rep.mod` identifies `NK_GLSV07_iclm` and uses the Appendix C equations.
-- Continuous F-numbering runs from `(F1)` through `(F17)` in both English and Chinese files.
 - Formula status is `needs_review`: OCR was readable for the equations used, but no targeted raw-PDF formula comparison was performed.
 - The markup notation is a review item. The paper uses $`\mu^p`$ for the gross price markup, while nearby calibration prose refers to a markup of 0.2. The example implementation sets `my_p=1.2`. The derivation records this convention rather than silently normalizing it.
 
@@ -36,10 +35,3 @@
 - The treatment of taxes paid by rule-of-thumb households is retained at the aggregate reduced-system level. A future runnable replication should decide whether to expose `t_t^r` separately or keep the MMB aggregate rule.
 - The implementation has an additional investment identity for IRF reporting; the derivation records the market-clearing and reduced capital equations and notes the implementation identity in the variable table.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English core.
-- Section order is identical.
-- F-number parity checked by validation script.
-- File paths, model id, DOI, and status markers were preserved.

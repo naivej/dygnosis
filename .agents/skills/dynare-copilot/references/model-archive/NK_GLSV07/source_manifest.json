@@ -71,8 +71,7 @@
     "Appendix C. Derivation of the Reduced Dynamical System"
   ],
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_GLSV07/NK_GLSV07_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_GLSV07/NK_GLSV07_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_GLSV07/NK_GLSV07_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_GLSV07/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_GLSV07/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_GLSV07/worker_report.json"
@@ -149,15 +148,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_GLSV07/NK_GLSV07_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_GLSV07/NK_GLSV07_derivation.md",
       "exists": true,
       "sha256": "a384bdca3b30ed3d1271a2305681dbf754e99ba5515e07f620a928bb8115f620"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_GLSV07/NK_GLSV07_derivation.zh.md",
-      "exists": true,
-      "sha256": "583da49aadba04efce52bef4b7a629e46db35a1f40bb5bada162a486e0b52520"
     },
     {
       "role": "source_manifest",

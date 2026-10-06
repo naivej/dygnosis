@@ -50,8 +50,7 @@
     }
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_BGG99AL/NK_BGG99AL_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_BGG99AL/NK_BGG99AL_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_BGG99AL/NK_BGG99AL_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_BGG99AL/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_BGG99AL/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_BGG99AL/worker_report.json"
@@ -64,7 +63,6 @@
   "formula_quality": {
     "overall_status": "needs_review",
     "ocr_quality": "usable_with_uncertain_timing_and_variant_mapping",
-    "equation_numbering": "F1-F44 continuous in English and Chinese",
     "known_uncertain_equations": [
       "F16 net-worth denominator timing should be source-checked against the PDF before implementation.",
       "F44 investment-delay equation is included as an AL variant candidate, not a confirmed replacement for F29."
@@ -123,15 +121,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_BGG99AL/NK_BGG99AL_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_BGG99AL/NK_BGG99AL_derivation.md",
       "exists": true,
       "sha256": "f9594f32edbe84731a105de3ed8b381420863e03bda83700d3ad52360ca84bc9"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_BGG99AL/NK_BGG99AL_derivation.zh.md",
-      "exists": true,
-      "sha256": "99e1cdb26c74f5113d2f3214b3f295305dcdf9b9c32e0b10a5f1758ef0cd79a0"
     },
     {
       "role": "source_manifest",

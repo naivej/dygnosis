@@ -27,7 +27,7 @@
     "primary_full_md": {
       "path": "raw/mmb_mineru/runs/us_dngs15_us_dngs15_sw_us_dngs15_swsp_us_dngs15__infation_in_the_great_recession_and_new_keynesian_models__c8e184ab/full.md",
       "sha256": "bfd43e66408395b5765a1d965343d9e09538ea7487844be973a375275f3b07f0",
-      "title_sniff": "# Inflation in the Great Recession and New Keynesian Models\u2020",
+      "title_sniff": "# Inflation in the Great Recession and New Keynesian Models†",
       "formula_regions_used": [
         "Section I.A equations (1)-(21)",
         "Section I.B equations (22)-(27) inspected for fundamental inflation but not included as core equilibrium equations",
@@ -56,8 +56,7 @@
     "run_id": "c8e184ab-3624-4257-9ea5-7ec1cf904fbb"
   },
   "outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_DNGS15/US_DNGS15_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_DNGS15/US_DNGS15_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_DNGS15/US_DNGS15_derivation.md",
     "extraction_notes": "mmb-paper-derivations/derivations/US_DNGS15/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_DNGS15/worker_report.json"
   },

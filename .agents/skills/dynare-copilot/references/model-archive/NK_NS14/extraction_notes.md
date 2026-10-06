@@ -32,8 +32,3 @@
 - The derivation does not reproduce the incomplete-markets extension because the MMB implementation uses complete-markets Backus-Smith risk sharing.
 - The derivation does not reproduce every policy experiment in Tables 6-9; it extracts the model equations needed for the MMB linear implementation.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English artifact.
-- F-number counts match: 26 in English and 26 in Chinese.

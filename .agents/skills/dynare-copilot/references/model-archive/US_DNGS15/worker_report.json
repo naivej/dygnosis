@@ -1,8 +1,7 @@
 {
   "model_id": "US_DNGS15",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_DNGS15/US_DNGS15_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_DNGS15/US_DNGS15_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_DNGS15/US_DNGS15_derivation.md",
     "mmb-paper-derivations/derivations/US_DNGS15/source_manifest.json",
     "mmb-paper-derivations/derivations/US_DNGS15/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_DNGS15/worker_report.json"

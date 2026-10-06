@@ -2,8 +2,7 @@
   "model_id": "US_IR11",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_IR11/US_IR11_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_IR11/US_IR11_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_IR11/US_IR11_derivation.md",
     "mmb-paper-derivations/derivations/US_IR11/source_manifest.json",
     "mmb-paper-derivations/derivations/US_IR11/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_IR11/worker_report.json"

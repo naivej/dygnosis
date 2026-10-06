@@ -2,8 +2,7 @@
   "model_id": "EAUS_NAWM08",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EAUS_NAWM08/EAUS_NAWM08_derivation.en.md",
-    "mmb-paper-derivations/derivations/EAUS_NAWM08/EAUS_NAWM08_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EAUS_NAWM08/EAUS_NAWM08_derivation.md",
     "mmb-paper-derivations/derivations/EAUS_NAWM08/source_manifest.json",
     "mmb-paper-derivations/derivations/EAUS_NAWM08/extraction_notes.md",
     "mmb-paper-derivations/derivations/EAUS_NAWM08/worker_report.json"
@@ -52,9 +51,8 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number counts match",
       "status": "passed",
-      "details": "English F references: 94; Chinese F references: 94; unique F numbers in each: 39."
+      "details": "English F references: 94; unique F numbers in each: 39."
     }
   ],
   "unresolved_issues": [

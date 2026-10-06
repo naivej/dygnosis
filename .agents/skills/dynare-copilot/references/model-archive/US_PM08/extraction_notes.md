@@ -32,8 +32,3 @@
 - Confirm whether the `US_PM08` and `US_PM08fl` entries should differ only by financial-real linkage terms or by additional stationary implementation conventions.
 - Dynare runtime validation was not performed by instruction.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English draft.
-- Equation numbers `(F1)` through `(F21)` are preserved in both files.

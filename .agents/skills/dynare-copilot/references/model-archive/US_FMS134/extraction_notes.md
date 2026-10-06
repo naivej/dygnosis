@@ -36,7 +36,3 @@
 - Runtime validation, BK checks, residual checks, and IRF validation are deferred.
 - Shared `catalog.csv` and `status.csv` were not edited by user request.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English version with matching section structure and `(F#)` numbering.

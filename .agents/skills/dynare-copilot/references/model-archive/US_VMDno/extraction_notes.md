@@ -30,7 +30,3 @@
 - Complete the steady-state solution from the source-side appendix or the MMB steady-state data file before marking anything beyond first-pass.
 - Runtime validation was not performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation is a translation of the English artifact and preserves the same eight section headings and `(F#)` numbering.

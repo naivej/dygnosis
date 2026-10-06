@@ -12,7 +12,6 @@
 ## Extraction Scope
 
 - English derivation was drafted first using the required eight-section structure.
-- Chinese derivation is a direct translation of the English core and preserves `(F#)` numbering, file paths, DOI values, model ID, and `needs_review` markers.
 - The paper is a cross-model policy-rule evaluation article. It summarizes FRB-US qualitatively and prints the policy-rule/loss-function equations, but it does not print the full FRB-US structural equation system.
 - The `.mod` file `.agents/skills/dynare-copilot/references/examples/US_FRB03_rep.mod` was read only as `implementation_cross_check`.
 
@@ -40,8 +39,3 @@
 - Check stock timing, expectation auxiliaries, and internal sector equations against FRB-US documentation rather than deriving them from the `.mod` alone.
 - Runtime validation, residual checks, BK checks, IRF checks, and promotion to the runnable skill archive were not performed.
 
-## Translation Status
-
-- English derivation completed first.
-- Chinese translation completed second.
-- English and Chinese `(F#)` counts match in validation.

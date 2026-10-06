@@ -28,7 +28,3 @@
 - The published PDF or original author code should be used for a source-level formula audit before changing status away from `needs_review`.
 - Runtime validation, determinacy checks, and IRF comparison are explicitly deferred.
 
-## Translation Status
-
-- `CA_LS07_derivation.zh.md` is a translation of the checked English first-pass file.
-- Equation numbers and formulas were preserved across English and Chinese versions.

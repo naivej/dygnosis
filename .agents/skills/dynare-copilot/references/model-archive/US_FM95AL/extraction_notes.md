@@ -26,8 +26,3 @@
 - Future validation phase should run Dynare only if assigned separately.
 - Future source audit may compare a few formulas against the PDF images, although Markdown quality was adequate for first-pass extraction.
 
-## Translation Status
-
-- English derivation written first.
-- Chinese derivation translated from the English core with equation numbering preserved.
-- English and Chinese F-number counts were checked.

@@ -2,8 +2,7 @@
   "model_id": "US_VGMP15",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_VGMP15/US_VGMP15_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_VGMP15/US_VGMP15_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_VGMP15/US_VGMP15_derivation.md",
     "mmb-paper-derivations/derivations/US_VGMP15/source_manifest.json",
     "mmb-paper-derivations/derivations/US_VGMP15/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_VGMP15/worker_report.json"
@@ -50,11 +49,6 @@
     {
       "command": "check English derivation has all eight required sections",
       "status": "passed"
-    },
-    {
-      "command": "check English and Chinese F-number counts match",
-      "status": "passed",
-      "details": "101 total F-number references in each file; 23 unique equation numbers, F1-F23"
     }
   ],
   "unresolved_issues": [

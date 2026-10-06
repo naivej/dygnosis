@@ -33,8 +33,3 @@
 - Confirm exact equation mapping from the corrected paper to the six-region `.mod`.
 - Runtime validation was not performed.
 
-## Translation Status
-
-- English derivation written first.
-- Chinese derivation translated second from the English core.
-- Both files preserve the same eight-section structure and (F1)-(F16) numbering.

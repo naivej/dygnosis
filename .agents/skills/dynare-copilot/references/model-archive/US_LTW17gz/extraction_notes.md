@@ -39,8 +39,3 @@ Confirmed cross-check points:
 - The steady-state solution is summarized from the paper calibration and implementation cross-check; it remains `needs_review` until checked against paper-side replication documentation.
 - Shared `catalog.csv` and `status.csv` were not edited per task ownership limits. Proposed row values are stored in `worker_report.json` and `source_manifest.json`.
 
-## Translation Status
-
-- English derivation was written first.
-- Chinese derivation was translated from the English version second.
-- Equation numbers `(F1)` through `(F34)`, file paths, model id, DOI, and status markers were preserved.

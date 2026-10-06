@@ -54,8 +54,7 @@
     ]
   },
   "outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_FM95AL/US_FM95AL_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_FM95AL/US_FM95AL_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_FM95AL/US_FM95AL_derivation.md",
     "extraction_notes": "mmb-paper-derivations/derivations/US_FM95AL/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_FM95AL/worker_report.json"
   },

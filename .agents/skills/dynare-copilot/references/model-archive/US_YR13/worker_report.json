@@ -2,8 +2,7 @@
   "model_id": "US_YR13",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_YR13/US_YR13_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_YR13/US_YR13_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_YR13/US_YR13_derivation.md",
     "mmb-paper-derivations/derivations/US_YR13/source_manifest.json",
     "mmb-paper-derivations/derivations/US_YR13/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_YR13/worker_report.json"
@@ -53,9 +52,8 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number counts match",
       "status": "passed",
-      "details": "English count 87, Chinese count 87; 35 unique equation labels."
+      "details": "35 unique equation labels."
     }
   ],
   "unresolved_issues": [

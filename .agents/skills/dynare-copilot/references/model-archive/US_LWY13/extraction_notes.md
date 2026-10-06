@@ -33,8 +33,3 @@
 - Confirm whether the model archive should privilege the analytical paper model, the quantitative NK application, or both as separate variants in future review.
 - Runtime validation, BK checks, and IRF checks are deferred.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation is a direct translation of the English draft.
-- Equation numbers `(F1)` through `(F35)` are preserved in both versions.

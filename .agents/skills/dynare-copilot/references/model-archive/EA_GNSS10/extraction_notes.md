@@ -35,8 +35,3 @@
 - Verify whether the bank-capital shock is best represented as a liability shock, a bank equity destruction shock, or both in future task packets.
 - Runtime validation was intentionally not performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English core.
-- Equation numbering `(F1)` through `(F27)` is preserved in both files.

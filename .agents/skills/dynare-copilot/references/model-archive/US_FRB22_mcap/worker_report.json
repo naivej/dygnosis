@@ -2,8 +2,7 @@
   "model_id": "US_FRB22_mcap",
   "status": "needs_review",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_FRB22_mcap/US_FRB22_mcap_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_FRB22_mcap/US_FRB22_mcap_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_FRB22_mcap/US_FRB22_mcap_derivation.md",
     "mmb-paper-derivations/derivations/US_FRB22_mcap/source_manifest.json",
     "mmb-paper-derivations/derivations/US_FRB22_mcap/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_FRB22_mcap/worker_report.json"
@@ -39,8 +38,7 @@
     "commands_to_run": [
       "git diff --check",
       "python3 -m json.tool mmb-paper-derivations/derivations/US_FRB22_mcap/source_manifest.json >/dev/null",
-      "python3 - <<'PY' ... archive_entry_checks_ok ... PY",
-      "python3 - <<'PY' ... compare English and Chinese F-number counts ... PY"
+      "python3 - <<'PY' ... archive_entry_checks_ok ... PY"
     ]
   },
   "unresolved_issues": [

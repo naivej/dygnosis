@@ -29,7 +29,3 @@
 - Decide whether implementation shocks to monitoring cost and idiosyncratic-risk dispersion should be documented as benchmark paper-side shocks or MMB implementation extensions.
 - Runtime validation, Dynare equation count, steady-state residuals, BK checks, and IRF checks were not performed.
 
-## Translation Status
-
-- `NK_DT12_derivation.zh.md` is a translation of the English draft.
-- Equation numbers `(F1)` through `(F35)` and LaTeX formulas were preserved.

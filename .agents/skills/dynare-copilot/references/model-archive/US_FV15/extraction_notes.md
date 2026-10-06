@@ -11,7 +11,6 @@
 ## Extraction Scope
 
 - English derivation was drafted first using the required eight-section structure.
-- Chinese derivation is a direct translation of the English core and preserves `(F#)` numbering, file paths, DOI values, model ID, and `needs_review` markers.
 - The paper-side Markdown gives the main model blocks in sections 5.1-5.4 but says the full stationary equilibrium is characterized in appendix 3. That appendix was not available as a local normalization file.
 - The `.mod` file `.agents/skills/dynare-copilot/references/examples/US_FV15_rep.mod` was read only as `implementation_cross_check`.
 
@@ -38,8 +37,3 @@
 - The paper's estimation uses second-order approximation, while the Rep-MMB `.mod` is a first-order implementation. Runtime and approximation-order implications are deferred to a later validation phase.
 - Runtime validation, residual checks, BK checks, IRF checks, and promotion to the runnable skill archive were not performed.
 
-## Translation Status
-
-- English derivation completed first.
-- Chinese translation completed second.
-- English and Chinese `(F#)` counts match in validation.

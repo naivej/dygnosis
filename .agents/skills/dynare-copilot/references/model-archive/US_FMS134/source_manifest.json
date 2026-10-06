@@ -56,15 +56,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/US_FMS134/US_FMS134_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/US_FMS134/US_FMS134_derivation.md",
       "exists": true,
       "sha256": "862233d46fbc7f45091ccf86c5b9bf96a0201f74bb612106e3b67df51a264fb8"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/US_FMS134/US_FMS134_derivation.zh.md",
-      "exists": true,
-      "sha256": "7ccfba627c1be03e71221c8702eba0f671b9822af85d0f177bd8a8057b5a8bcc"
     },
     {
       "role": "source_manifest",

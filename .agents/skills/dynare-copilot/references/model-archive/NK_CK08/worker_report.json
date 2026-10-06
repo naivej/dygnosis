@@ -3,8 +3,7 @@
   "owned_directory": "mmb-paper-derivations/derivations/NK_CK08",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_CK08/NK_CK08_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_CK08/NK_CK08_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_CK08/NK_CK08_derivation.md",
     "mmb-paper-derivations/derivations/NK_CK08/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_CK08/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_CK08/worker_report.json"
@@ -42,8 +41,7 @@
     "json_validation_source_manifest": "passed",
     "json_validation_worker_report": "passed",
     "eight_section_check_en": "passed",
-    "eight_section_check_zh": "passed",
-    "f_number_count_match": "passed: English and Chinese both contain unique F1-F26"
+    "eight_section_check_zh": "passed"
   },
   "unresolved_issues": [
     "Equations (F8)-(F11) are long OCR-sensitive wage-surplus recursions and need targeted PDF review.",

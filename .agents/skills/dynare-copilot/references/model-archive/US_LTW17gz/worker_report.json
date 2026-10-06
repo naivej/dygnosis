@@ -2,8 +2,7 @@
   "model_id": "US_LTW17gz",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_LTW17gz/US_LTW17gz_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_LTW17gz/US_LTW17gz_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_LTW17gz/US_LTW17gz_derivation.md",
     "mmb-paper-derivations/derivations/US_LTW17gz/source_manifest.json",
     "mmb-paper-derivations/derivations/US_LTW17gz/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_LTW17gz/worker_report.json"
@@ -43,8 +42,7 @@
   "validation": {
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/US_LTW17gz",
     "json_tool_source_manifest": "passed: python3 -m json.tool mmb-paper-derivations/derivations/US_LTW17gz/source_manifest.json",
-    "eight_sections_english": "passed: English derivation contains sections 1 through 8",
-    "f_number_count_match": "passed: English and Chinese each contain 34 unique F-numbers, F1 through F34"
+    "eight_sections_english": "passed: English derivation contains sections 1 through 8"
   },
   "unresolved_issues": [
     "Paper Markdown OCR damage in wage indexation and government budget identity.",

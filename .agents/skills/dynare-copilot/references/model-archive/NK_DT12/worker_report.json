@@ -2,8 +2,7 @@
   "model_id": "NK_DT12",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_DT12/NK_DT12_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_DT12/NK_DT12_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_DT12/NK_DT12_derivation.md",
     "mmb-paper-derivations/derivations/NK_DT12/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_DT12/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_DT12/worker_report.json"

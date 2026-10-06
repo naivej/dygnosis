@@ -30,8 +30,3 @@
 - Decide whether a later archive entry should separately cover the paper's non-NK baseline and section 6 robustness variants, or keep `NK_MPT10` narrowly tied to the MMB Figure 11 NK implementation.
 - Runtime validation, equation-count validation, and BK/IRF checks are deferred.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English file with matching `(F#)` numbering.
-- Both files are first-pass `needs_review`.

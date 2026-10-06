@@ -2,8 +2,7 @@
   "model_id": "US_ACELt",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_ACELt/US_ACELt_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_ACELt/US_ACELt_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_ACELt/US_ACELt_derivation.md",
     "mmb-paper-derivations/derivations/US_ACELt/source_manifest.json",
     "mmb-paper-derivations/derivations/US_ACELt/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_ACELt/worker_report.json"
@@ -53,9 +52,8 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number counts match",
       "status": "passed",
-      "details": "English count 111, Chinese count 111; 29 unique equation labels in each."
+      "details": "29 unique equation labels in each."
     }
   ],
   "unresolved_issues": [

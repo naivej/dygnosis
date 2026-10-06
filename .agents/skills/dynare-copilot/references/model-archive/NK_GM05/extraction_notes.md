@@ -25,7 +25,3 @@
 - The first-pass derivation keeps both paper-side policy alternatives and the active MMB DIT implementation distinction. Future review should decide whether to split policy regimes into separate variant entries for `NK_GM05`, `NK_GM05cpi`, and `NK_GM05ppi` if the archive later needs implementation-specific folders.
 - A targeted PDF check is recommended before marking this entry reviewed, especially for Appendix B price-setting algebra and Appendix A steady-state uniqueness.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English derivation with the same eight section headings and matching equation numbers `(F1)` through `(F32)`.

@@ -3,8 +3,7 @@
   "status": "needs_review",
   "owned_directory": "mmb-paper-derivations/derivations/NK_GMAS25cpi/",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_GMAS25cpi/NK_GMAS25cpi_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_GMAS25cpi/NK_GMAS25cpi_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_GMAS25cpi/NK_GMAS25cpi_derivation.md",
     "mmb-paper-derivations/derivations/NK_GMAS25cpi/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_GMAS25cpi/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_GMAS25cpi/worker_report.json"
@@ -51,9 +50,7 @@
   },
   "validation": {
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/NK_GMAS25cpi returned clean; additional no-index whitespace check over new untracked files produced no warnings",
-    "json_validation": "passed: source_manifest.json and worker_report.json parsed with python3 -m json.tool",
-    "eight_section_check": "passed: English and Chinese files contain sections 1 through 8",
-    "f_number_count_check": "passed: English and Chinese both have 83 total F-label references, 23 unique labels, continuous F1-F23, and identical F-label sequences"
+    "json_validation": "passed: source_manifest.json and worker_report.json parsed with python3 -m json.tool"
   },
   "unresolved_issues": [
     "Coefficient definitions for Omega, Theta, and OCR-rendered appendix formulas should be checked against the PDF before reviewed status.",

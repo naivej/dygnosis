@@ -2,8 +2,7 @@
   "model_id": "HK_FPP11",
   "owned_scope": "mmb-paper-derivations/derivations/HK_FPP11/",
   "changed_files": [
-    "mmb-paper-derivations/derivations/HK_FPP11/HK_FPP11_derivation.en.md",
-    "mmb-paper-derivations/derivations/HK_FPP11/HK_FPP11_derivation.zh.md",
+    "mmb-paper-derivations/derivations/HK_FPP11/HK_FPP11_derivation.md",
     "mmb-paper-derivations/derivations/HK_FPP11/source_manifest.json",
     "mmb-paper-derivations/derivations/HK_FPP11/extraction_notes.md",
     "mmb-paper-derivations/derivations/HK_FPP11/worker_report.json"
@@ -41,8 +40,7 @@
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/HK_FPP11",
     "json_tool_source_manifest": "passed: python3 -m json.tool source_manifest.json",
     "json_tool_worker_report": "passed: python3 -m json.tool worker_report.json",
-    "eight_section_check": "passed: English file contains ## 1. through ## 8.",
-    "f_number_count_check": "passed: English and Chinese equation labels match exactly, F1-F20"
+    "eight_section_check": "passed: English file contains ## 1. through ## 8."
   },
   "unresolved_issues": [
     "Composite coefficient definitions in the OCR Markdown require targeted source-level review.",

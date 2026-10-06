@@ -48,8 +48,7 @@
     }
   },
   "outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/RBC_DTT11/RBC_DTT11_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/RBC_DTT11/RBC_DTT11_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/RBC_DTT11/RBC_DTT11_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/RBC_DTT11/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/RBC_DTT11/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/RBC_DTT11/worker_report.json"
@@ -132,15 +131,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/RBC_DTT11/RBC_DTT11_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/RBC_DTT11/RBC_DTT11_derivation.md",
       "exists": true,
       "sha256": "95e52f6d9de923620b71fbf4554438404acaca0813ff44b9e97101267ce69012"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/RBC_DTT11/RBC_DTT11_derivation.zh.md",
-      "exists": true,
-      "sha256": "78a140cb44fd36dda0effcf28b899a414ec5be0d174552aa309ae0964a675519"
     },
     {
       "role": "source_manifest",

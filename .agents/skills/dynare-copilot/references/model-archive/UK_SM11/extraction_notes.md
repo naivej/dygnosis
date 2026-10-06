@@ -33,8 +33,3 @@
 - The paper text says utilities producers can optimally change price with probability `\chi_u`, but the NKPC and implementation use `\chi_u` as the non-reoptimization/stickiness parameter. This convention should be reviewed against the PDF/appendix.
 - The exact mapping between `\varepsilon_p`, `\xi_p`, and `\iota_pm` indexation/pass-through notation should be reviewed before any promotion to a runnable archive.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation created as a formula-preserving translation.
-- F-number count is intended to match exactly between English and Chinese.

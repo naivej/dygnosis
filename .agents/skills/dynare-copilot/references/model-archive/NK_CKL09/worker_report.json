@@ -1,8 +1,7 @@
 {
   "model_id": "NK_CKL09",
   "owned_paths": [
-    "mmb-paper-derivations/derivations/NK_CKL09/NK_CKL09_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_CKL09/NK_CKL09_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_CKL09/NK_CKL09_derivation.md",
     "mmb-paper-derivations/derivations/NK_CKL09/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_CKL09/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_CKL09/worker_report.json"

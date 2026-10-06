@@ -2,8 +2,7 @@
   "model_id": "ESREA_FIMOD12",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/ESREA_FIMOD12/ESREA_FIMOD12_derivation.en.md",
-    "mmb-paper-derivations/derivations/ESREA_FIMOD12/ESREA_FIMOD12_derivation.zh.md",
+    "mmb-paper-derivations/derivations/ESREA_FIMOD12/ESREA_FIMOD12_derivation.md",
     "mmb-paper-derivations/derivations/ESREA_FIMOD12/source_manifest.json",
     "mmb-paper-derivations/derivations/ESREA_FIMOD12/extraction_notes.md",
     "mmb-paper-derivations/derivations/ESREA_FIMOD12/worker_report.json"
@@ -19,7 +18,7 @@
     "KeyFeatures": "two-country monetary union; optimizing and rule-of-thumb households; public purchases, public investment, public wages and public employment; search and matching; Calvo prices and wages; public debt rules; union Taylor rule; international bonds with risk premium",
     "DateAdded": "2026-06-17",
     "SourceFullMD": "raw/mmb_mineru/runs/esrea_fimod12__fimod_a_dsge_model_for_fiscal_policy_simulations__962e806e/full.md",
-    "RawPDF": "raw/mmb_papers/FiMod\u2014A DSGE model for fiscal policy simulations.pdf",
+    "RawPDF": "raw/mmb_papers/FiMod—A DSGE model for fiscal policy simulations.pdf",
     "DOI": "10.1016/j.econmod.2011.10.001",
     "Status": "needs_review"
   },
@@ -27,7 +26,7 @@
     "model_id": "ESREA_FIMOD12",
     "paper_title": "FiMod--A DSGE model for fiscal policy simulations",
     "source_full_md": "raw/mmb_mineru/runs/esrea_fimod12__fimod_a_dsge_model_for_fiscal_policy_simulations__962e806e/full.md",
-    "raw_pdf_path": "raw/mmb_papers/FiMod\u2014A DSGE model for fiscal policy simulations.pdf",
+    "raw_pdf_path": "raw/mmb_papers/FiMod—A DSGE model for fiscal policy simulations.pdf",
     "status": "needs_review",
     "formula_quality": "needs_review",
     "steady_state_quality": "calibration_targets_recorded; complete_closed_form_not_reconstructed",
@@ -52,9 +51,8 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number counts match",
       "status": "passed",
-      "details": "English F references: 105; Chinese F references: 105; unique F numbers in each: 41."
+      "details": "English F references: 105; unique F numbers in each: 41."
     }
   ],
   "unresolved_issues": [

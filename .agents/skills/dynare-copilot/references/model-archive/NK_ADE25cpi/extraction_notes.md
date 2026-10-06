@@ -28,8 +28,3 @@
 - `needs_review`: Exact steady-state numbers were not recomputed and not validated against Dynare output.
 - Runtime validation was not performed. No `resid`, `steady`, `check`, `stoch_simul`, or optimal-control run was executed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English derivation.
-- The eight required sections and `(F#)` equation numbering are preserved across both files.

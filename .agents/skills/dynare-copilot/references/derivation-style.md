@@ -1,121 +1,153 @@
-# 推导文件写作规范（derivation.md 的格式标准）
+# Derivation note style
 
-> **何时读**：执行阶段1、生成 `<模型名>_derivation.md` 时。本文件规定推导文件的固定结构、
-> LaTeX 公式书写规则、编号与符号约定，确保每次产出格式统一、公式正确、可读、可与 .mod 对照。
->
-> **配套文件**：本文件只管**格式**；各主体（家庭/厂商/政府央行/市场出清）**最优化问题怎么设、
-> FOC 怎么推、有哪些会改方程结构的变体**——即填进下文第2/3/4节的**实质内容逻辑**——见
-> `references/modeling-blocks.md`，建模时两者配套使用。
+Read this when you write `<model>_derivation.md` in Stage 1 (derivation note). This file fixes the
+structure, the LaTeX rules, the numbering and the symbol conventions, so that each note has the same
+form, correct formulas, and a one-to-one match with the `.mod`.
 
-## 总原则
+This file covers form only. For the content of sections 2 to 4 (how to set up each agent's problem
+(households, firms, government and central bank, market clearing), how to derive the first-order
+conditions, and which variants change the equation structure), see modeling-blocks.md. Use the two
+files together.
 
-- 推导文件是**给人读、供用户审阅**的数学文档，不是代码——用规范 LaTeX 写公式，不用 Dynare 语法。
-- 一条 FOC = 一个编号 = 后续 .mod 里的一条方程，三者一一对应（用 `[name=]` 回指编号）。
-- 用 §0 选定语言叙述 + LaTeX 公式；术语首次出现建议附英文（如 Euler equation / 欧拉方程 / オイラー方程式）。
+## Principles
 
-## 固定结构（八节，顺序与标题照用）
+- The derivation note is a mathematical document for a human reader, who can review it. It is not
+  code: write formulas in standard LaTeX, not in Dynare syntax.
+- One first-order condition = one number = one equation in the `.mod`. The `.mod` equation refers back
+  to the number with `[name='...']`.
+- Prose and headings follow the user's language (R1). Keep the section numbers and their order. When the
+  prose is not English, give the English term at its first use, for example "Euler equation".
+- Formulas use LaTeX symbols ($`\beta`$, $`C_t`$). The variable and parameter table (section 8) uses the
+  model's ASCII names, the names that the `.mod` declares.
 
-> **[LANG] 适配**：下方模板以中文为例。§0 选定 English 时八节标题改为：
-> 1. Model Overview / 2. Optimization Problems / 3. First-Order Conditions /
-> 4. Market Clearing & Identities / 5. Exogenous Processes / 6. Steady-State Solution /
-> 7. Timing & Form Conventions / 8. Variable & Parameter Reference Table
-> 选 Japanese 时同理翻译；**叙述正文与标题一律用 §0 选定语言**。
+## Fixed structure (eight sections; keep the order and the headings)
+
+Translate the headings when the prose is not English.
 
 ```markdown
-# <模型名> —— 推导（最优化问题 + 一阶条件）
+# <Model name>: derivation (optimization problems and first-order conditions)
 
-> 一句话说明：本推导用于据此编写 Dynare .mod；确认后再进入写代码阶段。
+> This note is the blueprint for the Dynare file `<model>.mod`.
 
-## 1. 模型概述
-- 模型：<名称>，来源 <文献/教科书章节>。
-- 实验：<随机模拟 / 完全预见 / 估计 / 最优政策>，给哪些冲击、看什么。
-- 主体：<家庭/厂商/央行/政府/银行…>，各一句话职能。
-- 形式：<非线性（默认）/ 线性化 model(linear)>，并说明为何（一般默认非线性）。
+## 1. Model overview
+- Model: <name>, source <paper / textbook chapter>.
+- Experiment: <stochastic simulation / perfect foresight / estimation / optimal policy>; which shocks; what to look at.
+- Agents: <households / firms / central bank / government / banks ...>, one sentence each on their role.
+- Form: <nonlinear (default) / linearized model(linear)>, and why (normally nonlinear by default, R8).
 
-## 2. 主体的最优化问题
-（逐主体一小节：目标函数 + 约束，均用块级公式）
-> 只写**会优化**的主体（家庭、厂商等）。不优化的主体——外生政府支出、机械的央行规则、
-> 纯预算恒等式（如一次总付税 $`T_t=G_t`$）——不进第2/3节：其关系按性质归入第4节（恒等式/市场出清）
-> 或第5节（外生过程）。这样第3节的 FOC 编号才与"由 FOC 定的内生变量"严格一一对应，便于 R4 核对。
+## 2. Optimization problems
+(One subsection per agent: objective and constraints, all as display math.)
+> Only agents that optimize (households, firms, ...). Agents that do not optimize (exogenous government
+> spending, a mechanical central-bank rule, a pure budget identity such as lump-sum taxes $`T_t=G_t`$) do
+> not go in sections 2 and 3: put each such relation in section 4 (identities, market clearing) or in
+> section 5 (exogenous processes). Then the FOC numbers of section 3 map one-to-one to the endogenous
+> variables they determine, which makes the R4 check easy.
 
-## 3. 一阶条件（FOC）
-（逐主体推导，每条 FOC 编号 (F1)(F2)…，右侧可注一句经济含义）
+## 3. First-order conditions (FOC)
+(Per agent; number each condition (F1), (F2), ...; one phrase of economic meaning may follow.)
 
-## 4. 市场出清与总量恒等式
-（资源约束、要素市场出清、异质主体加总；继续编号）
+## 4. Market clearing and aggregate identities
+(Resource constraint, factor-market clearing, aggregation of heterogeneous agents; continue the numbering.
+Mark the equation that Walras's law makes redundant.)
 
-## 5. 外生过程
-（各 AR/冲击过程，继续编号）
+## 5. Exogenous processes
+(Each AR process or shock; continue the numbering.)
 
-## 6. 稳态求解（写到能直接照抄进 steady_state_model）
-- 列**稳态方程组**：把第3–5节的 FOC 取掉时间下标（$`X_{t}=X_{t+1}=\bar X`$）后的稳态版本。
-- 给**解析解或反解步骤**，按"可自上而下逐个求值"的顺序排列（与 steady_state_model 一致）：
-  先令外生稳态值（如 $`\bar A=1`$、冲击均值为 0），再逐个解出内生稳态量；
-  **校准目标用反解**：若校准 $`\bar N=1/3`$ 等目标量，则把对应参数（如 $`\psi`$）当未知反解出来。
-- 线性化模型：注明稳态全为 0（无需逐式求解）。
-- 每个稳态量标出**求解先后次序**，确保后用到的量已先算出（steady_state_model 自上而下求值）。
+## 6. Steady-state solution (ready to copy into steady_state_model)
+- List the **steady-state system**: the conditions of sections 3 to 5 without time subscripts
+  ($`X_{t}=X_{t+1}=\bar X`$).
+- Give the **closed-form solution or the reverse-solve steps**, in an order that evaluates from top to
+  bottom (the same order as steady_state_model): first the exogenous steady-state values (such as
+  $`\bar A=1`$, shock means 0), then each endogenous steady-state value in turn.
+  **Reverse-solve calibration targets**: if you calibrate a target such as $`\bar N=1/3`$, treat the
+  matching parameter (such as $`\psi`$) as an unknown and solve for it.
+- Linearized model: state that the steady state is zero (no step-by-step solution needed).
+- Mark the **solution order** of each steady-state value, so that every value is computed before it is
+  used (steady_state_model evaluates from top to bottom).
 
-## 7. 时序与形式约定
-（期末/期初存量、是否取对数、非线性/线性化）
+## 7. Timing and form conventions
+(Stock at the end or at the beginning of the period, logs or levels, nonlinear or linearized.)
 
-## 8. 变量与参数对照表
-（三张清单 + 每个内生变量对应哪条 FOC；预告阶段2）
+## 8. Variable and parameter table
+(Three lists, with the equation that determines each endogenous variable; preview of Stage 2.)
 ```
 
-## LaTeX 公式书写规则
+## LaTeX rules
 
-- **块级公式**用 GitHub 支持的 fenced `math` code block；**行内公式**用 GitHub 支持的 backtick-protected inline math，即 dollar + backtick 开头、backtick + dollar 结尾。不要使用 LaTeX display delimiters，GitHub Markdown 不把它们当数学分隔符。
-- **最优化问题**统一写法：
+- **Display formulas** use the fenced `math` code block that GitHub supports. **Inline formulas** use the
+  backtick-protected inline math that GitHub supports: dollar and backtick to open, backtick and dollar
+  to close. Do not use LaTeX display delimiters such as `\[ ... \]`: GitHub Markdown does not treat them
+  as math delimiters.
+- **Optimization problems** use one form:
   ````markdown
   ```math
   \max_{\{C_t,N_t,B_t\}} \; E_0\sum_{t=0}^{\infty}\beta^t\, U(C_t,N_t)
   \quad\text{s.t.}\quad P_tC_t + Q_tB_t \le B_{t-1} + W_tN_t + \Pi_t
   ```
   ````
-  目标函数与约束写在一起，约束用 `\quad\text{s.t.}\quad`；多条约束分行或编号。
-- **期望算子** `E_t`（信息集在 t）；**贴现因子** `\beta`；**求和** `\sum_{t=0}^{\infty}`。
-- **时间下标**：当期 `_t`、超前 `_{t+1}`、滞后 `_{t-1}`；与 Dynare 的 `(+1)/(-1)` 对应但**这里
-  用数学下标**，不要在推导里写 Dynare 语法。
-- **常用希腊字母**：`\beta \sigma \varphi \kappa \theta \phi \rho \alpha \delta \lambda`
-  （注意推导里可用 `\alpha\beta`，到 .mod 才改成 `alppha/betta` 避命名冲突，R5）。
-- **稳态值**用上标星或去时间下标：`C^\*` 或 `\bar{C}`，全文统一一种。
-- **对数偏离**（线性化模型）用小写帽子：`\hat{x}_t`，并在第6节声明定义 `\hat{x}_t=\log(X_t/\bar X)`。
-- 分式 `\frac{}{}`、指数 `^{}`、期望内乘积加括号 `E_t\big[\cdot\big]`；长式用 `\big( \big)` 配平。
+  Write the objective and the constraints together, the constraints after `\quad\text{s.t.}\quad`.
+  Several constraints go on separate lines or get numbers.
+- **Expectation operator** `E_t` (information set at t); **discount factor** `\beta`; **sum**
+  `\sum_{t=0}^{\infty}`.
+- **Time subscripts**: current `_t`, lead `_{t+1}`, lag `_{t-1}`. They correspond to Dynare's `(+1)` and
+  `(-1)`, but the note uses mathematical subscripts. Do not write Dynare syntax in the note.
+- **Common Greek letters**: `\beta \sigma \varphi \kappa \theta \phi \rho \alpha \delta \lambda`. The note
+  can use `\alpha` and `\beta`; only the `.mod` renames them (`alppha`, `betta`) to avoid name clashes
+  (R5). The section 8 table records each mapping.
+- **Steady-state values**: a superscript star or no time subscript, `C^*` or `\bar{C}`. Use one notation
+  in the whole note.
+- **Log deviations** (linearized models): a lowercase hat, `\hat{x}_t`, with its definition stated in
+  section 6: `\hat{x}_t=\log(X_t/\bar X)`.
+- Fractions `\frac{}{}`, exponents `^{}`, brackets around products inside an expectation
+  `E_t\big[\cdot\big]`; balance long expressions with `\big( \big)`.
 
-## FOC 编号与经济含义
+## FOC numbering and economic meaning
 
-- 每条均衡条件给唯一编号 (F1)(F2)…，**贯穿第3–5节连续编号**（市场出清、外生过程也算）。
-- 编号紧跟公式，例如：
+- Give each equilibrium condition a unique number (F1), (F2), ..., **continuous across sections 3 to 5**
+  (market clearing and exogenous processes count too).
+- Put the number right next to the formula, for example:
   ````markdown
-  - **(F1) 欧拉方程**（消费跨期选择）：
+  - **(F1) Euler equation** (intertemporal consumption choice):
   ```math
   C_t^{-\sigma} = \beta\,E_t\Big[C_{t+1}^{-\sigma}\big(R_{t+1}\big)\Big]
   ```
   ````
-- 经济含义一句话即可，不展开冗长文字推导；需要中间步骤时用"由 … 对 $`C_t`$ 求 FOC 得"带过。
+- One phrase of economic meaning is enough; do not write long verbal derivations. For an intermediate
+  step, write "the FOC with respect to $`C_t`$ gives".
 
-## 第8节对照表格式
+## Section 8 table format
 
-用三个清单（或一张表），并标注每个内生变量"由哪条方程定"，便于阶段3 核对 R4：
+Use three lists or one table. For each endogenous variable, give the equation that determines it, so
+that Stage 3 can check R4:
 
 ```markdown
-| 类别 | 符号 | 含义 | 由哪条 FOC 定 |
-|------|------|------|--------------|
-| 内生 var | C | 消费 | (F1) |
-| 内生 var | N | 劳动 | (F2) |
-| 外生 varexo | eps_a | TFP 创新 | — |
-| 参数 | beta, sigma, … | 贴现/风险规避… | — |
+| Class | Name (`.mod`) | Math | Meaning | Determined by |
+|---|---|---|---|---|
+| endogenous (`var`) | `c` | $`C_t`$ | Consumption | (F1) |
+| endogenous (`var`) | `n` | $`N_t`$ | Hours worked | (F2) |
+| exogenous (`varexo`) | `eps_a` | $`\varepsilon^a_t`$ | TFP innovation | — |
+| parameter | `betta`, `sigma`, ... | $`\beta, \sigma`$ | Discount factor, risk aversion, ... | — |
 ```
-- 内生变量条数 = 方程条数（F1…Fn 里"定方程"的条数）→ 这就是 R4 的预核对。
-- 备注：到 .mod 里 `var/varexo/parameters` 用 ASCII 名（`betta` 等），此表可中英并列。
 
-## 质量自检（交付推导前过一遍）
+- The number of endogenous variables = the number of determining equations among (F1) ... (Fn). This is
+  the R4 pre-check. The R4 exceptions apply: with `ramsey_model` or `discretionary_policy`, a policy
+  instrument has no determining equation in the note (write "policy instrument" in its row);
+  heterogeneous models count each heterogeneity dimension separately (heterogeneity.md).
+- The Name column uses the ASCII names that the `.mod` declares (`betta`, not `beta`; R5), so Stage 2
+  can copy them. The Meaning column follows the user's language.
 
-1. 八节齐全、标题与模板一致；
-2. 每条 FOC 有编号、公式 LaTeX 正确（括号配平、下标正确）；
-3. 内生变量数 = 能定方程的 FOC 数（第8节对照表能对上）；
-4. 形式（非线性/线性化）已声明且符合 R8；
-5. 时序约定（期末/期初存量）已写明；
-6. **稳态求解已写全**：稳态方程组 + 可自上而下求值的解析解/反解步骤（能直接照抄进
-   steady_state_model）；线性化模型则注明稳态全 0；
-7. 主体覆盖完整，无遗漏的约束或市场出清。
+## Quality self-check (before you deliver the note)
+
+1. All eight sections are present; the headings match the template (translated when the prose is not
+   English).
+2. Every FOC has a number; the LaTeX is correct (balanced brackets, correct subscripts).
+3. The number of endogenous variables = the number of determining FOCs (the section 8 table matches,
+   R4 exceptions marked).
+4. The form (nonlinear or linearized) is stated and follows R8.
+5. The timing convention (stock at the end or at the beginning of the period) is stated (R2).
+6. **The steady-state solution is complete**: the steady-state system and the closed-form or
+   reverse-solve steps in top-to-bottom order, ready to copy into steady_state_model. A linearized
+   model states that the steady state is zero.
+7. All agents are covered; no constraint or market-clearing condition is missing.
+8. The Walras-law redundancy is found and marked, and each CES aggregator has its own definition
+   equation (workflow-detail.md, Stage 1 (derivation note)).

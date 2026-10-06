@@ -2,8 +2,7 @@
   "model_id": "US_RE09",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_RE09/US_RE09_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_RE09/US_RE09_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_RE09/US_RE09_derivation.md",
     "mmb-paper-derivations/derivations/US_RE09/source_manifest.json",
     "mmb-paper-derivations/derivations/US_RE09/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_RE09/worker_report.json"

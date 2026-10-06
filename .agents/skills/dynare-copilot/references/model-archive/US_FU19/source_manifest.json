@@ -61,8 +61,7 @@
     }
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_FU19/US_FU19_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_FU19/US_FU19_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_FU19/US_FU19_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_FU19/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_FU19/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_FU19/worker_report.json"

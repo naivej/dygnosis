@@ -2,8 +2,7 @@
   "model_id": "US_MR07",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_MR07/US_MR07_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_MR07/US_MR07_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_MR07/US_MR07_derivation.md",
     "mmb-paper-derivations/derivations/US_MR07/source_manifest.json",
     "mmb-paper-derivations/derivations/US_MR07/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_MR07/worker_report.json"
@@ -45,8 +44,7 @@
     "results": [
       "git diff --check passed",
       "source_manifest.json valid JSON",
-      "worker_report.json valid JSON",
-      "archive_entry_checks_ok; English and Chinese F-number mention counts match at 62 each; unique F-number set is F1-F13"
+      "worker_report.json valid JSON"
     ]
   },
   "unresolved_issues": [

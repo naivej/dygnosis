@@ -34,8 +34,3 @@ Status: `needs_review`
 - The paper's simulation data and residual sequences are not archived in this derivation entry.
 - Dynare/runtime validation was not performed by request.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated second from the English file.
-- Equation numbering `(F1)` through `(F14)` and file paths/model IDs/status markers were preserved.

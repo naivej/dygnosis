@@ -31,9 +31,3 @@
 - The exact equation-to-variable count for the implementation model is deferred because the archive task is derivation extraction, not runnable `.mod` validation.
 - OCR-sensitive equations need a targeted source-level check before upgrading beyond `needs_review`.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English core after drafting.
-- Equation numbers `(F1)` through `(F38)` were preserved in both English and Chinese files.
-- File paths, DOI, model ID, and `needs_review` markers were preserved.

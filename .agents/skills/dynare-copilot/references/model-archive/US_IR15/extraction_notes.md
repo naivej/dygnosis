@@ -11,7 +11,6 @@
 ## Extraction Scope
 
 - English derivation was drafted first using the required eight-section structure.
-- Chinese derivation is a direct translation of the English core and preserves `(F#)` numbering, file paths, DOI values, model ID, and `needs_review` markers.
 - The source model is an empirical affine term-structure/state-space model, not a household-firm DSGE model. Therefore section 2 records the pricing-kernel/no-arbitrage object rather than invented household or firm optimization problems.
 - The `.mod` file `.agents/skills/dynare-copilot/references/examples/US_IR15_rep.mod` was read only as `implementation_cross_check`.
 
@@ -39,8 +38,3 @@
 - Review the notation mapping between paper $`\nu`$ and implementation `v`, especially where OCR renders `v`/`\nu` inconsistently.
 - Runtime validation, residual checks, BK checks, IRF checks, and promotion to the runnable skill archive were not performed.
 
-## Translation Status
-
-- English derivation completed first.
-- Chinese translation completed second.
-- English and Chinese `(F#)` counts match in validation.

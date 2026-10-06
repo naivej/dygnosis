@@ -3,8 +3,7 @@
   "owned_directory": "mmb-paper-derivations/derivations/G2_SIGMA08",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/G2_SIGMA08/G2_SIGMA08_derivation.en.md",
-    "mmb-paper-derivations/derivations/G2_SIGMA08/G2_SIGMA08_derivation.zh.md",
+    "mmb-paper-derivations/derivations/G2_SIGMA08/G2_SIGMA08_derivation.md",
     "mmb-paper-derivations/derivations/G2_SIGMA08/source_manifest.json",
     "mmb-paper-derivations/derivations/G2_SIGMA08/extraction_notes.md",
     "mmb-paper-derivations/derivations/G2_SIGMA08/worker_report.json"

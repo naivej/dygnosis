@@ -2,8 +2,7 @@
   "model_id": "NK_RW97",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_RW97/NK_RW97_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_RW97/NK_RW97_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_RW97/NK_RW97_derivation.md",
     "mmb-paper-derivations/derivations/NK_RW97/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_RW97/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_RW97/worker_report.json"
@@ -43,8 +42,7 @@
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/NK_RW97 returned no output",
     "json_tool_source_manifest": "passed: python3 -m json.tool source_manifest.json",
     "english_eight_sections": "passed",
-    "english_has_F1": "passed",
-    "f_number_counts_match": "passed: English and Chinese each have 79 F-markers and 27 unique F-numbers"
+    "english_has_F1": "passed"
   },
   "unresolved_issues": [
     "Long OCR equations, especially paper equation (3.17) and compact matrix equations (5.3)-(5.5), need source-level PDF review.",

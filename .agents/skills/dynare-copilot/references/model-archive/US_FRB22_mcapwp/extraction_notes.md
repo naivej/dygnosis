@@ -36,8 +36,3 @@ No Dynare run was performed.
 - The steady state is a 2018-2019 linearization baseline, not a standard DSGE deterministic steady state; exact baseline values are not reconstructed here.
 - Policy-rule formulas with ELB and threshold constraints need targeted checking against the PDF/package because OCR has placeholder characters.
 
-## Translation Status
-
-- English derivation written first.
-- Chinese derivation translated second from the English core.
-- F-number counts were kept aligned.

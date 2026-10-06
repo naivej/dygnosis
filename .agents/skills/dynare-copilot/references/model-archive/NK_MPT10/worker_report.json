@@ -2,8 +2,7 @@
   "model_id": "NK_MPT10",
   "status": "needs_review",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/NK_MPT10/NK_MPT10_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_MPT10/NK_MPT10_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_MPT10/NK_MPT10_derivation.md",
     "mmb-paper-derivations/derivations/NK_MPT10/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_MPT10/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_MPT10/worker_report.json"
@@ -40,8 +39,7 @@
     "commands_to_run": [
       "git diff --check",
       "python3 -m json.tool mmb-paper-derivations/derivations/NK_MPT10/source_manifest.json >/dev/null",
-      "python3 - <<'PY'\nfrom pathlib import Path\nimport re\nmodel = \"NK_MPT10\"\nbase = Path(\"mmb-paper-derivations/derivations\") / model\nen = (base / f\"{model}_derivation.en.md\").read_text()\nassert all(f\"## {i}.\" in en for i in range(1, 9))\nassert re.search(r\"\\(F1\\)\", en)\nprint(\"archive_entry_checks_ok\")\nPY",
-      "python3 - <<'PY'\nfrom pathlib import Path\nimport re\nmodel = \"NK_MPT10\"\nbase = Path(\"mmb-paper-derivations/derivations\") / model\nen = (base / f\"{model}_derivation.en.md\").read_text()\nzh = (base / f\"{model}_derivation.zh.md\").read_text()\nassert len(re.findall(r\"\\(F\\d+\\)\", en)) == len(re.findall(r\"\\(F\\d+\\)\", zh))\nprint(\"f_number_counts_match\")\nPY"
+      "python3 - <<'PY'\nfrom pathlib import Path\nimport re\nmodel = \"NK_MPT10\"\nbase = Path(\"mmb-paper-derivations/derivations\") / model\nen = (base / f\"{model}_derivation.md\").read_text()\nassert all(f\"## {i}.\" in en for i in range(1, 9))\nassert re.search(r\"\\(F1\\)\", en)\nprint(\"archive_entry_checks_ok\")\nPY"
     ]
   }
 }

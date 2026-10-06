@@ -33,8 +33,3 @@
 - The broader BGG baseline was not re-derived from BGG (1999); it was reconstructed from the PSV16 paper description plus the implementation cross-check.
 - Runtime validation, residual checks, steady-state checks, BK checks, and IRF reproduction are deferred.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English derivation with matching section order and F-numbering.
-- English and Chinese equation-number counts should match.

@@ -34,8 +34,3 @@ Status: `needs_review`
 - Verifying exact variable counts against a runnable MMB `.mod` implementation is deferred because no `US_SW07AL_rep.mod` cross-check file exists.
 - Dynare runtime validation, BK checks, residual checks, IRFs, and posterior replication were not performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated second from the English core.
-- F-number counts match between English and Chinese in the current files.

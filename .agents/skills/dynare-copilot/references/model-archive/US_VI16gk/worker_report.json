@@ -2,8 +2,7 @@
   "model_id": "US_VI16gk",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_VI16gk/US_VI16gk_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_VI16gk/US_VI16gk_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_VI16gk/US_VI16gk_derivation.md",
     "mmb-paper-derivations/derivations/US_VI16gk/source_manifest.json",
     "mmb-paper-derivations/derivations/US_VI16gk/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_VI16gk/worker_report.json"
@@ -53,9 +52,8 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number counts match",
       "status": "passed",
-      "details": "English count 94, Chinese count 94; 32 unique equation labels."
+      "details": "32 unique equation labels."
     }
   ],
   "unresolved_issues": [

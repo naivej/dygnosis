@@ -51,8 +51,3 @@ Not used for:
 - The `.mod` uses `mpl` for the marginal product / marginal revenue cue; the paper uses `Lambda_t` as the real marginal revenue of intermediate production. A later implementation pass should document the exact normalization.
 - Runtime validation, Dynare residual checks, Blanchard-Kahn checks, and IRF checks were not performed.
 
-## Translation Status
-
-- English draft was written first.
-- Chinese draft is a translation of the English draft.
-- Equation numbers `(F1)` through `(F35)` are preserved in both files.

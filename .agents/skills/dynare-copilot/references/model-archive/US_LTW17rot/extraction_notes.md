@@ -34,8 +34,3 @@
 - Targeted PDF checks are needed for the Calvo price objective, wage indexation equation, government budget constraint, and any missing nonlinear saver FOCs.
 - The current document is a derivation-only archive entry; runtime validation, BK checks, IRF checks, and promotion to the runnable skill archive are deferred.
 
-## Translation Status
-
-- English derivation was written first.
-- Chinese derivation was translated second from the English core.
-- Equation numbers `(F1)` through `(F37)` are preserved in both files.

@@ -64,8 +64,7 @@
     }
   },
   "outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/FI_AINO16/FI_AINO16_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/FI_AINO16/FI_AINO16_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/FI_AINO16/FI_AINO16_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/FI_AINO16/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/FI_AINO16/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/FI_AINO16/worker_report.json"
@@ -121,15 +120,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/FI_AINO16/FI_AINO16_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/FI_AINO16/FI_AINO16_derivation.md",
       "exists": true,
       "sha256": "aa069508a4358afb5fd7f4326fe3393ddc9070b7a65e3be28b0c6bdbc4cbd727"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/FI_AINO16/FI_AINO16_derivation.zh.md",
-      "exists": true,
-      "sha256": "5c4e6e3167fd05e8e7b1b88a9f8554f80a36e46940f72bfb658198c666650ab6"
     },
     {
       "role": "source_manifest",

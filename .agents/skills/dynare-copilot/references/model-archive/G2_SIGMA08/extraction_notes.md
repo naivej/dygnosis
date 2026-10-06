@@ -28,7 +28,3 @@
 - The full nonlinear steady-state system is not reconstructed in this first-pass entry. The archive records only calibration identities and the zero-deviation steady state for `model(linear)`.
 - Runtime validation was not performed: no Dynare run, residual check, steady-state check, or Blanchard-Kahn check.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English version while preserving eight required section headings and equation numbering `(F1)` through `(F40)`.

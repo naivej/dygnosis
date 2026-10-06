@@ -3,8 +3,7 @@
   "owned_directory": "mmb-paper-derivations/derivations/NK_GMAS25ppi",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_GMAS25ppi/NK_GMAS25ppi_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_GMAS25ppi/NK_GMAS25ppi_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_GMAS25ppi/NK_GMAS25ppi_derivation.md",
     "mmb-paper-derivations/derivations/NK_GMAS25ppi/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_GMAS25ppi/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_GMAS25ppi/worker_report.json"

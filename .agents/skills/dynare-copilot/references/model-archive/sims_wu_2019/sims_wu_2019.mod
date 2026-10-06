@@ -5,7 +5,7 @@
 // Calibration: Table 1 of the paper
 // ============================================================
 
-// ---------- 内生变量 (7) ----------
+// ---------- endogenous variables (7) ----------
 var
     x       ${x}$         (long_name='output gap')
     pi      ${\pi}$       (long_name='inflation')
@@ -16,7 +16,7 @@ var
     exr     ${exr}$       (long_name='expected excess return on long bond')
     ;
 
-// ---------- 外生创新 (4) ----------
+// ---------- exogenous innovations (4) ----------
 varexo
     eps_f       ${\varepsilon^f}$       (long_name='natural rate innovation')
     eps_theta   ${\varepsilon^\theta}$  (long_name='credit innovation')
@@ -24,7 +24,7 @@ varexo
     eps_q       ${\varepsilon^q}$       (long_name='QE innovation')
     ;
 
-// ---------- 参数 ----------
+// ---------- parameters ----------
 parameters
     betta z sigma bFI bcb gam zeta
     rho_r phi_pi phi_x
@@ -46,7 +46,7 @@ rho_f     = 0.8;     // AR natural rate
 rho_theta = 0.8;     // AR leverage
 rho_q     = 0.8;     // AR QE
 
-// ---------- 模型方程 ----------
+// ---------- model equations ----------
 model(linear);
 
 // E1: IS curve (eq. 2.1)
@@ -80,7 +80,7 @@ exr = pi(+1) + sigma*( bFI*( theta(+1) - theta ) + bcb*( qe(+1) - qe ) ) - rs;
 
 end;
 
-// ---------- 冲击 ----------
+// ---------- shocks ----------
 shocks;
     var eps_f     = 1;   // natural rate shock
     var eps_theta = 1;   // credit shock

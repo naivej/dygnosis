@@ -2,8 +2,7 @@
   "model_id": "US_BB18",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_BB18/US_BB18_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_BB18/US_BB18_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_BB18/US_BB18_derivation.md",
     "mmb-paper-derivations/derivations/US_BB18/source_manifest.json",
     "mmb-paper-derivations/derivations/US_BB18/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_BB18/worker_report.json"
@@ -49,8 +48,7 @@
     },
     {
       "check": "english_chinese_f_number_counts_match",
-      "status": "passed",
-      "details": "English and Chinese each contain defining equation tags (F1) through (F47)."
+      "status": "passed"
     },
     {
       "check": "git_diff_check",

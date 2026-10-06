@@ -58,8 +58,7 @@
     "model_type": "Medium-Scale New Keynesian Bayesian DSGE (Smets-Wouters framework, Linear)"
   },
   "archive_files": {
-    "derivation_en": "mmb-paper-derivations/derivations/US_BKM12/US_BKM12_derivation.en.md",
-    "derivation_zh": "mmb-paper-derivations/derivations/US_BKM12/US_BKM12_derivation.zh.md",
+    "derivation_en": "mmb-paper-derivations/derivations/US_BKM12/US_BKM12_derivation.md",
     "extraction_notes": "mmb-paper-derivations/derivations/US_BKM12/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_BKM12/worker_report.json"
   },

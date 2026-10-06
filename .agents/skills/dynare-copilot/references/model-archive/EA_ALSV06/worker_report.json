@@ -2,8 +2,7 @@
   "model_id": "EA_ALSV06",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_ALSV06/EA_ALSV06_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_ALSV06/EA_ALSV06_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_ALSV06/EA_ALSV06_derivation.md",
     "mmb-paper-derivations/derivations/EA_ALSV06/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_ALSV06/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_ALSV06/worker_report.json"

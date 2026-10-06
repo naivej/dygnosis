@@ -2,8 +2,7 @@
   "model_id": "NK_MCN99cr",
   "status": "needs_review",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/NK_MCN99cr/NK_MCN99cr_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_MCN99cr/NK_MCN99cr_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_MCN99cr/NK_MCN99cr_derivation.md",
     "mmb-paper-derivations/derivations/NK_MCN99cr/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_MCN99cr/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_MCN99cr/worker_report.json"

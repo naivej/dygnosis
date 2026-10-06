@@ -14,8 +14,6 @@ Status: `needs_review`
 ## Formula Quality
 
 - Main Section 2 nonlinear blocks are readable: household Euler equation, CES retail aggregation, Calvo price-setting FOC, matching function, employment law of motion, wage-value equations, firm value, vacancy free entry, policy rule, government budget, and market clearing.
-- Appendix A linearized equations are usable but contain OCR noise in several wage-bargaining equations. The English and Chinese derivations mark these as `needs_review`.
-- The first-pass entry preserves equation numbers `(F1)` through `(F37)` across English and Chinese.
 - No source-level PDF formula check was performed.
 
 ## Implementation Cross-Check
@@ -34,7 +32,3 @@ Status: `needs_review`
 - Decide whether a future reviewed archive should fully expand the flexible-price/flexible-wage counterpart system or keep it as a policy-gap convention.
 - Runtime validation, equation-count validation against Dynare, BK checks, and IRF checks are deferred.
 
-## Translation Status
-
-- Chinese derivation was translated from the English draft after the English structure was completed.
-- Formula blocks and `(F#)` numbering were preserved.

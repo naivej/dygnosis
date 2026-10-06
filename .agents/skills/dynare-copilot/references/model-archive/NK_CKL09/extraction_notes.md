@@ -29,8 +29,3 @@
 - Runtime validation was not performed; no Dynare `resid`, `steady`, `check`, or simulation run was attempted.
 - Shared `catalog.csv` and `status.csv` were intentionally not edited.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English derivation.
-- Equation numbers `(F1)` through `(F32)` are preserved in both files.

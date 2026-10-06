@@ -57,8 +57,7 @@
     "model_title_match_score": 1.0
   },
   "derived_outputs": [
-    "mmb-paper-derivations/derivations/US_FRB22_var/US_FRB22_var_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_FRB22_var/US_FRB22_var_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_FRB22_var/US_FRB22_var_derivation.md",
     "mmb-paper-derivations/derivations/US_FRB22_var/source_manifest.json",
     "mmb-paper-derivations/derivations/US_FRB22_var/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_FRB22_var/worker_report.json"

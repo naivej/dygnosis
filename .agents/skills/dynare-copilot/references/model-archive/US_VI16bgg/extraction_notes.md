@@ -36,8 +36,3 @@
 - Source-check shock process signs against an appendix or original replication package.
 - Runtime validation, residual checks, steady-state checks, BK conditions, and IRF checks were not performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English derivation.
-- The eight-section structure and `(F#)` numbering are preserved in both files.

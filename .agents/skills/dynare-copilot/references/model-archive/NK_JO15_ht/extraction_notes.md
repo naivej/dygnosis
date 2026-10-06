@@ -34,9 +34,3 @@
 - Runtime validation was not performed; no Dynare `steady`, `check`, or IRF run was executed.
 - The entry has not been merged into `catalog.csv` or `status.csv` because this task explicitly restricted edits to the model folder.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was created afterward as a translation of the English core.
-- Equation numbers `(F1)` through `(F24)` are preserved in both files.
-- File paths, model ID, DOI, and `needs_review` markers are preserved.

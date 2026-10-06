@@ -47,8 +47,7 @@
     }
   },
   "outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/EA_VI16bgg/EA_VI16bgg_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/EA_VI16bgg/EA_VI16bgg_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/EA_VI16bgg/EA_VI16bgg_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/EA_VI16bgg/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/EA_VI16bgg/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/EA_VI16bgg/worker_report.json"
@@ -134,15 +133,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/EA_VI16bgg/EA_VI16bgg_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/EA_VI16bgg/EA_VI16bgg_derivation.md",
       "exists": true,
       "sha256": "8006686c59546e105d51069e2720c1cbf780418bfb5112d7ce93a263f8a3fe31"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/EA_VI16bgg/EA_VI16bgg_derivation.zh.md",
-      "exists": true,
-      "sha256": "d78fa15c5617dd2c82cea45ad45ee09e17ba97e6ee7008b5c6af1858a27bee9e"
     },
     {
       "role": "source_manifest",

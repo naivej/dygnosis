@@ -27,7 +27,3 @@
 - Review whether the Rep-MMB `r` variable should be described as nominal policy-rate deviation, real rate, or interest-rate observable after aligning paper notation and implementation naming.
 - Confirm all starred tradable price relative-price identities against the full appendix because the paper text gives only the home-country functional forms.
 
-## Translation Status
-
-- English derivation was written first.
-- Chinese derivation is a direct translation of the English core and preserves `(F#)` numbering, paths, DOI values, model id, and `needs_review` markers.

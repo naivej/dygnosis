@@ -32,7 +32,3 @@
 - A future reviewer should verify coefficient groupings for the exact unemployment Phillips curve against the source PDF.
 - Shared `catalog.csv` and `status.csv` were not edited per worker assignment; proposed rows are recorded in `worker_report.json`.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation is a matched translation preserving all `(F#)` equation labels and section order.

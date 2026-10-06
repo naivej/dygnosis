@@ -31,7 +31,3 @@
 - Steady-state ratios and full steady-state construction are incomplete in the source Markdown and need review before runtime validation.
 - No Dynare run was performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English derivation and preserves the same eight-section structure and `(F#)` numbering.

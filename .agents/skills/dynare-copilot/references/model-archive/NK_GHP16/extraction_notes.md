@@ -51,8 +51,3 @@ Not used for:
 - The capital adjustment cost expression in the paper is transcribed from OCR and should be targeted-checked if this entry is promoted to runnable replication work.
 - Runtime validation, Dynare residual checks, Blanchard-Kahn checks, and IRF checks were not performed.
 
-## Translation Status
-
-- English draft was written first.
-- Chinese draft is a translation of the checked English draft.
-- Equation numbers `(F1)` through `(F25)` are preserved in both files.

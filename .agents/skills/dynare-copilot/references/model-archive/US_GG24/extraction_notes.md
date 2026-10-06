@@ -32,8 +32,3 @@ Status: `needs_review`.
 - Build a complete steady-state derivation if source code or author appendix becomes available.
 - Confirm exact naming and count of endogenous variables, exogenous shocks, and observables from implementation files before marking reviewed.
 
-## Translation Status
-
-- English derivation drafted first in `US_GG24_derivation.en.md`.
-- Chinese derivation translated second in `US_GG24_derivation.zh.md`.
-- Equation numbers `(F1)` through `(F37)`, source paths, DOI, model ID, and `needs_review` markers were preserved.

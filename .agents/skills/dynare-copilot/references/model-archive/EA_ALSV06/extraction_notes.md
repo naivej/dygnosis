@@ -28,10 +28,5 @@ Status: `needs_review`
 ## Deferred Issues
 
 - Source-level formula check against the PDF is still needed, especially for the money-demand shock sign convention and any typesetting ambiguity in equations (15)-(17).
-- The English/Chinese derivations are first-pass archive drafts and should remain `needs_review`.
 - No shared `catalog.csv` or `status.csv` edits were made. Proposed rows are in `worker_report.json`.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English derivation and preserves `(F#)` numbering and formulas.

@@ -10,7 +10,6 @@
 ## Formula Quality
 
 - The MinerU Markdown includes the paper's model appendix and displayed equations for firms, households, long-term bonds, policy, and trade.
-- First-pass uncertain formulas are marked `needs_review` in the English and Chinese derivations.
 - Known OCR issues:
   - Household Lagrangian Eq. (14) is multi-line and should be checked against the PDF before review promotion.
   - Domestic long-term bond Euler Eq. (17) has a malformed OCR tag and superscripts.
@@ -34,8 +33,3 @@
 - Runtime validation was not performed: no Dynare `steady`, `check`, or stochastic simulation was run.
 - Shared `catalog.csv` and `status.csv` were not edited by request.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English version.
-- Equation numbers `(F1)` through `(F38)` are preserved with matching counts.

@@ -33,8 +33,3 @@
 - Steady-state derivation needs a source-level Appendix pass before marking anything above first-pass `needs_review`.
 - Runtime validation, Dynare residual checks, BK checks, and IRF comparison were not performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated second from the English core.
-- Both files preserve eight required sections and equation labels `(F1)` through `(F20)`.

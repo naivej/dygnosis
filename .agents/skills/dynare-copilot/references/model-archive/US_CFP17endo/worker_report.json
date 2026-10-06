@@ -2,8 +2,7 @@
   "model_id": "US_CFP17endo",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_CFP17endo/US_CFP17endo_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_CFP17endo/US_CFP17endo_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_CFP17endo/US_CFP17endo_derivation.md",
     "mmb-paper-derivations/derivations/US_CFP17endo/source_manifest.json",
     "mmb-paper-derivations/derivations/US_CFP17endo/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_CFP17endo/worker_report.json"
@@ -43,8 +42,7 @@
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/US_CFP17endo returned no output",
     "json_tool_source_manifest": "passed: python3 -m json.tool source_manifest.json",
     "english_eight_sections": "passed",
-    "english_has_F1": "passed",
-    "f_number_counts_match": "passed: English and Chinese each have 79 F-markers and 33 unique F-numbers"
+    "english_has_F1": "passed"
   },
   "unresolved_issues": [
     "Source-level review should check the FI hold-up, leverage, and net-worth adjustment equations.",

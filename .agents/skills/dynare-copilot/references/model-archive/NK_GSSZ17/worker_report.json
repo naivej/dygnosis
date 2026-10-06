@@ -4,8 +4,7 @@
   "completed_at": "2026-06-17",
   "ownership_scope": "mmb-paper-derivations/derivations/NK_GSSZ17/",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/NK_GSSZ17/NK_GSSZ17_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_GSSZ17/NK_GSSZ17_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_GSSZ17/NK_GSSZ17_derivation.md",
     "mmb-paper-derivations/derivations/NK_GSSZ17/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_GSSZ17/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_GSSZ17/worker_report.json"

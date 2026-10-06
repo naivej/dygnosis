@@ -17,8 +17,7 @@
     "raw/mmb_papers/A framework for analyzing large-scale asset purchases as a monetary policy tool.pdf"
   ],
   "outputs": [
-    "mmb-paper-derivations/derivations/NK_GK13/NK_GK13_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_GK13/NK_GK13_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_GK13/NK_GK13_derivation.md",
     "mmb-paper-derivations/derivations/NK_GK13/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_GK13/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_GK13/worker_report.json"

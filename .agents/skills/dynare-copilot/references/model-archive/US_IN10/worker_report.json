@@ -2,8 +2,7 @@
   "model_id": "US_IN10",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_IN10/US_IN10_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_IN10/US_IN10_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_IN10/US_IN10_derivation.md",
     "mmb-paper-derivations/derivations/US_IN10/source_manifest.json",
     "mmb-paper-derivations/derivations/US_IN10/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_IN10/worker_report.json"

@@ -29,8 +29,3 @@
 - The covariance matrix and exact reduced-form VAR equations from the QJE estimation are not reconstructed in this first pass.
 - Dynare runtime validation was not performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English draft.
-- Equation numbers `(F1)` through `(F24)` are preserved in both files.

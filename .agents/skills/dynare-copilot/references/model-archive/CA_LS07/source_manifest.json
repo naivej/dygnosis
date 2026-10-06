@@ -46,8 +46,7 @@
     }
   },
   "archive_files": {
-    "derivation_en": "mmb-paper-derivations/derivations/CA_LS07/CA_LS07_derivation.en.md",
-    "derivation_zh": "mmb-paper-derivations/derivations/CA_LS07/CA_LS07_derivation.zh.md",
+    "derivation_en": "mmb-paper-derivations/derivations/CA_LS07/CA_LS07_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/CA_LS07/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/CA_LS07/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/CA_LS07/worker_report.json"

@@ -33,8 +33,3 @@
 - Verify the exact VAR expectation state vectors and coefficients for the all-VAR variant.
 - Verify how the MMB implementation maps the source's `ELB`, `FISCAL`, policy-rule, and residual-shock notation to Dynare names.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated second from the English core.
-- Equation numbers `(F1)` through `(F22)` match in both versions.

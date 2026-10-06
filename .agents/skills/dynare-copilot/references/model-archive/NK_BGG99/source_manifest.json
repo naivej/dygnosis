@@ -52,8 +52,7 @@
     "paper_slug": "nk_bgg99_nk_bgg99al__the_financial_accelerator_in_a_quantitative_business"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_BGG99/NK_BGG99_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_BGG99/NK_BGG99_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_BGG99/NK_BGG99_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_BGG99/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_BGG99/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_BGG99/worker_report.json"
@@ -124,8 +123,7 @@
     }
   },
   "archive_files": {
-    "derivation_en": "mmb-paper-derivations/derivations/NK_BGG99/NK_BGG99_derivation.en.md",
-    "derivation_zh": "mmb-paper-derivations/derivations/NK_BGG99/NK_BGG99_derivation.zh.md",
+    "derivation_en": "mmb-paper-derivations/derivations/NK_BGG99/NK_BGG99_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_BGG99/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_BGG99/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_BGG99/worker_report.json"

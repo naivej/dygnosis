@@ -2,8 +2,7 @@
   "model_id": "US_FRB22_mcapwp",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_FRB22_mcapwp/US_FRB22_mcapwp_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_FRB22_mcapwp/US_FRB22_mcapwp_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_FRB22_mcapwp/US_FRB22_mcapwp_derivation.md",
     "mmb-paper-derivations/derivations/US_FRB22_mcapwp/source_manifest.json",
     "mmb-paper-derivations/derivations/US_FRB22_mcapwp/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_FRB22_mcapwp/worker_report.json"
@@ -38,7 +37,7 @@
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/US_FRB22_mcapwp",
     "source_manifest_json_tool": "passed: python3 -m json.tool mmb-paper-derivations/derivations/US_FRB22_mcapwp/source_manifest.json",
     "english_eight_sections": "passed: English derivation contains sections ## 1. through ## 8. and (F1)",
-    "f_number_count_match": "passed: English F-count 11; Chinese F-count 11",
+    "f_number_count_match": "passed: English F-count 11;",
     "dynare_run": "not_performed"
   },
   "unresolved_issues": [

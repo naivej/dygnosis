@@ -2,8 +2,7 @@
   "model_id": "US_ACELswm",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_ACELswm/US_ACELswm_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_ACELswm/US_ACELswm_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_ACELswm/US_ACELswm_derivation.md",
     "mmb-paper-derivations/derivations/US_ACELswm/source_manifest.json",
     "mmb-paper-derivations/derivations/US_ACELswm/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_ACELswm/worker_report.json"
@@ -53,9 +52,8 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese visible F-number counts match",
       "status": "passed",
-      "details": "English count 54; Chinese count 54. Equations use LaTeX tag labels F1 through F53."
+      "details": "English count 54; Equations use LaTeX tag labels F1 through F53."
     }
   ],
   "unresolved_issues": [

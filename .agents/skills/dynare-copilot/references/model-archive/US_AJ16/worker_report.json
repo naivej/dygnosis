@@ -2,8 +2,7 @@
   "model_id": "US_AJ16",
   "status": "needs_review",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_AJ16/US_AJ16_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_AJ16/US_AJ16_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_AJ16/US_AJ16_derivation.md",
     "mmb-paper-derivations/derivations/US_AJ16/source_manifest.json",
     "mmb-paper-derivations/derivations/US_AJ16/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_AJ16/worker_report.json"

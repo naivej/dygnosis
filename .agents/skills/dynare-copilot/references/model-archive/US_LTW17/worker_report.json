@@ -2,8 +2,7 @@
   "model_id": "US_LTW17",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_LTW17/US_LTW17_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_LTW17/US_LTW17_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_LTW17/US_LTW17_derivation.md",
     "mmb-paper-derivations/derivations/US_LTW17/source_manifest.json",
     "mmb-paper-derivations/derivations/US_LTW17/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_LTW17/worker_report.json"

@@ -29,7 +29,3 @@
 - Wage Phillips curve, import price Phillips curve, domestic price Phillips curve, and all relative-price identities need formula-by-formula review against the PDF or a clean appendix source.
 - Runtime validation was not performed, per instruction.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English file and preserves the same eight-section structure and `(F#)` numbering.

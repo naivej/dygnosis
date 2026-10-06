@@ -30,8 +30,3 @@
 - The derivation should be reviewed against the raw PDF or an appendix normalization before marking it `reviewed_derivation`.
 - The interest-rate closure in the paper is an exchange-rate peg. The MMB implementation uses a simple rule `r = phi_pi*pi_H` with `phi_x=0`; this is recorded as an implementation cross-check rather than as a separate structural source claim.
 
-## Translation Status
-
-- English derivation was written first.
-- Chinese derivation was translated from the English draft.
-- Both files preserve eight required sections and 20 equation numbers `(F1)` through `(F20)`.

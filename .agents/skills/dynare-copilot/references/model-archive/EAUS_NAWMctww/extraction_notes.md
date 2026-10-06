@@ -13,7 +13,6 @@
 
 - Status: `needs_review`.
 - The paper provides the central fiscal authority equation, tax/debt feedback rule, household utility and budget constraints, capital accumulation, production and marginal-cost formulas, final-good CES technologies, and monetary policy rule.
-- Several operational recursive equations are not fully spelled out in the paper text as extracted by MinerU. The English and Chinese derivations mark Calvo wage/price reset recursions and foreign-bond timing as `needs_review`.
 - OCR quality for the central equations is usable, but the entry remains a first-pass derivation rather than a formula-by-formula verified transcription.
 
 ## Implementation Cross-Check
@@ -33,7 +32,3 @@
 - Exact timing of the foreign-bond accumulation identity should be checked in a targeted source review.
 - The archive entry should not be promoted to `.agents/skills/dynare-copilot/references/model-archive/` until a runnable implementation and validation evidence exist.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English core and preserves all `(F#)` equation numbers, source paths, DOI, model ID, and `needs_review` markers.

@@ -5,8 +5,7 @@
     "mmb-paper-derivations/derivations/NK_ET14/"
   ],
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_ET14/NK_ET14_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_ET14/NK_ET14_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_ET14/NK_ET14_derivation.md",
     "mmb-paper-derivations/derivations/NK_ET14/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_ET14/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_ET14/worker_report.json"

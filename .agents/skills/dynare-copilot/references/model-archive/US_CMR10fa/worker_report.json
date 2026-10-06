@@ -2,8 +2,7 @@
   "model_id": "US_CMR10fa",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_CMR10fa/US_CMR10fa_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_CMR10fa/US_CMR10fa_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_CMR10fa/US_CMR10fa_derivation.md",
     "mmb-paper-derivations/derivations/US_CMR10fa/source_manifest.json",
     "mmb-paper-derivations/derivations/US_CMR10fa/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_CMR10fa/worker_report.json"
@@ -52,7 +51,6 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number counts match",
       "status": "passed",
       "details": {
         "english_f_count": 124,

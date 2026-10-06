@@ -2,8 +2,7 @@
   "model_id": "US_HL16",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_HL16/US_HL16_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_HL16/US_HL16_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_HL16/US_HL16_derivation.md",
     "mmb-paper-derivations/derivations/US_HL16/source_manifest.json",
     "mmb-paper-derivations/derivations/US_HL16/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_HL16/worker_report.json"

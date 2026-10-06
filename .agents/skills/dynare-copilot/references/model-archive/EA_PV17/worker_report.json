@@ -2,8 +2,7 @@
   "model_id": "EA_PV17",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_PV17/EA_PV17_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_PV17/EA_PV17_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_PV17/EA_PV17_derivation.md",
     "mmb-paper-derivations/derivations/EA_PV17/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_PV17/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_PV17/worker_report.json"
@@ -52,8 +51,7 @@
     },
     {
       "check": "english_chinese_f_number_counts",
-      "status": "passed",
-      "details": "English and Chinese derivations each contain 87 F-number references and 38 unique F numbers."
+      "status": "passed"
     },
     {
       "check": "git_diff_check",

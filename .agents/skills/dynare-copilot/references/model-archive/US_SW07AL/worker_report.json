@@ -2,8 +2,7 @@
   "model_id": "US_SW07AL",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_SW07AL/US_SW07AL_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_SW07AL/US_SW07AL_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_SW07AL/US_SW07AL_derivation.md",
     "mmb-paper-derivations/derivations/US_SW07AL/source_manifest.json",
     "mmb-paper-derivations/derivations/US_SW07AL/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_SW07AL/worker_report.json"

@@ -40,8 +40,3 @@ Status: `needs_review`
 - Exact price-level normalization and inflation detrending used by the MMB conversion needs review.
 - Dynare was not run and runtime validation is explicitly deferred.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English derivation.
-- `(F#)` numbering was preserved in Chinese.

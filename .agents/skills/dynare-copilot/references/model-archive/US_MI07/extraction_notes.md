@@ -28,8 +28,3 @@
 - The steady state of beliefs and recursive least-squares moments was not reconstructed; the archive records the zero-deviation state and marks belief steady-state details as `needs_review`.
 - Dynare runtime validation was not performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English draft.
-- Equation numbers `(F1)` through `(F13)` are preserved in both files.

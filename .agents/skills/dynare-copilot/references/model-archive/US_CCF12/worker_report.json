@@ -1,8 +1,7 @@
 {
   "model_id": "US_CCF12",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_CCF12/US_CCF12_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_CCF12/US_CCF12_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_CCF12/US_CCF12_derivation.md",
     "mmb-paper-derivations/derivations/US_CCF12/source_manifest.json",
     "mmb-paper-derivations/derivations/US_CCF12/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_CCF12/worker_report.json"
@@ -43,8 +42,7 @@
     ],
     "results": [
       "git diff --check passed for mmb-paper-derivations/derivations/US_CCF12",
-      "source_manifest.json and worker_report.json parsed successfully as JSON",
-      "English and Chinese derivations both contain eight sections and matching F-number coverage from F1 through F24"
+      "source_manifest.json and worker_report.json parsed successfully as JSON"
     ]
   },
   "unresolved_formula_issues": [

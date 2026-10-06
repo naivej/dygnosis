@@ -2,8 +2,7 @@
   "model_id": "NK_BGG99",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_BGG99/NK_BGG99_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_BGG99/NK_BGG99_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_BGG99/NK_BGG99_derivation.md",
     "mmb-paper-derivations/derivations/NK_BGG99/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_BGG99/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_BGG99/worker_report.json"
@@ -50,11 +49,6 @@
     {
       "command": "check English has all eight required sections",
       "status": "passed"
-    },
-    {
-      "command": "check English and Chinese F-number counts match",
-      "status": "passed",
-      "details": "40 total F-number references in each file; 23 unique equation numbers, F1-F23"
     }
   ],
   "unresolved_issues": [

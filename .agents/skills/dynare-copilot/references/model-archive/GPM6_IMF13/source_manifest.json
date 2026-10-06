@@ -67,8 +67,7 @@
     }
   },
   "outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/GPM6_IMF13/GPM6_IMF13_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/GPM6_IMF13/GPM6_IMF13_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/GPM6_IMF13/GPM6_IMF13_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/GPM6_IMF13/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/GPM6_IMF13/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/GPM6_IMF13/worker_report.json"
@@ -127,15 +126,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/GPM6_IMF13/GPM6_IMF13_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/GPM6_IMF13/GPM6_IMF13_derivation.md",
       "exists": true,
       "sha256": "c62a5cde2f1793195680983687bf7dab23bd531b8725e37c015d96d1f697fd0c"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/GPM6_IMF13/GPM6_IMF13_derivation.zh.md",
-      "exists": true,
-      "sha256": "e32540baf8e8c6c5da6ef183ac9fa4e48660e9720d3349f63bf2e95c6eb84565"
     },
     {
       "role": "source_manifest",

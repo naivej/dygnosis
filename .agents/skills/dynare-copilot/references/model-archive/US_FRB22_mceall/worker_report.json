@@ -2,8 +2,7 @@
   "model_id": "US_FRB22_mceall",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_FRB22_mceall/US_FRB22_mceall_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_FRB22_mceall/US_FRB22_mceall_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_FRB22_mceall/US_FRB22_mceall_derivation.md",
     "mmb-paper-derivations/derivations/US_FRB22_mceall/source_manifest.json",
     "mmb-paper-derivations/derivations/US_FRB22_mceall/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_FRB22_mceall/worker_report.json"
@@ -52,7 +51,7 @@
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/US_FRB22_mceall",
     "source_manifest_json_tool": "passed: python3 -m json.tool mmb-paper-derivations/derivations/US_FRB22_mceall/source_manifest.json",
     "english_eight_sections": "passed: English derivation contains sections 1 through 8 and (F1)",
-    "f_number_counts_match": "passed: English and Chinese F-number sequences match; 49 F-number references counted in each file",
+    "f_number_counts_match": "49 F-number references counted in each file",
     "worker_report_json_tool": "passed: python3 -m json.tool mmb-paper-derivations/derivations/US_FRB22_mceall/worker_report.json",
     "dynare_run": "not_performed"
   },

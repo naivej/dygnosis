@@ -2,8 +2,7 @@
   "model_id": "US_GG24",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_GG24/US_GG24_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_GG24/US_GG24_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_GG24/US_GG24_derivation.md",
     "mmb-paper-derivations/derivations/US_GG24/source_manifest.json",
     "mmb-paper-derivations/derivations/US_GG24/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_GG24/worker_report.json"

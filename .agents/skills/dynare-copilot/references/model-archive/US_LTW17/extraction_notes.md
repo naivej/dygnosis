@@ -29,7 +29,3 @@
 - Verify the exact active monetary/passive fiscal regime assignment and same-paper variant differences for `US_LTW17gz`, `US_LTW17nu`, and `US_LTW17rot` before merging shared index rows.
 - Runtime validation is deferred; no Dynare execution was performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English derivation and preserves equation numbers, formulas, file paths, DOI, model ID, and `needs_review` markers.

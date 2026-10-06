@@ -52,8 +52,7 @@
     }
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_GK13/NK_GK13_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_GK13/NK_GK13_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_GK13/NK_GK13_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_GK13/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_GK13/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_GK13/worker_report.json"
@@ -79,7 +78,7 @@
     "date": "2026-06-17"
   },
   "paper_title": "Qe 1 vs. 2 vs. 3. . . : A framework for analyzing large-scale asset purchases as a monetary policy tool",
-  "authors": "Gertler, Mark; Karadi, Peter ",
+  "authors": "Gertler, Mark; Karadi, Peter",
   "year": "2013",
   "journal_or_series": "International Journal of Central Banking 9(1), pp. 5-53",
   "doi": "",
@@ -88,7 +87,7 @@
   "model_index_row_normalized": {
     "model_id": "NK_GK13",
     "paper_title": "Qe 1 vs. 2 vs. 3. . . : A framework for analyzing large-scale asset purchases as a monetary policy tool",
-    "authors": "Gertler, Mark; Karadi, Peter ",
+    "authors": "Gertler, Mark; Karadi, Peter",
     "year": "2013",
     "journal_or_series": "International Journal of Central Banking 9(1), pp. 5-53",
     "doi": "",
@@ -119,15 +118,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_GK13/NK_GK13_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_GK13/NK_GK13_derivation.md",
       "exists": true,
       "sha256": "b6049e0f0550b6c3343576b196fb164d7c5f8e98bb0537b4ad4c84dcbd8e7c2e"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_GK13/NK_GK13_derivation.zh.md",
-      "exists": true,
-      "sha256": "ef874c9305fe2094cefa67207fdd95a1dc2f013e15270a5a82b39346f68a1d9f"
     },
     {
       "role": "source_manifest",

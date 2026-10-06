@@ -31,8 +31,3 @@
 - Confirm whether the MMB implementation's `eps_m`-only active shock setting is a Rep-MMB simulation choice or the intended benchmark shock subset for this archive row.
 - Review OCR artifacts in names containing Curdia, policy notation, and some footnote markers.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English version.
-- Equation numbering `(F1)` through `(F24)` is preserved in both versions.

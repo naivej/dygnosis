@@ -27,8 +27,3 @@
 - The raw PDF body was not read; it may be useful only for targeted checks of OCR-noisy equations if this entry is promoted beyond first-pass status.
 - Shared archive indexes (`catalog.csv`, `status.csv`) were intentionally not touched for this task.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English core.
-- F-number parity checked: English and Chinese both contain equation-definition bullets `(F1)` through `(F35)`.

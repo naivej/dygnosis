@@ -29,11 +29,6 @@
 - Confirm the exact interpretation of the MMB variable `R_t` in the linear block, because the paper notation uses `R_t` for a gross interest rate while the implementation comments replace the monetary policy rule in model-base form.
 - Check whether the additional transitory neutral technology shock in the implementation should remain in the archive reference table for this MMB row after a full source/code review.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation is a direct translation of the English core with identical section order, file paths, model ID, DOI, status markers, and equation numbers `(F1)` through `(F38)`.
-
 ## Runtime Validation
 
 - Not performed. The user explicitly instructed: "Do not run Dynare."

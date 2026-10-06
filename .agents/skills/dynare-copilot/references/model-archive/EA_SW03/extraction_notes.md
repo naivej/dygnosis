@@ -33,8 +33,3 @@
 - Runtime validation was not performed by assignment.
 - Shared `catalog.csv` and `status.csv` were not edited; proposed row values are in `worker_report.json` and `source_manifest.json`.
 
-## Translation Status
-
-- English derivation written first as `EA_SW03_derivation.en.md`.
-- Chinese derivation written second as `EA_SW03_derivation.zh.md`.
-- Both versions preserve the same eight section headings and the same `(F1)` through `(F21)` numbering.

@@ -2,8 +2,7 @@
   "model_id": "US_PM08fl",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_PM08fl/US_PM08fl_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_PM08fl/US_PM08fl_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_PM08fl/US_PM08fl_derivation.md",
     "mmb-paper-derivations/derivations/US_PM08fl/source_manifest.json",
     "mmb-paper-derivations/derivations/US_PM08fl/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_PM08fl/worker_report.json"
@@ -51,11 +50,6 @@
     {
       "command": "English derivation has all eight required sections and includes (F1)",
       "status": "passed"
-    },
-    {
-      "command": "English and Chinese F-number counts match",
-      "status": "passed",
-      "details": "68 total F-number references in each file; 18 unique equation numbers, F1-F18"
     }
   ],
   "unresolved_issues": [

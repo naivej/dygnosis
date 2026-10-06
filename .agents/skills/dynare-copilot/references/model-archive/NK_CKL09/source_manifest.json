@@ -42,8 +42,7 @@
     "paper_slug": "ea_ckl09_nk_ckl09__the_role_of_labor_markets_for_euro_area_monetary_policy"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_CKL09/NK_CKL09_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_CKL09/NK_CKL09_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_CKL09/NK_CKL09_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_CKL09/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_CKL09/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_CKL09/worker_report.json"
@@ -106,15 +105,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_CKL09/NK_CKL09_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_CKL09/NK_CKL09_derivation.md",
       "exists": true,
       "sha256": "665ea4aa6fa570d36228c258839844f51c4cf1f3b339f0c54d4fe71a6eebf5e3"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_CKL09/NK_CKL09_derivation.zh.md",
-      "exists": true,
-      "sha256": "f86375b6236cafe23d5e1373d335d523c8b726b2414a4faa69aff8550d3222d3"
     },
     {
       "role": "source_manifest",

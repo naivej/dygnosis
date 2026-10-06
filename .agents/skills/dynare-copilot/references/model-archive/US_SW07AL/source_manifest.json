@@ -49,16 +49,14 @@
     }
   },
   "output_paths": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_SW07AL/US_SW07AL_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_SW07AL/US_SW07AL_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_SW07AL/US_SW07AL_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_SW07AL/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_SW07AL/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_SW07AL/worker_report.json"
   },
   "extraction": {
     "language_order": [
-      "English",
-      "Chinese"
+      "English"
     ],
     "english_sections_required": 8,
     "chinese_sections_required": 8,

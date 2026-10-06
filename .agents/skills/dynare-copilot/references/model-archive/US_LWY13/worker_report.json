@@ -2,8 +2,7 @@
   "model_id": "US_LWY13",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_LWY13/US_LWY13_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_LWY13/US_LWY13_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_LWY13/US_LWY13_derivation.md",
     "mmb-paper-derivations/derivations/US_LWY13/source_manifest.json",
     "mmb-paper-derivations/derivations/US_LWY13/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_LWY13/worker_report.json"
@@ -55,11 +54,6 @@
     {
       "command": "check English derivation has all eight required sections",
       "status": "passed"
-    },
-    {
-      "command": "check English and Chinese F-number counts match",
-      "status": "passed",
-      "details": "92 total F-number references in each file; 35 unique equation numbers, F1-F35"
     },
     {
       "command": "git status --short -- mmb-paper-derivations/derivations/US_LWY13 mmb-paper-derivations/derivations/catalog.csv mmb-paper-derivations/derivations/status.csv",

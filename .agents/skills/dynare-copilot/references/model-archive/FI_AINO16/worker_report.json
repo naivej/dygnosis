@@ -4,8 +4,7 @@
   "draft_state": "draft_extracted",
   "owned_folder": "mmb-paper-derivations/derivations/FI_AINO16",
   "changed_files": [
-    "mmb-paper-derivations/derivations/FI_AINO16/FI_AINO16_derivation.en.md",
-    "mmb-paper-derivations/derivations/FI_AINO16/FI_AINO16_derivation.zh.md",
+    "mmb-paper-derivations/derivations/FI_AINO16/FI_AINO16_derivation.md",
     "mmb-paper-derivations/derivations/FI_AINO16/source_manifest.json",
     "mmb-paper-derivations/derivations/FI_AINO16/extraction_notes.md",
     "mmb-paper-derivations/derivations/FI_AINO16/worker_report.json"

@@ -48,7 +48,3 @@
 - Dynare runtime validation was not run.
 - The entry was not promoted to `.agents/skills/dynare-copilot/references/model-archive/`.
 
-## Translation Status
-
-- `EAUS_NAWM08_derivation.zh.md` is a Chinese translation of the English core.
-- `(F#)` numbering, file paths, model ID, DOI, and `needs_review` markers were preserved.

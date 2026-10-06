@@ -32,7 +32,3 @@
 - A future reviewer should verify coefficient definitions and the exact MMB calibration for the `GMAS25cpi` variant before promotion.
 - Shared `catalog.csv` and `status.csv` were not edited by request; proposed rows are recorded in `worker_report.json`.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation is a matched translation preserving section order, file paths, status markers, and all `(F#)` equation labels.

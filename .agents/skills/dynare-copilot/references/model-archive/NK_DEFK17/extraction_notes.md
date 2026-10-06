@@ -25,13 +25,6 @@
 
 - Source-level checking of the detailed Calvo price block, Calvo wage block, capital-producer equation, and steady-state recursion requires either the online appendix or a normalized appendix extraction.
 - Runtime validation, Dynare `steady`, residual checks, ZLB path validation, and perfect-foresight simulation were not performed.
-- The English and Chinese derivations should remain `needs_review` until the appendix-level equations are checked against a paper-side source.
-
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English version.
-- Equation numbering `(F1)` through `(F35)` is preserved across English and Chinese files.
 
 ## Shared Indexes
 

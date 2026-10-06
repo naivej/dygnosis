@@ -11,7 +11,6 @@
 ## Extraction Scope
 
 - English derivation was drafted first using the required eight-section structure.
-- Chinese derivation is a direct translation of the English core and preserves `(F#)` numbering, file paths, DOI values, model ID, and `needs_review` markers.
 - The source paper contains nonlinear primitive problems and a log-linearized model. The MMB implementation cross-check is explicitly a linearized model, so the archive entry records `model(linear)` / log-linearized form.
 - `US_CFP17endo` is treated as the endogenous-debt variant because the implementation cross-check sets `term_prem = 0` and `term_premf = 0`.
 - The `.mod` file `.agents/skills/dynare-copilot/references/examples/US_CFP17endo_rep.mod` was read only as `implementation_cross_check`.
@@ -40,8 +39,3 @@
 - Exact numeric steady-state values are loaded from `parameterfile` in the implementation and were not recalculated here.
 - Runtime validation, residual checks, BK checks, IRF checks, and promotion to the runnable skill archive were not performed.
 
-## Translation Status
-
-- English derivation completed first.
-- Chinese translation completed second.
-- English and Chinese `(F#)` counts match in validation.

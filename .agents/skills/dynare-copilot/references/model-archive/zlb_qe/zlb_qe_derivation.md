@@ -1,195 +1,197 @@
-# ZLB-QE 模型 —— 推导（最优化问题 + 一阶条件）
+# ZLB-QE model: derivation (optimization problems + first-order conditions)
 
-> 本推导用于据此编写 Dynare `.mod`；**确认后再进入写代码阶段**。
-> 题目：用债券市场分割 / 组合平衡（CCF12/PV16 风格）渠道，分析**零利率下限（ZLB）对量化宽松（QE）政策效果的影响**。
+Read this when you study, reuse or extend the archived ZLB-QE model (`zlb_qe.mod`): a compact nonlinear New Keynesian model with a portfolio-balance term premium and QE, with the ZLB solved under perfect foresight with `lmmcp`.
 
----
-
-## 1. 模型概述
-
-- **模型**：紧凑型新凯恩斯模型 + 组合平衡（portfolio-balance）型期限溢价 + QE。
-  以 Chen-Curdia-Ferrero (2012, *Economic Journal*, "The Macroeconomic Effects of Large-Scale Asset Purchase Programmes") 的债券市场分割/组合平衡机制为蓝本（本地库 `US_CCF12_rep`），**蒸馏为可解析求稳态、可跑完全预见 lmmcp 的非线性紧凑版**——剥去习惯形成、工资黏性、产能利用率、两类价格制定者等枝节，只保留 QE 传导的骨架。
-- **QE 传导渠道（核心）**：短债与长久期资产（长期债 + 资本）因市场分割而**不完全替代**，二者之间存在期限溢价 $\zeta_t$。央行 QE = 买入长期资产、压低私人部门长债持有 → $\zeta_t$ 下降 → 长久期资产要求回报下降 → 资本价格 $Q^k_t$ 上升 → 投资回升。**这是 CCF12 式 portfolio-balance 渠道**（对应其 D.23：$\zeta_t = \zeta'(\text{私人长债持有}) + \text{shock}$）。
-- **实验**：完全预见（确定性）。一个**大的负向资本质量冲击**把自然利率压到 ZLB 之下，在三个情景下对比经济反应：
-  - **情景①** 无 ZLB（短端利率可为负，常规利率政策不受约束）、无 QE —— 基准；
-  - **情景②** ZLB 绑定（lmmcp 卡 $R_t\ge 1$）、无 QE —— 常规政策失效，衰退加深；
-  - **情景③** ZLB 绑定 + QE 启动 —— QE 通过 $\zeta_t$ 填补政策缺口。
-  三情景用宏处理器 `@#define` 切换，叠加 IRF。**直接回答："ZLB 使常规政策失效，正是此时 QE 才有用武之地。"**
-- **主体**：代表性家庭（消费/劳动/持短债与长久期资产）、垄断竞争厂商（Rotemberg 价格黏性）、资本生产者（投资调整成本）、央行（短端 Taylor 规则 + ZLB + QE 规则）。
-- **形式**：**非线性**（R8 默认）。ZLB 作为不等式约束天然非线性，完全预见 + lmmcp 正需要非线性原始方程；组合平衡的期限溢价写成结构关系而非约简线性式。
+> This derivation is the basis for the Dynare `.mod`. **Confirm it before moving to the coding stage.**
+> Topic: use the bond-market segmentation / portfolio-balance channel (CCF12/PV16 style) to analyze **how the zero lower bound (ZLB) affects the effectiveness of quantitative easing (QE)**.
 
 ---
 
-## 2. 各主体的最优化问题
+## 1. Model overview
 
-### 2.1 家庭
+- **Model**: compact New Keynesian model + portfolio-balance term premium + QE.
+  The template is the bond-market segmentation / portfolio-balance mechanism of Chen-Curdia-Ferrero (2012, *Economic Journal*, "The Macroeconomic Effects of Large-Scale Asset Purchase Programmes") (local library `US_CCF12_rep`), **distilled into a compact nonlinear version with a closed-form steady state that runs under perfect foresight with lmmcp**. It strips habit formation, wage rigidity, capacity utilization, two types of price setters and other side features, and keeps only the skeleton of QE transmission.
+- **QE transmission channel (core)**: because of market segmentation, short bonds and long-duration assets (long bonds + capital) are **imperfect substitutes**, and a term premium $\zeta_t$ separates them. Central-bank QE = buying long-term assets and reducing private long-bond holdings → $\zeta_t$ falls → the required return on long-duration assets falls → the price of capital $Q^k_t$ rises → investment recovers. **This is the CCF12-style portfolio-balance channel** (their D.23: $\zeta_t = \zeta'(\text{private long-bond holdings}) + \text{shock}$).
+- **Experiment**: perfect foresight (deterministic). A **large negative capital quality shock** pushes the natural rate of interest below the ZLB. Compare the economy's response across three scenarios:
+  - **Scenario (1)** no ZLB (the short rate can go negative; conventional rate policy is unconstrained), no QE — benchmark;
+  - **Scenario (2)** ZLB binds (lmmcp enforces $R_t\ge 1$), no QE — conventional policy fails, and the recession deepens;
+  - **Scenario (3)** ZLB binds + QE active — QE fills the policy gap through $\zeta_t$.
+  Switch between the three scenarios with the macro processor `@#define`, and overlay the IRFs. **Direct answer: "The ZLB disables conventional policy, and that is exactly when QE becomes useful."**
+- **Agents**: representative household (consumption/labor/holds short bonds and long-duration assets), monopolistically competitive firms (Rotemberg price rigidity), capital producers (investment adjustment costs), central bank (short-rate Taylor rule + ZLB + QE rule).
+- **Form**: **nonlinear** (R8 default). The ZLB, as an inequality constraint, is inherently nonlinear, and perfect foresight + lmmcp needs exactly the original nonlinear equations. The portfolio-balance term premium is written as a structural relation, not as a reduced linear form.
 
-代表性家庭持有**短期名义债券** $B_t$（一期，毛名义利率 $R_t$）与**长久期资产**（长期债 + 资本，实际回报 $R^L_{t+1}, R^k_{t+1}$）。市场分割 / 组合调整摩擦使长短资产不完全替代——在长久期资产的欧拉方程上体现为一个期限溢价楔子 $\zeta_t$（见 §3 说明）。效用：
+---
+
+## 2. Optimization problems of each agent
+
+### 2.1 Household
+
+The representative household holds **short-term nominal bonds** $B_t$ (one period, gross nominal rate $R_t$) and **long-duration assets** (long bonds + capital, real returns $R^L_{t+1}, R^k_{t+1}$). Market segmentation / portfolio adjustment frictions make long and short assets imperfect substitutes. This shows up as a term-premium wedge $\zeta_t$ in the Euler equation of the long-duration assets (see the note in Section 3). Utility:
 
 $$\max_{\{C_t,N_t,B_t,\dots\}}\; E_0\sum_{t=0}^{\infty}\beta^t\Big[\frac{C_t^{1-\sigma}}{1-\sigma}-\chi\frac{N_t^{1+\varphi}}{1+\varphi}\Big]$$
 
-预算约束（实际、含短债、长久期资产、工资、利润、资本租金）：
+Budget constraint (real; with short bonds, long-duration assets, wages, profits, capital rent):
 
-$$C_t + \frac{B_t}{P_t} + (\text{长久期资产购置}) \le \frac{R_{t-1}B_{t-1}}{P_t} + (\text{长久期资产回报}) + W_tN_t + \Pi^f_t$$
+$$C_t + \frac{B_t}{P_t} + (\text{long-duration asset purchases}) \le \frac{R_{t-1}B_{t-1}}{P_t} + (\text{long-duration asset returns}) + W_tN_t + \Pi^f_t$$
 
-记 $\Lambda_t \equiv C_t^{-\sigma}$ 为消费边际效用，随机贴现因子 $\Lambda_{t,t+1}\equiv\beta\,\Lambda_{t+1}/\Lambda_t = \beta\,C_{t+1}^{-\sigma}/C_t^{-\sigma}$。
+Let $\Lambda_t \equiv C_t^{-\sigma}$ be the marginal utility of consumption, and let the stochastic discount factor be $\Lambda_{t,t+1}\equiv\beta\,\Lambda_{t+1}/\Lambda_t = \beta\,C_{t+1}^{-\sigma}/C_t^{-\sigma}$.
 
-### 2.2 厂商（垄断竞争 + Rotemberg 价格黏性）
+### 2.2 Firms (monopolistic competition + Rotemberg price rigidity)
 
-中间品厂商 $j$ 用有效资本 $\tilde K_t=\xi_t K_{t-1}$ 与劳动生产，面对需求 $Y_t(j)=(P_t(j)/P_t)^{-\epsilon}Y_t$，调价付二次成本 $\frac{\phi_p}{2}\big(\frac{P_t(j)}{P_{t-1}(j)}-1\big)^2 Y_t$。实际利润现值最大化：
+Intermediate-goods firm $j$ produces with effective capital $\tilde K_t=\xi_t K_{t-1}$ and labor, faces demand $Y_t(j)=(P_t(j)/P_t)^{-\epsilon}Y_t$, and pays a quadratic cost $\frac{\phi_p}{2}\big(\frac{P_t(j)}{P_{t-1}(j)}-1\big)^2 Y_t$ to change its price. It maximizes the present value of real profits:
 
 $$\max\; E_0\sum_{t=0}^{\infty}\Lambda_{0,t}\Big[\big(\tfrac{P_t(j)}{P_t}-mc_t\big)\big(\tfrac{P_t(j)}{P_t}\big)^{-\epsilon}Y_t-\frac{\phi_p}{2}\big(\tfrac{P_t(j)}{P_{t-1}(j)}-1\big)^2 Y_t\Big]$$
 
-成本最小化给出要素需求（$mc_t$ = 实际边际成本）。
+Cost minimization gives the factor demands ($mc_t$ = real marginal cost).
 
-### 2.3 资本生产者
+### 2.3 Capital producers
 
-由投资 $I_t$ 产出新资本，付投资调整成本 $\frac{\kappa_I}{2}\big(\frac{I_t}{I_{t-1}}-1\big)^2 I_t$，资本价格（Tobin's Q）$Q^k_t$。
+Capital producers turn investment $I_t$ into new capital and pay investment adjustment costs $\frac{\kappa_I}{2}\big(\frac{I_t}{I_{t-1}}-1\big)^2 I_t$; the price of capital (Tobin's Q) is $Q^k_t$.
 
 ---
 
-## 3. 一阶条件（FOC）
+## 3. First-order conditions (FOC)
 
-> 关于期限溢价楔子 $\zeta_t$ 的处理：短债欧拉方程**不含** $\zeta_t$（短端是政策利率，由 ZLB 直接约束）；长久期资产（长期债、资本）的欧拉方程**含** $(1+\zeta_t)$ —— 正的 $\zeta_t$ 表示长资产须提供更高回报方被持有（价格更低、收益率更高）。$\zeta_t$ 由组合平衡关系 (F11) 决定，QE 通过它起作用。
+> Treatment of the term-premium wedge $\zeta_t$: the short-bond Euler equation **does not contain** $\zeta_t$ (the short rate is the policy rate, constrained directly by the ZLB). The Euler equations of the long-duration assets (long bonds, capital) **contain** $(1+\zeta_t)$ — a positive $\zeta_t$ means that long assets must offer a higher return to be held (lower price, higher yield). The portfolio-balance relation (F11) determines $\zeta_t$, and QE works through it.
 
-- **(F1) 消费欧拉方程（短端，ZLB 约束的就是它）**：
+- **(F1) Consumption Euler equation (short rate; this is the equation the ZLB constrains)**:
 $$C_t^{-\sigma}=\beta\,E_t\Big[C_{t+1}^{-\sigma}\,\frac{R_t}{\Pi_{t+1}}\Big]$$
 
-- **(F2) 劳动供给**：
+- **(F2) Labor supply**:
 $$\chi N_t^{\varphi}=C_t^{-\sigma}\,W_t$$
 
-- **(F3) 生产函数**（有效资本 $\xi_t K_{t-1}$）：
+- **(F3) Production function** (effective capital $\xi_t K_{t-1}$):
 $$Y_t=(\xi_t K_{t-1})^{\alpha}N_t^{1-\alpha}$$
 
-- **(F4) 资本租金（资本需求）**：
+- **(F4) Capital rent (capital demand)**:
 $$r^k_t=\alpha\,mc_t\,\frac{Y_t}{\xi_t K_{t-1}}$$
 
-- **(F5) 劳动需求**：
+- **(F5) Labor demand**:
 $$W_t=(1-\alpha)\,mc_t\,\frac{Y_t}{N_t}$$
 
-- **(F6) Rotemberg 新凯恩斯菲利普斯曲线**（$\Pi_{ss}=1$ 归一）：
+- **(F6) Rotemberg New Keynesian Phillips curve** (normalized with $\Pi_{ss}=1$):
 $$\phi_p\,(\Pi_t-1)\Pi_t=(1-\epsilon)+\epsilon\,mc_t+\phi_p\,E_t\Big[\Lambda_{t,t+1}(\Pi_{t+1}-1)\Pi_{t+1}\frac{Y_{t+1}}{Y_t}\Big]$$
 
-- **(F7) 资本积累**（含资本质量冲击 $\xi_t$ 与投资调整成本）：
+- **(F7) Capital accumulation** (with the capital quality shock $\xi_t$ and investment adjustment costs):
 $$K_t=(1-\delta)\xi_t K_{t-1}+\Big[1-\frac{\kappa_I}{2}\big(\tfrac{I_t}{I_{t-1}}-1\big)^2\Big]I_t$$
 
-- **(F8) 投资 FOC（Tobin's Q）**：
+- **(F8) Investment FOC (Tobin's Q)**:
 $$1=Q^k_t\Big[1-\frac{\kappa_I}{2}\big(\tfrac{I_t}{I_{t-1}}-1\big)^2-\kappa_I\big(\tfrac{I_t}{I_{t-1}}-1\big)\tfrac{I_t}{I_{t-1}}\Big]+E_t\Big[\Lambda_{t,t+1}\,Q^k_{t+1}\,\kappa_I\big(\tfrac{I_{t+1}}{I_t}-1\big)\big(\tfrac{I_{t+1}}{I_t}\big)^2\Big]$$
 
-- **(F9) 资本的实现回报**（$t-1\to t$，用 $Q^k_{t-1}$ 作分母）：
+- **(F9) Realized return on capital** ($t-1\to t$, with $Q^k_{t-1}$ in the denominator):
 $$R^k_t=\frac{\xi_t\big[r^k_t+(1-\delta)Q^k_t\big]}{Q^k_{t-1}}$$
 
-- **(F10) 资本欧拉方程（含期限溢价楔子）**：
+- **(F10) Capital Euler equation (with the term-premium wedge)**:
 $$1+\zeta_t=\beta\,E_t\Big[\frac{C_{t+1}^{-\sigma}}{C_t^{-\sigma}}\,R^k_{t+1}\Big]$$
 
-- **(F11) 组合平衡 / 期限溢价**（QE 入口）：
+- **(F11) Portfolio balance / term premium** (entry point of QE):
 $$\zeta_t=\bar\zeta-\zeta'\,qe_t$$
-央行长债持有 $qe_t$↑ → 私人长债持有↓ → $\zeta_t$↓。$\zeta'>0$ 为组合平衡弹性。
+Central-bank long-bond holdings $qe_t$↑ → private long-bond holdings↓ → $\zeta_t$↓. $\zeta'>0$ is the portfolio-balance elasticity.
 
-- **(F12) 长端名义利率（期限溢价定义，报告用）**：
+- **(F12) Long-term nominal rate (term-premium definition, for reporting)**:
 $$R^L_t=R_t\,(1+\zeta_t)$$
 
-> **关于长端利率的实现说明**：最初设想用永续债（几何衰减票息 $\kappa_L$，价格 $Q^L_t$）显式定价，但其前瞻欧拉 + $Q^L_{t-1}$ 递归在完全预见下产生**奇异雅可比**（两个 $\sim 10^{51}$ 量级伪特征根，求解器失败）。由于该长债块**对实体经济不反馈**（QE 的需求渠道是资本/投资 (F10)，长债仅作报告），改用**静态恒等式** $R^L_t=R_t(1+\zeta_t)$：长端名义利率 = 短端名义利率复合期限溢价。这既消除奇异性，又恰好凸显 QE 故事——ZLB 下 $R_t$ 锁定在 1，长端利率只能通过 QE 压低 $\zeta_t$ 而下降。
+> **Implementation note on the long rate**: the first design priced a perpetuity explicitly (geometrically decaying coupon $\kappa_L$, price $Q^L_t$). Under perfect foresight its forward-looking Euler equation + the $Q^L_{t-1}$ recursion produced a **singular Jacobian** (two spurious eigenvalues of order $\sim 10^{51}$; the solver failed). Because this long-bond block **does not feed back into the real economy** (the demand channel of QE is capital/investment (F10); the long bond is for reporting only), it was replaced with the **static identity** $R^L_t=R_t(1+\zeta_t)$: long-term nominal rate = short-term nominal rate compounded with the term premium. This removes the singularity and also highlights the QE story: at the ZLB, $R_t$ is locked at 1, so the long rate can fall only when QE compresses $\zeta_t$.
 
 ---
 
-## 4. 市场出清与总量恒等式
+## 4. Market clearing and aggregate identities
 
-- **(F15) 资源约束**（Rotemberg 调价成本是实际资源损耗；无政府购买；QE 不耗资源）：
+- **(F15) Resource constraint** (Rotemberg price adjustment costs are a real resource loss; no government purchases; QE uses no resources):
 $$Y_t=C_t+I_t+\frac{\phi_p}{2}(\Pi_t-1)^2 Y_t$$
 
-> **Walras 定律检查**：本模型的冗余方程是**家庭预算约束**。短债净供给为零（家庭间/与央行轧差），资本由家庭持有，厂商利润全额返还家庭；将家庭预算约束、厂商利润定义、央行/QE 账户三者相加并用各主体 FOC 替换，恰好退化为资源约束 (F15)。故**家庭预算约束冗余，不进 model 块**——否则方程数虚增一条、BK 必失败。QE 在本紧凑设定中以 (F11) 约简形式进入，不单列央行资产负债表账户（这是为可解析稳态作的显式建模取舍，机制等价于 CCF12 的 D.20+D.23）。
+> **Walras' law check**: the redundant equation of this model is the **household budget constraint**. Short bonds are in zero net supply (netted among households / with the central bank), households hold the capital, and firm profits are fully rebated to households. Adding the household budget constraint, the firm profit definition and the central-bank/QE account, and substituting each agent's FOCs, reduces exactly to the resource constraint (F15). So the **household budget constraint is redundant and does not go into the model block** — otherwise the equation count would be one too many and the Blanchard-Kahn conditions would necessarily fail. In this compact setup QE enters in the reduced form (F11), with no separate central-bank balance-sheet account (an explicit modeling trade-off for a closed-form steady state; the mechanism is equivalent to CCF12's D.20+D.23).
 
 ---
 
-## 5. 外生过程与政策规则
+## 5. Exogenous processes and policy rules
 
-- **(F16) 短端 Taylor 规则 + ZLB**（$R_{ss}=1/\beta$，$\Pi_{ss}=1$）：
+- **(F16) Short-rate Taylor rule + ZLB** ($R_{ss}=1/\beta$, $\Pi_{ss}=1$):
 $$R_t=R_{ss}\,\Pi_t^{\phi_\pi}\Big(\frac{Y_t}{Y_{ss}}\Big)^{\phi_y}\qquad\perp\qquad R_t\ge 1$$
-情景①：去掉互补条件、允许 $R_t<1$；情景②③：lmmcp 卡 $R_t\ge1$。
-（Dynare 残差 = LHS−RHS = $R_t-$规则；绑定时 $R_t=1$、规则值<1 → 残差>0，符合 lmmcp 下界要求。）
+Scenario (1): drop the complementarity condition and allow $R_t<1$. Scenarios (2) and (3): lmmcp enforces $R_t\ge1$.
+(Dynare residual = LHS−RHS = $R_t-$rule; when the bound binds, $R_t=1$ and the rule value is < 1 → residual > 0, as the lmmcp lower bound requires.)
 
-- **(F17) QE 规则**（央行长债持有；情景③启动，①②为 0）：
-$$qe_t=\rho_{qe}\,qe_{t-1}+\phi_{qe}\,\frac{Y_{ss}-Y_t}{Y_{ss}}\qquad(\text{情景①②}:qe_t=0)$$
-衰退（$Y_t<Y_{ss}$）→ 央行扩表买长债。
+- **(F17) QE rule** (central-bank long-bond holdings; active in Scenario (3), zero in (1) and (2)):
+$$qe_t=\rho_{qe}\,qe_{t-1}+\phi_{qe}\,\frac{Y_{ss}-Y_t}{Y_{ss}}\qquad(\text{Scenarios (1)(2)}:qe_t=0)$$
+Recession ($Y_t<Y_{ss}$) → the central bank expands its balance sheet and buys long bonds.
 
-- **(F18) 资本质量冲击过程**（衰退驱动）：
+- **(F18) Capital quality shock process** (drives the recession):
 $$\log\xi_t=\rho_\xi\,\log\xi_{t-1}+\varepsilon^\xi_t$$
-$\varepsilon^\xi_t<0$ 的大冲击 → 有效资本与资本回报骤降 → 投资坍塌 → 自然利率转负 → ZLB 绑定。
+A large shock with $\varepsilon^\xi_t<0$ → effective capital and the return on capital collapse → investment collapses → the natural rate of interest turns negative → the ZLB binds.
 
 ---
 
-## 6. 稳态求解（$\xi=1,\ qe=0,\ \Pi=1$；可自上而下照抄进 steady_state_model）
+## 6. Steady state ($\xi=1,\ qe=0,\ \Pi=1$; can be copied top-down into steady_state_model)
 
-按以下次序逐个求值：
+Evaluate in this order:
 
 1. $\Pi=1,\quad R=1/\beta,\quad \zeta=\bar\zeta,\quad qe=0,\quad \xi=1$
-2. 价格黏性 SS（F6，$\Pi=1$）：$mc=\dfrac{\epsilon-1}{\epsilon}$
-3. 投资 SS（F8，$I/I_{-1}=1$）：$Q^k=1$
-4. 资本回报（F10）：$R^k=\dfrac{1+\bar\zeta}{\beta}$
-5. 租金（F9，$\xi=1,Q^k=1$）：$r^k=R^k-(1-\delta)=\dfrac{1+\bar\zeta}{\beta}-(1-\delta)$
-6. 资本-产出比（F4）：$\dfrac{K}{Y}=\dfrac{\alpha\,mc}{r^k}$
-7. 投资-产出比（F7，$\xi=1$）：$I=\delta K\Rightarrow \dfrac{I}{Y}=\delta\dfrac{K}{Y}$
-8. 归一 $N=1$（反解 $\chi$）：由 $Y=K^\alpha N^{1-\alpha}=K^\alpha$ 与 $K=(K/Y)Y=(K/Y)K^\alpha$ 得
+2. Price-rigidity steady state (F6, $\Pi=1$): $mc=\dfrac{\epsilon-1}{\epsilon}$
+3. Investment steady state (F8, $I/I_{-1}=1$): $Q^k=1$
+4. Return on capital (F10): $R^k=\dfrac{1+\bar\zeta}{\beta}$
+5. Rent (F9, $\xi=1,Q^k=1$): $r^k=R^k-(1-\delta)=\dfrac{1+\bar\zeta}{\beta}-(1-\delta)$
+6. Capital-output ratio (F4): $\dfrac{K}{Y}=\dfrac{\alpha\,mc}{r^k}$
+7. Investment-output ratio (F7, $\xi=1$): $I=\delta K\Rightarrow \dfrac{I}{Y}=\delta\dfrac{K}{Y}$
+8. Normalize $N=1$ (back-solve $\chi$): from $Y=K^\alpha N^{1-\alpha}=K^\alpha$ and $K=(K/Y)Y=(K/Y)K^\alpha$,
 $$K=\Big(\frac{K}{Y}\Big)^{1/(1-\alpha)},\quad Y=K^\alpha,\quad I=\delta K,\quad C=Y-I$$
-9. 工资（F5）：$W=(1-\alpha)mc\,Y/N=(1-\alpha)mc\,Y$
-10. 反解偏好权重（F2）：$\chi=C^{-\sigma}W/N^{\varphi}=C^{-\sigma}W$
-11. 长端利率（F12）：$R^L=R\,(1+\bar\zeta)=\dfrac{1+\bar\zeta}{\beta}$
-12. 校验短端欧拉 (F1)：$1=\beta R/\Pi=\beta\cdot(1/\beta)/1=1$ ✓
+9. Wage (F5): $W=(1-\alpha)mc\,Y/N=(1-\alpha)mc\,Y$
+10. Back-solve the preference weight (F2): $\chi=C^{-\sigma}W/N^{\varphi}=C^{-\sigma}W$
+11. Long-term rate (F12): $R^L=R\,(1+\bar\zeta)=\dfrac{1+\bar\zeta}{\beta}$
+12. Check the short-rate Euler equation (F1): $1=\beta R/\Pi=\beta\cdot(1/\beta)/1=1$ (holds).
 
-> $R_{ss}=1/\beta>1$，稳态 ZLB 松弛 ✓。
-
----
-
-## 7. 时序与形式约定
-
-- **状态变量期末存量**：$K_t$ 是 $t$ 期末资本，生产用 $K_{t-1}$（F3 写 `K(-1)`）；$I_{t-1}$ 进调整成本；$Q^k_{t-1}$ 进 (F9) 实现回报；$qe_{t-1},\xi_{t-1}$ 进各自滞后项。
-- **资本质量冲击** $\xi_t$ 同期乘 $K_{t-1}$ 得有效资本（F3、F4、F7、F9）。
-- **利率时序**：$R_t$ 是 $t$ 期设定、$t\to t{+}1$ 兑现的毛名义利率，进 (F1) 的 `R`（当期）。
-- **形式**：全非线性，让 Dynare 做泰勒展开（R8）；ZLB 用 `perfect_foresight_solver(lmmcp)` + 方程后挂 `⟂ R>1`。
-- **求解**：完全预见，`perfect_foresight_setup`/`solver`；初/终值 = 无冲击稳态。
+> $R_{ss}=1/\beta>1$, so the ZLB is slack in the steady state.
 
 ---
 
-## 8. 变量与参数对照表
+## 7. Timing and form conventions
 
-| 类别 | 符号(.mod) | 含义 | 由哪条方程定 |
+- **State variables are stocks at the end of the period**: $K_t$ is capital at the end of period $t$; production uses $K_{t-1}$ (F3 writes `K(-1)`); $I_{t-1}$ enters the adjustment cost; $Q^k_{t-1}$ enters the realized return (F9); $qe_{t-1},\xi_{t-1}$ enter their own lag terms.
+- **Capital quality shock**: $\xi_t$ multiplies $K_{t-1}$ in the same period to give effective capital (F3, F4, F7, F9).
+- **Interest-rate timing**: $R_t$ is the gross nominal rate set in period $t$ and paid from $t$ to $t{+}1$; it enters (F1) as `R` (current period).
+- **Form**: fully nonlinear; let Dynare do the Taylor expansion (R8). The ZLB uses `perfect_foresight_solver(lmmcp)` + `⟂ R>1` attached after the equation.
+- **Solution**: perfect foresight, `perfect_foresight_setup`/`solver`; initial and terminal values = the no-shock steady state.
+
+---
+
+## 8. Variable and parameter table
+
+| Class | Symbol (.mod) | Meaning | Determined by |
 |------|-----------|------|--------------|
-| 内生 | `C` | 消费 | (F1) |
-| 内生 | `N` | 劳动 | (F2) |
-| 内生 | `Y` | 产出 | (F3) |
-| 内生 | `mc` | 实际边际成本 | (F5) |
-| 内生 | `W` | 实际工资 | (F4) 经因子需求；与(F5)联立 |
-| 内生 | `rk` | 资本租金 | (F4) |
-| 内生 | `Pi` | 毛通胀 | (F6) |
-| 内生 | `K` | 资本（期末） | (F7) |
-| 内生 | `I` | 投资 | (F8) |
-| 内生 | `Qk` | 资本价格 Tobin Q | (F10) |
-| 内生 | `Rk` | 资本实现回报 | (F9) |
-| 内生 | `zeta` | 期限溢价 | (F11) |
-| 内生 | `RL` | 长端毛名义利率 | (F12) |
-| 内生 | `R` | 短端毛名义利率 | (F16) Taylor+ZLB |
-| 内生 | `qe` | 央行长债持有(QE) | (F17) |
-| 内生 | `xi` | 资本质量 | (F18) |
-| 外生 | `eps_xi` | 资本质量创新 | — |
-| 参数 | `betta,sigma,varphi,chi,alppha,delta` | 偏好/技术 | — |
-| 参数 | `epsilon,phi_p` | 加成/Rotemberg 黏性 | — |
-| 参数 | `kappa_I` | 投资调整成本 | — |
-| 参数 | `zetabar,zeta_prime` | 稳态期限溢价/组合平衡弹性 | — |
-| 参数 | `phi_pi,phi_y` | Taylor 系数 | — |
-| 参数 | `rho_qe,phi_qe` | QE 规则 | — |
-| 参数 | `rho_xi` | 资本质量持续性 | — |
+| Endogenous | `C` | consumption | (F1) |
+| Endogenous | `N` | labor | (F2) |
+| Endogenous | `Y` | output | (F3) |
+| Endogenous | `mc` | real marginal cost | (F5) |
+| Endogenous | `W` | real wage | (F4) via factor demand; jointly with (F5) |
+| Endogenous | `rk` | capital rent | (F4) |
+| Endogenous | `Pi` | gross inflation | (F6) |
+| Endogenous | `K` | capital (end of period) | (F7) |
+| Endogenous | `I` | investment | (F8) |
+| Endogenous | `Qk` | price of capital, Tobin's Q | (F10) |
+| Endogenous | `Rk` | realized return on capital | (F9) |
+| Endogenous | `zeta` | term premium | (F11) |
+| Endogenous | `RL` | long-term gross nominal rate | (F12) |
+| Endogenous | `R` | short-term gross nominal rate | (F16) Taylor + ZLB |
+| Endogenous | `qe` | central-bank long-bond holdings (QE) | (F17) |
+| Endogenous | `xi` | capital quality | (F18) |
+| Exogenous | `eps_xi` | capital quality innovation | — |
+| Parameter | `betta,sigma,varphi,chi,alppha,delta` | preferences/technology | — |
+| Parameter | `epsilon,phi_p` | markup/Rotemberg rigidity | — |
+| Parameter | `kappa_I` | investment adjustment cost | — |
+| Parameter | `zetabar,zeta_prime` | steady-state term premium/portfolio-balance elasticity | — |
+| Parameter | `phi_pi,phi_y` | Taylor coefficients | — |
+| Parameter | `rho_qe,phi_qe` | QE rule | — |
+| Parameter | `rho_xi` | capital quality persistence | — |
 
-**R4 核对（最终实现）**：内生变量 16 个（C,N,Y,mc,W,rk,Pi,K,I,Qk,Rk,zeta,RL,R,qe,xi），方程 16 条（F1–F12、F15–F18；长债块由原 F12–F14 三条简化为 F12 一条静态恒等式，故变量数与方程数各减 2）。家庭预算约束按 Walras 剔除。已跑通：稳态残差全 0、BK 秩条件验证、完全预见求解残差 $\sim10^{-10}$。
+**R4 check (final implementation)**: 16 endogenous variables (C,N,Y,mc,W,rk,Pi,K,I,Qk,Rk,zeta,RL,R,qe,xi), 16 equations (F1–F12, F15–F18; the long-bond block was simplified from the original three equations F12–F14 to one static identity F12, so the variable count and the equation count each drop by 2). The household budget constraint is removed by Walras' law. Runs cleanly: steady-state residuals all 0, Blanchard-Kahn rank condition verified, perfect foresight solution residuals $\sim10^{-10}$.
 
-> **宏处理器切换**：`@#define ZLB`（0=情景①,1=②③）控制 (F16) 是否挂 `⟂`；`@#define QE`（0=①②,1=③）控制 (F17) 是 QE 规则还是 `qe=0`。三情景跑三次、叠加 IRF。
+> **Macro processor switches**: `@#define ZLB` (0 = Scenario (1), 1 = Scenarios (2)(3)) controls whether (F16) carries `⟂`; `@#define QE` (0 = Scenarios (1)(2), 1 = Scenario (3)) controls whether (F17) is the QE rule or `qe=0`. Run once per scenario (three runs) and overlay the IRFs.
 
 ---
 
-**确认要点（请审阅）**：
-1. **QE 渠道定位**：QE 通过期限溢价 $\zeta_t$ 作用于**资本/投资**（长久期资产要求回报），而非单列家庭消费的长端欧拉——这是把 CCF12 两类家庭蒸馏为代表性家庭后最自然的需求渠道。接受否？
-2. **期限溢价无独立冲击**：衰退由资本质量冲击单独驱动，$\zeta_t$ 仅随 QE 变动（无 QE 时恒为 $\bar\zeta$）。符合你"只用资本质量冲击"的选择。接受否？
-3. **QE 规则**对产出缺口反应（$\phi_{qe}\cdot(Y_{ss}-Y)/Y_{ss}$），情景③启动。或你想要**固定规模**的一次性 QE（更贴近"LSAP 公告"）？
-4. **价格黏性用 Rotemberg**（单条 NKPC、省辅助变量）替代 CCF12 的 Calvo。接受否？
+**Points to confirm (please review)**:
+1. **Where the QE channel acts**: QE acts through the term premium $\zeta_t$ on **capital/investment** (the required return on long-duration assets), not through a separate long-rate Euler equation for household consumption. This is the most natural demand channel once CCF12's two household types are distilled into a representative household. Accept?
+2. **No separate term-premium shock**: the capital quality shock alone drives the recession; $\zeta_t$ moves only with QE (without QE it stays at $\bar\zeta$). This matches your choice to "use only the capital quality shock". Accept?
+3. The **QE rule** responds to the output gap ($\phi_{qe}\cdot(Y_{ss}-Y)/Y_{ss}$) and is active in Scenario (3). Or do you want a one-time QE of **fixed size** (closer to an "LSAP announcement")?
+4. **Price rigidity uses Rotemberg** (a single NKPC, no helper variables needed) instead of CCF12's Calvo. Accept?
 
-确认（或指出要改的点）后，我进入阶段2 写 `.mod`，按三跑三锁增量验证。
+After you confirm (or name the points to change), I move to Stage 2 (declarations), write the `.mod`, and verify it incrementally with three locked runs.

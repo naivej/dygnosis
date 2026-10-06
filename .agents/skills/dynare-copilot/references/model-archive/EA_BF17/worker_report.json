@@ -2,8 +2,7 @@
   "model_id": "EA_BF17",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_BF17/EA_BF17_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_BF17/EA_BF17_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_BF17/EA_BF17_derivation.md",
     "mmb-paper-derivations/derivations/EA_BF17/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_BF17/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_BF17/worker_report.json"
@@ -54,11 +53,6 @@
     {
       "command": "check English has all eight required sections",
       "status": "passed"
-    },
-    {
-      "command": "check English and Chinese F-number counts match",
-      "status": "passed",
-      "details": "22 total F-number references in each file; 11 unique equation numbers, F1-F11"
     }
   ],
   "unresolved_issues": [

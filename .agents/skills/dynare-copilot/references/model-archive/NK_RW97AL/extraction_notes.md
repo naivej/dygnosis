@@ -34,7 +34,3 @@
 - The `NK_RW97AL` versus `NK_RW97` variant distinction is not visible in the shared paper-side source; this entry records the assigned `AL` model ID but uses the same matched paper.
 - Runtime validation, Dynare residual checks, BK checks, and IRF checks were not performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English version with the same eight sections and the same `(F1)` through `(F41)` equation numbers.

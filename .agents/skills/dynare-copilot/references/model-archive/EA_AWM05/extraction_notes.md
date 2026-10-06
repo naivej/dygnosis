@@ -31,8 +31,3 @@
 - No Dynare runtime validation was performed.
 - No shared `catalog.csv` or `status.csv` rows were edited; proposed rows are in `worker_report.json`.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English entry.
-- `(F#)` numbering was preserved across English and Chinese.

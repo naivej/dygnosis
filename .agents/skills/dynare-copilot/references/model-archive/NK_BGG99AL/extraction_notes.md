@@ -30,9 +30,3 @@
 - Reconstruct the full nonlinear steady-state ordering if this entry is later promoted to a runnable Dynare archive item.
 - Run Dynare only in a later runtime-validation phase; no runtime validation was performed here.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English core after drafting.
-- Section order, paths, DOI, status markers, and formulas were preserved.
-- English and Chinese derivations both contain F-numbers `(F1)` through `(F44)`.

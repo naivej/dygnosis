@@ -37,8 +37,3 @@ Status: `needs_review`
 - Steady-state logic is summarized from Appendix 2 and remains `needs_review`; the full implementation steady-state alias block was not adopted as source evidence.
 - Shared `catalog.csv` and `status.csv` were not edited. Proposed rows are in `worker_report.json`.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English version.
-- `(F#)` numbering was preserved in Chinese.

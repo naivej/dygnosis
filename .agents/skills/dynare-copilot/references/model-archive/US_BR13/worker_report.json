@@ -1,8 +1,7 @@
 {
   "model_id": "US_BR13",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_BR13/US_BR13_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_BR13/US_BR13_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_BR13/US_BR13_derivation.md",
     "mmb-paper-derivations/derivations/US_BR13/source_manifest.json",
     "mmb-paper-derivations/derivations/US_BR13/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_BR13/worker_report.json"
@@ -44,7 +43,7 @@
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/US_BR13",
     "json_tool": "passed: python3 -m json.tool source_manifest.json and worker_report.json",
     "eight_section_check": "passed: English derivation has sections ## 1. through ## 8. and contains (F1)",
-    "f_number_match_check": "passed: English and Chinese F-number reference counts match; unique benchmark equations are (F1)-(F18)"
+    "f_number_match_check": "unique benchmark equations are (F1)-(F18)"
   },
   "unresolved_issues": [
     "Online Appendix is referenced by the paper but unavailable as docs/mmb_appendix_full_normalizations/US_BR13.md.",

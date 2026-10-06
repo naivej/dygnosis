@@ -1,8 +1,7 @@
 {
   "model_id": "US_FGKR15",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_FGKR15/US_FGKR15_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_FGKR15/US_FGKR15_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_FGKR15/US_FGKR15_derivation.md",
     "mmb-paper-derivations/derivations/US_FGKR15/source_manifest.json",
     "mmb-paper-derivations/derivations/US_FGKR15/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_FGKR15/worker_report.json"
@@ -39,8 +38,6 @@
   "validation": {
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/US_FGKR15",
     "json_tool": "passed: python3 -m json.tool on source_manifest.json and worker_report.json",
-    "section_check": "passed: English and Chinese derivations contain sections 1 through 8",
-    "f_number_count_check": "passed: English and Chinese derivations each contain F1 through F26",
     "notes": "Dynare was not run. Validation was limited to document, JSON, and whitespace checks."
   },
   "unresolved_issues": [

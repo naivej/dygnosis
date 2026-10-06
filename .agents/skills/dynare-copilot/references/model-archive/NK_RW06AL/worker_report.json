@@ -2,8 +2,7 @@
   "model_id": "NK_RW06AL",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_RW06AL/NK_RW06AL_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_RW06AL/NK_RW06AL_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_RW06AL/NK_RW06AL_derivation.md",
     "mmb-paper-derivations/derivations/NK_RW06AL/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_RW06AL/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_RW06AL/worker_report.json"
@@ -52,7 +51,6 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number sequences match",
       "status": "passed",
       "details": "52 total F-number references in each file; 30 unique equation numbers."
     }

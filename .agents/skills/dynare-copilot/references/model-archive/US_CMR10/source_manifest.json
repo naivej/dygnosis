@@ -66,8 +66,7 @@
     "notes": "Used only to compare variable names, US baseline suffixes, nonlinear model block, flexible-price block, and AR(1)-style shock equations. Not used as paper-side mathematical evidence."
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_CMR10/US_CMR10_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_CMR10/US_CMR10_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_CMR10/US_CMR10_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_CMR10/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_CMR10/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_CMR10/worker_report.json"
@@ -135,8 +134,7 @@
     }
   },
   "archive_files": {
-    "derivation_en": "mmb-paper-derivations/derivations/US_CMR10/US_CMR10_derivation.en.md",
-    "derivation_zh": "mmb-paper-derivations/derivations/US_CMR10/US_CMR10_derivation.zh.md",
+    "derivation_en": "mmb-paper-derivations/derivations/US_CMR10/US_CMR10_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_CMR10/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_CMR10/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_CMR10/worker_report.json"

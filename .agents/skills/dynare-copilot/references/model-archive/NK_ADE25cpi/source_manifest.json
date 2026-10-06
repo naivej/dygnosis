@@ -60,8 +60,7 @@
     }
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_ADE25cpi/NK_ADE25cpi_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_ADE25cpi/NK_ADE25cpi_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_ADE25cpi/NK_ADE25cpi_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_ADE25cpi/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_ADE25cpi/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_ADE25cpi/worker_report.json"
@@ -97,7 +96,7 @@
     ]
   },
   "paper_title": "Trade Wars and the Optimal Design of Monetary Rules",
-  "authors": "Auray, Stéphane; Devereux, Micheal; Eyquem, Aurélien ",
+  "authors": "Auray, Stéphane; Devereux, Micheal; Eyquem, Aurélien",
   "year": "2025",
   "journal_or_series": "Journal of Monetary Economics",
   "doi": "10.1016/j.jmoneco.2024.103726",
@@ -107,7 +106,7 @@
   "model_index_row_normalized": {
     "model_id": "NK_ADE25cpi",
     "paper_title": "Trade Wars and the Optimal Design of Monetary Rules",
-    "authors": "Auray, Stéphane; Devereux, Micheal; Eyquem, Aurélien ",
+    "authors": "Auray, Stéphane; Devereux, Micheal; Eyquem, Aurélien",
     "year": "2025",
     "journal_or_series": "Journal of Monetary Economics",
     "doi": "10.1016/j.jmoneco.2024.103726",
@@ -138,15 +137,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_ADE25cpi/NK_ADE25cpi_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_ADE25cpi/NK_ADE25cpi_derivation.md",
       "exists": true,
       "sha256": "722eb59877cbd7be41216b22fad6291e962073dc23b84e54f39387d0e44d7408"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_ADE25cpi/NK_ADE25cpi_derivation.zh.md",
-      "exists": true,
-      "sha256": "d7f85c1ccd5608c5fdc5a92915934ef630150fd744b0e5fa7cc61486af767945"
     },
     {
       "role": "source_manifest",

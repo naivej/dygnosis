@@ -46,16 +46,14 @@
     "sniff_result": "First 80 Markdown lines match the expected title and authors."
   },
   "archive_files": {
-    "derivation_en": "mmb-paper-derivations/derivations/EA_PV15/EA_PV15_derivation.en.md",
-    "derivation_zh": "mmb-paper-derivations/derivations/EA_PV15/EA_PV15_derivation.zh.md",
+    "derivation_en": "mmb-paper-derivations/derivations/EA_PV15/EA_PV15_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/EA_PV15/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/EA_PV15/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/EA_PV15/worker_report.json"
   },
   "extraction": {
     "language_order": [
-      "English",
-      "Chinese"
+      "English"
     ],
     "english_sections_required": 8,
     "equation_numbering": "continuous F1-F50",

@@ -43,8 +43,3 @@
 - Confirm whether the MMB modelbase interest-rule substitution should be represented as the primary `US_ACELt` policy block or as a separate MMB implementation overlay.
 - Reconstruct a full steady-state ordering from source-level appendix material before any runnable `.mod` promotion.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English draft.
-- Equation numbers `(F1)` through `(F29)` are preserved in both files.

@@ -2,8 +2,7 @@
   "model_id": "CA_ToTEM10",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/CA_ToTEM10/CA_ToTEM10_derivation.en.md",
-    "mmb-paper-derivations/derivations/CA_ToTEM10/CA_ToTEM10_derivation.zh.md",
+    "mmb-paper-derivations/derivations/CA_ToTEM10/CA_ToTEM10_derivation.md",
     "mmb-paper-derivations/derivations/CA_ToTEM10/source_manifest.json",
     "mmb-paper-derivations/derivations/CA_ToTEM10/extraction_notes.md",
     "mmb-paper-derivations/derivations/CA_ToTEM10/worker_report.json"
@@ -49,8 +48,7 @@
     },
     {
       "check": "english_chinese_f_number_counts_match",
-      "status": "passed",
-      "details": "English and Chinese each contain 71 F-number references, including body and table references."
+      "status": "passed"
     },
     {
       "check": "git_diff_check",

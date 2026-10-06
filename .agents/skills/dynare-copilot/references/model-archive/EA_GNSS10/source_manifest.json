@@ -116,15 +116,13 @@
     "paper_slug": "ea_gnss10__credit_and_banking_in_a_dsge_model_of_the_euro_area"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/EA_GNSS10/EA_GNSS10_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/EA_GNSS10/EA_GNSS10_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/EA_GNSS10/EA_GNSS10_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/EA_GNSS10/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/EA_GNSS10/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/EA_GNSS10/worker_report.json"
   },
   "archive_files": {
-    "derivation_en": "mmb-paper-derivations/derivations/EA_GNSS10/EA_GNSS10_derivation.en.md",
-    "derivation_zh": "mmb-paper-derivations/derivations/EA_GNSS10/EA_GNSS10_derivation.zh.md",
+    "derivation_en": "mmb-paper-derivations/derivations/EA_GNSS10/EA_GNSS10_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/EA_GNSS10/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/EA_GNSS10/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/EA_GNSS10/worker_report.json"

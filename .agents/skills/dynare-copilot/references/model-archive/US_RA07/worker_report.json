@@ -2,8 +2,7 @@
   "model_id": "US_RA07",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_RA07/US_RA07_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_RA07/US_RA07_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_RA07/US_RA07_derivation.md",
     "mmb-paper-derivations/derivations/US_RA07/source_manifest.json",
     "mmb-paper-derivations/derivations/US_RA07/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_RA07/worker_report.json"
@@ -50,11 +49,6 @@
     {
       "command": "check English derivation has all eight required sections",
       "status": "passed"
-    },
-    {
-      "command": "check English and Chinese F-number counts match",
-      "status": "passed",
-      "details": "95 total F-number references in each file; 15 unique equation numbers, F1-F15"
     }
   ],
   "unresolved_issues": [

@@ -3,8 +3,7 @@
   "owned_directory": "mmb-paper-derivations/derivations/NK_RW97AL",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_RW97AL/NK_RW97AL_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_RW97AL/NK_RW97AL_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_RW97AL/NK_RW97AL_derivation.md",
     "mmb-paper-derivations/derivations/NK_RW97AL/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_RW97AL/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_RW97AL/worker_report.json"

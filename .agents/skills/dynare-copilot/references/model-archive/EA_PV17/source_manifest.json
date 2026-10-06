@@ -37,15 +37,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/EA_PV17/EA_PV17_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/EA_PV17/EA_PV17_derivation.md",
       "exists": true,
       "sha256": "739dd25aac58a8ffcf6438e0c39a8f51c79aafbee44185566e7c9ad253ff269c"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/EA_PV17/EA_PV17_derivation.zh.md",
-      "exists": true,
-      "sha256": "92b6155c28728ac7812f59c858d69913aa324be879235389bfbf209c9a4c5156"
     },
     {
       "role": "source_manifest",

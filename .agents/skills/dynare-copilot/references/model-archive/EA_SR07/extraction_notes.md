@@ -28,7 +28,3 @@
 - Confirm exact timing of UIP and capital services relative to physical capital in the paper appendix.
 - Runtime validation is deferred; no Dynare execution was performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English derivation and preserves equation numbers, formulas, file paths, DOI, model ID, and `needs_review` markers.

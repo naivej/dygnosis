@@ -7,8 +7,7 @@
     "pushed": false
   },
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_VI16gk/EA_VI16gk_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_VI16gk/EA_VI16gk_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_VI16gk/EA_VI16gk_derivation.md",
     "mmb-paper-derivations/derivations/EA_VI16gk/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_VI16gk/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_VI16gk/worker_report.json"
@@ -58,7 +57,6 @@
     "model_form": "log-linear / model(linear)",
     "equation_count": 23,
     "sections": 8,
-    "translation_status": "Chinese translation mirrors English equations and numbering",
     "runtime_validation": "not_performed",
     "first_pass_status": "needs_review"
   },

@@ -17,7 +17,7 @@
     "row": {
       "model_id": "NK_GK11",
       "paper_title": "A model of unconventional monetary policy",
-      "authors": "Gertler, Mark; Karadi, Peter ",
+      "authors": "Gertler, Mark; Karadi, Peter",
       "year": "2011",
       "journal_or_series": "Journal of Monetary Economics 58(1), pp. 17-34",
       "doi": "10.1016/j.jmoneco.2010.10.004",
@@ -70,8 +70,7 @@
     "steady_state_quality": "needs_review"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_GK11/NK_GK11_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_GK11/NK_GK11_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_GK11/NK_GK11_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_GK11/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_GK11/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_GK11/worker_report.json"
@@ -112,7 +111,7 @@
     }
   },
   "paper_title": "A model of unconventional monetary policy",
-  "authors": "Gertler, Mark; Karadi, Peter ",
+  "authors": "Gertler, Mark; Karadi, Peter",
   "year": "2011",
   "journal_or_series": "Journal of Monetary Economics 58(1), pp. 17-34",
   "doi": "10.1016/j.jmoneco.2010.10.004",
@@ -121,7 +120,7 @@
   "model_index_row_normalized": {
     "model_id": "NK_GK11",
     "paper_title": "A model of unconventional monetary policy",
-    "authors": "Gertler, Mark; Karadi, Peter ",
+    "authors": "Gertler, Mark; Karadi, Peter",
     "year": "2011",
     "journal_or_series": "Journal of Monetary Economics 58(1), pp. 17-34",
     "doi": "10.1016/j.jmoneco.2010.10.004",
@@ -152,15 +151,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_GK11/NK_GK11_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_GK11/NK_GK11_derivation.md",
       "exists": true,
       "sha256": "37525f1c8b528a41732dc8b8ca8212969acc5750133d7d3076b2bc45391d287a"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_GK11/NK_GK11_derivation.zh.md",
-      "exists": true,
-      "sha256": "fe7be115164aed6c2add0ff60748a90e9dd27f9fa636f991ab8becde93047c98"
     },
     {
       "role": "source_manifest",

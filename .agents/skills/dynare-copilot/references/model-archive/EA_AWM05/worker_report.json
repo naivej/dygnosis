@@ -2,8 +2,7 @@
   "model_id": "EA_AWM05",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_AWM05/EA_AWM05_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_AWM05/EA_AWM05_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_AWM05/EA_AWM05_derivation.md",
     "mmb-paper-derivations/derivations/EA_AWM05/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_AWM05/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_AWM05/worker_report.json"
@@ -52,7 +51,6 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number sequences match",
       "status": "passed",
       "details": "73 total F-number references in each file; 32 unique equation numbers."
     }

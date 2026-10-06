@@ -34,8 +34,3 @@
 - Reconcile paper notation for the household money-demand elasticity `v` / `nu` and the implementation parameter `nu`.
 - Confirm whether auxiliary implementation identities `rr` and `ygap` should be included in future equation-count audits or left as reporting variables.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English core.
-- Equation numbering `(F1)` through `(F14)` is preserved in both files.

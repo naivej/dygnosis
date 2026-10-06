@@ -51,8 +51,7 @@
     "paper_slug": "us_gg24__oil_prices_monetary_policy_and_inflation_surges"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_GG24/US_GG24_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_GG24/US_GG24_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_GG24/US_GG24_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_GG24/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_GG24/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_GG24/worker_report.json"

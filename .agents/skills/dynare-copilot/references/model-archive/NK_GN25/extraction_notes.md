@@ -32,8 +32,3 @@
 - The extraction emphasizes the Section 5 `model(linear)` simulation block and source definitions. It does not attempt to reproduce every optimal-policy closed-form path because OCR quality is poor in that area and those formulas are policy-analysis results rather than the simple-rule simulation closure.
 - The replication package URL is recorded in the source Markdown but no external package was downloaded or inspected.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English artifact.
-- F-number parity target: F1-F36 in both English and Chinese.

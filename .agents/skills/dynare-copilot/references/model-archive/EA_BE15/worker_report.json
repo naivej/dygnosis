@@ -2,8 +2,7 @@
   "model_id": "EA_BE15",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EA_BE15/EA_BE15_derivation.en.md",
-    "mmb-paper-derivations/derivations/EA_BE15/EA_BE15_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EA_BE15/EA_BE15_derivation.md",
     "mmb-paper-derivations/derivations/EA_BE15/source_manifest.json",
     "mmb-paper-derivations/derivations/EA_BE15/extraction_notes.md",
     "mmb-paper-derivations/derivations/EA_BE15/worker_report.json"
@@ -50,11 +49,6 @@
     {
       "command": "check English has all eight required sections",
       "status": "passed"
-    },
-    {
-      "command": "check English and Chinese F-number counts match",
-      "status": "passed",
-      "details": "71 total F-number references in each file; 14 unique equation numbers, F1-F14"
     }
   ],
   "unresolved_issues": [

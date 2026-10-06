@@ -46,8 +46,7 @@
     "notes": "Used only to compare variable coverage, timing conventions, shock names, and implementation scaling. It was not used as paper-side mathematical authority and Dynare was not run."
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_CMR14/US_CMR14_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_CMR14/US_CMR14_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_CMR14/US_CMR14_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_CMR14/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_CMR14/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_CMR14/worker_report.json"

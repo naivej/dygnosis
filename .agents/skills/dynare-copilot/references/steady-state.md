@@ -1,125 +1,188 @@
-# 稳态
+# Steady state
 
-> **何时读**：几乎每个任务（线性化点/初终条件都依赖稳态）。**本文件回答**：解析 steady_state_model（首选）vs 数值 initval 的决策、反解校准、homotopy、[static]/[dynamic] 标注、验证命令。
+Read this for almost every task: the linearization point and the initial and terminal conditions depend
+on the steady state. It covers the choice between a closed-form `steady_state_model` (preferred) and a
+numerical `initval` guess, calibration targets solved inside the steady state, homotopy, `[static]` /
+`[dynamic]` tags, and the commands that verify the result.
 
-几乎每个 `.mod` 都需要稳态：`stoch_simul` 和 `estimation` 在其附近线性化，完全预见用它
-作初/终条件。算对稳态是"结果正确"与"静默出错"的分水岭。**默认：能手解就写解析式
-`steady_state_model` 块**；无闭式解才退回数值 `initval` 初猜。
+Almost every `.mod` file needs a steady state: `stoch_simul` and `estimation` approximate the model
+around it, and perfect foresight uses it for initial and terminal conditions. A correct steady state
+separates a correct result from a silent error. **Default: if you can solve the steady state by hand,
+write the closed-form (analytical) solution in a `steady_state_model` block.** Use a numerical `initval`
+guess only when there is no closed form (SKILL.md "New model", "Stage 4 (steady state)" in
+workflow-detail.md).
 
-## 方案 A（首选）：解析式 `steady_state_model`
+Solving the steady state is numerical work that only Dynare does (`steady`, `resid`, run under MATLAB or
+Octave). Dygnosis checks the written blocks statically; it does not compute residuals or prove that a
+steady state exists. Static checks that apply:
 
-能在纸上解出稳态时，把公式交给 Dynare。它便能廉价可靠地在每个参数点重算稳态（对估计
-至关重要），而非每次跑 Newton 求解器。
+- W042: an endogenous variable has no assignment in `steady_state_model` (Dynare warns and falls back to
+  the `initval` value or zero).
+- E130: a variable is used before it is assigned in `steady_state_model` (Dynare refuses). Dygnosis does
+  not report E130 when `ramsey_model` or `ramsey_policy` is present, because a conditional steady state
+  can read the instrument value.
+- W131: a name is assigned twice in `steady_state_model` (Dynare accepts and warns).
+- I050: neither `initval` nor `steady_state_model` nor a sibling `<model>_steadystate.m` exists.
+- W052: an endogenous variable is missing from `initval` (Dynare assumes zero).
+- E065: an exogenous variable inside the `steady_state()` operator (Dynare refuses).
+- E208 / E209: `[static]` and `[dynamic]` counts differ, or the tags are used with Ramsey or discretion.
+- `dynare_related_files` shows whether a `<model>_steadystate.m` companion file exists and resolves.
+
+See `references/dygnosis-workflow.md` for the tools.
+
+## Option A (preferred): closed-form `steady_state_model`
+
+When you can solve the steady state on paper, give the formulas to Dynare. It can then recompute the
+steady state cheaply and reliably at every parameter point (essential for estimation) instead of running
+a Newton-type solver every time.
 
 ```dynare
 steady_state_model;
-    z = 0;                                  // 稳态下冲击为零
-    r = 1/betta - 1 + delta;                // 逐步构造中间量……
-    kl = (alppha/r)^(1/(1-alppha));         // 临时变量（资本-劳动比）
+    z = 0;                                  // the shock is zero in the steady state
+    r = 1/betta - 1 + delta;                // build intermediate values step by step...
+    kl = (alppha/r)^(1/(1-alppha));         // temporary variable (capital-labor ratio)
     w  = (1-alppha)*kl^alppha;
-    // ……用参数、稳态外生和上方已赋值的变量逐行推导每个内生变量
+    // ...derive each endogenous variable row by row from parameters, steady-state exogenous values and variables assigned above
     l  = ...;
     k  = kl*l;
     invest = delta*k;
     y  = kl^alppha*l;
     c  = y - invest;
 end;
-steady;        // 执行该块并验证它确实解出静态模型
+steady;        // runs the block and checks that it solves the static model
 ```
 
-规则：
-- 每行给**一个**变量（内生、临时或参数）赋一个表达式，只能用参数、稳态外生和**上方已赋值**
-  的变量。**顺序重要**——这是顺序计算，不是联立方程组。
-- 可自由引入临时变量（无需声明）。
-- 若右端 MATLAB 函数返回多个输出，可一次赋多个：`[W, e] = my_function(l, n);`。
-- Dynare 由该块自动生成 `+文件名/steadystate.m`。
-- 确定性模型也适用：每个设定外生水平的 `initval`/`endval` 块后都接 `steady` 来执行它。
-- 若故意提供"非静态模型精确解"的稳态值（如单位根模型），用 `steady(nocheck)`。
+Rules:
 
-## 在稳态里反解校准（Pfeifer 关键技巧）
+- Each row assigns **one** expression to one variable (endogenous, temporary or parameter). The
+  expression may use parameters, steady-state values of exogenous variables, and variables **assigned in
+  earlier rows**. **Order matters**: the block is computed row by row, not solved as a system
+  (E130 when a row reads a later assignment).
+- Temporary variables need no declaration.
+- When the right-hand side is a MATLAB/Octave function with several outputs, assign them together:
+  `[W, e] = my_function(l, n);`.
+- Dynare generates `+FILENAME/steadystate.m` from the block.
+- The block also works for deterministic models: put `steady` after each `initval` and `endval` block
+  that sets exogenous levels, to run it.
+- If the values deliberately do not solve the static model exactly (for example a unit-root model, where
+  the steady state is not unique or does not exist), use `steady(nocheck)`.
 
-`steady_state_model` 块里可以**更新参数**——把校准目标反解成参数值。例如固定稳态劳动
-`l=0.33`，反解劳动负效用 `psi`，并由"伟大比率"反解 `delta`、`betta`：
+## Calibration targets solved in the steady state (Pfeifer's key technique)
+
+A `steady_state_model` block can **update parameters**: solve a calibration target for the parameter
+value. Example: fix steady-state labor `l=0.33` and solve for the labor disutility `psi`; solve for
+`delta` and `betta` from the great ratios:
 
 ```dynare
 steady_state_model;
-    // 先做校准：用投资产出比 i_y、资本产出比 k_y 等目标反解参数
+    // calibration first: solve for parameters from targets such as investment/output i_y and capital/output k_y
     gammax = (1+n)*(1+x);
     delta  = i_y/k_y - x - n - n*x;
     betta  = (1+x)*(1+n)/(alppha/k_y + (1-delta));
-    l = 0.33;                               // 目标：稳态劳动 = 1/3
+    l = 0.33;                               // target: steady-state labor = 1/3
     k = ((1/betta*(1+n)*(1+x) - (1-delta))/alppha)^(1/(alppha-1))*l;
     invest = (x+n+delta+n*x)*k;
     y = k^alppha*l^(1-alppha);
     c = (1-gshare)*y - invest;
-    psi = (1-alppha)*(k/l)^alppha*(1-l)/c^sigma;   // 反解出 psi 命中 l=0.33
+    psi = (1-alppha)*(k/l)^alppha*(1-l)/c^sigma;   // psi solved so that l = 0.33
     w = (1-alppha)*y/l;
     r = 4*alppha*y/k;
     z = 0; ghat = 0;
 end;
 ```
 
-注意：这样被反解的参数（如 `psi`、`delta`、`betta`）**不要再**在前面 `parameters` 校准区
-赋值（或赋了也会被这里覆盖）。
+Do **not** also assign these parameters (`psi`, `delta`, `betta`) in the calibration section before the
+model; this block would overwrite the values anyway. Dygnosis W010 (parameter not assigned) is expected
+for them until the `steady_state_model` block assigns them.
 
-**被反解的参数也可同时出现在 model 块的某条动态方程里**——典型如政府支出占比 `G/Y=s_g`
-反解出稳态支出参数 `gss`，再在外生过程里用它定均值：
+**A parameter solved this way can also appear in a dynamic equation of the model block.** Typical: solve
+the steady-state spending parameter `gss` from the target `G/Y = gy_share` and use it as the mean of the
+exogenous process:
+
 ```dynare
-parameters gss;                              // 不在校准区赋值，下面反解
+parameters gss;                              // not assigned in the calibration section; solved below
 model;
    [name='gov spending process']
    log(g) = (1-rho_g)*log(gss) + rho_g*log(g(-1)) + eps_g;
 end;
 steady_state_model;
-   // …先解出 y…
-   gss = gy_share*y;                         // 反解：命中 G/Y = gy_share
+   // ...solve for y first...
+   gss = gy_share*y;                         // solved to hit G/Y = gy_share
    g   = gss;
 end;
 ```
-机制：估计/模拟时 `steady_state_model` 在每个参数点先更新 `gss` 再线性化，故动态方程里引用它
-是安全的。趋势增长率、稳态通胀、政府/债务比等\"既是校准目标又进方程\"的量都用这个模式。
 
-## 方案 B：数值 `initval` 初猜
+Why this is safe: in estimation and simulation, `steady_state_model` runs at each parameter point and
+updates `gss` before Dynare approximates the model, so the dynamic equation sees the updated value. Use
+this pattern for every quantity that is both a calibration target and part of an equation: trend growth,
+steady-state inflation, government spending or debt ratios.
 
-无闭式解时给 Newton 求解器一个好起点：
+## Option B: numerical `initval` guess
+
+Without a closed form, give the Newton-type solver a good starting point:
 
 ```dynare
 initval;
    c = 1;  k = 10;  l = 0.33;  y = 1;  invest = 0.25;  z = 0;
 end;
-steady;        // Dynare 从该初猜求解静态模型
+steady;        // Dynare solves the static model from this guess
 ```
 
-- 给**每个**内生变量赋值；省略的内生/外生默认 **0**，常导致求解失败（如 TFP 水平为 0）。
-- 好初猜是难点：复杂模型逐步搭建，用经济上合理的值（伟大比率、劳动约 1/3 等）。
-- 求解前用 `resid;` 检查（解出后应接近 0），失败时调
-  `steady(solve_algo=..., maxit=..., tolf=...)`。`solve_algo=0` 用 `fsolve`；`4`（默认）
-  信赖域；`2`/`12` 块分解。
+- Give a value to **every** endogenous variable. An endogenous or exogenous variable left out of
+  `initval` is set to **0**, which often makes the solver fail (for example a TFP level of 0). W052 lists
+  the omitted endogenous variables.
+- A good guess is the hard part. Build complex models step by step and use economically sensible values
+  (great ratios, labor about 1/3).
+- Check with `resid;` before solving (near 0 once solved). If `steady` fails, adjust
+  `steady(solve_algo=..., maxit=..., tolf=...)`; the algorithms are listed below.
 
-## 方案 C：手写稳态文件
+## Option C: hand-written steady-state file
 
-要最大灵活性（循环、条件）可自己写 `文件名_steadystate.m`。更强但更易引入 bug，通常
-`steady_state_model` 足矣。
+For maximum flexibility (loops, conditions), write `FILENAME_steadystate.m`, where `FILENAME.mod` is the
+model file. It is more powerful but easier to get wrong; `steady_state_model` is usually enough.
 
-## Homotopy——好初猜也不收敛时
+- Signature, as in the official examples:
+  `function [ys,params,check] = FILENAME_steadystate(ys,exo,M_,options_)`.
+- Examples: `<dynare-root>/examples/stochastic_simulations/nk_baseline_steadystate.m` (the manual
+  writes `NK_baseline_steadystate.m`; it calibrates labor disutility inside the file) and
+  `<dynare-root>/examples/optimal_policy/nk_ramsey_steady_file_steadystate.m` (a steady state
+  conditional on the Ramsey instrument; see optimal-policy.md).
+- Names (R5): the file runs as MATLAB code, so do not name parameters or variables after MATLAB functions
+  such as `alpha`, `beta`, `gamma`; write `alppha`, `betta`, `gam`. The preprocessor accepts these names
+  and Dygnosis does not report them, so a clean check does not clear them.
 
-先解容易的参数化，再分步推进到难的：
+## Homotopy: when a good guess still does not converge
+
+Solve an easy parameterization first, then move step by step to the hard one:
 
 ```dynare
 homotopy_setup;
-   gam, 0.5, 2;     // gam 从 0.5 走到 2
-   x,   2;          // x 从 initval 值走到 2
+   gam, 0.5, 2;     // gam moves from 0.5 to 2
+   x,   2;          // x moves from its initval value to 2
 end;
 steady(homotopy_mode=1, homotopy_steps=50);
 ```
 
-永久冲击且初始稳态已解出时，可在 `endval` 块后放
-`homotopy_setup(from_initval_to_endval);`（常空体）让所有外生从 initval 过渡到 endval。
+- Each line is `NAME, START, END;` or `NAME, END;` for a parameter or exogenous variable; with one value,
+  the start comes from the preceding `initval` block (or `endval`, if one comes before
+  `homotopy_setup`).
+- Dynare must solve the starting point without help (from the `initval` or `endval` guesses).
+- `homotopy_mode`: `0` no homotopy (default); `1` all parameters move together, the distance divided
+  into `homotopy_steps` intervals; `2` one parameter at a time; `3` try the end values first and halve
+  the interval after each failure (double it after each success), with `homotopy_steps` as the maximum
+  number of attempts. `homotopy_steps` defaults to 10; if the homotopy fails, increase it.
+- `homotopy_force_continue=1`: when the homotopy fails, `steady` keeps the last successful step and
+  continues. **Dangerous**: parameters or exogenous variables are then not at the values you asked for.
+- With a permanent shock and an already solved initial steady state, put
+  `homotopy_setup(from_initval_to_endval);` after the `endval` block (usually with an empty body): every
+  exogenous variable moves from its `initval` value to its `endval` value in the next `steady`.
 
-## `[static]` / `[dynamic]` 方程标注
+## `[static]` / `[dynamic]` equation tags
 
-静态（稳态）版方程有时应不同于动态版——典型是有连续稳态的单位根模型。给 `[static]` 标注
-的方程钉住稳态，配一条 `[dynamic]` 的运动律：
+Sometimes the static (steady-state) version of an equation should differ from the dynamic one; the
+typical case is a unit-root model with a continuum of steady states, or a partial closed form. An
+equation tagged `[static]` is used only for the steady state; an equation tagged `[dynamic]` is used for
+everything else:
 
 ```dynare
 model;
@@ -129,59 +192,77 @@ model;
 end;
 ```
 
-每条 `[static]` 须配一条 `[dynamic]`。
+Every `[static]` equation needs a `[dynamic]` partner (E208). The tags cannot be used with
+`ramsey_model`, `ramsey_policy` or `discretionary_policy` (E209). For the equation count (R4) a pair
+counts once.
 
-## 验证稳态（可通过 MCP 逐条运行）
+## Verify the steady state (Dynare)
 
-- `steady;`——打印稳态值（有稳态文件时还检查它解出静态模型）。
-- `resid;`（或 `resid(non_zero);`）——打印当前 `initval`/`endval` 下的静态残差，`steady`
-  前用它定位错误方程。
-- `check;`——报告特征值及 Blanchard-Kahn 条件是否成立（见 `references/debugging.md`）。
-- 跑完用 MCP 读 `oo_.steady_state` 核对是否无 NaN、经济合理。
+Run these in Dynare through the route the host offers (a MATLAB MCP server, `matlab -batch "…"`,
+`octave --eval "…"`); if no route exists, give the commands to the user (debugging.md "Run-and-fix
+loop"). Do not infer a steady state or the Blanchard-Kahn conditions from static checks.
 
----
+- `steady;` prints the steady-state values; with a steady-state file it also checks that they solve the
+  static model.
+- `resid;` (or `resid(non_zero);`, which prints only nonzero residuals) prints the static residuals at the
+  values of the last `initval` / `endval` block, or of the steady-state file. Use it before `steady` to
+  find the wrong equation.
+- `check;` reports the eigenvalues and whether the Blanchard-Kahn conditions hold
+  (`references/debugging.md`).
+- After the run, read `oo_.steady_state`: no NaN, economically plausible values.
+- Heterogeneous-agent models are different: Dynare refuses `steady` and `check` there (E474); use the
+  `heterogeneity_*` steady-state commands (heterogeneity.md).
 
-# 手册增补（Dynare 7.1 §4.10）
+## `steady` options
 
-## `steady` 全部 solve_algo（0–14）
+`solve_algo` (manual, "Steady state"):
 
-| 值 | 解法 | 备注 |
-|----|------|------|
-| 0 | `fsolve`（需 Optimization Toolbox；Octave 总有） | |
-| 1 | 带线搜索的 Newton | |
-| 2 | 分递归块、各块用 algo 1 | |
-| 3 | Chris Sims 求解器 | |
-| **4** | **整体 trust-region + 自动缩放（默认）** | 最稳健，首选 |
-| 5 | 稀疏高斯消元(SPE) Newton | 需 `bytecode`，配 `markowitz` |
-| 6 | 稀疏 LU Newton | |
-| 7 / 8 | GMRES / BiCGStab Newton | |
-| 9 | trust-region 整体（=4 不分块） | |
-| 10 | LMMCP 互补问题（`⟂`） | 偶尔约束 |
-| 11 | PATH 互补求解器 | 需自行下载 |
-| 12 | 块分解 + 各块 Newton | 比 2 高效；半结构/纯前/后向模型常用 |
-| 14 | 同 12 但块内用 trust-region | |
+| Value | Method | Note |
+| ----- | ------ | ---- |
+| 0 | `fsolve` | under MATLAB needs the Optimization Toolbox; always available under Octave |
+| 1 | Newton-like algorithm with line search | |
+| 2 | splits the model into recursive blocks, solves each with algorithm 1 | |
+| 3 | Chris Sims' solver | |
+| **4** | **splits the model into recursive blocks, solves each with a trust-region solver with autoscaling (default)** | first choice |
+| 5 | Newton with sparse Gaussian elimination (SPE) | needs the `bytecode` option; tune with `markowitz` (default 0.5) |
+| 6 | Newton with sparse LU | |
+| 7 / 8 | Newton with GMRES / BiCGStab | |
+| 9 | trust-region with autoscaling on the whole model (algorithm 4 without splitting) | |
+| 10 | Levenberg-Marquardt mixed complementarity problem solver (LMMCP) | complementarity conditions written with `⟂` (see the `lmmcp` option, R6) |
+| 11 | PATH mixed complementarity problem solver | download PATH yourself and put it on the MATLAB path |
+| 12 | block decomposition by the preprocessor, Newton-type solver on each block | more efficient than 2; typical for purely backward, forward or static models and semi-structural models; do not combine with the `block` option of `model` |
+| 14 | as 12, with a trust-region solver on the blocks | |
 
-`homotopy_force_continue=1` 失败也用上一成功步继续（**危险**：参数/外生未必在期望值）。
-`homotopy_mode`：1=所有参数同时推进、2=逐参数、3=自适应折半；`homotopy_steps` 控步数。
+Other options: `maxit` (default 50), `tolf` (default `eps^(1/3)`), `tolx` (default `eps^(2/3)`),
+`nocheck`, `noprint` (useful in loops), `non_zero`, `fsolve_options` (only with `solve_algo=0`),
+`homotopy_mode`, `homotopy_steps`, `homotopy_force_continue`. Dygnosis `dynare_list_options` lists the
+valid options.
 
-## 手写稳态文件的两种形态（与「收尾清理」白名单直接相关）
+## Two forms of a steady-state file
 
-手册（7.1）明确：
-- **`steady_state_model` 块** → Dynare 自动生成 **`+FILENAME/steadystate.m`**（在 `+包`文件夹内）。
-- **用户手写** → 必须命名 **`FILENAME_steadystate.m`**（更灵活，可用循环/条件，但更易出 bug）。
-  示例见 Dynare 自带 `NK_baseline_steadystate.m`。
+The manual gives two forms (manual, "Providing the steady state to Dynare"):
 
-> ⚠ 旧版（4.x/5.x）自动产物曾叫 `<m>_steadystate2.m`。在 7.1 下 `steady_state_model` 的自动产物
-> 进 `+<m>/steadystate.m`（清理时删 `+<m>/` 文件夹即可），一般不再出现 `_steadystate2.m`。
-> **绝不删**用户手写的 `<m>_steadystate.m`（无 2）。详见 workflow-detail.md「收尾清理」。
+- **`steady_state_model` block**: Dynare generates **`+FILENAME/steadystate.m`** inside the package
+  folder.
+- **Written by the user**: must be named **`FILENAME_steadystate.m`**. More flexible (loops,
+  conditions) at the cost of more programming and lower efficiency.
 
-两种文件都可在每次调用时**更新参数**（如把劳动负效用设成使稳态劳动=0.2 的值；估计时让某参数随
-被估参数更新以保持比率）——这正是稳态反解校准的机制。注意别误覆盖参数。
+Older Dynare versions (4.x/5.x) named the generated file `<m>_steadystate2.m`; not verified against
+the manual. With `steady_state_model`, current Dynare writes `+<m>/steadystate.m`, which cleanup removes
+with the `+<m>/` folder. **Never delete** a user-written `<m>_steadystate.m` (no `2`). See "Cleanup" in
+workflow-detail.md.
 
-## 稳态相关命令/输出
+Both forms can **update parameters** at each call: for example set the labor disutility so that
+steady-state labor is 0.2, or, in estimation, update a parameter that is a function of an estimated one
+so that a ratio stays fixed. This is how calibration targets are solved in the steady state. Do not
+overwrite parameters by accident.
 
-- `resid(non_zero);`——只显示非零残差，定位错误方程更快。
-- `[W, e] = my_function(l, n);`——`steady_state_model` 右端是多返回 MATLAB 函数时可一次赋多值。
-- `get_mean('c','k')`——取稳态值（未算则先算）。
-- 稳态存 `oo_.steady_state`（声明序）、外生稳态 `oo_.exo_steady_state`；永久冲击时初始稳态另存
-  `oo_.initial_steady_state`、`oo_.initial_exo_steady_state`。
+## Related commands and outputs
+
+- `resid(non_zero);` shows only nonzero residuals, which finds the wrong equation faster.
+- `get_mean('c','k')` returns steady-state values from `oo_.steady_state`; if the steady state is not yet
+  computed, it computes it first.
+- The steady state is in `oo_.steady_state` (declaration order of `var`, as in `M_.endo_names`); the
+  exogenous steady state is in `oo_.exo_steady_state` (declaration order of `varexo`). With a permanent
+  shock, the initial steady state is also stored in `oo_.initial_steady_state` and
+  `oo_.initial_exo_steady_state`.

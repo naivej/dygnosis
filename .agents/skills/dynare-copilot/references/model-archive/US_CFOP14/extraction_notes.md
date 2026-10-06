@@ -37,9 +37,3 @@
 - Runtime validation, Blanchard-Kahn checks, residual checks, and IRF reproduction are out of scope for this entry.
 - The calibration table in the OCR Markdown contains table parsing artifacts; parameter values in the derivation are therefore limited to values corroborated by the `.mod` cross-check or clean source prose.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English version.
-- Equation numbering `(F1)` through `(F33)` is preserved in both versions.
-- LaTeX formulas are preserved except for surrounding explanatory prose.

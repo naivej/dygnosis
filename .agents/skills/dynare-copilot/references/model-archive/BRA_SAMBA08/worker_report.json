@@ -2,8 +2,7 @@
   "model_id": "BRA_SAMBA08",
   "owned_path": "mmb-paper-derivations/derivations/BRA_SAMBA08",
   "changed_files": [
-    "mmb-paper-derivations/derivations/BRA_SAMBA08/BRA_SAMBA08_derivation.en.md",
-    "mmb-paper-derivations/derivations/BRA_SAMBA08/BRA_SAMBA08_derivation.zh.md",
+    "mmb-paper-derivations/derivations/BRA_SAMBA08/BRA_SAMBA08_derivation.md",
     "mmb-paper-derivations/derivations/BRA_SAMBA08/source_manifest.json",
     "mmb-paper-derivations/derivations/BRA_SAMBA08/extraction_notes.md",
     "mmb-paper-derivations/derivations/BRA_SAMBA08/worker_report.json"

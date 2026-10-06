@@ -1,99 +1,118 @@
-# 高阶摄动（order=2/3，风险、资产定价、不确定性冲击）
+# Higher-order perturbation (`order=2` or `order=3`)
 
-> **何时读**：任务涉及**风险/不确定性本身的效应**——风险溢价/资产定价、预防性储蓄、不确定性（波动率）
-> 冲击、福利的二阶项、Epstein-Zin 递归偏好、随机/遍历稳态、GIRF。命令仍是 `stoch_simul`/`method_of_moments`，
-> 但 `order=2` 或 `3`。**本文件回答**：何时必须上高阶、各阶多算了什么、pruning/GIRF/随机稳态怎么用、
-> 资产定价与 Epstein-Zin 的写法、政策函数怎么画。
-> **分工**：`stoch_simul` 的选项细节与 `oo_.dr` 高阶张量存储见 stochastic-simulation.md；本文讲**为什么用高阶、
-> 高阶特有的对象与陷阱**。
+Read this when the question is about risk itself: risk premia, asset pricing, precautionary saving,
+uncertainty (volatility) shocks, the second-order term in welfare, Epstein–Zin preferences, the
+stochastic steady state, or a generalized impulse response function (GIRF). The command is still
+`stoch_simul` or `method_of_moments`, with `order=2` or `order=3`. This file says when a higher order
+is required and how to use pruning, GIRFs and the stochastic steady state. Option details and the
+`oo_.dr` tensors are in [stochastic-simulation.md](stochastic-simulation.md).
 
-一阶摄动满足**确定性等价**：风险（冲击方差）完全不进决策规则，IRF 对称、风险溢价恒为 0、不确定性冲击无效。
-凡是研究"风险/方差本身如何影响均值与决策"的问题，一阶都给不出答案，必须上二阶及以上。
+A first-order approximation has certainty equivalence: shock variances do not enter the decision rule,
+IRFs are symmetric, risk premia are zero, and a volatility shock has no effect. A question about how
+risk changes means and decisions needs at least second order.
 
-## 1. 各阶多算了什么（决定该选几阶）
+## 1. What each order adds
 
-| 现象 / 需求 | 最低阶 | 为什么 |
-| ----------- | ------ | ------ |
-| 标准 IRF、矩、估计 | 1 | 确定性等价够用、最快最稳 |
-| 风险溢价、预防性储蓄、风险对**均值**的修正（`ghs2`）、二阶福利 | 2 | 引入常数风险修正项与平方项，均值偏离确定性稳态 |
-| **时变**风险溢价、随机波动率/不确定性冲击的传播、三阶福利 | 3 | 风险修正随状态变化（风险×状态交互），波动率冲击才有非平凡动态 |
+| Need | Lowest order | Why |
+|---|---|---|
+| IRFs, moments, estimation | 1 | Certainty equivalence is enough, and it is the most stable |
+| Risk premia, precautionary saving, the risk correction to the **mean** (`ghs2`), second-order welfare | 2 | A constant risk correction and quadratic terms; the mean leaves the deterministic steady state |
+| A **time-varying** risk premium, stochastic volatility, third-order welfare | 3 | The risk correction depends on the state, so a volatility shock has a nontrivial path |
 
-经验法则：能用一阶回答的就别上高阶（慢、易爆、需 pruning）；一旦问题里"方差/不确定性"是主角，才上。
+Stay at order 1 when it answers the question. Higher order is slower, can explode, and needs pruning.
 
-## 2. 必备选项：order 与 pruning
+## 2. `order` and `pruning`
 
 ```dynare
-stoch_simul(order=2, pruning, irf=0) y c rp_ann;   // 高阶通常 irf=0，改看矩/GIRF
+stoch_simul(order=2, pruning, irf=0) y c rp_ann;
 ```
 
-- `order=2|3`：泰勒展开阶。
-- **`pruning`：二阶起强烈建议开**。高阶模拟会因高次项产生爆炸性伪路径，pruning（Kim et al. 2008 /
-  Andreasen et al. 2018）按阶剥离这些项，保证模拟平稳。开 pruning 后理论矩按剪枝状态空间算（更准）；
-  不开则二阶矩只是基于线性项的近似（详见 stochastic-simulation.md）。
-- 高阶**不支持** `conditional_variance_decomposition`（order<3 且无 pruning 才行）、部分解析矩。
-- 高阶 + 非对称/有偏创新：见 DSGE_mod `Andreasen_2012`、`Born_Pfeifer_2014`。
+- `order=2` or `order=3` is the order of the Taylor approximation.
+- Turn **`pruning` on from order 2.** Higher-order simulation produces explosive paths from the higher
+  powers (Kim et al. 2008; Andreasen et al. 2018). Pruning drops those terms order by order.
+  Theoretical moments then use the pruned state space. Without pruning, the second moments are only
+  the linear approximation. See [stochastic-simulation.md](stochastic-simulation.md).
+- `conditional_variance_decomposition` is not available at the orders and pruning settings Dynare
+  refuses. Check `dynare_list_options` for `stoch_simul` before you write the option.
+- Skewed innovations at higher order: programming library `Andreasen_2012`, `Born_Pfeifer_2014`.
 
-## 3. 高阶特有对象
+## 3. Objects that exist only at higher order
 
-### 随机稳态 / 遍历均值（stochastic steady state, EMAS）
-二阶起，模型的"中心"不再是确定性稳态：
-- **随机稳态（risky steady state）**：无当期冲击、但 agent 知道未来有风险时停留的点。
-- **遍历均值（ergodic mean / EMAS）**：长期模拟的均值。
-两者都偏离确定性稳态，偏移量正是风险修正（`oo_.dr.ghs2`）。报告均值/IRF 时要说清是相对哪个基准。
-GIRF（见下）默认相对 EMAS。
+### Stochastic steady state and ergodic mean
 
-### 广义脉冲响应 GIRF
-高阶下 IRF 依赖初始状态与冲击符号/大小（非线性），标准 `irf=` 给的是相对确定性稳态的一条特定路径，
-往往不是想要的。要"从遍历均值出发、对冲击的平均响应"，用 **GIRF**：在 EMAS 处加冲击模拟、对随机化的
-未来路径取均值、再减无冲击基线。DSGE_mod `Basu_Bundick_2017` 给了在 EMAS/遍历均值处算 GIRF 的标准写法
-（尤其不确定性冲击：一阶下波动率冲击完全无效，必须三阶 + GIRF）。
+These are not manual terms. Define them when you report them.
 
-## 4. 资产定价：为什么一阶杀死风险溢价
+From order 2, the center of the model is not the deterministic steady state.
 
-风险溢价 = 风险资产与无风险利率的期望收益差，本质上来自收益与随机贴现因子（SDF）的**协方差**——
-这是个二阶矩。一阶摄动确定性等价 ⇒ 该协方差被抹平 ⇒ 溢价恒为 0。所以**任何风险溢价/股权溢价问题至少 order=2**
-（要时变溢价则 order=3）。课程的 Jermann (1998) 例子把这点演示得最直白：同一资产定价模型分别跑
-order=1/2/3，看溢价怎么从 0 长出来。常配合习惯形成（habit）+ 资本调整成本放大溢价。
+- **Stochastic steady state** (risky steady state): the point where the agent stays when the current
+  shock is zero but future risk is taken into account.
+- **Ergodic mean** (also called EMAS in this literature): the mean of a long simulation.
 
-## 5. Epstein-Zin 递归偏好
+Both differ from the deterministic steady state by the risk correction (`oo_.dr.ghs2`). Say which
+baseline an IRF or a mean uses. A GIRF is usually relative to the ergodic mean.
 
-把跨期替代弹性与风险厌恶解耦（标准 CRRA 把两者绑死），是高阶资产定价/长期风险模型的常用偏好。
-写法：用**辅助变量**递归定义效用与确定性等价算子（`U`、`E_t[U(+1)^(1-gamma)]^(1/(1-gamma))` 等），
-模型块里逐条写出，再 `order=2|3` + pruning。参照 DSGE_mod `Caldara_et_al_2012`（Epstein-Zin + 随机波动率，
-含递归偏好与预期收益的辅助变量写法）。
+### Generalized impulse response function (GIRF)
 
-## 6. 画政策函数 / 验证非线性
+Not a manual term. At higher order an IRF depends on the initial state and on the sign and size of the
+shock. The path from `irf=` is one path relative to the deterministic steady state. A GIRF is the
+average response to a shock starting from the ergodic mean: simulate shocked paths, average them, and
+subtract the no-shock baseline. The programming-library file `Basu_Bundick_2017` is the worked pattern,
+including uncertainty shocks (a volatility shock does nothing at order 1; use order 3 and a GIRF).
 
-高阶的价值在于决策规则的**曲率**，直接画出来最直观。课程提供 `plot_policy_fun.m`：给定状态网格，调用
-`oo_.dr` 张量重构并绘制某控制变量对某状态的政策函数，对比一阶（直线）与二/三阶（弯曲）。
-DSGE_mod `Caldara_et_al_2012` 亦含 `plot_policy_fun.m`。课程另有 `AES_example.m`：在一个玩具期望方程
-`y_t = E_t[exp(rho*x + eps)]` 上，把**真解**与**标准（同时）摄动**、**序贯摄动**两种近似并排画出，直观看
-摄动如何处理风险/Jensen 项（`exp` 的 `1/2*Var` 修正）——理解高阶为何能捕捉风险、不同摄动方案精度差异的最小例子。
+## 4. Asset pricing
 
-## 7. 课程示例（Pfeifer Dynare Course，本地可跑，**首选参照**）
+A risk premium is an expected excess return. It comes from the covariance of the return with the
+stochastic discount factor, which is a second moment. Certainty equivalence sets that covariance to
+zero, so the premium is zero at order 1. Any risk-premium question needs at least `order=2`. A
+time-varying premium needs `order=3`. The course file `Jermann1998.mod` runs the same asset-pricing
+model at orders 1, 2 and 3. Habit formation and capital adjustment costs are often used to enlarge the
+premium.
 
-> 路径 `references/examples-code/Dynare_Course/Chapter_08_Higher_order/`。
-> `grep -i "order = 2\|order=2\|higher\|risk premium\|asset pricing" references/catalog-code.csv`。
+## 5. Epstein–Zin preferences
 
-| 文件 | 教什么 |
-| ---- | ------ |
-| `Jermann1998.mod` | **同模型 order=1 vs 2 vs 3 并排对比**：风险溢价、无风险利率、SDF、年化收益怎么随阶变化；含习惯形成 + 资本调整成本 |
-| `Jermann_1998.mod` | DSGE_mod 复制版：`stoch_simul(order=2) rp_ann` 直接取股权溢价 |
-| `plot_policy_fun.m` | 政策函数绘图辅助（重构 `oo_.dr` 张量、画曲率） |
-| `AES_example.m` | 玩具期望方程上对比真解 vs 同时/序贯摄动近似，展示摄动如何处理风险项 |
+Epstein–Zin preferences separate the elasticity of intertemporal substitution from risk aversion.
+Write the utility and the certainty-equivalent operator with **helper variables** (for example `U` and
+`E_t[U(+1)^(1-gamma)]^(1/(1-gamma))`). Do not call these Dynare auxiliary variables: those are the
+`AUX_*` names Dynare creates. Then use `order=2` or `order=3` with `pruning`. Programming library:
+`Caldara_et_al_2012`.
 
-先读 `Jermann1998.mod` 的多阶对比块——它把"一阶为何不够"用一个能跑的例子讲清楚，比任何文字都有效。
+## 6. Plot the decision rule
 
-## 8. 相关 DSGE_mod（catalog-code.csv，编程逻辑库）
+The point of a higher order is the curvature of the decision rule. The course file `plot_policy_fun.m`
+rebuilds the rule from the `oo_.dr` tensors on a grid of the state and plots one control against one
+state: order 1 is a straight line; orders 2 and 3 bend. `AES_example.m` compares the true solution of
+a toy expectational equation with a simultaneous perturbation and a sequential perturbation, including
+the Jensen term from `exp`.
 
-- `SGU_2004`：二阶近似经典入门（policy function、pruning、一阶 vs 二阶福利）。
-- `Basu_Bundick_2017`：不确定性冲击、EMAS 处的 GIRF、外部 steadystate.m、三阶。
-- `Caldara_et_al_2012`：Epstein-Zin 递归偏好 + 随机波动率、`plot_policy_fun.m`。
-- `Born_Pfeifer_2018_welfare`、`RBC_baseline_welfare`：二阶福利/消费等价。
+## 7. Local course examples
 
-## 9. 常见坑
+Folder: `references/examples-code/Dynare_Course/Chapter_08_Higher_order/`.
+Search: `grep -iE "order = 2|order=2|higher|risk premium|asset pricing" references/catalog-code.csv`.
 
-- 忘开 `pruning` → 二/三阶模拟出现爆炸路径或 NaN。
-- 在高阶随机情形里用 `max/min/abs/比较算子`（R6）→ 拐点导数错误，结果静默失真；偶尔约束改用 OccBin/完全预见。
-- 把高阶 IRF/均值当成"相对确定性稳态"解读 → 实际多相对 EMAS/随机稳态，报告时务必说清基准。
-- 估计时盲目上 order=2 GMM/SMM → 慢且未必识别得更好；先确认问题真的需要风险项（见 moments-method.md）。
+| File | What it shows |
+|---|---|
+| `Jermann1998.mod` | The same model at orders 1, 2 and 3: risk premium, risk-free rate, stochastic discount factor, annualized return; habit and capital adjustment costs |
+| `Jermann_1998.mod` | DSGE_mod copy: `stoch_simul(order=2) rp_ann` |
+| `plot_policy_fun.m` | Decision-rule plot from `oo_.dr` |
+| `AES_example.m` | True solution against two perturbation schemes on a toy expectational equation |
+
+Read the order comparison in `Jermann1998.mod` first.
+
+## 8. Programming library (`catalog-code.csv`)
+
+- `SGU_2004`: second-order approximation, decision rule, pruning, first-order against second-order welfare.
+- `Basu_Bundick_2017`: uncertainty shocks, GIRF at the ergodic mean, a steady-state file, order 3.
+- `Caldara_et_al_2012`: Epstein–Zin preferences, stochastic volatility, `plot_policy_fun.m`.
+- `Born_Pfeifer_2018_welfare`, `RBC_baseline_welfare`: second-order welfare and consumption equivalents.
+
+## 9. Pitfalls
+
+| Pitfall | Class | What to do |
+|---|---|---|
+| No `pruning` | Compute advice | Explosive paths or NaN at order 2 or 3. Turn `pruning` on. |
+| `max`, `min`, `abs` or a comparison on an endogenous variable | Tool coverage | Derivatives at the kink are wrong (R6). Dygnosis W200. Use OccBin or perfect foresight. |
+| Reading a higher-order IRF as a deviation from the deterministic steady state | Compute advice | Say whether the baseline is the ergodic mean or the stochastic steady state. |
+| `order=2` in GMM or SMM by default | Compute advice | Slower, and not always better identified. Confirm that the question needs the risk term ([moments-method.md](moments-method.md)). |
+
+Nonsmooth operators in `model(linear)` are E210 and E211. Dygnosis does not compute risk premia, GIRFs
+or welfare.

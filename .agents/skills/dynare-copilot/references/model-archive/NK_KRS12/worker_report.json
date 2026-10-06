@@ -2,8 +2,7 @@
   "model_id": "NK_KRS12",
   "status": "needs_review",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/NK_KRS12/NK_KRS12_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_KRS12/NK_KRS12_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_KRS12/NK_KRS12_derivation.md",
     "mmb-paper-derivations/derivations/NK_KRS12/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_KRS12/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_KRS12/worker_report.json"

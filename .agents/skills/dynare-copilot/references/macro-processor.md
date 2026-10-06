@@ -1,91 +1,118 @@
-# 宏处理器（Macro processing language）
+# Macro processor (macro processing language)
 
-> **何时读**：任务含多国/多部门/模型变体切换/循环生成方程/模块化拆分/内生化参数。**本文件回答**：宏变量类型与运算符、全部 @# 指令、推导式、四类典型用法。
+Read this when the task involves multi-country or multi-sector models, switching between model variants,
+equations generated in loops, splitting a model into files, or endogenizing parameters. It covers macro
+variable types and operators, every `@#` directive, comprehensions, the typical uses, and the
+model-editing commands that go with them.
 
-宏处理器是 Dynare 预处理器中一个**独立**的组件，在解析 `.mod` 之前运行，把带宏的
-`.mod` 展开成不带宏的 `.mod` 再交给解析器。**它只做文本替换**（类似 C 预处理器或 PHP），
-与模型变量、MATLAB 变量完全无关。可用 `dynare 文件名 savemacro` 查看展开后的结果。
+The macro processor is a **separate** component of the Dynare preprocessor. It runs before the parser:
+it expands a `.mod` file with macros into a `.mod` file without macros, then passes that to the parser.
+**It only does text substitution** (like the C preprocessor or PHP) and knows nothing about model
+variables or MATLAB variables (manual, "Macro processing language").
 
-用途：模块化（拆分文件）、循环复制方程块、条件包含代码、写索引求和/求积、内生化参数
-（variable flipping）等。
+Uses: modular files, loops that copy blocks of equations, conditional inclusion, indexed sums or
+products, endogenizing parameters (variable flipping).
 
-> 语言规则提醒：宏指令和宏表达式本身全是 **ASCII（英文关键字）**，天然符合"注释外必须英文"
-> 的要求。非英文（[LANG]）仍只放在 `//` / `/* */` 注释里。注意：`//` 之后的 `@#` 指令**不被**宏处理器
-> 解释；而 `/* */` 块注释里的 `@#` 指令**会**被解释（历史遗留，不要依赖此行为）。
+See the expanded text:
 
-## 两种使用位置
+- Official Dynare: `dynare FILENAME savemacro` writes `FILENAME_macroexp.mod` (`savemacro=NAME` sets
+  the name); `onlymacro` stops after the macro processor; `linemacro` keeps `@#line` markers in the
+  output (manual, "Running Dynare").
+- Dygnosis: `dynare_expand` returns the text after include and macro expansion, before Dynare's
+  transformations, with a `complete` flag; when expansion is incomplete it withholds the counts.
+  `dynare_related_files` lists the include targets and companion files and whether each one resolved.
+  See `references/dygnosis-workflow.md`.
 
-- **在宏指令内部**直接用（如 `@#if`、`@#define` 的表达式）。
-- **在 `.mod` 文件体内**用 `@{表达式}` 替换：宏处理器把它替换成表达式的值。
-  例如 `var GDP_@{country};` 当 `country="US"` 时展开为 `var GDP_US;`。
+Language (R1): macro directives and macro expressions are ASCII keywords. Identifiers that macros
+generate (`GDP_@{co}`) are English ASCII like any other identifier; text in the user's language goes
+only in comments, labels and descriptions. Comment rules: a `@#` directive after `//` is **not**
+interpreted. A `@#` directive inside a `/* */` block comment **is** interpreted (historical behavior;
+the manual says not to rely on it).
 
-指令以 `@#` 开头，通常独占一行；行尾两个反斜杠 `\\` 表示续行。
+## Where macro expressions go
 
-## 宏变量类型与运算符
+- **Inside a macro directive**, directly (the expression of `@#if`, `@#define`).
+- **In the body of the `.mod` file** as `@{expression}`: the macro processor substitutes the value.
+  Example: with `country="US"`, `var GDP_@{country};` expands to `var GDP_US;`.
 
-宏处理器维护自己的变量表（与模型变量无关），类型有：**boolean、real、string、tuple、
-function、array**。
+Directives start with `@#` and usually take exactly one line; two backslashes `\\` at the end of a line
+continue the directive on the next line.
 
-- **Boolean**：比较 `== !=`；逻辑 `&& || !`。
-- **Real**：算术 `+ - * / ^`；比较 `< > <= >= == !=`；逻辑 `&& || !`；
-  - 区间（步长 1）`1:4` = `[1,2,3,4]`；自定义步长 `6:-2.1:-1` = `[6,3.9,1.8,-0.3]`。
-  - 函数：`max min mod exp log(=ln) log10 sin cos tan asin acos atan sqrt cbrt sign
-    floor ceil trunc erf erfc gamma lgamma round normpdf normcdf`。
-- **String**：双引号 `"name"`；比较；拼接 `+`；取子串 `s[3]`、`s[4:6]`；函数 `length`。
-- **Tuple**：圆括号 `(a,b,c)`；比较；函数 `empty length`。
-- **Array**：方括号 `[1,[2,3],4]`、`["US","FR"]`；
-  - 取元素 `v[2]`；拼接 `+`；并 `|`；交 `&`；差 `-`；笛卡尔积 `*`；自乘 `^N`；
-    取子数组 `v[4:6]`；成员测试 `"b" in ["a","b","c"]`（返回 1）；函数 `empty sum length`。
+## Macro variable types and operators
 
-### 推导式（comprehension）——从数组造数组
+The macro processor keeps its own variable table, separate from model variables. Types: **boolean,
+real, string, tuple, function, array**.
+
+- **Boolean**: comparison `== !=`; logical `&& || !`.
+- **Real**: arithmetic `+ - * / ^`; comparison `< > <= >= == !=`; logical `&& || !`.
+  - Ranges with step 1: `1:4` = `[1,2,3,4]`; `[1:4]` is a nested array `[[1,2,3,4]]`. Custom step:
+    `6:-2.1:-1` = `[6,3.9,1.8,-0.3]`.
+  - Functions: `max min mod exp log ln log10 sin cos tan asin acos atan sqrt cbrt sign floor ceil
+    trunc erf erfc gamma lgamma round normpdf normcdf` (`ln` is an alias for `log`).
+- **String**: double quotes `"name"`; comparison `< > <= >= == !=`; concatenation `+`; substring
+  `s[3]`, `s[4:6]`; function `length`.
+- **Tuple**: parentheses `(a,b,c)`; comparison `== !=`; functions `empty length`.
+- **Array**: brackets `[1,[2,3],4]`, `["US","FR"]`.
+  - Comparison `== !=`; element `v[2]`; concatenation `+`; union `|`; intersection `&`; difference `-`; Cartesian product
+    `*`; Cartesian power `^N`; subarray `v[4:6]`; membership `"b" in ["a","b","c"]` (returns 1);
+    functions `empty sum length`.
+
+### Comprehensions (build an array from an array)
 
 ```
-[ i in 1:5 when mod(i,2) == 0 ]        // 过滤 → [2, 4]
-[ i^2 for i in 1:5 ]                    // 映射 → [1, 4, 9, 16, 25]
-[ i^2 for i in 1:5 when mod(i,2) == 0] // 过滤+映射 → [4, 16]
-[ (j, i+1) for (i,j) in (1:2)^2 ]      // → [(1,2),(2,2),(1,3),(2,3)]
+[ i in 1:5 when mod(i,2) == 0 ]        // filter -> [2, 4]
+[ i^2 for i in 1:5 ]                    // map -> [1, 4, 9, 16, 25]
+[ i^2 for i in 1:5 when mod(i,2) == 0] // filter + map -> [4, 16]
+[ (j, i+1) for (i,j) in (1:2)^2 ]      // -> [(1,2),(2,2),(1,3),(2,3)]
 ```
 
-### 类型检查与转换
+### Type checks and casts
 
-- 检查：`isboolean isreal isstring istuple isarray`（如 `isreal("str")` → false）。
-- 转换：`(bool) -1.1` → true、`(real) "2.2"` → 2.2、`(array) 4.4` → `[4.4]`、
-  `(real) [5.5]` → 5.5；`(real) [6.6,7.7]` → 报错。可在表达式中使用：
-  `(string) (3+4)` → `"7"`、`(array) 5 + (array) 6` → `[5,6]`。
+- Checks: `isboolean isreal isstring istuple isarray` (`isreal("str")` -> false).
+- Casts: `(bool) -1.1` -> true, `(real) "2.2"` -> 2.2, `(array) 4.4` -> `[4.4]`, `(real) [5.5]` -> 5.5;
+  `(real) [6.6,7.7]` -> error. Casts work inside expressions: `(string) (3+4)` -> `"7"`,
+  `(array) 5 + (array) 6` -> `[5,6]`.
 
-## 宏指令详解
+## Directives
 
-### `@#include` / `@#includepath`——文件包含（模块化）
+### `@#include` / `@#includepath`: file inclusion (modular files)
 
 ```
-@#includepath "/path/to/modfiles"   // 添加搜索路径
-@#include "modelcomponent.mod"      // 原地插入该文件内容（等价于复制粘贴）
+@#includepath "/path/to/modfiles"   // add a search path
+@#include "modelcomponent.mod"      // insert the file's text here (same as copy and paste)
 ```
 
-可嵌套包含。文件先在当前目录找，找不到再去 `-I` 与 `@#includepath` 提供的路径找。
+Includes can be nested. The file is looked up in the current directory first, then in the paths given
+with `-I` on the command line, then in the `@#includepath` paths.
 
-### `@#define`——定义宏变量或宏函数
+Dygnosis: a target that cannot be found is E061 (Dynare refuses with `Could not open F`); an include
+file reachable from several parent models is W061 (open the intended parent `.mod`); a circular include
+is W062. When an include target is generated by a script (for example `model_params.inc`), generate it
+before you run Dygnosis or Dynare.
+
+### `@#define`: define a macro variable or macro function
 
 ```
 @#define flag                     // = true
 @#define x = 5                    // real
 @#define y = "US"                 // string
-@#define v = [1, 2, 4]            // real 数组
-@#define w = ["US", "EA"]         // string 数组
+@#define v = [1, 2, 4]            // real array
+@#define w = ["US", "EA"]         // string array
 @#define z = 3 + v[2]             // = 5
 @#define t = ("US" in w)          // = true
-@#define f(x) = " " + x + y       // 函数 f：返回 ' ' + x + 'US'
+@#define f(x) = " " + x + y       // function f: returns ' ' + x + 'US'
 ```
 
-宏函数在**调用时**求值（非定义时）。文件体内用 `@{...}` 取值：
-`A = @{y[i] + f("D")};`。
+A macro function is evaluated when it is called, not when it is defined. In the file body, get a value
+with `@{...}`: `A = @{y[i] + f("D")};`.
 
-### `@#if` / `@#ifdef` / `@#ifndef` / `@#elseif` / `@#else` / `@#endif`——条件包含
+### `@#if` / `@#ifdef` / `@#ifndef` / `@#elseif` / `@#else` / `@#endif`: conditional inclusion
 
-只有条件为真的分支被输出。`@#if` 后可跟零个或多个 `@#elseif`，`@#else` 可选。
+Only the branch whose condition is true is output. `@#if` takes zero or more `@#elseif` and an optional
+`@#else`.
 
 ```
-@#define linear_mon_pol = false    // 0 等同 false
+@#define linear_mon_pol = false    // 0 is the same as false
 ...
 model;
 @#if linear_mon_pol
@@ -97,15 +124,17 @@ model;
 end;
 ```
 
-- `@#ifdef X`：只要 `X` 被定义过就为真（无论其值）；`@#ifndef X`：尚未定义则为真。
-- `@#elseif` 里可用 `defined(X)` 判断是否定义：`@#elseif !defined(X)`。
-- **实数当布尔**：表达式结果为实数时，0 视作 false、非 0 视作 true。
-- **浮点比较要加容差**：`exp(log(5)) == 5` 会得 false；应写
-  `exp(log(5)) > 5-1e-14 && exp(log(5)) < 5+1e-14`。
+- `@#ifdef X` is true when `X` is defined, whatever its value; `@#ifndef X` is true when `X` is not yet
+  defined.
+- In `@#elseif`, test definition with `defined(X)`: `@#elseif !defined(X)`.
+- **Real as boolean**: a real result counts as false when 0 and true otherwise.
+- **Compare floating-point values with a tolerance**: `exp(log(5)) == 5` is false; write
+  `exp(log(5)) > 5-1e-14 && exp(log(5)) < 5+1e-14`.
 
-### `@#for ... @#endfor`——循环复制
+### `@#for ... @#endfor`: loops
 
-可包住变量/参数声明、计算任务，**但不能包住整个 model 声明**（可以在 model 块内部包方程）。
+A loop can enclose variable and parameter declarations and computing tasks, **but not a whole model
+declaration**. Put the loop inside the `model` block around equations.
 
 ```
 model;
@@ -113,10 +142,10 @@ model;
    GDP_@{country} = A * K_@{country}^a * L_@{country}^(1-a);
 @#endfor
 end;
-// 展开为 GDP_home = ...; 与 GDP_foreign = ...;
+// expands to GDP_home = ...; and GDP_foreign = ...;
 ```
 
-带 `when` 过滤、用 tuple、用笛卡尔积：
+With a `when` filter, tuples and a Cartesian product:
 
 ```
 @#define countries = ["US", "FR", "JA"]
@@ -133,24 +162,36 @@ end;
 @#endfor
 ```
 
-### `@#echo` / `@#error` / `@#echomacrovars`——调试
+### `@#echo` / `@#error` / `@#echomacrovars`: debugging
 
 ```
-@#echo "some message"          // 标准输出打印（参数须为字符串）
-@#error "abort message"        // 打印并中止
-@#echomacrovars A C D          // 打印这些宏变量/函数的当前值
-@#echomacrovars(save) A        // 存到 options_.macrovars_line_<行号>
+@#echo "some message"          // print to standard output (argument must be a string)
+@#error "abort message"        // print and stop
+@#echomacrovars A C D          // print the current values of these macro variables / functions
+@#echomacrovars(save) A        // save them in options_.macrovars_line_<line number>
 ```
 
-## 典型用法
+### Macro errors in Dygnosis
 
-### 模块化（`@#include`）
+- E062: an `@#if` or `@#for` without its closing directive, an empty loop body, or an incomplete
+  macro function definition.
+- E063: `Unknown variable NAME` or `Unknown function NAME` in a macro expression.
+- E064: `Macro-processing error` with the macro processor's message (bad expression, wrong type,
+  `@#error`).
+- I211: Dygnosis could not finish expanding a directive or interpolation. The source may be valid;
+  model checks that need the expanded text are withheld, and `dynare_expand` reports
+  `complete: false`. Run the official preprocessor (`savemacro`) for the full expansion.
 
-把模型拆成：`modeldesc.mod`（变量声明 + 模型方程 + 冲击声明）、`simul.mod`（包含
-modeldesc、校准参数、跑 `stoch_simul`）、`estim.mod`（包含 modeldesc、声明先验、跑
-`estimation`）。对 `simul.mod`/`estim.mod` 调用 Dynare，避免重复粘贴整套模型。
+## Typical uses
 
-### 索引求和/求积（移动平均）
+### Modular files (`@#include`)
+
+Split the model into `modeldesc.mod` (variable declarations, model equations, shock declarations),
+`simul.mod` (includes `modeldesc.mod`, calibrates the parameters, runs `stoch_simul`) and `estim.mod`
+(includes `modeldesc.mod`, declares priors, runs `estimation`). Run Dynare on `simul.mod` or
+`estim.mod`; the model is written once.
+
+### Indexed sums and products (moving average)
 
 ```
 @#define window = 2
@@ -162,10 +203,10 @@ MA_x = @{1/(2*window+1)}*(
 @#endfor
    );
 end;
-// 展开为 MA_x = 0.2*( +x(-2) +x(-1) +x(0) +x(1) +x(2) );
+// expands to MA_x = 0.2*( +x(-2) +x(-1) +x(0) +x(1) +x(2) );
 ```
 
-### 多国模型
+### Multi-country models
 
 ```
 @#define countries = ["US", "EA", "AS", "JP", "RC"]
@@ -186,16 +227,18 @@ model;
 end;
 ```
 
-参考 DSGE_mod 的 `macroprocessor/bkk_1992`（多国 RBC，演示宏处理器）。
+See `<dynare-root>/examples/macroprocessor/bkk_1992.mod` (multi-country RBC that shows the macro
+processor).
 
-### 内生化参数 / variable flipping（校准技巧）
+### Endogenizing parameters (variable flipping, a calibration technique)
 
-要用稳态内生量（如劳动份额 `lab_rat`）反推份额参数 `alpha`：稳态计算时把 `alpha` 当内生、
-把 `lab_rat` 当参数（给经济上合理的值），求解器反解出 `alpha`。用宏开关 `@#if steady`
-切换声明，并配合 `change_type`（见 `references/steady-state.md` 与变量声明）：
+To pin down a share parameter `alpha` from a steady-state target such as the labor share `lab_rat`:
+during the steady-state computation, make `alpha` endogenous and `lab_rat` a parameter with an
+economically sensible value; the solver then finds the implied `alpha` (manual, "Endogeneizing
+parameters"). Switch the declarations with a macro flag `@#if steady`:
 
 ```
-// 在模型声明文件 modeqs.mod 中：
+// in the model declaration file modeqs.mod:
 @#if steady
    var alpha;
    parameters lab_rat;
@@ -205,63 +248,106 @@ end;
 @#endif
 ```
 
-然后在"稳态用"主文件里 `@#define steady = 1` 后再 `@#include "modeqs.mod"`，并据此搭建
-反解稳态；在"动态用"主文件里 `@#define steady = 0`。
+- `steadystate.mod` starts with `@#define steady = 1` and `@#include "modeqs.mod"`, sets the parameters
+  (including `lab_rat`, not `alpha`), computes the steady state with guess values (including `alpha`),
+  and saves parameters and steady state with `save_params_and_steady_state`.
+- `simulate.mod` starts with `@#define steady = 0` and `@#include "modeqs.mod"`, loads them with
+  `load_params_and_steady_state`, and runs the simulations.
+- `change_type` (below) is the alternative that changes types inside one file.
 
----
+See `references/steady-state.md` for the steady-state side.
 
-## 课程示例（Pfeifer Dynare Course，本地可跑，**首选参照**）
+### MATLAB loops versus macro loops
 
-> 第2章（预处理器）、第3章（宏处理器）的讲解以幻灯片内联片段为主，没有独立 .mod；但宏处理器最实用的
-> 两种用法在别的章节有**完整可跑**的实例，查"宏开关/包含到底怎么落地"时直接读它们：
+To run the same computation for several parameter values, a MATLAB/Octave loop with
+`set_param_value` keeps the loop in MATLAB and suits many iterations. A macro loop unrolls the
+iterations in the expanded file. Check `info(1)==0` after each computation so you do not reuse stale
+results (manual, "MATLAB/Octave loops versus macro processor loops").
 
-| 用法 | 课程实例（本地路径） | 看点 |
-| ---- | -------------------- | ---- |
-| `@#if`/`@#else` **一文件多变体** | `Dynare_Course/Chapter_13_optimal_policy/Ramsey_Example_macroexp.mod` | 一个开关在 `ramsey_model` / `discretionary_policy` / `osr` 三种实验间切换——经典的"同模型多政策口径"复用 |
-| `@#include` **拆分共享方程** | `Dynare_Course/Chapter_11_perfect_foresight/rbc_det1..5.mod` + `rbc_model_eq.inc` | 把模型方程抽到 `.inc`，多个实验文件 `@#include` 同一份——改方程只改一处 |
-| `@#include` **拆分共享设定** | `Dynare_Course/Chapter_09_Method_of_Moments/RBC_MoM_*.mod` + `RBC_MoM_common.inc` | GMM/SMM 两文件共用一份 common.inc，只在主文件里换方法 |
+## Course examples (Pfeifer Dynare course, run locally, first reference)
 
-这三种都是"用宏处理器消除重复"的标准工程模式——做模型变体对比（如价格黏性 Calvo vs Rotemberg、
-多国、多政策）时，优先照搬 `@#if` 开关 + `@#include` 共享方程的组织方式，而不是复制粘贴整份 .mod。
+Chapters 2 (preprocessor) and 3 (macro processor) of the course teach with inline slide snippets and
+have no standalone `.mod` files. The two most useful macro patterns have **complete, runnable** examples
+in other chapters; read them to see how switches and includes work in practice:
 
----
+| Use | Course example (local path) | What it shows |
+| --- | --------------------------- | ------------- |
+| `@#if` / `@#else`: **several variants in one file** | `Dynare_Course/Chapter_13_optimal_policy/Ramsey_Example_macroexp.mod` (expanded copy; original `<dynare-root>/examples/optimal_policy/nk_ramsey_osr.mod`) | macro switches `Optimal_policy`, `Ramsey`, `Efficent_steady_state`, `Estimation_under_Ramsey` select a fixed Taylor rule, OSR or Ramsey for one model. The course file is `savemacro` output and holds only the OSR branch, with no `@#` left; read the original for the switches |
+| `@#include`: **shared equations** | `Dynare_Course/Chapter_11_perfect_foresight/rbc_det1..5.mod` + `rbc_model_eq.inc` | model equations in one `.inc`; several experiment files `@#include` it, so an equation change happens in one place |
+| `@#include`: **shared settings** | `Dynare_Course/Chapter_09_Method_of_Moments/RBC_MoM_*.mod` + `RBC_MoM_common.inc` | the GMM and SMM files share `RBC_MoM_common.inc`; only the main file changes the method |
 
-# 手册增补（Dynare 7.1 §4.2/4.5 + §3）
+These are the standard ways to remove duplication with the macro processor. For model variants (Calvo
+versus Rotemberg pricing, several countries, several policy regimes), use `@#if` switches and shared
+`@#include` equations; do not copy the whole `.mod` file.
 
-## `change_type` 与「变量翻转」（稳态反解参数的正规机制）
+## Known issue: workspace struct fields in the `.mod` file (`pp.x`, E275)
+
+Dynare refuses a namespace-qualified symbol such as `alppha = pp.alppha;` in a parameter assignment or
+`var eps_z = pp.sig_z^2;` in a `shocks` block (`Namespace-qualified symbol pp.alppha not allowed in this
+context`; Dygnosis E275). Workaround: the driver script writes every value as a numeric assignment to an
+include file, and the `.mod` file pulls it in with `@#include`:
 
 ```dynare
-change_type(var) alpha beta;        // 把参数 alpha,beta 变成内生
-change_type(parameters) y w;        // 把内生 y,w 变成参数
+parameters alppha betta ... sig_z ...;   // declare first
+@#include "model_params.inc"             // numeric literals, one assignment per line
+...
+shocks; var eps_z = sig_z^2; end;        // use the declared parameter, not pp.sig_z
 ```
-**全局生效**（在该命令前后都改）。配合宏开关 `@#if steady` 在「稳态用」与「动态用」两份主文件间
-切换声明，是用稳态目标（如劳动份额）反解结构参数（如 `alpha`）的标准做法。
-另有 `var_remove X;` 删变量（已被用过会报错）。
 
-## 即时声明（on-the-fly，省去顶部声明）
+The driver code and a worked example are in `references/known-issues.md`, entry "Parameter
+initialization: `Namespace-qualified symbol pp.x not allowed in this context`".
 
-- 方程标签里声明内生：`[endogenous='c']`。
-- 方程内用竖线后缀：`c|e`（内生）、`eps|x`（外生）、`alppha|p`（参数）——**只能用于当期变量**，
-  不必出现在该符号首次位置。
+## Related model-editing commands
+
+These are ordinary Dynare commands, not macro directives, but they serve the same purpose: model
+variants from one source (manual, "Variable declarations" and "Model declaration").
+
+### `change_type` and `var_remove`
+
+```dynare
+change_type(var) alpha beta;        // parameters alpha, beta become endogenous
+change_type(parameters) y w;        // endogenous y, w become parameters
+```
+
+The effect is **global**: the type change applies after and also before the command. With a macro flag
+`@#if steady` in a separate calibration file, it is the usual way to flip variables for steady-state
+calibration (pin down a structural parameter such as `alpha` from a target such as the labor share).
+`var_remove X;` removes a variable or parameter; removing a name already used in an equation or
+elsewhere is an error.
+
+### On-the-fly declarations (no declaration at the top)
+
+- Declare an endogenous variable in an equation tag: `[endogenous='c']`.
+- Or add a suffix in an equation: `c|e` (endogenous), `eps|x` (exogenous), `alppha|p` (parameter). Only
+  on contemporaneous variables; the suffix need not be on the first occurrence.
+
 ```dynare
 model;
 [endogenous='k',name='law of motion of capital']
-k(+1) = i|e + (1-delta|p)*k;
-y|e = k^alpha|p;
+k(+1) = invest|e + (1-delta|p)*k;
+y|e = k^alppha|p;
 end;
-delta = 0.025;  alpha = 0.36;
+delta = 0.025;  alppha = 0.36;
 ```
 
-## 按标签增删/替换方程（做变体的利器）
+(The manual's version of this example uses `i` and `alpha`; renamed here for R5. The `k(+1)` timing is
+the manual's; follow the timing convention of R2 in your own model.)
 
-- `model_remove('eq:name', tag=val, [name='x',bar='baz']);`——删带这些标签的方程；对应内生若仍被
-  用则转外生，否则删除。
-- `model_replace('dummy'); ...新方程... end;`——删旧加新，不改变量类型。
-- `model_options(...)`——多个 model 块时给整模型统一选项。
-（与命令行 `exclude_eqs`/`include_eqs` 互补，见 debugging.md。）
+### Remove or replace equations by tag (for variants)
 
-## 命令行宏定义与包含路径
+- `model_remove('eq:name', tag = 'val', [ name = 'x', bar = 'baz' ]);` removes the equations with those
+  tags. A plain quoted string matches the `name` tag; tag values are quoted. Each removed equation needs
+  an `endogenous` tag or a single endogenous variable on its left-hand side. That variable becomes
+  exogenous if it is still used in the model, otherwise it is removed.
+- `model_replace('dummy'); ...new equations... end;` removes the tagged equations and adds the new ones;
+  no variable is removed or changes type.
+- `model_options(...)` takes the options of `model` and applies them to the whole model when there are
+  several `model` blocks.
 
-`-DA=true`、`'-DB="a string"'`、`-DC=[1,2,3]`、`-I<path>`（`@#include` 搜索路径，优先于
-`@#includepath`）。`savemacro` 查看展开结果。
+These complement the command-line options `exclude_eqs` / `include_eqs` (`references/debugging.md`).
 
+## Command-line macro definitions and include paths
+
+`-DA=true`, `'-DB="a string"'`, `-DC=[1,2,3]` define macro variables; `-I<path>` adds an `@#include`
+search path that is searched before the `@#includepath` paths. `savemacro` shows the expanded result
+(manual, "Running Dynare").

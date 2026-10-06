@@ -33,12 +33,6 @@
 - Source-level review is needed for the production-capital timing normalization and the markup/cost-push shock process.
 - A separate variant entry or appendix note would be needed if the nominal-debt channel in Appendix D is to be archived.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English derivation.
-- Equation numbers `(F1)` through `(F35)` were preserved in both files.
-
 ## Index Status
 
 - Shared `catalog.csv` and `status.csv` were not edited because this task explicitly restricted ownership to `mmb-paper-derivations/derivations/NK_GS14/`.

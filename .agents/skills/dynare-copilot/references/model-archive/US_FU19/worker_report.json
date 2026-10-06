@@ -2,8 +2,7 @@
   "model_id": "US_FU19",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_FU19/US_FU19_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_FU19/US_FU19_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_FU19/US_FU19_derivation.md",
     "mmb-paper-derivations/derivations/US_FU19/source_manifest.json",
     "mmb-paper-derivations/derivations/US_FU19/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_FU19/worker_report.json"

@@ -29,7 +29,3 @@
 - The distinction between baseline and extended Taylor rules should be preserved in any later implementation variant.
 - The published nonlinear IRFs use third-order perturbation; a first-order Rep-MMB run is not equivalent for volatility-shock experiments.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English file and preserves section order and equation numbers `(F1)` through `(F26)`.

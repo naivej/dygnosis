@@ -2,8 +2,7 @@
   "model_id": "US_DNGS15_SW",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_DNGS15_SW/US_DNGS15_SW_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_DNGS15_SW/US_DNGS15_SW_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_DNGS15_SW/US_DNGS15_SW_derivation.md",
     "mmb-paper-derivations/derivations/US_DNGS15_SW/source_manifest.json",
     "mmb-paper-derivations/derivations/US_DNGS15_SW/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_DNGS15_SW/worker_report.json"

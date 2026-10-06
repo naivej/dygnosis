@@ -31,7 +31,3 @@
 - Confirm whether archive should preserve the paper's monthly Taylor-rule denominators or add a separate quarterly MMB implementation note in future runnable-model work.
 - Runtime validation, equation-count matching to a runnable Dynare file, and BK diagnostics were not performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English file with matching section order and matching `(F#)` equation labels.

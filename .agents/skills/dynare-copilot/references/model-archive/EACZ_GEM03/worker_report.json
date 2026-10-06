@@ -2,8 +2,7 @@
   "model_id": "EACZ_GEM03",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EACZ_GEM03/EACZ_GEM03_derivation.en.md",
-    "mmb-paper-derivations/derivations/EACZ_GEM03/EACZ_GEM03_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EACZ_GEM03/EACZ_GEM03_derivation.md",
     "mmb-paper-derivations/derivations/EACZ_GEM03/source_manifest.json",
     "mmb-paper-derivations/derivations/EACZ_GEM03/extraction_notes.md",
     "mmb-paper-derivations/derivations/EACZ_GEM03/worker_report.json"
@@ -53,7 +52,6 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number counts match",
       "status": "passed",
       "details": {
         "english_f_count": 116,

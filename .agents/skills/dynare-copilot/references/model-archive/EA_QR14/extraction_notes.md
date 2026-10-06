@@ -29,7 +29,3 @@ Status: `needs_review`.
 - Nonlinear steady-state derivation was not reconstructed from the paper; the entry records the linearized zero-deviation steady state and the implementation's initialization constants as cross-check evidence only.
 - Dynare runtime validation was not performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English version and preserves section order, equation numbering, file paths, model id, DOI, and `needs_review` markers.

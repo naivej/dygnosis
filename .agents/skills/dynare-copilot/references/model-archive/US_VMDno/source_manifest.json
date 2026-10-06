@@ -67,8 +67,7 @@
     "reason": "Runtime validation was explicitly out of scope for this worker task."
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/US_VMDno/US_VMDno_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/US_VMDno/US_VMDno_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/US_VMDno/US_VMDno_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/US_VMDno/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/US_VMDno/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/US_VMDno/worker_report.json"
@@ -117,15 +116,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/US_VMDno/US_VMDno_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/US_VMDno/US_VMDno_derivation.md",
       "exists": true,
       "sha256": "eab821b7042129b41428900c2edddc05b15be7d36f643fbe4dfd23a992a43d0d"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/US_VMDno/US_VMDno_derivation.zh.md",
-      "exists": true,
-      "sha256": "1acbefa73100a027ef16075e266b10a95dfe302c38eaece26ef13e4452254e11"
     },
     {
       "role": "source_manifest",

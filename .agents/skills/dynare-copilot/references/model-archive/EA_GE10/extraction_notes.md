@@ -29,7 +29,3 @@
 - `needs_review`: confirm whether the policy-rule inflation term should use current or lagged inflation in the archive equation; the paper Markdown and implementation both emphasize lagged inflation/output-gap terms, but OCR around notation is noisy.
 - Runtime validation was not performed.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation is a translation of the English core and preserves equation numbers, file paths, DOI, and `needs_review` markers.

@@ -50,8 +50,3 @@ Not used for:
 - Equation-variable count equality is not meaningful for this first-pass derivation because the paper-side derivation is block-level while the implementation has 99 expanded linear equations.
 - Runtime validation, Dynare residual checks, Blanchard-Kahn checks, IRF checks, and archive promotion were not performed.
 
-## Translation Status
-
-- English draft was written first.
-- Chinese draft is a translation of the English draft.
-- Equation numbers `(F1)` through `(F47)` are preserved in both files.

@@ -32,8 +32,3 @@
 - Some notation conflicts are inherent: `N_t` appears as both a Calvo numerator in the appendix notation and `N`-prefixed level variables in the MMB implementation.
 - The DOI in `model_index.csv` is preserved exactly even though the visible paper source is a BIS working paper.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was translated from the English derivation.
-- Equation numbering parity: English and Chinese both contain `(F1)` through `(F43)`.

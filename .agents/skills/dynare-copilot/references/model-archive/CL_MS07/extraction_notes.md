@@ -26,7 +26,3 @@
 - Steady-state logic is summarized from calibration text and the replication file; a paper-side analytical steady-state derivation was not reconstructed.
 - Runtime validation, Dynare residual checks, Blanchard-Kahn checks, and IRF verification are out of scope for this entry.
 
-## Translation Status
-
-- `CL_MS07_derivation.zh.md` is a translation of the checked English first-pass file.
-- Equation numbers and formulas were preserved between English and Chinese versions.

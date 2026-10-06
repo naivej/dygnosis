@@ -39,8 +39,3 @@
 - No Dynare runtime validation was performed. BK conditions, residual checks, IRF reproduction, and equation-count validation are deferred to a later runtime-validation phase.
 - Shared `catalog.csv` and `status.csv` were not updated because this task explicitly limited write ownership to `mmb-paper-derivations/derivations/NK_JO15_lt/` and prohibited editing shared indexes.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation was created after the English draft.
-- F-number parity between English and Chinese derivations should be validated mechanically before handoff.

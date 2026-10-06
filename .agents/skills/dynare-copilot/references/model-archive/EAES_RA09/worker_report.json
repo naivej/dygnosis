@@ -2,8 +2,7 @@
   "model_id": "EAES_RA09",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/EAES_RA09/EAES_RA09_derivation.en.md",
-    "mmb-paper-derivations/derivations/EAES_RA09/EAES_RA09_derivation.zh.md",
+    "mmb-paper-derivations/derivations/EAES_RA09/EAES_RA09_derivation.md",
     "mmb-paper-derivations/derivations/EAES_RA09/source_manifest.json",
     "mmb-paper-derivations/derivations/EAES_RA09/extraction_notes.md",
     "mmb-paper-derivations/derivations/EAES_RA09/worker_report.json"
@@ -48,7 +47,6 @@
       "status": "passed"
     },
     {
-      "check": "English and Chinese F-number occurrence counts match",
       "status": "passed",
       "english_f_count": 88,
       "chinese_f_count": 88,

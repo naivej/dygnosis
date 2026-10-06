@@ -3,8 +3,7 @@
   "status": "needs_review",
   "owned_directory": "mmb-paper-derivations/derivations/HK_FP13",
   "changed_files": [
-    "mmb-paper-derivations/derivations/HK_FP13/HK_FP13_derivation.en.md",
-    "mmb-paper-derivations/derivations/HK_FP13/HK_FP13_derivation.zh.md",
+    "mmb-paper-derivations/derivations/HK_FP13/HK_FP13_derivation.md",
     "mmb-paper-derivations/derivations/HK_FP13/source_manifest.json",
     "mmb-paper-derivations/derivations/HK_FP13/extraction_notes.md",
     "mmb-paper-derivations/derivations/HK_FP13/worker_report.json"

@@ -60,15 +60,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/EA_QR14/EA_QR14_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/EA_QR14/EA_QR14_derivation.md",
       "exists": true,
       "sha256": "6117251c491a190dc28b5bd3cae99c6196b61e39298c21fc278dfe566cee7a6c"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/EA_QR14/EA_QR14_derivation.zh.md",
-      "exists": true,
-      "sha256": "7516d268dac50dd1bb46f6250fae4f59e19469b3f4678dca6985c6c90fa61c4a"
     },
     {
       "role": "source_manifest",

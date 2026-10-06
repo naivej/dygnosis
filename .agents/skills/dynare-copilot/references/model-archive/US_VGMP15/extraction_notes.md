@@ -35,8 +35,3 @@
 - Confirm the exact MMB implementation variable names and equation count once a `US_VGMP15` implementation source is available.
 - No Dynare runtime validation was performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation is a direct translation of the English draft.
-- Equation numbers `(F1)` through `(F23)` are preserved in both versions.

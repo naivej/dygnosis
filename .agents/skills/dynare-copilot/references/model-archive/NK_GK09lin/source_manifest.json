@@ -1,7 +1,7 @@
 {
   "model_id": "NK_GK09lin",
   "paper_title": "A Model of Unconvetional Monetary Policy",
-  "authors": "Gertler, Mark; Karadi, Peter ",
+  "authors": "Gertler, Mark; Karadi, Peter",
   "year": "2009",
   "journal_or_series": "Journal of Monetary Economics 58(1), pp. 17-34",
   "doi": "10.1016/j.jmoneco.2010.10.004",
@@ -47,8 +47,7 @@
     ]
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/NK_GK09lin/NK_GK09lin_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/NK_GK09lin/NK_GK09lin_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/NK_GK09lin/NK_GK09lin_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/NK_GK09lin/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/NK_GK09lin/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/NK_GK09lin/worker_report.json"
@@ -74,7 +73,7 @@
   "model_index_row_normalized": {
     "model_id": "NK_GK09lin",
     "paper_title": "A Model of Unconvetional Monetary Policy",
-    "authors": "Gertler, Mark; Karadi, Peter ",
+    "authors": "Gertler, Mark; Karadi, Peter",
     "year": "2009",
     "journal_or_series": "Journal of Monetary Economics 58(1), pp. 17-34",
     "doi": "10.1016/j.jmoneco.2010.10.004",
@@ -105,15 +104,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_GK09lin/NK_GK09lin_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/NK_GK09lin/NK_GK09lin_derivation.md",
       "exists": true,
       "sha256": "ab96df0cbc1e8e40f9d73dcf06de95ca2f4ebd635b546349297633a81db8aeb6"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/NK_GK09lin/NK_GK09lin_derivation.zh.md",
-      "exists": true,
-      "sha256": "4e740c7d94e0811cb7a0143abb75dc616ddbc3a89c32af7879cf62161aff7934"
     },
     {
       "role": "source_manifest",

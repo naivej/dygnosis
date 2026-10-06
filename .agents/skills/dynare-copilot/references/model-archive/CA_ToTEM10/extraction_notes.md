@@ -50,8 +50,3 @@ Not used for:
 - Equation-variable count equality is not meaningful for this first pass because the entry records structural blocks rather than the full MMB implementation equation list.
 - Runtime validation, Dynare residual checks, Blanchard-Kahn checks, and IRF checks were not performed.
 
-## Translation Status
-
-- English draft was written first.
-- Chinese draft is a translation of the checked English draft.
-- Equation numbers `(F1)` through `(F30)` are preserved in both files.

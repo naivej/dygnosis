@@ -1,8 +1,7 @@
 {
   "model_id": "US_FM95AL",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/US_FM95AL/US_FM95AL_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_FM95AL/US_FM95AL_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_FM95AL/US_FM95AL_derivation.md",
     "mmb-paper-derivations/derivations/US_FM95AL/source_manifest.json",
     "mmb-paper-derivations/derivations/US_FM95AL/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_FM95AL/worker_report.json"
@@ -45,8 +44,7 @@
     "results": [
       "git diff --check passed for mmb-paper-derivations/derivations/US_FM95AL",
       "source_manifest.json and worker_report.json parsed successfully as JSON",
-      "English derivation contains all eight required sections and (F1)",
-      "English and Chinese derivations both contain 24 unique F-numbered equations, (F1)-(F24)"
+      "English derivation contains all eight required sections and (F1)"
     ]
   },
   "unresolved_formula_or_ocr_issues": [

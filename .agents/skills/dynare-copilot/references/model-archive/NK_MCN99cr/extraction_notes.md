@@ -27,8 +27,3 @@
 - Check whether catalog merge should use paper year 1999 from the MMB row or 1998 from the NBER working-paper cover page. The worker report proposes 1999 to match `model_index.csv`.
 - Runtime validation is explicitly deferred: no Dynare `resid`, `steady`, `check`, or `stoch_simul` was run.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English version with section order and equation numbering preserved.
-- English and Chinese F-number counts should match during validation.

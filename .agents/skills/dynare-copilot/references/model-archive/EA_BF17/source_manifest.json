@@ -112,15 +112,13 @@
     "paper_slug": "ea_bf17__money_and_monetary_policy_in_the_eurozone_an_empirical_analysis_during_c"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/EA_BF17/EA_BF17_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/EA_BF17/EA_BF17_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/EA_BF17/EA_BF17_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/EA_BF17/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/EA_BF17/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/EA_BF17/worker_report.json"
   },
   "archive_files": {
-    "derivation_en": "mmb-paper-derivations/derivations/EA_BF17/EA_BF17_derivation.en.md",
-    "derivation_zh": "mmb-paper-derivations/derivations/EA_BF17/EA_BF17_derivation.zh.md",
+    "derivation_en": "mmb-paper-derivations/derivations/EA_BF17/EA_BF17_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/EA_BF17/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/EA_BF17/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/EA_BF17/worker_report.json"

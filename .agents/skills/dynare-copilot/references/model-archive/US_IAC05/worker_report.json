@@ -2,8 +2,7 @@
   "model_id": "US_IAC05",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/US_IAC05/US_IAC05_derivation.en.md",
-    "mmb-paper-derivations/derivations/US_IAC05/US_IAC05_derivation.zh.md",
+    "mmb-paper-derivations/derivations/US_IAC05/US_IAC05_derivation.md",
     "mmb-paper-derivations/derivations/US_IAC05/source_manifest.json",
     "mmb-paper-derivations/derivations/US_IAC05/extraction_notes.md",
     "mmb-paper-derivations/derivations/US_IAC05/worker_report.json"
@@ -63,10 +62,6 @@
       {
         "command": "python3 -m json.tool mmb-paper-derivations/derivations/US_IAC05/worker_report.json >/dev/null",
         "result": "passed"
-      },
-      {
-        "command": "python3 section and F-number validation for English and Chinese derivations",
-        "result": "passed; English has all eight required sections; English and Chinese F-number reference counts match at 78 with unique F1-F18"
       }
     ]
   },

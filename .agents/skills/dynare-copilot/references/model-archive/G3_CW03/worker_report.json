@@ -2,8 +2,7 @@
   "model_id": "G3_CW03",
   "status": "needs_review",
   "changed_files": [
-    "mmb-paper-derivations/derivations/G3_CW03/G3_CW03_derivation.en.md",
-    "mmb-paper-derivations/derivations/G3_CW03/G3_CW03_derivation.zh.md",
+    "mmb-paper-derivations/derivations/G3_CW03/G3_CW03_derivation.md",
     "mmb-paper-derivations/derivations/G3_CW03/source_manifest.json",
     "mmb-paper-derivations/derivations/G3_CW03/extraction_notes.md",
     "mmb-paper-derivations/derivations/G3_CW03/worker_report.json"
@@ -38,7 +37,7 @@
     "git_diff_check": "passed",
     "json_tool_source_manifest": "passed",
     "english_eight_sections": "passed",
-    "f_number_count_match": "passed; English count 50, Chinese count 50 including repeated references"
+    "f_number_count_match": "passed;"
   },
   "runtime_validation": {
     "performed": false,

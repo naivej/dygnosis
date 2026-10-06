@@ -2,8 +2,7 @@
   "model_id": "NK_CDK24",
   "owned_directory": "mmb-paper-derivations/derivations/NK_CDK24",
   "changed_files": [
-    "mmb-paper-derivations/derivations/NK_CDK24/NK_CDK24_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_CDK24/NK_CDK24_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_CDK24/NK_CDK24_derivation.md",
     "mmb-paper-derivations/derivations/NK_CDK24/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_CDK24/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_CDK24/worker_report.json"
@@ -49,9 +48,7 @@
   },
   "validation": {
     "git_diff_check": "passed: git diff --check -- mmb-paper-derivations/derivations/NK_CDK24",
-    "json_validation": "passed: python3 -m json.tool for source_manifest.json and worker_report.json",
-    "eight_section_check": "passed: English and Chinese derivations both contain sections 1 through 8",
-    "f_number_count_check": "passed: English and Chinese both contain 35 continuous equation tags, F1 through F35"
+    "json_validation": "passed: python3 -m json.tool for source_manifest.json and worker_report.json"
   },
   "unresolved_issues": [
     "OCR placeholders remain for household-share notation and some multiplier labels.",

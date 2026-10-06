@@ -30,8 +30,3 @@
 - Confirm whether the archive should keep the paper-side entrepreneur-consumption condition (23) only as provenance for the MMB no-entrepreneur-consumption variant.
 - Runtime validation, steady-state solve verification, BK checks, and IRF replication are deferred by task instruction.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English derivation.
-- Equation numbers `(F1)` through `(F26)` are preserved in both versions.

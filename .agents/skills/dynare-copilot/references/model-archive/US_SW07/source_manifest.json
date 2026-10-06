@@ -58,8 +58,7 @@
     "model_type": "Medium-scale New Keynesian DSGE (Bayesian estimated) -benchmark model"
   },
   "archive_files": {
-    "derivation_zh": "mmb-paper-derivations/derivations/US_SW07/US_SW07_derivation.md",
-    "derivation_en": "mmb-paper-derivations/derivations/US_SW07/US_SW07_derivation.en.md",
+    "derivation_en": "mmb-paper-derivations/derivations/US_SW07/US_SW07_derivation.md",
     "extraction_notes": "mmb-paper-derivations/derivations/US_SW07/extraction_notes.md"
   },
   "copyright_boundary": "The derivation summarizes model structure and equations. It does not copy long prose from the paper or appendix.",

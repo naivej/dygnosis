@@ -41,8 +41,7 @@
     "source_role": "implementation_cross_check_only"
   },
   "archive_outputs": {
-    "english_derivation": "mmb-paper-derivations/derivations/HK_FPP11/HK_FPP11_derivation.en.md",
-    "chinese_derivation": "mmb-paper-derivations/derivations/HK_FPP11/HK_FPP11_derivation.zh.md",
+    "english_derivation": "mmb-paper-derivations/derivations/HK_FPP11/HK_FPP11_derivation.md",
     "source_manifest": "mmb-paper-derivations/derivations/HK_FPP11/source_manifest.json",
     "extraction_notes": "mmb-paper-derivations/derivations/HK_FPP11/extraction_notes.md",
     "worker_report": "mmb-paper-derivations/derivations/HK_FPP11/worker_report.json"
@@ -100,15 +99,9 @@
   "archive_files": [
     {
       "role": "english_derivation",
-      "path": "mmb-paper-derivations/derivations/HK_FPP11/HK_FPP11_derivation.en.md",
+      "path": "mmb-paper-derivations/derivations/HK_FPP11/HK_FPP11_derivation.md",
       "exists": true,
       "sha256": "796d50dedf2a35dff7fa352b35e942d580823c38f802fd86887fb0585ec5e754"
-    },
-    {
-      "role": "chinese_derivation",
-      "path": "mmb-paper-derivations/derivations/HK_FPP11/HK_FPP11_derivation.zh.md",
-      "exists": true,
-      "sha256": "8996d2f104aac80ddfa56f141e2a53c47785307496b3bf7a07d23711f6658d36"
     },
     {
       "role": "source_manifest",

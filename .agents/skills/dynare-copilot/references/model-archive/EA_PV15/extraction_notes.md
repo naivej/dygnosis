@@ -10,7 +10,6 @@
 ## Extraction Scope
 
 - The English derivation was drafted first from the MinerU Markdown.
-- The Chinese derivation is a translation of the English draft and preserves F-number order and formulas.
 - `.agents/skills/dynare-copilot/references/examples/EA_PV15_rep.mod` was used only as `implementation_cross_check`, mainly to confirm variable names, `model(linear)`, shock naming, and timing conventions.
 - Shared `catalog.csv` and `status.csv` were not edited by request.
 
@@ -43,7 +42,3 @@
 - Verify whether the English derivation should include more of the final-goods consumption/investment CES price indexes as separate F-numbered equations.
 - Runtime validation was not performed.
 
-## Translation Status
-
-- Chinese file created after the English draft.
-- English and Chinese F-number counts are intended to match exactly.

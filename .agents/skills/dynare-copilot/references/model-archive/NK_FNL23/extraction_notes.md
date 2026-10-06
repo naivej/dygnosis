@@ -28,8 +28,3 @@
 - The derivation should receive a targeted source review against the PDF for the two `needs_review` policy/bond equations before being promoted beyond first-pass archive status.
 - The transition policy paths for $`\tau_t`$ and reserves are scenario-specific and are not fully encoded as stationary stochastic processes in the paper appendix.
 
-## Translation Status
-
-- English derivation drafted first.
-- Chinese derivation translated from the English core.
-- F-number parity checked: English and Chinese both contain (F1)-(F31).

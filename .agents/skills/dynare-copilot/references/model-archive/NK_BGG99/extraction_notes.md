@@ -31,8 +31,3 @@
 - Confirm whether the archive should include the investment-delay extension for a separate variant; this first pass treats `NK_BGG99` as the baseline one-sector implementation.
 - No Dynare runtime validation was performed.
 
-## Translation Status
-
-- English derivation was drafted first.
-- Chinese derivation is a direct translation of the checked English draft.
-- Equation numbers `(F1)` through `(F23)` are preserved in both versions.

@@ -1,8 +1,7 @@
 {
   "model_id": "NK_PP17",
   "changed_paths": [
-    "mmb-paper-derivations/derivations/NK_PP17/NK_PP17_derivation.en.md",
-    "mmb-paper-derivations/derivations/NK_PP17/NK_PP17_derivation.zh.md",
+    "mmb-paper-derivations/derivations/NK_PP17/NK_PP17_derivation.md",
     "mmb-paper-derivations/derivations/NK_PP17/source_manifest.json",
     "mmb-paper-derivations/derivations/NK_PP17/extraction_notes.md",
     "mmb-paper-derivations/derivations/NK_PP17/worker_report.json"
