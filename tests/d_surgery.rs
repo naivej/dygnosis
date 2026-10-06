@@ -111,7 +111,7 @@ fn codes(diags: &[Diagnostic]) -> Vec<&str> {
 fn without_writing(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     diags
         .iter()
-        .filter(|diag| !matches!(diag.code.as_str(), "I208" | "I209" | "I210"))
+        .filter(|diag| !matches!(diag.code.as_str(), "I208" | "I209"))
         .collect()
 }
 
@@ -366,5 +366,5 @@ fn refused_tag_list_does_not_remove_an_equation() {
 
 #[test]
 fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(dygnosis::explain::known_codes().len(), 383);
+    assert_eq!(dygnosis::explain::known_codes().len(), 382);
 }

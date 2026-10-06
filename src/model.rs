@@ -204,6 +204,10 @@ pub struct Equation {
     /// Tag keys that appeared twice on this equation (`[name='a', name='b']`).
     pub tag_twice: Vec<(String, Span)>,
     pub complementarity: Option<Complementarity>,
+    /// Expanded-token indexes of this equation execution, excluding the eaten
+    /// semicolon. Empty means the execution was not recorded. A raw written
+    /// span is not a substitute: it can cover a discarded macro branch.
+    pub active_tokens: Range<usize>,
 }
 
 /// The four top-level semi-structural model commands. Their option sets differ
@@ -1014,6 +1018,9 @@ pub struct Assignment {
     pub expr: Option<ExprId>,
     /// Retained native MATLAB text, whose RHS declares no Dynare symbols.
     pub native: bool,
+    /// Expanded-token indexes of this assignment execution. Empty means the
+    /// execution was not recorded. A raw written span is not a substitute.
+    pub active_tokens: Range<usize>,
 }
 
 /// Proof for the new assignment trace; legacy numeric readers ignore it.
@@ -1026,6 +1033,9 @@ pub struct AssignmentSyntax {
 #[derive(Clone, Debug, Default)]
 pub struct Model {
     pub source: String,
+    /// Tokens after macro expansion. Equation and assignment `active_tokens`
+    /// index this vector. Empty when the model was not produced by the parser.
+    pub expanded_tokens: Vec<crate::lexer::Token>,
     pub intern: Interner,
     pub statements: Vec<Statement>,
     pub execution_steps: Vec<ExecutionStep>,

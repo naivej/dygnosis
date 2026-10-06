@@ -14,9 +14,8 @@ MATLAB runs, plus its own warnings and notes. It does not run Dynare, MATLAB or 
 - **Error:** Dynare would refuse the file before MATLAB runs.
 - **Warning:** Dynare would accept the file, but something looks wrong. This includes Dynare's own
   warnings.
-- **Information:** nothing is wrong; confirm that it is intended. I208 (equation without a `name` tag),
-  I209 (declaration without `long_name`) and I210 (number written in an equation) are writing
-  preferences, not refusals.
+- **Information:** nothing is wrong; confirm that it is intended. I208 (equation without a `name` tag)
+  and I209 (declaration without `long_name`) are writing preferences, not refusals.
 
 `dynare_explain` gives the meaning and the fix of a code. `dynare_list_diagnostic_codes` lists all codes
 with a `kind`: `shared` (Dynare reports the same problem), `added` (only Dygnosis reports it), or

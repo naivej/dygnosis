@@ -1,7 +1,7 @@
 //! Apply stored `Diagnostic.fix` edits. Family modules stay pure.
 
 use crate::check_parse::check_parse;
-use crate::diagnostic::{analyze, Severity, TextEdit};
+use crate::diagnostic::{analyze, Diagnostic, TextEdit};
 use crate::lexer::{tokenize, TokenKind};
 use crate::parser::parse;
 
@@ -50,8 +50,8 @@ pub fn apply_fix(text: &str, edits: &[TextEdit]) -> String {
     lines.join("\n")
 }
 
-/// Two-pass auto-fix: E001 stored edits (up to 3 rounds), then any stored
-/// semantic `fix` that does not raise the thin error count.
+/// Two-pass auto-fix. A stored edit is applied only when that edit, by itself,
+/// reduces the number of diagnostics with the same code and message.
 ///
 /// Refuses when the raw file has both `@#define`/`@#for` and a `@{ident}`
 /// interpolation (lexer tokens; comments are trivia).
@@ -61,37 +61,64 @@ pub fn auto_fix(text: &str) -> String {
     }
     let mut text = text.to_string();
     for _ in 0..3 {
-        let model = parse(&text);
-        let fixes: Vec<TextEdit> = check_parse(&model)
-            .into_iter()
-            .filter(|d| d.code == "E001")
-            .filter_map(|d| d.fix)
-            .collect();
+        let diags = check_parse(&parse(&text));
+        let fixes = repairing_fixes(&text, &diags, true);
         if fixes.is_empty() {
             break;
         }
         text = apply_fix(&text, &fixes);
     }
-    let model = parse(&text);
-    let fixes: Vec<TextEdit> = analyze(&model)
-        .into_iter()
-        .filter(|d| PASS2_CODES.contains(&d.code.as_str()))
-        .filter_map(|d| d.fix)
-        .collect();
+    let diags = analyze(&parse(&text));
+    let fixes = repairing_fixes(&text, &diags, false);
     if !fixes.is_empty() {
-        let candidate = apply_fix(&text, &fixes);
-        if error_count(&candidate) <= error_count(&text) {
-            text = candidate;
-        }
+        text = apply_fix(&text, &fixes);
     }
     text
 }
 
-fn error_count(text: &str) -> usize {
-    analyze(&parse(text))
-        .into_iter()
-        .filter(|d| d.severity == Severity::Error)
+fn repairing_fixes(text: &str, diags: &[Diagnostic], parse_pass: bool) -> Vec<TextEdit> {
+    diags
+        .iter()
+        .filter(|diagnostic| {
+            if parse_pass {
+                diagnostic.code == "E001"
+            } else {
+                PASS2_CODES.contains(&diagnostic.code.as_str())
+            }
+        })
+        .filter(|diagnostic| diagnostic.fix.is_some())
+        .filter(|diagnostic| edit_repairs_owner(text, diags, diagnostic, parse_pass))
+        .filter_map(|diagnostic| diagnostic.fix.clone())
+        .collect()
+}
+
+fn owner_count(diags: &[Diagnostic], owner: &Diagnostic) -> usize {
+    diags
+        .iter()
+        .filter(|diagnostic| diagnostic.code == owner.code && diagnostic.message == owner.message)
         .count()
+}
+
+fn edit_repairs_owner(
+    text: &str,
+    before_diags: &[Diagnostic],
+    owner: &Diagnostic,
+    parse_pass: bool,
+) -> bool {
+    let Some(fix) = owner.fix.clone() else {
+        return false;
+    };
+    let before = owner_count(before_diags, owner);
+    if before == 0 {
+        return false;
+    }
+    let candidate = apply_fix(text, &[fix]);
+    let after = if parse_pass {
+        check_parse(&parse(&candidate))
+    } else {
+        analyze(&parse(&candidate))
+    };
+    owner_count(&after, owner) < before
 }
 
 fn refuse_macro_rewrite(text: &str) -> bool {

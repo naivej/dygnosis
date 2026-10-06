@@ -122,9 +122,9 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
     out.extend(invalid_ident_diags(model, &tokens, &index));
     out.extend(reserved_ident_diags(model, &index));
     out.extend(reserved_symbol_use_diags(model));
-    out.extend(merged_equation_diags(model, &tokens, &index, &out));
-    out.extend(merged_assignment_diags(model, &tokens, &index, &out));
-    out.extend(unbalanced_paren_diags(model, &tokens));
+    out.extend(merged_equation_diags(model, &index, &out));
+    out.extend(merged_assignment_diags(model, &index, &out));
+    out.extend(unbalanced_paren_diags(model));
     out
 }
 
@@ -520,14 +520,19 @@ fn format_recorded_issues(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
                 let line = src.split('\n').nth(start.line as usize).unwrap_or("");
                 let code = strip_line_comment(line);
                 let fix_char = code.chars().count() as u32;
+                let complete = complete_equation(&tokens_starting_in(model, issue.span));
+                let mut message =
+                    format!("Parameter assignment '{name}' is missing its terminating semicolon.");
+                if complete {
+                    message.push_str(&format!(
+                        " Fix: add ';' at the end of line {}.",
+                        start.line + 1
+                    ));
+                }
                 out.push(e001(
                     issue.span,
-                    format!(
-                        "Parameter assignment '{name}' is missing its terminating semicolon. \
-                         Fix: add ';' at the end of line {}.",
-                        start.line + 1
-                    ),
-                    Some(TextEdit {
+                    message,
+                    complete.then(|| TextEdit {
                         start_line: start.line,
                         start_char: fix_char,
                         end_line: start.line,
@@ -1171,7 +1176,9 @@ fn push_invalid_run(
     // similar leftover with no Decl stays quiet. A lone string/junk token in an
     // active list has no Decl and still refuses.
     let run_span = Span { start, end };
-    let overlaps_decl = active_decls.iter().any(|decl| spans_overlap(run_span, *decl));
+    let overlaps_decl = active_decls
+        .iter()
+        .any(|decl| spans_overlap(run_span, *decl));
     let ident_like = run.iter().any(|&i| {
         matches!(
             tokens[i].kind,
@@ -1270,16 +1277,65 @@ fn reserved_ident_diags(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
     out
 }
 
-fn tokens_in_span(tokens: &[Token], span: Span) -> Vec<&Token> {
-    tokens
+/// Active tokens of one equation or assignment execution.
+///
+/// The slice is the parser's expanded-token range. A raw written span is not
+/// used: it can cover a discarded macro branch, and a later execution can
+/// select a different branch at that same span. An empty range, a
+/// `MacroDir` or `MacroInterp` inside the slice, or a retained unresolved
+/// directive around the slice is not proof, so the scan does not guess.
+fn execution_tokens<'a>(model: &'a Model, range: &std::ops::Range<usize>) -> Option<&'a [Token]> {
+    if range.is_empty() {
+        return None;
+    }
+    let tokens = model.expanded_tokens.get(range.clone())?;
+    if tokens
         .iter()
-        .filter(|t| {
-            t.span.start >= span.start && t.span.end <= span.end && t.kind != TokenKind::Eof
-        })
-        .collect()
+        .any(|token| matches!(token.kind, TokenKind::MacroDir | TokenKind::MacroInterp))
+        || raw_directive_encloses(model, range.start)
+    {
+        return None;
+    }
+    Some(tokens)
 }
 
-fn skip_tag_tokens(toks: &[&Token], mut i: usize) -> usize {
+/// Resolved `@#if` and `@#for` directives leave the expanded stream. A retained
+/// directive keeps its opener, so depth is positive only inside that raw block.
+fn raw_directive_encloses(model: &Model, index: usize) -> bool {
+    let mut depth = 0i32;
+    for token in model.expanded_tokens.iter().take(index) {
+        if token.kind != TokenKind::MacroDir {
+            continue;
+        }
+        depth += directive_delta(token.text(&model.source));
+        if depth < 0 {
+            depth = 0;
+        }
+    }
+    depth > 0
+}
+
+fn directive_delta(text: &str) -> i32 {
+    let word = text
+        .trim()
+        .trim_start_matches("@#")
+        .split_whitespace()
+        .next()
+        .unwrap_or("");
+    if word.eq_ignore_ascii_case("if")
+        || word.eq_ignore_ascii_case("ifdef")
+        || word.eq_ignore_ascii_case("ifndef")
+        || word.eq_ignore_ascii_case("for")
+    {
+        1
+    } else if word.eq_ignore_ascii_case("endif") || word.eq_ignore_ascii_case("endfor") {
+        -1
+    } else {
+        0
+    }
+}
+
+fn skip_tag_tokens(toks: &[Token], mut i: usize) -> usize {
     if i >= toks.len() || toks[i].kind != TokenKind::LBrack {
         return i;
     }
@@ -1294,7 +1350,7 @@ fn skip_tag_tokens(toks: &[&Token], mut i: usize) -> usize {
     }
 }
 
-fn standalone_eq_indices(toks: &[&Token]) -> Vec<usize> {
+fn standalone_eq_indices(toks: &[Token]) -> Vec<usize> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < toks.len() {
@@ -1310,9 +1366,314 @@ fn standalone_eq_indices(toks: &[&Token]) -> Vec<usize> {
     out
 }
 
+/// The token span is a written separator candidate.
+///
+/// A plain token and a macro copy both keep the source bytes in `span`. A
+/// generated lexeme is a candidate when `span` is one whole `@{...}` interpolation.
+/// Pieces of one multi-token replacement share that span, including pieces whose
+/// `expanded_adjacent_next` is set. [`proved_separator_edge`] keeps only the written
+/// start of the first piece and the written end of the last.
+fn written_boundary(src: &str, token: &Token) -> bool {
+    if token.lexeme.is_none() && token.expanded_adjacent_next.is_some() {
+        return false;
+    }
+    let Some(written) = src.get(token.span.start as usize..token.span.end as usize) else {
+        return false;
+    };
+    if token.lexeme.is_none() {
+        return written == token.text(src);
+    }
+    written.starts_with("@{") && written.ends_with('}')
+}
+
+fn byte_inside_other_token(tokens: &[Token], skip: usize, at: u32) -> bool {
+    tokens
+        .iter()
+        .enumerate()
+        .any(|(index, token)| index != skip && token.span.start < at && at < token.span.end)
+}
+
+fn shares_generated_span(tokens: &[Token], index: usize, earlier: bool) -> bool {
+    let span = tokens[index].span;
+    tokens.iter().enumerate().any(|(other_i, other)| {
+        let side = if earlier {
+            other_i < index
+        } else {
+            other_i > index
+        };
+        side && other.lexeme.is_some() && other.span.start < span.end && span.start < other.span.end
+    })
+}
+
+/// `at` is this active token's own written edge.
+///
+/// Copied literals own both edges of their span. A single-token `@{...}` does
+/// too. In a multi-token replacement every piece carries the whole interpolation
+/// span, so only the first piece's start and the last piece's end are written
+/// boundaries. An equal span does not count as a strict overlap.
+fn proved_separator_edge(src: &str, tokens: &[Token], index: usize, at: u32) -> bool {
+    let Some(token) = tokens.get(index) else {
+        return false;
+    };
+    if !written_boundary(src, token) || byte_inside_other_token(tokens, index, at) {
+        return false;
+    }
+    if token.lexeme.is_none() {
+        return true;
+    }
+    if at == token.span.start {
+        return !shares_generated_span(tokens, index, true);
+    }
+    if at == token.span.end {
+        return !shares_generated_span(tokens, index, false);
+    }
+    false
+}
+
+const EXPR_UNARY_BP: u8 = 7;
+
+/// Binding powers of the infix tokens `parse_expr` already accepts.
+fn infix_binding(kind: TokenKind) -> Option<(u8, u8)> {
+    match kind {
+        TokenKind::Plus | TokenKind::Minus => Some((3, 4)),
+        TokenKind::Star | TokenKind::Slash => Some((5, 6)),
+        TokenKind::Caret => Some((9, 8)),
+        TokenKind::Lt
+        | TokenKind::Gt
+        | TokenKind::Le
+        | TokenKind::Ge
+        | TokenKind::EqEq
+        | TokenKind::Ne => Some((1, 2)),
+        _ => None,
+    }
+}
+
+struct ExprWalk<'a> {
+    tokens: &'a [Token],
+    i: usize,
+}
+
+impl<'a> ExprWalk<'a> {
+    fn kind(&self) -> Option<TokenKind> {
+        self.tokens.get(self.i).map(|token| token.kind)
+    }
+
+    /// One expression, using the parser's prefix, infix, call, and timing tokens.
+    /// A missing operand, an open delimiter, or a trailing operator returns false.
+    fn parse_bp(&mut self, min_bp: u8) -> bool {
+        if !self.parse_prefix() {
+            return false;
+        }
+        while let Some((left_bp, right_bp)) = self.kind().and_then(infix_binding) {
+            if left_bp < min_bp {
+                break;
+            }
+            self.i += 1;
+            if !self.parse_bp(right_bp) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn parse_prefix(&mut self) -> bool {
+        let Some(kind) = self.kind() else {
+            return false;
+        };
+        match kind {
+            TokenKind::Plus | TokenKind::Minus => {
+                self.i += 1;
+                self.parse_bp(EXPR_UNARY_BP)
+            }
+            TokenKind::LParen => self.parse_grouping(),
+            TokenKind::Number | TokenKind::String => {
+                self.i += 1;
+                true
+            }
+            TokenKind::Ident => {
+                self.i += 1;
+                self.parse_postfix()
+            }
+            _ => false,
+        }
+    }
+
+    fn parse_postfix(&mut self) -> bool {
+        loop {
+            match self.kind() {
+                Some(TokenKind::LParen) => {
+                    if !self.parse_call_args() {
+                        return false;
+                    }
+                }
+                Some(TokenKind::Dot) => {
+                    self.i += 1;
+                    if self.kind() != Some(TokenKind::Ident) {
+                        return false;
+                    }
+                    self.i += 1;
+                }
+                _ => return true,
+            }
+        }
+    }
+
+    /// Bare `(...)` is one nonempty expression and its close. A comma is a call argument.
+    fn parse_grouping(&mut self) -> bool {
+        if self.kind() != Some(TokenKind::LParen) {
+            return false;
+        }
+        self.i += 1;
+        if !self.parse_bp(0) || self.kind() != Some(TokenKind::RParen) {
+            return false;
+        }
+        self.i += 1;
+        true
+    }
+
+    /// Arguments of a call or a timing suffix. Empty `()` and `a, b` are allowed.
+    fn parse_call_args(&mut self) -> bool {
+        if self.kind() != Some(TokenKind::LParen) {
+            return false;
+        }
+        self.i += 1;
+        if self.kind() == Some(TokenKind::RParen) {
+            self.i += 1;
+            return true;
+        }
+        loop {
+            if !self.parse_bp(0) {
+                return false;
+            }
+            if self.kind() == Some(TokenKind::Comma) {
+                self.i += 1;
+                continue;
+            }
+            break;
+        }
+        if self.kind() != Some(TokenKind::RParen) {
+            return false;
+        }
+        self.i += 1;
+        true
+    }
+}
+
+fn skip_leading_tags(tokens: &[Token]) -> usize {
+    let mut i = 0;
+    while tokens
+        .get(i)
+        .is_some_and(|token| token.kind == TokenKind::LBrack)
+    {
+        let mut depth = 0i32;
+        loop {
+            let Some(kind) = tokens.get(i).map(|token| token.kind) else {
+                return i;
+            };
+            i += 1;
+            match kind {
+                TokenKind::LBrack => depth += 1,
+                TokenKind::RBrack => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    i
+}
+
+/// `tokens` is one equation or assignment: optional tags, then a complete
+/// left-hand expression, `=`, and a complete right-hand expression.
+fn complete_equation(tokens: &[Token]) -> bool {
+    let mut walk = ExprWalk {
+        tokens,
+        i: skip_leading_tags(tokens),
+    };
+    if !walk.parse_bp(0) || walk.kind() != Some(TokenKind::Eq) {
+        return false;
+    }
+    walk.i += 1;
+    walk.parse_bp(0) && walk.i == tokens.len()
+}
+
+fn tokens_starting_in(model: &Model, span: Span) -> Vec<Token> {
+    model
+        .expanded_tokens
+        .iter()
+        .filter(|token| {
+            token.kind != TokenKind::Eof
+                && token.span.start >= span.start
+                && token.span.start < span.end
+        })
+        .cloned()
+        .collect()
+}
+
+/// Semicolon for a merged equation, at a proved active-token boundary that
+/// also ends a complete equation.
+///
+/// A second equation that starts on its own line takes `;` at the end of the
+/// previous active token. That skips directives, dormant branches, and comments,
+/// which are not tokens. A same-line pair still inserts `;\n` before the name.
+/// An unproved generated span, or a boundary after an unfinished expression,
+/// stores no edit.
+fn equation_separator_edit(
+    src: &str,
+    index: &LineIndex,
+    eq_span: Span,
+    tokens: &[Token],
+    ident_i: usize,
+) -> Option<TextEdit> {
+    let ident = tokens.get(ident_i)?;
+    if !proved_separator_edge(src, tokens, ident_i, ident.span.start)
+        || !complete_equation(&tokens[..ident_i])
+    {
+        return None;
+    }
+    let split_pos = index.position(src, ident.span.start);
+    let line = src.split('\n').nth(split_pos.line as usize).unwrap_or("");
+    let prefix = {
+        let mut end = 0;
+        for (n, c) in line.chars().enumerate() {
+            if n as u32 >= split_pos.character {
+                break;
+            }
+            end += c.len_utf8();
+        }
+        &line[..end]
+    };
+    let eq_start_line = index.position(src, eq_span.start).line;
+    if !(split_pos.line > eq_start_line && prefix.trim().is_empty()) {
+        return Some(TextEdit {
+            start_line: split_pos.line,
+            start_char: split_pos.character,
+            end_line: split_pos.line,
+            end_char: split_pos.character,
+            new_text: ";\n".to_string(),
+        });
+    }
+    let anchor_i = ident_i.checked_sub(1)?;
+    let anchor = &tokens[anchor_i];
+    let at = anchor.span.end;
+    if !proved_separator_edge(src, tokens, anchor_i, at) || at > ident.span.start {
+        return None;
+    }
+    let pos = index.position(src, at);
+    Some(TextEdit {
+        start_line: pos.line,
+        start_char: pos.character,
+        end_line: pos.line,
+        end_char: pos.character,
+        new_text: ";".to_string(),
+    })
+}
+
 fn merged_equation_diags(
     model: &Model,
-    tokens: &[Token],
     index: &LineIndex,
     already: &[Diagnostic],
 ) -> Vec<Diagnostic> {
@@ -1329,21 +1690,15 @@ fn merged_equation_diags(
         }) {
             continue;
         }
-        let toks = tokens_in_span(tokens, eq.span);
-        let eqs = standalone_eq_indices(&toks);
+        let Some(toks) = execution_tokens(model, &eq.active_tokens) else {
+            continue;
+        };
+        let eqs = standalone_eq_indices(toks);
         if eqs.len() < 2 {
             continue;
         }
         let second = eqs[1];
-        let mut k = second;
-        while k > 0 && !matches!(toks[k - 1].kind, TokenKind::Ident) {
-            // walk left skipping non-idents; stop at first ident
-            k -= 1;
-            if toks[k].kind == TokenKind::Ident {
-                break;
-            }
-        }
-        // Walk left from second '=' over whitespace (trivia is already skipped).
+        // Walk left from the second '=' to the next equation's left-hand name.
         let mut ident_i = None;
         let mut j = second;
         while j > 0 {
@@ -1360,64 +1715,18 @@ fn merged_equation_diags(
             }
         }
         let split_var = ident_i.map(|ii| toks[ii].text(src).to_string());
-        let mut fix = None;
-        if let Some(ii) = ident_i {
-            let split_pos = index.position(src, toks[ii].span.start);
-            let line = src.split('\n').nth(split_pos.line as usize).unwrap_or("");
-            let prefix = {
-                let mut end = 0;
-                for (n, c) in line.chars().enumerate() {
-                    if n as u32 >= split_pos.character {
-                        break;
-                    }
-                    end += c.len_utf8();
-                }
-                &line[..end]
-            };
-            let eq_start_line = index.position(src, eq.span.start).line;
-            if split_pos.line > eq_start_line && prefix.trim().is_empty() {
-                let mut prev = split_pos.line.saturating_sub(1);
-                let lines: Vec<&str> = src.split('\n').collect();
-                while prev > eq_start_line
-                    && lines
-                        .get(prev as usize)
-                        .is_some_and(|l| strip_line_comment(l).trim().is_empty())
-                {
-                    prev -= 1;
-                }
-                let prev_char = strip_line_comment(lines.get(prev as usize).copied().unwrap_or(""))
-                    .chars()
-                    .count() as u32;
-                // Python uses rstrip of comment-stripped line, which keeps trailing code.
-                let prev_char = lines
-                    .get(prev as usize)
-                    .map(|l| strip_line_comment(l).chars().count() as u32)
-                    .unwrap_or(prev_char);
-                fix = Some(TextEdit {
-                    start_line: prev,
-                    start_char: prev_char,
-                    end_line: prev,
-                    end_char: prev_char,
-                    new_text: ";".to_string(),
-                });
-            } else {
-                fix = Some(TextEdit {
-                    start_line: split_pos.line,
-                    start_char: split_pos.character,
-                    end_line: split_pos.line,
-                    end_char: split_pos.character,
-                    new_text: ";\n".to_string(),
-                });
-            }
-        }
+        let fix = ident_i.and_then(|ii| equation_separator_edit(src, index, eq.span, toks, ii));
         let mut msg =
             "Equation appears to contain multiple equations merged due to a missing semicolon."
                 .to_string();
         if let Some(var) = &split_var {
             msg.push_str(&format!(
-                " It looks like '{var} = ...' should be a separate equation. Fix: add ';' before '{var}'."
+                " It looks like '{var} = ...' should be a separate equation."
             ));
-        } else {
+            if fix.is_some() {
+                msg.push_str(&format!(" Fix: add ';' before '{var}'."));
+            }
+        } else if fix.is_some() {
             msg.push_str(" Fix: add ';' between the two equations.");
         }
         out.push(e001(eq.span, msg, fix));
@@ -1427,13 +1736,12 @@ fn merged_equation_diags(
 
 fn merged_assignment_diags(
     model: &Model,
-    tokens: &[Token],
     index: &LineIndex,
     already: &[Diagnostic],
 ) -> Vec<Diagnostic> {
     let src = &model.source;
-    let trailing = trailing_code_line(tokens, src, index);
-    let cmd_spans = crate::command_skip::command_stmt_spans(tokens, src);
+    let trailing = trailing_code_line(&model.expanded_tokens, src, index);
+    let cmd_spans = crate::command_skip::command_stmt_spans(&model.expanded_tokens, src);
     let mut out = Vec::new();
 
     let skip_span = |span: Span| {
@@ -1446,20 +1754,26 @@ fn merged_assignment_diags(
             .any(|r| span.start >= r.start && span.end <= r.end)
     };
 
-    let mut consider = |span: Span, name: &str, context: &str| {
+    let mut consider = |span: Span, active: std::ops::Range<usize>, name: &str, context: &str| {
         if skip_span(span) {
             return;
         }
+        let Some(toks) = execution_tokens(model, &active) else {
+            return;
+        };
         if context == "top-level" {
             if trailing.is_some_and(|t| index.position(src, span.start).line > t) {
                 return;
             }
-            let seg = &src[span.start as usize..span.end as usize];
-            if looks_like_matlab(seg) {
+            let joined = toks
+                .iter()
+                .map(|token| token.text(src))
+                .collect::<Vec<_>>()
+                .join(" ");
+            if looks_like_matlab(&joined) {
                 return;
             }
         }
-        let toks = tokens_in_span(tokens, span);
         let mut lhs_hits: Vec<usize> = Vec::new();
         for (i, tok) in toks.iter().enumerate() {
             if tok.kind == TokenKind::Ident
@@ -1473,41 +1787,49 @@ fn merged_assignment_diags(
         }
         let second = lhs_hits[1];
         let second_name = toks[second].text(src);
+        let proved = proved_separator_edge(src, toks, second, toks[second].span.start)
+            && complete_equation(&toks[..second]);
         let split_pos = index.position(src, toks[second].span.start);
         let mut fix_start = toks[second].span.start;
-        while fix_start > span.start {
-            let b = src.as_bytes()[(fix_start - 1) as usize];
-            if b == b' ' || b == b'\t' {
-                fix_start -= 1;
-            } else {
-                break;
+        if proved {
+            while fix_start > span.start {
+                let b = src.as_bytes()[(fix_start - 1) as usize];
+                if b == b' ' || b == b'\t' {
+                    fix_start -= 1;
+                } else {
+                    break;
+                }
             }
         }
         let fix_start_pos = index.position(src, fix_start);
+        let attach = proved && !byte_inside_other_token(toks, second, fix_start);
         let message = if context == "top-level" {
-            format!(
+            let mut message = format!(
                 "Parameter/helper assignment '{name}' appears to contain \
-                 multiple assignments merged due to a missing semicolon. \
-                 Fix: add ';' before '{second_name} = ...'."
-            )
+                 multiple assignments merged due to a missing semicolon."
+            );
+            if attach {
+                message.push_str(&format!(" Fix: add ';' before '{second_name} = ...'."));
+            }
+            message
         } else {
-            format!(
+            let mut message = format!(
                 "Statement in '{context}' appears to contain multiple assignments \
-                 merged due to a missing semicolon. \
-                 Fix: add ';' before '{second_name} = ...'."
-            )
+                 merged due to a missing semicolon."
+            );
+            if attach {
+                message.push_str(&format!(" Fix: add ';' before '{second_name} = ...'."));
+            }
+            message
         };
-        out.push(e001(
-            span,
-            message,
-            Some(TextEdit {
-                start_line: fix_start_pos.line,
-                start_char: fix_start_pos.character,
-                end_line: split_pos.line,
-                end_char: split_pos.character,
-                new_text: "; ".to_string(),
-            }),
-        ));
+        let fix = attach.then(|| TextEdit {
+            start_line: fix_start_pos.line,
+            start_char: fix_start_pos.character,
+            end_line: split_pos.line,
+            end_char: split_pos.character,
+            new_text: "; ".to_string(),
+        });
+        out.push(e001(span, message, fix));
     };
 
     for a in model
@@ -1515,13 +1837,28 @@ fn merged_assignment_diags(
         .iter()
         .chain(&model.helper_assignments)
     {
-        consider(a.span, model.name(a.name), "top-level");
+        consider(
+            a.span,
+            a.active_tokens.clone(),
+            model.name(a.name),
+            "top-level",
+        );
     }
     for a in &model.initval {
-        consider(a.span, model.name(a.name), "initval");
+        consider(
+            a.span,
+            a.active_tokens.clone(),
+            model.name(a.name),
+            "initval",
+        );
     }
     for a in &model.endval {
-        consider(a.span, model.name(a.name), "endval");
+        consider(
+            a.span,
+            a.active_tokens.clone(),
+            model.name(a.name),
+            "endval",
+        );
     }
     for eq in &model.steady_state_equations {
         if eq.text.trim_start().starts_with('#') {
@@ -1532,21 +1869,23 @@ fn merged_assignment_diags(
         } else {
             eq.lhs.as_str()
         };
-        consider(eq.span, lhs, "steady_state_model");
+        consider(eq.span, eq.active_tokens.clone(), lhs, "steady_state_model");
     }
     out
 }
 
-fn unbalanced_paren_diags(model: &Model, tokens: &[Token]) -> Vec<Diagnostic> {
+fn unbalanced_paren_diags(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for eq in crate::check_e020::all_model_equations(model) {
-        let toks = tokens_in_span(tokens, eq.span);
+        let Some(toks) = execution_tokens(model, &eq.active_tokens) else {
+            continue;
+        };
         let mut depth = 0i32;
         let mut orphan = false;
         let mut i = 0;
         while i < toks.len() {
             if toks[i].kind == TokenKind::LBrack {
-                i = skip_tag_tokens(&toks, i);
+                i = skip_tag_tokens(toks, i);
                 continue;
             }
             match toks[i].kind {

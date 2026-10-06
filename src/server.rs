@@ -1112,8 +1112,12 @@ impl Backend {
             .into_iter()
             .map(CodeActionOrCommand::CodeAction)
             .collect();
+        if !action_kind_requested(&params.context.only, &CodeActionKind::QUICKFIX) {
+            return (!actions.is_empty()).then_some(actions);
+        }
         let uri = &params.text_document.uri;
         let rows = inner.routed_library.get(uri).cloned().unwrap_or_default();
+        let mut seen_fixes = HashSet::new();
         for row in rows {
             let lib = &row.diagnostic;
             let Some(fix) = &lib.fix else { continue };
@@ -1133,23 +1137,24 @@ impl Backend {
             if !ranges_overlap(diag_range, params.range) {
                 continue;
             }
-            let supplied = params.context.diagnostics.iter().filter(|diag| {
-                diag.code == Some(NumberOrString::String(lib.code.clone()))
-                    && ranges_overlap(diag.range, diag_range)
-                    && diag
-                        .data
-                        .as_ref()
-                        .and_then(|data| data.get("root"))
-                        .and_then(Value::as_str)
-                        .is_none_or(|root| root == row.root.as_str())
-            });
-            if supplied.into_iter().any(|diag| {
-                diag.data
-                    .as_ref()
-                    .and_then(|data| data.get("input_revision"))
-                    .and_then(Value::as_str)
-                    .is_some_and(|revision| revision != row.revision)
-            }) {
+            if !params.context.diagnostics.is_empty()
+                && !context_owns_stored_fix(&params.context, lib, diag_range, &row)
+            {
+                continue;
+            }
+            let seen_key = (
+                row.root.to_string(),
+                row.revision.clone(),
+                lib.code.clone(),
+                lib.span.start,
+                lib.span.end,
+                fix.new_text.clone(),
+                fix.start_line,
+                fix.start_char,
+                fix.end_line,
+                fix.end_char,
+            );
+            if !seen_fixes.insert(seen_key) {
                 continue;
             }
             let edit = TextEdit {
@@ -1167,27 +1172,10 @@ impl Backend {
                     HashMap::from([(uri.clone(), vec![edit])]),
                 )),
                 is_preferred: Some(true),
+                diagnostics: Some(vec![row.lsp_diagnostic.clone()]),
                 ..CodeAction::default()
             });
-            let existing = actions.iter_mut().find(|existing| {
-                let mut comparable = (**existing).clone();
-                if let CodeActionOrCommand::CodeAction(action) = &mut comparable {
-                    action.diagnostics = None;
-                }
-                comparable == action
-            });
-            if let Some(CodeActionOrCommand::CodeAction(existing)) = existing {
-                let diagnostics = existing.diagnostics.get_or_insert_with(Vec::new);
-                if !diagnostics.contains(&row.lsp_diagnostic) {
-                    diagnostics.push(row.lsp_diagnostic);
-                }
-            } else {
-                let CodeActionOrCommand::CodeAction(mut action) = action else {
-                    unreachable!("library fixes are code actions")
-                };
-                action.diagnostics = Some(vec![row.lsp_diagnostic]);
-                actions.push(CodeActionOrCommand::CodeAction(action));
-            }
+            actions.push(action);
         }
         (!actions.is_empty()).then_some(actions)
     }
@@ -1237,10 +1225,7 @@ impl Backend {
                     title: template_kind.title().into(),
                     kind: Some(kind.clone()),
                     diagnostics: None,
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(changes),
-                        ..WorkspaceEdit::default()
-                    }),
+                    edit: Some(versioned_workspace_edit(&inner, changes)),
                     command: None,
                     is_preferred: Some(false),
                     disabled: None,
@@ -2872,6 +2857,9 @@ fn diagnostic_context(diagnostic: &crate::Diagnostic) -> Option<Value> {
 }
 
 fn naming_code_actions(inner: &mut Inner, params: &CodeActionParams) -> Vec<CodeAction> {
+    if !action_kind_requested(&params.context.only, &CodeActionKind::QUICKFIX) {
+        return Vec::new();
+    }
     let requested = &params.text_document.uri;
     let mut notes: Vec<(Url, Diagnostic)> = inner
         .published
@@ -2898,18 +2886,14 @@ fn naming_code_actions(inner: &mut Inner, params: &CodeActionParams) -> Vec<Code
         .collect::<HashSet<_>>()
         .len()
         > 1;
-    let requested_notes: Vec<_> = params
-        .context
-        .diagnostics
-        .iter()
-        .filter(|diag| ranges_overlap(diag.range, params.range))
-        .filter(|diagnostic| matches!(&diagnostic.code, Some(NumberOrString::String(code)) if matches!(code.as_str(), "I208" | "I209")))
-        .collect();
-    if !requested_notes.is_empty() {
+    if !params.context.diagnostics.is_empty() {
         notes.retain(|(_, note)| {
-            requested_notes
-                .iter()
-                .any(|supplied| supplied.range == note.range && supplied.data == note.data)
+            params.context.diagnostics.iter().any(|supplied| {
+                supplied.code == note.code
+                    && supplied.range == note.range
+                    && supplied.data.is_some()
+                    && supplied.data == note.data
+            })
         });
     }
     notes
@@ -3368,6 +3352,58 @@ fn fix_title(d: &crate::Diagnostic) -> String {
         }
     }
     format!("Apply fix for {}", d.code)
+}
+
+fn context_owns_stored_fix(
+    context: &CodeActionContext,
+    diagnostic: &crate::Diagnostic,
+    diag_range: Range,
+    row: &RoutedDiagnostic,
+) -> bool {
+    context.diagnostics.iter().any(|supplied| {
+        let Some(NumberOrString::String(code)) = &supplied.code else {
+            return false;
+        };
+        let Some(NumberOrString::String(published_code)) = &row.lsp_diagnostic.code else {
+            return false;
+        };
+        // Two stored rows can share code, range, root, and revision. The
+        // published message, source, and severity are what the client selected.
+        if code != &diagnostic.code
+            || code != published_code
+            || supplied.range != diag_range
+            || supplied.range != row.lsp_diagnostic.range
+            || supplied.message != row.lsp_diagnostic.message
+            || supplied.source != row.lsp_diagnostic.source
+            || supplied.severity != row.lsp_diagnostic.severity
+        {
+            return false;
+        }
+        let Some(data) = supplied.data.as_ref().and_then(Value::as_object) else {
+            return false;
+        };
+        let Some(root) = data.get("root").and_then(Value::as_str) else {
+            return false;
+        };
+        let Some(revision) = data.get("input_revision").and_then(Value::as_str) else {
+            return false;
+        };
+        if root != row.root.as_str() || revision != row.revision {
+            return false;
+        }
+        match (data.get("writing_context"), diagnostic.writing.as_ref()) {
+            (None, None) => true,
+            (Some(supplied_writing), Some(owner)) => {
+                serde_json::from_value::<crate::diagnostic::WritingContext>(
+                    supplied_writing.clone(),
+                )
+                .ok()
+                .as_ref()
+                    == Some(owner)
+            }
+            _ => false,
+        }
+    })
 }
 
 fn action_kind_requested(only: &Option<Vec<CodeActionKind>>, kind: &CodeActionKind) -> bool {

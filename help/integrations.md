@@ -176,6 +176,28 @@ row set. Its keyword can be in the root while the edits belong to an include.
 I209 exposes the same ownership contract for declaration rows. A code or
 written range alone cannot identify either scope across roots or statements.
 
+A code-action request with no selected diagnostic can discover each current fix,
+and that action names its check. A request that already names a diagnostic
+returns a fix only for that diagnostic. A different code, a missing or stale
+root, revision, or writing context, or another root is not a substitute.
+`context.only` keeps Quick Fix and refactor apart. Equal edit text does not
+combine roots into one action. Refactor templates carry the open document
+version, the same way stored fixes do. An unopened file stays unversioned.
+
+The VS Code language client drops `TextDocumentEdit.version` when it builds a
+`WorkspaceEdit`. The extension therefore removes that edit from the code
+action and applies its private copy from `dygnosis.applyDiagnosticEdit`. The
+command argument is only an opaque id. The extension applies the copy when
+the offered document versions, the owning diagnostics, and the server instance
+are still current. A closed, reopened, or replaced document does not revive
+it. A file-dependency change drops it. A notification that repeats an action's
+own root and input revision does not. A revision notification drops a refactor
+template or an older-engine fix that carries no root or revision, because that
+checked input cannot be proved. Changing the model owner drops a captured edit
+while the previous diagnostics are still on screen. Withdrawing a check, or
+ignoring it, drops its captured edit. Publishing or showing that check again
+requires a new action.
+
 ## Project diagnostics
 
 Project diagnostics check unopened saved `.mod` models beneath file-backed workspace folders. Discovery uses the recursive saved-model walk, including its generated `+` directory skip. Open `.dyn`, excluded models, loose files, and untitled documents retain ordinary editor diagnostics.

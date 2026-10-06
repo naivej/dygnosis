@@ -166,7 +166,7 @@ Apply it to each file (rule IDs: SKILL.md "Writing rules"). "Static" names the D
     equation tags and TeX names are English ASCII (house style). Dynare 7.2 accepts non-ASCII text in
     comments, `long_name`, TeX names and `[name=…]` tags; it refuses a non-ASCII character in an
     identifier, an equation or a shock statement (E001, `character unrecognized by lexer`). Static:
-    I208, I209, I210 find missing tags, missing `long_name` and numbers written in equations
+    I208 and I209 find missing tags and missing `long_name`
     (Information, not Dynare refusals).
 11. **Form (R8).** Write the original nonlinear equations by default. Use `model(linear);` only when the
     user asks for a linear model or the source gives only a linearized system. In a nonlinear model,

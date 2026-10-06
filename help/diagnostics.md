@@ -11,7 +11,7 @@ Complete files without a `model` block receive the applicable unused-parameter (
 
 Use the lightbulb or **Quick Fix** on a Dygnosis diagnostic to choose:
 
-- **Ignore this check (code)** hides every diagnostic with that code in this window, including Errors, Warnings, and Information. It also hides fixes attached only to that check. Independent refactors stay available.
+- **Ignore this check (code)** hides every diagnostic with that code in this window, including Errors, Warnings, and Information. It also hides fixes attached only to that check. Independent refactors stay available. When a check is selected, Ignore and Explain apply to that check. A request with no selected check can offer them for the current checks that overlap the cursor. A hidden, withdrawn, or foreign diagnostic is not a substitute.
 - **Explain this check (code)** opens the engine's explanation in Dygnosis Help. **Dygnosis: Explain a check** in the Command Palette asks for a diagnostic code.
 
 Hiding is temporary display state. It does not edit your `.mod`, change the engine's checks, or affect diagnostics from other extensions. Agent tools still receive all diagnostics. Later diagnostic updates respect the hidden list.

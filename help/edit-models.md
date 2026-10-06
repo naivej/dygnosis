@@ -68,13 +68,20 @@ change works for all affected copies; otherwise it stays as written. After the
 text or model inputs change, request the action again. Applying it again leaves
 existing metadata unchanged.
 
+When a check is selected, Quick Fix shows only that check's edits. Another
+check at the same place is not a substitute. With no check selected, each
+offered fix names its check. Quick Fix and refactor stay separate. A captured
+action runs only while that open file is still the one that offered it. After
+the text changes, request the action again.
+
 **Insert stochastic shocks template** and **Insert deterministic shocks
 template** are independent refactors. They insert commented templates for the
 available exogenous names when an ordinary shocks block is absent. The model's
 simulation commands determine which form is offered; mixed or unspecified
 context can offer both. Fill in the template and uncomment it only when it fits
-the intended experiment. A changed input invalidates an old diagnostic action.
-Request it again from the current text.
+the intended experiment. The editor inserts it only while that open file is
+still unchanged. A later edit, a dependency change, or a new engine does not
+insert the captured template. Request it again from the current text.
 
 ## Format and select
 

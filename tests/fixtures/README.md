@@ -25,7 +25,7 @@ Folders follow the diagnostic code. File names start with the same code (`w010_u
 | `format/` | ugly spacing / macros / `verbatim`. Pair is `name.mod` plus `name.formatted.mod`. No `// inventory:` line. |
 | `check_dir/` | a tree for saved-model discovery (recurse `*.mod`, skip `+` directories; an explicit `.inc` path is still diagnosed) |
 | `equations/` | counted equation object (library reader + MCP duplicate `[name=]` tag) |
-| `writing/` | I208–I210 writing summaries: equation name tags, declaration `long_name`, and literals in equations |
+| `writing/` | I208–I209 writing summaries: equation name tags and declaration `long_name` |
 | `equation_names/` | I208 bulk naming action. No `// inventory:` line. |
 | `w211/` | ordinary aggregate `varexo` used with a lead under `stoch_simul` or `estimation` |
 | `compare/` | aggregate and per-dimension heterogeneous equation compare pairs (names, tags, regimes) and symbol kind or metadata pairs. No `// inventory:` line. |

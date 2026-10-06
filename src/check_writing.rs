@@ -1,9 +1,8 @@
-//! Writing-preference summaries I208, I209, and I210.
+//! Writing-preference summaries I208 and I209.
 //!
 //! I208/I209 notes retain the exact rows of their owning statement executions.
-//! I210 retains its compilation-unit scope. None is a Dynare refusal.
+//! Neither is a Dynare refusal.
 
-use crate::expr::ExprKind;
 use crate::intern::Name;
 use crate::model::{Decl, Equation, Model};
 use crate::span::Span;
@@ -19,14 +18,11 @@ pub(crate) fn writing_summaries(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     out.extend(unnamed_equations(model));
     out.extend(missing_long_names(model));
-    if let Some(diag) = literal_numbers(model) {
-        out.push(diag);
-    }
     out
 }
 
 pub(crate) fn is_writing_code(code: &str) -> bool {
-    matches!(code, "I208" | "I209" | "I210")
+    matches!(code, "I208" | "I209")
 }
 
 /// Facts about whether the parsed model is complete enough to count.
@@ -269,53 +265,6 @@ pub(crate) fn context_is_current(
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == code && diagnostic.writing.as_ref() == Some(context))
-}
-
-fn literal_numbers(model: &Model) -> Option<Diagnostic> {
-    let mut sites = Vec::new();
-    for eq in equation_sites_full(model, false) {
-        if let Some(id) = eq.lhs_expr {
-            collect_numbers(model, id, &mut sites);
-        }
-        if let Some(id) = eq.rhs_expr {
-            collect_numbers(model, id, &mut sites);
-        }
-    }
-    let n = sites.len();
-    let span = sites.into_iter().next()?;
-    let message = if n == 1 {
-        "1 number is written directly in equations. Consider named parameters.".to_string()
-    } else {
-        format!("{n} numbers are written directly in equations. Consider named parameters.")
-    };
-    Some(note(span, "I210", message))
-}
-
-fn collect_numbers(model: &Model, id: crate::expr::ExprId, out: &mut Vec<Span>) {
-    let expr = model.exprs.get(id);
-    match &expr.kind {
-        ExprKind::Number => {
-            let quiet = expr
-                .interned
-                .is_some_and(|value| value.abs() == 0.0 || value.abs() == 1.0);
-            if !quiet {
-                out.push(expr.span);
-            }
-        }
-        ExprKind::String | ExprKind::Error | ExprKind::Ident { .. } => {}
-        ExprKind::Unary { arg, .. }
-        | ExprKind::SteadyState { arg }
-        | ExprKind::Expectation { arg, .. } => collect_numbers(model, *arg, out),
-        ExprKind::Binary { lhs, rhs, .. } => {
-            collect_numbers(model, *lhs, out);
-            collect_numbers(model, *rhs, out);
-        }
-        ExprKind::Call { args, .. } => {
-            for arg in args {
-                collect_numbers(model, *arg, out);
-            }
-        }
-    }
 }
 
 fn equation_sites_full(model: &Model, counted_only: bool) -> Vec<&Equation> {

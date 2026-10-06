@@ -458,10 +458,7 @@ fn macro_directive_in_declaration_names() {
     );
     let model = parse(&for_text);
     assert!(
-        model
-            .endogenous
-            .iter()
-            .any(|d| model.name(d.name) == "y_1"),
+        model.endogenous.iter().any(|d| model.name(d.name) == "y_1"),
         "loop-generated decl missing: {:?}",
         model
             .endogenous
@@ -512,7 +509,9 @@ fn macro_decl_reach_audit() {
 
     let unknown = analyze(&parse(&check_mod("e001/macro_decl_reach_unknown.mod")));
     assert!(
-        unknown.iter().any(|d| d.code == "E020" && d.message.contains('z')),
+        unknown
+            .iter()
+            .any(|d| d.code == "E020" && d.message.contains('z')),
         "unknown equation symbol must reach E020: {unknown:?}"
     );
 

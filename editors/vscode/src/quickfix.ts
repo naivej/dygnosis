@@ -21,6 +21,11 @@ interface RawSet {
 interface ActionContext {
   uri: vscode.Uri; version: number; instance: number; diagnostic: vscode.Diagnostic;
 }
+interface PendingEdit {
+  edit: vscode.WorkspaceEdit; versions: Map<string, number | null>; instance: number; folder: number;
+  documentUri: string; documentVersion: number; diagnostics: vscode.Diagnostic[];
+  roots: { root: string; revision: string }[];
+}
 
 /** Keep the diagnostic object intact: the language client's subclass carries LSP data. */
 export function diagnosticCode(diagnostic: vscode.Diagnostic): string | undefined {
@@ -28,11 +33,19 @@ export function diagnosticCode(diagnostic: vscode.Diagnostic): string | undefine
   const value = typeof code === "object" ? code.value : code;
   return typeof value === "number" || (typeof value === "string" && value.length > 0) ? String(value) : undefined;
 }
+function ownershipAgrees(left: vscode.Diagnostic, right: vscode.Diagnostic): boolean {
+  const leftData = "data" in left && record(left.data) ? left.data : undefined;
+  const rightData = "data" in right && record(right.data) ? right.data : undefined;
+  return ["root", "input_revision", "writing_context"].every(key => {
+    const leftValue = leftData?.[key];
+    const rightValue = rightData?.[key];
+    if (leftValue === undefined && rightValue === undefined) return true;
+    if (leftValue === undefined || rightValue === undefined) return false;
+    return JSON.stringify(leftValue) === JSON.stringify(rightValue);
+  });
+}
 function sameDiagnostic(left: vscode.Diagnostic, right: vscode.Diagnostic): boolean {
-  const supplied = "data" in right ? right.data : undefined;
-  const retained = "data" in left ? left.data : undefined;
-  if (record(supplied) && ["root", "input_revision"].some(key =>
-    supplied[key] !== undefined && (!record(retained) || supplied[key] !== retained[key]))) return false;
+  if (!ownershipAgrees(left, right)) return false;
   return left === right || (left.source === right.source && left.message === right.message &&
     left.severity === right.severity && diagnosticCode(left) === diagnosticCode(right) &&
     left.range.isEqual(right.range));
@@ -93,6 +106,7 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
   const pushed = new Map<string, RawSet>();
   const pulled = new Map<string, RawSet>();
   const actionContexts = new Map<string, ActionContext>();
+  const pendingEdits = new Map<string, PendingEdit>();
   const progressSubscriptions = new Set<vscode.Disposable>();
   const middleware = service.middleware;
   const previousPush = middleware.handleDiagnostics;
@@ -100,7 +114,7 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
   const previousWorkspace = middleware.provideWorkspaceDiagnostics;
   const previousActions = middleware.provideCodeActions;
   let disposed = false, actionSequence = 0, folderGeneration = 0, inputGeneration = 0;
-  let instance = service.currentInstance;
+  let instance = service.currentInstance, revisionConfirmedChange = false;
   const status = vscode.window.createStatusBarItem("dygnosis.hiddenDiagnostics", vscode.StatusBarAlignment.Left, 9);
   status.name = "Dygnosis hidden checks";
   status.command = "dygnosis.showDiagnostic";
@@ -117,7 +131,7 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
   const syncInstance = (): void => {
     if (instance === service.currentInstance) return;
     instance = service.currentInstance;
-    pushed.clear(); pulled.clear(); actionContexts.clear();
+    pushed.clear(); pulled.clear(); actionContexts.clear(); pendingEdits.clear();
   };
   const refresh = (): void => {
     syncInstance();
@@ -159,7 +173,12 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     if (disposed) { next(uri, diagnostics); return; }
     syncInstance();
     const retain: PushNext = (target, items) => {
-      pushed.set(target.toString(), { uri: target, items, version: versionFor(target), next });
+      const key = target.toString();
+      for (const [id, saved] of pendingEdits) {
+        if (saved.documentUri !== key || saved.diagnostics.length === 0) continue;
+        if (!saved.diagnostics.every(diagnostic => items.some(item => sameDiagnostic(item, diagnostic)))) pendingEdits.delete(id);
+      }
+      pushed.set(key, { uri: target, items, version: versionFor(target), next });
       next(target, visible(items));
     };
     if (previousPush) previousPush(uri, diagnostics, retain); else retain(uri, diagnostics);
@@ -225,21 +244,48 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     syncInstance();
     const version = document.version, requestInstance = instance, generation = folderGeneration, input = inputGeneration;
     const raw = currentRaw(document.uri);
-    const rawContext = context.diagnostics.flatMap(supplied => {
-      const exact = raw?.items.find(diagnostic => diagnostic === supplied);
-      return exact ? [exact] : raw?.items.filter(diagnostic => sameDiagnostic(diagnostic, supplied)) ?? [supplied];
+    const requested = context.diagnostics;
+    const engineDiagnostics = requested.length === 0 ? [] : requested.flatMap(supplied => {
+      if (!raw || raw.version !== version) return [supplied];
+      const exact = raw.items.find(diagnostic => diagnostic === supplied);
+      if (exact) return [exact];
+      const matches = raw.items.filter(diagnostic => sameDiagnostic(diagnostic, supplied));
+      return matches.length > 0 ? matches : [supplied];
     });
-    const fullContext = { ...context, diagnostics: [...new Set(rawContext)] };
+    const fullContext = { ...context, diagnostics: [...new Set(engineDiagnostics)] };
     const result = await (previousActions ? previousActions(document, range, fullContext, token, next) : next(document, range, fullContext, token));
     if (disposed || token.isCancellationRequested || version !== document.version || requestInstance !== service.currentInstance || generation !== folderGeneration || input !== inputGeneration) return [];
     const retained = (result ?? []).filter(action => !("diagnostics" in action) || !action.diagnostics?.length || action.diagnostics.some(diagnostic => !hiddenCodes.has(diagnosticCode(diagnostic) ?? "")));
+    // The language client builds a WorkspaceEdit without TextDocumentEdit.version.
+    // Keep the edit here and apply it only through the guarded command below.
+    for (const action of retained) {
+      if (!("edit" in action) || !action.edit) continue;
+      const edit = action.edit;
+      const key = String(++actionSequence);
+      const versions = new Map<string, number | null>();
+      if (typeof edit.entries === "function") for (const [uri] of edit.entries()) versions.set(uri.toString(), versionFor(uri));
+      const diagnostics = "diagnostics" in action && action.diagnostics ? [...action.diagnostics] : [];
+      const roots = diagnostics.flatMap(diagnostic => {
+        const data = "data" in diagnostic && record(diagnostic.data) ? diagnostic.data : undefined;
+        return typeof data?.root === "string" && typeof data.input_revision === "string" ? [{ root: data.root, revision: data.input_revision }] : [];
+      });
+      pendingEdits.set(key, { edit, versions, instance, folder: folderGeneration, documentUri: document.uri.toString(), documentVersion: version, diagnostics, roots });
+      action.edit = undefined;
+      action.command = { title: action.title, command: "dygnosis.applyDiagnosticEdit", arguments: [{ diagnosticEdit: key }] };
+    }
     if (context.only && !context.only.contains(vscode.CodeActionKind.QuickFix)) return retained;
     const ignore = booleanSetting("diagnosticActions.ignore", document.uri, true, service.log);
     const explain = booleanSetting("diagnosticActions.explain", document.uri, true, service.log);
     if (!ignore && !explain) return retained;
     for (const [key, saved] of actionContexts) if (saved.uri.toString() === document.uri.toString()) actionContexts.delete(key);
-    const candidates = (raw?.version === version ? raw.items : fullContext.diagnostics)
-      .filter(diagnostic => diagnostic.source === "dygnosis" && overlapping(diagnostic.range, range) && !hiddenCodes.has(diagnosticCode(diagnostic) ?? ""));
+    const current = raw?.version === version ? raw.items : [];
+    const visibleOwner = (diagnostic: vscode.Diagnostic): boolean =>
+      diagnostic.source === "dygnosis" && overlapping(diagnostic.range, range) && !hiddenCodes.has(diagnosticCode(diagnostic) ?? "");
+    const candidates = requested.length === 0
+      ? current.filter(visibleOwner)
+      : requested.flatMap(supplied => supplied.source === "dygnosis"
+        ? current.filter(diagnostic => visibleOwner(diagnostic) && sameDiagnostic(diagnostic, supplied))
+        : []);
     for (const diagnostic of candidates) {
       const code = diagnosticCode(diagnostic);
       if (!code) continue;
@@ -263,16 +309,43 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
   middleware.provideWorkspaceDiagnostics = workspacePull;
   middleware.provideCodeActions = actions;
 
+  const currentEdit = (saved: PendingEdit): boolean => {
+    if (disposed || saved.instance !== service.currentInstance || saved.folder !== folderGeneration) return false;
+    const document = documentFor(vscode.Uri.parse(saved.documentUri));
+    if (!document || document.version !== saved.documentVersion) return false;
+    for (const [key, offered] of saved.versions) {
+      const open = documentFor(vscode.Uri.parse(key));
+      if (offered === null) { if (open) return false; }
+      else if (!open || open.version !== offered) return false;
+    }
+    if (saved.diagnostics.length === 0) return true;
+    const raw = currentRaw(document.uri);
+    if (!raw || raw.version !== document.version) return false;
+    return saved.diagnostics.every(diagnostic => !hiddenCodes.has(diagnosticCode(diagnostic) ?? "") && raw.items.some(item => sameDiagnostic(item, diagnostic)));
+  };
   const savedAction = (argument: unknown): ActionContext | undefined => {
     if (typeof argument !== "object" || argument === null || !("diagnosticAction" in argument) || typeof argument.diagnosticAction !== "string") return undefined;
     const saved = actionContexts.get(argument.diagnosticAction);
     return saved && saved.instance === service.currentInstance && saved.version === versionFor(saved.uri) ? saved : undefined;
   };
   const registrations = [status,
+    vscode.commands.registerCommand("dygnosis.applyDiagnosticEdit", async (argument: unknown): Promise<boolean> => {
+      if (disposed) return false;
+      syncInstance();
+      const key = typeof argument === "object" && argument !== null && "diagnosticEdit" in argument && typeof argument.diagnosticEdit === "string" ? argument.diagnosticEdit : undefined;
+      const saved = key ? pendingEdits.get(key) : undefined;
+      if (key) pendingEdits.delete(key);
+      if (!saved || !currentEdit(saved)) return false;
+      return await vscode.workspace.applyEdit(saved.edit) === true;
+    }),
     vscode.commands.registerCommand("dygnosis.ignoreDiagnostic", (argument: unknown) => {
       const saved = savedAction(argument), code = saved ? diagnosticCode(saved.diagnostic) : undefined;
       if (!code || !saved || disposed || !booleanSetting("diagnosticActions.ignore", saved.uri, true, service.log)) return;
-      hiddenCodes.add(code); refresh();
+      hiddenCodes.add(code);
+      for (const [id, pending] of pendingEdits) {
+        if (pending.diagnostics.some(diagnostic => diagnosticCode(diagnostic) === code)) pendingEdits.delete(id);
+      }
+      refresh();
     }),
     vscode.commands.registerCommand("dygnosis.showDiagnostic", async () => {
       const code = await vscode.window.showQuickPick([...hiddenCodes].sort().map(code => ({ label: code, description: "Show this check in this window", code })), { title: "Dygnosis: Show a hidden check", placeHolder: "Choose a check to restore" });
@@ -308,13 +381,24 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       ++folderGeneration;
       pushed.clear(); pulled.clear();
-      hiddenCodes.clear(); actionContexts.clear(); refresh();
+      hiddenCodes.clear(); actionContexts.clear(); pendingEdits.clear(); refresh();
     }),
     vscode.workspace.onDidCloseTextDocument(document => {
-      for (const [key, saved] of actionContexts) if (saved.uri.toString() === document.uri.toString()) actionContexts.delete(key);
+      const key = document.uri.toString();
+      for (const [id, saved] of actionContexts) if (saved.uri.toString() === key) actionContexts.delete(id);
+      for (const [id, saved] of pendingEdits) if (saved.documentUri === key || saved.versions.has(key)) pendingEdits.delete(id);
       pushed.delete(document.uri.toString()); pulled.delete(document.uri.toString());
     }),
     service.onDidInvalidate(event => {
+      // invalidate() fires changed immediately afterwards. An owner change fires
+      // changed alone, so only that following changed may keep proved edits.
+      revisionConfirmedChange = true;
+      queueMicrotask(() => { revisionConfirmedChange = false; });
+      if (event.reason === "file" || event.inputRevision === undefined) pendingEdits.clear();
+      else for (const [key, saved] of pendingEdits) {
+        const contradicted = saved.roots.some(row => row.root === event.root && row.revision !== event.inputRevision);
+        if (saved.roots.length === 0 || contradicted) pendingEdits.delete(key);
+      }
       // Input changes can leave the document version unchanged. A server
       // notification follows its push; preserve facts from that same revision.
       if (!event.root) pushed.clear();
@@ -330,10 +414,15 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
       }
       pulled.clear();
     }),
-    service.onDidChange(() => { ++inputGeneration; actionContexts.clear(); syncInstance(); }),
+    service.onDidChange(() => {
+      ++inputGeneration; actionContexts.clear(); syncInstance();
+      const followedInvalidation = revisionConfirmedChange;
+      revisionConfirmedChange = false;
+      if (!followedInvalidation) pendingEdits.clear();
+    }),
   ];
   return vscode.Disposable.from(...registrations, new vscode.Disposable(() => {
-    disposed = true; hiddenCodes.clear(); pushed.clear(); pulled.clear(); actionContexts.clear();
+    disposed = true; hiddenCodes.clear(); pushed.clear(); pulled.clear(); actionContexts.clear(); pendingEdits.clear();
     for (const subscription of progressSubscriptions) subscription.dispose();
     progressSubscriptions.clear();
     if (middleware.handleDiagnostics === push) middleware.handleDiagnostics = previousPush;

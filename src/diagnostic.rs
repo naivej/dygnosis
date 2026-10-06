@@ -130,9 +130,7 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     diagnostics
 }
 
-fn dedupe_macro_diagnostics(
-    diagnostics: impl IntoIterator<Item = Diagnostic>,
-) -> Vec<Diagnostic> {
+fn dedupe_macro_diagnostics(diagnostics: impl IntoIterator<Item = Diagnostic>) -> Vec<Diagnostic> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for diagnostic in diagnostics {
@@ -159,14 +157,9 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     // Macro processing runs before the .mod parser. A failed definition may
     // otherwise turn its later interpolation into a spurious equation error.
     if !model.macro_type_errors.is_empty() {
-        return dedupe_macro_diagnostics(
-            model
-                .macro_type_errors
-                .iter()
-                .map(|(span, code, message)| {
-                    Diagnostic::new(*span, Severity::Error, *code, message.clone())
-                }),
-        );
+        return dedupe_macro_diagnostics(model.macro_type_errors.iter().map(
+            |(span, code, message)| Diagnostic::new(*span, Severity::Error, *code, message.clone()),
+        ));
     }
     if !model.incomplete_reasons.is_empty() || model.macro_incomplete_span.is_some() {
         // The remaining source still contains macro syntax, so any ordinary

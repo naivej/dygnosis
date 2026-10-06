@@ -186,8 +186,8 @@ next one.
   style: Dynare 7.2 accepts UTF-8 in comments and quoted strings, but ASCII labels keep MATLAB, Octave,
   TeX and plot output portable. For a new model or a substantial extension, tag every equation and give
   every declaration a TeX name and `long_name`:
-  `var c $C$ (long_name='Consumption');` and `[name='euler'] …`. Dygnosis Information I208, I209 and
-  I210 find missing tags, missing `long_name` and numbers written in equations. The conventions of an
+  `var c $C$ (long_name='Consumption');` and `[name='euler'] …`. Dygnosis Information I208 and I209
+  find missing tags and missing `long_name`. The conventions of an
   existing file, small edits and explicit user preferences come first. Missing metadata is not a Dynare
   error.
 - **R2 Timing.** The timing of a variable reflects when it is decided. Default "stock at the end of the

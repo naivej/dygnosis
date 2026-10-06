@@ -66,7 +66,6 @@ pub mod preprocessor;
 mod preview_layout;
 mod preview_navigation;
 mod preview_source;
-mod source_navigation;
 pub mod refs;
 pub mod server;
 mod server_model_map;
@@ -75,6 +74,7 @@ pub mod server_settings;
 mod shape_gate;
 pub(crate) mod shock_template;
 mod signature_help;
+mod source_navigation;
 pub mod span;
 pub mod timing;
 pub mod workspace;
@@ -166,4 +166,3 @@ pub use refs::{
 pub use workspace::{CycleRecord, IncludeRecords, ResolvedInclude, UnresolvedInclude, Workspace};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-

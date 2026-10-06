@@ -14,8 +14,7 @@ back-solved calibration in `steady_state_model`, `log_*` helper variables for pl
   names stay English ASCII. This is house style, not a Dynare rule: Dynare 7.2 accepts UTF-8 in comments
   and quoted strings, but ASCII labels keep MATLAB/Octave output, TeX and plots portable. The templates
   use English comments. Dygnosis reports missing metadata as Information: I208 (equation without a
-  `name` tag), I209 (declaration without `long_name`), I210 (number written in an equation). None of
-  them is a Dynare refusal.
+  `name` tag) and I209 (declaration without `long_name`). Neither is a Dynare refusal.
 - **R5.** The templates use `betta`, `alppha`, `gam` and `invest`. `psi` and `pi` are also MATLAB
   function names. They are safe with `steady_state_model`; rename them if you move the steady state to a
   user-written steady-state file (`<model>_steadystate.m`).

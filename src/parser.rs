@@ -210,12 +210,14 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
     let Parser {
         intern,
         mut model,
+        tokens,
         eq_token_ranges,
         hetero_eq_token_ranges,
         ..
     } = p;
     model.source = src.to_string();
     model.intern = intern;
+    model.expanded_tokens = tokens;
     (
         model,
         EquationTokenRanges {
@@ -2878,6 +2880,7 @@ impl Parser<'_> {
             tag_map: BTreeMap::new(),
             tag_twice: Vec::new(),
             complementarity: None,
+            active_tokens: start..end,
         })
     }
 
@@ -3103,7 +3106,8 @@ impl Parser<'_> {
                 });
                 continue;
             }
-            if let Some(a) = self.assignment_from(&raw, span) {
+            if let Some(mut a) = self.assignment_from(&raw, span) {
+                a.active_tokens = range.clone();
                 if self.tokens[range.start].kind == TokenKind::Ident {
                     self.record_write(a.name, range.start);
                 }
@@ -8565,6 +8569,7 @@ impl Parser<'_> {
             },
             expr,
             native: self.in_native_assignment,
+            active_tokens: target_token..expr_end_i,
         })
     }
 
@@ -8642,6 +8647,7 @@ impl Parser<'_> {
             span,
             expr: None,
             native: false,
+            active_tokens: 0..0,
         })
     }
 
@@ -8728,6 +8734,7 @@ impl Parser<'_> {
         eq.tag_map = tag_map;
         eq.tag_twice = tag_twice;
         eq.complementarity = complementarity;
+        eq.active_tokens = stmt_i..stmt_end_i;
         eq.lhs_expr = Some(if lhs_ok {
             lhs_expr.unwrap_or_else(|| self.alloc_error(eq.span))
         } else {
@@ -11601,6 +11608,7 @@ fn equation_from_statement(raw: &str, span: Span, parse_order: usize) -> Option<
         tag_map: BTreeMap::new(),
         tag_twice: Vec::new(),
         complementarity: None,
+        active_tokens: 0..0,
     })
 }
 

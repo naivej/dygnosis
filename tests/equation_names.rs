@@ -457,11 +457,7 @@ async fn included_writing_notes_route_to_their_files_and_clear_after_edits() {
     );
     let equations = items(&service, &eq_uri).await;
     assert!(equations.iter().all(|diag| diag_code(diag) != "I208"));
-    let literal = equations
-        .iter()
-        .find(|diag| diag_code(diag) == "I210")
-        .unwrap();
-    assert_eq!(literal.range.start, Position::new(0, 11));
+    assert!(equations.iter().all(|diag| diag_code(diag) != "I210"));
 
     service
         .inner()

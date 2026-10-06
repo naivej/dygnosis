@@ -157,8 +157,16 @@ mod tests {
         // j remains from the loop; last value is 2
         let layout = preview(src);
         assert!(layout.proven, "{}", layout.text);
-        assert!(layout.text.contains("parameters beta_1;"), "{}", layout.text);
-        assert!(layout.text.contains("parameters beta_2;"), "{}", layout.text);
+        assert!(
+            layout.text.contains("parameters beta_1;"),
+            "{}",
+            layout.text
+        );
+        assert!(
+            layout.text.contains("parameters beta_2;"),
+            "{}",
+            layout.text
+        );
         assert!(!layout.text.contains("@#"), "{}", layout.text);
     }
 
@@ -241,8 +249,7 @@ mod tests {
             .iter()
             .find(|fragment| {
                 fragment.written.is_none()
-                    && &layout.text
-                        [fragment.display.start as usize..fragment.display.end as usize]
+                    && &layout.text[fragment.display.start as usize..fragment.display.end as usize]
                         == "\n"
             })
             .expect("boundary newline fragment");

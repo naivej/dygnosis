@@ -15,6 +15,39 @@ fn e001_count(text: &str) -> usize {
         .count()
 }
 
+fn versioned_insert(action: &CodeAction) -> TextEdit {
+    versioned_insert_for(action, None)
+}
+
+fn versioned_insert_for(action: &CodeAction, uri: Option<&Url>) -> TextEdit {
+    let Some(DocumentChanges::Edits(rows)) = action
+        .edit
+        .as_ref()
+        .and_then(|edit| edit.document_changes.as_ref())
+    else {
+        panic!("refactor template must use versioned document edits");
+    };
+    let row = match uri {
+        Some(uri) => rows
+            .iter()
+            .find(|row| &row.text_document.uri == uri)
+            .unwrap_or_else(|| panic!("missing edit for {uri}")),
+        None => {
+            assert_eq!(rows.len(), 1, "one open document");
+            &rows[0]
+        }
+    };
+    assert_eq!(
+        row.text_document.version,
+        Some(1),
+        "open document carries its version"
+    );
+    let Some(OneOf::Left(edit)) = row.edits.first() else {
+        panic!("text edit");
+    };
+    edit.clone()
+}
+
 fn apply_edit(text: &str, edit: &TextEdit) -> String {
     let index = LineIndex::new(text);
     let start = index.offset_utf16(
@@ -92,13 +125,7 @@ async fn offers_commented_rows_before_the_command_without_applying_them() {
     assert_eq!(action.kind.as_ref(), Some(&CodeActionKind::REFACTOR));
     assert_ne!(action.is_preferred, Some(true));
     assert!(action.command.is_none());
-    let edit = action
-        .edit
-        .as_ref()
-        .and_then(|ws| ws.changes.as_ref())
-        .and_then(|changes| changes.values().next())
-        .and_then(|edits| edits.first())
-        .expect("one insert");
+    let edit = versioned_insert(&action);
     assert_eq!(edit.range.start, edit.range.end);
     assert_eq!(
         body_lines(&edit.new_text),
@@ -112,7 +139,7 @@ async fn offers_commented_rows_before_the_command_without_applying_them() {
         ]
     );
     assert!(!edit.new_text.chars().any(|ch| ch.is_ascii_digit()));
-    let edited = apply_edit(text, edit);
+    let edited = apply_edit(text, &edit);
     let template = edited.find("// shocks;").unwrap();
     let command = edited.find("stoch_simul").unwrap();
     let model_end = edited.find("end;").unwrap();
@@ -136,15 +163,7 @@ async fn no_varexo_and_existing_ordinary_shocks_offer_nothing() {
 async fn heterogeneous_shocks_still_offer_and_varexo_det_is_ignored() {
     let het = "heterogeneity_dimension d;\nvarexo e;\nvarexo(heterogeneity=d) h;\nshocks(heterogeneity=d);\nvar h = 0.1;\nend;\n";
     let action = template_for(het, None).await.expect("still offered");
-    let edit = action
-        .edit
-        .unwrap()
-        .changes
-        .unwrap()
-        .into_values()
-        .next()
-        .unwrap()
-        .remove(0);
+    let edit = versioned_insert(&action);
     assert!(edit.new_text.contains("// var e;"));
     assert!(!edit.new_text.contains("// var h;"));
     assert!(!edit.new_text.chars().any(|ch| ch.is_ascii_digit()));
@@ -155,15 +174,7 @@ async fn heterogeneous_shocks_still_offer_and_varexo_det_is_ignored() {
     let mixed = template_for("varexo e;\nvarexo_det u;\n", None)
         .await
         .expect("aggregate name");
-    let mixed_edit = mixed
-        .edit
-        .unwrap()
-        .changes
-        .unwrap()
-        .into_values()
-        .next()
-        .unwrap()
-        .remove(0);
+    let mixed_edit = versioned_insert(&mixed);
     assert!(mixed_edit.new_text.contains("// var e;"));
     assert!(!mixed_edit.new_text.contains("// var u;"));
 }
@@ -184,15 +195,7 @@ async fn quickfix_filter_does_not_return_the_template() {
 async fn utf16_emoji_inserts_after_the_character() {
     let text = "varexo e; \u{1F600}";
     let action = template_for(text, None).await.expect("template");
-    let edit = action
-        .edit
-        .unwrap()
-        .changes
-        .unwrap()
-        .into_values()
-        .next()
-        .unwrap()
-        .remove(0);
+    let edit = versioned_insert(&action);
     assert_eq!(edit.range.start.line, 0);
     assert_eq!(
         edit.range.start.character,
@@ -207,15 +210,7 @@ async fn utf16_emoji_inserts_after_the_character() {
 async fn crlf_inserts_before_the_command() {
     let text = "varexo e;\r\nstoch_simul;\r\n";
     let action = template_for(text, None).await.expect("template");
-    let edit = action
-        .edit
-        .unwrap()
-        .changes
-        .unwrap()
-        .into_values()
-        .next()
-        .unwrap()
-        .remove(0);
+    let edit = versioned_insert(&action);
     assert_eq!(edit.range.start, Position::new(1, 0));
     let edited = apply_edit(text, &edit);
     assert!(edited.contains("// shocks;\r\n// var e;\r\n// stderr ;\r\n// end;\r\nstoch_simul;"));
@@ -278,14 +273,7 @@ async fn include_supplies_names_and_an_ordinary_block_hides_the_action() {
             _ => None,
         })
         .expect("include varexo is eligible");
-    let edit = action
-        .edit
-        .unwrap()
-        .changes
-        .unwrap()
-        .remove(&uri)
-        .unwrap()
-        .remove(0);
+    let edit = versioned_insert_for(&action, Some(&uri));
     assert!(edit.new_text.contains("// var e;"));
     assert_ne!(action.is_preferred, Some(true));
     let edited = apply_edit(parent_src, &edit);
@@ -347,15 +335,7 @@ async fn both_forms_follow_command_context_and_declared_names() {
     let plain_det = template_named(plain, deterministic, None)
         .await
         .expect("deterministic form");
-    let edit = plain_det
-        .edit
-        .unwrap()
-        .changes
-        .unwrap()
-        .into_values()
-        .next()
-        .unwrap()
-        .remove(0);
+    let edit = versioned_insert(&plain_det);
     assert!(edit
         .new_text
         .contains("// var e;\n// periods ;\n// values ;"));
@@ -375,15 +355,7 @@ async fn both_forms_follow_command_context_and_declared_names() {
     let action = template_named(pf_only, deterministic, None)
         .await
         .expect("PF form");
-    let edit = action
-        .edit
-        .unwrap()
-        .changes
-        .unwrap()
-        .into_values()
-        .next()
-        .unwrap()
-        .remove(0);
+    let edit = versioned_insert(&action);
     assert!(edit.new_text.contains("// periods ;\n// values ;"));
     assert!(e001_count(&apply_edit(pf_only, &edit)) <= e001_count(pf_only));
 
@@ -411,15 +383,7 @@ async fn unfinished_blocks_receive_an_action_at_a_top_level_gap() {
             let action = template_named(&text, title, None)
                 .await
                 .expect("safe action");
-            let edit = action
-                .edit
-                .unwrap()
-                .changes
-                .unwrap()
-                .into_values()
-                .next()
-                .unwrap()
-                .remove(0);
+            let edit = versioned_insert(&action);
             let edited = apply_edit(&text, &edit);
             assert!(
                 edited.find("// shocks;").unwrap() < edited.find(block).unwrap(),
@@ -432,15 +396,7 @@ async fn unfinished_blocks_receive_an_action_at_a_top_level_gap() {
     let action = template_named(closed, "Insert deterministic shocks template", None)
         .await
         .unwrap();
-    let edit = action
-        .edit
-        .unwrap()
-        .changes
-        .unwrap()
-        .into_values()
-        .next()
-        .unwrap()
-        .remove(0);
+    let edit = versioned_insert(&action);
     let edited = apply_edit(closed, &edit);
     assert!(edited.find("// shocks;").unwrap() > edited.find("end;").unwrap());
 }

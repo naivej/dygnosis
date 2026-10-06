@@ -203,27 +203,53 @@ async fn shared_include_fix_retains_each_root_context_without_duplicate_edits() 
     let server = service.inner();
     open(server, &a, text, 7).await;
     open(server, &b, text, 8).await;
-    let note = pull(server, &child)
+    let notes: Vec<_> = pull(server, &child)
         .await
         .into_iter()
-        .find(|row| is_code(row, "E001"))
-        .unwrap();
-    let fixes = actions(server, &child, note.range, vec![note]).await;
+        .filter(|row| is_code(row, "E001"))
+        .collect();
+    assert!(
+        !notes.is_empty(),
+        "the shared declaration must publish E001"
+    );
+    let note = notes[0].clone();
+    let fixes = actions(server, &child, note.range, vec![note.clone()]).await;
     assert_eq!(fixes.len(), 1, "{fixes:?}");
     let diagnostics = fixes[0].diagnostics.as_ref().unwrap();
-    assert_eq!(diagnostics.len(), 2);
-    for root in [&a, &b] {
-        let diagnostic = diagnostics
-            .iter()
-            .find(|row| row.data.as_ref().unwrap()["root"] == root.as_str())
-            .unwrap();
-        assert!(is_code(diagnostic, "E001"));
-        assert!(diagnostic.data.as_ref().unwrap()["input_revision"]
-            .as_str()
-            .is_some());
-    }
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(
+        diagnostics[0].data.as_ref().unwrap()["root"],
+        note.data.as_ref().unwrap()["root"]
+    );
     assert_eq!(edits(&fixes[0]).len(), 1);
     assert_eq!(edits(&fixes[0])[0].text_document.uri, child);
+    let discovered = actions(server, &child, note.range, Vec::new()).await;
+    let mut roots = Vec::new();
+    for action in &discovered {
+        let owned = action
+            .diagnostics
+            .as_ref()
+            .expect("each fix names its owner");
+        assert_eq!(owned.len(), 1, "{action:?}");
+        assert!(is_code(&owned[0], "E001"));
+        let root = owned[0].data.as_ref().unwrap()["root"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(owned[0].data.as_ref().unwrap()["input_revision"]
+            .as_str()
+            .is_some());
+        assert!(!roots.contains(&root), "equal edits must not merge roots");
+        roots.push(root);
+        assert_eq!(edits(action).len(), 1);
+        assert_eq!(edits(action)[0].text_document.uri, child);
+    }
+    for root in [&a, &b] {
+        assert!(
+            roots.iter().any(|got| got == root.as_str()),
+            "missing {root} in {roots:?}"
+        );
+    }
 }
 
 #[tokio::test]

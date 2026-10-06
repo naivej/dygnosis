@@ -66,6 +66,15 @@ const vscode = {
     openTextDocument: uri => { const document = { uri, version: 1, languageId: "plaintext" }; host.documents.push(document); host.opened.push(document); return host.loadDocument?.(document) ?? Promise.resolve(document); },
     onDidChangeWorkspaceFolders: listener => host.folder.event(listener),
     onDidCloseTextDocument: listener => host.close.event(listener),
+    applyEdit: async edit => {
+      host.applied.push(edit);
+      if (host.applyResult === false) return false;
+      for (const [uri] of typeof edit.entries === "function" ? edit.entries() : []) {
+        const open = host.documents.find(item => item.uri.toString() === uri.toString());
+        if (open) ++open.version;
+      }
+      return true;
+    },
   },
   languages: { setTextDocumentLanguage: (document, language) => { document.languageId = language; return host.setLanguage?.(document) ?? Promise.resolve(document); } },
 };
@@ -84,7 +93,7 @@ const c2p = require("vscode-languageclient/lib/common/codeConverter").createConv
 Module._load = originalLoad;
 const token = { isCancellationRequested: false };
 function reset() {
-  host = { status: [], commands: new Map(), executed: [], providers: new Map(), documents: [], settings: {}, folder: new Emitter(), close: new Emitter(), changed: new Emitter(), opened: [], refreshes: 0, calls: [], logs: [], progress: new Map() };
+  host = { status: [], commands: new Map(), executed: [], providers: new Map(), documents: [], settings: {}, folder: new Emitter(), close: new Emitter(), changed: new Emitter(), opened: [], refreshes: 0, calls: [], logs: [], progress: new Map(), applied: [] };
   const provider = { onDidChangeDiagnosticsEmitter: { fire() { ++host.refreshes; } } };
   host.invalidated = new Emitter();
   const service = { middleware: {}, currentInstance: 1, onDidChange: host.changed.event, onDidInvalidate: host.invalidated.event,
@@ -239,6 +248,42 @@ test("actions retain engine fixes and raw root/data context, hiding only diagnos
   assert.ok(!filtered.includes(leftFix));
   assert.ok(filtered.includes(refactor)); assert.ok(filtered.includes(independent));
   assert.deepEqual(await offers(service, doc, [], [refactor], Kind.Refactor), [refactor]);
+  registration.dispose();
+});
+
+test("a selected check does not adopt another check, stripped ownership, or a foreign source", async () => {
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document();
+  const steady = note("I050"), naming = note("I208", undefined, 3);
+  push(service, doc, [steady, naming]);
+  const selected = await offers(service, doc, [steady]);
+  assert.equal(host.actionContext.diagnostics.length, 1);
+  assert.equal(host.actionContext.diagnostics[0], steady);
+  assert.ok(selected.every(action => !action.diagnostics?.includes(naming)));
+  assert.equal(selected.filter(action => action.diagnostics?.includes(steady)).length, 2);
+  const empty = await offers(service, doc, []);
+  assert.ok(empty.some(action => action.diagnostics?.includes(steady)));
+  assert.ok(empty.some(action => action.diagnostics?.includes(naming)));
+  const strippedWire = wire("I208", undefined, 3);
+  delete strippedWire.data;
+  const stripped = p2c.asDiagnostic(strippedWire);
+  const strippedActions = await offers(service, doc, [stripped]);
+  assert.equal(host.actionContext.diagnostics.length, 1);
+  assert.equal(host.actionContext.diagnostics[0], stripped);
+  assert.ok(!strippedActions.some(action => action.command?.command === "dygnosis.ignoreDiagnostic"));
+  const foreignWire = wire("W010");
+  foreignWire.source = "other";
+  const foreign = p2c.asDiagnostic(foreignWire);
+  const foreignActions = await offers(service, doc, [foreign]);
+  assert.equal(host.actionContext.diagnostics[0], foreign);
+  assert.ok(!foreignActions.some(action => action.command?.command === "dygnosis.ignoreDiagnostic"));
+  assert.ok(!foreignActions.some(action => action.diagnostics?.some(diagnostic => diagnostic.source === "dygnosis")));
+  doc.version = 2;
+  const stale = note("I208", undefined, 3);
+  const staleActions = await offers(service, doc, [stale]);
+  assert.equal(host.actionContext.diagnostics[0], stale);
+  assert.ok(!staleActions.some(action => action.command?.command === "dygnosis.ignoreDiagnostic"));
+  const refactor = new CodeAction("Shock template", Kind.Refactor);
+  assert.deepEqual(await offers(service, doc, [steady], [refactor], Kind.Refactor), [refactor]);
   registration.dispose();
 });
 
@@ -452,6 +497,173 @@ test("Markdown destinations are normalized by the parser; safe formatting and li
   }
   const ordinary = "# Heading\n\n**Bold** and *italic*. [Docs](https://www.dynare.org/manual/)\n\n- First\n- Second\n\n> A quote\n\n```dynare\nvar y;\n```\n\n`[Run](command:literal)`";
   assert.equal(marked.parse(safeExplanation(ordinary)), marked.parse(ordinary));
+});
+
+function engineEdit(uri, text = ";") {
+  return { text, entries: () => [[uri, [{ newText: text }]]] };
+}
+async function sealedFix(service, doc, diagnostic, title, kind = Kind.QuickFix, edit = engineEdit(doc.uri), preferred = true) {
+  const action = new CodeAction(title, kind);
+  action.diagnostics = diagnostic ? [diagnostic] : undefined;
+  action.isPreferred = preferred;
+  action.edit = edit;
+  const offered = await offers(service, doc, diagnostic ? [diagnostic] : [], [action], kind === Kind.Refactor ? Kind.Refactor : undefined);
+  return offered.find(item => item.title === title);
+}
+
+test("a captured edit applies once through its command and a later version cannot replay it", async () => {
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document();
+  const diagnostic = note("E001", undefined, 1);
+  push(service, doc, [diagnostic]);
+  const stored = engineEdit(doc.uri, ";");
+  const fix = await sealedFix(service, doc, diagnostic, "Apply fix for E001", Kind.QuickFix, stored, true);
+  assert.equal(fix.edit, undefined);
+  assert.equal(fix.kind, Kind.QuickFix);
+  assert.equal(fix.isPreferred, true);
+  assert.equal(fix.diagnostics[0], diagnostic);
+  assert.equal(fix.command.command, "dygnosis.applyDiagnosticEdit");
+  assert.deepEqual(Object.keys(fix.command.arguments[0]), ["diagnosticEdit"]);
+  const forged = { ...fix.command.arguments[0], newText: "pwned", edit: engineEdit(doc.uri, "pwned") };
+  assert.equal(await command("dygnosis.applyDiagnosticEdit", { diagnosticEdit: "missing", newText: "pwned" }), false);
+  assert.equal(host.applied.length, 0);
+  assert.equal(await command("dygnosis.applyDiagnosticEdit", forged), true);
+  assert.equal(host.applied[0], stored);
+  assert.equal(doc.version, 2);
+  ++doc.version;
+  assert.equal(await command("dygnosis.applyDiagnosticEdit", forged), false);
+  assert.equal(host.applied.length, 1);
+  registration.dispose();
+});
+
+test("dependency, ownership, close, reopen, and instance changes cannot revive a captured edit", async () => {
+  const refuse = async (prepare, title) => {
+    const service = reset(), registration = registerDiagnosticActions(service), doc = document();
+    const diagnostic = note("E001", undefined, 1);
+    push(service, doc, [diagnostic]);
+    const fix = await sealedFix(service, doc, diagnostic, title);
+    await prepare(service, doc, fix);
+    assert.equal(await command(fix.command.command, ...fix.command.arguments), false, title);
+    assert.equal(host.applied.length, 0, title);
+    registration.dispose();
+  };
+  await refuse((_service, doc) => { ++doc.version; }, "document version");
+  await refuse(service => { ++service.currentInstance; }, "server instance");
+  await refuse(() => { host.folder.fire(); }, "folder");
+  await refuse((_service, doc) => { host.close.fire(doc); const index = host.documents.indexOf(doc); if (index >= 0) host.documents.splice(index, 1); document(); }, "close and reopen");
+  await refuse(() => { host.invalidated.fire({ reason: "file", uri: "file:///project/dep.inc" }); }, "dependency file");
+  await refuse(() => { host.invalidated.fire({ reason: "input", root: "file:///project/a.mod", inputRevision: "changed-2" }); host.changed.fire(); }, "stale revision");
+  await refuse((service, doc) => { push(service, doc, []); }, "withdrawn push");
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document(), child = document("child.inc");
+  const diagnostic = note("E001", undefined, 1);
+  push(service, doc, [diagnostic]);
+  const fix = await sealedFix(service, doc, diagnostic, "Cross file", Kind.QuickFix, { entries: () => [[doc.uri, [{ newText: "a" }]], [child.uri, [{ newText: "b" }]]] });
+  ++child.version;
+  assert.equal(await command(fix.command.command, ...fix.command.arguments), false);
+  assert.equal(host.applied.length, 0);
+  assert.equal(doc.version, 1);
+  const closedUri = Uri.parse("file:///project/closed.inc");
+  const closed = await sealedFix(service, doc, diagnostic, "Closed target", Kind.QuickFix, engineEdit(closedUri));
+  document("closed.inc");
+  assert.equal(await command(closed.command.command, ...closed.command.arguments), false);
+  host.invalidated.fire({ reason: "input", root: doc.uri.toString(), inputRevision: "checked-1" }); host.changed.fire();
+  const current = await sealedFix(service, doc, diagnostic, "Same revision");
+  const paired = await sealedFix(service, doc, diagnostic, "Paired edit");
+  assert.notEqual(current.command.arguments[0].diagnosticEdit, paired.command.arguments[0].diagnosticEdit);
+  assert.equal(await command(current.command.command, ...current.command.arguments), true);
+  assert.equal(await command(paired.command.command, ...paired.command.arguments), false);
+  assert.equal(host.applied.length, 1);
+  registration.dispose();
+});
+
+test("a refactor template and an older engine edit stay guarded without a public edit payload", async () => {
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document();
+  const template = await sealedFix(service, doc, undefined, "Insert stochastic shocks template", Kind.Refactor, engineEdit(doc.uri, "shocks;"), false);
+  assert.equal(template.kind, Kind.Refactor);
+  assert.equal(template.isPreferred, false);
+  assert.equal(template.diagnostics, undefined);
+  assert.equal(template.edit, undefined);
+  assert.equal(template.command.command, "dygnosis.applyDiagnosticEdit");
+  host.invalidated.fire({ reason: "file", uri: "file:///project/other.inc" });
+  assert.equal(await command(template.command.command, ...template.command.arguments), false);
+  assert.equal(host.applied.length, 0);
+  assert.equal(doc.version, 1);
+  const value = wire("E001", undefined, 1); delete value.data;
+  const legacy = p2c.asDiagnostic(value);
+  push(service, doc, [legacy]);
+  const legacyFix = await sealedFix(service, doc, legacy, "Legacy semicolon");
+  host.invalidated.fire({ reason: "input", root: doc.uri.toString(), inputRevision: "later" }); host.changed.fire();
+  assert.equal(await command(legacyFix.command.command, ...legacyFix.command.arguments), false);
+  assert.equal(host.applied.length, 0);
+  assert.equal(doc.version, 1);
+  registration.dispose();
+});
+
+test("revision, withdrawal, ignore, and owner changes retire unproved captured edits", async () => {
+  const notify = (root, inputRevision) => {
+    host.invalidated.fire({ reason: "input", root, inputRevision });
+    host.changed.fire();
+  };
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document();
+  const template = await sealedFix(service, doc, undefined, "Insert stochastic shocks template", Kind.Refactor, engineEdit(doc.uri, "shocks;"), false);
+  notify(doc.uri.toString(), "rev-2");
+  assert.equal(template.kind, Kind.Refactor);
+  assert.equal(template.isPreferred, false);
+  assert.equal(await command(template.command.command, ...template.command.arguments), false);
+  assert.equal(host.applied.length, 0);
+
+  const value = wire("E001", undefined, 1); delete value.data;
+  const legacy = p2c.asDiagnostic(value);
+  push(service, doc, [legacy]);
+  const legacyFix = await sealedFix(service, doc, legacy, "Legacy semicolon");
+  notify(doc.uri.toString(), "later");
+  assert.equal(await command(legacyFix.command.command, ...legacyFix.command.arguments), false);
+
+  const owned = note("E001", undefined, 1);
+  push(service, doc, [owned]);
+  const proved = await sealedFix(service, doc, owned, "Proved semicolon");
+  const refresh = p2c.asDiagnostic(c2p.asDiagnostic(owned));
+  push(service, doc, [refresh]);
+  notify(owned.data.root, owned.data.input_revision);
+  assert.equal(proved.diagnostics[0], owned);
+  assert.equal(proved.isPreferred, true);
+  assert.equal(await command(proved.command.command, ...proved.command.arguments), true);
+  assert.equal(await command(proved.command.command, ...proved.command.arguments), false);
+  assert.equal(host.applied.length, 1);
+  assert.equal(host.applied[0].text, ";");
+
+  const again = note("E001", undefined, 1);
+  push(service, doc, [again]);
+  const withdrawn = await sealedFix(service, doc, again, "Withdrawn semicolon");
+  push(service, doc, []);
+  push(service, doc, [again]);
+  assert.equal(await command(withdrawn.command.command, ...withdrawn.command.arguments), false);
+  const replacement = await sealedFix(service, doc, again, "Republished semicolon");
+  assert.notEqual(replacement.command.arguments[0].diagnosticEdit, withdrawn.command.arguments[0].diagnosticEdit);
+  assert.equal(await command(replacement.command.command, ...replacement.command.arguments), true);
+
+  const hidden = note("E001", undefined, 1);
+  push(service, doc, [hidden]);
+  const hiddenEdit = engineEdit(doc.uri);
+  const hiddenAction = new CodeAction("Hidden semicolon", Kind.QuickFix);
+  hiddenAction.diagnostics = [hidden]; hiddenAction.isPreferred = true; hiddenAction.edit = hiddenEdit;
+  const offered = await offers(service, doc, [hidden], [hiddenAction]);
+  const captured = offered.find(action => action.title === "Hidden semicolon");
+  const ignore = offered.find(action => action.command?.command === "dygnosis.ignoreDiagnostic");
+  await command(ignore.command.command, ...ignore.command.arguments);
+  host.selection = "E001";
+  await command("dygnosis.showDiagnostic");
+  assert.equal(await command(captured.command.command, ...captured.command.arguments), false);
+
+  const rooted = note("E001", "file:///project/root-a.mod", 1);
+  push(service, doc, [rooted]);
+  const ownerEdit = await sealedFix(service, doc, rooted, "Owner semicolon");
+  assert.equal(host.documents.includes(doc), true);
+  host.changed.fire();
+  assert.equal(await command(ownerEdit.command.command, ...ownerEdit.command.arguments), false);
+  push(service, doc, [rooted]);
+  const currentOwner = await sealedFix(service, doc, rooted, "Current owner semicolon");
+  assert.equal(await command(currentOwner.command.command, ...currentOwner.command.arguments), true);
+  registration.dispose();
 });
 
 test("palette Explain starts the first engine and rejects a restart during its backend reply", async () => {

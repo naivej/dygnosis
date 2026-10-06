@@ -359,8 +359,8 @@ that it was not run.
 Before the report:
 
 1. Static: run `dynare_diagnose` on the finished file (`dynare_workspace_diagnose` for a project of
-   several files). No Error. Fix each Warning, or say in the report why it stays. Information I208,
-   I209 and I210 shows missing metadata (R1).
+   several files). No Error. Fix each Warning, or say in the report why it stays. Information I208
+   and I209 shows missing metadata (R1).
 2. Go through the final checklist in debugging.md (the items that apply).
 3. A model with several agents: the equation that Walras's law makes redundant is not in the model
    block (Stage 1, check 2).
@@ -447,8 +447,8 @@ stoch_simul(order=1, irf=40) ... ;
   UTF-8 in comments and quoted strings; ASCII labels keep MATLAB/Octave output, TeX and plots portable.
 - New models and substantial extensions: every equation has `[name='...']`, every declaration a TeX
   name and a `long_name`, helper variables such as `log_y` included. Dygnosis Information I208 (equation
-  without a name tag), I209 (declaration without `long_name`) and I210 (number written in an equation)
-  find the gaps. Missing metadata is not a Dynare refusal.
+  without a name tag) and I209 (declaration without `long_name`) find the gaps. Missing metadata is
+  not a Dynare refusal.
 - The conventions of an existing file, a small edit, or an explicit user preference take precedence.
 
 ### R2 details (timing)

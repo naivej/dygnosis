@@ -183,7 +183,7 @@ fn p_core_check_file_no_preproc() {
         assert!(
             diags
                 .iter()
-                .all(|d| matches!(d.code.as_str(), "I050" | "I208" | "I209" | "I210")),
+                .all(|d| matches!(d.code.as_str(), "I050" | "I208" | "I209")),
             "{name} library check codes: {:?}",
             diags.iter().map(|d| &d.code).collect::<Vec<_>>()
         );
