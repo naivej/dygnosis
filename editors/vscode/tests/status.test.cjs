@@ -113,7 +113,36 @@ test("incomplete expansion withholds even supplied old numbers", () => {
   const value = modelStatus(facts(document(), { complete: false, message: "Model expansion is incomplete" }), ["endogenous", "equations"], "main.mod");
   assert.equal(value.text, "$(info) Dynare: incomplete");
   assert.match(value.tooltip, /Counts are unavailable/);
+  assert.match(value.tooltip, /Model expansion is incomplete/);
   assert.doesNotMatch(value.tooltip, /Endogenous:|households|Timing:/);
+});
+test("incomplete reasons appear in the hover without reading diagnostics", () => {
+  const value = modelStatus(facts(document(), {
+    complete: false,
+    message: "Model expansion is incomplete",
+    incomplete_reasons: [
+      { code: "E063", message: "Unknown variable missing", location: null },
+      { code: "I211", message: "Macro expression 'length([1])' could not be evaluated; some model checks were withheld.", location: null },
+    ],
+  }), ["endogenous", "equations"], "main.mod");
+  assert.equal(value.text, "$(info) Dynare: incomplete");
+  assert.match(value.tooltip, /Unknown variable missing/);
+  assert.match(value.tooltip, /Macro expression 'length\(\[1\]\)' could not be evaluated/);
+  assert.doesNotMatch(value.tooltip, /Model expansion is incomplete/);
+  assert.match(value.tooltip, /Counts are unavailable/);
+});
+test("older engines without incomplete_reasons keep the generic hover", () => {
+  const value = modelStatus(facts(document(), { complete: false, message: "Model expansion is incomplete" }), ["endogenous"], "main.mod");
+  assert.match(value.tooltip, /Model expansion is incomplete/);
+  assert.doesNotMatch(value.tooltip, /Unknown variable/);
+});
+test("ignored diagnostic codes do not remove incomplete hover reasons", () => {
+  // Hover reads model-info reasons only; Ignore filters painted diagnostics elsewhere.
+  const value = modelStatus(facts(document(), {
+    complete: false,
+    incomplete_reasons: [{ code: "I211", message: "Macro expression '1 in 1:3' could not be evaluated; some model checks were withheld." }],
+  }), ["equations"], "main.mod");
+  assert.match(value.tooltip, /Macro expression '1 in 1:3' could not be evaluated/);
 });
 test("default status is native, accessible, and focuses Outline", async () => {
   const env = setup();

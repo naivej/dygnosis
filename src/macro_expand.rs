@@ -16,8 +16,17 @@ type ExpandTracedFull = (
     Vec<MacroTypeError>,
     Vec<Span>,
     Option<Span>,
+    Vec<IncompleteReason>,
     bool,
 );
+
+/// One verified incomplete-expansion failure for diagnostics and status hover.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IncompleteReason {
+    pub span: Span,
+    pub code: &'static str,
+    pub message: String,
+}
 
 #[derive(Clone, Debug)]
 enum MacroVal {
@@ -98,6 +107,10 @@ enum MacroEvalError {
     SyntaxEol,
     SyntaxUnexpected(&'static str),
     Unsupported,
+    /// Local evaluator resource limit (depth or collection size).
+    Limit(&'static str),
+    /// An earlier failed definition already owns the reason; withhold quietly.
+    PriorFailure,
 }
 
 impl MacroEvalError {
@@ -117,8 +130,83 @@ impl MacroEvalError {
             Self::SyntaxUnexpected(token) => {
                 Some(("E062", format!("syntax error, unexpected {token}")))
             }
-            Self::Unsupported => None,
+            Self::Unsupported | Self::Limit(_) | Self::PriorFailure => None,
         }
+    }
+}
+
+fn i211_expression_message(expression: &str) -> String {
+    let expression = expression.trim();
+    if expression.is_empty() {
+        "Macro expansion is incomplete; some model checks were withheld.".to_string()
+    } else {
+        format!(
+            "Macro expression '{expression}' could not be evaluated; some model checks were withheld."
+        )
+    }
+}
+
+fn i211_limit_message(limit: &str) -> String {
+    format!("Macro expansion stopped at the {limit} limit; some model checks were withheld.")
+}
+
+fn push_type_error(state: &mut ExpandState<'_>, span: Span, code: &'static str, message: String) {
+    if !state
+        .type_errors
+        .iter()
+        .any(|(existing, existing_code, existing_message)| {
+            *existing == span && *existing_code == code && existing_message == &message
+        })
+    {
+        state.type_errors.push((span, code, message));
+    }
+    state.incomplete.get_or_insert(span);
+}
+
+fn push_i211(state: &mut ExpandState<'_>, span: Span, message: String) {
+    if !state.incomplete_reasons.iter().any(|reason| {
+        reason.span == span && reason.code == "I211" && reason.message == message
+    }) {
+        state.incomplete_reasons.push(IncompleteReason {
+            span,
+            code: "I211",
+            message,
+        });
+    }
+    state.incomplete.get_or_insert(span);
+}
+
+fn note_eval_failure(
+    state: &mut ExpandState<'_>,
+    span: Span,
+    error: MacroEvalError,
+    expression: &str,
+) {
+    if let Some((code, message)) = error.diagnostic() {
+        push_type_error(state, span, code, message);
+        return;
+    }
+    match error {
+        MacroEvalError::Limit(limit) => push_i211(state, span, i211_limit_message(limit)),
+        MacroEvalError::PriorFailure => {
+            state.incomplete.get_or_insert(span);
+        }
+        MacroEvalError::Unsupported => {
+            push_i211(state, span, i211_expression_message(expression));
+        }
+        _ => {
+            state.incomplete.get_or_insert(span);
+        }
+    }
+}
+
+fn oversized_collection(value: &MacroVal) -> bool {
+    match value {
+        MacroVal::Range { start, end } => {
+            (*end as i128 - *start as i128 + 1) > RANGE_CAP as i128
+        }
+        MacroVal::Array(values) | MacroVal::Tuple(values) => values.len() > RANGE_CAP,
+        _ => false,
     }
 }
 
@@ -171,6 +259,7 @@ struct ExpandState<'a> {
     type_errors: &'a mut Vec<MacroTypeError>,
     discarded: &'a mut Vec<Span>,
     incomplete: &'a mut Option<Span>,
+    incomplete_reasons: &'a mut Vec<IncompleteReason>,
     include_seen: bool,
     file_visitor: Option<&'a mut dyn MacroFileVisitor>,
 }
@@ -296,6 +385,7 @@ fn macro_file_complete(
     let mut errors = Vec::new();
     let mut discarded = Vec::new();
     let mut incomplete = None;
+    let mut incomplete_reasons = Vec::new();
     let mut state = ExpandState {
         src: &source,
         defines,
@@ -304,6 +394,7 @@ fn macro_file_complete(
         type_errors: &mut errors,
         discarded: &mut discarded,
         incomplete: &mut incomplete,
+        incomplete_reasons: &mut incomplete_reasons,
         include_seen: false,
         file_visitor: Some(includes),
     };
@@ -319,16 +410,21 @@ pub fn expand_macros_full(
     src: &str,
     tokens: Vec<Token>,
 ) -> (Vec<Token>, Vec<(Span, &'static str, String)>) {
-    let (out, _, _, errors, _, _, _) = expand_macros_traced_full(src, tokens);
+    let (out, _, _, errors, _, _, _, _) = expand_macros_traced_full(src, tokens);
     (out, errors)
 }
 
 pub(crate) fn expand_macros_with_status(
     src: &str,
     tokens: Vec<Token>,
-) -> (Vec<Token>, Vec<MacroTypeError>, Option<Span>) {
-    let (out, _, _, errors, _, incomplete, _) = expand_macros_traced_full(src, tokens);
-    (out, errors, incomplete)
+) -> (
+    Vec<Token>,
+    Vec<MacroTypeError>,
+    Option<Span>,
+    Vec<IncompleteReason>,
+) {
+    let (out, _, _, errors, _, incomplete, reasons, _) = expand_macros_traced_full(src, tokens);
+    (out, errors, incomplete, reasons)
 }
 
 pub(crate) fn expand_macros_traced_with_status(
@@ -338,7 +434,7 @@ pub(crate) fn expand_macros_traced_with_status(
     // Check the original stream, including bodies skipped by inactive branches
     // or empty loops. This metadata proof does not change expansion or errors.
     let blocks_complete = macro_blocks_complete(src, &tokens);
-    let (out, traces, arena, errors, _, incomplete, _) = expand_macros_traced_full(src, tokens);
+    let (out, traces, arena, errors, _, incomplete, _, _) = expand_macros_traced_full(src, tokens);
     // Some existing macro checks record an error while still unrolling. Keep
     // legacy incomplete unchanged, but consume that same error proof for jumps.
     (
@@ -403,7 +499,7 @@ pub(crate) fn for_body_is_empty(source: &str, opener: Span, closer: Span) -> boo
 /// Source ranges of `@#if` / `@#ifndef` branches that expansion discarded.
 pub(crate) fn inactive_macro_spans(src: &str) -> Vec<Span> {
     let tokens = crate::lexer::tokenize(src);
-    let (_, _, _, _, discarded, _, _) = expand_macros_traced_full(src, tokens);
+    let (_, _, _, _, discarded, _, _, _) = expand_macros_traced_full(src, tokens);
     discarded
 }
 
@@ -438,7 +534,7 @@ pub(crate) fn required_includes_complete(src: &str) -> bool {
     if !has_include_directives(&source) {
         return true;
     }
-    let (_, _, _, _, _, incomplete, include_seen) =
+    let (_, _, _, _, _, incomplete, _, include_seen) =
         expand_macros_traced_full(&source, crate::lexer::tokenize(&source));
     !include_seen && incomplete.is_none()
 }
@@ -449,6 +545,7 @@ fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull 
     let mut type_errors = Vec::new();
     let mut discarded = Vec::new();
     let mut incomplete = None;
+    let mut incomplete_reasons = Vec::new();
     let (out, traces, include_seen) = {
         let mut state = ExpandState {
             src,
@@ -458,6 +555,7 @@ fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull 
             type_errors: &mut type_errors,
             discarded: &mut discarded,
             incomplete: &mut incomplete,
+            incomplete_reasons: &mut incomplete_reasons,
             include_seen: false,
             file_visitor: None,
         };
@@ -471,6 +569,7 @@ fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull 
         type_errors,
         discarded,
         incomplete,
+        incomplete_reasons,
         include_seen,
     )
 }
@@ -500,14 +599,9 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                                 if let Some(name) = defined_name(tok.text(state.src)) {
                                     state.defines.insert(name, MacroVal::Unresolved);
                                 }
-                                if let Some((code, message)) = error.diagnostic() {
-                                    state.type_errors.push((tok.span, code, message));
-                                    state.incomplete.get_or_insert(tok.span);
-                                    emit(state, &mut out, &mut traces, tok.clone());
-                                } else {
-                                    state.incomplete.get_or_insert(tok.span);
-                                    emit(state, &mut out, &mut traces, tok.clone());
-                                }
+                                let expression = define_rhs_expression(tok.text(state.src));
+                                note_eval_failure(state, tok.span, error, expression);
+                                emit(state, &mut out, &mut traces, tok.clone());
                             }
                         }
                     }
@@ -666,15 +760,11 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                             )
                         {
                             state.incomplete.get_or_insert(span);
-                            emit(state, &mut out, &mut traces, tok.clone());
-                        } else if let Some((code, message)) = error.diagnostic() {
-                            state.type_errors.push((span, code, message));
-                            state.incomplete.get_or_insert(span);
-                            emit(state, &mut out, &mut traces, tok.clone());
                         } else {
-                            state.incomplete.get_or_insert(span);
-                            emit(state, &mut out, &mut traces, tok.clone());
+                            let expression = interp_expression(state.src, tok);
+                            note_eval_failure(state, span, error, &expression);
                         }
+                        emit(state, &mut out, &mut traces, tok.clone());
                     }
                 }
             }
@@ -845,19 +935,26 @@ fn unroll_for(
     traces: &mut Vec<TokenTrace>,
 ) -> bool {
     let Some((vars, collection, condition)) = parse_for(for_tok.text(state.src)) else {
+        push_i211(
+            state,
+            for_tok.span,
+            i211_expression_message(for_tok.text(state.src)),
+        );
         return false;
     };
     let values = match eval_macro_expr(&collection, state.defines, 0) {
         Ok(values) => values,
         Err(error) => {
-            if let Some((code, message)) = error.diagnostic() {
-                state.type_errors.push((for_tok.span, code, message));
-                return false;
-            }
+            note_eval_failure(state, for_tok.span, error, &collection);
             return false;
         }
     };
     let Some(values) = values.loop_values() else {
+        if oversized_collection(&values) {
+            push_i211(state, for_tok.span, i211_limit_message("range size"));
+        } else {
+            push_i211(state, for_tok.span, i211_expression_message(&collection));
+        }
         return false;
     };
     let mut planned = Vec::new();
@@ -865,7 +962,10 @@ fn unroll_for(
         let members = match (&vars[..], &value) {
             ([_], _) => vec![value.clone()],
             (_, MacroVal::Tuple(items)) if items.len() == vars.len() => items.clone(),
-            _ => return false,
+            _ => {
+                push_i211(state, for_tok.span, i211_expression_message(&collection));
+                return false;
+            }
         };
         let mut bindings = state.defines.clone();
         for (name, member) in vars.iter().zip(&members) {
@@ -876,13 +976,13 @@ fn unroll_for(
                 Ok(result) => match result.condition() {
                     Some(true) => {}
                     Some(false) => continue,
-                    None => return false,
-                },
-                Err(error) => {
-                    if let Some((code, message)) = error.diagnostic() {
-                        state.type_errors.push((for_tok.span, code, message));
+                    None => {
+                        push_i211(state, for_tok.span, i211_expression_message(condition));
                         return false;
                     }
+                },
+                Err(error) => {
+                    note_eval_failure(state, for_tok.span, error, condition);
                     return false;
                 }
             }
@@ -1159,18 +1259,17 @@ fn eval_condition(state: &mut ExpandState<'_>, tok: &Token, kw: &str) -> Option<
         Ok(value) => match value.condition() {
             Some(condition) => Some(condition),
             None => {
-                state.type_errors.push((
+                push_type_error(
+                    state,
                     tok.span,
                     "E283",
                     "The condition must evaluate to a boolean or a double".to_string(),
-                ));
+                );
                 None
             }
         },
         Err(error) => {
-            if let Some((code, message)) = error.diagnostic() {
-                state.type_errors.push((tok.span, code, message));
-            }
+            note_eval_failure(state, tok.span, error, arg);
             None
         }
     }
@@ -1182,23 +1281,24 @@ fn eval_includepath(state: &mut ExpandState<'_>, tok: &Token) -> Option<String> 
     match eval_macro_expr(argument, state.defines, 0) {
         Ok(MacroVal::Text(path)) => Some(path),
         Ok(_) => {
-            state.type_errors.push((
+            push_type_error(
+                state,
                 tok.span,
                 "E305",
                 "File name does not evaluate to a string".to_string(),
-            ));
+            );
             None
         }
         Err(error) => {
-            if !(state.include_seen
+            if state.include_seen
                 && matches!(
                     error,
                     MacroEvalError::UnknownVariable(_) | MacroEvalError::UnknownFunction(_)
-                ))
+                )
             {
-                if let Some((code, message)) = error.diagnostic() {
-                    state.type_errors.push((tok.span, code, message));
-                }
+                state.incomplete.get_or_insert(tok.span);
+            } else {
+                note_eval_failure(state, tok.span, error, argument);
             }
             None
         }
@@ -1231,12 +1331,51 @@ fn retain_raw_macro(
     out: &mut Vec<Token>,
     traces: &mut Vec<TokenTrace>,
 ) {
+    // Condition/definition failures already recorded their reasons. Keep the
+    // incomplete flag when a raw block is retained without a new named reason.
     if let Some(first) = tokens.first() {
         state.incomplete.get_or_insert(first.span);
     }
     for token in tokens {
         emit(state, out, traces, token.clone());
     }
+}
+
+fn define_rhs_expression(text: &str) -> &str {
+    let Some(rest) = strip_kw(text, "define") else {
+        return text.trim();
+    };
+    let rest = rest.trim_start();
+    let Some(n) = ident_len(rest) else {
+        return rest.trim();
+    };
+    let rest = rest[n..].trim_start();
+    if let Some(after_open) = rest.strip_prefix('(') {
+        if let Some(close) = after_open.find(')') {
+            let after = after_open[close + 1..].trim_start();
+            return after.strip_prefix('=').map(str::trim).unwrap_or(after);
+        }
+    }
+    rest.strip_prefix('=').map(str::trim).unwrap_or(rest.trim())
+}
+
+fn interp_expression(src: &str, tok: &Token) -> String {
+    let text = tok.text(src);
+    if tok.kind == TokenKind::MacroInterp {
+        return text
+            .strip_prefix("@{")
+            .and_then(|s| s.strip_suffix('}'))
+            .unwrap_or(text)
+            .trim()
+            .to_string();
+    }
+    // Quoted value: name the first @{} that failed when available.
+    if let Some(start) = text.find("@{") {
+        if let Some(end) = text[start + 2..].find('}') {
+            return text[start + 2..start + 2 + end].trim().to_string();
+        }
+    }
+    text.trim().to_string()
 }
 
 fn parse_define_eval(
@@ -1385,7 +1524,7 @@ fn eval_macro_expr(
     depth: usize,
 ) -> Result<MacroVal, MacroEvalError> {
     if depth >= MACRO_DEPTH_CAP {
-        return Err(MacroEvalError::Unsupported);
+        return Err(MacroEvalError::Limit("expression depth"));
     }
     let source = source.trim();
     if source.is_empty() {
@@ -1487,7 +1626,7 @@ fn eval_macro_expr(
                 return Err(MacroEvalError::Unsupported);
             }
             return match defines.get(arg) {
-                Some(MacroVal::Unresolved) => Err(MacroEvalError::Unsupported),
+                Some(MacroVal::Unresolved) => Err(MacroEvalError::PriorFailure),
                 value => Ok(MacroVal::Bool(value.is_some())),
             };
         }
@@ -1529,7 +1668,7 @@ fn eval_macro_expr(
             .cloned()
             .ok_or_else(|| MacroEvalError::UnknownVariable(name.to_string()))?;
         return if matches!(value, MacroVal::Unresolved) {
-            Err(MacroEvalError::Unsupported)
+            Err(MacroEvalError::PriorFailure)
         } else {
             Ok(value)
         };
@@ -1637,11 +1776,12 @@ fn eval_membership(left: MacroVal, right: MacroVal) -> Result<MacroVal, MacroEva
     let items = match right {
         MacroVal::Array(values) if values.len() <= RANGE_CAP => values,
         MacroVal::Tuple(values) if values.len() <= RANGE_CAP => values,
-        MacroVal::Range { .. }
-        | MacroVal::Array(_)
-        | MacroVal::Tuple(_)
-        | MacroVal::Unresolved
-        | MacroVal::Function { .. } => {
+        MacroVal::Range { .. } => return Err(MacroEvalError::Unsupported),
+        MacroVal::Array(_) | MacroVal::Tuple(_) => {
+            return Err(MacroEvalError::Limit("range size"));
+        }
+        MacroVal::Unresolved => return Err(MacroEvalError::PriorFailure),
+        MacroVal::Function { .. } => {
             return Err(MacroEvalError::Unsupported);
         }
         _ => return Err(MacroEvalError::InOperandType),
@@ -1828,11 +1968,12 @@ fn check_for_tuple(state: &mut ExpandState<'_>, tok: &Token) {
     };
     if let Some(n) = first_tuple_size(after) {
         if n != names {
-            state.type_errors.push((
+            push_type_error(
+                state,
                 tok.span,
                 "E284",
                 format!("Encountered tuple of size {n} but only have {names} index variables"),
-            ));
+            );
         }
     }
 }

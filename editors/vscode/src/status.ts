@@ -22,13 +22,26 @@ function dimensionLines(dimension: Dimension): string[] {
   ];
 }
 
+function incompleteDetail(info: ModelInfo): string {
+  const reasons = Array.isArray(info.incomplete_reasons)
+    ? info.incomplete_reasons
+      .map(reason => typeof reason?.message === "string" ? reason.message.trim() : "")
+      .filter(message => message.length > 0)
+    : [];
+  if (reasons.length > 0) return reasons.join("\n");
+  return info.message ?? "Model expansion is incomplete.";
+}
+
 /** Format only engine facts. Aggregate and dimension counts stay separate. */
 export function modelStatus(info: ModelInfo, counts: StatusCount[], modelLabel: string): StatusContent {
-  if (!info.complete) return {
-    text: "$(info) Dynare: incomplete",
-    tooltip: `${modelLabel}\n${info.message ?? "Model expansion is incomplete."}\nCounts are unavailable.\nClick to focus Outline.`,
-    accessibilityLabel: "Dynare model expansion is incomplete. Counts are unavailable. Focus Outline.",
-  };
+  if (!info.complete) {
+    const detail = incompleteDetail(info);
+    return {
+      text: "$(info) Dynare: incomplete",
+      tooltip: `${modelLabel}\n${detail}\nCounts are unavailable.\nClick to focus Outline.`,
+      accessibilityLabel: "Dynare model expansion is incomplete. Counts are unavailable. Focus Outline.",
+    };
+  }
   const shown = counts.map(count => ({ ...countDetails[count], value: info[countDetails[count].field] }));
   if (shown.some(count => typeof count.value !== "number" || !Number.isSafeInteger(count.value) || count.value < 0)) return {
     text: "$(info) Dynare: unavailable",

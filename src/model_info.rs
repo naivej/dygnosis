@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::equations::count_gap;
 use crate::intern::Name;
 use crate::model::Model;
+use crate::span::Span;
 use serde_json::{json, Value};
 
 use crate::timing::classify_aggregate_variable_timing;
@@ -268,6 +269,69 @@ pub fn model_info_json(model: &Model) -> Value {
 
 pub(crate) fn model_incomplete_status() -> Value {
     json!({"status": "incomplete", "message": "Model expansion is incomplete"})
+}
+
+/// Optional `incomplete_reasons` entries share the diagnostic sentences.
+pub(crate) fn model_incomplete_status_with_reasons(reasons: &[Value]) -> Value {
+    let mut status = model_incomplete_status();
+    if !reasons.is_empty() {
+        status["incomplete_reasons"] = Value::Array(reasons.to_vec());
+    }
+    status
+}
+
+fn e061_reasons(records: &crate::workspace::IncludeRecords) -> Vec<(Span, &'static str, String)> {
+    records
+        .unresolved
+        .iter()
+        .map(|unresolved| {
+            let mut message = format!(
+                "Could not open {}. The following directories were searched",
+                unresolved.filename
+            );
+            if !unresolved.searched.is_empty() {
+                message.push(':');
+                for dir in &unresolved.searched {
+                    message.push_str("\n   * ");
+                    message.push_str(dir);
+                }
+            }
+            (unresolved.span, "E061", message)
+        })
+        .collect()
+}
+
+/// Same reason selection as the incomplete diagnostic cascade, without locations.
+pub fn incomplete_reason_records(
+    model: &Model,
+    includes: Option<&crate::workspace::IncludeRecords>,
+) -> Vec<(Span, &'static str, String)> {
+    // Missing includes own the status: a spliced miss must not promote a
+    // downstream unknown name that the absent file might have defined.
+    if let Some(records) = includes {
+        if !records.unresolved.is_empty() {
+            return e061_reasons(records);
+        }
+    }
+    if !model.macro_type_errors.is_empty() {
+        let mut seen = HashSet::new();
+        return model
+            .macro_type_errors
+            .iter()
+            .filter_map(|(span, code, message)| {
+                seen.insert((*span, *code, message.clone()))
+                    .then_some((*span, *code, message.clone()))
+            })
+            .collect();
+    }
+    if !model.incomplete_reasons.is_empty() {
+        return model
+            .incomplete_reasons
+            .iter()
+            .map(|reason| (reason.span, reason.code, reason.message.clone()))
+            .collect();
+    }
+    Vec::new()
 }
 
 /// The same include/companion rows, with each transport retaining its path keys.

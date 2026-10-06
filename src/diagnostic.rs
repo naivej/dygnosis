@@ -130,6 +130,25 @@ pub fn analyze(model: &Model) -> Vec<Diagnostic> {
     diagnostics
 }
 
+fn dedupe_macro_diagnostics(
+    diagnostics: impl IntoIterator<Item = Diagnostic>,
+) -> Vec<Diagnostic> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for diagnostic in diagnostics {
+        let key = (
+            diagnostic.span.start,
+            diagnostic.span.end,
+            diagnostic.code.clone(),
+            diagnostic.message.clone(),
+        );
+        if seen.insert(key) {
+            out.push(diagnostic);
+        }
+    }
+    out
+}
+
 /// Keep analysis positions through every selection and suppression decision.
 /// Only the completed collection receives display ranges.
 fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
@@ -140,27 +159,40 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     // Macro processing runs before the .mod parser. A failed definition may
     // otherwise turn its later interpolation into a spurious equation error.
     if !model.macro_type_errors.is_empty() {
-        return model
-            .macro_type_errors
-            .iter()
-            .map(|(span, code, message)| {
-                Diagnostic::new(*span, Severity::Error, *code, message.clone())
-            })
-            .collect();
+        return dedupe_macro_diagnostics(
+            model
+                .macro_type_errors
+                .iter()
+                .map(|(span, code, message)| {
+                    Diagnostic::new(*span, Severity::Error, *code, message.clone())
+                }),
+        );
     }
-    if let Some(span) = model.macro_incomplete_span {
+    if !model.incomplete_reasons.is_empty() || model.macro_incomplete_span.is_some() {
         // The remaining source still contains macro syntax, so any ordinary
         // parse/name/count diagnostic could describe a tree Dynare never sees.
         let explicit_error = crate::check_e060::check_e064(model);
         if !explicit_error.is_empty() {
             return explicit_error;
         }
-        return vec![Diagnostic::new(
-            span,
-            Severity::Information,
-            "I211",
-            "Macro expansion is incomplete; some model checks were withheld.",
-        )];
+        if !model.incomplete_reasons.is_empty() {
+            return dedupe_macro_diagnostics(model.incomplete_reasons.iter().map(|reason| {
+                Diagnostic::new(
+                    reason.span,
+                    Severity::Information,
+                    reason.code,
+                    reason.message.clone(),
+                )
+            }));
+        }
+        if let Some(span) = model.macro_incomplete_span {
+            return vec![Diagnostic::new(
+                span,
+                Severity::Information,
+                "I211",
+                "Macro expansion is incomplete; some model checks were withheld.",
+            )];
+        }
     }
     let parse_diags = crate::check_parse::check_parse(model);
     if !parse_diags.is_empty() {
@@ -432,7 +464,10 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
     let revision = ws.input_revision(abs_path)?;
     let model = ws.get_effective_model(abs_path)?.clone();
     let mut diags = analyze_positions(&model);
-    if model.macro_incomplete() {
+    let records = ws.include_records(abs_path).cloned().unwrap_or_default();
+    // Missing includes own the status even when splicing removed the directive
+    // and a later name looked undefined. Fall through so E061 is emitted.
+    if model.macro_incomplete() && records.unresolved.is_empty() && records.cycles.is_empty() {
         // An unevaluated macro can change declarations, command options, and
         // which includes exist. Keep only the macro result already established
         // by analyze; file and companion checks would use an unfinished tree.
@@ -450,17 +485,20 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
     diags.extend(crate::check_d_open::check_workspace_d_open(
         ws, &model, abs_path,
     ));
-    let records = ws.include_records(abs_path).cloned().unwrap_or_default();
     // Missing and cyclic includes are workspace records. The spliced model no
     // longer contains the directive, so `model_structure_incomplete` cannot see them.
     let expansion_blocked = !records.unresolved.is_empty() || !records.cycles.is_empty();
     if expansion_blocked {
         let no_model = model.model_block.is_none() && model.heterogeneous_models.is_empty();
+        let unresolved = !records.unresolved.is_empty();
         diags.retain(|d| {
             !(no_model && matches!(d.code.as_str(), "E021" | "W022"))
                 && d.code != "W060"
                 && d.code != "W208"
                 && d.code != "W211"
+                // A missing include may define the name; do not invent E063 from it.
+                && !(unresolved && d.code == "E063")
+                && !(unresolved && d.code == "I211")
                 && !matches!(d.code.as_str(), "E186" | "E188" | "E189" | "E190" | "E192")
                 && !crate::check_writing::is_writing_code(&d.code)
         });

@@ -1667,6 +1667,28 @@ impl Backend {
         let complete = report.complete
             && report.model_map.complete
             && inner.workspace.includes_complete(root.as_str());
+        let includes = inner
+            .workspace
+            .include_records(root.as_str())
+            .cloned()
+            .unwrap_or_default();
+        let mut result = if complete {
+            crate::model_info::model_info_json(&model)
+        } else {
+            let reasons = crate::model_info::incomplete_reason_records(&model, Some(&includes));
+            let reason_json: Vec<Value> = reasons
+                .iter()
+                .map(|(span, code, message)| {
+                    let location = incomplete_reason_location(&mut inner, &root, *span);
+                    json!({
+                        "code": code,
+                        "message": message,
+                        "location": location,
+                    })
+                })
+                .collect();
+            crate::model_info::model_incomplete_status_with_reasons(&reason_json)
+        };
         let Some(text) = inner.workspace.get_source(document.as_str()) else {
             return json!({"error":"The displayed source is unavailable", "code":"DOCUMENT_NOT_FOUND"});
         };
@@ -1681,11 +1703,6 @@ impl Backend {
         )
         .with_known_uris(inner.docs.keys().chain(std::iter::once(&root)));
         let facts = view.facts_json();
-        let mut result = if complete {
-            crate::model_info::model_info_json(&model)
-        } else {
-            crate::model_info::model_incomplete_status()
-        };
         result
             .as_object_mut()
             .unwrap()
@@ -1707,11 +1724,6 @@ impl Backend {
             .iter()
             .map(|(category, default)| json!({"category":category,"default":default}))
             .collect::<Vec<_>>());
-        let includes = inner
-            .workspace
-            .include_records(root.as_str())
-            .cloned()
-            .unwrap_or_default();
         let companions = inner
             .workspace
             .companion_records(root.as_str())
@@ -3003,6 +3015,36 @@ fn preview_written_location(
     Some(
         json!({"uri":uri,"range":range,"document_version":inner.document(&uri).map(|doc|doc.version)}),
     )
+}
+
+fn incomplete_reason_location(inner: &mut Inner, root: &Url, span: crate::span::Span) -> Value {
+    let Some((file, written)) = inner.workspace.map_effective_origin(root.as_str(), span) else {
+        return Value::Null;
+    };
+    let Some(text) = inner.workspace.get_source(&file) else {
+        return Value::Null;
+    };
+    let Some(range) = crate::server_model_map::written_range(text, written) else {
+        return Value::Null;
+    };
+    let Some(uri) = inner
+        .docs
+        .keys()
+        .chain(std::iter::once(root))
+        .find(|uri| crate::include_resolver::normalize_uri(uri.as_str()) == file)
+        .cloned()
+        .or_else(|| file_url_from_path_key(&file))
+    else {
+        return Value::Null;
+    };
+    if !["file", "untitled"].contains(&uri.scheme()) {
+        return Value::Null;
+    }
+    json!({
+        "uri": uri,
+        "range": range,
+        "document_version": inner.document(&uri).map(|doc| doc.version),
+    })
 }
 
 fn origin_uri_json(path_key: Option<&str>) -> Option<String> {

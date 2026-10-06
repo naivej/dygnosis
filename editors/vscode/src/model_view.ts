@@ -259,7 +259,13 @@ export function registerModelView(service: DygnosisClient): vscode.Disposable {
       view.description = vscode.workspace.asRelativePath(root);
       contextKeys(info.complete && info.equations.length > 0, service.knownOwners(document.uri).length > 0);
       if (!info.complete) {
-        clear(`${info.message ?? "Model expansion is incomplete."} Counts and equation navigation are unavailable.`);
+        const reasons = Array.isArray(info.incomplete_reasons)
+          ? info.incomplete_reasons
+            .map(reason => typeof reason?.message === "string" ? reason.message.trim() : "")
+            .filter(message => message.length > 0)
+          : [];
+        const detail = reasons.length > 0 ? reasons.join("\n") : (info.message ?? "Model expansion is incomplete.");
+        clear(`${detail} Counts and equation navigation are unavailable.`);
         view.description = vscode.workspace.asRelativePath(root);
         contextKeys(false, service.knownOwners(document.uri).length > 0);
         return;

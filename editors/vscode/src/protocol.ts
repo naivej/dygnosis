@@ -43,6 +43,7 @@ export interface ModelInfo {
   static?: string[]; predetermined?: string[]; forward_looking?: string[]; mixed?: string[];
   heterogeneity_dimensions?: Dimension[];
   status?: string; message?: string;
+  incomplete_reasons?: { code?: string; message?: string; location?: unknown }[];
 }
 export function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

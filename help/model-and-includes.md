@@ -95,7 +95,10 @@ has its own count domain; its counts are shown separately in the tooltip.
 Timing classes use the timing convention described above. These are model facts, not
 solver results. Counts refresh while you edit. Updating, incomplete expansion,
 or unavailable model information replaces the numbers until current facts are
-available. The bar is hidden on `.inc` files and read-only previews.
+available. When expansion is incomplete, the status item says **Dynare: incomplete**
+and its hover lists each reason — the missing symbol, file, or expression — with
+the same words that appear on that place in the file. Counts stay unavailable.
+The bar is hidden on `.inc` files and read-only previews.
 
 Open **Dygnosis: Open Settings**, then use the Model overview controls:
 

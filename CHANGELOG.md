@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- When expansion is incomplete, the status item names the missing symbol, file, or expression, and the same words appear on that place in the file.
 - Each check is shown once in the editor and Problems panel.
 - A macro directive inside a `var`, `varexo`, `parameters`, or similar declaration list is no longer reported as an invalid name. Discarded-branch names stay quiet; an active illegal name such as `bad-name` still refuses.
 - `@#if` can test whether a value is in an array or tuple, for example `("8" in possible_signals)`.

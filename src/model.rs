@@ -1370,6 +1370,8 @@ pub struct Model {
     /// First unsupported macro directive/interpolation in the written file.
     /// Present when valid macro text remains unexpanded and parsed rows are incomplete.
     pub macro_incomplete_span: Option<Span>,
+    /// Named incomplete-expansion failures (I211), source order, deduplicated.
+    pub incomplete_reasons: Vec<crate::macro_expand::IncompleteReason>,
     /// `epilogue;` … `end;` (first block).
     pub epilogue_block: Option<Span>,
     /// `epilogue` assignments `name = expr;`, source order.

@@ -1658,3 +1658,162 @@ fn macro_membership_honesty_and_reach_audit() {
         );
     }
 }
+
+
+
+#[test]
+fn incomplete_reasons_name_expression_limit_and_official_errors() {
+    use dygnosis::diagnostic::check_file;
+
+    let undef = "var y; model; y=@{missing}; end;\n";
+    let diags = analyze(&parse(undef));
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0].code, "E063");
+    assert_eq!(diags[0].message, "Unknown variable missing");
+    assert_eq!(
+        parse(undef).incomplete_reasons.len(),
+        0,
+        "official Errors are not I211 reasons"
+    );
+
+    let missing = "@#include \"absent.inc\"\nvar y; model; y=0; end;\n";
+    let diags = check_file(missing, "absent_root.mod");
+    let e061 = diags.iter().find(|d| d.code == "E061").expect("E061");
+    assert!(
+        e061.message.starts_with("Could not open absent.inc"),
+        "{}",
+        e061.message
+    );
+    assert!(!parse(missing).macro_incomplete());
+
+    let unsup = "@#define n = length([1,2])\nvar y; model; y=@{n}; end;\n";
+    let diags = analyze(&parse(unsup));
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0].code, "I211");
+    assert_eq!(
+        diags[0].message,
+        "Macro expression 'length([1,2])' could not be evaluated; some model checks were withheld."
+    );
+    assert_eq!(parse(unsup).incomplete_reasons.len(), 1);
+
+    let range_in = "@#if 1 in 1:3\nvar y; model; y=0; end;\n@#endif\n";
+    let diags = analyze(&parse(range_in));
+    assert_eq!(diags[0].code, "I211");
+    assert_eq!(
+        diags[0].message,
+        "Macro expression '1 in 1:3' could not be evaluated; some model checks were withheld."
+    );
+
+    let depth = "@#define f(x)=f(x)\nvar y; model; y=@{f(1)}; end;";
+    assert_eq!(
+        analyze(&parse(depth))[0].message,
+        "Macro expansion stopped at the expression depth limit; some model checks were withheld."
+    );
+    let big = "@#define nums=1:10001\nvar y; model; @#for i in nums\ny=0;\n@#endfor\nend;";
+    assert_eq!(
+        analyze(&parse(big))[0].message,
+        "Macro expansion stopped at the range size limit; some model checks were withheld."
+    );
+
+    let ok = "@#define possible_signals = [\"8\"]\n@#if (\"8\" in possible_signals)\nvar y; model; y=0; end;\n@#endif\n";
+    assert!(!parse(ok).macro_incomplete());
+    assert!(!analyze(&parse(ok)).iter().any(|d| d.code == "I211"));
+}
+
+#[test]
+fn incomplete_reasons_dedupe_loops_keep_independent_failures_and_skip_dormant() {
+    use dygnosis::diagnostic::check_file;
+    use std::collections::HashMap;
+
+    let looped = "var y; model;\n@#for k in [0,1,2]\ny=@{missing};\n@#endfor\nend;\n";
+    let diags = analyze(&parse(looped));
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0].code, "E063");
+    assert_eq!(diags[0].message, "Unknown variable missing");
+
+    let two = "@#define a = length([1])\n@#define b = length([2])\nvar y; model; y=@{a}+@{b}; end;\n";
+    let diags = analyze(&parse(two));
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    assert!(diags.iter().all(|d| d.code == "I211"));
+    assert!(diags[0].span.start < diags[1].span.start);
+    assert!(diags[0].message.contains("length([1])"));
+    assert!(diags[1].message.contains("length([2])"));
+
+    let dormant = "@#if 0\ny=@{missing};\n@#endif\nvar y; model; y=0; end;\n";
+    assert!(!parse(dormant).macro_incomplete());
+    assert!(!analyze(&parse(dormant)).iter().any(|d| matches!(d.code.as_str(), "E063" | "I211")));
+
+    let dir = (0..1024)
+        .map(|n| {
+            std::env::temp_dir().join(format!(
+                "dygnosis_incomplete_include_{}_{}",
+                std::process::id(),
+                n
+            ))
+        })
+        .find(|path| std::fs::create_dir(path).is_ok())
+        .expect("unique temporary workspace");
+    let root = dir.join("root.mod");
+    let included = dir.join("body.inc");
+    std::fs::write(&included, "y=@{missing};\n").expect("write include");
+    let root_src = "@#include \"body.inc\"\nvar y; model;\nend;\n";
+    std::fs::write(&root, root_src).expect("write root");
+    let root_key = root.to_string_lossy().into_owned();
+    let inc_key = included.to_string_lossy().into_owned();
+    let files = HashMap::from([
+        (root_key.clone(), root_src.to_string()),
+        (inc_key.clone(), "y=@{missing};\n".to_string()),
+    ]);
+    let diags = dygnosis::mcp::dynare_diagnose(root_src, Some(&root_key), Some(&files));
+    let unknown = diags
+        .iter()
+        .find(|d| d.code == "E063" && d.message == "Unknown variable missing")
+        .expect("included E063");
+    assert_eq!(unknown.file.as_deref(), Some(inc_key.as_str()), "{unknown:?}");
+
+    let unknown_include = "@#include \"ghost.inc\"\nvar y; model; y=@{maybe_from_include}; end;\n";
+    let diags = check_file(unknown_include, "ghost_root.mod");
+    assert!(diags.iter().any(|d| d.code == "E061"), "{diags:?}");
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.code == "E063" && d.message.contains("maybe_from_include")),
+        "{diags:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn incomplete_reason_records_match_diagnostics_for_hover() {
+    use dygnosis::diagnostic::check_file;
+    use dygnosis::model_info::incomplete_reason_records;
+    use dygnosis::workspace::Workspace;
+
+    let unsup = "@#define n = length([1])\nvar y; model; y=@{n}; end;\n";
+    let model = parse(unsup);
+    let diags = analyze(&model);
+    let reasons = incomplete_reason_records(&model, None);
+    assert_eq!(reasons.len(), 1);
+    assert_eq!(reasons[0].1, "I211");
+    assert_eq!(reasons[0].2, diags[0].message);
+
+    let undef = "var y; model; y=@{missing}; end;\n";
+    let model = parse(undef);
+    let diags = analyze(&model);
+    let reasons = incomplete_reason_records(&model, None);
+    assert_eq!(reasons.len(), 1);
+    assert_eq!(reasons[0].1, "E063");
+    assert_eq!(reasons[0].2, diags[0].message);
+
+    let missing = "@#include \"absent.inc\"\nvar y; model; y=0; end;\n";
+    let mut ws = Workspace::new();
+    ws.update_document("absent_root.mod", missing);
+    let model = ws.get_effective_model("absent_root.mod").unwrap().clone();
+    let records = ws.include_records("absent_root.mod").cloned().unwrap();
+    let reasons = incomplete_reason_records(&model, Some(&records));
+    let diags = check_file(missing, "absent_root.mod");
+    let e061 = diags.iter().find(|d| d.code == "E061").unwrap();
+    assert_eq!(reasons.len(), 1);
+    assert_eq!(reasons[0].1, "E061");
+    assert_eq!(reasons[0].2, e061.message);
+}

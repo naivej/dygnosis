@@ -155,7 +155,7 @@ pub fn parse(text: &str) -> Model {
     let raw_tokens = tokenize(&source);
     let (includes, includepaths, macro_directives, macro_interps) =
         collect_include_dirs(&source, &raw_tokens);
-    let (tokens, macro_type_errors, macro_incomplete_span) =
+    let (tokens, macro_type_errors, macro_incomplete_span, incomplete_reasons) =
         expand_macros_with_status(&source, raw_tokens);
     let (mut model, _ranges) = parse_expanded(&source, tokens);
     model.includes = includes;
@@ -164,6 +164,7 @@ pub fn parse(text: &str) -> Model {
     model.macro_interps = macro_interps;
     model.macro_type_errors = macro_type_errors;
     model.macro_incomplete_span = macro_incomplete_span;
+    model.incomplete_reasons = incomplete_reasons;
     model
 }
 

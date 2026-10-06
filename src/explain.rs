@@ -177,7 +177,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("I211", ExplainEntry {
         title: "Macro expansion incomplete",
-        body: "Dygnosis could not finish expanding this macro directive or interpolation. This includes a quoted replacement that closes its surrounding quote or adds a line break. The source may be valid Dynare syntax; this Information is not a Dynare refusal. Model checks that need the expanded text were withheld, and the effective-model view is marked incomplete.\n\n**Next step**\n\nInspect the macro expression or run the official Dynare preprocessor for its full expansion.",
+        body: "Dygnosis could not finish expanding this macro directive or interpolation. The Information names the unsupported valid expression or the local limit that stopped expansion. This includes a quoted replacement that closes its surrounding quote or adds a line break. The source may be valid Dynare syntax; this Information is not a Dynare refusal. Official macro Errors keep precedence. Independent active failures are reported once each; repeated copies of the same written failure are not duplicated. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nInspect the named macro expression or limit, or run the official Dynare preprocessor for its full expansion.",
         kind: ExplainKind::Added,
     }),
     ("W010", ExplainEntry {

@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "20b234d076dbfd565c5c65b113d6aa8cd0cdd9d9210c5d63b431eb097d87d7f3",
+  "fingerprint": "17eda6e371dbbc6f3ab5299a64196d7da127a789dc07c471053e954d88bc84b1",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -2587,7 +2587,7 @@
       "code": "I211",
       "kind": "added",
       "title": "Macro expansion incomplete",
-      "markdown": "### I211: Macro expansion incomplete\n\nDygnosis could not finish expanding this macro directive or interpolation. This includes a quoted replacement that closes its surrounding quote or adds a line break. The source may be valid Dynare syntax; this Information is not a Dynare refusal. Model checks that need the expanded text were withheld, and the effective-model view is marked incomplete.\n\n**Next step**\n\nInspect the macro expression or run the official Dynare preprocessor for its full expansion.\n"
+      "markdown": "### I211: Macro expansion incomplete\n\nDygnosis could not finish expanding this macro directive or interpolation. The Information names the unsupported valid expression or the local limit that stopped expansion. This includes a quoted replacement that closes its surrounding quote or adds a line break. The source may be valid Dynare syntax; this Information is not a Dynare refusal. Official macro Errors keep precedence. Independent active failures are reported once each; repeated copies of the same written failure are not duplicated. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nInspect the named macro expression or limit, or run the official Dynare preprocessor for its full expansion.\n"
     },
     {
       "code": "W010",

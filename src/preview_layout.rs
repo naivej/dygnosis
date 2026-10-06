@@ -19,7 +19,7 @@ pub(crate) fn readable(report: &ExpandReport, model: &Model) -> Option<PreviewLa
     // Statement facts must come from the original source parse: compact text
     // loses the newline that ends native text in Dynare's lexer. Replay only
     // token expansion to prove the same emitted copy and record token offsets.
-    let (tokens, _, _) = expand_macros_with_status(&model.source, tokenize(&model.source));
+    let (tokens, _, _, _) = expand_macros_with_status(&model.source, tokenize(&model.source));
     let mut emitted = vec![None; tokens.len()];
     let copy = join_lexemes_recorded(&model.source, &tokens, |index, span| {
         emitted[index] = Some(span);
