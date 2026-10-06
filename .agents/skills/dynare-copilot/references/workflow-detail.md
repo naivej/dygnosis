@@ -257,14 +257,15 @@ Static check:
   `discretionary_policy`, `delta` equals minus the number of policy instruments (`expected_delta`).
   Heterogeneous models: count each dimension (heterogeneity.md). A mismatch also shows as E188 or W013
   (heterogeneous: E192 or W208).
-- `dynare_model_info` (R2): the written timing classes match section 7 of the note. Under the default
+- `dynare_model_info` (R2): the timing classes match section 7 of the note. Under the default
   convention, the stocks are in `predetermined` and the forward-looking variables in `forward_looking`. For a small
   RBC with `y = exp(z)*k(-1)^alppha*n^(1-alppha);` and an Euler equation in `c(+1)` and `y(+1)`, the
   classes are `predetermined` = `k`, `z`; `forward_looking` = `y`, `c`; `static` = `invest`, `n`,
   `log_y`. Under the default convention, a stock in `forward_looking` or `mixed` usually means a timing
-  slip (for example `k` instead of `k(-1)` in production makes `k` `mixed`). The classes show the
-  timing as written: a variable listed in `predetermined_variables` and written as `k(+1)` shows as
-  `forward_looking`.
+  slip (for example `k` instead of `k(-1)` in production makes `k` `mixed`). Classification uses Dynare
+  timing after the predetermined-variable convention conversion: a variable listed in
+  `predetermined_variables` and written as `k(+1)` is classified as predetermined. Per-use `timing`
+  stays the written offset; `dynare_timing` is the converted offset.
 
 Count mismatch: compare with the section 8 table row by row (which FOC was not translated, which variable
 is declared extra or is missing). Then see debugging.md (equation count, and the error, cause and fix
@@ -462,8 +463,9 @@ stoch_simul(order=1, irf=40) ... ;
   parameter with a lead or lag).
 - The "stock at the beginning of the period" convention: `predetermined_variables k;`, production uses
   `k`, the law of motion is `k(+1) = invest + (1-delta)*k;`.
-- One convention per file. Check the written timing classes with `dynare_model_info` and the
-  per-equation `idents` in `dynare_equations` (Stage 3).
+- One convention per file. Check the timing classes with `dynare_model_info` and the per-equation
+  `idents` in `dynare_equations` (Stage 3). Classification uses Dynare timing; per-use `timing` stays
+  written.
 
 ### R8 details (nonlinear by default)
 

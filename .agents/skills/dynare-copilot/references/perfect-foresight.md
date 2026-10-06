@@ -22,7 +22,9 @@ A solver command before its setup is E213 (expectation errors: E214). A file can
 
 After the run, read `oo_.endo_simul` and `oo_.exo_simul`. Dygnosis does not compute those paths.
 Setting an exogenous variable in `initval` (the permanent-shock pattern below) is accepted by Dynare.
-Dygnosis may still report W051. Do not delete that assignment: the shock would start at zero.
+With a parsed `simul`, `perfect_foresight_setup`, `perfect_foresight_solver`, either
+expectation-errors command, or `perfect_foresight_controlled_paths`, Dygnosis keeps W051 quiet. Keep
+the assignment: without it the shock would start at zero.
 
 ## Initial and terminal conditions
 

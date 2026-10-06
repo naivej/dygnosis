@@ -32,8 +32,8 @@ conditions, determinacy, correct economics or a successful experiment. Those nee
 |---|---|
 | Check the current model | `dynare_diagnose`. Run it before a change (baseline) and after each substantive change. |
 | Check several saved models or a folder | `dynare_workspace_diagnose`. Report each failed root separately. |
-| Symbols, written timing, blocks, counts | `dynare_model_info`: `endogenous`, `predetermined`, `forward_looking`, `static`, `mixed`, counts, block flags. |
-| Find an equation and its source location; check the equation count | `dynare_equations`: rows with tags, `idents` (class, lead or lag, timing class), `origin`, and `count_gap`. |
+| Symbols, timing classes, blocks, counts | `dynare_model_info`: `endogenous`, `predetermined`, `forward_looking`, `static`, `mixed`, counts, block flags. |
+| Find an equation and its source location; check the equation count | `dynare_equations`: rows with tags, `idents` (written `timing`, `dynare_timing`, timing class), `origin`, and `count_gap`. |
 | See text produced by `@#include` and macros | `dynare_expand`: `effective_text`, `complete`, navigation back to the written source. |
 | Find includes and companion files (steady-state file, helper files) | `dynare_related_files`, then read those files. A listed companion is not proof that its MATLAB code is correct. |
 | Understand a diagnostic | `dynare_explain`; `dynare_list_diagnostic_codes` to find a code. |
@@ -59,10 +59,11 @@ text. Include the text of each executed `@#include` target.
 - Find the includes with `dynare_related_files`. An include with `resolved: false` is missing from your
   map: read it and add it.
 
-**Confirm that the root resolved.** If `active_file` does not match a key, the tools return an empty
-result without an error: `[]` from `dynare_diagnose`, zero counts from `dynare_model_info`, `{}` from
-`dynare_rename`. This looks like a clean model. After you build a map, check that `dynare_expand`
-returns `root_file` equal to your key, or that `dynare_model_info` returns your declarations.
+**Confirm that the root resolved.** If `active_file` is omitted or does not match a key in a nonempty
+`files` map, the tools return JSON-RPC invalid parameters (`-32602`) with
+`active_file is required with a nonempty files map` or `"<key>" is not in the file map`. After you
+build a map, check that `dynare_expand` returns `root_file` equal to your key, or that
+`dynare_model_info` returns your declarations.
 
 **Saved files on disk.** `dynare_workspace_diagnose` has two modes. Do not combine them.
 
@@ -86,38 +87,36 @@ the inputs of the two sides separate.
 |---|---|
 | `dynare_diagnose` | E061 (an `@#include` target could not be opened), I211 (macro expansion incomplete) |
 | `dynare_model_info` | `{"status": "incomplete", …}` |
+| `dynare_equations` | `{"status": "incomplete", …}`, `equations: []`, `count_gap: null` |
 | `dynare_expand` | `complete: false` |
 | `dynare_related_files` | a row with `resolved: false` |
 | `dynare_extract` | `status: "unsupported_context"`, `fragment: null` |
-| `dynare_compare_models` | `navigation.before.complete` or `navigation.after.complete` is `false`; equations of the partial side can show as removed |
+| `dynare_compare_models` | `{"status": "incomplete", …}` with no diff arrays or removed/added claims |
 | `dynare_workspace_diagnose` | a root with `status: "failed"` and a `failure` message |
 
 A partial result cannot support a claim that the model is clean. Fix the inputs, or report what was not
 covered.
 
 **Equation count.** `dynare_equations` returns `count_gap` (`n_equations`, `n_endogenous`, `delta`,
-`unreferenced_endogenous`). It can return a count for a model with an unresolved include without
-marking it incomplete; the missing include then looks like missing equations. Confirm completeness with
-`dynare_model_info` or `dynare_expand` before you use `count_gap`. The counts describe the written model
-before Dynare transforms it; Dynare's `AUX_*` auxiliary variables are not in them. With
-`ramsey_model` or `discretionary_policy` and `instruments` listing N names, the expected `delta` is −N.
+`unreferenced_endogenous`) only for a complete model. An unresolved include, incomplete parse, or
+incomplete macro expansion returns `status: "incomplete"` with `count_gap: null`. The counts describe
+the written model before Dynare transforms it; Dynare's `AUX_*` auxiliary variables are not in them.
+With `ramsey_model` or `discretionary_policy` and `instruments` listing N names, the expected `delta`
+is −N.
 
 **Timing lists.** `predetermined`, `forward_looking`, `static`, `mixed` and the counts
 (`n_jumpers`, `n_state_variables`) in `dynare_model_info`, and `timing_class` in `dynare_equations`,
-follow the written leads and lags. They do not apply `predetermined_variables`: a variable declared
-there and written as `k(+1)` is listed as forward-looking, although Dynare treats it as predetermined.
-Do not compare these counts with the Blanchard-Kahn count in such a file.
+use Dynare timing after the `predetermined_variables` convention conversion. Per-use `timing` remains
+the written offset; `dynare_timing` is the converted offset. Use the returned class and counts for
+classification. Older engines omit `dynare_timing`; do not invent it.
 
 **Equation numbers.** The `index` of a `dynare_equations` row starts at **zero**, and the `index` filter
-uses the same numbering (the schema text says "starting at one"; the behavior is zero-based). Prefer the
-`name` filter. If you use `index`, take the value from an earlier unfiltered result; do not count
-equations from one. An equation number in Dygnosis output is not an equation number in Dynare's
-transformed model or in MATLAB output.
+uses the same numbering. Prefer the `name` filter when tags are available. An equation number in
+Dygnosis output is not an equation number in Dynare's transformed model or in MATLAB output.
 
-**Macro-generated tags.** Dygnosis does not substitute `@{…}` inside a quoted tag: for
-`[name='eq@{j}']` in an `@#for` loop it reports the name `eq@{j}` for each copy, while Dynare writes
-`eq1`, `eq2`, …. The `name` filter does not find `eq2`. Use the unfiltered rows (`origin_frames` gives
-the loop value) or `dynare_expand` navigation.
+**Macro-generated tags.** Quoted `@{…}` values expand: `[name='eq@{j}']` in an `@#for` loop becomes
+`eq1`, `eq2`, …, and the `name` filter finds those tags. Use `origin_frames` or `dynare_expand`
+navigation when you need the loop copy that produced a row.
 
 **Locations.** Lines and columns are one-based; columns count Unicode scalar values. A location belongs
 to the file named in the row (`file`, `origin_uri`), or to the root when no file is named. After an

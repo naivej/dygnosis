@@ -194,9 +194,9 @@ next one.
   period" convention: `y = k(-1)^alppha*…;` and `k = invest + (1-delta)*k(-1);`. Alternative:
   `predetermined_variables k;` with `y = k^alppha*…;` and `k(+1) = invest + (1-delta)*k;`. Use one
   convention per file. Check the result with `dynare_model_info` (`predetermined`, `forward_looking`) and
-  the `idents` of `dynare_equations`. These lists follow the written leads and lags: under
-  `predetermined_variables`, a `k` written as `k(+1)` is listed as forward-looking although Dynare
-  treats it as predetermined.
+  the `idents` of `dynare_equations`. Classification and counts use Dynare timing after the
+  predetermined-variable convention conversion. Per-use `timing` stays the written offset;
+  `dynare_timing` is the converted offset.
 - **R3 Exogenous processes.** For stochastic commands (`stoch_simul`, `estimation`, …), declare the
   innovations in `varexo` and write persistent processes as endogenous variables:
   `var z; varexo eps_z; z = rhoz*z(-1) + eps_z;`. In perfect foresight an exogenous variable can carry

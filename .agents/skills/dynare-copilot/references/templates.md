@@ -249,8 +249,8 @@ perfect_foresight_solver;
 rplot c; rplot k;
 ```
 
-Dygnosis warns (W051) that `x` is assigned in `initval`. Here the assignment is intended: an exogenous
-variable missing from `initval` starts at zero, and TFP must not be zero. Keep `x = 1;`.
+Keep `x = 1;` in `initval`: an exogenous variable missing from `initval` starts at zero, and TFP must
+not be zero. With the perfect-foresight commands below, Dygnosis keeps W051 quiet for that assignment.
 
 ## Macro processor: several variants in one file
 
