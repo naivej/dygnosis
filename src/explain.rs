@@ -132,7 +132,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E062", ExplainEntry {
         title: "Macro syntax error",
-        body: "A Dynare macro `@#if` block has no matching `@#endif`, a `@#for` block has no matching `@#endfor` or has an empty body, or a function definition ends while its expression still needs an operand. Dynare refuses during macro parsing: an empty loop body prints `syntax error, unexpected ENDFOR`, and a trailing operator in `@#define f(x) = x+` prints `syntax error, unexpected EOL`. A blank line or comment counts as a loop body; an empty iteration array with a nonempty body is valid.\n\n**Warrant**\n\nFor unmatched blocks, the editor names the opener or stray closer and points at that directive; Dynare's bison location does not. For an empty loop body, the editor selects the closing keyword without leading indentation or a trailing comment.\n\n**Fix**\n\nClose the macro block with the matching directive, add the intended loop body, or complete the function expression before the end of the definition.",
+        body: "A Dynare macro `@#if` block has no matching `@#endif`, a `@#for` block has no matching `@#endfor` or has an empty body, a function definition ends while its expression still needs an operand, or a membership expression is malformed. Dynare refuses during macro parsing: an empty loop body prints `syntax error, unexpected ENDFOR`, a trailing operator in `@#define f(x) = x+` prints `syntax error, unexpected EOL`, and an unparenthesized chain such as `1 in [1] in [true]` prints `syntax error, unexpected IN`. A blank line or comment counts as a loop body; an empty iteration array with a nonempty body is valid.\n\n**Warrant**\n\nFor unmatched blocks, the editor names the opener or stray closer and points at that directive; Dynare's bison location does not. For an empty loop body, the editor selects the closing keyword without leading indentation or a trailing comment.\n\n**Fix**\n\nClose the macro block with the matching directive, add the intended loop body, complete the function expression before the end of the definition, or parenthesize each membership test.",
         kind: ExplainKind::Shared,
     }),
     ("E063", ExplainEntry {
@@ -896,8 +896,8 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Shared,
     }),
     ("E285", ExplainEntry {
-        title: "Macro + operand type mismatch",
-        body: "A macro ``+`` combines operands of incompatible types. Dynare refuses: `Type mismatch for operands of + operator`.\n\n**Fix**\n\nAdd numbers to numbers, or change the operands.",
+        title: "Macro operand type mismatch",
+        body: "A macro operator combines operands of incompatible types. Dynare refuses with the operator-specific sentence: `Type mismatch for operands of + operator`, or for membership `Second argument of `in` operator must be an array` when the right operand is not an array, tuple, or integer range.\n\n**Fix**\n\nUse operands the operator accepts. For `in`, the right operand must be an array, a tuple, or a bounded integer range.",
         kind: ExplainKind::Shared,
     }),
     ("E286", ExplainEntry {

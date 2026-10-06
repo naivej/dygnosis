@@ -93,7 +93,10 @@ enum MacroEvalError {
     UnknownVariable(String),
     UnknownFunction(String),
     TypeMismatch(&'static str),
+    /// Pinned refusal for a non-array/tuple/`Range` right operand of `in`.
+    InOperandType,
     SyntaxEol,
+    SyntaxUnexpected(&'static str),
     Unsupported,
 }
 
@@ -106,7 +109,14 @@ impl MacroEvalError {
                 "E285",
                 format!("Type mismatch for operands of {op} operator"),
             )),
+            Self::InOperandType => Some((
+                "E285",
+                "Second argument of `in` operator must be an array".to_string(),
+            )),
             Self::SyntaxEol => Some(("E062", "syntax error, unexpected EOL".to_string())),
+            Self::SyntaxUnexpected(token) => {
+                Some(("E062", format!("syntax error, unexpected {token}")))
+            }
             Self::Unsupported => None,
         }
     }
@@ -1381,13 +1391,27 @@ fn eval_macro_expr(
     if source.is_empty() {
         return Err(MacroEvalError::Unsupported);
     }
-    // Pinned macro grammar: `:` binds looser than arithmetic, tighter than comparison.
+    // Pinned macro grammar: comparison binds looser than `in`; `in` binds looser
+    // than `:` and arithmetic. `in` is non-associative.
     for group in [&['|'][..], &['&'][..], &['=', '!', '<', '>'][..]] {
         if let Some((left, op, right)) = split_macro_binary(source, group) {
             let left = eval_macro_expr(left, defines, depth + 1)?;
             let right = eval_macro_expr(right, defines, depth + 1)?;
             return eval_binary(left, op, right);
         }
+    }
+    if let Some((left, right)) = split_top_level_keyword_first(source, "in") {
+        let left = left.trim();
+        let right = right.trim();
+        if left.is_empty() || right.is_empty() {
+            return Err(MacroEvalError::SyntaxUnexpected("IN"));
+        }
+        if split_top_level_keyword_first(right, "in").is_some() {
+            return Err(MacroEvalError::SyntaxUnexpected("IN"));
+        }
+        let left = eval_macro_expr(left, defines, depth + 1)?;
+        let right = eval_macro_expr(right, defines, depth + 1)?;
+        return eval_membership(left, right);
     }
     if let Some((left, right)) = split_top_level_char(source, ':') {
         let start = eval_macro_expr(left, defines, depth + 1)?;
@@ -1605,6 +1629,67 @@ fn numeric_value(value: &MacroVal) -> Option<f64> {
     }
 }
 
+fn eval_membership(left: MacroVal, right: MacroVal) -> Result<MacroVal, MacroEvalError> {
+    let items = match right {
+        MacroVal::Array(values) if values.len() <= RANGE_CAP => values,
+        MacroVal::Tuple(values) if values.len() <= RANGE_CAP => values,
+        MacroVal::Range { start, end } => MacroVal::Range { start, end }
+            .loop_values()
+            .ok_or(MacroEvalError::Unsupported)?,
+        MacroVal::Array(_) | MacroVal::Tuple(_) => {
+            return Err(MacroEvalError::Unsupported);
+        }
+        MacroVal::Unresolved | MacroVal::Function { .. } => {
+            return Err(MacroEvalError::Unsupported);
+        }
+        _ => return Err(MacroEvalError::InOperandType),
+    };
+    Ok(MacroVal::Bool(
+        items
+            .iter()
+            .any(|item| macro_values_equal(&left, item)),
+    ))
+}
+
+fn macro_values_equal(left: &MacroVal, right: &MacroVal) -> bool {
+    match (left, right) {
+        (MacroVal::Bool(a), MacroVal::Bool(b)) => a == b,
+        (MacroVal::Text(a), MacroVal::Text(b)) => a == b,
+        (MacroVal::Int(a), MacroVal::Int(b)) => a == b,
+        (MacroVal::Real(a), MacroVal::Real(b)) => a == b,
+        (MacroVal::Int(a), MacroVal::Real(b)) => *a as f64 == *b,
+        (MacroVal::Real(a), MacroVal::Int(b)) => *a == *b as f64,
+        (MacroVal::Range { start: s1, end: e1 }, MacroVal::Range { start: s2, end: e2 }) => {
+            s1 == s2 && e1 == e2
+        }
+        (MacroVal::Range { start, end }, MacroVal::Array(items))
+        | (MacroVal::Array(items), MacroVal::Range { start, end }) => {
+            match (MacroVal::Range {
+                start: *start,
+                end: *end,
+            })
+            .loop_values()
+            {
+                Some(expanded) => {
+                    expanded.len() == items.len()
+                        && expanded
+                            .iter()
+                            .zip(items.iter())
+                            .all(|(a, b)| macro_values_equal(a, b))
+                }
+                None => false,
+            }
+        }
+        (MacroVal::Array(a), MacroVal::Array(b)) | (MacroVal::Tuple(a), MacroVal::Tuple(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .zip(b.iter())
+                    .all(|(x, y)| macro_values_equal(x, y))
+        }
+        _ => false,
+    }
+}
+
 fn split_macro_binary<'a>(source: &'a str, group: &[char]) -> Option<(&'a str, &'a str, &'a str)> {
     let mut found = None;
     walk_top_level(source, |i, tail| {
@@ -1637,17 +1722,32 @@ fn split_top_level_char(source: &str, needle: char) -> Option<(&str, &str)> {
 fn split_top_level_keyword<'a>(source: &'a str, word: &str) -> Option<(&'a str, &'a str)> {
     let mut found = None;
     walk_top_level(source, |i, tail| {
-        if tail.starts_with(word)
-            && source[..i].chars().last().is_some_and(char::is_whitespace)
-            && tail[word.len()..]
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace)
-        {
+        if is_top_level_keyword_at(source, i, tail, word) {
             found = Some((&source[..i], &source[i + word.len()..]));
         }
     });
     found
+}
+
+/// Leftmost whitespace-bounded keyword. Membership uses this so a second
+/// top-level `in` on the right can refuse instead of nesting.
+fn split_top_level_keyword_first<'a>(source: &'a str, word: &str) -> Option<(&'a str, &'a str)> {
+    let mut found = None;
+    walk_top_level(source, |i, tail| {
+        if found.is_none() && is_top_level_keyword_at(source, i, tail, word) {
+            found = Some((&source[..i], &source[i + word.len()..]));
+        }
+    });
+    found
+}
+
+fn is_top_level_keyword_at(source: &str, i: usize, tail: &str, word: &str) -> bool {
+    tail.starts_with(word)
+        && source[..i].chars().last().is_some_and(char::is_whitespace)
+        && tail[word.len()..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace)
 }
 
 fn split_top_level_list(source: &str) -> Vec<&str> {

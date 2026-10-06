@@ -1317,3 +1317,321 @@ async fn quoted_include_copies_keep_readable_ranges_frames_and_written_source_ow
         .iter()
         .any(|row| row.code == "E063" && row.file.as_deref() == Some(include.as_str())));
 }
+
+fn membership_branch(condition: &str) -> String {
+    format!(
+        "var y;\n@#if ({condition})\ny_hit = 1;\n@#else\ny_miss = 1;\n@#endif\nmodel; y=1; end;"
+    )
+}
+
+fn assert_membership_branch(condition: &str, expect_hit: bool) {
+    let source = membership_branch(condition);
+    let report = expand_report(&source);
+    assert!(
+        report.complete,
+        "{condition}: incomplete {}",
+        report.effective_text
+    );
+    let hit = report.effective_text.contains("y_hit");
+    let miss = report.effective_text.contains("y_miss");
+    assert_eq!(hit, expect_hit, "{condition}: {}", report.effective_text);
+    assert_eq!(!miss, expect_hit, "{condition}: {}", report.effective_text);
+    assert!(
+        !analyze(&parse(&source))
+            .iter()
+            .any(|row| row.code == "I211"),
+        "{condition}: unexpected I211"
+    );
+}
+
+#[test]
+fn macro_membership_hits_misses_types_and_nesting() {
+    assert_membership_branch(r#""8" in ["8"]"#, true);
+    assert_membership_branch(r#""7" in ["8"]"#, false);
+    assert_membership_branch("1 in []", false);
+    assert_membership_branch("1 in [1]", true);
+    assert_membership_branch(r#""a" in [1, "a", true]"#, true);
+    assert_membership_branch("true in [1]", false);
+    assert_membership_branch(r#""1" in [1]"#, false);
+    assert_membership_branch("1 in [1.0]", true);
+    assert_membership_branch("true in [true, false]", true);
+    assert_membership_branch("[1] in [[1], [2]]", true);
+    assert_membership_branch("2 in (1,2)", true);
+    assert_membership_branch("3 in (1,2)", false);
+    assert_membership_branch("1 in 1:3", true);
+    assert_membership_branch("0 in 1:3", false);
+    assert_membership_branch("1.0 in 1:3", true);
+    assert_membership_branch("1 in [1:3]", false);
+    assert_membership_branch("(1:3) in [1:3]", true);
+    assert_membership_branch("(1:3) in [[1,2,3]]", true);
+    assert_membership_branch("(1:3) in [1,2,3]", false);
+    assert_membership_branch("1+1 in [2]", true);
+    assert_membership_branch("1 in [1] == true", true);
+    assert_membership_branch("false == 1 in [1]", false);
+    assert_membership_branch(r#"("8") in (["8"])"#, true);
+
+    let word = "@#define inside = 1\nvar y;\n@#if (inside)\ny_hit = 1;\n@#else\ny_miss = 1;\n@#endif\nmodel; y=1; end;";
+    let report = expand_report(word);
+    assert!(report.complete);
+    assert!(report.effective_text.contains("y_hit"));
+    assert!(!analyze(&parse(word)).iter().any(|row| row.code == "I211"));
+}
+
+#[test]
+fn macro_membership_in_define_interpolation_function_and_for_collection() {
+    let define = "@#define possible_signals = [\"0\", \"1\", \"8\"]\n@#define has8 = \"8\" in possible_signals\nvar y;\n@#if (has8)\ny_hit = 1;\n@#else\ny_miss = 1;\n@#endif\nmodel; y=1; end;";
+    assert!(expand_report(define).effective_text.contains("y_hit"));
+
+    let interp = "@#define a=[\"8\"]\nvar y; model; y=@{\"8\" in a}; end;";
+    let report = expand_report(interp);
+    assert!(report.complete, "{}", report.effective_text);
+    assert_eq!(parse(interp).equations[0].rhs.trim(), "true");
+
+    let function = "@#define f(x) = x in [1,2]\nvar y;\n@#if (f(2))\ny_hit = 1;\n@#else\ny_miss = 1;\n@#endif\nmodel; y=1; end;";
+    assert!(expand_report(function).effective_text.contains("y_hit"));
+
+    let for_coll = "@#define xs = [1,2]\nvar y; model;\n@#for j in [1 in xs, 3]\ny=@{j};\n@#endfor\nend;";
+    let report = expand_report(for_coll);
+    assert!(report.complete, "{}", report.effective_text);
+    assert!(report.effective_text.contains("y = true"));
+    assert!(report.effective_text.contains("y = 3"));
+
+    let plain_for = "var y; model;\n@#for j in 1:2\ny@{j}=1;\n@#endfor\nend;";
+    let report = expand_report(plain_for);
+    assert!(report.complete, "{}", report.effective_text);
+    assert!(report.effective_text.contains("y1 = 1"));
+    assert!(report.effective_text.contains("y2 = 1"));
+    assert!(!analyze(&parse(plain_for))
+        .iter()
+        .any(|row| matches!(row.code.as_str(), "I211" | "E062" | "E285")));
+}
+
+#[test]
+fn macro_membership_possible_signals_style_takes_true_branch_without_i211() {
+    let source = r#"
+@#define possible_signals = ["0", "1", "2", "3", "4", "5", "6", "7", "8"]
+var y;
+@#if ("8" in possible_signals)
+y_eight = 1;
+@#else
+y_no_eight = 1;
+@#endif
+@#if ("9" in possible_signals)
+y_nine = 1;
+@#else
+y_no_nine = 1;
+@#endif
+model; y=1; end;
+"#;
+    let report = expand_report(source);
+    assert!(report.complete, "{}", report.effective_text);
+    assert!(report.effective_text.contains("y_eight"));
+    assert!(!report.effective_text.contains("y_no_eight"));
+    assert!(report.effective_text.contains("y_no_nine"));
+    assert!(!report.effective_text.contains("y_nine"));
+    assert!(!analyze(&parse(source))
+        .iter()
+        .any(|row| row.code == "I211"));
+}
+
+#[test]
+fn macro_membership_refusals_keep_pinned_sentences() {
+    let string_right = membership_branch(r#"1 in "abc""#);
+    let diagnostics = analyze(&parse(&string_right));
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E285");
+    assert_eq!(
+        diagnostics[0].message,
+        "Second argument of `in` operator must be an array"
+    );
+    assert!(!expand_report(&string_right).complete);
+
+    let int_right = membership_branch("1 in 2");
+    let diagnostics = analyze(&parse(&int_right));
+    assert_eq!(diagnostics[0].code, "E285");
+    assert_eq!(
+        diagnostics[0].message,
+        "Second argument of `in` operator must be an array"
+    );
+
+    let chain = membership_branch("1 in [1] in [true]");
+    let diagnostics = analyze(&parse(&chain));
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E062");
+    assert_eq!(diagnostics[0].message, "syntax error, unexpected IN");
+    assert!(!expand_report(&chain).complete);
+
+    let unknown = membership_branch("1 in missing");
+    let diagnostics = analyze(&parse(&unknown));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|row| row.code == "E063" && row.message == "Unknown variable missing"),
+        "{diagnostics:?}"
+    );
+    assert!(!diagnostics.iter().any(|row| row.code == "I211"));
+
+    let huge = membership_branch("1 in 1:10001");
+    let diagnostics = analyze(&parse(&huge));
+    assert_eq!(diagnostics[0].code, "I211");
+    assert!(!expand_report(&huge).complete);
+}
+
+#[test]
+fn macro_membership_honesty_and_reach_audit() {
+    let Some(binary) = pinned_binary() else {
+        eprintln!("SKIP membership honesty: Dynare 7.2 is absent");
+        return;
+    };
+
+    for (condition, expect_hit) in [
+        (r#""8" in ["8"]"#, true),
+        (r#""7" in ["8"]"#, false),
+        ("2 in (1,2)", true),
+        ("1 in 1:3", true),
+        ("1 in [1:3]", false),
+        ("1+1 in [2]", true),
+    ] {
+        let source = membership_branch(condition);
+        let stem = condition
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect::<String>();
+        let mod_path = std::env::temp_dir().join(format!("dyg-membership-{stem}.mod"));
+        let out = std::env::temp_dir().join(format!("dyg-membership-{stem}.out"));
+        std::fs::write(&mod_path, &source).unwrap();
+        let _ = std::fs::remove_file(&out);
+        let output = std::process::Command::new(&binary)
+            .arg(&mod_path)
+            .arg("onlymacro")
+            .arg(format!("savemacro={}", out.display()))
+            .output()
+            .expect("run preprocessor");
+        assert!(
+            output.status.success(),
+            "{condition}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let saved = std::fs::read_to_string(&out).unwrap_or_default();
+        assert_eq!(saved.contains("y_hit"), expect_hit, "{condition}: {saved}");
+        assert_eq!(saved.contains("y_miss"), !expect_hit, "{condition}: {saved}");
+        let _ = std::fs::remove_file(&mod_path);
+        let _ = std::fs::remove_file(&out);
+    }
+
+    let cases = [
+        (
+            "string-right",
+            membership_branch(r#"1 in "abc""#),
+            "E285",
+            "Second argument of `in` operator must be an array",
+            true,
+        ),
+        (
+            "chain",
+            membership_branch("1 in [1] in [true]"),
+            "E062",
+            "syntax error, unexpected IN",
+            true,
+        ),
+        (
+            "unknown",
+            membership_branch("1 in missing"),
+            "E063",
+            "Unknown variable missing",
+            true,
+        ),
+        (
+            "hit-quiet",
+            membership_branch(r#""8" in ["8"]"#),
+            "E285",
+            "Second argument of `in` operator must be an array",
+            false,
+        ),
+    ];
+    for (label, source, code, needle, should_fire) in cases {
+        let ours = analyze(&parse(&source));
+        let ours_hit = ours
+            .iter()
+            .any(|row| row.code == code && row.message.contains(needle));
+        assert_eq!(ours_hit, should_fire, "{label}: {ours:?}");
+
+        let result = dygnosis::run_preprocessor(
+            &source,
+            &binary,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Check,
+        );
+        let text = result.raw_stdout.clone() + &result.raw_stderr;
+        if should_fire {
+            assert!(!result.success, "{label}: expected refuse");
+            assert!(text.contains(needle), "{label}: {text}");
+        } else {
+            assert!(result.success, "{label}: {text}");
+            assert!(!text.contains(needle), "{label}: {text}");
+        }
+    }
+
+    // Reach audit: membership entry points vs shipped generic codes.
+    let surfaces = [
+        (
+            "@#if",
+            "@#define a=[1]\nvar y;\n@#if (MISSING in a)\ny=1;\n@#endif\nmodel; y=1; end;",
+            "E063",
+            "Unknown variable MISSING",
+        ),
+        (
+            "@#define",
+            "@#define x = 1 in \"abc\"\nvar y; model; y=1; end;",
+            "E285",
+            "Second argument of `in` operator must be an array",
+        ),
+        (
+            "@{}",
+            "var y; model; y=@{1 in \"abc\"}; end;",
+            "E285",
+            "Second argument of `in` operator must be an array",
+        ),
+        (
+            "function-body",
+            "@#define f(x)=x in \"abc\"\nvar y; model; y=@{f(1)}; end;",
+            "E285",
+            "Second argument of `in` operator must be an array",
+        ),
+        (
+            "@#for-collection",
+            "var y; model;\n@#for j in (1 in \"abc\")\ny=1;\n@#endfor\nend;",
+            "E285",
+            "Second argument of `in` operator must be an array",
+        ),
+        (
+            "@#if-chain",
+            "var y;\n@#if (1 in [1] in [true])\ny=1;\n@#endif\nmodel; y=1; end;",
+            "E062",
+            "syntax error, unexpected IN",
+        ),
+    ];
+    for (surface, source, code, needle) in surfaces {
+        let diagnostics = analyze(&parse(source));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|row| row.code == code && row.message.contains(needle)),
+            "{surface}: expected {code} ({needle}); got {diagnostics:?}"
+        );
+        let result = dygnosis::run_preprocessor(
+            source,
+            &binary,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Check,
+        );
+        let text = result.raw_stdout + &result.raw_stderr;
+        assert!(!result.success, "{surface}: Dynare should refuse");
+        assert!(
+            text.contains(needle),
+            "{surface}: Dynare text missing {needle}: {text}"
+        );
+    }
+}
