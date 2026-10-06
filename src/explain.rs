@@ -897,7 +897,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E285", ExplainEntry {
         title: "Macro operand type mismatch",
-        body: "A macro operator combines operands of incompatible types. Dynare refuses with the operator-specific sentence: `Type mismatch for operands of + operator`, or for membership `Second argument of `in` operator must be an array` when the right operand is not an array, tuple, or integer range.\n\n**Fix**\n\nUse operands the operator accepts. For `in`, the right operand must be an array, a tuple, or a bounded integer range.",
+        body: "A macro operator combines operands of incompatible types. Dynare refuses with the operator-specific sentence: `Type mismatch for operands of + operator`, or for membership `Second argument of `in` operator must be an array` when the right operand is a proven non-array value such as a string, real, bool, or int.\n\n**Fix**\n\nUse operands the operator accepts. For `in`, the right operand must be an array or a tuple.",
         kind: ExplainKind::Shared,
     }),
     ("E286", ExplainEntry {

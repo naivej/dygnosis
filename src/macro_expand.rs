@@ -93,7 +93,7 @@ enum MacroEvalError {
     UnknownVariable(String),
     UnknownFunction(String),
     TypeMismatch(&'static str),
-    /// Pinned refusal for a non-array/tuple/`Range` right operand of `in`.
+    /// Pinned refusal for a proven non-array/tuple right operand of `in`.
     InOperandType,
     SyntaxEol,
     SyntaxUnexpected(&'static str),
@@ -1630,16 +1630,18 @@ fn numeric_value(value: &MacroVal) -> Option<f64> {
 }
 
 fn eval_membership(left: MacroVal, right: MacroVal) -> Result<MacroVal, MacroEvalError> {
+    // Pin: `in` calls `contains` on the evaluated right operand. Only Array and
+    // Tuple implement `contains`. Range::eval materializes to an Array before
+    // storage; this evaluator does not materialize, so a still-Range right
+    // operand stays Unsupported (incomplete), not a Boolean and not E285.
     let items = match right {
         MacroVal::Array(values) if values.len() <= RANGE_CAP => values,
         MacroVal::Tuple(values) if values.len() <= RANGE_CAP => values,
-        MacroVal::Range { start, end } => MacroVal::Range { start, end }
-            .loop_values()
-            .ok_or(MacroEvalError::Unsupported)?,
-        MacroVal::Array(_) | MacroVal::Tuple(_) => {
-            return Err(MacroEvalError::Unsupported);
-        }
-        MacroVal::Unresolved | MacroVal::Function { .. } => {
+        MacroVal::Range { .. }
+        | MacroVal::Array(_)
+        | MacroVal::Tuple(_)
+        | MacroVal::Unresolved
+        | MacroVal::Function { .. } => {
             return Err(MacroEvalError::Unsupported);
         }
         _ => return Err(MacroEvalError::InOperandType),
@@ -1659,26 +1661,10 @@ fn macro_values_equal(left: &MacroVal, right: &MacroVal) -> bool {
         (MacroVal::Real(a), MacroVal::Real(b)) => a == b,
         (MacroVal::Int(a), MacroVal::Real(b)) => *a as f64 == *b,
         (MacroVal::Real(a), MacroVal::Int(b)) => *a == *b as f64,
+        // Endpoint equality for two stored ranges; pin Array::is_equal does not
+        // treat a range as equal to the array of its elements.
         (MacroVal::Range { start: s1, end: e1 }, MacroVal::Range { start: s2, end: e2 }) => {
             s1 == s2 && e1 == e2
-        }
-        (MacroVal::Range { start, end }, MacroVal::Array(items))
-        | (MacroVal::Array(items), MacroVal::Range { start, end }) => {
-            match (MacroVal::Range {
-                start: *start,
-                end: *end,
-            })
-            .loop_values()
-            {
-                Some(expanded) => {
-                    expanded.len() == items.len()
-                        && expanded
-                            .iter()
-                            .zip(items.iter())
-                            .all(|(a, b)| macro_values_equal(a, b))
-                }
-                None => false,
-            }
         }
         (MacroVal::Array(a), MacroVal::Array(b)) | (MacroVal::Tuple(a), MacroVal::Tuple(b)) => {
             a.len() == b.len()

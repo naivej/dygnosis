@@ -1344,6 +1344,25 @@ fn assert_membership_branch(condition: &str, expect_hit: bool) {
     );
 }
 
+fn assert_membership_incomplete(condition: &str) {
+    let source = membership_branch(condition);
+    let report = expand_report(&source);
+    assert!(
+        !report.complete,
+        "{condition}: expected incomplete {}",
+        report.effective_text
+    );
+    let diagnostics = analyze(&parse(&source));
+    assert!(
+        diagnostics.iter().any(|row| row.code == "I211"),
+        "{condition}: expected I211, got {diagnostics:?}"
+    );
+    assert!(
+        !diagnostics.iter().any(|row| row.code == "E285"),
+        "{condition}: unexpected E285 {diagnostics:?}"
+    );
+}
+
 #[test]
 fn macro_membership_hits_misses_types_and_nesting() {
     assert_membership_branch(r#""8" in ["8"]"#, true);
@@ -1358,12 +1377,14 @@ fn macro_membership_hits_misses_types_and_nesting() {
     assert_membership_branch("[1] in [[1], [2]]", true);
     assert_membership_branch("2 in (1,2)", true);
     assert_membership_branch("3 in (1,2)", false);
-    assert_membership_branch("1 in 1:3", true);
-    assert_membership_branch("0 in 1:3", false);
-    assert_membership_branch("1.0 in 1:3", true);
+    // A still-Range right operand is incomplete until range materialization.
+    assert_membership_incomplete("1 in 1:3");
+    assert_membership_incomplete("0 in 1:3");
+    assert_membership_incomplete("1.0 in 1:3");
+    assert_membership_branch("1 in [1,2,3]", true);
     assert_membership_branch("1 in [1:3]", false);
     assert_membership_branch("(1:3) in [1:3]", true);
-    assert_membership_branch("(1:3) in [[1,2,3]]", true);
+    assert_membership_branch("(1:3) in [[1,2,3]]", false);
     assert_membership_branch("(1:3) in [1,2,3]", false);
     assert_membership_branch("1+1 in [2]", true);
     assert_membership_branch("1 in [1] == true", true);
@@ -1484,6 +1505,8 @@ fn macro_membership_honesty_and_reach_audit() {
         return;
     };
 
+    // Dynare materializes `1:3` to an array before `contains`, so `1 in 1:3`
+    // hits there. This evaluator leaves a still-Range right operand incomplete.
     for (condition, expect_hit) in [
         (r#""8" in ["8"]"#, true),
         (r#""7" in ["8"]"#, false),
