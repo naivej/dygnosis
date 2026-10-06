@@ -2,7 +2,7 @@
 
 Show effective model opens include and macro expansion in a read-only editor. The preview shows the model before Dynare transforms equations. Edit the written files, then use Refresh effective model to update the preview.
 
-With the bundled engine or an engine that supports readable layout, statements start on separate lines, with indented block bodies. Equation tags stay with their equation, and model-local definitions have their own lines. Copying the preview keeps these line breaks. Strings, native text, and matrix contents keep their existing text. Older engines keep the compact preview.
+With the bundled engine or an engine that supports source layout, the preview keeps the written spaces and line breaks. Macro substitution and includes expand in place. Strings, native text, and matrix contents stay as written. An older engine that only advertises readable layout keeps the indented preview, which does not preserve written spacing. Engines without either layout keep the compact preview.
 
 Macro interpolation also expands inside quoted values. For example, a loop over `j` with `[name='eq@{j}']` and `long_name='Output @{j}'` produces `eq1`, `eq2`, and their corresponding labels. Each repeated equation keeps its own source and macro origins. A replacement that closes its surrounding quote or adds a line break keeps expansion incomplete; run the official Dynare preprocessor for that case.
 
@@ -26,7 +26,7 @@ The three commands appear in the Command Palette while a preview is active. [Edi
 
 [Keyboard Shortcuts](action:shortcuts) can change these bindings. Pickers use VS Code's native keyboard controls and theme.
 
-Each preview retains its chosen root and input revision. It can refresh after that root closes, and several previews can refer to different roots. Source edits, dependency changes, settings changes, and a language-server restart disable origin actions until Refresh. The readable preview remains available. Refresh replaces text and navigation together; an older response cannot overwrite a newer request. Refresh does not jump to a location based on the previous cursor mapping.
+Each preview retains its chosen root and input revision. It can refresh after that root closes, and several previews can refer to different roots. Source edits, dependency changes, settings changes, and a language-server restart disable origin actions until Refresh. Open, Refresh, and source jumps use one layout for that engine. Refresh replaces text and navigation together; an older response cannot overwrite a newer request. Refresh does not jump to a location based on the previous cursor mapping.
 
 A missing or changed source cancels a jump. Refresh the preview and choose the row again.
 

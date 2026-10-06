@@ -150,7 +150,12 @@ fn i211_limit_message(limit: &str) -> String {
     format!("Macro expansion stopped at the {limit} limit; some model checks were withheld.")
 }
 
-fn push_type_error(state: &mut ExpandState<'_>, span: Span, code: &'static str, message: String) {
+fn push_type_error(
+    state: &mut ExpandState<'_, '_>,
+    span: Span,
+    code: &'static str,
+    message: String,
+) {
     if !state
         .type_errors
         .iter()
@@ -163,7 +168,7 @@ fn push_type_error(state: &mut ExpandState<'_>, span: Span, code: &'static str, 
     state.incomplete.get_or_insert(span);
 }
 
-fn push_i211(state: &mut ExpandState<'_>, span: Span, message: String) {
+fn push_i211(state: &mut ExpandState<'_, '_>, span: Span, message: String) {
     if !state.incomplete_reasons.iter().any(|reason| {
         reason.span == span && reason.code == "I211" && reason.message == message
     }) {
@@ -177,7 +182,7 @@ fn push_i211(state: &mut ExpandState<'_>, span: Span, message: String) {
 }
 
 fn note_eval_failure(
-    state: &mut ExpandState<'_>,
+    state: &mut ExpandState<'_, '_>,
     span: Span,
     error: MacroEvalError,
     expression: &str,
@@ -251,17 +256,156 @@ pub(crate) struct FrameRec {
     pub value: Option<String>,
 }
 
-struct ExpandState<'a> {
+/// Display fragment for the source-layout preview. Private to the crate until
+/// slice 03 publishes `source_navigation` from these records.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SourceFragment {
+    pub display: Span,
+    /// Span in the expander source (include-spliced text).
+    pub written: Option<Span>,
+    pub kind: SourceFragmentKind,
+    /// Emitted while a macro frame was on the origin stack.
+    pub macro_active: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SourceFragmentKind {
+    Copy,
+    Substitution,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SourceLayoutBuild {
+    pub text: String,
+    pub fragments: Vec<SourceFragment>,
+}
+
+struct SourceRecorder<'a> {
     src: &'a str,
-    defines: &'a mut HashMap<String, MacroVal>,
+    text: String,
+    fragments: Vec<SourceFragment>,
+    cursor: u32,
+    suppress: bool,
+}
+
+impl<'a> SourceRecorder<'a> {
+    fn new(src: &'a str) -> Self {
+        Self {
+            src,
+            text: String::with_capacity(src.len()),
+            fragments: Vec::new(),
+            cursor: 0,
+            suppress: false,
+        }
+    }
+
+    fn finish(self) -> SourceLayoutBuild {
+        SourceLayoutBuild {
+            text: self.text,
+            fragments: self.fragments,
+        }
+    }
+
+    fn skip_directive(&mut self, dir: Span, copy_leading_gap: bool, macro_active: bool) {
+        let line = directive_line_extent(self.src, dir);
+        if copy_leading_gap && self.cursor < line.start {
+            self.copy_range(self.cursor, line.start, macro_active);
+        }
+        self.cursor = line.end;
+    }
+
+    fn copy_through_token(&mut self, span: Span, macro_active: bool) {
+        let end = span.end;
+        if self.cursor <= span.start && (end as usize) <= self.src.len() {
+            self.copy_range(self.cursor, end, macro_active);
+        } else if (span.start as usize) < self.src.len() && (end as usize) <= self.src.len() {
+            self.copy_range(span.start, end, macro_active);
+            self.cursor = end;
+        }
+    }
+
+    fn substitute(&mut self, written: Span, text: &str, macro_active: bool) {
+        if self.cursor < written.start {
+            self.copy_range(self.cursor, written.start, macro_active);
+        }
+        let start = self.text.len() as u32;
+        self.text.push_str(text);
+        self.fragments.push(SourceFragment {
+            display: Span {
+                start,
+                end: self.text.len() as u32,
+            },
+            written: Some(written),
+            kind: SourceFragmentKind::Substitution,
+            macro_active,
+        });
+        self.cursor = written.end;
+    }
+
+    fn copy_range(&mut self, start: u32, end: u32, macro_active: bool) {
+        if end <= start || (end as usize) > self.src.len() {
+            return;
+        }
+        let piece = &self.src[start as usize..end as usize];
+        if piece.is_empty() {
+            return;
+        }
+        // Preview buffers use `\n` only; keep the written span on the raw bytes.
+        let normalized = piece.replace("\r\n", "\n").replace('\r', "\n");
+        if normalized.is_empty() {
+            self.cursor = end;
+            return;
+        }
+        let display_start = self.text.len() as u32;
+        self.text.push_str(&normalized);
+        self.fragments.push(SourceFragment {
+            display: Span {
+                start: display_start,
+                end: self.text.len() as u32,
+            },
+            written: Some(Span { start, end }),
+            kind: SourceFragmentKind::Copy,
+            macro_active,
+        });
+        self.cursor = end;
+    }
+
+    fn begin_loop_body(&mut self, body_start: u32) {
+        self.cursor = body_start;
+    }
+
+    fn finish_loop_body(&mut self, body_end: u32, macro_active: bool) {
+        if self.cursor < body_end {
+            self.copy_range(self.cursor, body_end, macro_active);
+        }
+    }
+}
+
+/// Line occupied by a macro directive: indent, directive text, and trailing `\n`.
+fn directive_line_extent(src: &str, dir: Span) -> Span {
+    let mut start = dir.start as usize;
+    while start > 0 && matches!(src.as_bytes()[start - 1], b' ' | b'\t') {
+        start -= 1;
+    }
+    let mut end = dir.end as usize;
+    if end < src.len() && src.as_bytes()[end] == b'\n' {
+        end += 1;
+    }
+    Span::new(start, end)
+}
+
+struct ExpandState<'src, 'w> {
+    src: &'src str,
+    defines: &'w mut HashMap<String, MacroVal>,
     origin_stack: Vec<usize>,
-    arena: &'a mut Vec<FrameRec>,
-    type_errors: &'a mut Vec<MacroTypeError>,
-    discarded: &'a mut Vec<Span>,
-    incomplete: &'a mut Option<Span>,
-    incomplete_reasons: &'a mut Vec<IncompleteReason>,
+    arena: &'w mut Vec<FrameRec>,
+    type_errors: &'w mut Vec<MacroTypeError>,
+    discarded: &'w mut Vec<Span>,
+    incomplete: &'w mut Option<Span>,
+    incomplete_reasons: &'w mut Vec<IncompleteReason>,
     include_seen: bool,
-    file_visitor: Option<&'a mut dyn MacroFileVisitor>,
+    file_visitor: Option<&'w mut dyn MacroFileVisitor>,
+    source: Option<&'w mut SourceRecorder<'src>>,
 }
 
 trait MacroFileVisitor {
@@ -397,6 +541,7 @@ fn macro_file_complete(
         incomplete_reasons: &mut incomplete_reasons,
         include_seen: false,
         file_visitor: Some(includes),
+        source: None,
     };
     expand_seq(&mut state, &tokens);
     incomplete.is_none() && errors.is_empty()
@@ -444,6 +589,49 @@ pub(crate) fn expand_macros_traced_with_status(
         incomplete.is_some(),
         blocks_complete && errors.is_empty(),
     )
+}
+
+/// Expand while recording a source-layout display copy. The token stream matches
+/// ordinary expansion; fragments are a side structure for the editor preview.
+pub(crate) fn expand_macros_with_source_layout(
+    src: &str,
+    tokens: Vec<Token>,
+) -> (
+    Vec<Token>,
+    Vec<MacroTypeError>,
+    Option<Span>,
+    SourceLayoutBuild,
+) {
+    let mut recorder = SourceRecorder::new(src);
+    let (out, type_errors, incomplete) = {
+        let mut defines = HashMap::new();
+        let mut arena = Vec::new();
+        let mut type_errors = Vec::new();
+        let mut discarded = Vec::new();
+        let mut incomplete = None;
+        let mut incomplete_reasons = Vec::new();
+        let mut state = ExpandState {
+            src,
+            defines: &mut defines,
+            origin_stack: Vec::new(),
+            arena: &mut arena,
+            type_errors: &mut type_errors,
+            discarded: &mut discarded,
+            incomplete: &mut incomplete,
+            incomplete_reasons: &mut incomplete_reasons,
+            include_seen: false,
+            file_visitor: None,
+            source: Some(&mut recorder),
+        };
+        let (out, _) = expand_seq(&mut state, &tokens);
+        (out, type_errors, incomplete)
+    };
+    if (recorder.cursor as usize) < src.len() {
+        let end = src.len() as u32;
+        let start = recorder.cursor;
+        recorder.copy_range(start, end, false);
+    }
+    (out, type_errors, incomplete, recorder.finish())
 }
 
 fn macro_blocks_complete(src: &str, tokens: &[Token]) -> bool {
@@ -558,6 +746,7 @@ fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull 
             incomplete_reasons: &mut incomplete_reasons,
             include_seen: false,
             file_visitor: None,
+            source: None,
         };
         let (out, traces) = expand_seq(&mut state, &tokens);
         (out, traces, state.include_seen)
@@ -574,7 +763,7 @@ fn expand_macros_traced_full(src: &str, tokens: Vec<Token>) -> ExpandTracedFull 
     )
 }
 
-fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec<TokenTrace>) {
+fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>, Vec<TokenTrace>) {
     let mut out = Vec::new();
     let mut traces = Vec::new();
     let mut i = 0;
@@ -589,7 +778,9 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
         if tok.kind == TokenKind::MacroDir {
             match dir_kind(state.src, tok) {
                 Dir::Define => {
-                    if emitting(&stack) {
+                    let em = emitting(&stack);
+                    let mut kept = false;
+                    if em {
                         match parse_define_eval(tok.text(state.src), state.defines) {
                             Ok(Some((name, val))) => {
                                 state.defines.insert(name, val);
@@ -602,26 +793,35 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                                 let expression = define_rhs_expression(tok.text(state.src));
                                 note_eval_failure(state, tok.span, error, expression);
                                 emit(state, &mut out, &mut traces, tok.clone());
+                                kept = true;
                             }
                         }
+                    }
+                    if !kept {
+                        record_source_directive(state, tok.span, em);
                     }
                     i += 1;
                 }
                 Dir::Ifdef => {
+                    let em = emitting(&stack);
                     let cond = name_is_defined(state, tok, "ifdef");
                     i += 1;
                     push_if_frame(state, &mut stack, tokens, i, tok.span, "ifdef", cond);
+                    record_source_directive(state, tok.span, em);
                 }
                 Dir::Ifndef => {
+                    let em = emitting(&stack);
                     let cond = match dir_arg_ident(tok.text(state.src), "ifndef") {
                         Some(name) => !state.defines.contains_key(&name),
                         None => false,
                     };
                     i += 1;
                     push_if_frame(state, &mut stack, tokens, i, tok.span, "ifndef", cond);
+                    record_source_directive(state, tok.span, em);
                 }
                 Dir::If => {
-                    let cond = if emitting(&stack) {
+                    let em = emitting(&stack);
+                    let cond = if em {
                         eval_condition(state, tok, "if")
                     } else {
                         Some(false)
@@ -629,6 +829,7 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                     if let Some(cond) = cond {
                         i += 1;
                         push_if_frame(state, &mut stack, tokens, i, tok.span, "if", cond);
+                        record_source_directive(state, tok.span, em);
                     } else {
                         let next = take_if_end(state.src, tokens, i);
                         retain_raw_macro(state, &tokens[i..next], &mut out, &mut traces);
@@ -637,6 +838,7 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                 }
                 Dir::Elseif => {
                     let boundary = tok.span;
+                    let em = emitting(&stack);
                     let outer_emitting = stack
                         .get(..stack.len().saturating_sub(1))
                         .is_some_and(|outer| outer.iter().all(|frame| frame.active));
@@ -666,18 +868,22 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                         frame.taken = frame.taken || active;
                         open_next_branch(state, frame, tokens, i, boundary, "elseif", active);
                     }
+                    record_source_directive(state, boundary, em);
                 }
                 Dir::Else => {
                     let boundary = tok.span;
+                    let em = emitting(&stack);
                     i += 1;
                     if let Some(frame) = stack.last_mut() {
                         let active = !frame.taken;
                         frame.taken = true;
                         open_next_branch(state, frame, tokens, i, boundary, "else", active);
                     }
+                    record_source_directive(state, boundary, em);
                 }
                 Dir::Endif => {
                     let end_span = tok.span;
+                    let em = emitting(&stack);
                     i += 1;
                     if let Some(frame) = stack.pop() {
                         if !frame.active {
@@ -691,23 +897,33 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                         );
                         state.origin_stack.pop();
                     }
+                    record_source_directive(state, end_span, em);
                 }
                 Dir::For => {
+                    let em = emitting(&stack);
                     let (body, next) = take_for_body(state.src, tokens, i);
-                    if emitting(&stack) {
+                    if em {
                         check_for_tuple(state, tok);
-                        if !unroll_for(state, tok, body, &mut out, &mut traces) {
+                        if !unroll_for(state, tok, body, &tokens[i..next], &mut out, &mut traces) {
                             state.incomplete.get_or_insert(tok.span);
                             for original in &tokens[i..next] {
                                 emit(state, &mut out, &mut traces, original.clone());
                             }
                         }
+                    } else {
+                        record_source_directive(state, tok.span, false);
+                        if next > i + 1 {
+                            let endfor = tokens[next - 1].span;
+                            record_source_directive(state, endfor, false);
+                        }
                     }
                     i = next;
                 }
                 Dir::Endfor | Dir::Unknown => {
+                    let em = emitting(&stack);
+                    let mut kept = false;
                     if directive_name(tok.text(state.src)).eq_ignore_ascii_case("include")
-                        && emitting(&stack)
+                        && em
                     {
                         if let Some(visitor) = state.file_visitor.as_deref_mut() {
                             if !visitor.visit(tok.span, state.defines, state.incomplete.is_none()) {
@@ -718,7 +934,7 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                         }
                     } else if directive_name(tok.text(state.src))
                         .eq_ignore_ascii_case("includepath")
-                        && emitting(&stack)
+                        && em
                     {
                         if let Some(path) = eval_includepath(state, tok) {
                             if let Some(visitor) = state.file_visitor.as_deref_mut() {
@@ -729,7 +945,11 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
                         } else {
                             state.incomplete.get_or_insert(tok.span);
                             emit(state, &mut out, &mut traces, tok.clone());
+                            kept = true;
                         }
+                    }
+                    if !kept {
+                        record_source_directive(state, tok.span, em);
                     }
                     i += 1;
                 }
@@ -741,14 +961,26 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
         {
             if emitting(&stack) {
                 let replacements = if tok.kind == TokenKind::String {
-                    subst_quoted(state.src, tok, state.defines).map(|token| vec![token])
+                    subst_quoted(state.src, tok, state.defines).map(|token| {
+                        let display = token.text(state.src).to_string();
+                        (display, vec![token])
+                    })
                 } else {
-                    subst_interp(state.src, tok, state.defines).map_err(|error| (tok.span, error))
+                    subst_interp(state.src, tok, state.defines)
+                        .map_err(|error| (tok.span, error))
+                        .map(|(display, tokens)| (display, tokens))
                 };
                 match replacements {
-                    Ok(replacements) => {
+                    Ok((display, replacements)) => {
+                        record_source_substitution(state, tok, &display);
+                        if let Some(recorder) = state.source.as_deref_mut() {
+                            recorder.suppress = true;
+                        }
                         for replacement in replacements {
                             emit(state, &mut out, &mut traces, replacement);
+                        }
+                        if let Some(recorder) = state.source.as_deref_mut() {
+                            recorder.suppress = false;
                         }
                     }
                     Err((span, error)) => {
@@ -790,13 +1022,14 @@ fn expand_seq(state: &mut ExpandState<'_>, tokens: &[Token]) -> (Vec<Token>, Vec
     (out, traces)
 }
 
-fn push_discarded(state: &mut ExpandState<'_>, start: u32, end: u32) {
+fn push_discarded(state: &mut ExpandState<'_, '_>, start: u32, end: u32) {
     if end > start {
         state.discarded.push(Span { start, end });
     }
 }
 
-fn emit(state: &ExpandState<'_>, out: &mut Vec<Token>, traces: &mut Vec<TokenTrace>, tok: Token) {
+fn emit(state: &mut ExpandState<'_, '_>, out: &mut Vec<Token>, traces: &mut Vec<TokenTrace>, tok: Token) {
+    record_source_emit(state, &tok);
     if let Some(prev) = out.last() {
         if let Some(merged) = merge_adjacent(state.src, prev, &tok) {
             *out.last_mut().expect("token just read") = merged;
@@ -807,6 +1040,40 @@ fn emit(state: &ExpandState<'_>, out: &mut Vec<Token>, traces: &mut Vec<TokenTra
         frames: state.origin_stack.clone(),
     });
     out.push(tok);
+}
+
+fn record_source_emit(state: &mut ExpandState<'_, '_>, tok: &Token) {
+    if state.source.is_none() {
+        return;
+    }
+    let suppress = state.source.as_ref().is_some_and(|recorder| recorder.suppress);
+    if suppress || tok.kind == TokenKind::Eof {
+        return;
+    }
+    let macro_active = !state.origin_stack.is_empty();
+    let text = tok.text(state.src).to_string();
+    let span = tok.span;
+    let has_lexeme = tok.lexeme.is_some();
+    let recorder = state.source.as_deref_mut().expect("checked above");
+    if has_lexeme {
+        recorder.substitute(span, &text, macro_active);
+    } else {
+        recorder.copy_through_token(span, macro_active);
+    }
+}
+
+fn record_source_directive(state: &mut ExpandState<'_, '_>, dir: Span, copy_leading_gap: bool) {
+    let macro_active = !state.origin_stack.is_empty();
+    if let Some(recorder) = state.source.as_deref_mut() {
+        recorder.skip_directive(dir, copy_leading_gap, macro_active);
+    }
+}
+
+fn record_source_substitution(state: &mut ExpandState<'_, '_>, original: &Token, display: &str) {
+    let macro_active = !state.origin_stack.is_empty();
+    if let Some(recorder) = state.source.as_deref_mut() {
+        recorder.substitute(original.span, display, macro_active);
+    }
 }
 
 /// Glue `x@{i}` into one identifier when the pieces touch in the source.
@@ -877,7 +1144,7 @@ fn alloc_frame(
 }
 
 fn push_if_frame(
-    state: &mut ExpandState<'_>,
+    state: &mut ExpandState<'_, '_>,
     stack: &mut Vec<IfFrame>,
     tokens: &[Token],
     next_i: usize,
@@ -928,9 +1195,10 @@ fn tokens_body_span(body: &[Token]) -> Span {
 }
 
 fn unroll_for(
-    state: &mut ExpandState<'_>,
+    state: &mut ExpandState<'_, '_>,
     for_tok: &Token,
     body: &[Token],
+    for_range: &[Token],
     out: &mut Vec<Token>,
     traces: &mut Vec<TokenTrace>,
 ) -> bool {
@@ -989,6 +1257,19 @@ fn unroll_for(
         }
         planned.push((value, members));
     }
+    let endfor_span = for_range.last().map(|token| token.span);
+    let body_text = match endfor_span {
+        Some(closer) => {
+            let start = directive_line_extent(state.src, for_tok.span).end;
+            let end = directive_line_extent(state.src, closer).start;
+            Span {
+                start,
+                end: end.max(start),
+            }
+        }
+        None => tokens_body_span(body),
+    };
+    record_source_directive(state, for_tok.span, true);
     let body_span = tokens_body_span(body);
     // A collection or `when` filter that yields no iteration leaves the written
     // body inactive; mark it discarded like an untaken `@#if` branch.
@@ -1012,7 +1293,13 @@ fn unroll_for(
             value: Some(value.display()),
         });
         state.origin_stack.push(frame_id);
+        if let Some(recorder) = state.source.as_deref_mut() {
+            recorder.begin_loop_body(body_text.start);
+        }
         let (expanded, expanded_traces) = expand_seq(state, body);
+        if let Some(recorder) = state.source.as_deref_mut() {
+            recorder.finish_loop_body(body_text.end, true);
+        }
         for (tok, trace) in expanded.into_iter().zip(expanded_traces) {
             if tok.kind != TokenKind::Eof {
                 if let Some(prev) = out.last() {
@@ -1026,6 +1313,9 @@ fn unroll_for(
             }
         }
         state.origin_stack.pop();
+    }
+    if let Some(closer) = endfor_span {
+        record_source_directive(state, closer, false);
     }
     // Dynare defines each index in the shared environment and leaves its
     // final value (including body/nested-loop redefinitions) after the loop.
@@ -1062,7 +1352,7 @@ fn subst_interp(
     src: &str,
     tok: &Token,
     defines: &HashMap<String, MacroVal>,
-) -> Result<Vec<Token>, MacroEvalError> {
+) -> Result<(String, Vec<Token>), MacroEvalError> {
     let text = tok.text(src);
     let inner = text
         .strip_prefix("@{")
@@ -1106,7 +1396,7 @@ fn subst_interp(
         .last()
         .is_some_and(|piece| (piece.span.end as usize) < repl.len());
     let last = pieces.len() - 1;
-    pieces
+    let tokens = pieces
         .iter()
         .enumerate()
         .map(|(index, piece)| {
@@ -1126,7 +1416,8 @@ fn subst_interp(
                 .map(|next| piece.span.end == next.span.start);
             Ok(replacement)
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((repl, tokens))
 }
 
 /// Substitute inside a quoted .mod value without changing its string boundary.
@@ -1203,12 +1494,12 @@ fn dir_kind(src: &str, tok: &Token) -> Dir {
     }
 }
 
-fn name_is_defined(state: &ExpandState<'_>, tok: &Token, kw: &str) -> bool {
+fn name_is_defined(state: &ExpandState<'_, '_>, tok: &Token, kw: &str) -> bool {
     dir_arg_ident(tok.text(state.src), kw).is_some_and(|name| state.defines.contains_key(&name))
 }
 
 fn open_next_branch(
-    state: &mut ExpandState<'_>,
+    state: &mut ExpandState<'_, '_>,
     frame: &mut IfFrame,
     tokens: &[Token],
     next_i: usize,
@@ -1249,7 +1540,7 @@ fn directive_name(text: &str) -> &str {
     }
 }
 
-fn eval_condition(state: &mut ExpandState<'_>, tok: &Token, kw: &str) -> Option<bool> {
+fn eval_condition(state: &mut ExpandState<'_, '_>, tok: &Token, kw: &str) -> Option<bool> {
     let arg = strip_kw(tok.text(state.src), kw)?;
     let arg = arg.trim();
     if arg.is_empty() {
@@ -1275,7 +1566,7 @@ fn eval_condition(state: &mut ExpandState<'_>, tok: &Token, kw: &str) -> Option<
     }
 }
 
-fn eval_includepath(state: &mut ExpandState<'_>, tok: &Token) -> Option<String> {
+fn eval_includepath(state: &mut ExpandState<'_, '_>, tok: &Token) -> Option<String> {
     let argument = strip_kw(tok.text(state.src), "includepath")?;
     let argument = strip_line_comment(argument).trim();
     match eval_macro_expr(argument, state.defines, 0) {
@@ -1326,7 +1617,7 @@ fn take_if_end(src: &str, tokens: &[Token], start: usize) -> usize {
 }
 
 fn retain_raw_macro(
-    state: &mut ExpandState<'_>,
+    state: &mut ExpandState<'_, '_>,
     tokens: &[Token],
     out: &mut Vec<Token>,
     traces: &mut Vec<TokenTrace>,
@@ -1938,7 +2229,7 @@ fn strip_quotes(s: &str) -> Option<&str> {
     }
 }
 
-fn check_for_tuple(state: &mut ExpandState<'_>, tok: &Token) {
+fn check_for_tuple(state: &mut ExpandState<'_, '_>, tok: &Token) {
     let Some(rest) = strip_kw(tok.text(state.src), "for") else {
         return;
     };

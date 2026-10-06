@@ -683,6 +683,18 @@ async fn readable_preview(backend: &Backend, root: &Url) -> Value {
         .unwrap()
 }
 
+async fn source_preview(backend: &Backend, root: &Url) -> Value {
+    backend
+        .execute_command(ExecuteCommandParams {
+            command: "dynare/showEffectiveModel".into(),
+            arguments: vec![json!({"root_uri":root, "layout":"source"})],
+            work_done_progress_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap()
+}
+
 fn token_texts(text: &str) -> Vec<(dygnosis::lexer::TokenKind, String)> {
     dygnosis::lexer::tokenize(text)
         .iter()
@@ -690,12 +702,12 @@ fn token_texts(text: &str) -> Vec<(dygnosis::lexer::TokenKind, String)> {
         .collect()
 }
 
-fn same_preview_facts(compact: &Value, readable: &Value) {
+fn same_preview_facts(compact: &Value, layout: &Value) {
     assert_eq!(
         token_texts(compact["effective_text"].as_str().unwrap()),
-        token_texts(readable["effective_text"].as_str().unwrap())
+        token_texts(layout["effective_text"].as_str().unwrap())
     );
-    let mut without_layout = readable.clone();
+    let mut without_layout = layout.clone();
     without_layout["effective_text"] = compact["effective_text"].clone();
     for (display, old) in without_layout["navigation"]
         .as_array_mut()
@@ -704,16 +716,16 @@ fn same_preview_facts(compact: &Value, readable: &Value) {
         .zip(compact["navigation"].as_array().unwrap())
     {
         assert_eq!(
-            json_slice(
-                readable["effective_text"].as_str().unwrap(),
+            token_texts(json_slice(
+                layout["effective_text"].as_str().unwrap(),
                 &display["effective_range"],
                 true
-            ),
-            json_slice(
+            )),
+            token_texts(json_slice(
                 compact["effective_text"].as_str().unwrap(),
                 &old["effective_range"],
                 true
-            ),
+            )),
         );
         display["effective_range"] = old["effective_range"].clone();
     }
@@ -731,9 +743,13 @@ async fn readable_layout_separates_statements_tags_locals_and_blocks_without_cha
         .initialize(InitializeParams::default())
         .await
         .unwrap();
+    let experimental = initialized.capabilities.experimental.unwrap();
     assert_eq!(
-        initialized.capabilities.experimental.unwrap()["dygnosis"]["effectivePreview"]
-            ["readable_layout"],
+        experimental["dygnosis"]["effectivePreview"]["readable_layout"],
+        true
+    );
+    assert_eq!(
+        experimental["dygnosis"]["effectivePreview"]["source_layout"],
         true
     );
     open(backend, &root, source, 1).await;
@@ -892,6 +908,89 @@ async fn readable_incomplete_previews_keep_partial_text_and_withhold_navigation(
             .starts_with("var y ;\n"));
         same_preview_facts(&compact, &readable);
     }
+}
+
+#[tokio::test]
+async fn source_layout_keeps_written_spacing_and_leaves_shared_output_unchanged() {
+    let source = "var y;\nmodel;\ny=c;\nend;\n";
+    let root = Url::parse("file:///C:/dygnosis-preview/source.mod").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(backend, &root, source, 1).await;
+    let compact = preview(backend, &root).await;
+    let mcp = dynare_expand(source, None, None);
+    let formatted = dygnosis::format_text(source, "  ");
+    let source_view = source_preview(backend, &root).await;
+    assert_eq!(source_view["complete"], true, "{source_view}");
+    assert_eq!(source_view["effective_text"], "var y;\nmodel;\ny=c;\nend;\n");
+    same_preview_facts(&compact, &source_view);
+    assert_eq!(preview(backend, &root).await, compact);
+    assert_eq!(dynare_expand(source, None, None), mcp);
+    assert_eq!(dygnosis::format_text(source, "  "), formatted);
+    assert_ne!(
+        source_view["effective_text"],
+        readable_preview(backend, &root).await["effective_text"]
+    );
+}
+
+#[tokio::test]
+async fn source_layout_covers_macros_includes_branches_and_crlf() {
+    let root = Url::parse("file:///C:/dygnosis-preview/source-macros.mod").unwrap();
+    let include = Url::parse("file:///C:/dygnosis-preview/source-body.inc").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(
+        backend,
+        &root,
+        "var y;\r\n@#if 0\r\nbad=1;\r\n@#else\r\nmodel;\r\n@#include \"source-body.inc\"\r\nend;\r\n@#endif\r\n",
+        1,
+    )
+    .await;
+    open(
+        backend,
+        &include,
+        "@#for i in 1:2\n#k=@{i}; [name='😀'] y=k+@{i};\n@#endfor",
+        1,
+    )
+    .await;
+    let compact = preview(backend, &root).await;
+    let source_view = source_preview(backend, &root).await;
+    assert_eq!(source_view["complete"], true, "{source_view}");
+    let text = source_view["effective_text"].as_str().unwrap();
+    assert!(!text.contains('\r'), "{text}");
+    assert!(!text.contains("bad"), "{text}");
+    assert!(!text.contains("@#"), "{text}");
+    assert!(text.contains("#k=1;"), "{text}");
+    assert!(text.contains("#k=2;"), "{text}");
+    assert!(text.contains("[name='😀'] y=k+1;"), "{text}");
+    assert!(text.contains("[name='😀'] y=k+2;"), "{text}");
+    same_preview_facts(&compact, &source_view);
+    let rows = source_view["navigation"].as_array().unwrap();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(
+        json_slice(text, &rows[1]["effective_range"], true),
+        "[name='😀'] y=k+1"
+    );
+    assert_eq!(
+        json_slice(text, &rows[3]["effective_range"], true),
+        "[name='😀'] y=k+2"
+    );
+}
+
+#[tokio::test]
+async fn source_incomplete_previews_withhold_navigation() {
+    let root = Url::parse("file:///C:/dygnosis-preview/source-partial.mod").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(backend, &root, "var y; model; y=@{missing}; end;", 1).await;
+    let source_view = source_preview(backend, &root).await;
+    assert_eq!(source_view["complete"], false, "{source_view}");
+    assert_eq!(source_view["status"], "incomplete");
+    assert_eq!(source_view["navigation"], json!([]));
+    assert!(source_view["effective_text"]
+        .as_str()
+        .unwrap()
+        .contains("y=@{missing}"));
 }
 
 #[tokio::test]

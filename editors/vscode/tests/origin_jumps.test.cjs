@@ -405,6 +405,28 @@ test("readable preview open Refresh and both jump proofs use one layout and disp
   env.registration.dispose(); env.previews.dispose();
 });
 
+test("source preview open Refresh and jump proofs prefer source_layout over readable", async () => {
+  const env = setup();
+  Object.assign(env.service.client.initializeResult.capabilities.experimental.dygnosis.effectivePreview, {
+    readable_layout: true, source_layout: true,
+  });
+  const displayed = "model;\ny=c;\nend;", mapped = row({ effective_range: new Range(1, 0, 1, 3) });
+  env.service.executeHook = (_command, args) => {
+    assert.deepEqual(args, [{ root_uri: main, layout: "source" }]);
+    return payload({ effective_text: displayed, navigation: [mapped] });
+  };
+  const session = await env.show();
+  assert.equal(session.document.getText(), displayed);
+  env.host.editor.selection = new Range(1, 0);
+  await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 1);
+  env.activate(session); await env.run("refreshEffectiveModel");
+  assert.equal(session.document.getText(), displayed);
+  for (const request of env.service.requests.filter(request => request.command === "dynare/showEffectiveModel")) {
+    assert.deepEqual(request.args, [{ root_uri: main, layout: "source" }]);
+  }
+  env.registration.dispose(); env.previews.dispose();
+});
+
 test("a navigation-capable older server keeps its compact layout in open Refresh and source proofs", async () => {
   const env = setup(), compact = "model; y = 1; end;";
   env.service.value = payload({ effective_text: compact, navigation: [row({ effective_range: new Range(0, 7, 0, 12) })] });

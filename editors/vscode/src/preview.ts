@@ -26,11 +26,16 @@ function previewText(result: unknown): string | undefined {
 /** Open, Refresh, and jump proofs must use the same advertised display layout. */
 export function effectivePreviewArguments(service: Pick<DygnosisClient, "client">, root: vscode.Uri, legacyUriString = false): unknown[] {
   const experimental: unknown = service.client?.initializeResult?.capabilities.experimental;
-  const readable = record(experimental) && record(experimental.dygnosis) && record(experimental.dygnosis.effectivePreview) &&
-    experimental.dygnosis.effectivePreview.command === "dynare/showEffectiveModel" &&
-    experimental.dygnosis.effectivePreview.readable_layout === true;
-  return readable ? [{ root_uri: root.toString(), layout: "readable" }]
-    : [legacyUriString ? root.toString() : { root_uri: root.toString() }];
+  const preview = record(experimental) && record(experimental.dygnosis) && record(experimental.dygnosis.effectivePreview) &&
+    experimental.dygnosis.effectivePreview.command === "dynare/showEffectiveModel"
+    ? experimental.dygnosis.effectivePreview : undefined;
+  if (preview && preview.source_layout === true) {
+    return [{ root_uri: root.toString(), layout: "source" }];
+  }
+  if (preview && preview.readable_layout === true) {
+    return [{ root_uri: root.toString(), layout: "readable" }];
+  }
+  return [legacyUriString ? root.toString() : { root_uri: root.toString() }];
 }
 export function registerEffectivePreview(service: DygnosisClient): EffectivePreviewRegistry {
   const text = new Map<string, string>();

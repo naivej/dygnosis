@@ -1830,20 +1830,40 @@ impl Backend {
         let Some(report) = inner.workspace.expand_report(uri.as_str()).cloned() else {
             return json!({"success": false, "message": "Document not available"});
         };
-        let layout = arguments
+        let requested = arguments
             .first()
             .and_then(|arg| arg.get("layout"))
-            .and_then(Value::as_str)
-            .filter(|layout| *layout == "readable")
-            .and_then(|_| inner.workspace.get_effective_model(uri.as_str()))
-            .and_then(|model| crate::preview_layout::readable(&report, model));
-        let effective_text = layout
-            .as_ref()
-            .map_or(report.effective_text.as_str(), |layout| {
-                layout.text.as_str()
-            });
-        let complete =
-            report.navigation_complete && inner.workspace.includes_complete(uri.as_str());
+            .and_then(Value::as_str);
+        let model = matches!(requested, Some("readable") | Some("source"))
+            .then(|| inner.workspace.get_effective_model(uri.as_str()))
+            .flatten();
+        enum DisplayLayout {
+            Readable(crate::preview_layout::PreviewLayout),
+            Source(crate::preview_source::SourcePreview),
+        }
+        let layout = model.and_then(|model| match requested {
+            Some("readable") => {
+                crate::preview_layout::readable(&report, model).map(DisplayLayout::Readable)
+            }
+            Some("source") => {
+                crate::preview_source::source(&report, model).map(DisplayLayout::Source)
+            }
+            _ => None,
+        });
+        let source_unproven = matches!(
+            &layout,
+            Some(DisplayLayout::Source(preview)) if !preview.proven
+        );
+        let effective_text = match &layout {
+            Some(DisplayLayout::Readable(preview)) => preview.text.as_str(),
+            Some(DisplayLayout::Source(preview)) => preview.text.as_str(),
+            None if requested == Some("source") => "",
+            None => report.effective_text.as_str(),
+        };
+        let complete = report.navigation_complete
+            && inner.workspace.includes_complete(uri.as_str())
+            && !source_unproven
+            && !(requested == Some("source") && layout.is_none());
         let has_heterogeneous = !report.heterogeneous_origins.is_empty();
         let origins: Vec<Value> = report
             .origins
@@ -1868,7 +1888,11 @@ impl Backend {
             crate::preview_navigation::navigation_json(
                 &report,
                 |span| {
-                    let display_span = layout.as_ref().map_or(span, |layout| layout.ranges[rows]);
+                    let display_span = match &layout {
+                        Some(DisplayLayout::Readable(preview)) => preview.ranges[rows],
+                        Some(DisplayLayout::Source(preview)) => preview.ranges[rows],
+                        None => span,
+                    };
                     rows += 1;
                     json!(span_range(&index, effective_text, display_span))
                 },
@@ -2605,7 +2629,7 @@ pub fn initialize_result() -> InitializeResult {
                 "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true},
                 "modelInfoChanged": true,
                 "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1},
-                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true},
+                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
                 ,"projectDiagnostics": {"schema_version":project::SCHEMA_VERSION,"status_command":"dynare/projectStatus","recheck_command":"dynare/recheckProject","cancel_command":"dynare/cancelProject","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/projectStatusChanged","typing_pause_ms":250}
             }})),
