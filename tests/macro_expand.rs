@@ -1411,7 +1411,8 @@ fn macro_membership_in_define_interpolation_function_and_for_collection() {
     let function = "@#define f(x) = x in [1,2]\nvar y;\n@#if (f(2))\ny_hit = 1;\n@#else\ny_miss = 1;\n@#endif\nmodel; y=1; end;";
     assert!(expand_report(function).effective_text.contains("y_hit"));
 
-    let for_coll = "@#define xs = [1,2]\nvar y; model;\n@#for j in [1 in xs, 3]\ny=@{j};\n@#endfor\nend;";
+    let for_coll =
+        "@#define xs = [1,2]\nvar y; model;\n@#for j in [1 in xs, 3]\ny=@{j};\n@#endfor\nend;";
     let report = expand_report(for_coll);
     assert!(report.complete, "{}", report.effective_text);
     assert!(report.effective_text.contains("y = true"));
@@ -1450,9 +1451,7 @@ model; y=1; end;
     assert!(!report.effective_text.contains("y_no_eight"));
     assert!(report.effective_text.contains("y_no_nine"));
     assert!(!report.effective_text.contains("y_nine"));
-    assert!(!analyze(&parse(source))
-        .iter()
-        .any(|row| row.code == "I211"));
+    assert!(!analyze(&parse(source)).iter().any(|row| row.code == "I211"));
 }
 
 #[test]
@@ -1508,6 +1507,9 @@ fn macro_membership_honesty_and_reach_audit() {
     // Dynare materializes `1:3` to an array before `contains`, so `1 in 1:3`
     // hits there. This evaluator leaves a still-Range right operand incomplete.
     for (condition, expect_hit) in [
+        (r#""8"in["8"]"#, true),
+        ("1in[1]", true),
+        ("(1)in(0,1)", true),
         (r#""8" in ["8"]"#, true),
         (r#""7" in ["8"]"#, false),
         ("2 in (1,2)", true),
@@ -1537,12 +1539,79 @@ fn macro_membership_honesty_and_reach_audit() {
         );
         let saved = std::fs::read_to_string(&out).unwrap_or_default();
         assert_eq!(saved.contains("y_hit"), expect_hit, "{condition}: {saved}");
-        assert_eq!(saved.contains("y_miss"), !expect_hit, "{condition}: {saved}");
+        assert_eq!(
+            saved.contains("y_miss"),
+            !expect_hit,
+            "{condition}: {saved}"
+        );
         let _ = std::fs::remove_file(&mod_path);
         let _ = std::fs::remove_file(&out);
     }
 
     let cases = [
+        (
+            "missing-comparison",
+            membership_branch("1 in == true"),
+            "E062",
+            "syntax error, unexpected EQUAL_EQUAL",
+            true,
+        ),
+        (
+            "missing-array",
+            "@#define n = [1 in]\nvar y; model; y=1; end;".to_string(),
+            "E062",
+            "syntax error, unexpected RBRACKET",
+            true,
+        ),
+        (
+            "missing-tuple",
+            "@#define n = (0,1 in)\nvar y; model; y=1; end;".to_string(),
+            "E062",
+            "syntax error, unexpected RPAREN",
+            true,
+        ),
+        (
+            "missing-item",
+            "@#define n = [1 in,2]\nvar y; model; y=1; end;".to_string(),
+            "E062",
+            "syntax error, unexpected COMMA",
+            true,
+        ),
+        (
+            "missing-call",
+            "@#define f(x)=x\n@#if f(1 in)\n@#endif\nvar y; model; y=1; end;".to_string(),
+            "E062",
+            "syntax error, unexpected RPAREN",
+            true,
+        ),
+        (
+            "missing-parenthesized",
+            membership_branch("1 in"),
+            "E062",
+            "syntax error, unexpected RPAREN",
+            true,
+        ),
+        (
+            "missing-interpolated",
+            "var y; model; y=@{1 in}; end;".to_string(),
+            "E062",
+            "syntax error, unexpected END_EVAL",
+            true,
+        ),
+        (
+            "missing-right",
+            membership_branch("1 in").replace("(1 in)", "1 in"),
+            "E062",
+            "syntax error, unexpected EOL",
+            true,
+        ),
+        (
+            "missing-left",
+            membership_branch("in [1]").replace("(in [1])", "in [1]"),
+            "E062",
+            "syntax error, unexpected IN",
+            true,
+        ),
         (
             "string-right",
             membership_branch(r#"1 in "abc""#),
@@ -1659,8 +1728,6 @@ fn macro_membership_honesty_and_reach_audit() {
     }
 }
 
-
-
 #[test]
 fn incomplete_reasons_name_expression_limit_and_official_errors() {
     use dygnosis::diagnostic::check_file;
@@ -1731,7 +1798,8 @@ fn incomplete_reasons_dedupe_loops_keep_independent_failures_and_skip_dormant() 
     assert_eq!(diags[0].code, "E063");
     assert_eq!(diags[0].message, "Unknown variable missing");
 
-    let two = "@#define a = length([1])\n@#define b = length([2])\nvar y; model; y=@{a}+@{b}; end;\n";
+    let two =
+        "@#define a = length([1])\n@#define b = length([2])\nvar y; model; y=@{a}+@{b}; end;\n";
     let diags = analyze(&parse(two));
     assert_eq!(diags.len(), 2, "{diags:?}");
     assert!(diags.iter().all(|d| d.code == "I211"));
@@ -1741,7 +1809,9 @@ fn incomplete_reasons_dedupe_loops_keep_independent_failures_and_skip_dormant() 
 
     let dormant = "@#if 0\ny=@{missing};\n@#endif\nvar y; model; y=0; end;\n";
     assert!(!parse(dormant).macro_incomplete());
-    assert!(!analyze(&parse(dormant)).iter().any(|d| matches!(d.code.as_str(), "E063" | "I211")));
+    assert!(!analyze(&parse(dormant))
+        .iter()
+        .any(|d| matches!(d.code.as_str(), "E063" | "I211")));
 
     let dir = (0..1024)
         .map(|n| {
@@ -1769,7 +1839,11 @@ fn incomplete_reasons_dedupe_loops_keep_independent_failures_and_skip_dormant() 
         .iter()
         .find(|d| d.code == "E063" && d.message == "Unknown variable missing")
         .expect("included E063");
-    assert_eq!(unknown.file.as_deref(), Some(inc_key.as_str()), "{unknown:?}");
+    assert_eq!(
+        unknown.file.as_deref(),
+        Some(inc_key.as_str()),
+        "{unknown:?}"
+    );
 
     let unknown_include = "@#include \"ghost.inc\"\nvar y; model; y=@{maybe_from_include}; end;\n";
     let diags = check_file(unknown_include, "ghost_root.mod");
@@ -1796,7 +1870,9 @@ fn incomplete_reason_records_match_diagnostics_for_hover() {
     assert_eq!(reasons.len(), 1);
     assert_eq!(reasons[0].1, "I211");
     assert_eq!(reasons[0].2, diags[0].message);
-    assert!(!reasons.iter().any(|(_, code, _)| *code == "E062" || *code == "E064"));
+    assert!(!reasons
+        .iter()
+        .any(|(_, code, _)| *code == "E062" || *code == "E064"));
 
     let undef = "var y; model; y=@{missing}; end;\n";
     let model = parse(undef);
@@ -1817,6 +1893,44 @@ fn incomplete_reason_records_match_diagnostics_for_hover() {
     assert_eq!(reasons.len(), 1);
     assert_eq!(reasons[0].1, "E061");
     assert_eq!(reasons[0].2, e061.message);
+}
+
+#[test]
+fn quoted_incomplete_reason_names_the_interpolation_that_failed() {
+    let source = "var y; model; [name='eq@{1}_@{length([1,2])}'] y=1; end;";
+    let model = parse(source);
+    let reason = analyze(&model)
+        .into_iter()
+        .find(|diagnostic| diagnostic.code == "I211")
+        .unwrap();
+    assert!(reason.message.contains("'length([1,2])'"), "{reason:?}");
+    assert_eq!(
+        &source[reason.span.start as usize..reason.span.end as usize],
+        "@{length([1,2])}"
+    );
+}
+
+#[test]
+fn macro_membership_accepts_punctuation_boundaries_and_refuses_missing_operands() {
+    for condition in [r#""8"in["8"]"#, "(1)in(0,1)", "1in[1]"] {
+        assert_membership_branch(condition, true);
+    }
+    for (condition, message) in [
+        ("1 in", "syntax error, unexpected EOL"),
+        ("in [1]", "syntax error, unexpected IN"),
+    ] {
+        let source = membership_branch(condition).replace(&format!("({condition})"), condition);
+        let diagnostics = analyze(&parse(&source));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E062" && diagnostic.message == message),
+            "{condition}: {diagnostics:?}"
+        );
+        assert!(!diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.code.as_str(), "I211" | "E063")));
+    }
 }
 
 #[test]
@@ -1844,7 +1958,9 @@ fn incomplete_reason_records_prefer_e062_and_e064_over_i211() {
     assert_eq!(reasons.len(), 1, "{reasons:?}");
     assert_eq!(reasons[0].1, "E062");
     assert_eq!(reasons[0].2, diags[0].message);
-    assert!(!reasons.iter().any(|(_, code, _)| *code == "I211" || *code == "E063"));
+    assert!(!reasons
+        .iter()
+        .any(|(_, code, _)| *code == "I211" || *code == "E063"));
 
     let with_error = "@#define n = length([1])\n@#error \"boom\"\nvar y; model; y=@{n}; end;\n";
     let model = parse(with_error);

@@ -86,7 +86,8 @@ const token = { isCancellationRequested: false };
 function reset() {
   host = { status: [], commands: new Map(), executed: [], providers: new Map(), documents: [], settings: {}, folder: new Emitter(), close: new Emitter(), changed: new Emitter(), opened: [], refreshes: 0, calls: [], logs: [], progress: new Map() };
   const provider = { onDidChangeDiagnosticsEmitter: { fire() { ++host.refreshes; } } };
-  const service = { middleware: {}, currentInstance: 1, onDidChange: host.changed.event,
+  host.invalidated = new Emitter();
+  const service = { middleware: {}, currentInstance: 1, onDidChange: host.changed.event, onDidInvalidate: host.invalidated.event,
     ensureStarted: () => Promise.resolve(),
     log: message => host.logs.push(message), failure: message => { host.logs.push(message); return Promise.resolve(); },
     execute: (command, args) => { host.calls.push({ command, args }); return Promise.resolve(host.markdown ?? "# W010\nExplanation"); },
@@ -143,6 +144,79 @@ test("push hide applies across files/classes and restoration replays the latest 
   assert.equal(c2p.asDiagnostic(original).relatedInformation[0].location.uri, "file:///project/first.inc");
   // Replaying the second push restores exactly that newer diagnostic.
   assert.equal(latestDisplay.at(-1)[0], next);
+  registration.dispose();
+});
+
+test("Show cannot replay a push after a dependency or folder change at the same document version", async () => {
+  for (const change of ["dependency", "folder"]) {
+    const service = reset(), registration = registerDiagnosticActions(service), doc = document();
+    const diagnostic = note(), displayed = push(service, doc, [diagnostic]);
+    await hide(service, doc, diagnostic);
+    const count = displayed.length;
+    if (change === "dependency") { host.invalidated.fire({ reason: "file" }); host.changed.fire(); } else host.folder.fire();
+    await command("dygnosis.showAllDiagnostics");
+    assert.equal(displayed.length, count, "old push was not replayed");
+    const fresh = note(); fresh.message = "Fresh input";
+    const latest = push(service, doc, [fresh]);
+    await hide(service, doc, fresh);
+    await command("dygnosis.showAllDiagnostics");
+    assert.equal(latest.at(-1)[0], fresh, "a subsequent push remains usable");
+    registration.dispose();
+  }
+});
+
+test("owner presentation changes keep a current push available to Show", async () => {
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document();
+  const diagnostic = note(), displayed = push(service, doc, [diagnostic]);
+  await hide(service, doc, diagnostic);
+  host.changed.fire();
+  await command("dygnosis.showAllDiagnostics");
+  assert.equal(displayed.at(-1)[0], diagnostic);
+  registration.dispose();
+});
+
+test("a server revision notification preserves its new push and invalidates only older root facts", async () => {
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document(), other = document("other.mod");
+  const diagnostic = note(), displayed = push(service, doc, [diagnostic]);
+  const independent = note("W010", other.uri.toString()), otherDisplay = push(service, other, [independent]);
+  await hide(service, doc, diagnostic);
+  host.invalidated.fire({ reason: "input", root: doc.uri.toString(), inputRevision: "checked-1" }); host.changed.fire();
+  await command("dygnosis.showAllDiagnostics");
+  assert.equal(displayed.at(-1)[0], diagnostic, "notification after a current push retains it");
+  await hide(service, doc, diagnostic);
+  const count = displayed.length;
+  host.invalidated.fire({ reason: "input", root: doc.uri.toString(), inputRevision: "changed-2" }); host.changed.fire();
+  await command("dygnosis.showAllDiagnostics");
+  assert.equal(displayed.length, count + 1, "retired contribution clears its display on Show");
+  assert.deepEqual(displayed.at(-1), [], "old revision cannot replay");
+  assert.equal(otherDisplay.at(-1)[0], independent, "other roots retain their current push");
+  registration.dispose();
+});
+
+test("shared includes retain a current owner's rows when another owner becomes stale", async () => {
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document("shared.inc");
+  const left = note("W010", "file:///project/left.mod"), right = note("W010", "file:///project/right.mod");
+  const displayed = push(service, doc, [left, right]);
+  await hide(service, doc, left);
+  host.invalidated.fire({ reason: "input", root: "file:///project/left.mod", inputRevision: "changed" }); host.changed.fire();
+  await command("dygnosis.showAllDiagnostics");
+  assert.deepEqual(displayed.at(-1), [right]);
+  registration.dispose();
+});
+
+test("legacy metadata-less pushes survive their notification but expire on local input changes", async () => {
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document();
+  const value = wire(); delete value.data;
+  const diagnostic = p2c.asDiagnostic(value), displayed = push(service, doc, [diagnostic]);
+  await hide(service, doc, diagnostic);
+  host.invalidated.fire({ reason: "input", root: doc.uri.toString(), inputRevision: "current" }); host.changed.fire();
+  await command("dygnosis.showAllDiagnostics");
+  assert.equal(displayed.at(-1)[0], diagnostic);
+  await hide(service, doc, diagnostic);
+  const count = displayed.length;
+  host.invalidated.fire({ reason: "file" }); host.changed.fire();
+  await command("dygnosis.showAllDiagnostics");
+  assert.equal(displayed.length, count);
   registration.dispose();
 });
 

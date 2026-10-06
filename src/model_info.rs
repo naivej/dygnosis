@@ -281,23 +281,9 @@ pub(crate) fn model_incomplete_status_with_reasons(reasons: &[Value]) -> Value {
 }
 
 fn e061_reasons(records: &crate::workspace::IncludeRecords) -> Vec<(Span, &'static str, String)> {
-    records
-        .unresolved
-        .iter()
-        .map(|unresolved| {
-            let mut message = format!(
-                "Could not open {}. The following directories were searched",
-                unresolved.filename
-            );
-            if !unresolved.searched.is_empty() {
-                message.push(':');
-                for dir in &unresolved.searched {
-                    message.push_str("\n   * ");
-                    message.push_str(dir);
-                }
-            }
-            (unresolved.span, "E061", message)
-        })
+    crate::check_e060::check_e061(records)
+        .into_iter()
+        .map(|diagnostic| (diagnostic.span, "E061", diagnostic.message))
         .collect()
 }
 
@@ -306,11 +292,14 @@ pub fn incomplete_reason_records(
     model: &Model,
     includes: Option<&crate::workspace::IncludeRecords>,
 ) -> Vec<(Span, &'static str, String)> {
-    // Missing includes own the status: a spliced miss must not promote a
-    // downstream unknown name that the absent file might have defined.
+    // Missing includes suppress possibly downstream unknown names and I211,
+    // as in workspace diagnostics. Independent proven macro Errors remain.
     if let Some(records) = includes {
         if !records.unresolved.is_empty() {
-            return e061_reasons(records);
+            let mut reasons = incomplete_reason_records(model, None);
+            reasons.retain(|(_, code, _)| !matches!(*code, "E063" | "I211"));
+            reasons.extend(e061_reasons(records));
+            return reasons;
         }
     }
     // Match analyze_positions: official macro Errors before I211.
@@ -327,8 +316,11 @@ pub fn incomplete_reason_records(
             .macro_type_errors
             .iter()
             .filter_map(|(span, code, message)| {
-                seen.insert((*span, *code, message.clone()))
-                    .then_some((*span, *code, message.clone()))
+                seen.insert((*span, *code, message.clone())).then_some((
+                    *span,
+                    *code,
+                    message.clone(),
+                ))
             })
             .collect();
     }

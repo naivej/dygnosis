@@ -2,11 +2,12 @@
 
 ## Unreleased
 
-- **Show effective model** shades macro-expanded text with a faint background. Turn off `dynare.effectiveModel.macroTint` to remove it.
+- **Show effective model** shades macro-expanded text with a faint background. Turn off `dynare.effectiveModel.macroTint` to remove it. Changing the tint keeps source jumps available and needs no Refresh.
 - **Go to written source** opens the editor that already has the file, and it works on any written text in the preview, including a macro-built name such as `beta_1`, which selects `beta_@{j}`. Show macro origins is removed.
 - When expansion is incomplete, the status item names the missing symbol, file, or expression, and the same words appear on that place in the file.
 - **Show effective model** keeps the spacing of the `.mod` file. Macro substitution and includes still expand. An older engine keeps the indented preview.
 - Each check is shown once in the editor and Problems panel.
+- Showing hidden checks does not restore results from obsolete inputs. Checks from another current owner of a shared include remain available.
 - A macro directive inside a `var`, `varexo`, `parameters`, or similar declaration list is no longer reported as an invalid name. Discarded-branch names stay quiet; an active illegal name such as `bad-name` still refuses.
 - `@#if` can test whether a value is in an array or tuple, for example `("8" in possible_signals)`.
 - **W070** (Parameter outside its conventional range) is no longer reported. A parameter name such as `beta` or `rho` can mean whatever the model uses.
@@ -29,7 +30,6 @@
 - The `dynare_equations` schema states that `index` starts at zero, matching the existing selector.
 - Help supports native **Find** in the open page. The header search still finds topics.
 - The equation CodeLens says **Jump to equation** or **Jump to N equations**. Its picker opens the written equation before transformation.
-- **Show effective model** starts statements on separate lines and indents block bodies. Copying the preview keeps the line breaks. Refresh and source jumps use the same readable layout.
 - Timing classes, model summaries, hovers, colors and Outline use Dynare's
   end-of-period convention for valid `predetermined_variables` marks. Written
   equations stay unchanged. MCP identifier `timing` remains the written offset;

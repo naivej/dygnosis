@@ -104,6 +104,7 @@ enum MacroEvalError {
     TypeMismatch(&'static str),
     /// Pinned refusal for a proven non-array/tuple right operand of `in`.
     InOperandType,
+    MissingInOperand,
     SyntaxEol,
     SyntaxUnexpected(&'static str),
     Unsupported,
@@ -114,6 +115,14 @@ enum MacroEvalError {
 }
 
 impl MacroEvalError {
+    fn at_end(self, token: &'static str) -> Self {
+        if matches!(self, Self::MissingInOperand) {
+            Self::SyntaxUnexpected(token)
+        } else {
+            self
+        }
+    }
+
     fn diagnostic(&self) -> Option<(&'static str, String)> {
         match self {
             Self::UnknownVariable(name) => Some(("E063", format!("Unknown variable {name}"))),
@@ -127,6 +136,7 @@ impl MacroEvalError {
                 "Second argument of `in` operator must be an array".to_string(),
             )),
             Self::SyntaxEol => Some(("E062", "syntax error, unexpected EOL".to_string())),
+            Self::MissingInOperand => Some(("E062", "syntax error, unexpected EOL".to_string())),
             Self::SyntaxUnexpected(token) => {
                 Some(("E062", format!("syntax error, unexpected {token}")))
             }
@@ -169,9 +179,11 @@ fn push_type_error(
 }
 
 fn push_i211(state: &mut ExpandState<'_, '_>, span: Span, message: String) {
-    if !state.incomplete_reasons.iter().any(|reason| {
-        reason.span == span && reason.code == "I211" && reason.message == message
-    }) {
+    if !state
+        .incomplete_reasons
+        .iter()
+        .any(|reason| reason.span == span && reason.code == "I211" && reason.message == message)
+    {
         state.incomplete_reasons.push(IncompleteReason {
             span,
             code: "I211",
@@ -207,9 +219,7 @@ fn note_eval_failure(
 
 fn oversized_collection(value: &MacroVal) -> bool {
     match value {
-        MacroVal::Range { start, end } => {
-            (*end as i128 - *start as i128 + 1) > RANGE_CAP as i128
-        }
+        MacroVal::Range { start, end } => (*end as i128 - *start as i128 + 1) > RANGE_CAP as i128,
         MacroVal::Array(values) | MacroVal::Tuple(values) => values.len() > RANGE_CAP,
         _ => false,
     }
@@ -425,7 +435,20 @@ impl<'a> SourceRecorder<'a> {
         if piece.is_empty() {
             return;
         }
-        // Preview buffers use `\n` only; keep the written span on the raw bytes.
+        // Keep each collapsed CRLF separate. Length alone cannot locate CRLF
+        // among mixed line endings or split a copy at an included-file boundary.
+        let mut cursor = start;
+        for (offset, _) in piece.match_indices("\r\n") {
+            let newline = start + offset as u32;
+            self.push_copy(cursor, newline, macro_active);
+            self.push_copy(newline, newline + 2, macro_active);
+            cursor = newline + 2;
+        }
+        self.push_copy(cursor, end, macro_active);
+    }
+
+    fn push_copy(&mut self, start: u32, end: u32, macro_active: bool) {
+        let piece = &self.src[start as usize..end as usize];
         let normalized = piece.replace("\r\n", "\n").replace('\r', "\n");
         if normalized.is_empty() {
             return;
@@ -999,9 +1022,7 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                 Dir::Endfor | Dir::Unknown => {
                     let em = emitting(&stack);
                     let mut kept = false;
-                    if directive_name(tok.text(state.src)).eq_ignore_ascii_case("include")
-                        && em
-                    {
+                    if directive_name(tok.text(state.src)).eq_ignore_ascii_case("include") && em {
                         if let Some(visitor) = state.file_visitor.as_deref_mut() {
                             if !visitor.visit(tok.span, state.defines, state.incomplete.is_none()) {
                                 state.incomplete.get_or_insert(tok.span);
@@ -1038,18 +1059,22 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
         {
             if emitting(&stack) {
                 let replacements = if tok.kind == TokenKind::String {
-                    subst_quoted(state.src, tok, state.defines).map(|token| {
-                        let display = token.text(state.src).to_string();
-                        (display, vec![token])
-                    })
+                    subst_quoted(state.src, tok, state.defines)
+                        .map(|expansion| (vec![expansion.token], expansion.substitutions))
                 } else {
                     subst_interp(state.src, tok, state.defines)
                         .map_err(|error| (tok.span, error))
-                        .map(|(display, tokens)| (display, tokens))
+                        .map(|(display, tokens)| (tokens, vec![(tok.span, display)]))
                 };
                 match replacements {
-                    Ok((display, replacements)) => {
-                        record_source_substitution(state, tok, &display);
+                    Ok((replacements, substitutions)) => {
+                        let macro_active = !state.origin_stack.is_empty();
+                        if let Some(recorder) = state.source.as_deref_mut() {
+                            for (span, display) in substitutions {
+                                recorder.substitute(span, &display, macro_active);
+                            }
+                            recorder.copy_range(recorder.cursor, tok.span.end, macro_active);
+                        }
                         if let Some(recorder) = state.source.as_deref_mut() {
                             recorder.suppress = true;
                         }
@@ -1070,7 +1095,8 @@ fn expand_seq(state: &mut ExpandState<'_, '_>, tokens: &[Token]) -> (Vec<Token>,
                         {
                             state.incomplete.get_or_insert(span);
                         } else {
-                            let expression = interp_expression(state.src, tok);
+                            let expression = interp_expression(state.src, span);
+                            let error = error.at_end("END_EVAL");
                             note_eval_failure(state, span, error, &expression);
                         }
                         emit(state, &mut out, &mut traces, tok.clone());
@@ -1105,7 +1131,12 @@ fn push_discarded(state: &mut ExpandState<'_, '_>, start: u32, end: u32) {
     }
 }
 
-fn emit(state: &mut ExpandState<'_, '_>, out: &mut Vec<Token>, traces: &mut Vec<TokenTrace>, tok: Token) {
+fn emit(
+    state: &mut ExpandState<'_, '_>,
+    out: &mut Vec<Token>,
+    traces: &mut Vec<TokenTrace>,
+    tok: Token,
+) {
     record_source_emit(state, &tok);
     if let Some(prev) = out.last() {
         if let Some(merged) = merge_adjacent(state.src, prev, &tok) {
@@ -1123,7 +1154,10 @@ fn record_source_emit(state: &mut ExpandState<'_, '_>, tok: &Token) {
     if state.source.is_none() {
         return;
     }
-    let suppress = state.source.as_ref().is_some_and(|recorder| recorder.suppress);
+    let suppress = state
+        .source
+        .as_ref()
+        .is_some_and(|recorder| recorder.suppress);
     if suppress || tok.kind == TokenKind::Eof {
         return;
     }
@@ -1143,13 +1177,6 @@ fn record_source_directive(state: &mut ExpandState<'_, '_>, dir: Span, copy_lead
     let macro_active = !state.origin_stack.is_empty();
     if let Some(recorder) = state.source.as_deref_mut() {
         recorder.skip_directive(dir, copy_leading_gap, macro_active);
-    }
-}
-
-fn record_source_substitution(state: &mut ExpandState<'_, '_>, original: &Token, display: &str) {
-    let macro_active = !state.origin_stack.is_empty();
-    if let Some(recorder) = state.source.as_deref_mut() {
-        recorder.substitute(original.span, display, macro_active);
     }
 }
 
@@ -1500,11 +1527,16 @@ fn subst_interp(
 /// Substitute inside a quoted .mod value without changing its string boundary.
 /// Dynare expands before string lexing. A replacement that closes the quote or
 /// adds a line needs a surrounding-source lexer pass and stays incomplete here.
+struct QuotedExpansion {
+    token: Token,
+    substitutions: Vec<(Span, String)>,
+}
+
 fn subst_quoted(
     src: &str,
     tok: &Token,
     defines: &HashMap<String, MacroVal>,
-) -> Result<Token, (Span, MacroEvalError)> {
+) -> Result<QuotedExpansion, (Span, MacroEvalError)> {
     let text = tok.text(src);
     let delimiter = text
         .chars()
@@ -1514,6 +1546,7 @@ fn subst_quoted(
         return Err((tok.span, MacroEvalError::Unsupported));
     }
     let mut output = String::new();
+    let mut substitutions = Vec::new();
     let mut cursor = 0;
     let mut unsafe_span = None;
     while let Some(relative) = text[cursor..].find("@{") {
@@ -1541,6 +1574,7 @@ fn subst_quoted(
                     unsafe_span.get_or_insert(span);
                 }
                 output.push_str(&replacement);
+                substitutions.push((span, replacement));
             }
             Err(MacroEvalError::Unsupported) => {
                 unsafe_span.get_or_insert(span);
@@ -1553,7 +1587,10 @@ fn subst_quoted(
         return Err((span, MacroEvalError::Unsupported));
     }
     output.push_str(&text[cursor..]);
-    Ok(Token::with_lexeme(TokenKind::String, tok.span, output))
+    Ok(QuotedExpansion {
+        token: Token::with_lexeme(TokenKind::String, tok.span, output),
+        substitutions,
+    })
 }
 
 fn dir_kind(src: &str, tok: &Token) -> Dir {
@@ -1727,23 +1764,13 @@ fn define_rhs_expression(text: &str) -> &str {
     rest.strip_prefix('=').map(str::trim).unwrap_or(rest.trim())
 }
 
-fn interp_expression(src: &str, tok: &Token) -> String {
-    let text = tok.text(src);
-    if tok.kind == TokenKind::MacroInterp {
-        return text
-            .strip_prefix("@{")
-            .and_then(|s| s.strip_suffix('}'))
-            .unwrap_or(text)
-            .trim()
-            .to_string();
-    }
-    // Quoted value: name the first @{} that failed when available.
-    if let Some(start) = text.find("@{") {
-        if let Some(end) = text[start + 2..].find('}') {
-            return text[start + 2..start + 2 + end].trim().to_string();
-        }
-    }
-    text.trim().to_string()
+fn interp_expression(src: &str, span: Span) -> String {
+    let text = &src[span.start as usize..span.end as usize];
+    text.strip_prefix("@{")
+        .and_then(|s| s.strip_suffix('}'))
+        .unwrap_or(text)
+        .trim()
+        .to_string()
 }
 
 fn parse_define_eval(
@@ -1902,7 +1929,21 @@ fn eval_macro_expr(
     // than `:` and arithmetic. `in` is non-associative.
     for group in [&['|'][..], &['&'][..], &['=', '!', '<', '>'][..]] {
         if let Some((left, op, right)) = split_macro_binary(source, group) {
-            let left = eval_macro_expr(left, defines, depth + 1)?;
+            let token = match op {
+                "||" => "OR",
+                "&&" => "AND",
+                "|" => "UNION",
+                "&" => "INTERSECTION",
+                "==" => "EQUAL_EQUAL",
+                "!=" => "NOT_EQUAL",
+                "<=" => "LESS_EQUAL",
+                ">=" => "GREATER_EQUAL",
+                "<" => "LESS",
+                ">" => "GREATER",
+                _ => unreachable!(),
+            };
+            let left =
+                eval_macro_expr(left, defines, depth + 1).map_err(|error| error.at_end(token))?;
             let right = eval_macro_expr(right, defines, depth + 1)?;
             return eval_binary(left, op, right);
         }
@@ -1910,8 +1951,11 @@ fn eval_macro_expr(
     if let Some((left, right)) = split_top_level_keyword_first(source, "in") {
         let left = left.trim();
         let right = right.trim();
-        if left.is_empty() || right.is_empty() {
+        if left.is_empty() {
             return Err(MacroEvalError::SyntaxUnexpected("IN"));
+        }
+        if right.is_empty() {
+            return Err(MacroEvalError::MissingInOperand);
         }
         if split_top_level_keyword_first(right, "in").is_some() {
             return Err(MacroEvalError::SyntaxUnexpected("IN"));
@@ -1936,24 +1980,45 @@ fn eval_macro_expr(
         }
     }
     if let Some(body) = source.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+        let parts = split_top_level_list(body);
+        let count = parts.len();
         return Ok(MacroVal::Array(
-            split_top_level_list(body)
+            parts
                 .into_iter()
-                .map(|item| eval_macro_expr(item, defines, depth + 1))
+                .enumerate()
+                .map(|(index, item)| {
+                    eval_macro_expr(item, defines, depth + 1).map_err(|error| {
+                        error.at_end(if index + 1 == count {
+                            "RBRACKET"
+                        } else {
+                            "COMMA"
+                        })
+                    })
+                })
                 .collect::<Result<_, _>>()?,
         ));
     }
     if let Some(body) = source.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
         let parts = split_top_level_list(body);
+        let count = parts.len();
         return if parts.len() > 1 {
             Ok(MacroVal::Tuple(
                 parts
                     .into_iter()
-                    .map(|item| eval_macro_expr(item, defines, depth + 1))
+                    .enumerate()
+                    .map(|(index, item)| {
+                        eval_macro_expr(item, defines, depth + 1).map_err(|error| {
+                            error.at_end(if index + 1 == count {
+                                "RPAREN"
+                            } else {
+                                "COMMA"
+                            })
+                        })
+                    })
                     .collect::<Result<_, _>>()?,
             ))
         } else {
-            eval_macro_expr(body, defines, depth + 1)
+            eval_macro_expr(body, defines, depth + 1).map_err(|error| error.at_end("RPAREN"))
         };
     }
     if let Some(value) = strip_quotes(source) {
@@ -2010,8 +2075,15 @@ fn eval_macro_expr(
             return Err(MacroEvalError::Unsupported);
         }
         let mut local = defines.clone();
-        for (param, arg) in params.iter().zip(arguments) {
-            local.insert(param.clone(), eval_macro_expr(arg, defines, depth + 1)?);
+        for (index, (param, arg)) in params.iter().zip(arguments).enumerate() {
+            let value = eval_macro_expr(arg, defines, depth + 1).map_err(|error| {
+                error.at_end(if index + 1 == params.len() {
+                    "RPAREN"
+                } else {
+                    "COMMA"
+                })
+            })?;
+            local.insert(param.clone(), value);
         }
         return eval_macro_expr(body, &local, depth + 1);
     }
@@ -2019,7 +2091,9 @@ fn eval_macro_expr(
         let value = defines
             .get(name)
             .ok_or_else(|| MacroEvalError::UnknownVariable(name.to_string()))?;
-        let MacroVal::Int(index) = eval_macro_expr(index, defines, depth + 1)? else {
+        let MacroVal::Int(index) =
+            eval_macro_expr(index, defines, depth + 1).map_err(|error| error.at_end("RBRACKET"))?
+        else {
             return Err(MacroEvalError::Unsupported);
         };
         return match value {
@@ -2155,9 +2229,7 @@ fn eval_membership(left: MacroVal, right: MacroVal) -> Result<MacroVal, MacroEva
         _ => return Err(MacroEvalError::InOperandType),
     };
     Ok(MacroVal::Bool(
-        items
-            .iter()
-            .any(|item| macro_values_equal(&left, item)),
+        items.iter().any(|item| macro_values_equal(&left, item)),
     ))
 }
 
@@ -2223,7 +2295,7 @@ fn split_top_level_keyword<'a>(source: &'a str, word: &str) -> Option<(&'a str, 
     found
 }
 
-/// Leftmost whitespace-bounded keyword. Membership uses this so a second
+/// Leftmost identifier-bounded keyword. Membership uses this so a second
 /// top-level `in` on the right can refuse instead of nesting.
 fn split_top_level_keyword_first<'a>(source: &'a str, word: &str) -> Option<(&'a str, &'a str)> {
     let mut found = None;
@@ -2236,12 +2308,24 @@ fn split_top_level_keyword_first<'a>(source: &'a str, word: &str) -> Option<(&'a
 }
 
 fn is_top_level_keyword_at(source: &str, i: usize, tail: &str, word: &str) -> bool {
-    tail.starts_with(word)
-        && source[..i].chars().last().is_some_and(char::is_whitespace)
+    if !tail.starts_with(word) {
+        return false;
+    }
+    let identifier_char = |ch: char| ch.is_ascii_alphanumeric() || ch == '_';
+    // The pin lexes a number followed immediately by `in` as two tokens.
+    // A preceding identifier absorbs it (for example `begin` or `x1in`).
+    let prefix = &source[..i];
+    let numeric = prefix
+        .rsplit(|ch: char| !identifier_char(ch) && ch != '.')
+        .next()
+        .unwrap_or("");
+    let after_number = numeric.starts_with(|ch: char| ch.is_ascii_digit() || ch == '.')
+        && numeric.replace(['d', 'D'], "e").parse::<f64>().is_ok();
+    (!prefix.chars().last().is_some_and(identifier_char) || after_number)
         && tail[word.len()..]
             .chars()
             .next()
-            .is_some_and(char::is_whitespace)
+            .is_none_or(|ch| !identifier_char(ch))
 }
 
 fn split_top_level_list(source: &str) -> Vec<&str> {
@@ -2508,5 +2592,3 @@ fn ident_len(s: &str) -> Option<usize> {
 fn is_simple_ident(s: &str) -> bool {
     ident_len(s).is_some_and(|n| n == s.len())
 }
-
-

@@ -87,9 +87,7 @@ pub(crate) fn macro_display_ranges(
         fragment.macro_active
             || fragment.kind == SourceFragmentKind::Substitution
             || include_spans.iter().any(|segment| {
-                !segment.is_empty()
-                    && written.start >= segment.start
-                    && written.end <= segment.end
+                !segment.is_empty() && written.start >= segment.start && written.end <= segment.end
             })
     };
     let mut shaded = Vec::new();
@@ -159,8 +157,7 @@ fn build_regions(display: &str, fragments: &[SourceFragment], file_cuts: &[u32])
             continue;
         }
         for gap in subtract_spans(fragment.display, &identifiers) {
-            let Some(projected) = project_fragment(fragment, display, gap.start, gap.end)
-            else {
+            let Some(projected) = project_fragment(fragment, display, gap.start, gap.end) else {
                 continue;
             };
             let kind = match fragment.kind {
@@ -213,7 +210,10 @@ fn split_copies_at_files(
             }
             let rel = (cut - start_w) as usize;
             let display_cut = start_d + rel as u32;
-            if display.get(start_d as usize..display_cut as usize).is_none() {
+            if display
+                .get(start_d as usize..display_cut as usize)
+                .is_none()
+            {
                 continue;
             }
             out.push(SourceFragment {
@@ -279,13 +279,19 @@ fn identifier_covers(
             }
             match fragment.kind {
                 SourceFragmentKind::Substitution => {
+                    // A replacement may produce several tokens. Only a whole
+                    // replacement can be part of one written identifier; keep
+                    // partial overlaps in the original substitution region.
+                    if start != fragment.display.start || end != fragment.display.end {
+                        ok = false;
+                        break;
+                    }
                     has_sub = true;
                     parts.push(written);
                 }
                 SourceFragmentKind::Copy => {
                     has_copy = true;
-                    let Some(projected) = project_fragment(fragment, display, start, end)
-                    else {
+                    let Some(projected) = project_fragment(fragment, display, start, end) else {
                         ok = false;
                         break;
                     };
@@ -395,42 +401,9 @@ fn project_fragment(fragment: &SourceFragment, display: &str, d0: u32, d1: u32) 
             end: written.start + rel1 as u32,
         });
     }
-    // CRLF in the written span is one `\n` in the preview. The display is
-    // shorter by one byte per collapsed break, and the break sits at a
-    // newline in the display.
-    let (start, end) = map_display_newlines(shown, written_len, rel0, rel1)?;
-    Some(Span {
-        start: written.start + start as u32,
-        end: written.start + end as u32,
-    })
-}
-
-/// Map display offsets back through `\r\n` written as `\n`.
-fn map_display_newlines(
-    shown: &str,
-    written_len: usize,
-    rel0: usize,
-    rel1: usize,
-) -> Option<(usize, usize)> {
-    let extra = written_len.checked_sub(shown.len())?;
-    if extra == 0 || shown.bytes().filter(|&byte| byte == b'\n').count() < extra {
-        return None;
-    }
-    let mut newlines = 0usize;
-    let mut start = None;
-    for (offset, ch) in shown.char_indices() {
-        if offset == rel0 {
-            start = Some(offset + newlines.min(extra));
-        }
-        if offset == rel1 {
-            return Some((start?, offset + newlines.min(extra)));
-        }
-        if ch == '\n' && newlines < extra {
-            newlines += 1;
-        }
-    }
-    let start = start?;
-    (rel1 == shown.len()).then_some((start, shown.len() + newlines.min(extra)))
+    // The recorder isolates every collapsed CRLF. No count-based guess is
+    // needed about where mixed written line endings occurred.
+    (shown == "\n" && written_len == 2 && rel0 == 0 && rel1 == 1).then_some(written)
 }
 
 #[cfg(test)]
@@ -477,7 +450,7 @@ mod tests {
         (layout.text, ranges, includes)
     }
 
-    fn slice<'a>(text: &'a str, span: Span) -> &'a str {
+    fn slice(text: &str, span: Span) -> &str {
         &text[span.start as usize..span.end as usize]
     }
 
@@ -532,9 +505,8 @@ mod tests {
 
     #[test]
     fn for_body_is_shaded_including_whitespace() {
-        let (display, ranges) = tint(
-            "var y;\n@#for j in 1:2\nparameters beta_@{j};\n@#endfor\nmodel;\ny=1;\nend;\n",
-        );
+        let (display, ranges) =
+            tint("var y;\n@#for j in 1:2\nparameters beta_@{j};\n@#endfor\nmodel;\ny=1;\nend;\n");
         assert!(fully_shaded(&display, &ranges, "parameters beta_1;"));
         assert!(fully_shaded(&display, &ranges, "parameters beta_2;"));
         assert!(!covers(&display, &ranges, "var y"));
@@ -607,8 +579,8 @@ mod tests {
 
         let (quoted, quoted_ranges) =
             tint("@#define j=2\nvar y;\nmodel;\n[name='eq@{j}'] y=1;\nend;\n");
-        assert!(covers(&quoted, &quoted_ranges, "eq2"), "{quoted}");
-        assert!(fully_shaded(&quoted, &quoted_ranges, "'eq2'"), "{quoted}");
+        assert!(fully_shaded(&quoted, &quoted_ranges, "2"), "{quoted}");
+        assert!(!covers(&quoted, &quoted_ranges, "eq"), "{quoted}");
     }
 
     #[test]
@@ -619,8 +591,10 @@ mod tests {
         assert!(!fully_shaded(&display, &ranges, "parameters "), "{display}");
         let beta_at = display.find("beta_2").unwrap();
         let params = display.find("parameters").unwrap();
-        assert!(ranges.iter().any(|span| span.start == beta_at as u32
-            && span.end == (beta_at + "beta_2".len()) as u32));
+        assert!(ranges
+            .iter()
+            .any(|span| span.start == beta_at as u32
+                && span.end == (beta_at + "beta_2".len()) as u32));
         assert!(!ranges
             .iter()
             .any(|span| span.start <= params as u32 && (params + 10) as u32 <= span.end));
@@ -648,7 +622,8 @@ mod tests {
 
         let (unicode, unicode_ranges) =
             tint("@#define j=1\nvar y;\nmodel;\n[name='😀@{j}'] y=1;\nend;\n");
-        assert!(covers(&unicode, &unicode_ranges, "😀1"), "{unicode}");
+        assert!(fully_shaded(&unicode, &unicode_ranges, "1"), "{unicode}");
+        assert!(!covers(&unicode, &unicode_ranges, "😀"), "{unicode}");
 
         let (crlf, crlf_ranges) = tint(
             "@#for j in 1:1\r\nparameters beta_@{j};\r\n@#endfor\r\nvar y;\r\nmodel;\r\ny=1;\r\nend;\r\n",

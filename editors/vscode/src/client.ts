@@ -6,7 +6,7 @@ import {
 } from "vscode-languageclient/node";
 import { Binary, resolveBinary } from "./binary";
 import { ClientLifecycle, ManagedClient } from "./lifecycle";
-import { configurationSnapshot } from "./settings";
+import { configurationSnapshot, macroTintOnlyChange } from "./settings";
 import { ModelInfo, parseModelInfo, record, timingModifiers, tokenRoles } from "./protocol";
 
 interface ClientProcess extends ManagedClient { readonly client: LanguageClient }
@@ -82,7 +82,7 @@ interface CachedRequest {
 export interface ModelSnapshot extends ModelInfo { client_instance: number }
 export interface NavigationDecision { isCurrent(): boolean }
 export type NavigationGuard = (loadedDocument: vscode.TextDocument) => boolean | NavigationDecision | Promise<boolean | NavigationDecision>;
-export interface InputInvalidation { root?: string; reason: "input" | "file"; uri?: string }
+export interface InputInvalidation { root?: string; reason: "input" | "file"; uri?: string; inputRevision?: string }
 
 /** Shared service for status, view, tint, lenses, diagnostics and previews. */
 export class DygnosisClient implements vscode.Disposable {
@@ -162,7 +162,7 @@ export class DygnosisClient implements vscode.Disposable {
       }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => { this.selectedOwners.clear(); this.explicitOwnerDocuments.clear(); this.ownedDocuments.clear(); void this.sendSettings(); }),
       vscode.workspace.onDidChangeConfiguration(event => {
-        if (!event.affectsConfiguration("dynare")) return;
+        if (!event.affectsConfiguration("dynare") || macroTintOnlyChange(event)) return;
         if (event.affectsConfiguration("dynare.serverPath")) void this.restart();
         else void this.sendSettings();
       }),
@@ -186,7 +186,7 @@ export class DygnosisClient implements vscode.Disposable {
     }
     return vscode.Disposable.from(...listeners);
   }
-  invalidate(root?: string, file?: vscode.Uri): void {
+  invalidate(root?: string, file?: vscode.Uri, inputRevision?: string): void {
     ++this.epoch;
     // Every in-flight snapshot uses the global epoch. Release its fresh
     // callers immediately; a server ignoring cancellation must not hold a queue.
@@ -195,7 +195,7 @@ export class DygnosisClient implements vscode.Disposable {
       if (!root || key.startsWith(`${root}\n`)) { request.cancellation.cancel(); request.cancellation.dispose(); this.cache.delete(key); }
     }
     if (root) this.infos.delete(root); else this.infos.clear();
-    this.invalidated.fire(file ? { root, reason: "file", uri: file.toString() } : { root, reason: "input" });
+    this.invalidated.fire(file ? { root, reason: "file", uri: file.toString() } : { root, reason: "input", ...(inputRevision ? { inputRevision } : {}) });
     this.changed.fire();
     this.scheduleRootRefresh();
     this.scheduleSymbolRefresh();
@@ -249,7 +249,8 @@ export class DygnosisClient implements vscode.Disposable {
         this.modelInfoSupported = record(experimental) && record(experimental.dygnosis) &&
           record(experimental.dygnosis.modelInfo) && experimental.dygnosis.modelInfo.schema_version === 1;
         this.instanceSubscriptions.push(client.onNotification("dynare/modelInfoChanged", (value: unknown) => {
-          if (client === this.client && record(value) && value.schema_version === 1 && typeof value.root_uri === "string") this.invalidate(value.root_uri);
+          if (client === this.client && record(value) && value.schema_version === 1 && typeof value.root_uri === "string")
+            this.invalidate(value.root_uri, undefined, typeof value.input_revision === "string" ? value.input_revision : undefined);
         }), client.onDidChangeState(event => {
           if (client === this.client && event.newState === State.Stopped) { this.modelInfoSupported = false; this.invalidate(); }
         }));
@@ -504,8 +505,7 @@ export class DygnosisClient implements vscode.Disposable {
     if (typeof decision === "boolean" ? !decision : decision.isCurrent() !== true) return;
     if (root) this.selectOwner(document.uri, root);
     const viewColumn = options?.reuseOpen ? reuseOpenViewColumn(document.uri) : options?.viewColumn;
-    const { reuseOpen: _reuseOpen, ...rest } = options ?? {};
-    await vscode.window.showTextDocument(document, { ...rest, viewColumn, selection });
+    await vscode.window.showTextDocument(document, { viewColumn, selection });
   }
   async failure(message: string): Promise<void> {
     this.log(message);

@@ -1041,3 +1041,28 @@ test("macro tint uses complete source ranges and skips a stale incomplete label"
   assert.deepEqual(macroTintRanges({ ...parsed, complete: false }, document, text), []);
   assert.deepEqual(macroTintRanges(parsed, document, "stale"), []);
 });
+
+test("macro tint toggles preserve source jumps and restore decoration without Refresh", async () => {
+  const env = setup();
+  env.service.client.initializeResult.capabilities.experimental.dygnosis.effectivePreview.macro_ranges = true;
+  env.service.value.macro_ranges = [new Range(1, 0, 1, 5)];
+  const session = await env.show(); env.activate(session);
+  const paints = [];
+  env.host.editor.setDecorations = (_type, ranges) => paints.push(ranges);
+  env.host.active.fire();
+  assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
+  const count = env.service.requests.length;
+  const event = { affectsConfiguration: key => ["dynare", "dynare.effectiveModel.macroTint"].includes(key) };
+  env.host.settings["effectiveModel.macroTint"] = false;
+  env.host.configured.fire(event);
+  assert.deepEqual(paints.at(-1), []);
+  assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
+  env.host.settings["effectiveModel.macroTint"] = true;
+  env.host.configured.fire(event);
+  assert.equal(paints.at(-1).length, 1);
+  assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
+  assert.equal(env.service.requests.length, count);
+  env.host.configured.fire({ affectsConfiguration: key => ["dynare", "dynare.effectiveModel.macroTint", "dynare.searchPaths"].includes(key) });
+  assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false, "simultaneous input changes still invalidate");
+  env.registration.dispose(); env.previews.dispose();
+});

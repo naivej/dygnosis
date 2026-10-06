@@ -5,7 +5,7 @@ import type { EffectivePreviewRegistry, EffectivePreviewSession } from "./previe
 import { effectivePreviewArguments } from "./preview";
 import { location, record } from "./protocol";
 import type { Location, Position, Range } from "./protocol";
-import { booleanSetting, listSetting } from "./settings";
+import { booleanSetting, listSetting, macroTintOnlyChange } from "./settings";
 
 /** The input-only event and native placement option are integrated with 0.11.2. */
 export interface OriginJumpClient extends Pick<DygnosisClient, "client" | "currentInstance" | "log" | "failure" | "revalidate" | "execute"> {
@@ -76,7 +76,7 @@ function parseMacroRanges(value: unknown, lines: string[]): Range[] | undefined 
   const ranges: Range[] = [];
   for (const row of value) {
     if (!boundedRange(row, lines)) return undefined;
-    ranges.push(row as Range);
+    ranges.push(row);
   }
   return ranges;
 }
@@ -236,7 +236,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     const canTint = enabled && !state.stale && payload?.complete === true && supportsMacroRanges(service) &&
       Array.isArray(payload.macro_ranges) && state.instance === service.currentInstance &&
       !state.session.document.isClosed && state.session.document.getText() === state.session.text;
-    const ranges = canTint ? macroTintRanges(payload!, state.session.document, state.session.text) : [];
+    const ranges = canTint ? macroTintRanges(payload, state.session.document, state.session.text) : [];
     const decorations = ranges.map(range => ({ range, hoverMessage }));
     for (const editor of vscode.window.visibleTextEditors) {
       if (editor.document === state.session.document) editor.setDecorations(macroDecoration, decorations);
@@ -295,7 +295,9 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       vscode.workspace.onDidCloseTextDocument(document => {
         if ((state.payload?.dependency_candidates ?? [session.root.toString()]).some(uri => sameUri(uri, document.uri.toString()))) stale(state);
       }),
-      vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration("dynare", session.root)) stale(state); }));
+      vscode.workspace.onDidChangeConfiguration(event => {
+        if (event.affectsConfiguration("dynare", session.root) && !macroTintOnlyChange(event, session.root)) stale(state);
+      }));
     if (supportsNavigation(service)) {
       try {
         state.payload = parsePreviewNavigation(session.result, session.root); watch(state);

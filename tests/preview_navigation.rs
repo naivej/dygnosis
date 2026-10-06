@@ -717,7 +717,10 @@ fn same_preview_facts(compact: &Value, layout: &Value) {
         .as_object_mut()
         .unwrap()
         .remove("source_navigation");
-    without_layout.as_object_mut().unwrap().remove("macro_ranges");
+    without_layout
+        .as_object_mut()
+        .unwrap()
+        .remove("macro_ranges");
     for (display, old) in without_layout["navigation"]
         .as_array_mut()
         .unwrap()
@@ -935,7 +938,10 @@ async fn source_layout_keeps_written_spacing_and_leaves_shared_output_unchanged(
     let formatted = dygnosis::format_text(source, "  ");
     let source_view = source_preview(backend, &root).await;
     assert_eq!(source_view["complete"], true, "{source_view}");
-    assert_eq!(source_view["effective_text"], "var y;\nmodel;\ny=c;\nend;\n");
+    assert_eq!(
+        source_view["effective_text"],
+        "var y;\nmodel;\ny=c;\nend;\n"
+    );
     same_preview_facts(&compact, &source_view);
     assert_eq!(preview(backend, &root).await, compact);
     assert_eq!(dynare_expand(source, None, None), mcp);
@@ -1012,7 +1018,13 @@ async fn source_layout_drops_include_directive_indent_and_keeps_file_spacing() {
     let include = Url::parse("file:///C:/dygnosis-preview/include-indent-body.inc").unwrap();
     let (service, _socket) = new_service();
     let backend = service.inner();
-    open(backend, &root, "model;\n  @#include \"include-indent-body.inc\"\nend;\n", 1).await;
+    open(
+        backend,
+        &root,
+        "model;\n  @#include \"include-indent-body.inc\"\nend;\n",
+        1,
+    )
+    .await;
     open(backend, &include, "y=1;\n", 1).await;
     let source_view = source_preview(backend, &root).await;
     assert_eq!(source_view["complete"], true, "{source_view}");
@@ -1026,7 +1038,13 @@ async fn source_layout_include_without_final_newline_keeps_line_separator() {
     let include = Url::parse("file:///C:/dygnosis-preview/include-nonew-body.inc").unwrap();
     let (service, _socket) = new_service();
     let backend = service.inner();
-    open(backend, &root, "model;\n@#include \"include-nonew-body.inc\"\nend;\n", 1).await;
+    open(
+        backend,
+        &root,
+        "model;\n@#include \"include-nonew-body.inc\"\nend;\n",
+        1,
+    )
+    .await;
     open(backend, &include, "y=1;", 1).await;
     let source_view = source_preview(backend, &root).await;
     assert_eq!(source_view["complete"], true, "{source_view}");
@@ -1050,7 +1068,10 @@ async fn source_layout_dormant_include_emits_no_text() {
     open(backend, &include, "  leaked=1;\n", 1).await;
     let source_view = source_preview(backend, &root).await;
     assert_eq!(source_view["complete"], true, "{source_view}");
-    assert_eq!(source_view["effective_text"], "var y;\nmodel;\ny=1;\nend;\n");
+    assert_eq!(
+        source_view["effective_text"],
+        "var y;\nmodel;\ny=1;\nend;\n"
+    );
     assert!(!source_view["effective_text"]
         .as_str()
         .unwrap()
@@ -1311,9 +1332,9 @@ async fn source_navigation_maps_declarations_macros_includes_and_identifiers() {
             && json_slice(text, &region["effective_range"], true).contains("y=1")
     });
     assert!(include_hit.is_some(), "{regions:?}");
-    let comment = regions.iter().find(|region| {
-        json_slice(text, &region["effective_range"], true).contains("note 😀")
-    });
+    let comment = regions
+        .iter()
+        .find(|region| json_slice(text, &region["effective_range"], true).contains("note 😀"));
     assert!(comment.is_some(), "{regions:?}");
 }
 
@@ -1338,7 +1359,10 @@ async fn source_navigation_nested_name_and_incomplete_are_empty() {
         .iter()
         .find(|region| region["kind"] == "identifier")
         .expect("nested identifier");
-    assert_eq!(json_slice(text, &region["effective_range"], true), "beta_1_2");
+    assert_eq!(
+        json_slice(text, &region["effective_range"], true),
+        "beta_1_2"
+    );
     assert_eq!(
         json_slice(
             "@#for i in 1:1\n@#for j in 2:2\nparameters beta_@{i}_@{j};\n@#endfor\n@#endfor\nvar y;\nmodel;\ny=1;\nend;\n",
@@ -1354,6 +1378,187 @@ async fn source_navigation_nested_name_and_incomplete_are_empty() {
     assert_eq!(incomplete["source_navigation"], json!([]));
     assert_eq!(incomplete["macro_ranges"], json!([]));
     assert_eq!(incomplete["navigation"], json!([]));
+}
+
+#[tokio::test]
+async fn source_navigation_keeps_every_character_of_multitoken_substitutions() {
+    let root = Url::parse("file:///C:/dygnosis-preview/source-nav-list.mod").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    let source = "parameters beta_@{\"a gamma\"};\nvar y; model; y=1; end;\n";
+    open(backend, &root, source, 1).await;
+    let view = source_preview(backend, &root).await;
+    assert_eq!(view["complete"], true, "{view}");
+    let text = view["effective_text"].as_str().unwrap();
+    let regions = view["source_navigation"].as_array().unwrap();
+    let substitution = regions
+        .iter()
+        .find(|region| {
+            region["kind"] == "substitution"
+                && json_slice(text, &region["effective_range"], true) == "a gamma"
+        })
+        .expect("the entire substitution has one written target");
+    assert_eq!(
+        json_slice(source, &substitution["written_location"]["range"], true),
+        "@{\"a gamma\"}"
+    );
+    assert!(!regions.iter().any(|region| region["kind"] == "identifier"));
+}
+
+#[tokio::test]
+async fn source_navigation_mixed_newlines_keep_names_and_include_boundaries() {
+    let root = Url::parse("file:///C:/dygnosis-preview/source-nav-mixed.mod").unwrap();
+    let include = Url::parse("file:///C:/dygnosis-preview/mixed.inc").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    let source = "@#define j 1\nvar y;\n// root\r\n@#include \"mixed.inc\"\r\nmodel; y=1; end;\n";
+    let body = "// include\nparameters beta_@{j};\r\n";
+    open(backend, &root, source, 1).await;
+    open(backend, &include, body, 1).await;
+    let view = source_preview(backend, &root).await;
+    assert_eq!(view["complete"], true, "{view}");
+    let text = view["effective_text"].as_str().unwrap();
+    let regions = view["source_navigation"].as_array().unwrap();
+    let name = regions
+        .iter()
+        .find(|region| region["kind"] == "identifier")
+        .expect("identifier");
+    assert_eq!(
+        json_slice(body, &name["written_location"]["range"], true),
+        "beta_@{j}"
+    );
+    for region in regions.iter().filter(|region| region["kind"] == "copy") {
+        let written = if region["written_location"]["uri"] == root.as_str() {
+            source
+        } else {
+            body
+        };
+        assert_eq!(
+            json_slice(text, &region["effective_range"], true),
+            json_slice(written, &region["written_location"]["range"], true).replace("\r\n", "\n"),
+            "{region}"
+        );
+    }
+    let mapped_bytes: usize = regions
+        .iter()
+        .map(|region| json_slice(text, &region["effective_range"], true).len())
+        .sum();
+    assert_eq!(
+        mapped_bytes,
+        text.len(),
+        "all characters have a written source: {view}"
+    );
+}
+
+#[tokio::test]
+async fn source_navigation_quoted_substitutions_keep_copied_text_and_tint_separate() {
+    let root = Url::parse("file:///C:/dygnosis-preview/source-nav-quoted.mod").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    let source = "@#define j = 2\nvar y; model; [name='prefix@{j}suffix'] y=1; end;\n";
+    open(backend, &root, source, 1).await;
+    let view = source_preview(backend, &root).await;
+    assert_eq!(view["complete"], true, "{view}");
+    let text = view["effective_text"].as_str().unwrap();
+    let region = view["source_navigation"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|region| region["kind"] == "substitution")
+        .unwrap();
+    assert_eq!(json_slice(text, &region["effective_range"], true), "2");
+    assert_eq!(
+        json_slice(source, &region["written_location"]["range"], true),
+        "@{j}"
+    );
+    let shaded: Vec<_> = view["macro_ranges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|range| json_slice(text, range, true))
+        .collect();
+    assert_eq!(shaded, ["2"]);
+    let compact = preview(backend, &root).await;
+    same_preview_facts(&compact, &view);
+}
+
+#[tokio::test]
+async fn incomplete_status_keeps_independent_errors_and_written_include_locations() {
+    let root = Url::parse("file:///C:/dygnosis-preview/status-missing.mod").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    for (source, line) in [
+        (
+            "@#include \"absent.inc\"\n@#define n = 1 in \"x\"\nvar y; model; y=0; end;\n",
+            0,
+        ),
+        (
+            "var y;\n@#include \"absent.inc\"\n@#define n = 1 in \"x\"\nmodel; y=0; end;\n",
+            1,
+        ),
+    ] {
+        open(backend, &root, source, 1).await;
+        let info = backend
+            .execute_command(ExecuteCommandParams {
+                command: "dynare/modelInfo".into(),
+                arguments: vec![json!({"root_uri":root})],
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let reasons = info["incomplete_reasons"].as_array().unwrap();
+        assert_eq!(reasons.len(), 2, "{info}");
+        assert_eq!(reasons[0]["location"]["range"]["start"]["line"], line);
+        assert_eq!(reasons[1]["location"]["range"]["start"]["line"], line + 1);
+        let include = reasons
+            .iter()
+            .find(|reason| reason["code"] == "E061")
+            .unwrap();
+        assert_eq!(
+            json_slice(source, &include["location"]["range"], true),
+            "@#include \"absent.inc\""
+        );
+        assert_eq!(include["location"]["uri"], root.as_str());
+        let operand = reasons
+            .iter()
+            .find(|reason| reason["code"] == "E285")
+            .unwrap();
+        assert!(json_slice(source, &operand["location"]["range"], true).contains("1 in \"x\""));
+    }
+}
+
+#[tokio::test]
+async fn ordinary_diagnostic_pull_rows_have_the_published_root_revision() {
+    let root = Url::parse("file:///C:/dygnosis-preview/ordinary-provenance.mod").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(backend, &root, "var y; model; y=missing; end;", 1).await;
+    let view = source_preview(backend, &root).await;
+    let report = backend
+        .diagnostic(DocumentDiagnosticParams {
+            text_document: TextDocumentIdentifier { uri: root.clone() },
+            identifier: None,
+            previous_result_id: None,
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap();
+    let report = serde_json::to_value(report).unwrap();
+    let ordinary = report["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["code"] == "E020")
+        .unwrap();
+    assert_eq!(ordinary["data"]["root"], root.as_str());
+    assert!(ordinary["data"]["input_revision"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+    assert!(view["revision"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
 }
 
 #[tokio::test]
@@ -1428,7 +1633,11 @@ async fn source_navigation_name_in_included_loop_body() {
         assert!(json_slice(text, &region["effective_range"], true).starts_with("beta_"));
         assert_eq!(region["written_location"]["uri"], include.as_str());
         assert_eq!(
-            json_slice("parameters beta_@{j};\n", &region["written_location"]["range"], true),
+            json_slice(
+                "parameters beta_@{j};\n",
+                &region["written_location"]["range"],
+                true
+            ),
             "beta_@{j}"
         );
     }

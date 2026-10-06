@@ -121,7 +121,7 @@ When `complete` is false, authoritative counts and equation numbers are withheld
 To receive invalidations, set `initialize.capabilities.experimental.dygnosis.modelInfoChanged` to `true`. The server then sends `dynare/modelInfoChanged` with:
 
 ```json
-{"schema_version": 1, "root_uri": "file:///C:/models/project/main.mod", "revision": "opaque-input-revision"}
+{"schema_version": 1, "root_uri": "file:///C:/models/project/main.mod", "revision": "opaque-model-revision", "input_revision": "opaque-diagnostic-input-revision"}
 ```
 
 A missing root has `revision: null`. Re-request model information for affected roots after changes to includes, settings, overlays, or reported disk files. A client should forward watched-file events, cancel superseded requests, and discard old revisions and document versions. Standard semantic-token and inlay-hint refresh requests are sent only when the client advertises support; document-symbol refresh needs client handling.
@@ -150,6 +150,15 @@ The LSP inlay-hint provider returns values at verified written source positions.
 Applicable duplicate diagnostics link to the first occurrence through LSP `relatedInformation` and MCP's additive `related` rows. Include cycles retain the written include edges. LSP coordinates are zero-based UTF-16; MCP keeps one-based scalar coordinates. Each related location is mapped independently to its own source file and macro occurrence.
 
 Published fixes remain available for an unopened include when its checked source snapshot is current. Edits to open files carry their actual document versions; unopened files use an unversioned identifier. Stale source or root revisions withhold the action. W020 and W022 carry the standard LSP Unnecessary tag; E021 does not.
+
+Every routed diagnostic carries `data.root` and `data.input_revision` for its
+checked owner and inputs. `dynare/modelInfoChanged` adds optional
+`input_revision` with that same diagnostic token. Its existing `revision`
+is the model-view token and also covers presentation settings; do not compare
+these two tokens. Notifications follow the diagnostic push. A client can
+therefore retain matching pushed facts and retire only an older owner's rows.
+Older engines can omit this provenance; local input and document-version
+guards still apply.
 
 I208 and I209 carry `data.writing_context` with `root`, `input_revision`,
 `statement_ids`, and `rows`. The normalized root path and opaque revision bind

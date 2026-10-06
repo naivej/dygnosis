@@ -307,11 +307,28 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       ++folderGeneration;
+      pushed.clear(); pulled.clear();
       hiddenCodes.clear(); actionContexts.clear(); refresh();
     }),
     vscode.workspace.onDidCloseTextDocument(document => {
       for (const [key, saved] of actionContexts) if (saved.uri.toString() === document.uri.toString()) actionContexts.delete(key);
       pushed.delete(document.uri.toString()); pulled.delete(document.uri.toString());
+    }),
+    service.onDidInvalidate(event => {
+      // Input changes can leave the document version unchanged. A server
+      // notification follows its push; preserve facts from that same revision.
+      if (!event.root) pushed.clear();
+      else for (const [key, raw] of pushed) {
+        const items = raw.items.filter(diagnostic => {
+          const data = "data" in diagnostic ? diagnostic.data : undefined;
+          // Older engines may omit provenance. Their current push still
+          // survives its following notification; local input changes clear it.
+          if (!event.inputRevision || !record(data) || typeof data.root !== "string" || typeof data.input_revision !== "string") return true;
+          return data.root !== event.root || data.input_revision === event.inputRevision;
+        });
+        if (items.length !== raw.items.length) pushed.set(key, { ...raw, items });
+      }
+      pulled.clear();
     }),
     service.onDidChange(() => { ++inputGeneration; actionContexts.clear(); syncInstance(); }),
   ];

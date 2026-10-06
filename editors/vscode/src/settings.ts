@@ -2,6 +2,12 @@ import * as vscode from "vscode";
 
 export const outlineSections = ["declarations", "blocks", "commands", "dimensions", "equations"];
 export type Log = (message: string) => void;
+/** Macro tint changes no server input; simultaneous engine-setting changes still do. */
+export function macroTintOnlyChange(event: vscode.ConfigurationChangeEvent, resource?: vscode.Uri): boolean {
+  return event.affectsConfiguration("dynare.effectiveModel.macroTint", resource) &&
+    !["serverPath", "searchPaths", "formatIndent", "projectDiagnostics", "projectExcludePaths", "nameDetails", "outline", "parameterValueHints"]
+      .some(key => event.affectsConfiguration(`dynare.${key}`, resource));
+}
 function valueSetting(key: string, resource: vscode.Uri | undefined, fallback: unknown): unknown {
   const config = vscode.workspace.getConfiguration("dynare", { uri: resource, languageId: "dynare" });
   if (resource) return config.get<unknown>(key, fallback);

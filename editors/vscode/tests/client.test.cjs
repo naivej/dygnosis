@@ -119,6 +119,30 @@ test("startup sends latest settings and reconciles folders changed while initial
   assert.equal(settings.dynare.configuration.folders.length, 2);
   assert.equal(client.supportsModelInfo, true); await client.shutdown();
 });
+
+test("macro tint alone sends no server settings or input invalidation", async () => {
+  reset(); const client = service(); await client.ensureStarted();
+  const events = [], listener = client.onDidInvalidate(event => events.push(event));
+  const count = host.notifications.length;
+  host.config.fire({ affectsConfiguration: key => ["dynare", "dynare.effectiveModel.macroTint"].includes(key) });
+  await flush();
+  assert.equal(events.length, 0);
+  assert.equal(host.notifications.length, count);
+  host.config.fire({ affectsConfiguration: key => ["dynare", "dynare.effectiveModel.macroTint", "dynare.searchPaths"].includes(key) });
+  await flush();
+  assert.equal(events.length, 1);
+  assert.ok(host.notifications.length > count);
+  listener.dispose(); await client.shutdown();
+});
+
+test("server invalidation keeps the diagnostic input token separate from the model revision", async () => {
+  reset(); const client = service(); await client.ensureStarted();
+  const events = [], listener = client.onDidInvalidate(event => events.push(event));
+  host.managed[0].client.notify({ schema_version: 1, root_uri: "file:///project/root.mod", revision: "model-token", input_revision: "diagnostic-token" });
+  assert.equal(events[0].inputRevision, "diagnostic-token");
+  assert.equal(events[0].root, "file:///project/root.mod");
+  listener.dispose(); await client.shutdown();
+});
 test("edits and disk/server invalidations coalesce a native Outline refresh", async () => {
   reset(); const client = service(); await client.ensureStarted(); const before = host.symbols;
   const included = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 2 };

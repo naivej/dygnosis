@@ -326,7 +326,8 @@ impl Inner {
                 } else {
                     self.tracked_roots.remove(&root);
                 }
-                changes.push(json!({"schema_version": MODEL_INFO_SCHEMA_VERSION, "root_uri": root, "revision": revision}));
+                let input_revision = self.workspace.input_revision(root.as_str());
+                changes.push(json!({"schema_version": MODEL_INFO_SCHEMA_VERSION, "root_uri": root, "revision": revision, "input_revision": input_revision}));
             }
         }
         changes
@@ -1679,7 +1680,8 @@ impl Backend {
             let reason_json: Vec<Value> = reasons
                 .iter()
                 .map(|(span, code, message)| {
-                    let location = incomplete_reason_location(&mut inner, &root, *span);
+                    let location =
+                        incomplete_reason_location(&mut inner, &root, *span, *code == "E061");
                     json!({
                         "code": code,
                         "message": message,
@@ -1687,6 +1689,18 @@ impl Backend {
                     })
                 })
                 .collect();
+            let mut reason_json = reason_json;
+            reason_json.sort_by_key(|reason| {
+                (
+                    reason["location"]["uri"].as_str().unwrap_or("").to_string(),
+                    reason["location"]["range"]["start"]["line"]
+                        .as_u64()
+                        .unwrap_or(0),
+                    reason["location"]["range"]["start"]["character"]
+                        .as_u64()
+                        .unwrap_or(0),
+                )
+            });
             crate::model_info::model_incomplete_status_with_reasons(&reason_json)
         };
         let Some(text) = inner.workspace.get_source(document.as_str()) else {
@@ -2772,17 +2786,15 @@ fn prepare_root_report(
                 .into_iter()
                 .zip(converted)
                 .map(|(diagnostic, mut item)| {
-                    if crate::check_writing::is_writing_code(&diagnostic.code)
-                        || diagnostic.fix.is_some()
-                    {
-                        let data = item
-                            .data
-                            .get_or_insert_with(|| json!({}))
-                            .as_object_mut()
-                            .unwrap();
-                        data.insert("root".into(), json!(root));
-                        data.insert("input_revision".into(), json!(revision));
-                    }
+                    // Every row needs provenance for replay after a root
+                    // revision notification, including ordinary checks.
+                    let data = item
+                        .data
+                        .get_or_insert_with(|| json!({}))
+                        .as_object_mut()
+                        .unwrap();
+                    data.insert("root".into(), json!(root));
+                    data.insert("input_revision".into(), json!(revision));
                     RoutedDiagnostic {
                         diagnostic,
                         lsp_diagnostic: item,
@@ -3089,8 +3101,20 @@ fn preview_written_location(
     )
 }
 
-fn incomplete_reason_location(inner: &mut Inner, root: &Url, span: crate::span::Span) -> Value {
-    let Some((file, written)) = inner.workspace.map_effective_origin(root.as_str(), span) else {
+fn incomplete_reason_location(
+    inner: &mut Inner,
+    root: &Url,
+    span: crate::span::Span,
+    root_written: bool,
+) -> Value {
+    // E061 records already anchor at the written root include site. Macro
+    // failures instead carry offsets in the include-spliced effective source.
+    let origin = if root_written {
+        Some((crate::include_resolver::normalize_uri(root.as_str()), span))
+    } else {
+        inner.workspace.map_effective_origin(root.as_str(), span)
+    };
+    let Some((file, written)) = origin else {
         return Value::Null;
     };
     let Some(text) = inner.workspace.get_source(&file) else {
@@ -3894,5 +3918,28 @@ fn ch_equation_item(
         range: rng,
         selection_range: rng,
         data: Some(json!({"dynare": "equation", "start": eq.span.start})),
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_revision_tests {
+    use super::*;
+
+    #[test]
+    fn model_change_announces_the_same_input_token_as_diagnostics() {
+        let root = Url::parse("file:///C:/dygnosis-preview/revision-notification.mod").unwrap();
+        let mut inner = Inner::default();
+        inner
+            .workspace
+            .update_document(root.as_str(), "var y; model; y=1; end;");
+        inner.root_revision(&root).unwrap();
+        inner
+            .workspace
+            .update_document(root.as_str(), "var y; model; y=2; end;");
+        let input_revision = inner.workspace.input_revision(root.as_str()).unwrap();
+        let changes = inner.changed_model_info();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0]["input_revision"], input_revision);
+        assert_eq!(changes[0]["revision"], inner.root_revision(&root).unwrap());
     }
 }
