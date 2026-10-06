@@ -174,13 +174,6 @@
         "enablement": "dygnosis.previewWrittenSource"
       },
       {
-        "command": "dygnosis.showMacroOrigins",
-        "title": "Show macro origins",
-        "category": "Dygnosis",
-        "icon": "$(list-tree)",
-        "enablement": "dygnosis.previewMacroOrigins"
-      },
-      {
         "command": "dygnosis.refreshEffectiveModel",
         "title": "Refresh effective model",
         "category": "Dygnosis",
@@ -238,14 +231,9 @@
           "group": "navigation@1"
         },
         {
-          "command": "dygnosis.showMacroOrigins",
-          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewToolbarActions",
-          "group": "navigation@2"
-        },
-        {
           "command": "dygnosis.refreshEffectiveModel",
           "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewToolbarActions",
-          "group": "navigation@3"
+          "group": "navigation@2"
         },
         {
           "command": "dygnosis.diffWith",
@@ -270,14 +258,9 @@
           "group": "navigation@1"
         },
         {
-          "command": "dygnosis.showMacroOrigins",
-          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
-          "group": "navigation@2"
-        },
-        {
           "command": "dygnosis.refreshEffectiveModel",
           "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && dygnosis.previewContextActions",
-          "group": "navigation@3"
+          "group": "navigation@2"
         },
         {
           "command": "dygnosis.diffWith",
@@ -313,10 +296,6 @@
         },
         {
           "command": "dygnosis.goToWrittenSource",
-          "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview"
-        },
-        {
-          "command": "dygnosis.showMacroOrigins",
           "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview"
         },
         {
@@ -1522,12 +1501,6 @@
         "key": "ctrl+alt+g",
         "mac": "cmd+alt+g",
         "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && editorTextFocus && dygnosis.previewWrittenSource"
-      },
-      {
-        "command": "dygnosis.showMacroOrigins",
-        "key": "ctrl+alt+m",
-        "mac": "cmd+alt+m",
-        "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview && editorTextFocus && dygnosis.previewMacroOrigins"
       },
       {
         "command": "dygnosis.refreshEffectiveModel",

@@ -44,8 +44,9 @@ function matches(pattern, value) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 let host;
+class TabInputText { constructor(uri) { this.uri = uri; } }
 const vscode = {
-  Disposable, EventEmitter: Emitter, CancellationTokenSource, Range, TreeItem: class {}, ViewColumn: { Beside: 2 },
+  Disposable, EventEmitter: Emitter, CancellationTokenSource, Range, TreeItem: class {}, TabInputText, ViewColumn: { Beside: 2, One: 1 },
   RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
   Uri: { parse: uri, file: value => uri(`file://${value.startsWith("/") ? "" : "/"}${value.replaceAll("\\", "/")}`),
     from: value => uri(`${value.scheme}:${value.path}`) },
@@ -59,7 +60,8 @@ const vscode = {
   languages: { setTextDocumentLanguage: async (document, language) => { document.languageId = language; return document; } },
   window: {
     get activeTextEditor() { return host.editor; },
-    get visibleTextEditors() { return host.editor ? [host.editor] : []; },
+    get visibleTextEditors() { return host.visibleEditors ?? (host.editor ? [host.editor] : []); },
+    tabGroups: { get all() { return host.tabGroups ?? []; } },
     onDidChangeActiveTextEditor: listener => host.active.event(listener),
     onDidChangeTextEditorSelection: listener => host.selection.event(listener),
     showQuickPick: async (items, options) => { host.picks.push({ items, options }); return host.pick ? host.pick(items) : items[0]; },
@@ -67,7 +69,7 @@ const vscode = {
     createOutputChannel: () => ({ appendLine: message => host.clientLogs.push(message), append() {}, show() {}, dispose() {} }),
     showErrorMessage: async message => { host.messages.push(message); },
     showTextDocument: async (document, options) => {
-      host.shown.push({ document, options }); host.editor = { document, selection: new Range(1, 0) };
+      host.shown.push({ document, options }); host.editor = { document, selection: new Range(1, 0), viewColumn: options?.viewColumn };
       host.active.fire(host.editor); return host.editor;
     },
   },
@@ -120,9 +122,9 @@ Module._load = function(id, ...args) {
   return originalLoad.call(this, id, ...args);
 };
 const { registerEffectivePreview } = require("../out/preview");
-const { registerOriginJumps, parsePreviewNavigation, previewRowAt, writtenSourcePicks, macroOriginPicks } = require("../out/origin_jumps");
+const { registerOriginJumps, parsePreviewNavigation, previewRowAt, previewRegionAt, writtenSourcePicks, projectRegionTarget } = require("../out/origin_jumps");
 const contributed = require("../package.json").contributes;
-const originCommands = ["dygnosis.goToWrittenSource", "dygnosis.showMacroOrigins", "dygnosis.refreshEffectiveModel"];
+const originCommands = ["dygnosis.goToWrittenSource", "dygnosis.refreshEffectiveModel"];
 const originJumpContributions = { commands: contributed.commands.filter(item => originCommands.includes(item.command)),
   menus: Object.fromEntries(Object.entries(contributed.menus).map(([key, items]) => [key, items.filter(item => originCommands.includes(item.command))])),
   keybindings: contributed.keybindings.filter(item => originCommands.includes(item.command)) };
@@ -141,9 +143,10 @@ function payload(extra = {}) {
 }
 function setup(options = {}) {
   host = { commands: new Map(), contexts: new Map(), providers: new Map(), documents: new Map(), watchers: [], shown: [], loads: [],
-    picks: [], messages: [], clientLogs: [], settings: {}, active: new Emitter(), selection: new Emitter(), edited: new Emitter(), closed: new Emitter(), configured: new Emitter(),
+    picks: [], messages: [], clientLogs: [], settings: {}, visibleEditors: undefined, tabGroups: [],
+    active: new Emitter(), selection: new Emitter(), edited: new Emitter(), closed: new Emitter(), configured: new Emitter(),
     opened: new Emitter(), foldersChanged: new Emitter() };
-  const rootDocument = doc(main); host.documents.set(main, rootDocument); host.editor = { document: rootDocument, selection: new Range(1, 0) };
+  const rootDocument = doc(main); host.documents.set(main, rootDocument); host.editor = { document: rootDocument, selection: new Range(1, 0), viewColumn: 1 };
   const changed = new Emitter(), presentation = new Emitter();
   const service = { currentInstance: 1, changed, presentation, onDidChange: presentation.event, onDidInvalidate: changed.event,
     logged: [], requests: [], validations: [], jumps: [],
@@ -239,33 +242,29 @@ test("cursor and selections respect half-open ranges and reject ambiguous rows",
   assert.equal(previewRowAt([row({ effective_range: new Range(1, 0, 3, 5) })], new Range(2, 9)).id, "e1");
 });
 
-test("source and macro pick labels retain scope, occurrence, kind and loop binding", () => {
+test("source pick labels retain scope, occurrence and preview line", () => {
   const value = row({ scope: "heterogeneous", dimension: "households", macro_frames: [
     { kind: "for", variable: "country", value: '"US"', directive_locations: [target(main, new Range(0, 0, 0, 9))], body_locations: [target("file:///project/body.inc", new Range(2, 0, 2, 3), null)] },
-    { kind: "if", variable: null, value: null, directive_locations: [target()], body_locations: [] },
   ] });
   assert.match(writtenSourcePicks(value)[0].description, /Dimension households.*Preview line 2/);
-  const picks = macroOriginPicks(value);
-  assert.deepEqual(picks.map(pick => pick.label), ['for · country="US" · directive', 'for · country="US" · body', "if · directive"]);
-  assert.match(picks[1].description, /body\.inc:3/);
-  assert.equal(picks[1].frameIndex, 0); assert.equal(picks[1].site, "body");
 });
 
 test("menus and native keys are preview-scoped and toolbar placements have separate controls", () => {
-  assert.deepEqual(originJumpContributions.commands.map(command => command.command), ["dygnosis.goToWrittenSource", "dygnosis.showMacroOrigins", "dygnosis.refreshEffectiveModel"]);
+  assert.deepEqual(originJumpContributions.commands.map(command => command.command), ["dygnosis.goToWrittenSource", "dygnosis.refreshEffectiveModel"]);
+  assert.equal(contributed.commands.some(command => command.command === "dygnosis.showMacroOrigins"), false);
   for (const items of Object.values(originJumpContributions.menus)) for (const item of items) assert.match(item.when, /resourceScheme == dygnosis-effective/);
   for (const binding of originJumpContributions.keybindings) assert.match(binding.when, /dygnosis-effective.*editorTextFocus/);
   assert.match(originJumpContributions.menus["editor/title"][0].when, /previewToolbarActions/);
   assert.match(originJumpContributions.menus["editor/context"][0].when, /previewContextActions/);
 });
 
-test("one verified source opens beside the preview with its stored root", async () => {
+test("one verified source reuses an open editor with its stored root", async () => {
   const env = setup(), session = await env.show();
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), true);
   await env.run("goToWrittenSource");
   assert.equal(env.service.jumps.length, 1);
   assert.equal(env.service.jumps[0].root, main);
-  assert.deepEqual(env.service.jumps[0].options, { viewColumn: 2 });
+  assert.deepEqual(env.service.jumps[0].options, { reuseOpen: true });
   assert.equal(env.host.picks.length, 0);
   assert.equal(session.uri.scheme, "dygnosis-effective");
   assert.equal(session.document.languageId, "dynare");
@@ -282,20 +281,6 @@ test("included and split rows offer every verified written portion", async () =>
   assert.equal(env.host.picks[0].items.length, 2);
   assert.equal(env.service.jumps[0].location.uri, "file:///project/body.inc");
   assert.equal(env.service.jumps[0].root, session.root.toString());
-  env.registration.dispose(); env.previews.dispose();
-});
-
-test("macro origin command always picks directive and clipped body locations", async () => {
-  const env = setup();
-  env.service.value.navigation[0].macro_frames = [
-    { kind: "for", variable: "i", value: "2", directive_locations: [target(main, new Range(0, 0, 0, 6))], body_locations: [target()] },
-    { kind: "if", variable: null, value: null, directive_locations: [target(main, new Range(0, 0, 0, 3))], body_locations: [] },
-  ];
-  await env.show(); env.host.pick = items => items[1];
-  await env.run("showMacroOrigins");
-  assert.equal(env.host.picks[0].items.length, 3);
-  assert.equal(env.service.jumps.length, 1);
-  assert.match(env.host.picks[0].items[0].label, /i=2/);
   env.registration.dispose(); env.previews.dispose();
 });
 
@@ -396,11 +381,9 @@ test("readable preview open Refresh and both jump proofs use one layout and disp
   assert.equal(session.document.getText(), displayed, "copyable virtual document uses the engine's line breaks");
   env.host.editor.selection = new Range(1, 4);
   await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 1);
-  env.activate(session); env.host.editor.selection = new Range(1, 4);
-  await env.run("showMacroOrigins"); assert.equal(env.service.jumps.length, 2);
   env.activate(session); await env.run("refreshEffectiveModel");
   assert.equal(session.document.getText(), displayed);
-  assert.ok(env.service.requests.length >= 8, "initial open, both guarded jumps, and Refresh reached the engine");
+  assert.ok(env.service.requests.length >= 5, "initial open, guarded jump, and Refresh reached the engine");
   assert.equal(env.service.logged.length, 0);
   env.registration.dispose(); env.previews.dispose();
 });
@@ -408,17 +391,19 @@ test("readable preview open Refresh and both jump proofs use one layout and disp
 test("source preview open Refresh and jump proofs prefer source_layout over readable", async () => {
   const env = setup();
   Object.assign(env.service.client.initializeResult.capabilities.experimental.dygnosis.effectivePreview, {
-    readable_layout: true, source_layout: true,
+    readable_layout: true, source_layout: true, source_navigation_schema_version: 1,
   });
   const displayed = "model;\ny=c;\nend;", mapped = row({ effective_range: new Range(1, 0, 1, 3) });
+  const region = { id: "r0", effective_range: new Range(1, 0, 1, 3), written_location: target(main, new Range(1, 0, 1, 3)), kind: "copy" };
   env.service.executeHook = (_command, args) => {
     assert.deepEqual(args, [{ root_uri: main, layout: "source" }]);
-    return payload({ effective_text: displayed, navigation: [mapped] });
+    return payload({ effective_text: displayed, navigation: [mapped], source_navigation_schema_version: 1, source_navigation: [region] });
   };
   const session = await env.show();
   assert.equal(session.document.getText(), displayed);
   env.host.editor.selection = new Range(1, 0);
   await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 1);
+  assert.deepEqual(env.service.jumps[0].options, { reuseOpen: true });
   env.activate(session); await env.run("refreshEffectiveModel");
   assert.equal(session.document.getText(), displayed);
   for (const request of env.service.requests.filter(request => request.command === "dynare/showEffectiveModel")) {
@@ -444,7 +429,7 @@ test("incomplete text keeps its label and supplies no origins", async () => {
   const env = setup(); env.service.value = payload({ complete: false, status: "incomplete", navigation: [] });
   const session = await env.show(); assert.match(session.text, /^\/\/ INCOMPLETE EXPANSION/);
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
-  await env.run("showMacroOrigins"); assert.equal(env.host.picks.length, 0);
+  await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 0);
   env.registration.dispose(); env.previews.dispose();
 });
 
@@ -548,7 +533,7 @@ test("closing a preview cancels work and disposes its subscriptions and dependen
 test("commands outside a registered virtual preview do no model work", async () => {
   const env = setup(); await env.show(); env.host.editor = { document: env.rootDocument, selection: new Range(1, 0) }; env.host.active.fire();
   const calls = env.service.requests.length;
-  for (const id of ["goToWrittenSource", "showMacroOrigins", "refreshEffectiveModel"]) await env.run(id);
+  for (const id of ["goToWrittenSource", "refreshEffectiveModel"]) await env.run(id);
   assert.equal(env.service.requests.length, calls); assert.equal(env.host.contexts.get("dygnosis.effectivePreview"), false);
   env.registration.dispose(); env.previews.dispose();
 });
@@ -581,14 +566,21 @@ test("initial preview discards old engine and native document contexts before ex
   }
 });
 
-test("macro frame binding changes after a pick cannot use its formerly labelled target", async () => {
-  const env = setup(); env.service.value.navigation[0].macro_frames = [
-    { kind: "for", variable: "i", value: "1", directive_locations: [target()], body_locations: [] },
+test("source region hit testing rejects crossing selections and projects copy subranges", () => {
+  const regions = [
+    { id: "r0", effective_range: new Range(0, 0, 0, 5), written_location: target(main, new Range(2, 0, 2, 5)), kind: "copy" },
+    { id: "r1", effective_range: new Range(0, 5, 0, 6), written_location: target(main, new Range(2, 5, 2, 8)), kind: "substitution" },
+    { id: "r2", effective_range: new Range(1, 0, 1, 6), written_location: target(main, new Range(3, 0, 3, 8)), kind: "identifier" },
   ];
-  await env.show(); env.host.pick = items => { env.service.value.navigation[0].macro_frames[0].value = "2"; return items[0]; };
-  await env.run("showMacroOrigins"); assert.equal(env.service.jumps.length, 0);
-  assert.equal(env.host.contexts.get("dygnosis.previewMacroOrigins"), false);
-  env.registration.dispose(); env.previews.dispose();
+  assert.equal(previewRegionAt(regions, new Range(0, 0)).id, "r0");
+  assert.equal(previewRegionAt(regions, new Range(0, 5)).id, "r1");
+  assert.equal(previewRegionAt(regions, new Range(0, 6)), undefined);
+  assert.equal(previewRegionAt(regions, new Range(0, 2, 0, 4)).id, "r0");
+  assert.equal(previewRegionAt(regions, new Range(0, 2, 0, 6)), undefined);
+  assert.equal(previewRegionAt(regions, new Range(1, 0, 1, 6)).id, "r2");
+  const payloadValue = payload({ effective_text: "beta_1;\nbeta_2;\n", source_navigation_schema_version: 1, source_navigation: regions });
+  assert.deepEqual(projectRegionTarget(payloadValue, regions[0], new Range(0, 1, 0, 3)).range, { start: { line: 2, character: 1 }, end: { line: 2, character: 3 } });
+  assert.deepEqual(projectRegionTarget(payloadValue, regions[2], new Range(1, 1)).range, regions[2].written_location.range);
 });
 
 test("source edits during post-loader revalidation are rejected by the loaded document guard", async () => {

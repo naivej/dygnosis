@@ -14,7 +14,6 @@
   "dygnosis.showDiagnostic": "diagnostics",
   "dygnosis.showAllDiagnostics": "diagnostics",
   "dygnosis.goToWrittenSource": "effective-model",
-  "dygnosis.showMacroOrigins": "effective-model",
   "dygnosis.refreshEffectiveModel": "effective-model",
   "dygnosis.diffWith": "structural-diff",
   "dygnosis.setupProjectMcp": "agents",

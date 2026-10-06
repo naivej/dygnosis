@@ -209,16 +209,16 @@ impl Lexer<'_> {
                 self.bump();
                 TokenKind::Dot
             }
-            'A'..='Z' | 'a'..='z' => {
+            '_' if self.starts("_|_") => {
+                self.pos += 3;
+                TokenKind::Perpendicular
+            }
+            'A'..='Z' | 'a'..='z' | '_' => {
                 self.scan_ident();
                 TokenKind::Ident
             }
             '⟂' => {
                 self.bump();
-                TokenKind::Perpendicular
-            }
-            '_' if self.starts("_|_") => {
-                self.pos += 3;
                 TokenKind::Perpendicular
             }
             _ => {
@@ -413,6 +413,22 @@ mod tests {
                 TokenKind::Eof,
             ]
         );
+    }
+
+    #[test]
+    fn underscore_is_part_of_an_identifier() {
+        let tokens = tokenize("_beta beta_1 _|_");
+        assert_eq!(
+            tokens.iter().map(|token| token.kind).collect::<Vec<_>>(),
+            [
+                TokenKind::Ident,
+                TokenKind::Ident,
+                TokenKind::Perpendicular,
+                TokenKind::Eof,
+            ]
+        );
+        assert_eq!(tokens[0].text("_beta beta_1 _|_"), "_beta");
+        assert_eq!(tokens[1].text("_beta beta_1 _|_"), "beta_1");
     }
 
     #[test]

@@ -10,7 +10,7 @@ import { listSetting } from "./settings";
 /** The input-only event and native placement option are integrated with 0.11.2. */
 export interface OriginJumpClient extends Pick<DygnosisClient, "client" | "currentInstance" | "log" | "failure" | "revalidate" | "execute"> {
   readonly onDidInvalidate: vscode.Event<InputInvalidation>;
-  openLocation(location: Location, root?: vscode.Uri, guard?: NavigationGuard, options?: { viewColumn?: vscode.ViewColumn }): Promise<void>;
+  openLocation(location: Location, root?: vscode.Uri, guard?: NavigationGuard, options?: { viewColumn?: vscode.ViewColumn; reuseOpen?: boolean }): Promise<void>;
 }
 export interface PreviewLocation extends Location { document_version: number | null }
 export interface PreviewFrame {
@@ -22,9 +22,14 @@ export interface PreviewRow {
   macro_frames: PreviewFrame[]; kind: "equation" | "local" | "static"; active: boolean;
   number: number | null; scope: "aggregate" | "heterogeneous"; dimension: string | null;
 }
+export interface SourceRegion {
+  id: string; effective_range: Range; written_location: PreviewLocation;
+  kind: "copy" | "substitution" | "identifier";
+}
 export interface PreviewNavigation {
   effective_text: string; navigation_schema_version: 1; root_uri: string; revision: string;
   document_version: number | null; complete: boolean; navigation: PreviewRow[]; dependency_candidates: string[];
+  source_navigation_schema_version?: 1; source_navigation?: SourceRegion[];
 }
 function natural(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
 function version(value: unknown): boolean { return value === null || natural(value); }
@@ -53,6 +58,18 @@ function sameUri(left: string, right: string): boolean {
   const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
   return sameWrittenLocation({ uri: left, range }, { uri: right, range });
 }
+function parseSourceRegions(value: unknown, lines: string[]): SourceRegion[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const ids = new Set<string>();
+  const regions: SourceRegion[] = [];
+  for (const row of value) {
+    if (!record(row) || typeof row.id !== "string" || !row.id || ids.has(row.id) || !boundedRange(row.effective_range, lines) ||
+        !source(row.written_location) || !["copy", "substitution", "identifier"].includes(String(row.kind))) return undefined;
+    ids.add(row.id);
+    regions.push(row as unknown as SourceRegion);
+  }
+  return regions;
+}
 /** Malformed supported data is a feature failure; old engines keep their text preview. */
 export function parsePreviewNavigation(value: unknown, root: vscode.Uri): PreviewNavigation {
   const bad = (): never => { throw new Error("Unsupported or invalid effective-model navigation. Update dynare.serverPath or use the bundled binary."); };
@@ -71,6 +88,12 @@ export function parsePreviewNavigation(value: unknown, root: vscode.Uri): Previe
     ids.add(row.id);
   }
   if (!value.complete && value.navigation.length) return bad();
+  if (value.source_navigation_schema_version !== undefined || value.source_navigation !== undefined) {
+    if (value.source_navigation_schema_version !== 1) return bad();
+    const regions = parseSourceRegions(value.source_navigation, lines);
+    if (!regions || (!value.complete && regions.length)) return bad();
+    return { ...(value as unknown as PreviewNavigation), source_navigation_schema_version: 1, source_navigation: regions };
+  }
   return value as unknown as PreviewNavigation;
 }
 /** A selection crossing several mapped rows has no unambiguous source action. */
@@ -79,6 +102,14 @@ export function previewRowAt(rows: PreviewRow[], selection: Range): PreviewRow |
   const matches = rows.filter(row => empty
     ? !before(selection.start, row.effective_range.start) && before(selection.start, row.effective_range.end)
     : before(selection.start, row.effective_range.end) && before(row.effective_range.start, selection.end));
+  return matches.length === 1 ? matches[0] : undefined;
+}
+/** Half-open region hit test; a nonempty selection must fit inside one region. */
+export function previewRegionAt(regions: SourceRegion[], selection: Range): SourceRegion | undefined {
+  const empty = !before(selection.start, selection.end);
+  const matches = regions.filter(region => empty
+    ? !before(selection.start, region.effective_range.start) && before(selection.start, region.effective_range.end)
+    : !before(selection.start, region.effective_range.start) && !before(region.effective_range.end, selection.end));
   return matches.length === 1 ? matches[0] : undefined;
 }
 function supportsNavigation(service: OriginJumpClient): boolean {
@@ -103,16 +134,40 @@ function sourceLabel(target: PreviewLocation): string { return `${vscode.workspa
 function rowLabel(row: PreviewRow): string {
   return `${row.scope === "aggregate" ? "Aggregate" : `Dimension ${row.dimension ?? "(unnamed)"}`} · ${row.number === null ? row.kind : `Equation ${String(row.number)}`} · Preview line ${String(row.effective_range.start.line + 1)}`;
 }
-interface SourcePick extends vscode.QuickPickItem { target: PreviewLocation; frameIndex?: number; site?: "directive" | "body" }
+interface SourcePick extends vscode.QuickPickItem { target: PreviewLocation }
 export function writtenSourcePicks(row: PreviewRow): SourcePick[] {
   return row.written_locations.map(target => ({ label: sourceLabel(target), description: rowLabel(row), target }));
 }
-export function macroOriginPicks(row: PreviewRow): SourcePick[] {
-  return row.macro_frames.flatMap((frame, frameIndex) => (["directive", "body"] as const).flatMap(site =>
-    frame[site === "directive" ? "directive_locations" : "body_locations"].map(target => ({
-      label: `${frame.kind}${frame.variable !== null && frame.value !== null ? ` · ${frame.variable}=${frame.value}` : ""} · ${site}`,
-      description: sourceLabel(target), detail: `${rowLabel(row)} · Frame ${String(frameIndex + 1)}`, target, frameIndex, site,
-    }))));
+function utf16Offset(lines: string[], position: Position): number {
+  let offset = 0;
+  for (let line = 0; line < position.line; line++) offset += (lines[line]?.length ?? 0) + 1;
+  return offset + position.character;
+}
+function advance(origin: Position, text: string, units: number): Position {
+  let line = origin.line, character = origin.character;
+  for (let index = 0; index < units && index < text.length; index++) {
+    if (text[index] === "\n") { line += 1; character = 0; }
+    else character += 1;
+  }
+  return { line, character };
+}
+function sliceText(text: string, range: Range): string {
+  const lines = text.split("\n");
+  return text.slice(utf16Offset(lines, range.start), utf16Offset(lines, range.end));
+}
+/** Copy projects a subrange; substitution and identifier select the whole written target. */
+export function projectRegionTarget(payload: PreviewNavigation, region: SourceRegion, selection: Range): PreviewLocation {
+  if (region.kind !== "copy") return region.written_location;
+  const lines = payload.effective_text.split("\n");
+  const text = sliceText(payload.effective_text, region.effective_range);
+  const base = utf16Offset(lines, region.effective_range.start);
+  const empty = !before(selection.start, selection.end);
+  const startUnits = Math.max(0, Math.min(utf16Offset(lines, selection.start) - base, text.length));
+  const endUnits = empty ? startUnits : Math.max(startUnits, Math.min(utf16Offset(lines, selection.end) - base, text.length));
+  return {
+    ...region.written_location,
+    range: { start: advance(region.written_location.range.start, text, startUnits), end: advance(region.written_location.range.start, text, endUnits) },
+  };
 }
 interface State {
   session: EffectivePreviewSession; payload?: PreviewNavigation; instance: number; stale: boolean; closed: boolean;
@@ -133,9 +188,11 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
   const updateContext = (): void => {
     const state = activeState(), editor = vscode.window.activeTextEditor;
     const actions = listSetting("editorActions", state?.session.root, ["toolbar", "contextMenu"], ["toolbar", "contextMenu"], service.log);
-    const row = state && editor && usable(state) ? previewRowAt(state.payload!.navigation, editor.selection) : undefined;
-    for (const [key, value] of Object.entries({ effectivePreview: !!state, previewWrittenSource: !!row?.written_locations.length,
-      previewMacroOrigins: !!row && macroOriginPicks(row).length > 0, previewToolbarActions: actions.includes("toolbar"), previewContextActions: actions.includes("contextMenu") }))
+    const regions = state?.payload?.source_navigation;
+    const region = state && editor && usable(state) && regions ? previewRegionAt(regions, editor.selection) : undefined;
+    const row = state && editor && usable(state) && !regions ? previewRowAt(state.payload!.navigation, editor.selection) : undefined;
+    for (const [key, value] of Object.entries({ effectivePreview: !!state, previewWrittenSource: !!(region || row?.written_locations.length),
+      previewToolbarActions: actions.includes("toolbar"), previewContextActions: actions.includes("contextMenu") }))
       void vscode.commands.executeCommand("setContext", `dygnosis.${key}`, value);
   };
   const cancel = (state: State): void => {
@@ -230,12 +287,89 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       watch(state); updateContext();
     } catch (error) { if (current()) await service.failure(String(error)); }
   };
-  const navigate = async (macro: boolean): Promise<void> => {
+  const openTarget = async (state: State, editor: vscode.TextEditor, target: PreviewLocation, proofMatch: (fresh: PreviewNavigation, loadedDocument?: vscode.TextDocument) => boolean): Promise<void> => {
+    const request = begin(state), generation = state.session.generation, documentVersion = editor.document.version, instance = state.instance;
+    const selection = JSON.stringify(editor.selection), payload = state.payload!;
+    const ownsOperation = (): boolean => !disposed && !state.closed && state.operation === request.operation && state.epoch === request.epoch &&
+      state.session.generation === generation && state.instance === instance && service.currentInstance === instance && !request.token.isCancellationRequested;
+    const loadProofCurrent = (): boolean => state.loadingOperation === request.operation && state.pendingFile && state.payload?.complete === true &&
+      supportsNavigation(service) && !state.session.document.isClosed && state.session.document.getText() === state.session.text;
+    const current = (): boolean => ownsOperation() && (usable(state) || loadProofCurrent()) && vscode.window.activeTextEditor === editor &&
+      editor.document.version === documentVersion && JSON.stringify(editor.selection) === selection;
+    interface Proof { fileEpoch: number; root: string; revision: string }
+    const validated = async (loadedDocument?: vscode.TextDocument): Promise<Proof | undefined> => {
+      for (let attempt = 0; attempt < 4; ++attempt) {
+        if (!current()) return undefined;
+        const fileEpoch = state.fileEpoch;
+        const result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, state.session.root), request.token);
+        if (!current()) return undefined;
+        const fresh = parsePreviewNavigation(result, state.session.root);
+        if (!fresh.complete || fresh.revision !== payload.revision || fresh.effective_text !== payload.effective_text || !rootVersionMatches(state, fresh)) return undefined;
+        if (fresh.document_version !== payload.document_version && !(loadedDocument && payload.document_version === null &&
+            sameUri(loadedDocument.uri.toString(), state.session.root.toString()) && fresh.document_version === loadedDocument.version)) return undefined;
+        const info = await service.revalidate(state.session.root, payload.revision, state.instance, state.session.root, request.token);
+        if (!current()) return undefined;
+        if (fileEpoch !== state.fileEpoch && loadedDocument) continue;
+        if (!info && loadedDocument) continue;
+        if (!info?.complete) return undefined;
+        if (!proofMatch(fresh, loadedDocument)) return undefined;
+        return { fileEpoch, root: fresh.root_uri, revision: fresh.revision };
+      }
+      return undefined;
+    };
+    try {
+      if (!await validated()) { if (current()) { stale(state); unavailable(); } return; }
+      state.loadingOperation = request.operation;
+      let acceptedProof: Proof | undefined;
+      await service.openLocation(target, state.session.root, async document => {
+        if (!current()) return false;
+        const loaded = document.version;
+        if (document.isClosed || !sameUri(document.uri.toString(), target.uri) || !targetFitsDocument(target, document) ||
+            (target.document_version !== null && loaded !== target.document_version) ||
+            (target.document_version === null && document.isDirty)) { stale(state); return false; }
+        const proof = await validated(document);
+        const proofCurrent = (): boolean => !!proof && proof.fileEpoch === state.fileEpoch && proof.revision === payload.revision &&
+          sameUri(proof.root, state.session.root.toString()) && current() && !document.isClosed && document.version === loaded &&
+          (target.document_version !== null || !document.isDirty);
+        if (!proofCurrent()) { if (current()) { stale(state); unavailable(); } return false; }
+        return { isCurrent: (): boolean => {
+          if (!proofCurrent()) return false;
+          acceptedProof = proof;
+          return true;
+        } };
+      }, { reuseOpen: true });
+      if (acceptedProof && acceptedProof.fileEpoch === state.fileEpoch && ownsOperation()) {
+        state.pendingFile = false; state.stale = false; updateContext();
+      }
+    } catch (error) { if (current()) { stale(state); service.log(String(error)); unavailable(); } } finally {
+      if (state.loadingOperation === request.operation) {
+        state.loadingOperation = undefined;
+        if (state.pendingFile && ownsOperation()) stale(state);
+      }
+    }
+  };
+  const navigate = async (): Promise<void> => {
     const state = activeState(), editor = vscode.window.activeTextEditor;
     if (!state || !editor || !usable(state)) return;
+    const regions = state.payload!.source_navigation;
+    if (regions) {
+      const region = previewRegionAt(regions, editor.selection);
+      if (!region) return;
+      const target = projectRegionTarget(state.payload!, region, editor.selection);
+      await openTarget(state, editor, target, (fresh, loadedDocument) => {
+        const freshRegion = fresh.source_navigation?.find(candidate => candidate.id === region.id);
+        if (!freshRegion || JSON.stringify(freshRegion.effective_range) !== JSON.stringify(region.effective_range) ||
+            freshRegion.kind !== region.kind) return false;
+        const versionOk = freshRegion.written_location.document_version === region.written_location.document_version ||
+          (!!loadedDocument && region.written_location.document_version === null &&
+            freshRegion.written_location.document_version === loadedDocument.version);
+        return versionOk && sameWrittenLocation(freshRegion.written_location, region.written_location);
+      });
+      return;
+    }
     const row = previewRowAt(state.payload!.navigation, editor.selection);
     if (!row) return;
-    const picks = macro ? macroOriginPicks(row) : writtenSourcePicks(row);
+    const picks = writtenSourcePicks(row);
     if (!picks.length) return;
     const request = begin(state), generation = state.session.generation, documentVersion = editor.document.version, instance = state.instance;
     const selection = JSON.stringify(editor.selection), payload = state.payload!;
@@ -259,18 +393,13 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
         const info = await service.revalidate(state.session.root, payload.revision, state.instance, state.session.root, request.token);
         if (!current()) return undefined;
         if (fileEpoch !== state.fileEpoch && loadedDocument) continue;
-        // Another root can advance the client's global input epoch without
-        // invalidating this loader. Obtain a new proof; never accept that reply.
         if (!info && loadedDocument) continue;
         if (!info?.complete) return undefined;
         const freshRow = fresh.navigation.find(candidate => candidate.id === row.id && candidate.statement_id === row.statement_id);
         if (!freshRow || JSON.stringify(freshRow.effective_range) !== JSON.stringify(row.effective_range)) return undefined;
         if (pick) {
-          const candidates = macro ? macroOriginPicks(freshRow) : writtenSourcePicks(freshRow);
-          if (macro && pick.frameIndex !== undefined &&
-              JSON.stringify([freshRow.macro_frames[pick.frameIndex]?.kind, freshRow.macro_frames[pick.frameIndex]?.variable, freshRow.macro_frames[pick.frameIndex]?.value]) !==
-              JSON.stringify([row.macro_frames[pick.frameIndex]?.kind, row.macro_frames[pick.frameIndex]?.variable, row.macro_frames[pick.frameIndex]?.value])) return undefined;
-          if (!candidates.some(candidate => candidate.frameIndex === pick.frameIndex && candidate.site === pick.site &&
+          const candidates = writtenSourcePicks(freshRow);
+          if (!candidates.some(candidate =>
               (candidate.target.document_version === pick.target.document_version || (loadedDocument && pick.target.document_version === null &&
                 candidate.target.document_version === loadedDocument.version)) && sameWrittenLocation(candidate.target, pick.target))) return undefined;
         }
@@ -280,8 +409,8 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     };
     try {
       if (!await validated()) { if (current()) { stale(state); unavailable(); } return; }
-      const pick = !macro && picks.length === 1 ? picks[0] : await vscode.window.showQuickPick(picks, {
-        placeHolder: macro ? "Choose a verified macro origin" : "Choose the written portion of this model row", matchOnDescription: true, matchOnDetail: true,
+      const pick = picks.length === 1 ? picks[0] : await vscode.window.showQuickPick(picks, {
+        placeHolder: "Choose the written portion of this model row", matchOnDescription: true, matchOnDetail: true,
       });
       if (!pick || !current()) return;
       if (!await validated(pick)) { if (current()) { stale(state); unavailable(); } return; }
@@ -303,7 +432,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
           acceptedProof = proof;
           return true;
         } };
-      }, { viewColumn: vscode.ViewColumn.Beside });
+      }, { reuseOpen: true });
       if (acceptedProof && acceptedProof.fileEpoch === state.fileEpoch && ownsOperation()) {
         state.pendingFile = false; state.stale = false; updateContext();
       }
@@ -315,8 +444,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     }
   };
   const subscriptions = [previews.onDidCreate(attach), previews.onDidClose(detach),
-    vscode.commands.registerCommand("dygnosis.goToWrittenSource", () => navigate(false)),
-    vscode.commands.registerCommand("dygnosis.showMacroOrigins", () => navigate(true)),
+    vscode.commands.registerCommand("dygnosis.goToWrittenSource", () => navigate()),
     vscode.commands.registerCommand("dygnosis.refreshEffectiveModel", refresh),
     vscode.window.onDidChangeActiveTextEditor(updateContext), vscode.window.onDidChangeTextEditorSelection(updateContext),
     vscode.workspace.onDidChangeConfiguration(updateContext)];

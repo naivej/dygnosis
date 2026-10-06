@@ -256,8 +256,8 @@ pub(crate) struct FrameRec {
     pub value: Option<String>,
 }
 
-/// Display fragment for the source-layout preview. Private to the crate until
-/// slice 03 publishes `source_navigation` from these records.
+/// Display fragment for the source-layout preview. The preview publishes
+/// `source_navigation` from these records.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceFragment {
     pub display: Span,

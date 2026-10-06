@@ -34,13 +34,16 @@ function matches(pattern, value) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 let host;
+class TabInputText { constructor(uri) { this.uri = uri; } }
 const vscode = {
-  Disposable, EventEmitter: Emitter, Uri, ViewColumn: { Beside: 2 },
+  Disposable, EventEmitter: Emitter, Uri, TabInputText, ViewColumn: { Beside: 2, One: 1 },
   DocumentLink: class { constructor(range, target) { this.range = range; this.target = target; } },
   Range: class { constructor(...coordinates) { this.coordinates = coordinates; } },
   RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } }, CancellationTokenSource,
   window: {
     get activeTextEditor() { return host.editor; },
+    get visibleTextEditors() { return host.visibleEditors ?? (host.editor ? [host.editor] : []); },
+    tabGroups: { get all() { return host.tabGroups ?? []; } },
     createOutputChannel: () => ({ appendLine() {}, append() {}, show() {}, dispose() {} }),
     showErrorMessage: () => Promise.resolve(undefined), showQuickPick: items => { host.picks.push(items); return Promise.resolve(host.pick ? host.pick(items) : items[0]); },
     showTextDocument: (document, options) => { host.opened.push(document.uri.toString()); host.reveals.push({ document, options }); return Promise.resolve({ document }); },
@@ -70,7 +73,8 @@ Module._load = function(id, ...args) { return id === "vscode" ? vscode : id === 
 const { DygnosisClient, extendCapabilities } = require("../out/client");
 Module._load = originalLoad;
 function reset() {
-  host = { documents: [], folders: [{ uri: Uri.parse("file:///project"), name: "project" }], settings: {}, commands: new Map(), opened: [], reveals: [], managed: [], watchers: [], notifications: [], picks: [], symbols: 0 };
+  host = { documents: [], folders: [{ uri: Uri.parse("file:///project"), name: "project" }], settings: {}, commands: new Map(), opened: [], reveals: [], managed: [], watchers: [], notifications: [], picks: [], symbols: 0,
+    visibleEditors: undefined, tabGroups: [] };
   for (const name of ["created", "disk", "deleted", "open", "edit", "close", "folder", "config"]) host[name] = new Emitter();
 }
 function model(root = "file:///project/root.mod", related = []) {
@@ -535,6 +539,27 @@ test("native Beside placement is forwarded only after a source loader guard acce
   assert.equal(host.reveals.length, 1); assert.equal(host.reveals[0].options.viewColumn, vscode.ViewColumn.Beside);
   assert.deepEqual(host.reveals[0].options.selection.coordinates, [2, 3, 2, 5]);
   vscode.workspace.openTextDocument = originalOpen; await client.shutdown();
+});
+
+test("reuseOpen prefers a visible editor after validation and otherwise reuses a hidden tab", async () => {
+  reset(); const client = service();
+  const root = Uri.parse("file:///project/root.mod"), target = Uri.parse("file:///project/part.inc");
+  const loaded = { uri: target, languageId: "dynare", version: 1 };
+  const location = { uri: target.toString(), range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } };
+  host.documents.push(loaded);
+  host.visibleEditors = [{ document: loaded, viewColumn: 1 }];
+  host.editor = { document: { uri: root }, viewColumn: 1 };
+  await client.openLocation(location, root, () => true, { reuseOpen: true });
+  assert.equal(host.reveals[0].options.viewColumn, 1);
+  assert.equal(host.reveals[0].options.reuseOpen, undefined);
+  host.reveals = []; host.visibleEditors = [];
+  host.tabGroups = [{ viewColumn: 3, tabs: [{ input: new TabInputText(target) }] }];
+  await client.openLocation(location, root, () => true, { reuseOpen: true });
+  assert.equal(host.reveals[0].options.viewColumn, 3);
+  host.reveals = []; host.tabGroups = [];
+  await client.openLocation(location, root, () => true, { reuseOpen: true });
+  assert.equal(host.reveals[0].options.viewColumn, vscode.ViewColumn.Beside);
+  await client.shutdown();
 });
 
 test("dependency patterns match literal bracket/brace names and ignore unrelated directory events", async () => {

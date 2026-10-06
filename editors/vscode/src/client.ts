@@ -491,19 +491,21 @@ export class DygnosisClient implements vscode.Disposable {
     this.changed.fire();
   }
   treatAsRoot(document: vscode.Uri): void { this.selectedOwners.delete(document.toString()); this.explicitOwnerDocuments.delete(document.toString()); this.ownedDocuments.delete(document.toString()); this.changed.fire(); this.scheduleRootRefresh(); }
-  async openLocation(location: { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }, root?: vscode.Uri, guard?: NavigationGuard, options?: { viewColumn?: vscode.ViewColumn }): Promise<void> {
+  async openLocation(location: { uri: string; range: { start: { line: number; character: number }; end: { line: number; character: number } } }, root?: vscode.Uri, guard?: NavigationGuard, options?: { viewColumn?: vscode.ViewColumn; reuseOpen?: boolean }): Promise<void> {
     const uri = vscode.Uri.parse(location.uri);
     const range = new vscode.Range(location.range.start.line, location.range.start.character, location.range.end.line, location.range.end.character);
     await this.openSource(uri, root, guard, range, options);
   }
-  private async openSource(uri: vscode.Uri, root?: vscode.Uri, guard?: NavigationGuard, selection?: vscode.Range, options?: { viewColumn?: vscode.ViewColumn }): Promise<void> {
+  private async openSource(uri: vscode.Uri, root?: vscode.Uri, guard?: NavigationGuard, selection?: vscode.Range, options?: { viewColumn?: vscode.ViewColumn; reuseOpen?: boolean }): Promise<void> {
     if (!["file", "untitled"].includes(uri.scheme)) throw new Error("This source location is unavailable to native analysis.");
     const document = await vscode.workspace.openTextDocument(uri);
     const decision = guard ? await guard(document) : true;
     // An asynchronous proof may expire before this continuation can reveal it.
     if (typeof decision === "boolean" ? !decision : decision.isCurrent() !== true) return;
     if (root) this.selectOwner(document.uri, root);
-    await vscode.window.showTextDocument(document, { ...options, selection });
+    const viewColumn = options?.reuseOpen ? reuseOpenViewColumn(document.uri) : options?.viewColumn;
+    const { reuseOpen: _reuseOpen, ...rest } = options ?? {};
+    await vscode.window.showTextDocument(document, { ...rest, viewColumn, selection });
   }
   async failure(message: string): Promise<void> {
     this.log(message);
@@ -537,6 +539,21 @@ function sameUri(left: vscode.Uri, right: vscode.Uri): boolean {
   if (left.scheme !== right.scheme) return false;
   if (left.scheme === "file" && process.platform === "win32") return left.fsPath.toLowerCase() === right.fsPath.toLowerCase();
   return left.toString() === right.toString();
+}
+/** Prefer a visible or hidden text tab after async validation; otherwise open beside. */
+function reuseOpenViewColumn(uri: vscode.Uri): vscode.ViewColumn {
+  const visible = vscode.window.visibleTextEditors.filter(editor => sameUri(editor.document.uri, uri));
+  const activeColumn = vscode.window.activeTextEditor?.viewColumn;
+  const inActive = visible.find(editor => editor.viewColumn === activeColumn);
+  if (inActive?.viewColumn !== undefined) return inActive.viewColumn;
+  if (visible[0]?.viewColumn !== undefined) return visible[0].viewColumn;
+  for (const group of vscode.window.tabGroups.all) {
+    for (const tab of group.tabs) {
+      const input = tab.input;
+      if (input instanceof vscode.TabInputText && sameUri(input.uri, uri)) return group.viewColumn;
+    }
+  }
+  return vscode.ViewColumn.Beside;
 }
 function requireDirectory(filename: string): string {
   const slash = Math.max(filename.lastIndexOf("/"), filename.lastIndexOf("\\"));

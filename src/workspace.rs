@@ -1227,6 +1227,23 @@ impl Workspace {
         source
     }
 
+    /// Spliced offsets where the next byte belongs to a different written file.
+    pub(crate) fn source_file_cuts(&mut self, uri: &str) -> Vec<u32> {
+        let Some(key) = self.ensure_loaded(uri) else {
+            return Vec::new();
+        };
+        let spliced = self.spliced_source(&key);
+        let mut cuts = Vec::new();
+        let mut previous = None;
+        for segment in &spliced.segments {
+            if previous.is_some() && previous != Some(segment.file.as_deref()) {
+                cuts.push(segment.spliced.start);
+            }
+            previous = Some(segment.file.as_deref());
+        }
+        cuts
+    }
+
     /// Leftover include-directive ranges for the source-layout preview.
     pub(crate) fn source_layout_gaps(
         &mut self,

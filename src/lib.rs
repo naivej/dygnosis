@@ -66,6 +66,7 @@ pub mod preprocessor;
 mod preview_layout;
 mod preview_navigation;
 mod preview_source;
+mod source_navigation;
 pub mod refs;
 pub mod server;
 mod server_model_map;

@@ -709,6 +709,14 @@ fn same_preview_facts(compact: &Value, layout: &Value) {
     );
     let mut without_layout = layout.clone();
     without_layout["effective_text"] = compact["effective_text"].clone();
+    without_layout
+        .as_object_mut()
+        .unwrap()
+        .remove("source_navigation_schema_version");
+    without_layout
+        .as_object_mut()
+        .unwrap()
+        .remove("source_navigation");
     for (display, old) in without_layout["navigation"]
         .as_array_mut()
         .unwrap()
@@ -1232,4 +1240,146 @@ async fn root_ownership_virtual_targets_and_missing_includes_never_guess() {
         preview(backend, &untitled).await["navigation"][0]["written_locations"][0]["uri"],
         untitled.as_str()
     );
+}
+
+#[tokio::test]
+async fn source_navigation_maps_declarations_macros_includes_and_identifiers() {
+    let root = Url::parse("file:///C:/dygnosis-preview/source-nav.mod").unwrap();
+    let include = Url::parse("file:///C:/dygnosis-preview/source-nav-body.inc").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    let initialized = backend
+        .initialize(InitializeParams::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        initialized.capabilities.experimental.unwrap()["dygnosis"]["effectivePreview"]
+            ["source_navigation_schema_version"],
+        1
+    );
+    open(
+        backend,
+        &root,
+        "var y;\n@#for j in 1:2\nparameters beta_@{j};\n@#endfor\nmodel;\n@#include \"source-nav-body.inc\"\n// note 😀\nend;\n",
+        1,
+    )
+    .await;
+    open(backend, &include, "y=1;\n", 1).await;
+    let compact = preview(backend, &root).await;
+    let source_view = source_preview(backend, &root).await;
+    same_preview_facts(&compact, &source_view);
+    assert_eq!(source_view["source_navigation_schema_version"], 1);
+    assert!(compact.get("source_navigation").is_none());
+    let text = source_view["effective_text"].as_str().unwrap();
+    assert!(text.contains("parameters beta_1;"));
+    assert!(text.contains("parameters beta_2;"));
+    assert!(text.contains("y=1;"));
+    assert!(text.contains("// note 😀"));
+    let regions = source_view["source_navigation"].as_array().unwrap();
+    assert!(!regions.is_empty(), "{source_view}");
+    let ids: Vec<_> = regions
+        .iter()
+        .filter(|region| region["kind"] == "identifier")
+        .collect();
+    assert_eq!(ids.len(), 2, "{regions:?}");
+    for region in &ids {
+        assert_eq!(
+            json_slice(text, &region["effective_range"], true)
+                .chars()
+                .filter(|ch| ch.is_ascii_digit())
+                .count(),
+            1
+        );
+        assert!(json_slice(text, &region["effective_range"], true).starts_with("beta_"));
+        assert_eq!(
+            json_slice(
+                "var y;\n@#for j in 1:2\nparameters beta_@{j};\n@#endfor\nmodel;\n@#include \"source-nav-body.inc\"\n// note 😀\nend;\n",
+                &region["written_location"]["range"],
+                true
+            ),
+            "beta_@{j}"
+        );
+        assert_eq!(region["written_location"]["uri"], root.as_str());
+    }
+    let include_hit = regions.iter().find(|region| {
+        region["written_location"]["uri"] == include.as_str()
+            && json_slice(text, &region["effective_range"], true).contains("y=1")
+    });
+    assert!(include_hit.is_some(), "{regions:?}");
+    let comment = regions.iter().find(|region| {
+        json_slice(text, &region["effective_range"], true).contains("note 😀")
+    });
+    assert!(comment.is_some(), "{regions:?}");
+}
+
+#[tokio::test]
+async fn source_navigation_nested_name_and_incomplete_are_empty() {
+    let root = Url::parse("file:///C:/dygnosis-preview/source-nav-nested.mod").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(
+        backend,
+        &root,
+        "@#for i in 1:1\n@#for j in 2:2\nparameters beta_@{i}_@{j};\n@#endfor\n@#endfor\nvar y;\nmodel;\ny=1;\nend;\n",
+        1,
+    )
+    .await;
+    let source_view = source_preview(backend, &root).await;
+    assert_eq!(source_view["complete"], true, "{source_view}");
+    let text = source_view["effective_text"].as_str().unwrap();
+    let region = source_view["source_navigation"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|region| region["kind"] == "identifier")
+        .expect("nested identifier");
+    assert_eq!(json_slice(text, &region["effective_range"], true), "beta_1_2");
+    assert_eq!(
+        json_slice(
+            "@#for i in 1:1\n@#for j in 2:2\nparameters beta_@{i}_@{j};\n@#endfor\n@#endfor\nvar y;\nmodel;\ny=1;\nend;\n",
+            &region["written_location"]["range"],
+            true
+        ),
+        "beta_@{i}_@{j}"
+    );
+    open(backend, &root, "var y; model; y=@{missing}; end;", 2).await;
+    let incomplete = source_preview(backend, &root).await;
+    assert_eq!(incomplete["complete"], false, "{incomplete}");
+    assert_eq!(incomplete["source_navigation_schema_version"], 1);
+    assert_eq!(incomplete["source_navigation"], json!([]));
+    assert_eq!(incomplete["navigation"], json!([]));
+}
+
+#[tokio::test]
+async fn source_navigation_name_in_included_loop_body() {
+    let root = Url::parse("file:///C:/dygnosis-preview/source-nav-inc-loop.mod").unwrap();
+    let include = Url::parse("file:///C:/dygnosis-preview/source-nav-inc-loop.inc").unwrap();
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(
+        backend,
+        &root,
+        "var y;\n@#for j in 1:2\n@#include \"source-nav-inc-loop.inc\"\n@#endfor\nmodel;\ny=1;\nend;\n",
+        1,
+    )
+    .await;
+    open(backend, &include, "parameters beta_@{j};\n", 1).await;
+    let source_view = source_preview(backend, &root).await;
+    assert_eq!(source_view["complete"], true, "{source_view}");
+    let text = source_view["effective_text"].as_str().unwrap();
+    let ids: Vec<_> = source_view["source_navigation"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|region| region["kind"] == "identifier")
+        .collect();
+    assert_eq!(ids.len(), 2, "{ids:?}");
+    for region in ids {
+        assert!(json_slice(text, &region["effective_range"], true).starts_with("beta_"));
+        assert_eq!(region["written_location"]["uri"], include.as_str());
+        assert_eq!(
+            json_slice("parameters beta_@{j};\n", &region["written_location"]["range"], true),
+            "beta_@{j}"
+        );
+    }
 }

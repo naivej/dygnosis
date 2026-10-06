@@ -1904,6 +1904,33 @@ impl Backend {
         } else {
             json!([])
         };
+        if matches!(requested, Some("source")) {
+            result["source_navigation_schema_version"] =
+                json!(crate::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION);
+            result["source_navigation"] = if complete {
+                if let Some(DisplayLayout::Source(preview)) = &layout {
+                    let index = LineIndex::new(effective_text);
+                    let file_cuts = inner.workspace.source_file_cuts(uri.as_str());
+                    crate::source_navigation::source_navigation_json(
+                        &preview.text,
+                        &preview.fragments,
+                        &file_cuts,
+                        |span| {
+                            let segments =
+                                inner.workspace.map_effective_segments(uri.as_str(), span);
+                            (segments.len() == 1)
+                                .then(|| preview_written_location(&inner, &uri, &segments[0]))
+                                .flatten()
+                        },
+                        |span| json!(span_range(&index, effective_text, span)),
+                    )
+                } else {
+                    json!([])
+                }
+            } else {
+                json!([])
+            };
+        }
         if !complete {
             result["status"] = json!("incomplete");
         }
@@ -2632,7 +2659,7 @@ pub fn initialize_result() -> InitializeResult {
                 "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true},
                 "modelInfoChanged": true,
                 "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1},
-                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true},
+                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
                 ,"projectDiagnostics": {"schema_version":project::SCHEMA_VERSION,"status_command":"dynare/projectStatus","recheck_command":"dynare/recheckProject","cancel_command":"dynare/cancelProject","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/projectStatusChanged","typing_pause_ms":250}
             }})),

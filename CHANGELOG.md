@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Go to written source** opens the editor that already has the file, and it works on any written text in the preview, including a macro-built name such as `beta_1`, which selects `beta_@{j}`. Show macro origins is removed.
 - When expansion is incomplete, the status item names the missing symbol, file, or expression, and the same words appear on that place in the file.
 - **Show effective model** keeps the spacing of the `.mod` file. Macro substitution and includes still expand. An older engine keeps the indented preview.
 - Each check is shown once in the editor and Problems panel.
@@ -12,7 +13,7 @@
   and adds a symbol's own `long_name`. **Add equation tags** and **Add long
   names** fill missing metadata counted by I208 and I209, including in included
   files. Existing values stay unchanged.
-- Macro interpolation expands inside quoted equation tags, `long_name` labels, and other quoted values. Repeated copies retain their written source and macro origins. Replacements that close the surrounding quote or add a line break keep expansion incomplete.
+- Macro interpolation expands inside quoted equation tags, `long_name` labels, and other quoted values. Repeated copies retain their written source and macro frames. Replacements that close the surrounding quote or add a line break keep expansion incomplete.
 - Complete files without a `model` block receive the applicable unused-parameter,
   unused-exogenous and unused-endogenous checks on their written declarations.
   An earlier Check error suppresses the later Transform refusal.

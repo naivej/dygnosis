@@ -13,13 +13,7 @@ pub(crate) struct SourcePreview {
     pub ranges: Vec<Span>,
     /// False when active tokens disagree with the stored expansion.
     pub proven: bool,
-    /// Private until slice 03 publishes `source_navigation`.
-    ///
-    /// Each fragment is contiguous display text with a written span in the
-    /// expander source (include-spliced), a copy/substitution tag, and whether
-    /// it was emitted under an active macro frame. Slice 03 maps these through
-    /// include segments and coalesces identifier regions.
-    #[allow(dead_code)]
+    /// Contiguous display pieces with written spans in include-spliced source.
     pub(crate) fragments: Vec<SourceFragment>,
 }
 
