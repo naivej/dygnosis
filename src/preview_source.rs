@@ -175,4 +175,27 @@ mod tests {
         assert!(layout.text.contains("A=[1 2;3 4]"), "{}", layout.text);
         assert!(layout.text.contains("fprintf('a;b😀')"), "{}", layout.text);
     }
+
+    #[test]
+    fn fewer_ranges_than_rows_keep_preview_unproven() {
+        let text = "var y;\nmodel;\ny=1;\nend;\n";
+        let mut report = expand_report(text);
+        let model = parse(text);
+        let ok = source(&report, &model).expect("source layout");
+        assert!(!report.navigation.is_empty());
+        assert!(ok.proven, "{ok:?}");
+        assert_eq!(ok.ranges.len(), report.navigation.len());
+        // Unmappable effective spans make map_navigation fail; source() then
+        // keeps an empty range list and clears proven so showEffectiveModel
+        // returns incomplete with empty navigation instead of indexing past it.
+        report.navigation[0].effective_span = Span::new(usize::MAX / 2, usize::MAX / 2 + 1);
+        let short = source(&report, &model).expect("source layout");
+        assert!(
+            short.ranges.len() < report.navigation.len(),
+            "{:?} vs {}",
+            short.ranges.len(),
+            report.navigation.len()
+        );
+        assert!(!short.proven, "{short:?}");
+    }
 }

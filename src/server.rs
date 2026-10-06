@@ -1889,6 +1889,7 @@ impl Backend {
                 &report,
                 |span| {
                     let display_span = match &layout {
+                        // Source clears proven when ranges are short; complete then skips this index.
                         Some(DisplayLayout::Readable(preview)) => preview.ranges[rows],
                         Some(DisplayLayout::Source(preview)) => preview.ranges[rows],
                         None => span,
