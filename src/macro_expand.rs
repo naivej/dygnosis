@@ -880,6 +880,11 @@ fn unroll_for(
         planned.push((value, members));
     }
     let body_span = tokens_body_span(body);
+    // A collection or `when` filter that yields no iteration leaves the written
+    // body inactive; mark it discarded like an untaken `@#if` branch.
+    if planned.is_empty() && body_span.end > body_span.start {
+        push_discarded(state, body_span.start, body_span.end);
+    }
     for (value, members) in planned {
         for (name, member) in vars.iter().zip(members) {
             state.defines.insert(name.clone(), member);
@@ -1908,3 +1913,5 @@ fn ident_len(s: &str) -> Option<usize> {
 fn is_simple_ident(s: &str) -> bool {
     ident_len(s).is_some_and(|n| n == s.len())
 }
+
+

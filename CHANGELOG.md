@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Each check is shown once in the editor and Problems panel.
+- A macro directive inside a `var`, `varexo`, `parameters`, or similar declaration list is no longer reported as an invalid name. Discarded-branch names stay quiet; an active illegal name such as `bad-name` still refuses.
 - **W070** (Parameter outside its conventional range) is no longer reported. A parameter name such as `beta` or `rho` can mean whatever the model uses.
 - **Trigger Suggest** completes the lowest unused positive `eqN` equation tag
   and adds a symbol's own `long_name`. **Add equation tags** and **Add long
