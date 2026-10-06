@@ -847,73 +847,97 @@ fn looks_like_matlab(rhs: &str) -> bool {
 fn invalid_ident_diags(model: &Model, tokens: &[Token], index: &LineIndex) -> Vec<Diagnostic> {
     let _ = index;
     let src = &model.source;
-    let declared = declared_spellings(model);
-    let mut blocks = complete_block_ranges(tokens, src, &declared);
-    // Statements the parser read claim their own spans: a `keyword=[…]` option
-    // value inside one is not a declaration.
-    blocks.extend(model.statement_spans());
     let mut out = Vec::new();
-    let mut i = 0;
-    while i < tokens.len() {
-        let tok = &tokens[i];
-        if inside_span(tok.span.start, &blocks) || !ident_in(tok, src, DECL_KEYWORDS) {
-            i += 1;
-            continue;
-        }
-        let mut j = i + 1;
-        if tokens.get(j).is_some_and(|t| t.kind == TokenKind::LParen) {
-            j = skip_balanced(tokens, j, TokenKind::LParen, TokenKind::RParen);
-        }
-        let body_start_i = j;
-        let mut k = j;
-        let mut saw_inner_kw = false;
-        while k < tokens.len()
-            && tokens[k].kind != TokenKind::Semi
-            && tokens[k].kind != TokenKind::Eof
-        {
-            if tokens[k].kind == TokenKind::Latex {
+    // Active Decl spans are the names expansion kept. Do not invent activeness
+    // when a branch or loop is still unresolved.
+    if !model.macro_incomplete() {
+        let inactive = crate::macro_expand::inactive_macro_spans(src);
+        let active_decls = active_decl_spans(model);
+        let declared = declared_spellings(model);
+        let mut blocks = complete_block_ranges(tokens, src, &declared);
+        // Statements the parser read claim their own spans: a `keyword=[…]` option
+        // value inside one is not a declaration.
+        blocks.extend(model.statement_spans());
+        let mut i = 0;
+        while i < tokens.len() {
+            let tok = &tokens[i];
+            if inside_span(tok.span.start, &blocks)
+                || inside_span(tok.span.start, &inactive)
+                || !ident_in(tok, src, DECL_KEYWORDS)
+            {
+                i += 1;
+                continue;
+            }
+            let mut j = i + 1;
+            if tokens.get(j).is_some_and(|t| t.kind == TokenKind::LParen) {
+                j = skip_balanced(tokens, j, TokenKind::LParen, TokenKind::RParen);
+            }
+            let body_start_i = j;
+            let mut k = j;
+            let mut saw_inner_kw = false;
+            while k < tokens.len()
+                && tokens[k].kind != TokenKind::Semi
+                && tokens[k].kind != TokenKind::Eof
+            {
+                if tokens[k].kind == TokenKind::Latex {
+                    k += 1;
+                    continue;
+                }
+                if tokens[k].kind == TokenKind::LParen {
+                    k = skip_balanced(tokens, k, TokenKind::LParen, TokenKind::RParen);
+                    continue;
+                }
+                if ident_in(&tokens[k], src, DECL_OR_BLOCK) {
+                    saw_inner_kw = true;
+                    break;
+                }
                 k += 1;
+            }
+            if saw_inner_kw || k >= tokens.len() || tokens[k].kind != TokenKind::Semi {
+                i += 1;
                 continue;
             }
-            if tokens[k].kind == TokenKind::LParen {
-                k = skip_balanced(tokens, k, TokenKind::LParen, TokenKind::RParen);
-                continue;
-            }
-            if ident_in(&tokens[k], src, DECL_OR_BLOCK) {
-                saw_inner_kw = true;
-                break;
-            }
-            k += 1;
-        }
-        if saw_inner_kw || k >= tokens.len() || tokens[k].kind != TokenKind::Semi {
-            i += 1;
-            continue;
-        }
-        let mut kept: Vec<usize> = Vec::new();
-        let mut t = body_start_i;
-        while t < k {
-            if tokens[t].kind == TokenKind::Latex {
+            let mut kept: Vec<usize> = Vec::new();
+            let mut t = body_start_i;
+            while t < k {
+                if tokens[t].kind == TokenKind::Latex
+                    || tokens[t].kind == TokenKind::MacroDir
+                    || inside_span(tokens[t].span.start, &inactive)
+                {
+                    t += 1;
+                    continue;
+                }
+                if tokens[t].kind == TokenKind::LParen {
+                    t = skip_balanced(tokens, t, TokenKind::LParen, TokenKind::RParen);
+                    continue;
+                }
+                if tokens[t].kind == TokenKind::Comma {
+                    flush_invalid_runs(src, tokens, &kept, &active_decls, &mut out);
+                    kept.clear();
+                    t += 1;
+                    continue;
+                }
+                kept.push(t);
                 t += 1;
-                continue;
             }
-            if tokens[t].kind == TokenKind::LParen {
-                t = skip_balanced(tokens, t, TokenKind::LParen, TokenKind::RParen);
-                continue;
-            }
-            if tokens[t].kind == TokenKind::Comma {
-                flush_invalid_runs(src, tokens, &kept, &mut out);
-                kept.clear();
-                t += 1;
-                continue;
-            }
-            kept.push(t);
-            t += 1;
+            flush_invalid_runs(src, tokens, &kept, &active_decls, &mut out);
+            i = k + 1;
         }
-        flush_invalid_runs(src, tokens, &kept, &mut out);
-        i = k + 1;
     }
     push_unrecognized_file_gaps(src, tokens, &excluded_character_spans(model), &mut out);
     out
+}
+
+fn active_decl_spans(model: &Model) -> Vec<Span> {
+    model
+        .endogenous
+        .iter()
+        .chain(&model.exogenous)
+        .chain(&model.deterministic_exogenous)
+        .chain(&model.parameters)
+        .chain(&model.predetermined)
+        .map(|decl| decl.span)
+        .collect()
 }
 
 /// Byte ranges that are not active Dynare syntax. The lexer still skips
@@ -1098,7 +1122,13 @@ fn is_dynare_ident(s: &str) -> bool {
     first.is_ascii_alphabetic() && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-fn flush_invalid_runs(src: &str, tokens: &[Token], kept: &[usize], out: &mut Vec<Diagnostic>) {
+fn flush_invalid_runs(
+    src: &str,
+    tokens: &[Token],
+    kept: &[usize],
+    active_decls: &[Span],
+    out: &mut Vec<Diagnostic>,
+) {
     if kept.is_empty() {
         return;
     }
@@ -1108,16 +1138,22 @@ fn flush_invalid_runs(src: &str, tokens: &[Token], kept: &[usize], out: &mut Vec
         let cur = &tokens[i];
         let between = &src[prev.span.end as usize..cur.span.start as usize];
         if between.chars().any(char::is_whitespace) {
-            push_invalid_run(src, tokens, &run, out);
+            push_invalid_run(src, tokens, &run, active_decls, out);
             run = vec![i];
         } else {
             run.push(i);
         }
     }
-    push_invalid_run(src, tokens, &run, out);
+    push_invalid_run(src, tokens, &run, active_decls, out);
 }
 
-fn push_invalid_run(src: &str, tokens: &[Token], run: &[usize], out: &mut Vec<Diagnostic>) {
+fn push_invalid_run(
+    src: &str,
+    tokens: &[Token],
+    run: &[usize],
+    active_decls: &[Span],
+    out: &mut Vec<Diagnostic>,
+) {
     if run.is_empty() {
         return;
     }
@@ -1133,6 +1169,27 @@ fn push_invalid_run(src: &str, tokens: &[Token], run: &[usize], out: &mut Vec<Di
     if is_dynare_ident(token) {
         return;
     }
+    // Ident-like runs must cover an active Decl. A discarded `@#for` body or
+    // similar leftover with no Decl stays quiet. A lone string/junk token in an
+    // active list has no Decl and still refuses.
+    let run_span = Span { start, end };
+    let overlaps_decl = active_decls.iter().any(|decl| spans_overlap(run_span, *decl));
+    let ident_like = run.iter().any(|&i| {
+        matches!(
+            tokens[i].kind,
+            TokenKind::Ident
+                | TokenKind::Number
+                | TokenKind::Minus
+                | TokenKind::Plus
+                | TokenKind::Star
+                | TokenKind::Slash
+                | TokenKind::Dot
+                | TokenKind::Caret
+        )
+    });
+    if ident_like && !overlaps_decl {
+        return;
+    }
     out.push(e001(
         Span { start, end },
         format!(
@@ -1142,6 +1199,10 @@ fn push_invalid_run(src: &str, tokens: &[Token], run: &[usize], out: &mut Vec<Di
         ),
         None,
     ));
+}
+
+fn spans_overlap(a: Span, b: Span) -> bool {
+    a.start < b.end && b.start < a.end
 }
 
 pub(crate) fn reserved_reason(name: &str) -> Option<&'static str> {

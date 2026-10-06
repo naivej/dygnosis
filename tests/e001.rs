@@ -347,6 +347,148 @@ fn e001_invalid_ident_c_minus_x() {
     );
 }
 
+fn invalid_ident_messages(text: &str) -> Vec<String> {
+    rust_e001(text)
+        .into_iter()
+        .filter(|d| d.message.contains("Invalid Dynare identifier"))
+        .map(|d| d.message)
+        .collect()
+}
+
+#[test]
+fn macro_directive_in_declaration_names() {
+    let active = check_mod("e001/macro_decl_active_illegal.mod");
+    let active_diags: Vec<_> = rust_e001(&active)
+        .into_iter()
+        .filter(|d| d.message.contains("Invalid Dynare identifier"))
+        .collect();
+    assert_eq!(active_diags.len(), 1, "{active_diags:?}");
+    assert!(
+        active_diags[0]
+            .message
+            .contains("Invalid Dynare identifier 'bad-name'"),
+        "{active_diags:?}"
+    );
+    assert_span(&active, &active_diags[0], "bad-name");
+
+    for rel in [
+        "e001/macro_decl_inactive_illegal.mod",
+        "e001/macro_decl_elseif_nested.mod",
+        "e001/macro_decl_metadata.mod",
+        "e001/macro_decl_money0.mod",
+        "e001/macro_decl_money1.mod",
+        "e001/macro_decl_varexo_det.mod",
+        "e001/macro_decl_separate_inactive.mod",
+    ] {
+        let text = check_mod(rel);
+        let msgs = invalid_ident_messages(&text);
+        assert!(msgs.is_empty(), "{rel}: {msgs:?}");
+        assert!(
+            analyze(&parse(&text))
+                .iter()
+                .all(|d| !d.message.contains("Invalid Dynare identifier")),
+            "{rel}"
+        );
+    }
+
+    let for_include = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/e001/macro_decl_for_include.mod");
+    let for_text = std::fs::read_to_string(&for_include)
+        .unwrap()
+        .replace("\r\n", "\n");
+    let for_path = for_include.to_str().unwrap();
+    assert!(invalid_ident_messages(&for_text).is_empty(), "{for_text}");
+    let for_diags = dygnosis::check_file(&for_text, for_path);
+    assert!(
+        for_diags
+            .iter()
+            .all(|d| !d.message.contains("Invalid Dynare identifier")),
+        "{for_diags:?}"
+    );
+    assert!(
+        for_diags.iter().all(|d| d.code != "E061"),
+        "resolved include must not be missing: {for_diags:?}"
+    );
+    let model = parse(&for_text);
+    assert!(
+        model
+            .endogenous
+            .iter()
+            .any(|d| model.name(d.name) == "y_1"),
+        "loop-generated decl missing: {:?}",
+        model
+            .endogenous
+            .iter()
+            .map(|d| model.name(d.name))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !model
+            .endogenous
+            .iter()
+            .any(|d| model.name(d.name) == "bad" || model.name(d.name) == "name"),
+        "empty @#for must not activate bad-name"
+    );
+
+    let malformed = check_mod("e001/macro_decl_malformed.mod");
+    let malformed_diags = analyze(&parse(&malformed));
+    assert!(
+        malformed_diags.iter().any(|d| d.code == "E062"),
+        "{malformed_diags:?}"
+    );
+    assert!(
+        malformed_diags
+            .iter()
+            .all(|d| !d.message.contains("Invalid Dynare identifier")),
+        "{malformed_diags:?}"
+    );
+}
+
+#[test]
+fn macro_decl_reach_audit() {
+    let dup = analyze(&parse(&check_mod("e001/macro_decl_reach_dup.mod")));
+    assert!(
+        dup.iter().any(|d| d.code == "W031"),
+        "duplicate active name must reach W031: {dup:?}"
+    );
+    assert!(
+        dup.iter()
+            .all(|d| !d.message.contains("Invalid Dynare identifier")),
+        "{dup:?}"
+    );
+
+    let typed = analyze(&parse(&check_mod("e001/macro_decl_reach_type.mod")));
+    assert!(
+        typed.iter().any(|d| d.code == "E030"),
+        "wrong-kind redeclaration must reach E030: {typed:?}"
+    );
+
+    let unknown = analyze(&parse(&check_mod("e001/macro_decl_reach_unknown.mod")));
+    assert!(
+        unknown.iter().any(|d| d.code == "E020" && d.message.contains('z')),
+        "unknown equation symbol must reach E020: {unknown:?}"
+    );
+
+    let list = analyze(&parse(&check_mod("e001/macro_decl_reach_list.mod")));
+    assert!(
+        list.iter()
+            .any(|d| d.code == "E240" && d.message.contains('p')),
+        "wrong-type command list must reach E240: {list:?}"
+    );
+    assert!(
+        list.iter()
+            .any(|d| d.code == "E239" && d.message.contains('z')),
+        "undeclared command-list name must reach E239: {list:?}"
+    );
+    assert!(
+        list.iter().all(|d| {
+            !(d.code == "E239" && d.message.contains("Variable x ")
+                || d.code == "E240" && d.message.contains("Variable x "))
+        }),
+        "active macro-declared x must be usable in rplot: {list:?}"
+    );
+}
+
 #[test]
 fn e001_non_ascii_trailing_declaration() {
     assert_fire(

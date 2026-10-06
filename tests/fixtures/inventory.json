@@ -266,6 +266,160 @@
       "cluster": "e001/invalid_ident.mod",
       "notes": "invalid ident c-x ; auto_fix noop"
     },
+
+    {
+      "id": "e001_macro_decl_active_illegal",
+      "codes": [
+        "E001"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_active_illegal.mod",
+      "source": "e001.rs::macro_directive_in_declaration_names",
+      "cluster": "e001/macro_decl_active_illegal.mod",
+      "notes": "active bad-name inside @#if in var list fires E001"
+    },
+    {
+      "id": "e001_macro_decl_inactive_illegal",
+      "codes": [],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_inactive_illegal.mod",
+      "source": "e001.rs::macro_directive_in_declaration_names",
+      "cluster": "e001/macro_decl_inactive_illegal.mod",
+      "notes": "discarded-branch bad-name and directives stay quiet"
+    },
+    {
+      "id": "e001_macro_decl_elseif_nested",
+      "codes": [],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_elseif_nested.mod",
+      "source": "e001.rs::macro_directive_in_declaration_names",
+      "cluster": "e001/macro_decl_elseif_nested.mod",
+      "notes": "@#elseif and nested conditionals in decl lists stay quiet"
+    },
+    {
+      "id": "e001_macro_decl_for_include",
+      "codes": [],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_for_include.mod",
+      "source": "e001.rs::macro_directive_in_declaration_names",
+      "cluster": "e001/macro_decl_for_include.mod",
+      "notes": "@#for and @#include in decl lists; empty for bad-name quiet"
+    },
+    {
+      "id": "e001_macro_decl_metadata",
+      "codes": [],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_metadata.mod",
+      "source": "e001.rs::macro_directive_in_declaration_names",
+      "cluster": "e001/macro_decl_metadata.mod",
+      "notes": "long_name metadata beside a directive stays quiet"
+    },
+    {
+      "id": "e001_macro_decl_malformed",
+      "codes": [
+        "E062"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_malformed.mod",
+      "source": "e001.rs::macro_directive_in_declaration_names",
+      "cluster": "e001/macro_decl_malformed.mod",
+      "notes": "stray @#else in decl list is E062; no fake identifier E001 on the directive"
+    },
+    {
+      "id": "e001_macro_decl_money0",
+      "codes": [],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_money0.mod",
+      "source": "e001.rs::macro_directive_in_declaration_names",
+      "cluster": "e001/macro_decl_money0.mod",
+      "notes": "money_growth_rule=0 directives in var/varexo/parameters quiet"
+    },
+    {
+      "id": "e001_macro_decl_money1",
+      "codes": [],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_money1.mod",
+      "source": "e001.rs::macro_directive_in_declaration_names",
+      "cluster": "e001/macro_decl_money1.mod",
+      "notes": "money_growth_rule=1 directives in var/varexo/parameters quiet"
+    },
+    {
+      "id": "e001_macro_decl_reach_dup",
+      "codes": [
+        "W031"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_reach_dup.mod",
+      "source": "e001.rs::macro_decl_reach_audit",
+      "cluster": "e001/macro_decl_reach_dup.mod",
+      "notes": "active name from macro-in-decl still reaches W031 duplicate"
+    },
+    {
+      "id": "e001_macro_decl_reach_type",
+      "codes": [
+        "E030"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_reach_type.mod",
+      "source": "e001.rs::macro_decl_reach_audit",
+      "cluster": "e001/macro_decl_reach_type.mod",
+      "notes": "active name from macro-in-decl still reaches E030 wrong kind"
+    },
+    {
+      "id": "e001_macro_decl_reach_unknown",
+      "codes": [
+        "E020"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_reach_unknown.mod",
+      "source": "e001.rs::macro_decl_reach_audit",
+      "cluster": "e001/macro_decl_reach_unknown.mod",
+      "notes": "equation unknown symbol still reaches E020 beside macro-in-decl"
+    },
+    {
+      "id": "e001_macro_decl_reach_list",
+      "codes": [
+        "E239",
+        "E240"
+      ],
+      "kind": "fire",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_reach_list.mod",
+      "source": "e001.rs::macro_decl_reach_audit",
+      "cluster": "e001/macro_decl_reach_list.mod",
+      "notes": "rplot unknown E239 and wrong-type E240; active macro name quiet"
+    },
+    {
+      "id": "e001_macro_decl_varexo_det",
+      "codes": [],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_varexo_det.mod",
+      "source": "e001.rs::macro_directive_in_declaration_names",
+      "cluster": "e001/macro_decl_varexo_det.mod",
+      "notes": "varexo_det and predetermined_variables share the scan"
+    },
+    {
+      "id": "e001_macro_decl_separate_inactive",
+      "codes": [],
+      "kind": "quiet",
+      "package": "parse",
+      "fixture": "tests/fixtures/e001/macro_decl_separate_inactive.mod",
+      "source": "e001.rs::macro_directive_in_declaration_names",
+      "cluster": "e001/macro_decl_separate_inactive.mod",
+      "notes": "inactive separate var bad-name statement quiet"
+    },
     {
       "id": "e001_non_ascii_trailing",
       "codes": [

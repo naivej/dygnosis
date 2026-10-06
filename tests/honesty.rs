@@ -5583,6 +5583,62 @@ fn native_and_inactive_non_ascii_accepted_at_check() {
 }
 
 #[test]
+fn macro_directive_in_declaration_accepted_at_check() {
+    let Some(pp) = find_preprocessor(None) else {
+        eprintln!("skipping honesty: dynare-preprocessor not found");
+        return;
+    };
+    for rel in [
+        "e001/macro_decl_money0.mod",
+        "e001/macro_decl_money1.mod",
+        "e001/macro_decl_inactive_illegal.mod",
+        "e001/macro_decl_elseif_nested.mod",
+        "e001/macro_decl_metadata.mod",
+        "e001/macro_decl_varexo_det.mod",
+        "e001/macro_decl_separate_inactive.mod",
+    ] {
+        let path = fixture(rel);
+        let path_str = path.to_str().expect("utf-8 path");
+        let text = read_path(&path);
+        let result = spawn(&text, &path, &pp, JsonStage::Check);
+        assert!(
+            result.success,
+            "{rel} should be accepted at json=check: {:?}",
+            result.diagnostics
+        );
+        let own = check_file(&text, path_str);
+        assert!(
+            own.iter()
+                .all(|d| !d.message.contains("Invalid Dynare identifier")),
+            "{rel}: {own:?}"
+        );
+    }
+
+    let fire = fixture("e001/macro_decl_active_illegal.mod");
+    let fire_text = read_path(&fire);
+    let fire_result = spawn(&fire_text, &fire, &pp, JsonStage::Check);
+    assert!(
+        !fire_result.success,
+        "active bad-name must refuse at json=check: {:?}",
+        fire_result.diagnostics
+    );
+    assert!(
+        they_mention(&fire_result, "syntax error, unexpected MINUS")
+            || they_mention(&fire_result, "MINUS"),
+        "Dynare should refuse active bad-name: stdout={} stderr={}",
+        fire_result.raw_stdout,
+        fire_result.raw_stderr
+    );
+    let own_fire = analyze(&parse(&fire_text));
+    assert!(
+        own_fire.iter().any(|d| {
+            d.code == "E001" && d.message.contains("Invalid Dynare identifier 'bad-name'")
+        }),
+        "{own_fire:?}"
+    );
+}
+
+#[test]
 fn unicode_display_accepted_at_check() {
     let Some(pp) = find_preprocessor(None) else {
         eprintln!("skipping honesty: dynare-preprocessor not found");
