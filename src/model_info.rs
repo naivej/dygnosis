@@ -313,6 +313,14 @@ pub fn incomplete_reason_records(
             return e061_reasons(records);
         }
     }
+    // Match analyze_positions: official macro Errors before I211.
+    let e062 = crate::check_e060::check_e062(model);
+    if !e062.is_empty() {
+        return e062
+            .into_iter()
+            .map(|diagnostic| (diagnostic.span, "E062", diagnostic.message))
+            .collect();
+    }
     if !model.macro_type_errors.is_empty() {
         let mut seen = HashSet::new();
         return model
@@ -324,12 +332,28 @@ pub fn incomplete_reason_records(
             })
             .collect();
     }
-    if !model.incomplete_reasons.is_empty() {
-        return model
-            .incomplete_reasons
-            .iter()
-            .map(|reason| (reason.span, reason.code, reason.message.clone()))
-            .collect();
+    if !model.incomplete_reasons.is_empty() || model.macro_incomplete_span.is_some() {
+        let e064 = crate::check_e060::check_e064(model);
+        if !e064.is_empty() {
+            return e064
+                .into_iter()
+                .map(|diagnostic| (diagnostic.span, "E064", diagnostic.message))
+                .collect();
+        }
+        if !model.incomplete_reasons.is_empty() {
+            return model
+                .incomplete_reasons
+                .iter()
+                .map(|reason| (reason.span, reason.code, reason.message.clone()))
+                .collect();
+        }
+        if let Some(span) = model.macro_incomplete_span {
+            return vec![(
+                span,
+                "I211",
+                "Macro expansion is incomplete; some model checks were withheld.".to_string(),
+            )];
+        }
     }
     Vec::new()
 }

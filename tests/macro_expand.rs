@@ -1796,6 +1796,7 @@ fn incomplete_reason_records_match_diagnostics_for_hover() {
     assert_eq!(reasons.len(), 1);
     assert_eq!(reasons[0].1, "I211");
     assert_eq!(reasons[0].2, diags[0].message);
+    assert!(!reasons.iter().any(|(_, code, _)| *code == "E062" || *code == "E064"));
 
     let undef = "var y; model; y=@{missing}; end;\n";
     let model = parse(undef);
@@ -1816,4 +1817,44 @@ fn incomplete_reason_records_match_diagnostics_for_hover() {
     assert_eq!(reasons.len(), 1);
     assert_eq!(reasons[0].1, "E061");
     assert_eq!(reasons[0].2, e061.message);
+}
+
+#[test]
+fn incomplete_reason_records_prefer_e062_and_e064_over_i211() {
+    use dygnosis::model_info::incomplete_reason_records;
+
+    let chain = membership_branch("1 in [1] in [true]");
+    let model = parse(&chain);
+    let diags = analyze(&model);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0].code, "E062");
+    assert_eq!(diags[0].message, "syntax error, unexpected IN");
+    let reasons = incomplete_reason_records(&model, None);
+    assert_eq!(reasons.len(), 1, "{reasons:?}");
+    assert_eq!(reasons[0].1, "E062");
+    assert_eq!(reasons[0].2, diags[0].message);
+    assert!(!reasons.iter().any(|(_, code, _)| *code == "I211"));
+
+    let unmatched = "@#if 1\n@#error \"boom\"\nvar y; model; y=@{missing}; end;\n";
+    let model = parse(unmatched);
+    let diags = analyze(&model);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0].code, "E062");
+    let reasons = incomplete_reason_records(&model, None);
+    assert_eq!(reasons.len(), 1, "{reasons:?}");
+    assert_eq!(reasons[0].1, "E062");
+    assert_eq!(reasons[0].2, diags[0].message);
+    assert!(!reasons.iter().any(|(_, code, _)| *code == "I211" || *code == "E063"));
+
+    let with_error = "@#define n = length([1])\n@#error \"boom\"\nvar y; model; y=@{n}; end;\n";
+    let model = parse(with_error);
+    let diags = analyze(&model);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0].code, "E064");
+    assert_eq!(diags[0].message, "Macro-processing error: boom");
+    let reasons = incomplete_reason_records(&model, None);
+    assert_eq!(reasons.len(), 1, "{reasons:?}");
+    assert_eq!(reasons[0].1, "E064");
+    assert_eq!(reasons[0].2, diags[0].message);
+    assert!(!reasons.iter().any(|(_, code, _)| *code == "I211"));
 }
