@@ -356,6 +356,53 @@ fn invalid_ident_messages(text: &str) -> Vec<String> {
 }
 
 #[test]
+fn incomplete_expansion_keeps_decidable_invalid_ident() {
+    let text = check_mod("e001/macro_decl_incomplete_illegal.mod");
+    let model = parse(&text);
+    assert!(
+        model.macro_incomplete(),
+        "undefined @#if FOO must leave expansion incomplete"
+    );
+    assert!(
+        model
+            .endogenous
+            .iter()
+            .any(|d| model.name(d.name) == "bad" || model.name(d.name) == "name"),
+        "parser still records active decls for bad-name tokens: {:?}",
+        model
+            .endogenous
+            .iter()
+            .map(|d| model.name(d.name))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !model
+            .endogenous
+            .iter()
+            .any(|d| model.name(d.name) == "x" || model.name(d.name) == "FOO"),
+        "incomplete @#if must not invent names: {:?}",
+        model
+            .endogenous
+            .iter()
+            .map(|d| model.name(d.name))
+            .collect::<Vec<_>>()
+    );
+    let invalid: Vec<_> = rust_e001(&text)
+        .into_iter()
+        .filter(|d| d.message.contains("Invalid Dynare identifier"))
+        .collect();
+    assert_eq!(invalid.len(), 1, "{invalid:?}");
+    assert_eq!(invalid[0].code, "E001");
+    assert!(
+        invalid[0]
+            .message
+            .contains("Invalid Dynare identifier 'bad-name'"),
+        "{invalid:?}"
+    );
+    assert_span(&text, &invalid[0], "bad-name");
+}
+
+#[test]
 fn macro_directive_in_declaration_names() {
     let active = check_mod("e001/macro_decl_active_illegal.mod");
     let active_diags: Vec<_> = rust_e001(&active)
