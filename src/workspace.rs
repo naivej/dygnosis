@@ -119,32 +119,14 @@ fn note_resolved(
     });
 }
 
-/// Nesting of `@#if` / `@#for` before `byte`. A top-level directive has depth 0.
-fn directive_depth(source: &str, byte: u32) -> i32 {
-    let end = (byte as usize).min(source.len());
-    let mut depth = 0i32;
-    for line in source[..end].split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("@#if") || trimmed.starts_with("@#for") {
-            depth += 1;
-        } else if trimmed.starts_with("@#endif") || trimmed.starts_with("@#endfor") {
-            depth = depth.saturating_sub(1);
-        }
-    }
-    depth
-}
-
-/// End of the earliest missing or cyclic include that is not inside `@#if` / `@#for`.
-/// An include inside a branch still reports E061, and the equations after that
-/// branch stay in the root.
-fn top_level_fatal_cut(source: &str, records: &IncludeRecords) -> Option<u32> {
+/// End of the earliest missing or cyclic include. A taken miss stops the root,
+/// including a miss inside `@#if` or `@#for`.
+fn fatal_include_cut(records: &IncludeRecords) -> Option<u32> {
     records
         .unresolved
         .iter()
-        .map(|item| item.span)
-        .chain(records.cycles.iter().map(|item| item.span))
-        .filter(|span| directive_depth(source, span.start) == 0)
-        .map(|span| span.end)
+        .map(|item| item.span.end)
+        .chain(records.cycles.iter().map(|item| item.span.end))
         .min()
 }
 
@@ -730,7 +712,7 @@ impl Workspace {
                     .first()
                     .map(|item| item.span)
                     .or_else(|| records.cycles.first().map(|item| item.span))?;
-                Some((span, top_level_fatal_cut(&root, records)))
+                Some((span, fatal_include_cut(records)))
             });
             let mut model = if let Some((_, Some(cut))) = fatal {
                 let cut = (cut as usize).min(root.len());
@@ -811,7 +793,7 @@ impl Workspace {
                 .map(|records| {
                     (
                         !records.unresolved.is_empty() || !records.cycles.is_empty(),
-                        top_level_fatal_cut(&root, records),
+                        fatal_include_cut(records),
                     )
                 })
                 .unwrap_or((false, None));
@@ -1121,7 +1103,7 @@ impl Workspace {
         let cut = self
             .records
             .get(root_key)
-            .and_then(|records| top_level_fatal_cut(&root, records));
+            .and_then(|records| fatal_include_cut(records));
         let (source, model) = if let Some(cut) = cut {
             let text = root[..(cut as usize).min(root.len())].to_string();
             let model = parse(&text);

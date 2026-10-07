@@ -172,7 +172,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("I211", ExplainEntry {
         title: "Macro expansion incomplete",
-        body: "Dygnosis stopped this macro expansion at an explicit local limit: expression depth, range or collection size, output size, message size, or iteration work. The Information names that limit. A supported macro expression is expanded; this note is not a Dynare refusal. Official macro Errors keep precedence. A limit stops later directives in that file. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nShrink the named macro expression, or run the official Dynare preprocessor for its full expansion.",
+        body: "Dygnosis stopped this macro expansion. A limit note names that limit: expression depth, value depth, execution depth, string size, range size, collection size, output size, message size, iteration work, or a non-UTF-8 byte slice. An unsupported expression names that expression. A supported macro expression is expanded; this note is not a Dynare refusal. Official macro Errors keep precedence. A limit stops later directives in that file. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nShrink the named macro expression, or run the official Dynare preprocessor for its full expansion.",
         kind: ExplainKind::Added,
     }),
     ("W010", ExplainEntry {
@@ -991,7 +991,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         kind: ExplainKind::Shared,
     }),
     ("E305", ExplainEntry {
-        title: "@#includepath argument is not a string",
+        title: "@#include or @#includepath argument is not a string",
         body: "An ``@#include`` or ``@#includepath`` argument does not evaluate to a string. Dynare refuses: `File name does not evaluate to a string`.\n\n**Fix**\n\nUse a string expression, for example ``@#include \"helper.inc\"`` or ``@#includepath \"mydir\"``.",
         kind: ExplainKind::Shared,
     }),

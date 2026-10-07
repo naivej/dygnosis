@@ -1212,7 +1212,7 @@ fn realize_model_tokens(
         };
         if let Some(prev) = prev_end {
             let gap_empty = emitted.get(prev..a).is_some_and(str::is_empty);
-            let inside_generated = contribs
+            let inside_generated = overlapping
                 .iter()
                 .any(|contrib| contrib.exact && prev > contrib.emit_start && a < contrib.emit_end);
             if let Some(previous) = out.last_mut() {

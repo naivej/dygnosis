@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "8f445a11068f57d986494b177cb2db0ec681bdbe4de292b6a346fd9d5448bd90",
+  "fingerprint": "8f56d76accaeefae96e5ad6c75324aaec1aafaf71cca7f30581a003114a1ce95",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -1500,8 +1500,8 @@
     {
       "code": "E305",
       "kind": "shared",
-      "title": "@#includepath argument is not a string",
-      "markdown": "### E305: @#includepath argument is not a string\n\nAn ``@#include`` or ``@#includepath`` argument does not evaluate to a string. Dynare refuses: `File name does not evaluate to a string`.\n\n**Fix**\n\nUse a string expression, for example ``@#include \"helper.inc\"`` or ``@#includepath \"mydir\"``.\n"
+      "title": "@#include or @#includepath argument is not a string",
+      "markdown": "### E305: @#include or @#includepath argument is not a string\n\nAn ``@#include`` or ``@#includepath`` argument does not evaluate to a string. Dynare refuses: `File name does not evaluate to a string`.\n\n**Fix**\n\nUse a string expression, for example ``@#include \"helper.inc\"`` or ``@#includepath \"mydir\"``.\n"
     },
     {
       "code": "E306",
@@ -2581,7 +2581,7 @@
       "code": "I211",
       "kind": "added",
       "title": "Macro expansion incomplete",
-      "markdown": "### I211: Macro expansion incomplete\n\nDygnosis stopped this macro expansion at an explicit local limit: expression depth, range or collection size, output size, message size, or iteration work. The Information names that limit. A supported macro expression is expanded; this note is not a Dynare refusal. Official macro Errors keep precedence. A limit stops later directives in that file. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nShrink the named macro expression, or run the official Dynare preprocessor for its full expansion.\n"
+      "markdown": "### I211: Macro expansion incomplete\n\nDygnosis stopped this macro expansion. A limit note names that limit: expression depth, value depth, execution depth, string size, range size, collection size, output size, message size, iteration work, or a non-UTF-8 byte slice. An unsupported expression names that expression. A supported macro expression is expanded; this note is not a Dynare refusal. Official macro Errors keep precedence. A limit stops later directives in that file. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nShrink the named macro expression, or run the official Dynare preprocessor for its full expansion.\n"
     },
     {
       "code": "W010",

@@ -112,12 +112,14 @@ fn cached_activity_rechecks_definitions_and_diagnostic_records() {
         dygnosis::check_e061(workspace.include_records(&root).unwrap()).len(),
         1
     );
+    assert_eq!(before.non_local_equation_count(), 1);
+    // A taken missing include stops the root, so the equation after it is absent.
     assert_eq!(
-        before.non_local_equation_count(),
         workspace
             .get_effective_model(&root)
             .unwrap()
-            .non_local_equation_count()
+            .non_local_equation_count(),
+        0
     );
 }
 
