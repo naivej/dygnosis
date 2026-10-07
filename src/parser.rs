@@ -1,6 +1,6 @@
 //! Native recursive-descent parser over the token stream.
 
-use std::collections::{hash_map::Entry, BTreeMap, HashMap};
+use std::collections::{hash_map::Entry, BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 
 use crate::expr::{BinOp, ExprId, ExprKind, UnOp};
@@ -223,11 +223,15 @@ fn parse_with_lines_and_evaluations_budget(
 pub(crate) struct EquationTokenRanges {
     pub aggregate: Vec<Range<usize>>,
     pub heterogeneous: Vec<Vec<Range<usize>>>,
+    /// Each parser token's range in the original expanded stream. Dynare
+    /// string matching can join newline-bounded native lexer tokens.
+    pub(crate) original_tokens: Vec<Range<usize>>,
 }
 
 pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationTokenRanges) {
     let mut p = Parser {
         src,
+        token_origins: (0..tokens.len()).map(|i| i..i + 1).collect(),
         tokens,
         i: 0,
         intern: Interner::default(),
@@ -238,6 +242,9 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         hetero_eq_token_ranges: Vec::new(),
         verbatim_ranges: Vec::new(),
         native_ranges: Vec::new(),
+        initial_source_cursor: 0,
+        completed_block_separator: None,
+        refused_row_ends: HashSet::new(),
         symbol_list_id: 1,
         in_model: false,
         in_equation_body: false,
@@ -264,6 +271,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         intern,
         mut model,
         tokens,
+        token_origins,
         eq_token_ranges,
         hetero_eq_token_ranges,
         ..
@@ -271,11 +279,13 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
     model.source = src.to_string();
     model.intern = intern;
     model.expanded_tokens = tokens;
+    model.expanded_token_origins = token_origins.clone();
     (
         model,
         EquationTokenRanges {
             aggregate: eq_token_ranges,
             heterogeneous: hetero_eq_token_ranges,
+            original_tokens: token_origins,
         },
     )
 }
@@ -1056,6 +1066,7 @@ fn is_ident_only(s: &str) -> bool {
 struct Parser<'a> {
     src: &'a str,
     tokens: Vec<Token>,
+    token_origins: Vec<Range<usize>>,
     i: usize,
     intern: Interner,
     model: Model,
@@ -1069,6 +1080,12 @@ struct Parser<'a> {
     verbatim_ranges: Vec<Range<usize>>,
     /// Token ranges already read as native text, independently of written spans.
     native_ranges: Vec<Range<usize>>,
+    /// End of consumed emitted text, including trivia omitted by the lexer.
+    initial_source_cursor: usize,
+    /// The END token and the parser position after its INITIAL semicolon.
+    completed_block_separator: Option<(usize, usize)>,
+    /// Original delimiter tokens left after a lexer-refused collected row.
+    refused_row_ends: HashSet<usize>,
     /// Bumped once per statement that lists names, so `CommandSymbol::list_id`
     /// groups one statement's list.
     symbol_list_id: u32,
@@ -1163,12 +1180,31 @@ impl Parser<'_> {
     }
 
     fn parse_file(&mut self) {
-        while !self.at(TokenKind::Eof) {
+        loop {
+            if self.skip_initial_native_region(true) {
+                continue;
+            }
+            if self.at(TokenKind::Eof) {
+                break;
+            }
+            let native_assignment = self.at(TokenKind::Ident)
+                && self.kind_at(1) == Some(TokenKind::Eq)
+                && self
+                    .intern
+                    .lookup(self.tokens[self.i].text(self.src))
+                    .is_none_or(|name| self.assignment_head_is_native(name));
+            if !native_assignment && self.refuse_active_row(false) {
+                self.advance_initial_source_cursor();
+                continue;
+            }
             let from = self.i;
             let mut recognized = true;
             let parameters_before = self.model.param_assignments.len();
             let helpers_before = self.model.helper_assignments.len();
             let dotted_before = self.model.dotted_statements.len();
+            let shapes_before = self.model.shape_refuses.len();
+            let identifications_before = self.model.svar_identifications.len();
+            let paths_before = self.model.conditional_forecast_paths.len();
             self.model_expression_command = [
                 "model",
                 "model_replace",
@@ -1212,6 +1248,7 @@ impl Parser<'_> {
                 }
                 self.eat(TokenKind::Semi);
                 self.record_statement(from, None, None);
+                self.advance_initial_source_cursor();
                 continue;
             }
             if self.at_ident_ci("var") {
@@ -1369,9 +1406,6 @@ impl Parser<'_> {
                 self.parse_handed_over_statement();
             } else if self.skip_generated_native_line() {
                 recognized = false;
-            } else if let Some(end) = self.native_statement_end() {
-                self.skip_native_statement(end);
-                recognized = false;
             } else if let Some(command) = self.at_policy_command() {
                 self.parse_policy_command(command);
             } else if self.at_skipped_block() {
@@ -1391,6 +1425,8 @@ impl Parser<'_> {
                     && self.at_statement_boundary();
                 self.skip_until_semi();
             }
+            self.capture_shape_orders(from, shapes_before, identifications_before, paths_before);
+            self.advance_initial_source_cursor();
             let assignment = if self.model.param_assignments.len() > parameters_before {
                 Some(crate::model::AssignmentIndex::Parameter(parameters_before))
             } else if self.model.helper_assignments.len() > helpers_before {
@@ -1425,6 +1461,55 @@ impl Parser<'_> {
                 .min()
                 .unwrap_or(0),
             end: tokens.iter().map(|token| token.span.end).max().unwrap_or(0),
+        }
+    }
+
+    /// A written span can occur in several macro executions. Capture each new
+    /// refusal beside the tokens consumed for its own executed statement.
+    fn capture_shape_orders(
+        &mut self,
+        from: usize,
+        shapes_before: usize,
+        identifications_before: usize,
+        paths_before: usize,
+    ) {
+        let tokens = &self.tokens;
+        let origins = &self.token_origins;
+        let end = if self.at(TokenKind::Eof) {
+            (self.i + 1).min(tokens.len())
+        } else {
+            self.i
+        };
+        let execution = origins
+            .get(from)
+            .zip(origins.get(end.saturating_sub(1)))
+            .map(|(first, last)| first.start..last.end);
+        let capture = |refuse: &mut ShapeRefuse| {
+            refuse.parse_execution = execution.clone();
+            if refuse.parse_order.is_some() {
+                return;
+            }
+            let mut matching =
+                (from..end).filter(|&index| tokens[index].span.start == refuse.span.start);
+            let first = matching.next();
+            refuse.parse_order = if matching.next().is_none() {
+                first.map(|index| origins[index].start)
+            } else {
+                None
+            };
+        };
+        for refuse in &mut self.model.shape_refuses[shapes_before..] {
+            capture(refuse);
+        }
+        for block in &mut self.model.svar_identifications[identifications_before..] {
+            for refuse in &mut block.shape_refuses {
+                capture(refuse);
+            }
+        }
+        for block in &mut self.model.conditional_forecast_paths[paths_before..] {
+            for refuse in &mut block.shape_refuses {
+                capture(refuse);
+            }
         }
     }
 
@@ -1536,10 +1621,9 @@ impl Parser<'_> {
             .or(subtype);
         let complete = self.tokens[self.i - 1].kind == TokenKind::Semi
             && (!block
-                || (self.i >= from + 2
-                    && self.tokens[self.i - 2]
-                        .text(self.src)
-                        .eq_ignore_ascii_case("end")));
+                || self
+                    .completed_block_separator
+                    .is_some_and(|(end, after)| from <= end && end < after && after == self.i));
         let id = self.model.statements.len();
         let native = assignment.is_some_and(|index| match index {
             crate::model::AssignmentIndex::Parameter(i) => self.model.param_assignments[i].native,
@@ -2250,7 +2334,7 @@ impl Parser<'_> {
     }
 
     fn push_bison(&mut self, span: Span, message: String) {
-        self.model.parse_issues.push(ParseIssue {
+        self.record_issue(ParseIssue {
             kind: ParseIssueKind::BisonSyntax(message),
             span,
         });
@@ -2416,17 +2500,17 @@ impl Parser<'_> {
                 continue;
             }
             let tok = self.bump();
-            self.model.shape_refuses.push(ShapeRefuse::new(
-                tok.span,
-                "var_remove",
-                "a list of symbols",
-            ));
+            self.model.shape_refuses.push(
+                ShapeRefuse::new(tok.span, "var_remove", "a list of symbols")
+                    .with_parse_order(self.token_origins[self.i - 1].start),
+            );
         }
         let end = if self.at(TokenKind::Semi) {
             self.bump().span.end
         } else {
             self.current_start()
         };
+        let parse_order = self.token_origins[self.i.saturating_sub(1)].start;
         let statement = Span { start, end };
         for (name, name_span) in names {
             if self.symbol_roles.contains_key(&name) {
@@ -2437,6 +2521,7 @@ impl Parser<'_> {
             self.record_initializations_before_removal(name, "var_remove", removal_event);
             self.model.var_removed.push(VarRemovedName {
                 symbol_type_context: removal_event,
+                parse_order,
                 name,
                 name_span,
                 statement,
@@ -2723,7 +2808,29 @@ impl Parser<'_> {
         // Same body as `model`: an opener spelling is an identifier here.
         self.in_equation_body = true;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
-            if self.refuse_ss_scalar_target() {
+            // END in a closed output list belongs to the scalar/list target
+            // refusal, which recovers through that row's own semicolon.
+            let end_in_targets = self.at(TokenKind::LBrack)
+                && self.tokens[self.i..]
+                    .iter()
+                    .take_while(|token| {
+                        !matches!(
+                            token.kind,
+                            TokenKind::RBrack | TokenKind::Semi | TokenKind::Eof
+                        )
+                    })
+                    .any(|token| {
+                        token.kind == TokenKind::Ident
+                            && token.text(self.src).eq_ignore_ascii_case("end")
+                    });
+            if let Some((index, expected)) = self.ss_scalar_target_refusal() {
+                if self.refuse_active_row_with_limit(true, end_in_targets, Some(index)) {
+                    continue;
+                }
+                self.refuse_ss_target(index, expected);
+                continue;
+            }
+            if self.refuse_active_row_with_embedded_end(true, end_in_targets) {
                 continue;
             }
             if let Some(eq) = self.parse_ss_equation() {
@@ -2741,7 +2848,7 @@ impl Parser<'_> {
     /// 7.2's `steady_state_equation` takes `symbol EQUAL`, rather than a
     /// model-expression LHS. Its bracketed multiple-output form is separate.
     /// Refuse before parsing an invalid target as a use or an implicit local.
-    fn refuse_ss_scalar_target(&mut self) -> bool {
+    fn ss_scalar_target_refusal(&self) -> Option<(usize, Option<&'static str>)> {
         let (index, expected) = if self.at(TokenKind::Ident) {
             if self
                 .ss_block_word_token(self.i)
@@ -2749,7 +2856,7 @@ impl Parser<'_> {
             {
                 (self.i, None)
             } else if self.peek_kind(1) == Some(TokenKind::Eq) {
-                return false;
+                return None;
             } else {
                 (self.i + 1, Some("EQUAL"))
             }
@@ -2763,10 +2870,9 @@ impl Parser<'_> {
         ) {
             (self.i, None)
         } else {
-            return false;
+            return None;
         };
-        self.refuse_ss_target(index, expected);
-        true
+        Some((index, expected))
     }
 
     fn ss_unexpected_token(&self, index: usize) -> (Span, String) {
@@ -2821,6 +2927,19 @@ impl Parser<'_> {
             None => format!("syntax error, unexpected {unexpected}"),
         };
         self.push_bison(span, message);
+        // A rejected `y end=...` target owns this END token. A later END
+        // without EQUAL still belongs to the enclosing block's recovery.
+        if self.tokens[index].kind == TokenKind::Ident
+            && self.tokens[index]
+                .text(self.src)
+                .eq_ignore_ascii_case("end")
+            && self
+                .tokens
+                .get(index + 1)
+                .is_some_and(|t| t.kind == TokenKind::Eq)
+        {
+            self.i = index + 1;
+        }
         // A refused target may have unmatched parentheses. Its semicolon or
         // block boundary still ends recovery; balancing would consume later rows.
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) && !self.at_block_stop() {
@@ -5214,6 +5333,7 @@ impl Parser<'_> {
     /// One family `;` statement: its span, its option rows, and ? for `ms_irf` and
     /// `plot_conditional_forecast` ? the trailing symbol list.
     fn parse_ms_statement(&mut self) {
+        let parse_order = self.token_origins[self.i].start;
         let command = self
             .at_ms_family_command()
             .expect("caller checked the command")
@@ -5239,18 +5359,21 @@ impl Parser<'_> {
         if option_span.is_some() && command.eq_ignore_ascii_case("svar_global_identification_check")
         {
             let tok = self.tokens[self.i - 1].span;
-            self.model
-                .shape_refuses
-                .push(ShapeRefuse::new(tok, &command, "no option list"));
+            self.model.shape_refuses.push(
+                ShapeRefuse::new(tok, &command, "no option list")
+                    .with_parse_order(self.token_origins[self.i - 1].start),
+            );
         }
         if option_span.is_none() && requires_option_list(&command) {
             let tok = self.tokens[self.i].span;
-            self.model
-                .shape_refuses
-                .push(ShapeRefuse::new(tok, &command, "an option list"));
+            self.model.shape_refuses.push(
+                ShapeRefuse::new(tok, &command, "an option list")
+                    .with_parse_order(self.token_origins[self.i].start),
+            );
         }
         self.model.ms_statements.push(MsStatement {
             symbol_type_context: self.model.symbol_context(),
+            parse_order,
             command: command.clone(),
             span: Span {
                 start,
@@ -5272,11 +5395,10 @@ impl Parser<'_> {
                 .any(|sym| sym.list_id == self.symbol_list_id)
         {
             let tok = self.tokens[self.i].span;
-            self.model.shape_refuses.push(ShapeRefuse::new(
-                tok,
-                &command,
-                "a list of endogenous names",
-            ));
+            self.model.shape_refuses.push(
+                ShapeRefuse::new(tok, &command, "a list of endogenous names")
+                    .with_parse_order(self.token_origins[self.i].start),
+            );
         }
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             self.bump();
@@ -5288,6 +5410,7 @@ impl Parser<'_> {
         };
         if let Some(stmt) = self.model.ms_statements.last_mut() {
             stmt.span.end = end;
+            stmt.parse_order = self.token_origins[self.i.saturating_sub(1)].start;
         }
     }
 
@@ -5313,9 +5436,10 @@ impl Parser<'_> {
         // list, and `data()` needs at least one option in it.
         if !has_list {
             let tok = self.tokens[self.i].span;
-            self.model
-                .shape_refuses
-                .push(ShapeRefuse::new(tok, "data", "an option list"));
+            self.model.shape_refuses.push(
+                ShapeRefuse::new(tok, "data", "an option list")
+                    .with_parse_order(self.token_origins[self.i].start),
+            );
         }
         let end = if self.at(TokenKind::Semi) {
             self.bump().span.end
@@ -5519,12 +5643,8 @@ impl Parser<'_> {
     /// The symbol at a token offset when the pin's lexer would read it as a
     /// statement head, or `None`.
     ///
-    /// 7.1's rule is `symbol_exists_and_is_not_modfile_local_or_external_function`:
-    /// a name declared as `var` / `varexo` / `parameters` / `predetermined_variables`
-    /// enters a Dynare statement, while a mod-file local (`#x = 1;`) or an
-    /// `external_function` name sends the whole line to native MATLAB, where no
-    /// language claim is made. This mirrors that rule, so `#x = 1;` followed by
-    /// `x.prior(?)` is native text to both sides.
+    /// The pinned symbol test includes `#` and `model_local_variable` names.
+    /// Mod-file locals and external functions send the line to native MATLAB.
     fn declared_ident_at(&self, offset: usize) -> Option<(Name, Span)> {
         let tok = self.tokens.get(self.i + offset)?;
         if tok.kind != TokenKind::Ident {
@@ -5558,98 +5678,6 @@ impl Parser<'_> {
         self.src
             .get(a.span.end as usize..b.span.start as usize)
             .is_some_and(|gap| gap == s)
-    }
-
-    /// Whether a token offset is an identifier at all (declaration not checked).
-    fn ident_at(&self, offset: usize) -> bool {
-        self.kind_at(offset) == Some(TokenKind::Ident)
-    }
-
-    /// The head names of the dotted shape at the cursor plus the offset of the
-    /// identifier after the head, or `None` when the tokens are not that shape.
-    ///
-    /// Shape only: 7.1's lexer decides statement versus native line by looking at
-    /// the head, and the grammar then keys the body on `prior` / `options` /
-    /// `subsamples`, so this must not consult the symbol table.
-    fn syntactic_dotted_head(&self) -> Option<(Vec<usize>, usize)> {
-        // `[a, b].prior(?)` and longer vectors.
-        if self.kind_at(0) == Some(TokenKind::LBrack) {
-            let mut names = Vec::new();
-            let mut k = 1;
-            loop {
-                if !self.ident_at(k) {
-                    return None;
-                }
-                names.push(k);
-                k += 1;
-                match self.kind_at(k) {
-                    // One name is enough for the shape: `[a].prior(?)` is the same
-                    // `SYMBOL_VEC` production, and the joint prior's check pass
-                    // refuses it for its count.
-                    Some(TokenKind::RBrack) => {
-                        if !names.is_empty()
-                            && self.kind_at(k + 1) == Some(TokenKind::Dot)
-                            && self.ident_at(k + 2)
-                        {
-                            return Some((names, k + 2));
-                        }
-                        return None;
-                    }
-                    Some(TokenKind::Comma) => k += 1,
-                    _ => return None,
-                }
-            }
-        }
-        // `std(x).prior(?)` and `corr(x, y).prior(?)`. Their names are checked by the
-        // grammar's own `symbol` production, so the head is always a statement.
-        let mut head_names = Vec::new();
-        for (keyword, arity) in [("std", 1usize), ("corr", 2usize)] {
-            if !self.at_ident_ci_at(0, keyword) || self.kind_at(1) != Some(TokenKind::LParen) {
-                continue;
-            }
-            let mut k = 2;
-            for arg in 0..arity {
-                if arg > 0 && self.kind_at(k) == Some(TokenKind::Comma) {
-                    k += 1;
-                }
-                if !self.ident_at(k) {
-                    return None;
-                }
-                head_names.push(k);
-                k += 1;
-            }
-            if self.kind_at(k) != Some(TokenKind::RParen)
-                || self.kind_at(k + 1) != Some(TokenKind::Dot)
-            {
-                return None;
-            }
-            // These two are keywords, so they never go native.
-            if self.ident_at(k + 2) {
-                return Some((Vec::new(), k + 4));
-            }
-            return Some((Vec::new(), k + 2));
-        }
-        // `alpha.prior(?)` and `alpha.beta.prior(?)`.
-        if self.ident_at(0) && self.kind_at(1) == Some(TokenKind::Dot) {
-            if self.ident_at(2) && self.kind_at(3) == Some(TokenKind::Dot) {
-                return Some((vec![0], 4));
-            }
-            return Some((vec![0], 2));
-        }
-        None
-    }
-
-    /// Whether every head name at these token offsets is declared as a statement
-    /// head. An empty list means the head is a keyword (`std` / `corr`), which the
-    /// grammar always reads as a statement.
-    fn dotted_head_is_statement(&self, names: &[usize]) -> bool {
-        names.iter().all(|&k| {
-            self.ident_at(k)
-                && self
-                    .intern
-                    .lookup(self.tokens[self.i + k].text(self.src))
-                    .is_some_and(|name| self.is_statement_head_symbol(name))
-        })
     }
 
     /// Macro output is not scanned again. Generated macro markers and unknown
@@ -5692,72 +5720,376 @@ impl Parser<'_> {
         true
     }
 
-    /// The end offset of a top-level statement 7.1 reads as native MATLAB text: it
-    /// makes no language claim on the line, so neither may we beyond leaving it be.
-    ///
-    /// Two shapes reach here. A dotted head whose names fail the pin's declaration
-    /// rule (`zzz.prior(?)`, `[aaa, bbb].prior(?)`, a mod-file local or an
-    /// external-function name as the head), and an identifier that is not one of the
-    /// pin's statement keywords followed by `(`. Both are 7.1-accepted however their
-    /// contents read. A head that passes the rule stays a Dynare statement, so the
-    /// grammar's own refusals on it keep their existing paths.
-    fn native_statement_end(&self) -> Option<usize> {
-        let native_dotted = self.syntactic_dotted_head().is_some_and(|(names, body)| {
-            self.kind_at(body + 1) == Some(TokenKind::LParen)
-                && !self.dotted_head_is_statement(&names)
+    /// Consume every non-assignment NATIVE entry before a keyword can claim it.
+    /// The source cursor sees characters that tokenization omits, such as `{`.
+    fn skip_initial_native_region(&mut self, leave_assignment: bool) -> bool {
+        let head = self.tokens[self.i].clone();
+        let emitted = head.emitted.clone();
+        let source = emitted
+            .as_ref()
+            .map_or(self.src, |t| t.source.text.as_str());
+        let start = crate::native_line::initial_content_start(source, self.initial_source_cursor);
+        if start >= source.len() {
+            return false;
+        }
+        let token_start = emitted.as_ref().map_or(head.span.start, |t| t.span.start) as usize;
+        // Only a token at the first source character can enter DYNARE_STATEMENT.
+        let statement = start == token_start && self.initial_token_starts_statement(source, start);
+        if statement {
+            return false;
+        }
+        // Slice 19 retains a native assignment for guidance and skips its RHS.
+        if leave_assignment
+            && start == token_start
+            && head.kind == TokenKind::Ident
+            && self.kind_at(1) == Some(TokenKind::Eq)
+        {
+            return false;
+        }
+        let end = crate::native_line::native_region_end(source, start);
+        let from = self.i;
+        while !self.at(TokenKind::Eof)
+            && (self.tokens[self.i]
+                .emitted
+                .as_ref()
+                .map_or(self.tokens[self.i].span.start, |t| t.span.start) as usize)
+                < end
+        {
+            self.i += 1;
+        }
+        self.initial_source_cursor = end;
+        self.native_ranges.push(from..self.i);
+        self.initial_source_cursor = end;
+        let written = emitted.as_ref().map_or(Span::new(start, end), |t| Span {
+            start: t.source.written_start(start),
+            end: t.source.written_end(end),
         });
-        let head = &self.tokens[self.i];
-        let non_keyword_call = self.ident_at(0)
-            && self.kind_at(1) == Some(TokenKind::LParen)
-            && !crate::command_skip::is_pin_statement_keyword(head.text(self.src))
-            && self
-                .intern
-                .lookup(head.text(self.src))
-                .is_none_or(|name| !self.is_statement_head_symbol(name));
-        if !native_dotted && !non_keyword_call {
-            return None;
+        self.model.ms_unparsed_spans.push(written);
+        if from < self.i {
+            self.model.opaque_tokens.insert(
+                self.model.execution_steps.len(),
+                self.tokens[from..self.i].to_vec(),
+            );
+            self.model
+                .execution_steps
+                .push(crate::model::ExecutionStep::Opaque(written));
         }
-        // The statement ends at its `;`, or at the end of the parenthesised group.
-        let mut k = 0;
-        while let Some(kind) = self.kind_at(k) {
-            match kind {
-                TokenKind::Semi => return Some(k),
-                TokenKind::LParen | TokenKind::LBrack => {
-                    let close = if kind == TokenKind::LParen {
-                        TokenKind::RParen
-                    } else {
-                        TokenKind::RBrack
-                    };
-                    k = skip_balanced_tokens(&self.tokens, self.i + k, kind, close) - self.i;
-                    continue;
-                }
-                TokenKind::Eof => return None,
-                _ => k += 1,
-            }
-        }
-        None
+        true
     }
 
-    /// Claim a native statement's span and step over it, recording no row.
-    fn skip_native_statement(&mut self, end: usize) {
-        self.native_ranges
-            .push(self.i..(self.i + end + 1).min(self.tokens.len()));
-        let start = self.tokens[self.i].span.start;
-        let end_span = if self.kind_at(end) == Some(TokenKind::Semi) {
-            self.tokens[self.i + end].span.end
-        } else {
-            self.tokens
-                .get(self.i + end.saturating_sub(1))
-                .map(|t| t.span.end)
-                .unwrap_or(start)
+    fn initial_token_starts_statement(&self, source: &str, start: usize) -> bool {
+        let head = &self.tokens[self.i];
+        match head.kind {
+            TokenKind::Semi => true,
+            TokenKind::Ident => {
+                let spelling = head.text(self.src);
+                if spelling.eq_ignore_ascii_case("verbatim") {
+                    if crate::native_line::verbatim_opener(source, start) {
+                        return true;
+                    }
+                } else if crate::command_skip::is_pin_statement_keyword(spelling) {
+                    return true;
+                }
+                self.intern.lookup(spelling).is_some_and(|name| {
+                    self.is_statement_head_symbol(name)
+                        || self.generated_policy_discount == Some(name)
+                })
+            }
+            TokenKind::LBrack => self.initial_symbol_vector(source, start),
+            TokenKind::MacroReplay => true,
+            _ => false,
+        }
+    }
+
+    /// The SYMBOL_VEC source rule accepts commas and whitespace, never comments.
+    fn initial_symbol_vector(&self, source: &str, start: usize) -> bool {
+        let bytes = source.as_bytes();
+        let mut cursor = start + 1;
+        loop {
+            while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+                cursor += 1;
+            }
+            if !bytes
+                .get(cursor)
+                .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_')
+            {
+                return false;
+            }
+            cursor += 1;
+            while bytes
+                .get(cursor)
+                .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+            {
+                cursor += 1;
+            }
+            while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+                cursor += 1;
+            }
+            match bytes.get(cursor) {
+                Some(b']') => {
+                    // Flex strips literal spaces only before consulting symbols.
+                    // A tab/newline remains part of a name and fails that test.
+                    return source[start + 1..cursor]
+                        .replace(' ', "")
+                        .split(',')
+                        .all(|spelling| {
+                            self.intern
+                                .lookup(spelling)
+                                .is_some_and(|name| self.is_statement_head_symbol(name))
+                        });
+                }
+                Some(b',') => cursor += 1,
+                _ => return false,
+            }
+        }
+    }
+
+    fn advance_initial_source_cursor(&mut self) {
+        if self.i > 0 {
+            let last = &self.tokens[self.i - 1];
+            let end = last.emitted.as_ref().map_or(last.span.end, |t| t.span.end) as usize;
+            self.initial_source_cursor = self.initial_source_cursor.max(end);
+        }
+    }
+
+    /// Refuse the row before expressions can add uses, writes, or values.
+    /// Strings and comments have already been identified by the source lexer.
+    fn refuse_active_row(&mut self, block: bool) -> bool {
+        self.refuse_active_row_with_embedded_end(block, false)
+    }
+
+    fn refuse_active_row_with_embedded_end(
+        &mut self,
+        block: bool,
+        allow_embedded_end: bool,
+    ) -> bool {
+        self.refuse_active_row_with_limit(block, allow_embedded_end, None)
+    }
+
+    fn refuse_active_row_with_limit(
+        &mut self,
+        block: bool,
+        allow_embedded_end: bool,
+        scan_limit: Option<usize>,
+    ) -> bool {
+        self.coalesce_active_strings();
+        let from = self.i;
+        let mut end = from;
+        while end < self.tokens.len() {
+            let token = &self.tokens[end];
+            if matches!(token.kind, TokenKind::Semi | TokenKind::Eof)
+                || (block
+                    && !allow_embedded_end
+                    && token.kind == TokenKind::Ident
+                    && token.text(self.src).eq_ignore_ascii_case("end"))
+            {
+                break;
+            }
+            end += 1;
+        }
+        let scan_end = scan_limit.map_or(end, |limit| end.min(limit));
+        let mut failure = None;
+        // Include the delimiter's preceding gap: a final dropped `{` is still
+        // inside this row even when no expression token follows it.
+        for i in from..=scan_end.min(self.tokens.len().saturating_sub(1)) {
+            let token = &self.tokens[i];
+            let emitted = token.emitted.as_ref();
+            let source = emitted.map_or(self.src, |t| t.source.text.as_str());
+            let token_start = emitted.map_or(token.span.start, |t| t.span.start) as usize;
+            let previous_end = i.checked_sub(1).map_or(0, |prev| {
+                self.tokens[prev]
+                    .emitted
+                    .as_ref()
+                    .map_or(self.tokens[prev].span.end, |t| t.span.end) as usize
+            });
+            let mut cursor = previous_end.min(token_start);
+            if i == from && !block {
+                cursor = cursor.max(self.initial_source_cursor.min(token_start));
+            }
+            while cursor < token_start {
+                cursor = crate::native_line::initial_content_start(source, cursor);
+                if cursor >= token_start {
+                    break;
+                }
+                if matches!(source.as_bytes()[cursor], b'{' | b'}') {
+                    let span = emitted.map_or(Span::new(cursor, cursor + 1), |t| Span {
+                        start: t.source.written_start(cursor),
+                        end: t.source.written_end(cursor + 1),
+                    });
+                    failure = Some((span, "character unrecognized by lexer"));
+                    break;
+                }
+                cursor += source[cursor..]
+                    .chars()
+                    .next()
+                    .map(char::len_utf8)
+                    .unwrap_or(1);
+            }
+            if failure.is_some() {
+                break;
+            }
+            if i == scan_end {
+                if scan_limit.is_none()
+                    && block
+                    && i > from
+                    && token.kind == TokenKind::Ident
+                    && token.text(self.src).eq_ignore_ascii_case("end")
+                    && !(matches!(
+                        self.tokens[i - 1].kind,
+                        TokenKind::Ident | TokenKind::Number | TokenKind::RParen
+                    ) && source
+                        .get(previous_end..token_start)
+                        .is_some_and(|gap| gap.contains('\n')))
+                {
+                    failure = Some((token.span, "syntax error, unexpected END"));
+                }
+                break;
+            }
+            if block && token.kind == TokenKind::String && token.text(self.src) == "'" {
+                failure = Some((token.span, "character unrecognized by lexer"));
+                break;
+            }
+            if token.kind == TokenKind::Dot
+                && self
+                    .tokens
+                    .get(i + 1)
+                    .is_some_and(|next| next.kind == TokenKind::Dot)
+            {
+                failure = Some((token.span, "syntax error, unexpected '.'"));
+                break;
+            }
+        }
+        let Some((span, message)) = failure else {
+            return false;
         };
-        self.model.ms_unparsed_spans.push(Span {
-            start,
-            end: end_span,
-        });
-        self.i = (self.i + end + 1).min(self.tokens.len().saturating_sub(1));
-        if self.tokens[self.i].kind == TokenKind::Semi {
-            self.bump();
+        self.push_bison(span, message.to_string());
+        self.i = end;
+        // Keep END for the enclosing block reader. Consuming it here would
+        // turn one rejected row into an additional missing-END refusal.
+        if block && self.at_ident_ci("end") {
+            return true;
+        }
+        self.eat(TokenKind::Semi);
+        true
+    }
+
+    fn coalesce_active_strings(&mut self) {
+        let mut at = self.i;
+        while at < self.tokens.len()
+            && !matches!(self.tokens[at].kind, TokenKind::Semi | TokenKind::Eof)
+        {
+            self.coalesce_dynare_string(at);
+            at += 1;
+        }
+    }
+
+    /// Match the pinned single-quoted source rule in Dynare syntax. Tokens on
+    /// a native line remain newline-bounded and never use this operation.
+    pub(super) fn coalesce_dynare_string(&mut self, at: usize) {
+        let head = self.tokens[at].clone();
+        if head.kind != TokenKind::String || !head.text(self.src).starts_with('\'') {
+            return;
+        }
+        let emitted = head.emitted.clone();
+        let source = emitted
+            .as_ref()
+            .map_or(self.src, |t| t.source.text.as_str());
+        let start = emitted.as_ref().map_or(head.span.start, |t| t.span.start) as usize;
+        let Some(close) = source.get(start + 1..).and_then(|s| s.find('\'')) else {
+            return;
+        };
+        let close_end = start + close + 2;
+        let head_end = emitted.as_ref().map_or(head.span.end, |t| t.span.end) as usize;
+        if close_end <= head_end {
+            return;
+        }
+        let mut after = at + 1;
+        while after < self.tokens.len() && self.tokens[after].kind != TokenKind::Eof {
+            let token_start = self.tokens[after]
+                .emitted
+                .as_ref()
+                .map_or(self.tokens[after].span.start, |t| t.span.start)
+                as usize;
+            if token_start >= close_end {
+                break;
+            }
+            after += 1;
+        }
+        let last = &self.tokens[after - 1];
+        let replacement_end = last.emitted.as_ref().map_or(last.span.end, |t| t.span.end) as usize;
+        let mut merged = head;
+        merged.lexeme = Some(source[start..close_end].to_string());
+        if let Some(token) = &mut merged.emitted {
+            token.span.end = close_end as u32;
+            merged.span.end = token.source.written_end(close_end).max(merged.span.start);
+        } else {
+            merged.span.end = close_end as u32;
+        }
+        let mut replacement = vec![merged];
+        if replacement_end > close_end {
+            for mut token in tokenize(&source[close_end..replacement_end])
+                .into_iter()
+                .filter(|t| t.kind != TokenKind::Eof)
+            {
+                let start = close_end + token.span.start as usize;
+                let end = close_end + token.span.end as usize;
+                token.lexeme = Some(source[start..end].to_string());
+                if let Some(origin) = &emitted {
+                    token.emitted = Some(crate::native_line::EmittedToken {
+                        source: origin.source.clone(),
+                        span: Span::new(start, end),
+                    });
+                    token.span = Span {
+                        start: origin.source.written_start(start),
+                        end: origin.source.written_end(end),
+                    };
+                } else {
+                    token.span = Span::new(start, end);
+                }
+                replacement.push(token);
+            }
+        }
+        let whole_origin = self.token_origins[at].start..self.token_origins[after - 1].end;
+        let suffix_origin = self.token_origins[after - 1].clone();
+        let mut origins = vec![whole_origin];
+        origins.extend((1..replacement.len()).map(|_| suffix_origin.clone()));
+        self.tokens.splice(at..after, replacement);
+        self.token_origins.splice(at..after, origins);
+    }
+
+    /// END has returned the source lexer to INITIAL; only an INITIAL semicolon
+    /// completes the enclosing block. Semicolons inside native lines do not.
+    pub(super) fn finish_block_separator(&mut self) -> u32 {
+        let end_token = self.i.saturating_sub(1);
+        self.completed_block_separator = None;
+        loop {
+            if self.skip_initial_native_region(false) {
+                continue;
+            }
+            if self.at(TokenKind::Semi) {
+                let end = self.bump().span.end;
+                self.completed_block_separator = Some((end_token, self.i));
+                return end;
+            }
+            let token = &self.tokens[self.i];
+            let span = token.span;
+            let unexpected = if token.kind == TokenKind::Eof {
+                "end of file".to_string()
+            } else if token.kind == TokenKind::Ident {
+                if crate::command_skip::is_pin_statement_keyword(token.text(self.src)) {
+                    token.text(self.src).to_ascii_uppercase()
+                } else {
+                    "IDENTIFIER".to_string()
+                }
+            } else {
+                self.bison_token_name(self.i)
+            };
+            self.push_bison(
+                span,
+                format!("syntax error, unexpected {unexpected}, expecting ';'"),
+            );
+            self.i = self.tokens.len().saturating_sub(1);
+            return span.end;
         }
     }
 
@@ -5877,6 +6209,18 @@ impl Parser<'_> {
     /// The refuse one of those heads earns, or `None` when the shape is one the
     /// grammar does accept.
     fn handed_over_refusal(&self) -> Option<ShapeRefuse> {
+        self.handed_over_refusal_at().map(|mut refuse| {
+            // This reader owns one executed statement. Its head proves that
+            // previous statements precede the refusal even when interpolation
+            // gives every token the same written span.
+            if refuse.parse_order.is_none() {
+                refuse.parse_order = Some(self.token_origins[self.i].start);
+            }
+            refuse
+        })
+    }
+
+    fn handed_over_refusal_at(&self) -> Option<ShapeRefuse> {
         let head = &self.tokens[self.i];
         let lex = head.text(self.src);
         if lex.eq_ignore_ascii_case("dsample") {
@@ -5986,11 +6330,14 @@ impl Parser<'_> {
         );
         let options = self.read_family_options(self.i + open, close);
         if options.is_empty() {
-            return Some(ShapeRefuse::new(
-                self.tokens[self.i + open].span,
-                subject,
-                "at least one option",
-            ));
+            return Some(
+                ShapeRefuse::new(
+                    self.tokens[self.i + open].span,
+                    subject,
+                    "at least one option",
+                )
+                .with_parse_order(self.token_origins[self.i + open].start),
+            );
         }
         let table = crate::shape_gate::command_options(subject)?;
         crate::shape_gate::option_refusal(self.src, subject, &options, table)
@@ -6018,7 +6365,9 @@ impl Parser<'_> {
     /// A declared name the pin's lexer sends to a Dynare statement. The lexer
     /// decides as it reads, so the declaration must start before this line.
     fn declared_spelling(&self, spelling: &str) -> bool {
-        self.declared_before(self.tokens[self.i].span.start, spelling)
+        self.intern
+            .lookup(spelling)
+            .is_some_and(|name| self.is_statement_head_symbol(name))
     }
 
     /// `alpha;`, `y(1) = 2;`, `alpha.foo(…)`, `alpha.foo.bar(…)`, `alpha.foo = 1;`:
@@ -6027,11 +6376,28 @@ impl Parser<'_> {
     fn declared_head_refusal(&self, head_span: Span, first: &str) -> Option<ShapeRefuse> {
         match self.kind_at(1) {
             // `alpha;` — the grammar wants `EQUAL` or a `.`-tail.
-            Some(TokenKind::Semi) => {
-                Some(ShapeRefuse::new(head_span, first, "EQUAL or a dotted tail"))
-            }
+            Some(TokenKind::Semi) => Some(
+                ShapeRefuse::new(head_span, first, "EQUAL or a dotted tail")
+                    .with_parse_order(self.token_origins[self.i + 1].start),
+            ),
             // `y(1) = 2;` — the grammar's top-level `symbol` takes no arguments.
-            Some(TokenKind::LParen) => Some(ShapeRefuse::new(head_span, first, "EQUAL or '.'")),
+            Some(TokenKind::LParen) => {
+                let model_local = self.intern.lookup(first).is_some_and(|name| {
+                    self.model.final_symbol_kind(name) == Some("model_local_variable")
+                });
+                Some(
+                    (if model_local {
+                        ShapeRefuse::official(
+                            self.tokens[self.i + 1].span,
+                            first,
+                            "syntax error, unexpected '(', expecting EQUAL or '.'",
+                        )
+                    } else {
+                        ShapeRefuse::new(head_span, first, "EQUAL or '.'")
+                    })
+                    .with_parse_order(self.token_origins[self.i + 1].start),
+                )
+            }
             Some(TokenKind::Dot) => self.dotted_tail_refusal(head_span, first),
             _ => None,
         }
@@ -6049,28 +6415,39 @@ impl Parser<'_> {
         if !is_dotted_body_word(tail) {
             // `alpha.foo = 1;` names the second word; `alpha.foo(…)` and
             // `alpha.foo;` are the dot's own token.
-            return Some(if self.kind_at(3) == Some(TokenKind::Eq) {
-                ShapeRefuse::new(self.tokens[self.i + 2].span, first, "'.'")
-            } else {
-                ShapeRefuse::new(self.tokens[self.i + 1].span, first, "'.'")
-            });
+            let index = self.i
+                + if self.kind_at(3) == Some(TokenKind::Eq) {
+                    2
+                } else {
+                    1
+                };
+            return Some(
+                (if self.kind_at(3) == Some(TokenKind::Eq) {
+                    ShapeRefuse::new(self.tokens[self.i + 2].span, first, "'.'")
+                } else {
+                    ShapeRefuse::new(self.tokens[self.i + 1].span, first, "'.'")
+                })
+                .with_parse_order(self.token_origins[index].start),
+            );
         }
         if self.kind_at(3) != Some(TokenKind::Dot) {
             // `alpha.prior;`, `alpha.prior = beta.prior;` — the copy form needs a
             // right-hand head, and a bare `;` has none. `at_dotted_statement` has
             // already claimed the legal body forms.
-            return Some(ShapeRefuse::new(head_span, first, "EQUAL or '.'"));
+            return Some(
+                ShapeRefuse::new(head_span, first, "EQUAL or '.'")
+                    .with_parse_order(self.token_origins[self.i + 3].start),
+            );
         }
         if self.kind_at(4) != Some(TokenKind::Ident) {
             return None;
         }
         let inner = self.tokens[self.i + 4].text(self.src);
         if !is_dotted_body_word(inner) {
-            return Some(ShapeRefuse::new(
-                self.tokens[self.i + 4].span,
-                first,
-                "OPTIONS or PRIOR",
-            ));
+            return Some(
+                ShapeRefuse::new(self.tokens[self.i + 4].span, first, "OPTIONS or PRIOR")
+                    .with_parse_order(self.token_origins[self.i + 4].start),
+            );
         }
         None
     }
@@ -6089,12 +6466,11 @@ impl Parser<'_> {
             .chain(&self.model.parameters)
             .chain(&self.model.predetermined)
             .chain(&self.model.retyped_trend_decls)
+            .chain(&self.model.model_local_variables)
             .find(|d| d.name == name)
     }
 
-    /// A declared name that enters a Dynare statement: declared, and neither a
-    /// mod-file local nor an external-function name. This reads the **finished**
-    /// table, which is what every site that decides `local` vs `extern` needs.
+    /// Read the symbol kind at the current parser execution point.
     fn is_statement_head_symbol(&self, name: Name) -> bool {
         self.is_statement_head_at(name, None)
     }
@@ -6106,13 +6482,8 @@ impl Parser<'_> {
     /// `gg = 1` followed by `parameters gg hh;` is native text to 7.1 even though
     /// `gg` ends up declared.
     ///
-    /// **Only `record_missing_assign_semis` uses this form.** It is the one pass
-    /// that asks per line after the file is parsed, so it has to reconstruct the
-    /// position the lexer was at. Every other site — the dotted-statement head
-    /// rule, `native_statement_end`, `at_statement_boundary`,
-    /// `sweep_undeclared_dotted_heads` — reads the finished table through
-    /// `is_statement_head_symbol`, because it runs while the cursor is already at
-    /// the site and the lexer's own position is the cursor.
+    /// Post-parse source readers need this form. Parser readers use the current
+    /// symbol history, before later declarations or type changes can affect it.
     fn declared_before(&self, at: u32, spelling: &str) -> bool {
         let Some(name) = self.intern.lookup(spelling) else {
             return false;
@@ -6123,10 +6494,15 @@ impl Parser<'_> {
     /// `declaration_of` plus the local / external exclusions and the optional
     /// as-of position.
     fn is_statement_head_at(&self, name: Name, before: Option<u32>) -> bool {
-        if self.model.mod_file_locals.contains(&name)
-            || self.model.external_function_names.contains(&name)
-        {
-            return false;
+        let kind = self
+            .model
+            .symbol_type_events
+            .iter()
+            .rev()
+            .find(|event| event.name == name && before.is_none_or(|at| event.span.start < at))
+            .map(|event| event.kind.as_str());
+        if let Some(kind) = kind {
+            return !matches!(kind, "mod_file_local" | "external_function");
         }
         self.declaration_of(name)
             .is_some_and(|d| before.is_none_or(|at| d.span.start < at))
@@ -6164,11 +6540,14 @@ impl Parser<'_> {
                 options = self.read_family_options(self.i + open, close);
                 self.record_parsed_option_twice(&options);
                 if options.is_empty() {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[close.saturating_sub(1)].span,
-                        "prior",
-                        "syntax error, unexpected ')'",
-                    ));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(
+                            self.tokens[close.saturating_sub(1)].span,
+                            "prior",
+                            "syntax error, unexpected ')'",
+                        )
+                        .with_parse_order(self.token_origins[close.saturating_sub(1)].start),
+                    );
                 }
                 let joint = matches!(head, DottedHead::Vec { .. });
                 let table = crate::shape_gate::prior_options(joint);
@@ -6182,11 +6561,14 @@ impl Parser<'_> {
                 options = self.read_family_options(self.i + open, close);
                 self.record_parsed_option_twice(&options);
                 if options.is_empty() {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[close.saturating_sub(1)].span,
-                        "options",
-                        "syntax error, unexpected ')'",
-                    ));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(
+                            self.tokens[close.saturating_sub(1)].span,
+                            "options",
+                            "syntax error, unexpected ')'",
+                        )
+                        .with_parse_order(self.token_origins[close.saturating_sub(1)].start),
+                    );
                 }
                 if let Some(refuse) = crate::shape_gate::option_refusal(
                     self.src,
@@ -6202,7 +6584,7 @@ impl Parser<'_> {
                             opt.span,
                             "options",
                             "syntax error, unexpected IDENTIFIER, expecting BOUNDS or JSCALE or INIT",
-                        ));
+                        ).with_parse_order(opt.parse_order));
                     } else {
                         self.model.shape_refuses.push(refuse);
                     }
@@ -6232,9 +6614,11 @@ impl Parser<'_> {
         if kind == DottedKind::Subsamples {
             self.collect_subsample_statement(self.i, (self.i + k).min(self.tokens.len()));
         }
+        let parse_order = self.token_origins[(self.i + k).saturating_sub(1)].start;
         self.i = (self.i + k).min(self.tokens.len().saturating_sub(1));
         self.model.dotted_statements.push(DottedStatement {
             symbol_type_context: self.model.symbol_context(),
+            parse_order,
             kind,
             keyword_span,
             head,
@@ -6268,8 +6652,11 @@ impl Parser<'_> {
                 TokenKind::Ident if depth == 0 => {
                     let name = self.tokens[i].text(self.src).to_string();
                     let span = self.tokens[i].span;
+                    let parse_order = self.token_origins[i].start;
                     i += 1;
                     let mut opt = FamilyOption {
+                        parse_order,
+                        value_parse_order: parse_order,
                         name,
                         span,
                         has_value: false,
@@ -6281,6 +6668,9 @@ impl Parser<'_> {
                     if i < end && self.tokens[i].kind == TokenKind::Eq {
                         opt.has_value = true;
                         i += 1;
+                        if i < end {
+                            opt.value_parse_order = self.token_origins[i].start;
+                        }
                         let value = self.read_family_value(i, end, span);
                         opt.value_kind = value.kind;
                         opt.value_span = value.span;
@@ -6472,16 +6862,34 @@ impl Parser<'_> {
     fn parse_svar_identification_block(&mut self) {
         let opener_span = self.bump_plain_opener();
         let body_i = self.i;
+        let refused_rows_before = self.refused_row_ends.len();
         let body_end_i = self.consume_until_end();
+        let body_rows_refused = self.refused_row_ends.len() > refused_rows_before;
         self.record_missing_end_if_unclosed("svar_identification", opener_span, body_i, body_end_i);
         let end = self.block_end_after_consume();
         let saved = self.i;
         self.i = body_i;
         let mut elements = Vec::new();
+        let mut element_parse_orders = Vec::new();
         let mut refused_while_reading: Vec<ShapeRefuse> = Vec::new();
         while self.i < body_end_i && !self.at(TokenKind::Eof) {
             let before = self.i;
+            let elements_before = elements.len();
             self.read_svar_identification_element(&mut elements, &mut refused_while_reading);
+            if elements.len() > elements_before {
+                element_parse_orders.push(
+                    (self.i > before && self.tokens[self.i - 1].kind == TokenKind::Semi)
+                        .then(|| self.token_origins[self.i - 1].start),
+                );
+            } else if let Some(SvarIdentificationElement::ExclusionLag { equations, .. }) =
+                elements.last()
+            {
+                if let Some(row) = equations.last() {
+                    *element_parse_orders
+                        .last_mut()
+                        .expect("recorded exclusion element") = row.parse_order;
+                }
+            }
             if self.i <= before {
                 self.bump();
             }
@@ -6493,13 +6901,16 @@ impl Parser<'_> {
         // is refused at the `end;` that closes it. A lag this body closed without an
         // `equation` row is a syntax error too.
         let mut shape_refuses = refused_while_reading;
-        if elements.is_empty() {
+        if elements.is_empty() && !body_rows_refused {
             let end_tok = self.tokens[body_end_i.min(self.tokens.len() - 1)].span;
-            shape_refuses.push(ShapeRefuse::new(
-                end_tok,
-                "svar_identification",
-                "an exclusion, cholesky or restriction row",
-            ));
+            shape_refuses.push(
+                ShapeRefuse::new(
+                    end_tok,
+                    "svar_identification",
+                    "an exclusion, cholesky or restriction row",
+                )
+                .with_parse_order(self.token_origins[body_end_i.min(self.tokens.len() - 1)].start),
+            );
         }
         for element in &elements {
             if let SvarIdentificationElement::ExclusionLag {
@@ -6514,6 +6925,7 @@ impl Parser<'_> {
             }
         }
         self.model.svar_identifications.push(SvarIdentification {
+            element_parse_orders,
             span: Span {
                 start: opener_span.start,
                 end,
@@ -6538,13 +6950,13 @@ impl Parser<'_> {
                 // grammar needs at least one `equation` row before the element is
                 // combined.
                 let lag_span = self.tokens[self.i].span;
+                let lag_order = self.token_origins[self.i].start;
                 let lag = self.take_int();
                 if lag.is_none() && !self.at_ident_ci("lag") {
-                    refuses.push(ShapeRefuse::new(
-                        lag_span,
-                        "exclusion lag",
-                        "a non-negative integer",
-                    ));
+                    refuses.push(
+                        ShapeRefuse::new(lag_span, "exclusion lag", "a non-negative integer")
+                            .with_parse_order(lag_order),
+                    );
                 }
                 let span = self.finish_family_element(start);
                 out.push(SvarIdentificationElement::ExclusionLag {
@@ -6571,6 +6983,7 @@ impl Parser<'_> {
             return;
         }
         if self.at_ident_ci("equation") {
+            let row_order = self.token_origins[self.i].start;
             let row = self.read_svar_equation();
             match out.last_mut() {
                 Some(SvarIdentificationElement::ExclusionLag { equations, .. }) => {
@@ -6579,11 +6992,14 @@ impl Parser<'_> {
                 _ => {
                     // `equation N, …;` with no `exclusion lag` above it: the
                     // grammar's list has no production for a leading row.
-                    refuses.push(ShapeRefuse::new(
-                        row.span,
-                        "svar_identification",
-                        "a row of the block's own list",
-                    ));
+                    refuses.push(
+                        ShapeRefuse::new(
+                            row.span,
+                            "svar_identification",
+                            "a row of the block's own list",
+                        )
+                        .with_parse_order(row_order),
+                    );
                     out.push(SvarIdentificationElement::ExclusionLag {
                         lag: None,
                         span: row.span,
@@ -6615,6 +7031,7 @@ impl Parser<'_> {
                 start: expr_start,
                 end: expr_end,
             };
+            self.bump_until_semi();
             let span = self.finish_family_element(start);
             out.push(SvarIdentificationElement::Restriction {
                 number,
@@ -6649,8 +7066,12 @@ impl Parser<'_> {
             self.bump();
         }
         let end = self.block_end_after_consume();
+        let parse_order = self
+            .at(TokenKind::Semi)
+            .then(|| self.token_origins[self.i].start);
         self.eat(TokenKind::Semi);
         SvarEquation {
+            parse_order,
             number,
             names,
             span: Span { start, end },
@@ -6690,7 +7111,9 @@ impl Parser<'_> {
     fn parse_conditional_forecast_paths_block(&mut self) {
         let opener_span = self.bump_plain_opener();
         let body_i = self.i;
+        let refused_rows_before = self.refused_row_ends.len();
         let body_end_i = self.consume_until_end();
+        let body_rows_refused = self.refused_row_ends.len() > refused_rows_before;
         self.record_missing_end_if_unclosed(
             "conditional_forecast_paths",
             opener_span,
@@ -6709,14 +7132,13 @@ impl Parser<'_> {
             let before = self.i;
             if let Some(row) = self.read_conditional_forecast_path() {
                 rows.push(row);
-            } else if self.at(TokenKind::Ident) {
+            } else if self.i == before && self.at(TokenKind::Ident) {
                 let tok = self.tokens[self.i].clone();
                 let lex = self.lexeme(&tok).to_string();
-                stray_keywords.push(ShapeRefuse::new(
-                    tok.span,
-                    "conditional_forecast_paths",
-                    "a var row",
-                ));
+                stray_keywords.push(
+                    ShapeRefuse::new(tok.span, "conditional_forecast_paths", "a var row")
+                        .with_parse_order(self.token_origins[self.i].start),
+                );
                 let _ = lex;
                 self.bump_until_semi();
                 self.eat(TokenKind::Semi);
@@ -6736,35 +7158,36 @@ impl Parser<'_> {
         // before its `values`, and an empty `periods` / `values` list are each a
         // syntax error; an empty body is refused at the `end;` that closes it.
         let mut shape_refuses = stray_keywords;
-        if rows.is_empty() && shape_refuses.is_empty() {
+        if rows.is_empty() && shape_refuses.is_empty() && !body_rows_refused {
             let end_tok = self.tokens[body_end_i.min(self.tokens.len() - 1)].span;
-            shape_refuses.push(ShapeRefuse::new(
-                end_tok,
-                "conditional_forecast_paths",
-                "a var row",
-            ));
+            shape_refuses.push(
+                ShapeRefuse::new(end_tok, "conditional_forecast_paths", "a var row")
+                    .with_parse_order(
+                        self.token_origins[body_end_i.min(self.tokens.len() - 1)].start,
+                    ),
+            );
         }
         for row in &rows {
             if !row.has_periods {
-                shape_refuses.push(ShapeRefuse::new(
-                    row.span,
-                    "conditional_forecast_paths",
-                    "a periods row",
-                ));
+                shape_refuses.push(
+                    ShapeRefuse::new(row.span, "conditional_forecast_paths", "a periods row")
+                        .with_parse_order(row.shape_parse_order),
+                );
             } else if row.periods.is_empty() {
-                shape_refuses.push(ShapeRefuse::new(
-                    row.periods_span,
-                    "periods",
-                    "a date or an integer",
-                ));
+                shape_refuses.push(
+                    ShapeRefuse::new(row.periods_span, "periods", "a date or an integer")
+                        .with_parse_order(row.shape_parse_order),
+                );
             } else if !row.has_values {
-                shape_refuses.push(ShapeRefuse::new(
-                    row.span,
-                    "conditional_forecast_paths",
-                    "a values row",
-                ));
+                shape_refuses.push(
+                    ShapeRefuse::new(row.span, "conditional_forecast_paths", "a values row")
+                        .with_parse_order(row.shape_parse_order),
+                );
             } else if row.values.is_empty() {
-                shape_refuses.push(ShapeRefuse::new(row.values_span, "values", "a value"));
+                shape_refuses.push(
+                    ShapeRefuse::new(row.values_span, "values", "a value")
+                        .with_parse_order(row.shape_parse_order),
+                );
             }
         }
         self.model
@@ -6785,6 +7208,7 @@ impl Parser<'_> {
             return None;
         }
         let start = self.current_start();
+        let shape_parse_order = self.token_origins[self.i].start;
         self.bump();
         let Some(name_tok) = self
             .tokens
@@ -6799,6 +7223,9 @@ impl Parser<'_> {
         self.bump();
         let name = self.intern.intern(name_tok.text(self.src));
         self.eat(TokenKind::Semi);
+        if self.eat_refused_collected_row_end() {
+            return None;
+        }
         let mut periods = Vec::new();
         let mut periods_span = Span {
             start: name_tok.span.end,
@@ -6827,12 +7254,16 @@ impl Parser<'_> {
             }
             self.eat(TokenKind::Semi);
         }
+        if self.eat_refused_collected_row_end() {
+            return None;
+        }
         let mut values = Vec::new();
         let mut values_span = Span {
             start: periods_span.end,
             end: periods_span.end,
         };
         let mut has_values = false;
+        let mut parse_order = None;
         if self.at_ident_ci("values") {
             has_values = true;
             let from = self.i + 1;
@@ -6851,9 +7282,14 @@ impl Parser<'_> {
             if !values.is_empty() {
                 values_span = self.entry_list_span(from, self.i);
             }
+            parse_order = self
+                .at(TokenKind::Semi)
+                .then(|| self.token_origins[self.i].start);
             self.eat(TokenKind::Semi);
         }
         Some(ConditionalForecastPath {
+            parse_order,
+            shape_parse_order,
             name,
             name_span: name_tok.span,
             periods,
@@ -7262,6 +7698,9 @@ impl Parser<'_> {
         };
         let body_i = self.i;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
+            if self.refuse_active_row(true) {
+                continue;
+            }
             if self.at_ident_ci("name") {
                 self.parse_occbin_regime();
             } else {
@@ -7296,6 +7735,7 @@ impl Parser<'_> {
         let mut relax = None;
         let mut error_bind = None;
         let mut error_relax = None;
+        let mut rejected = false;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
             let clause = if self.at_ident_ci("error_bind") {
                 Some("error_bind")
@@ -7311,6 +7751,10 @@ impl Parser<'_> {
             let Some(clause) = clause else {
                 break;
             };
+            if self.refuse_active_row(true) {
+                rejected = true;
+                continue;
+            }
             self.bump();
             let expr_i = self.i;
             let expr_start = self.current_start();
@@ -7339,6 +7783,9 @@ impl Parser<'_> {
                 expr_end
             };
             self.eat(TokenKind::Semi);
+        }
+        if rejected {
+            return;
         }
         self.model.occbin_constraints.push(OccbinConstraint {
             name,
@@ -7402,14 +7849,17 @@ impl Parser<'_> {
         };
         let body_i = self.i;
         let body_end_i = self.consume_until_end();
-        self.record_missing_end_if_unclosed(&keyword, opener_span, body_i, body_end_i);
         let end = self.block_end_after_consume();
         if is_shocks || keyword == "mshocks" {
             self.model.shocks_block = Some(Span { start, end });
         }
         let block_kind = self.shock_block_kind(opener_i, body_i);
         if !matches!(block_kind, crate::model::ShockBlockKind::Heterogeneous) {
-            self.collect_shock_vars(body_i, body_end_i);
+            self.collect_shock_vars(
+                body_i,
+                body_end_i,
+                matches!(block_kind, crate::model::ShockBlockKind::Regular),
+            );
         }
         if record_stmts && matches!(block_kind, crate::model::ShockBlockKind::Regular) {
             self.model
@@ -7422,6 +7872,11 @@ impl Parser<'_> {
             self.record_missing_shocks_semis(body_i, body_end_i);
         }
         self.record_shock_shape_refuses(opener_i, body_i, body_end_i, block_kind);
+        let incomplete_regular_row = matches!(block_kind, crate::model::ShockBlockKind::Regular)
+            && (body_i..body_end_i).any(|i| self.incomplete_regular_shock_var(i, body_end_i));
+        if !incomplete_regular_row {
+            self.record_missing_end_if_unclosed(&keyword, opener_span, body_i, body_end_i);
+        }
     }
 
     fn parse_varobs(&mut self) {
@@ -7631,17 +8086,23 @@ impl Parser<'_> {
     }
 
     fn consume_estimated_remove_until_end(&mut self) -> usize {
+        let mut row_head = true;
         loop {
+            if row_head && self.discard_refused_block_row(false) {
+                row_head = false;
+                continue;
+            }
             if self.at(TokenKind::Eof) {
                 return self.i;
             }
-            if self.at_ident("end") && self.peek_kind(1) == Some(TokenKind::Semi) {
+            if self.at_ident("end") {
                 let at = self.i;
                 self.bump();
-                self.bump();
+                self.advance_initial_source_cursor();
+                self.finish_block_separator();
                 return at;
             }
-            self.bump();
+            row_head = self.bump().kind == TokenKind::Semi;
         }
     }
 
@@ -8313,9 +8774,23 @@ impl Parser<'_> {
         span
     }
 
-    fn collect_shock_vars(&mut self, start_i: usize, end_i: usize) {
+    fn collect_shock_vars(&mut self, start_i: usize, end_i: usize, regular: bool) {
         let mut i = start_i;
         while i < end_i {
+            let failed_continuation = self
+                .tokens
+                .get(i + 3)
+                .is_some_and(|t| t.kind == TokenKind::Semi);
+            let unfinished_schedule = self.tokens[i].kind == TokenKind::Ident
+                && self.tokens[i].text(self.src).eq_ignore_ascii_case("var")
+                && self.shock_var_is_scheduled(i, end_i)
+                && !self.scheduled_shock_has_value_row(i, end_i);
+            if ((regular || failed_continuation) && self.incomplete_regular_shock_var(i, end_i))
+                || unfinished_schedule
+            {
+                i += 3;
+                continue;
+            }
             let is_var_or_corr = self.tokens[i].kind == TokenKind::Ident && {
                 let kw = self.tokens[i].text(self.src);
                 kw.eq_ignore_ascii_case("var") || kw.eq_ignore_ascii_case("corr")
@@ -8355,7 +8830,9 @@ impl Parser<'_> {
             if self.at_ident_ci("var") {
                 // `var x; periods ...; values ...;` is deterministic and must
                 // never enter the stochastic variance checks.
-                if self.shock_var_is_scheduled(self.i, end_i) {
+                if self.incomplete_regular_shock_var(self.i, end_i) {
+                    self.i += 3;
+                } else if self.shock_var_is_scheduled(self.i, end_i) {
                     self.skip_scheduled_shock(end_i);
                 } else if let Some(stmt) = self.parse_shock_var_stmt(end_i) {
                     self.model.shock_stmts.push(stmt);
@@ -8381,6 +8858,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_shock_var_stmt(&mut self, end_i: usize) -> Option<ShockStmt> {
+        let parse_order = self.token_origins[self.i].start;
         let start = self.current_start();
         self.bump();
         let mut names = Vec::new();
@@ -8422,6 +8900,7 @@ impl Parser<'_> {
         };
         Some(ShockStmt {
             symbol_type_context: self.model.symbol_context(),
+            parse_order,
             kind,
             rhs,
             rhs_expr,
@@ -8430,6 +8909,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_shock_corr_stmt(&mut self, end_i: usize) -> Option<ShockStmt> {
+        let parse_order = self.token_origins[self.i].start;
         let start = self.current_start();
         self.bump();
         let mut names = Vec::new();
@@ -8455,6 +8935,7 @@ impl Parser<'_> {
         }
         Some(ShockStmt {
             symbol_type_context: self.model.symbol_context(),
+            parse_order,
             kind: ShockKind::Corr {
                 a: names[0],
                 b: names[1],
@@ -8466,6 +8947,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_shock_skew_stmt(&mut self, end_i: usize) -> Option<ShockStmt> {
+        let parse_order = self.token_origins[self.i].start;
         let start = self.current_start();
         self.bump();
         let mut names = Vec::new();
@@ -8491,6 +8973,7 @@ impl Parser<'_> {
         }
         Some(ShockStmt {
             symbol_type_context: self.model.symbol_context(),
+            parse_order,
             kind: ShockKind::Skew(names),
             rhs,
             rhs_expr,
@@ -8534,7 +9017,7 @@ impl Parser<'_> {
             self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
         }
         self.eat(TokenKind::Semi);
-        self.consume_until_end();
+        self.consume_block_end(opener != "verbatim");
         if opener == "verbatim" {
             // Raw text: 7.1 passes it through, so its quotes are none of the grammar's business.
             self.verbatim_ranges.push(start..self.i);
@@ -8542,8 +9025,7 @@ impl Parser<'_> {
     }
 
     /// Dynare `NATIVE` is an unknown name, a mod-file local, or an external
-    /// function. A `#` local and `model_local_variable` also set
-    /// `in_native_assignment`. Those heads stay expressions.
+    /// function. A `#` local and `model_local_variable` stay Dynare expressions.
     fn assignment_head_is_native(&self, name: Name) -> bool {
         if self.generated_policy_discount == Some(name) {
             return false;
@@ -8618,6 +9100,7 @@ impl Parser<'_> {
                 (token.source.text.as_str(), token.span.start as usize)
             });
         let region_end = crate::native_line::native_region_end(native_src, start);
+        self.initial_source_cursor = region_end;
         let expr_i = self.i;
         while !self.at(TokenKind::Eof)
             && self.tokens[self.i]
@@ -8662,6 +9145,9 @@ impl Parser<'_> {
     }
 
     fn parse_named_assignment(&mut self) -> Option<Assignment> {
+        if self.refuse_active_row(self.in_dynare_block) {
+            return None;
+        }
         if !self.looks_like_assignment_start() {
             self.skip_to_stmt_end();
             self.eat(TokenKind::Semi);
@@ -8800,17 +9286,58 @@ impl Parser<'_> {
     }
 
     fn consume_until_end(&mut self) -> usize {
+        self.consume_block_end(true)
+    }
+
+    fn consume_block_end(&mut self, inspect_rows: bool) -> usize {
+        let mut row_head = true;
         loop {
+            if inspect_rows && row_head && self.discard_refused_block_row(false) {
+                row_head = false;
+                continue;
+            }
             if self.at(TokenKind::Eof) || self.at_block_opener() {
                 return self.i;
             }
-            if self.at_ident("end") && self.peek_kind(1) == Some(TokenKind::Semi) {
+            if self.at_ident("end") {
                 let idx = self.i;
                 self.bump();
-                self.bump();
+                self.advance_initial_source_cursor();
+                self.finish_block_separator();
                 return idx;
             }
-            self.bump();
+            row_head = self.bump().kind == TokenKind::Semi;
+        }
+    }
+
+    /// Collected blocks read their rows after locating END. Remove only a
+    /// refused row, retaining its semicolon and all completed earlier rows.
+    pub(super) fn discard_refused_block_row(&mut self, allow_embedded_end: bool) -> bool {
+        let from = self.i;
+        if !self.refuse_active_row_with_embedded_end(true, allow_embedded_end) {
+            return false;
+        }
+        let mut after = self.i;
+        if after > from && self.tokens[after - 1].kind == TokenKind::Semi {
+            after -= 1;
+        }
+        self.refused_row_ends
+            .insert(self.token_origins[after].start);
+        self.tokens.drain(from..after);
+        self.token_origins.drain(from..after);
+        self.i = from;
+        true
+    }
+
+    fn eat_refused_collected_row_end(&mut self) -> bool {
+        if self
+            .refused_row_ends
+            .contains(&self.token_origins[self.i].start)
+        {
+            self.eat(TokenKind::Semi);
+            true
+        } else {
+            false
         }
     }
 
@@ -8883,6 +9410,9 @@ impl Parser<'_> {
             return None;
         }
         if self.at(TokenKind::Eof) || self.at_block_stop() {
+            return None;
+        }
+        if self.refuse_active_row(true) {
             return None;
         }
 
@@ -9083,16 +9613,15 @@ impl Parser<'_> {
     fn finish_block_named(&mut self, keyword: &str, opener_span: Span, body_i: usize) -> u32 {
         if self.at_ident("end") {
             self.bump();
-            if self.at(TokenKind::Semi) {
-                return self.bump().span.end;
-            }
+            self.advance_initial_source_cursor();
+            return self.finish_block_separator();
         }
         self.record_missing_end(keyword, opener_span, body_i);
         self.current_start()
     }
 
     fn at_block_end(&self) -> bool {
-        self.at_ident("end") && self.peek_kind(1) == Some(TokenKind::Semi)
+        self.at_ident("end")
     }
 
     fn at_block_stop(&self) -> bool {
@@ -9128,7 +9657,10 @@ impl Parser<'_> {
         }
         if !after_bare_end
             && self.in_equation_body
-            && self.declared_before(self.current_start(), keyword)
+            && self
+                .intern
+                .lookup(keyword)
+                .is_some_and(|name| self.is_statement_head_symbol(name))
         {
             return false;
         }
@@ -9268,6 +9800,11 @@ impl Parser<'_> {
     }
 
     fn record_issue(&mut self, issue: ParseIssue) {
+        if let Some(origin) = self.token_origins.get(self.i) {
+            self.model
+                .parse_issue_orders
+                .push((issue.span, origin.start));
+        }
         self.model.parse_issues.push(issue);
     }
 
@@ -9299,6 +9836,18 @@ impl Parser<'_> {
                 continue;
             }
             if self.native_ranges.iter().any(|range| range.contains(&i)) {
+                if self.lexeme(tok).len() > 1 && self.lexeme(tok).ends_with('"') {
+                    continue;
+                }
+                issues.push(ParseIssue {
+                    kind: ParseIssueKind::BisonSyntax(
+                        "character unrecognized by lexer".to_string(),
+                    ),
+                    span: Span {
+                        start: tok.span.start,
+                        end: tok.span.start + 1,
+                    },
+                });
                 continue;
             }
             if self.in_native_line_assignment(i)
@@ -9393,6 +9942,13 @@ impl Parser<'_> {
             stmt_rel += 1;
         }
         let stmt_start = body_start + stmt_rel as u32;
+        if self.model.parse_issues.iter().any(|issue| {
+            matches!(issue.kind, ParseIssueKind::BisonSyntax(_))
+                && issue.span.start >= stmt_start
+                && issue.span.start <= body_end
+        }) {
+            return;
+        }
         self.record_issue(ParseIssue {
             kind: ParseIssueKind::MissingFinalSemi {
                 keyword: keyword.to_string(),
@@ -10553,11 +11109,14 @@ impl Parser<'_> {
                 let from = self.i;
                 self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
                 if saw_trailing_symbol {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[from].span,
-                        opener.as_deref().unwrap_or("symbol list"),
-                        "syntax error, unexpected '('",
-                    ));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(
+                            self.tokens[from].span,
+                            opener.as_deref().unwrap_or("symbol list"),
+                            "syntax error, unexpected '('",
+                        )
+                        .with_parse_order(self.token_origins[from].start),
+                    );
                     continue;
                 }
                 self.record_deprecated_options_in_range(from, self.i);
@@ -10565,11 +11124,16 @@ impl Parser<'_> {
                     if handed_option_command(cmd) {
                         let options = self.read_family_options(from, self.i);
                         if options.is_empty() {
-                            self.model.shape_refuses.push(ShapeRefuse::official(
-                                self.tokens[self.i.saturating_sub(1)].span,
-                                cmd,
-                                "syntax error, unexpected ')'",
-                            ));
+                            self.model.shape_refuses.push(
+                                ShapeRefuse::official(
+                                    self.tokens[self.i.saturating_sub(1)].span,
+                                    cmd,
+                                    "syntax error, unexpected ')'",
+                                )
+                                .with_parse_order(
+                                    self.token_origins[self.i.saturating_sub(1)].start,
+                                ),
+                            );
                         }
                         if let Some(refuse) =
                             crate::shape_gate::handed_option_refusal(self.src, cmd, &options)
@@ -10620,9 +11184,10 @@ impl Parser<'_> {
                 let word = self.lexeme(&self.tokens[self.i]).to_string();
                 if let Some(message) = reserved_trailing_option_error(&word) {
                     let span = self.tokens[self.i].span;
-                    self.model
-                        .shape_refuses
-                        .push(ShapeRefuse::official(span, &cmd, message));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(span, &cmd, message)
+                            .with_parse_order(self.token_origins[self.i].start),
+                    );
                     self.bump();
                     continue;
                 }
@@ -10631,11 +11196,14 @@ impl Parser<'_> {
                 continue;
             }
             if self.at(TokenKind::Eq) && saw_trailing_symbol {
-                self.model.shape_refuses.push(ShapeRefuse::official(
-                    self.tokens[self.i].span,
-                    opener.as_deref().unwrap_or("symbol list"),
-                    "syntax error, unexpected EQUAL",
-                ));
+                self.model.shape_refuses.push(
+                    ShapeRefuse::official(
+                        self.tokens[self.i].span,
+                        opener.as_deref().unwrap_or("symbol list"),
+                        "syntax error, unexpected EQUAL",
+                    )
+                    .with_parse_order(self.token_origins[self.i].start),
+                );
             }
             self.bump();
         }
@@ -11315,9 +11883,10 @@ impl Parser<'_> {
         if options.is_empty() {
             // `name()` — the grammar's list needs at least one option.
             let at = self.tokens[open_i].span;
-            self.model
-                .shape_refuses
-                .push(ShapeRefuse::new(at, command, "at least one option"));
+            self.model.shape_refuses.push(
+                ShapeRefuse::new(at, command, "at least one option")
+                    .with_parse_order(self.token_origins[open_i].start),
+            );
             return;
         }
         if let Some(refuse) = crate::shape_gate::option_refusal(self.src, command, options, table) {
@@ -11449,7 +12018,22 @@ impl Parser<'_> {
             "deterministic_trends",
             "verbatim",
         ];
-        BLOCKS.iter().any(|kw| self.at_ident_ci(kw))
+        BLOCKS.iter().any(|kw| {
+            self.at_ident_ci(kw)
+                && (*kw != "verbatim" || {
+                    let tok = &self.tokens[self.i];
+                    let source = tok
+                        .emitted
+                        .as_ref()
+                        .map_or(self.src, |t| t.source.text.as_str());
+                    let start = tok
+                        .emitted
+                        .as_ref()
+                        .map_or(tok.span.start, |t| t.span.start)
+                        as usize;
+                    crate::native_line::verbatim_opener(source, start)
+                })
+        })
     }
 
     fn at_ident(&self, name: &str) -> bool {

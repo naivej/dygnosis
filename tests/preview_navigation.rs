@@ -821,7 +821,7 @@ async fn readable_layout_separates_statements_tags_locals_and_blocks_without_cha
 
 #[tokio::test]
 async fn readable_layout_preserves_strings_native_text_and_matrix_contents() {
-    let source = "var y; verbatim; A=[1 2;3 4]; fprintf('a;b😀'); end; disp([1 2;3 4]); model; [name='a;b😀'] y=1; end;";
+    let source = "var y; verbatim; A=[1 2;3 4]; fprintf('a;b😀'); end; disp([1 2;3 4]);\nmodel; [name='a;b😀'] y=1; end;";
     let root = Url::parse("file:///C:/dygnosis-preview/native.mod").unwrap();
     let (service, _socket) = new_service();
     let backend = service.inner();

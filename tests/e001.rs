@@ -882,11 +882,26 @@ fn e001_opener_var_decl_only_reaches_transform_without_e001() {
 #[test]
 fn e001_opener_var_bare_row_in_own_block() {
     let text = check_mod("e001/opener_var_bare_row_in_own_block.mod");
-    let got = rust_e001(&text);
+    let got: Vec<_> = analyze(&parse(&text))
+        .into_iter()
+        .filter(|diagnostic| diagnostic.code == "E001")
+        .collect();
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "E001");
-    assert!(got[0].message.contains("Missing 'end;' for 'shocks'"));
-    assert_span_in(&text, &got[0], "\nshocks;\nvar e;\n", "shocks;");
+    assert_eq!(got[0].severity, Severity::Error);
+    assert!(
+        got[0]
+            .message
+            .contains("unexpected IDENTIFIER, expecting PERIODS or STDERR"),
+        "{got:?}"
+    );
+    let index = LineIndex::new(&text);
+    let start = index.position(&text, got[0].span.start);
+    let end = index.position(&text, got[0].span.end);
+    assert_eq!(
+        (start.line, start.character, end.line, end.character),
+        range_in(&text, "\nvar e;\nshocks;\n", "shocks")
+    );
 }
 
 /// An undeclared opener-shaped name reports the neighbouring **E020**, the code
@@ -956,8 +971,8 @@ fn e001_opener_var_controls_still_fire() {
 fn e001_opener_var_end_without_semi_before_a_block() {
     assert_fire(
         "e001/opener_var_end_no_semi.mod",
-        "Missing 'end;' for 'model'",
-        "model;",
+        "unexpected INITVAL, expecting ';'",
+        "initval",
     );
     for (name, tail) in [
         ("shocks", "shocks;\nvar e; stderr 0.01;\nend;\n"),
@@ -972,7 +987,10 @@ fn e001_opener_var_end_without_semi_before_a_block() {
         assert_eq!(got.len(), 1, "{name}: {got:?}");
         assert_eq!(got[0].code, "E001");
         assert!(
-            got[0].message.contains("Missing 'end;' for 'model' block"),
+            got[0].message.contains(&format!(
+                "unexpected {}, expecting ';'",
+                name.to_uppercase()
+            )),
             "{name}: {}",
             got[0].message
         );

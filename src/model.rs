@@ -757,6 +757,7 @@ pub struct EstimatedParam {
 #[derive(Clone, Debug)]
 pub struct ShockStmt {
     pub symbol_type_context: SymbolContext,
+    pub(crate) parse_order: usize,
     pub kind: ShockKind,
     /// Folded RHS (`var name = expr` / `corr a, b = expr`). `None` if missing or unevaluable.
     pub rhs: Option<f64>,
@@ -959,6 +960,7 @@ pub struct SubsampleRange {
 #[derive(Clone, Debug)]
 pub struct VarRemovedName {
     pub symbol_type_context: SymbolContext,
+    pub(crate) parse_order: usize,
     pub name: Name,
     pub name_span: Span,
     pub statement: Span,
@@ -1169,6 +1171,10 @@ pub struct Model {
     /// Recovery notes from the parser (byte spans). Messages are formatted in
     /// `check_parse` via `LineIndex`.
     pub parse_issues: Vec<ParseIssue>,
+    /// Proven positions of parser refusals in the original expanded stream.
+    /// Written spans can repeat or run backwards through a macro loop.
+    pub(crate) parse_issue_orders: Vec<(Span, usize)>,
+    pub(crate) expanded_token_origins: Vec<Range<usize>>,
     /// Reserved-symbol expression uses captured while reading Dynare blocks.
     pub reserved_block_symbol_uses: Vec<Span>,
     /// Names that were still trend variables when an ordinary expression used them.
@@ -1539,6 +1545,7 @@ pub struct CommandSymbol {
 pub struct MsStatement {
     /// Type history when this row was parsed, including previous macro iterations.
     pub symbol_type_context: SymbolContext,
+    pub(crate) parse_order: usize,
     /// Command name as written.
     pub command: String,
     /// Whole statement: opener through the terminating `;`.
@@ -1572,6 +1579,11 @@ impl DataStatement {
 /// is set, and otherwise names `subject` with our generic shape wording.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShapeRefuse {
+    /// Proven position of this execution in the original expanded token stream.
+    pub(crate) parse_order: Option<usize>,
+    /// Executed statement bounds when a producer token is not independently
+    /// identifiable. Earlier statements still precede this definite refusal.
+    pub(crate) parse_execution: Option<Range<usize>>,
     /// The token the pinned preprocessor stops on.
     pub span: Span,
     /// The command, keyword or head the message names, as written.
@@ -1584,8 +1596,15 @@ pub struct ShapeRefuse {
 }
 
 impl ShapeRefuse {
+    pub(crate) fn with_parse_order(mut self, order: usize) -> Self {
+        self.parse_order = Some(order);
+        self
+    }
+
     pub fn new(span: Span, subject: impl Into<String>, expected: &'static str) -> Self {
         Self {
+            parse_order: None,
+            parse_execution: None,
             span,
             subject: subject.into(),
             expected,
@@ -1599,6 +1618,8 @@ impl ShapeRefuse {
         message: impl Into<Cow<'static, str>>,
     ) -> Self {
         Self {
+            parse_order: None,
+            parse_execution: None,
             span,
             subject: subject.into(),
             expected: "",
@@ -1635,6 +1656,8 @@ pub fn mod_file_local_in_model_message(name: &str) -> String {
 #[derive(Clone, Debug)]
 pub struct DottedStatement {
     pub symbol_type_context: SymbolContext,
+    /// Completion position of this execution in the original expanded token stream.
+    pub(crate) parse_order: usize,
     pub kind: DottedKind,
     /// Retained `prior`, `options`, or `subsamples` token after the head.
     pub keyword_span: Span,
@@ -1687,6 +1710,10 @@ pub enum DottedHead {
 /// One option row of a parsed family statement.
 #[derive(Clone, Debug)]
 pub struct FamilyOption {
+    /// Producer positions in the original expanded token stream. Several
+    /// emitted tokens can share one interpolation's written span.
+    pub(crate) parse_order: usize,
+    pub(crate) value_parse_order: usize,
     /// Option name as written.
     pub name: String,
     /// Option-name span.
@@ -1724,6 +1751,8 @@ pub enum FamilyValueKind {
 /// One parsed `svar_identification;` … `end;` block.
 #[derive(Clone, Debug)]
 pub struct SvarIdentification {
+    /// Completed element actions in executed token order, parallel to `elements`.
+    pub(crate) element_parse_orders: Vec<Option<usize>>,
     /// Opener through `end;`.
     pub span: Span,
     pub elements: Vec<SvarIdentificationElement>,
@@ -1764,6 +1793,7 @@ pub enum SvarIdentificationElement {
 /// One `equation N, name…;` row under an `exclusion lag` row.
 #[derive(Clone, Debug)]
 pub struct SvarEquation {
+    pub(crate) parse_order: Option<usize>,
     pub number: Option<i32>,
     pub names: Vec<(Name, Span)>,
     pub span: Span,
@@ -1784,6 +1814,8 @@ pub struct ConditionalForecastPaths {
 /// One `var name; periods …; values …;` row.
 #[derive(Clone, Debug)]
 pub struct ConditionalForecastPath {
+    pub(crate) parse_order: Option<usize>,
+    pub(crate) shape_parse_order: usize,
     pub name: Name,
     pub name_span: Span,
     /// One entry per `periods` element; `1:4` counts as one entry.
@@ -2073,6 +2105,16 @@ pub enum ShocksSemiFamily {
 }
 
 impl Model {
+    /// A rejected model row makes uses and counts from that body incomplete.
+    pub(crate) fn model_rows_rejected(&self) -> bool {
+        self.parse_issues.iter().any(|issue| {
+            self.model_block
+                .into_iter()
+                .chain(self.heterogeneous_models.iter().map(|block| block.span))
+                .any(|block| block.start <= issue.span.start && issue.span.start <= block.end)
+        })
+    }
+
     pub fn name(&self, name: Name) -> &str {
         self.intern.get(name)
     }

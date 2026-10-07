@@ -197,7 +197,9 @@ x = pp.rho;
 model_local_variable x;
 x = 1; parameters rho; rho = pp.rho;
 ";
-    assert_eq!(message(&diags(same_line), "E275"), NAMESPACE);
+    // Slice 20 restores init_param's earlier target-type refusal. The RHS
+    // namespace controls above still reach E275 before the target-type check.
+    assert_eq!(message(&diags(same_line), "E378"), "x is not a parameter");
     let swallowed = "proof = 1; parameters rho; rho = pp.rho;\n";
     quiet(swallowed, "E275");
 }

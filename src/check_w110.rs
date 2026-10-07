@@ -14,7 +14,7 @@ const FALLBACK: Span = Span { start: 0, end: 1 };
 
 pub fn check_w110(model: &Model) -> Vec<Diagnostic> {
     let mut diagnostics = check_w060(model);
-    diagnostics.extend(check_shock_stmts(model));
+    diagnostics.extend(check_shock_stmts(model, None));
     diagnostics.extend(check_shock_types(model));
     diagnostics.extend(check_e212(model));
     diagnostics
@@ -107,7 +107,23 @@ fn check_w060(model: &Model) -> Vec<Diagnostic> {
     out
 }
 
-fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
+/// Completed regular rows whose duplicate action refuses during Parse.
+pub(crate) fn completed_regular_parse_duplicates(model: &Model) -> Vec<(Diagnostic, usize)> {
+    let mut orders = Vec::new();
+    check_shock_stmts(model, Some(&mut orders))
+        .into_iter()
+        .zip(orders)
+        .filter(|(diagnostic, order)| {
+            diagnostic.code == "E111"
+                && model
+                    .shock_stmts
+                    .iter()
+                    .any(|row| row.parse_order == *order)
+        })
+        .collect()
+}
+
+fn check_shock_stmts(model: &Model, mut parse_orders: Option<&mut Vec<usize>>) -> Vec<Diagnostic> {
     let mut seen: HashMap<SeenKey, Span> = HashMap::new();
     let mut diagnostics = Vec::new();
     for block in &model.shock_blocks {
@@ -124,6 +140,7 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
             continue;
         }
         for stmt in &block.stochastic {
+            let before = diagnostics.len();
             let span = nonempty(stmt.span);
             match &stmt.kind {
                 ShockKind::Var(name) | ShockKind::Stderr(name) => {
@@ -254,6 +271,12 @@ fn check_shock_stmts(model: &Model) -> Vec<Diagnostic> {
                         }
                     }
                 }
+            }
+            if let Some(orders) = parse_orders.as_mut() {
+                orders.extend(std::iter::repeat_n(
+                    stmt.parse_order,
+                    diagnostics.len() - before,
+                ));
             }
         }
         // Pinned ParsingDriver::end_heterogeneous_shocks clears the variance

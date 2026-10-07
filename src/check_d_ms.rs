@@ -47,13 +47,34 @@ use crate::span::Span;
 /// ordered against its units by file position.
 pub fn check_d_ms(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
-    if check_parse_phase(model, &mut out) {
+    if check_parse_phase(model, &mut out, None) {
         return out;
     }
     check_check_phase(model, &mut out);
     if out.is_empty() {
         check_subsample_writer(model, &mut out);
     }
+    out
+}
+
+/// Preserve a completed Parse action before a later source-lexer refusal.
+/// Check and Write actions cannot precede a failure to finish parsing.
+pub(crate) fn check_parse_before(model: &Model, syntax: &[Diagnostic]) -> Vec<Diagnostic> {
+    let mut boundary = usize::MAX;
+    for diagnostic in syntax {
+        let Some(order) = model
+            .parse_issue_orders
+            .iter()
+            .filter(|(span, _)| *span == diagnostic.span)
+            .map(|(_, order)| *order)
+            .min()
+        else {
+            return Vec::new();
+        };
+        boundary = boundary.min(order);
+    }
+    let mut out = Vec::new();
+    check_parse_phase(model, &mut out, Some(boundary));
     out
 }
 
@@ -138,54 +159,86 @@ fn shape_refuse_message(refuse: &ShapeRefuse) -> String {
 
 /// The refusals the pin prints while reading the file, in file order. Returns `true`
 /// when one fired.
-fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
-    // Every parse-time unit of the family, ordered by where it starts. The shape
-    // refusals are units of their own, so a refuse written before a sentence's
-    // statement wins and one written after it loses — the pinned parser stops at the
-    // first of the two in file order.
+fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<usize>) -> bool {
+    let mut before = before;
+    // Parse actions and grammar refusals compete in executed token order.
+    // Macro iterations can execute a later written line before an earlier one.
     enum Unit<'a> {
         Shape(&'a ShapeRefuse),
         Markov(&'a MsStatement),
         Svar(&'a MsStatement),
-        Identification(&'a SvarIdentification),
-        Paths(&'a crate::model::ConditionalForecastPaths),
         Prior(&'a DottedStatement),
         VarRemove(&'a VarRemovedName),
-        RemovedUse(Name, Span),
+        RemovedUse(Name, Span, usize),
         ChangeType(&'a crate::model::ChangeTypeStmt),
         TopAssignment(&'a crate::model::Assignment),
+        CompletedParse(Box<Diagnostic>, usize),
     }
-    let mut units: Vec<(u32, Unit)> = Vec::new();
+    let mut units: Vec<(usize, Unit)> = Vec::new();
     let spans = statement_spans(model);
     for refuse in shape_refuses(model) {
         let at = containing_statement_start(&spans, refuse);
-        units.push((at, Unit::Shape(refuse)));
+        units.push((at as usize, Unit::Shape(refuse)));
+    }
+    // A completed regular row runs its symbol actions before a later malformed
+    // row reaches the grammar's next-token refusal.
+    for (diagnostic, order) in crate::check_d_shocks::completed_regular_parse_unknowns(model)
+        .into_iter()
+        .chain(crate::check_w110::completed_regular_parse_duplicates(model))
+    {
+        units.push((
+            diagnostic.span.start as usize,
+            Unit::CompletedParse(Box::new(diagnostic), order),
+        ));
     }
     // A top-level `symbol = …;` reaches the grammar only when the head is declared,
     // and the pin refuses it while parsing when the symbol is not a parameter.
     for assignment in &model.helper_assignments {
-        if !assignment.native && declared_names(model).contains(&assignment.name) {
-            units.push((assignment.span.start, Unit::TopAssignment(assignment)));
+        if !assignment.native
+            && model
+                .symbol_kind_in_context(assignment.name, assignment.symbol_type_context)
+                .is_some()
+            && !model.namespace_qualified.iter().any(|(_, span)| {
+                span.start >= assignment.span.start && span.end <= assignment.span.end
+            })
+        {
+            units.push((
+                assignment.span.start as usize,
+                Unit::TopAssignment(assignment),
+            ));
         }
     }
     for stmt in &model.ms_statements {
         if stmt.command.eq_ignore_ascii_case("markov_switching") {
-            units.push((stmt.span.start, Unit::Markov(stmt)));
+            units.push((stmt.span.start as usize, Unit::Markov(stmt)));
         } else if stmt.command.eq_ignore_ascii_case("svar") {
-            units.push((stmt.span.start, Unit::Svar(stmt)));
+            units.push((stmt.span.start as usize, Unit::Svar(stmt)));
         }
     }
     for block in &model.svar_identifications {
-        units.push((block.span.start, Unit::Identification(block)));
+        if let Some((span, code, message, order)) = identification_body_refusal(model, block) {
+            units.push((
+                span.start as usize,
+                Unit::CompletedParse(
+                    Box::new(Diagnostic::new(span, Severity::Error, code, message)),
+                    order,
+                ),
+            ));
+        }
     }
     for block in &model.conditional_forecast_paths {
-        units.push((block.span.start, Unit::Paths(block)));
+        if let Some((diagnostic, order)) = conditional_forecast_path_refusal(model, block) {
+            units.push((
+                diagnostic.span.start as usize,
+                Unit::CompletedParse(Box::new(diagnostic), order),
+            ));
+        }
     }
     for stmt in &model.dotted_statements {
-        units.push((stmt.span.start, Unit::Prior(stmt)));
+        units.push((stmt.span.start as usize, Unit::Prior(stmt)));
     }
     for row in &model.var_removed {
-        units.push((row.statement.start, Unit::VarRemove(row)));
+        units.push((row.statement.start as usize, Unit::VarRemove(row)));
     }
     // These captures can compete across backward written macro spans.
     let first_removed = model
@@ -203,22 +256,69 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
         .min_by_key(|stmt| stmt.parse_order);
     match (first_removed, first_change) {
         (Some((name, span, order)), Some(stmt)) if *order <= stmt.parse_order => {
-            units.push((span.start, Unit::RemovedUse(*name, *span)))
+            units.push((span.start as usize, Unit::RemovedUse(*name, *span, *order)))
         }
-        (_, Some(stmt)) => units.push((stmt.span.start, Unit::ChangeType(stmt))),
-        (Some((name, span, _)), None) => units.push((span.start, Unit::RemovedUse(*name, *span))),
+        (_, Some(stmt)) => units.push((stmt.span.start as usize, Unit::ChangeType(stmt))),
+        (Some((name, span, order)), None) => {
+            units.push((span.start as usize, Unit::RemovedUse(*name, *span, *order)))
+        }
         _ => {}
     }
+    // A statement bound proves that earlier executions precede its refusal.
+    // It does not prove which in-statement action wins. If a source refusal
+    // overlaps that bound, retain only actions proved before both failures.
+    for refuse in shape_refuses(model)
+        .into_iter()
+        .filter(|row| row.parse_order.is_none())
+    {
+        if let Some(execution) = &refuse.parse_execution {
+            if let Some(boundary) = before {
+                if execution.start < boundary && boundary < execution.end {
+                    before = Some(execution.start);
+                }
+            }
+        } else {
+            if before.is_some() {
+                return false;
+            }
+            push(out, refuse.span, "E001", shape_refuse_message(refuse));
+            return true;
+        }
+    }
+    units.retain_mut(|(at, unit)| {
+        let order = match unit {
+            Unit::Shape(row) => row
+                .parse_order
+                .or_else(|| row.parse_execution.as_ref().map(|range| range.start)),
+            Unit::Prior(row) => Some(row.parse_order),
+            Unit::Markov(row) | Unit::Svar(row) => Some(row.parse_order),
+            Unit::VarRemove(row) => Some(row.parse_order),
+            Unit::RemovedUse(_, _, index) => model
+                .expanded_token_origins
+                .get(*index)
+                .map(|range| range.start),
+            Unit::ChangeType(row) => model
+                .expanded_token_origins
+                .get(row.parse_order)
+                .map(|range| range.start),
+            Unit::CompletedParse(_, order) => Some(*order),
+            Unit::TopAssignment(assignment) if !assignment.active_tokens.is_empty() => model
+                .expanded_token_origins
+                .get(assignment.active_tokens.start)
+                .map(|range| range.start),
+            Unit::TopAssignment(_) => None,
+        };
+        if let Some(order) = order.filter(|order| before.is_none_or(|boundary| *order < boundary)) {
+            *at = order;
+            true
+        } else {
+            false
+        }
+    });
     units.sort_by_key(|(at, _)| *at);
     // Dotted statements keep their parser execution order even when a macro
     // copy has an earlier original span. Their subsample definitions are checked
     // beside the owning header, so one range table follows that same order.
-    let mut dotted = model.dotted_statements.iter();
-    for (_, unit) in &mut units {
-        if matches!(unit, Unit::Prior(_)) {
-            *unit = Unit::Prior(dotted.next().expect("one slot per dotted statement"));
-        }
-    }
     let mut subsamples = model.subsamples.iter().peekable();
 
     let mut subsample_ranges: HashMap<(Name, Option<Name>), HashSet<Name>> = HashMap::new();
@@ -230,15 +330,6 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
             }
             Unit::Markov(stmt) => check_markov_switching_parse(model, stmt, out),
             Unit::Svar(stmt) => check_svar(&model.source, stmt, out),
-            Unit::Identification(block) => {
-                if let Some((span, code, message)) = identification_body_refusal(model, block) {
-                    push(out, span, code, message);
-                    true
-                } else {
-                    false
-                }
-            }
-            Unit::Paths(block) => check_conditional_forecast_paths(model, block, out),
             Unit::Prior(stmt) => {
                 if check_dotted_head_and_subsample(model, stmt, &subsample_ranges, out) {
                     true
@@ -285,7 +376,7 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
                     true
                 }
             }
-            Unit::RemovedUse(name, span) => {
+            Unit::RemovedUse(name, span, _) => {
                 push(out, span, "E426", format!("Variable '{}' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement", model.name(name)));
                 true
             }
@@ -305,6 +396,10 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>) -> bool {
                 }
             }
             Unit::TopAssignment(assignment) => check_top_assignment(model, assignment, out),
+            Unit::CompletedParse(diagnostic, _) => {
+                out.push(*diagnostic);
+                true
+            }
         };
         if fired {
             return true;
@@ -963,34 +1058,50 @@ fn check_conditional_forecast(stmt: &MsStatement, out: &mut Vec<Diagnostic>) -> 
 /// syntax error, and 7.1's parser stops at it before any count is read — so the
 /// block's own shape refuses are ordered against the rows here. Returns `true`
 /// when it refused.
-fn check_conditional_forecast_paths(
+fn conditional_forecast_path_refusal(
     model: &Model,
     block: &crate::model::ConditionalForecastPaths,
-    out: &mut Vec<Diagnostic>,
-) -> bool {
-    // A row whose name their type check refuses stops the block before any count
-    // is read, and so does a row the grammar cannot spell.
-    if cfp_first_bad_row(model, &block.rows).is_some() {
-        return false;
-    }
+) -> Option<(Diagnostic, usize)> {
+    let declared = declared_names(model);
     let endogenous = endogenous_names(model);
     let mut seen: HashMap<Name, Span> = HashMap::new();
     for row in &block.rows {
-        // A malformed row is the parser's own refuse; it comes first, because a
-        // syntax error stops the run before the sentence on a later row.
-        if let Some(refuse) = block
-            .shape_refuses
-            .iter()
-            .find(|refuse| refuse.span.start >= row.span.start && refuse.span.start < row.span.end)
-        {
-            push(out, refuse.span, "E001", shape_refuse_message(refuse));
-            return true;
-        }
-        if !endogenous.contains(&row.name) {
+        let Some(order) = row.parse_order else {
+            continue;
+        };
+        // Shape units arbitrate separately. The completed production alone
+        // reaches add_det_shock; a surviving header after a refused values row
+        // must not add a name or a count.
+        if !row.has_periods || !row.has_values || row.periods.is_empty() || row.values.is_empty() {
             continue;
         }
+        if !declared.contains(&row.name) {
+            return Some((
+                Diagnostic::new(
+                    row.span,
+                    Severity::Error,
+                    "E058",
+                    format!(
+                        "Variable '{}' in conditional_forecast_paths is not declared.",
+                        model.name(row.name)
+                    ),
+                ),
+                order,
+            ));
+        }
+        if !endogenous.contains(&row.name) {
+            return Some((
+                Diagnostic::new(
+                    row.span,
+                    Severity::Error,
+                    "E317",
+                    format!("{} is not endogenous.", model.name(row.name)),
+                ),
+                order,
+            ));
+        }
         if let Some(&first) = seen.get(&row.name) {
-            out.push(
+            return Some((
                 Diagnostic::new(
                     row.span,
                     Severity::Error,
@@ -1004,30 +1115,23 @@ fn check_conditional_forecast_paths(
                     first,
                     "Earlier conditional forecast path",
                 )),
-            );
-            return true;
+                order,
+            ));
         }
         seen.insert(row.name, row.span);
         if row.periods.len() != row.values.len() {
-            push(
-                out,
+            return Some((Diagnostic::new(
                 row.span,
+                Severity::Error,
                 "E343",
                 format!(
                     "shocks/conditional_forecast_paths: variable {}: number of periods is different from number of shock values",
                     model.name(row.name)
                 ),
-            );
-            return true;
+            ), order));
         }
     }
-    // A refuse that sits outside every row's span — the empty body, or an
-    // `exogenize` / `endogenize` row the walker skipped — is reported after them.
-    if let Some(refuse) = block.shape_refuses.first() {
-        push(out, refuse.span, "E001", shape_refuse_message(refuse));
-        return true;
-    }
-    false
+    None
 }
 
 /// The first `var` row of one block whose name their type check refuses, as
@@ -1405,8 +1509,8 @@ fn identification_names(model: &Model, block: &SvarIdentification) -> Vec<(Span,
     out
 }
 
-/// The first body refusal 7.1 prints while reading the body, as `(span, code,
-/// message)`. `None` when the body is one it accepts.
+/// The first completed body action refusal, with its executed token order.
+/// Shape units arbitrate independently, including incomplete and empty bodies.
 ///
 /// Their order: an `equation` row is read (its number, then its names), and the
 /// lag is only combined — and its repeat test run — after that element's rows.
@@ -1419,22 +1523,10 @@ fn identification_names(model: &Model, block: &SvarIdentification) -> Vec<(Span,
 fn identification_body_refusal(
     model: &Model,
     block: &SvarIdentification,
-) -> Option<(Span, &'static str, String)> {
+) -> Option<(Span, &'static str, String, usize)> {
     let declared = declared_names(model);
     let mut lags: Vec<i32> = Vec::new();
-    for element in &block.elements {
-        let element_span = match element {
-            SvarIdentificationElement::ExclusionLag { span, .. } => *span,
-            SvarIdentificationElement::Restriction { span, .. } => *span,
-            SvarIdentificationElement::ExclusionConstants { span }
-            | SvarIdentificationElement::UpperCholesky { span }
-            | SvarIdentificationElement::LowerCholesky { span } => *span,
-        };
-        if let Some(refuse) = block.shape_refuses.iter().find(|refuse| {
-            refuse.span.start >= element_span.start && refuse.span.start < element_span.end
-        }) {
-            return Some((refuse.span, "E001", shape_refuse_message(refuse)));
-        }
+    for (element, order) in block.elements.iter().zip(&block.element_parse_orders) {
         match element {
             SvarIdentificationElement::ExclusionLag { lag, equations, .. } => {
                 if let Some(refusal) = equation_rows_refusal(model, equations, &declared) {
@@ -1446,26 +1538,25 @@ fn identification_body_refusal(
                     continue;
                 }
                 let Some(lag) = lag else { continue };
+                let Some(order) = order else { continue };
                 if lags.contains(lag) {
                     return Some((
                         lag_span(equations),
                         "E358",
                         format!("lag {lag} used more than once."),
+                        *order,
                     ));
                 }
                 lags.push(*lag);
             }
             SvarIdentificationElement::Restriction { span, .. } => {
+                let Some(order) = order else { continue };
                 if let Some(refusal) = qi_ri_refusal(model, *span) {
-                    return Some(refusal);
+                    return Some((refusal.0, refusal.1, refusal.2, *order));
                 }
             }
             _ => {}
         }
-    }
-    // A refuse that belongs to no element — an empty body — is reported after them.
-    if let Some(refuse) = block.shape_refuses.first() {
-        return Some((refuse.span, "E001", shape_refuse_message(refuse)));
     }
     None
 }
@@ -1480,9 +1571,12 @@ fn equation_rows_refusal(
     model: &Model,
     equations: &[SvarEquation],
     declared: &HashSet<Name>,
-) -> Option<(Span, &'static str, String)> {
+) -> Option<(Span, &'static str, String, usize)> {
     let mut numbers: Vec<i64> = Vec::new();
     for row in equations {
+        let Some(order) = row.parse_order else {
+            continue;
+        };
         if let Some(number) = row.number {
             let number = number as i64;
             if number < 1 {
@@ -1490,6 +1584,7 @@ fn equation_rows_refusal(
                     row.span,
                     "E360",
                     "equation numbers must be greater than or equal to 1.".to_string(),
+                    order,
                 ));
             }
             if numbers.contains(&number) {
@@ -1499,22 +1594,30 @@ fn equation_rows_refusal(
                     format!(
                         "equation number {number} referenced more than once under a single lag."
                     ),
+                    order,
                 ));
             }
             numbers.push(number);
         }
-        // The body name is only checked to exist here; a wrong type is accepted.
-        // An undeclared one is **E058**'s row and stops their run.
-        if row.names.iter().any(|(name, _)| !declared.contains(name)) {
-            return None;
-        }
         let mut names: Vec<Name> = Vec::new();
-        for (name, _span) in &row.names {
+        for (name, name_span) in &row.names {
+            if !declared.contains(name) {
+                return Some((
+                    *name_span,
+                    "E058",
+                    format!(
+                        "Variable '{}' in svar_identification is not declared.",
+                        model.name(*name)
+                    ),
+                    order,
+                ));
+            }
             if names.contains(name) {
                 return Some((
                     row.span,
                     "E361",
                     format!("{} restriction added twice.", model.name(*name)),
+                    order,
                 ));
             }
             names.push(*name);
@@ -1901,6 +2004,19 @@ fn check_top_assignment(
     assignment: &crate::model::Assignment,
     out: &mut Vec<Diagnostic>,
 ) -> bool {
+    if let Some(id) = assignment.expr {
+        for usage in model.exprs.walk_idents(id) {
+            if let Some(diagnostic) = crate::check_d_block::outside_expression_role_refusal(
+                model,
+                usage.name,
+                usage.span,
+                assignment.symbol_type_context,
+            ) {
+                out.push(diagnostic);
+                return true;
+            }
+        }
+    }
     let is_parameter = model.parameter_in_context(assignment.name, assignment.symbol_type_context);
     if is_parameter {
         return false;

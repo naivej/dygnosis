@@ -948,48 +948,47 @@ fn active_decl_spans(model: &Model) -> Vec<Span> {
 fn excluded_character_spans(model: &Model) -> Vec<Span> {
     let src = &model.source;
     let mut spans = crate::macro_expand::inactive_macro_spans(src);
+    spans.extend(
+        model
+            .expanded_tokens
+            .iter()
+            .filter(|token| {
+                token.kind == TokenKind::String
+                    && token.text(src).starts_with('\'')
+                    && token.text(src).len() > 1
+                    && token.text(src).ends_with('\'')
+            })
+            .map(|token| token.span),
+    );
     for span in model.ms_unparsed_spans.iter().copied() {
         spans.push(native_line_span(src, span));
     }
     for assignment in &model.helper_assignments {
-        if !declared_statement_head(model, assignment.name, assignment.span.start) {
+        if !declared_statement_head(model, assignment.name, assignment.symbol_type_context) {
             spans.push(native_line_span(src, assignment.span));
         }
     }
     spans
 }
 
-/// A line that begins as native MATLAB stays native through the newline.
-/// A native statement later on a Dynare line does not claim the rest of that line.
+/// A NATIVE entry keeps the rest of its region, including mid-line entries.
 fn native_line_span(src: &str, span: Span) -> Span {
-    let before = &src[..span.start as usize];
-    let at_line_start = before
-        .rsplit_once('\n')
-        .map(|(_, tail)| tail.trim().is_empty())
-        .unwrap_or_else(|| before.trim().is_empty());
-    if !at_line_start {
-        return span;
-    }
-    let rest = &src[span.end as usize..];
-    let extra = rest.find('\n').unwrap_or(rest.len()) as u32;
     Span {
         start: span.start,
-        end: span.end + extra,
+        end: span
+            .end
+            .max(crate::native_line::native_region_end(src, span.start as usize) as u32),
     }
 }
 
-fn declared_statement_head(model: &Model, name: Name, at: u32) -> bool {
-    if model.mod_file_locals.contains(&name) || model.external_function_names.contains(&name) {
-        return false;
-    }
+fn declared_statement_head(
+    model: &Model,
+    name: Name,
+    context: crate::model::SymbolContext,
+) -> bool {
     model
-        .endogenous
-        .iter()
-        .chain(&model.exogenous)
-        .chain(&model.deterministic_exogenous)
-        .chain(&model.parameters)
-        .chain(&model.predetermined)
-        .any(|decl| decl.name == name && decl.span.start < at)
+        .symbol_kind_in_context(name, context)
+        .is_some_and(|kind| !matches!(kind, "mod_file_local" | "external_function"))
 }
 
 /// Non-ASCII characters the lexer skips. Dynare's `<*>.` rule refuses them
@@ -1029,6 +1028,7 @@ fn verbatim_body_spans(src: &str, tokens: &[Token]) -> Vec<Span> {
             && tokens
                 .get(i + 1)
                 .is_some_and(|tok| tok.kind == TokenKind::Semi)
+            && crate::native_line::verbatim_opener(src, tokens[i].span.start as usize)
         {
             let start = tokens[i + 1].span.end;
             i += 2;

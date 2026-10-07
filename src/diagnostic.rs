@@ -185,6 +185,10 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     }
     let parse_diags = crate::check_parse::check_parse(model);
     if !parse_diags.is_empty() {
+        let earlier = crate::check_d_ms::check_parse_before(model, &parse_diags);
+        if !earlier.is_empty() {
+            return earlier;
+        }
         return parse_diags;
     }
     let pac_parse_diags = crate::check_d_pac::check_parse(model);
@@ -216,7 +220,21 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     if ms_diags.first().is_some_and(|d| {
         matches!(
             d.code.as_str(),
-            "E058" | "E059" | "E317" | "E378" | "E426" | "E427" | "E428" | "E429" | "E430"
+            "E058"
+                | "E059"
+                | "E111"
+                | "E279"
+                | "E282"
+                | "E294"
+                | "E310"
+                | "E317"
+                | "E378"
+                | "E426"
+                | "E427"
+                | "E428"
+                | "E429"
+                | "E430"
+                | "E463"
         )
     }) {
         return ms_diags;

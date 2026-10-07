@@ -165,6 +165,34 @@ fn check_stochastic_names(model: &Model, out: &mut Vec<Diagnostic>) {
     }
 }
 
+/// Completed regular rows whose symbol action refuses during Parse. Keep the
+/// row's execution position; a written span alone cannot identify a macro copy.
+pub(crate) fn completed_regular_parse_unknowns(model: &Model) -> Vec<(Diagnostic, usize)> {
+    let mut out = Vec::new();
+    for row in &model.shock_stmts {
+        let names: Vec<Name> = match &row.kind {
+            ShockKind::Var(name) | ShockKind::Stderr(name) => vec![*name],
+            ShockKind::Cov(names) | ShockKind::Skew(names) => names.clone(),
+            ShockKind::Corr { a, b } => vec![*a, *b],
+        };
+        for name in names {
+            if !known(model, name, row.span, row.symbol_type_context) {
+                out.push((
+                    Diagnostic::new(
+                        row.span,
+                        Severity::Error,
+                        "E058",
+                        format!("Unknown symbol: {}.", model.name(name)),
+                    ),
+                    row.parse_order,
+                ));
+                break;
+            }
+        }
+    }
+    out
+}
+
 fn check_irf_shocks_options(model: &Model, out: &mut Vec<Diagnostic>) {
     for option in &model.irf_shocks_options {
         for &(name, span) in &option.names {

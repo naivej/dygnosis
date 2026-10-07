@@ -6,6 +6,9 @@ use crate::model::{Equation, Model, PolicyCommand};
 use crate::span::Span;
 
 pub fn check_e010(model: &Model) -> Vec<Diagnostic> {
+    if model.model_rows_rejected() {
+        return Vec::new();
+    }
     if model.model_block.is_none() && model.equations.is_empty() {
         return Vec::new();
     }

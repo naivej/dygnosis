@@ -468,6 +468,9 @@ fn has_written_model(model: &Model) -> bool {
 /// CheckPass also examines complete roots with no model block. An unfinished
 /// include or macro may still supply the equations, so that extension is quiet.
 fn has_usage_model_or_complete_root(model: &Model) -> bool {
+    if model.model_rows_rejected() {
+        return false;
+    }
     has_written_model(model)
         || (model.model_block.is_none()
             && model.heterogeneous_models.is_empty()

@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::expr::{ExprId, ExprKind};
 use crate::intern::Name;
-use crate::model::{Equation, Model};
+use crate::model::{Equation, Model, SymbolContext};
 use crate::span::Span;
 
 pub fn check_d_block(model: &Model) -> Vec<Diagnostic> {
@@ -19,7 +19,7 @@ pub fn check_d_block(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_generate_irfs(model));
     out.extend(check_namespace(model));
     out.extend(check_const_fold(model));
-    out.extend(check_matlab_locals(model));
+    out.extend(check_outside_assignment_roles(model));
     out.extend(check_model_expression_roles(model));
     out.extend(check_ss_rhs_roles(model));
     out
@@ -239,49 +239,9 @@ fn check_const_fold(model: &Model) -> Vec<Diagnostic> {
         .collect()
 }
 
-fn check_matlab_locals(model: &Model) -> Vec<Diagnostic> {
-    let externals: HashSet<Name> = model.external_function_names.iter().copied().collect();
-    let pound: HashSet<Name> = model
-        .equations
-        .iter()
-        .filter(|eq| eq.is_local)
-        .filter_map(|eq| lhs_ident(model, eq))
-        .collect();
+fn check_outside_assignment_roles(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
-    let mut seen_out: HashSet<(Name, &'static str)> = HashSet::new();
-
-    for (id, span) in outside_ident_uses(model) {
-        if externals.contains(&id) && seen_out.insert((id, "E279")) {
-            let name = model.name(id);
-            out.push(err(
-                span,
-                "E279",
-                format!(
-                    "Symbol '{name}' is the name of a MATLAB/Octave function, and cannot be used as a variable."
-                ),
-            ));
-        }
-        if pound.contains(&id) && seen_out.insert((id, "E282")) {
-            let name = model.name(id);
-            out.push(err(
-                span,
-                "E282",
-                format!(
-                    "Variable {name} not allowed outside model declaration. Its scope is only inside model."
-                ),
-            ));
-        }
-    }
-    out
-}
-
-fn outside_ident_uses(model: &Model) -> Vec<(Name, Span)> {
-    let mut out = Vec::new();
-    let push_expr = |out: &mut Vec<(Name, Span)>, id: ExprId| {
-        for r in model.exprs.walk_idents(id) {
-            out.push((r.name, r.span));
-        }
-    };
+    let mut seen = HashSet::new();
     for a in model
         .param_assignments
         .iter()
@@ -289,7 +249,18 @@ fn outside_ident_uses(model: &Model) -> Vec<(Name, Span)> {
         .filter(|assignment| !assignment.native)
     {
         if let Some(id) = a.expr {
-            push_expr(&mut out, id);
+            for usage in model.exprs.walk_idents(id) {
+                if let Some(diagnostic) = outside_expression_role_refusal(
+                    model,
+                    usage.name,
+                    usage.span,
+                    a.symbol_type_context,
+                ) {
+                    if seen.insert((usage.name, diagnostic.code.clone())) {
+                        out.push(diagnostic);
+                    }
+                }
+            }
         }
     }
     out
@@ -321,19 +292,37 @@ fn check_model_expression_roles(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_ss_rhs_roles(model: &Model) -> Vec<Diagnostic> {
-    model.steady_state_rhs_uses.iter().filter_map(|&(name, span, context)| {
-        let spelling = model.name(name);
-        let (code, message) = if model.heterogeneous_in_context(name, context) {
-            ("E463", format!("Symbol '{spelling}' cannot be used outside model declaration, because it is heterogeneous."))
-        } else { match model.symbol_kind_in_context(name, context)? {
-            "model_local_variable" => ("E282", format!("Variable {spelling} not allowed outside model declaration. Its scope is only inside model.")),
-            "external_function" => ("E279", format!("Symbol '{spelling}' is the name of a MATLAB/Octave function, and cannot be used as a variable.")),
-            "epilogue" => ("E294", format!("Symbol '{spelling}' cannot be used outside the epilogue block.")),
-            "excluded" => ("E426", format!("Variable '{spelling}' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement")),
-            _ => return None,
-        } };
-        Some(err(span, code, message))
-    }).collect()
+    model
+        .steady_state_rhs_uses
+        .iter()
+        .filter_map(|&(name, span, context)| {
+            outside_expression_role_refusal(model, name, span, context)
+        })
+        .collect()
+}
+
+/// ParsingDriver::add_variable checks the RHS role before init_param checks
+/// the target. Use the symbol history captured at this expression's read.
+pub(crate) fn outside_expression_role_refusal(
+    model: &Model,
+    name: Name,
+    span: Span,
+    context: SymbolContext,
+) -> Option<Diagnostic> {
+    let spelling = model.name(name);
+    let (code, message) = if model.heterogeneous_in_context(name, context) {
+        ("E463", format!("Symbol '{spelling}' cannot be used outside model declaration, because it is heterogeneous."))
+    } else {
+        match model.symbol_kind_in_context(name, context)? {
+        "model_local_variable" => ("E282", format!("Variable {spelling} not allowed outside model declaration. Its scope is only inside model.")),
+        "external_function" => ("E279", format!("Symbol '{spelling}' is the name of a MATLAB/Octave function, and cannot be used as a variable.")),
+        "epilogue" => ("E294", format!("Symbol '{spelling}' cannot be used outside the epilogue block.")),
+        "trend_var" | "log_trend_var" => ("E310", format!("Variable {spelling} not allowed outside model declaration, because it is a trend variable.")),
+        "excluded" => ("E426", format!("Variable '{spelling}' can no longer be used since it has been excluded by a previous 'model_remove' or 'var_remove' statement")),
+        _ => return None,
+    }
+    };
+    Some(err(span, code, message))
 }
 
 fn lhs_ident(model: &Model, eq: &Equation) -> Option<Name> {

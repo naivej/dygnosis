@@ -22,6 +22,20 @@ pub(crate) struct EmittedOrigin {
 }
 
 impl EmittedSource {
+    /// Map the first byte, including source characters omitted by tokenization.
+    pub fn written_start(&self, start: usize) -> u32 {
+        let next = self
+            .origins
+            .partition_point(|origin| origin.emitted.end as usize <= start);
+        let Some(origin) = self.origins.get(next) else {
+            return self.written_end(start);
+        };
+        if origin.copied {
+            origin.written.start + (start as u32).max(origin.emitted.start) - origin.emitted.start
+        } else {
+            origin.written.start
+        }
+    }
     /// Map a region's end, including trivia that produced no token.
     pub fn written_end(&self, end: usize) -> u32 {
         let after = self
@@ -36,6 +50,36 @@ impl EmittedSource {
             origin.written.end
         }
     }
+}
+
+/// First non-trivia byte read in INITIAL. Comments do not enter NATIVE.
+pub(crate) fn initial_content_start(src: &str, start: usize) -> usize {
+    let bytes = src.as_bytes();
+    let mut i = start.min(bytes.len());
+    loop {
+        i = skip_flex_space(bytes, i);
+        if bytes.get(i) == Some(&b'%') || bytes.get(i..).is_some_and(|s| s.starts_with(b"//")) {
+            i += line_comment_body(bytes, i);
+        } else if bytes.get(i..).is_some_and(|s| s.starts_with(b"/*")) {
+            i = src[i + 2..]
+                .find("*/")
+                .map_or(bytes.len(), |n| i + 2 + n + 2);
+        } else {
+            return i;
+        }
+    }
+}
+
+/// The pinned verbatim opener permits whitespace, but no intervening comment.
+pub(crate) fn verbatim_opener(src: &str, start: usize) -> bool {
+    let Some(head) = src.get(start..start.saturating_add(8)) else {
+        return false;
+    };
+    head.eq_ignore_ascii_case("verbatim")
+        && src
+            .as_bytes()
+            .get(skip_flex_space(src.as_bytes(), start + 8))
+            == Some(&b';')
 }
 
 #[derive(Clone)]

@@ -93,7 +93,7 @@ fn mutations_invalidate_state_and_explicit_assignments_restore_it() {
         "verbatim; p=4; end;",
     ] {
         let actual = values(&format!(
-            "parameters p q; p=2; {barrier} q=p+1; p=3; q=p+1;"
+            "parameters p q; p=2; {barrier}\nq=p+1; p=3; q=p+1;"
         ));
         assert_eq!(
             actual.iter().map(|row| row.1).collect::<Vec<_>>(),

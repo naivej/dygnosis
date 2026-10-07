@@ -90,6 +90,35 @@ impl Parser<'_> {
                 .eq_ignore_ascii_case("periods")
     }
 
+    pub(super) fn scheduled_shock_has_value_row(&self, at: usize, end_i: usize) -> bool {
+        if !self.word_at(at, "var") || !self.shock_var_is_scheduled(at, end_i) {
+            return false;
+        }
+        let mut semis = 0;
+        let mut i = at;
+        while i < end_i && semis < 2 {
+            if self.tokens[i].kind == TokenKind::Semi {
+                semis += 1;
+            }
+            i += 1;
+        }
+        semis == 2
+            && ["values", "add", "multiply", "scales"]
+                .iter()
+                .any(|word| self.word_at(i, word))
+    }
+
+    /// A regular `var symbol;` must continue with `periods` or `stderr`.
+    /// Include the closer/EOF token at `end_i`: neither completes a row.
+    pub(super) fn incomplete_regular_shock_var(&self, at: usize, end_i: usize) -> bool {
+        at + 2 < end_i
+            && self.word_at(at, "var")
+            && self.tokens[at + 1].kind == TokenKind::Ident
+            && self.tokens[at + 2].kind == TokenKind::Semi
+            && !self.word_at(at + 3, "periods")
+            && !self.word_at(at + 3, "stderr")
+    }
+
     pub(super) fn skip_scheduled_shock(&mut self, end_i: usize) {
         let mut semis = 0;
         while self.i < end_i && semis < 3 {
@@ -158,6 +187,10 @@ impl Parser<'_> {
                 self.bump();
                 continue;
             }
+            if self.incomplete_regular_shock_var(self.i, end_i) {
+                self.i += 3;
+                continue;
+            }
             let row = if self.at_ident_ci("var") && !self.shock_var_is_scheduled(self.i, end_i) {
                 self.parse_shock_var_stmt(end_i)
             } else if self.at_ident_ci("corr") {
@@ -221,11 +254,14 @@ impl Parser<'_> {
         }
         let values_end = self.i;
         if values_start < values_end && self.tokens[values_start].kind == TokenKind::Ident {
-            self.model.shape_refuses.push(ShapeRefuse::official(
-                self.tokens[values_start].span,
-                "values",
-                "syntax error, unexpected IDENTIFIER",
-            ));
+            self.model.shape_refuses.push(
+                ShapeRefuse::official(
+                    self.tokens[values_start].span,
+                    "values",
+                    "syntax error, unexpected IDENTIFIER",
+                )
+                .with_parse_order(self.token_origins[values_start].start),
+            );
         }
         let values = self.written_values(values_start, values_end, false, false);
         let end = if self.at(TokenKind::Semi) {
@@ -323,16 +359,22 @@ impl Parser<'_> {
     ) -> Option<ShapeRefuse> {
         let token = self.tokens.get(next)?;
         if token.kind == TokenKind::Minus {
-            return Some(ShapeRefuse::official(token.span, subject, minus_message));
+            return Some(
+                ShapeRefuse::official(token.span, subject, minus_message)
+                    .with_parse_order(self.token_origins[next].start),
+            );
         }
         if token.kind == TokenKind::Plus {
             let value = self.tokens.get(next + 1)?;
             if value.kind == TokenKind::Number && !is_integer_lexeme(value.text(self.src)) {
-                return Some(ShapeRefuse::official(
-                    value.span,
-                    subject,
-                    "syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER",
-                ));
+                return Some(
+                    ShapeRefuse::official(
+                        value.span,
+                        subject,
+                        "syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER",
+                    )
+                    .with_parse_order(self.token_origins[next + 1].start),
+                );
             }
         }
         None
@@ -379,11 +421,14 @@ impl Parser<'_> {
                     last = Some(point);
                     self.i = after;
                 } else if !allow_end && self.word_at(self.i, "end") {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[self.i].span,
-                        "periods",
-                        "syntax error, unexpected END, expecting INT_NUMBER",
-                    ));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(
+                            self.tokens[self.i].span,
+                            "periods",
+                            "syntax error, unexpected END, expecting INT_NUMBER",
+                        )
+                        .with_parse_order(self.token_origins[self.i].start),
+                    );
                 }
             }
             let end = self.tokens[self.i - 1].span.end;
@@ -402,11 +447,10 @@ impl Parser<'_> {
                 } else {
                     "syntax error, unexpected INT_NUMBER, expecting COMMA or ';'"
                 };
-                self.model.shape_refuses.push(ShapeRefuse::official(
-                    self.tokens[self.i].span,
-                    "shock_paths",
-                    message,
-                ));
+                self.model.shape_refuses.push(
+                    ShapeRefuse::official(self.tokens[self.i].span, "shock_paths", message)
+                        .with_parse_order(self.token_origins[self.i].start),
+                );
             }
         }
         self.eat(TokenKind::Semi);
@@ -542,20 +586,26 @@ impl Parser<'_> {
                     || self.tokens.get(after.saturating_sub(2)).map(|t| t.kind)
                         == Some(TokenKind::Comma)
                 {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[after.saturating_sub(1)].span,
-                        "shock_paths",
-                        "syntax error, unexpected ')'",
-                    ));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(
+                            self.tokens[after.saturating_sub(1)].span,
+                            "shock_paths",
+                            "syntax error, unexpected ')'",
+                        )
+                        .with_parse_order(self.token_origins[after.saturating_sub(1)].start),
+                    );
                 } else if namespace.as_deref() == Some("learnt_in") {
                     if let Some(comma) = (after_name + 1..after.saturating_sub(1))
                         .find(|&j| self.tokens[j].kind == TokenKind::Comma)
                     {
-                        self.model.shape_refuses.push(ShapeRefuse::official(
-                            self.tokens[comma].span,
-                            "shock_paths",
-                            "syntax error, unexpected COMMA",
-                        ));
+                        self.model.shape_refuses.push(
+                            ShapeRefuse::official(
+                                self.tokens[comma].span,
+                                "shock_paths",
+                                "syntax error, unexpected COMMA",
+                            )
+                            .with_parse_order(self.token_origins[comma].start),
+                        );
                     }
                 }
                 next = after;
@@ -585,26 +635,33 @@ impl Parser<'_> {
     /// `end` can be a period in an exogenous path stanza. Dynare's lexer
     /// distinguishes that use from the block closer; our token lexer needs this
     /// small context check while searching for the closer.
-    fn consume_until_path_end(&mut self) -> usize {
+    fn consume_until_path_end(&mut self, allow_period_end: bool) -> usize {
         let mut in_periods = false;
+        let mut row_head = true;
         loop {
+            if row_head
+                && self.discard_refused_block_row(allow_period_end && self.at_ident_ci("periods"))
+            {
+                row_head = false;
+                continue;
+            }
             if self.at(TokenKind::Eof) || self.at_block_opener() {
                 return self.i;
             }
             if self.at_ident_ci("periods") {
                 in_periods = true;
             }
-            if self.at_ident_ci("end") && self.peek_kind(1) == Some(TokenKind::Semi) && !in_periods
-            {
+            if self.at_ident_ci("end") && !in_periods {
                 let at = self.i;
                 self.bump();
-                self.bump();
+                self.advance_initial_source_cursor();
+                self.finish_block_separator();
                 return at;
             }
             if self.at(TokenKind::Semi) {
                 in_periods = false;
             }
-            self.bump();
+            row_head = self.bump().kind == TokenKind::Semi;
         }
     }
 
@@ -644,12 +701,12 @@ impl Parser<'_> {
                         self.tokens[i].span,
                         keyword,
                         "syntax error, unexpected COMMA, expecting OVERWRITE or LEARNT_IN or ')'",
-                    ));
+                    ).with_parse_order(self.token_origins[i].start));
                     break;
                 }
             }
         }
-        let body_end_i = self.consume_until_path_end();
+        let body_end_i = self.consume_until_path_end(!companion);
         self.record_missing_end_if_unclosed(
             keyword,
             Span {
@@ -684,11 +741,10 @@ impl Parser<'_> {
             } else {
                 "syntax error, unexpected END, expecting VAR or EXOGENIZE"
             };
-            self.model.shape_refuses.push(ShapeRefuse::official(
-                self.tokens[body_end_i].span,
-                keyword,
-                message,
-            ));
+            self.model.shape_refuses.push(
+                ShapeRefuse::official(self.tokens[body_end_i].span, keyword, message)
+                    .with_parse_order(self.token_origins[body_end_i].start),
+            );
         }
         let block = PathBlock {
             options,
@@ -764,11 +820,10 @@ impl Parser<'_> {
                         None
                     };
                     if let Some(message) = message {
-                        self.model.shape_refuses.push(ShapeRefuse::official(
-                            self.tokens[i].span,
-                            "shock_paths",
-                            message,
-                        ));
+                        self.model.shape_refuses.push(
+                            ShapeRefuse::official(self.tokens[i].span, "shock_paths", message)
+                                .with_parse_order(self.token_origins[i].start),
+                        );
                         break;
                     }
                 }
@@ -931,11 +986,10 @@ impl Parser<'_> {
                 _ => None,
             };
             if let Some(message) = message {
-                self.model.shape_refuses.push(ShapeRefuse::official(
-                    self.tokens[first].span,
-                    "set_time",
-                    message,
-                ));
+                self.model.shape_refuses.push(
+                    ShapeRefuse::official(self.tokens[first].span, "set_time", message)
+                        .with_parse_order(self.token_origins[first].start),
+                );
             }
         }
         let value = if self.at(TokenKind::LParen) {
@@ -1080,9 +1134,10 @@ impl Parser<'_> {
                         None
                     };
                     if let Some(message) = message {
-                        self.model
-                            .shape_refuses
-                            .push(ShapeRefuse::official(value.span, command, message));
+                        self.model.shape_refuses.push(
+                            ShapeRefuse::official(value.span, command, message)
+                                .with_parse_order(self.token_origins[i + 2].start),
+                        );
                     }
                 }
             }
@@ -1098,18 +1153,24 @@ impl Parser<'_> {
                 skip_balanced_tokens(&self.tokens, i + 2, TokenKind::LParen, TokenKind::RParen)
                     .min(close);
             if self.tokens.get(i + 3).map(|t| t.kind) == Some(TokenKind::RParen) {
-                self.model.shape_refuses.push(ShapeRefuse::official(
-                    self.tokens[i + 3].span,
-                    command,
-                    "syntax error, unexpected ')'",
-                ));
+                self.model.shape_refuses.push(
+                    ShapeRefuse::official(
+                        self.tokens[i + 3].span,
+                        command,
+                        "syntax error, unexpected ')'",
+                    )
+                    .with_parse_order(self.token_origins[i + 3].start),
+                );
             }
             if self.tokens.get(after.saturating_sub(2)).map(|t| t.kind) == Some(TokenKind::Comma) {
-                self.model.shape_refuses.push(ShapeRefuse::official(
-                    self.tokens[after - 1].span,
-                    command,
-                    "syntax error, unexpected ')'",
-                ));
+                self.model.shape_refuses.push(
+                    ShapeRefuse::official(
+                        self.tokens[after - 1].span,
+                        command,
+                        "syntax error, unexpected ')'",
+                    )
+                    .with_parse_order(self.token_origins[after - 1].start),
+                );
             }
             let mut names = Vec::new();
             for j in i + 3..after.saturating_sub(1) {
@@ -1122,11 +1183,10 @@ impl Parser<'_> {
                     } else {
                         "syntax error, unexpected FLOAT_NUMBER"
                     };
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[j].span,
-                        command,
-                        message,
-                    ));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(self.tokens[j].span, command, message)
+                            .with_parse_order(self.token_origins[j].start),
+                    );
                 }
             }
             self.model.irf_shocks_options.push(IrfShocksOption {
@@ -1223,11 +1283,14 @@ impl Parser<'_> {
             return;
         }
         if self.tokens.get(i + 1).map(|t| t.kind) == Some(TokenKind::RParen) {
-            self.model.shape_refuses.push(ShapeRefuse::official(
-                self.tokens[i + 1].span,
-                "subsamples",
-                "syntax error, unexpected ')'",
-            ));
+            self.model.shape_refuses.push(
+                ShapeRefuse::official(
+                    self.tokens[i + 1].span,
+                    "subsamples",
+                    "syntax error, unexpected ')'",
+                )
+                .with_parse_order(self.token_origins[i + 1].start),
+            );
         }
         i += 1;
         let mut ranges = Vec::new();
@@ -1246,11 +1309,14 @@ impl Parser<'_> {
             let Some((first, after_first)) = self.date_at(i + 2) else {
                 if let Some(tok) = self.tokens.get(i + 2) {
                     if tok.kind == TokenKind::Number {
-                        self.model.shape_refuses.push(ShapeRefuse::official(
-                            tok.span,
-                            "subsamples",
-                            "syntax error, unexpected INT_NUMBER, expecting DATE",
-                        ));
+                        self.model.shape_refuses.push(
+                            ShapeRefuse::official(
+                                tok.span,
+                                "subsamples",
+                                "syntax error, unexpected INT_NUMBER, expecting DATE",
+                            )
+                            .with_parse_order(self.token_origins[i + 2].start),
+                        );
                     }
                 }
                 i += 1;
@@ -1265,11 +1331,14 @@ impl Parser<'_> {
             }
             if !self.gap_is(after_first - 1, after_first, ":") {
                 if self.tokens.get(after_first).map(|t| t.kind) == Some(TokenKind::Comma) {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[after_first].span,
-                        "subsamples",
-                        "syntax error, unexpected COMMA, expecting PLUS or ':'",
-                    ));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(
+                            self.tokens[after_first].span,
+                            "subsamples",
+                            "syntax error, unexpected COMMA, expecting PLUS or ':'",
+                        )
+                        .with_parse_order(self.token_origins[after_first].start),
+                    );
                 }
                 i += 1;
                 continue;
@@ -1277,11 +1346,14 @@ impl Parser<'_> {
             let Some((last, after_last)) = self.date_at(after_first) else {
                 if let Some(tok) = self.tokens.get(after_first) {
                     if tok.kind == TokenKind::Number {
-                        self.model.shape_refuses.push(ShapeRefuse::official(
-                            tok.span,
-                            "subsamples",
-                            "syntax error, unexpected INT_NUMBER, expecting DATE",
-                        ));
+                        self.model.shape_refuses.push(
+                            ShapeRefuse::official(
+                                tok.span,
+                                "subsamples",
+                                "syntax error, unexpected INT_NUMBER, expecting DATE",
+                            )
+                            .with_parse_order(self.token_origins[after_first].start),
+                        );
                     }
                 }
                 i += 1;
@@ -1332,11 +1404,14 @@ impl Parser<'_> {
             (_, "all_values_required") => "ALL_VALUES_REQUIRED",
             _ => "IDENTIFIER",
         };
-        self.model.shape_refuses.push(ShapeRefuse::official(
-            token.span,
-            command,
-            format!("syntax error, unexpected {unexpected}, expecting {expected}"),
-        ));
+        self.model.shape_refuses.push(
+            ShapeRefuse::official(
+                token.span,
+                command,
+                format!("syntax error, unexpected {unexpected}, expecting {expected}"),
+            )
+            .with_parse_order(self.token_origins[at].start),
+        );
         true
     }
 
@@ -1388,11 +1463,14 @@ impl Parser<'_> {
             return false;
         }
         let unexpected = self.bison_token_name(shape_end);
-        self.model.shape_refuses.push(ShapeRefuse::official(
-            self.tokens[shape_end].span,
-            "shocks",
-            format!("syntax error, unexpected {unexpected}, expecting ')'"),
-        ));
+        self.model.shape_refuses.push(
+            ShapeRefuse::official(
+                self.tokens[shape_end].span,
+                "shocks",
+                format!("syntax error, unexpected {unexpected}, expecting ')'"),
+            )
+            .with_parse_order(self.token_origins[shape_end].start),
+        );
         true
     }
 
@@ -1563,11 +1641,38 @@ impl Parser<'_> {
                 | ShockBlockKind::LearntIn => Some("syntax error, unexpected END, expecting VAR"),
             };
             if let Some(message) = message {
-                self.model.shape_refuses.push(ShapeRefuse::official(
-                    self.tokens[body_end_i].span,
-                    &command,
-                    message,
-                ));
+                self.model.shape_refuses.push(
+                    ShapeRefuse::official(self.tokens[body_end_i].span, &command, message)
+                        .with_parse_order(self.token_origins[body_end_i].start),
+                );
+            }
+        }
+        if kind == ShockBlockKind::Regular {
+            for i in body_i..body_end_i {
+                let row_start = i == body_i || self.tokens[i - 1].kind == TokenKind::Semi;
+                if !row_start || !self.incomplete_regular_shock_var(i, body_end_i) {
+                    continue;
+                }
+                let next_i = i + 3;
+                let token = &self.tokens[next_i];
+                let expected = if self.word_at(next_i, "end") {
+                    "PERIODS"
+                } else {
+                    "PERIODS or STDERR"
+                };
+                let unexpected = if token.kind == TokenKind::Eof {
+                    "end of file".to_string()
+                } else {
+                    self.bison_token_name(next_i)
+                };
+                self.model.shape_refuses.push(
+                    ShapeRefuse::official(
+                        token.span,
+                        &command,
+                        format!("syntax error, unexpected {unexpected}, expecting {expected}"),
+                    )
+                    .with_parse_order(self.token_origins[next_i].start),
+                );
             }
         }
         if matches!(
@@ -1584,33 +1689,42 @@ impl Parser<'_> {
                     && self.tokens[i + 1].kind == TokenKind::Ident
                     && self.tokens[i + 2].kind == TokenKind::Comma
                 {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[i + 2].span,
-                        &command,
-                        "syntax error, unexpected COMMA, expecting ';'",
-                    ));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(
+                            self.tokens[i + 2].span,
+                            &command,
+                            "syntax error, unexpected COMMA, expecting ';'",
+                        )
+                        .with_parse_order(self.token_origins[i + 2].start),
+                    );
                     break;
                 }
                 if self.word_at(i, "var")
                     && self.tokens[i + 1].kind == TokenKind::Ident
                     && self.tokens[i + 2].kind == TokenKind::Eq
                 {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[i + 2].span,
-                        &command,
-                        "syntax error, unexpected EQUAL, expecting ';'",
-                    ));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(
+                            self.tokens[i + 2].span,
+                            &command,
+                            "syntax error, unexpected EQUAL, expecting ';'",
+                        )
+                        .with_parse_order(self.token_origins[i + 2].start),
+                    );
                 }
                 if self.word_at(i, "var")
                     && self.tokens[i + 1].kind == TokenKind::Ident
                     && self.tokens[i + 2].kind == TokenKind::Semi
                     && self.word_at(i + 3, "stderr")
                 {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[i + 3].span,
-                        &command,
-                        "syntax error, unexpected STDERR, expecting PERIODS",
-                    ));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(
+                            self.tokens[i + 3].span,
+                            &command,
+                            "syntax error, unexpected STDERR, expecting PERIODS",
+                        )
+                        .with_parse_order(self.token_origins[i + 3].start),
+                    );
                 }
             }
         }
@@ -1632,11 +1746,10 @@ impl Parser<'_> {
                     } else {
                         "syntax error, unexpected SKEW, expecting VAR"
                     };
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[i].span,
-                        &command,
-                        message,
-                    ));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(self.tokens[i].span, &command, message)
+                            .with_parse_order(self.token_origins[i].start),
+                    );
                     break;
                 }
                 if !self.word_at(i, "periods") {
@@ -1671,11 +1784,10 @@ impl Parser<'_> {
                     _ => None,
                 };
                 if let Some(message) = message {
-                    self.model.shape_refuses.push(ShapeRefuse::official(
-                        self.tokens[op_i].span,
-                        &command,
-                        message,
-                    ));
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(self.tokens[op_i].span, &command, message)
+                            .with_parse_order(self.token_origins[op_i].start),
+                    );
                     break;
                 }
             }
@@ -1686,7 +1798,7 @@ impl Parser<'_> {
                     self.model.shape_refuses.push(ShapeRefuse::official(
                         self.tokens[i].span, &command,
                         "syntax error, unexpected COMMA, expecting OVERWRITE or LEARNT_IN or RELATIVE_TO_INITVAL or ')'",
-                    ));
+                    ).with_parse_order(self.token_origins[i].start));
                     break;
                 }
             }

@@ -393,7 +393,7 @@ fn excluded_dotted_heads_go_native() {
         "an excluded head is not a dotted statement: {:?}",
         model.dotted_statements.len()
     );
-    assert_eq!(model.ms_unparsed_spans.len(), 2);
+    assert_eq!(model.ms_unparsed_spans.len(), 3);
     quiet(&analyze(&model), "E271");
     // The one Warning is W160 for the `external_function` companion, not a parse claim.
     let diags = analyze(&model);

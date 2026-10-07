@@ -90,7 +90,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
             workspace_only: false,
         },
         their_needle: "expecting PERIODS or STDERR",
-        our_needle: "Missing 'end;' for 'shocks'",
+        our_needle: "unexpected IDENTIFIER, expecting PERIODS or STDERR",
         stage: JsonStage::Check,
     },
     HonestyRow {
@@ -100,7 +100,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
             workspace_only: false,
         },
         their_needle: "unexpected INITVAL, expecting ';'",
-        our_needle: "Missing 'end;' for 'model'",
+        our_needle: "unexpected INITVAL, expecting ';'",
         stage: JsonStage::Check,
     },
     HonestyRow {

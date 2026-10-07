@@ -441,7 +441,9 @@ pub fn handed_option_refusal(
                 "kalman_tol" => "syntax error, unexpected KALMAN_TOL",
                 _ => "syntax error, unexpected IDENTIFIER",
             };
-            return Some(ShapeRefuse::official(opt.span, command, message));
+            return Some(
+                ShapeRefuse::official(opt.span, command, message).with_parse_order(opt.parse_order),
+            );
         }
         if let Some((_, shapes)) = DECOMPOSITION_VALUE_SHAPES
             .iter()
@@ -452,17 +454,23 @@ pub fn handed_option_refusal(
                     && opt.value_text.bytes().all(|b| b.is_ascii_digit())
                     && !opt.value_text.is_empty()
                 {
-                    return Some(ShapeRefuse::official(
-                        opt.value_span,
-                        command,
-                        "syntax error, unexpected INT_NUMBER, expecting DATE",
-                    ));
+                    return Some(
+                        ShapeRefuse::official(
+                            opt.value_span,
+                            command,
+                            "syntax error, unexpected INT_NUMBER, expecting DATE",
+                        )
+                        .with_parse_order(opt.value_parse_order),
+                    );
                 }
-                return Some(ShapeRefuse::new(
-                    opt.span,
-                    command,
-                    "a value written in the shape that option has",
-                ));
+                return Some(
+                    ShapeRefuse::new(
+                        opt.span,
+                        command,
+                        "a value written in the shape that option has",
+                    )
+                    .with_parse_order(opt.parse_order),
+                );
             }
         }
     }
@@ -683,28 +691,37 @@ pub fn option_refusal(
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case(&opt.name))
         else {
-            return Some(ShapeRefuse::new(
-                opt.span,
-                command.to_string(),
-                "one of the option names this statement carries",
-            ));
+            return Some(
+                ShapeRefuse::new(
+                    opt.span,
+                    command.to_string(),
+                    "one of the option names this statement carries",
+                )
+                .with_parse_order(opt.parse_order),
+            );
         };
         if !row_fits(src, shapes, opt) {
             if shapes.contains(&Shape::Date)
                 && opt.value_text.bytes().all(|b| b.is_ascii_digit())
                 && !opt.value_text.is_empty()
             {
-                return Some(ShapeRefuse::official(
-                    opt.value_span,
-                    command,
-                    "syntax error, unexpected INT_NUMBER, expecting DATE",
-                ));
+                return Some(
+                    ShapeRefuse::official(
+                        opt.value_span,
+                        command,
+                        "syntax error, unexpected INT_NUMBER, expecting DATE",
+                    )
+                    .with_parse_order(opt.value_parse_order),
+                );
             }
-            return Some(ShapeRefuse::new(
-                opt.span,
-                command.to_string(),
-                "a value written in the shape that option has",
-            ));
+            return Some(
+                ShapeRefuse::new(
+                    opt.span,
+                    command.to_string(),
+                    "a value written in the shape that option has",
+                )
+                .with_parse_order(opt.parse_order),
+            );
         }
     }
     None

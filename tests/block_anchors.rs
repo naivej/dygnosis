@@ -91,7 +91,7 @@ fn whole_construct_matrix_keeps_baseline_messages_severity_and_multiplicity() {
             "1 endogenous variable(s) missing from initval (will default to 0): c",
         )],
     );
-    assert_fixture("d_ms/e058_cfp_var_undeclared.mod", "W092", "varobs", 0, &[(2, "3 observed variable(s) but only 1 shock source(s) found (structural shocks plus measurement errors). Review the observed variables and shock sources before estimation.")]);
+    assert_fixture("d_ms/quiet_prior_std_endo.mod", "W092", "varobs", 0, &[(2, "3 observed variable(s) but only 1 shock source(s) found (structural shocks plus measurement errors). Review the observed variables and shock sources before estimation.")]);
     assert_fixture(
         "compare/groups_after.mod",
         "E188",

@@ -378,6 +378,20 @@ impl Lexer<'_> {
     }
 
     fn scan_string(&mut self, quote: char) {
+        // A lone quote remains visible. The parser joins multiline quoted
+        // strings only in active Dynare syntax; NATIVE quotes stop at newline.
+        if quote == '\'' {
+            let rest = &self.src[self.pos + 1..];
+            let close = rest.find('\'');
+            if close.is_none() {
+                self.bump();
+                return;
+            }
+            if !rest[..close.unwrap()].contains('\n') {
+                self.pos += close.unwrap() + 2;
+                return;
+            }
+        }
         self.bump();
         while self.pos < self.src.len() {
             let c = self.peek();
@@ -407,13 +421,14 @@ impl Lexer<'_> {
     }
 
     fn scan_number(&mut self) {
-        if self.peek() == '.' {
+        let starts_with_dot = self.peek() == '.';
+        if starts_with_dot {
             self.bump();
         }
         while self.peek().is_ascii_digit() {
             self.bump();
         }
-        if self.peek() == '.' && self.peek_nth(1).is_some_and(|c| c.is_ascii_digit()) {
+        if !starts_with_dot && self.peek() == '.' {
             self.bump();
             while self.peek().is_ascii_digit() {
                 self.bump();
