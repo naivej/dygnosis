@@ -256,8 +256,10 @@ fn unnamed_mcp_compare_does_not_resolve_absolute_host_includes_for_navigation() 
         }),
     )
     .to_json();
-    assert_eq!(legacy["common_endogenous"], serde_json::json!(["z"]));
-    assert_eq!(legacy["changed_equations"][0]["text_old"], "z = 1");
+    // An unnamed input cannot read the required include. The later declaration
+    // and equation are not an established comparison input.
+    assert_eq!(legacy["common_endogenous"], serde_json::json!([]));
+    assert_eq!(legacy["changed_equations"], serde_json::json!([]));
 }
 
 #[test]

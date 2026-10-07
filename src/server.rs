@@ -1265,17 +1265,88 @@ impl Backend {
     }
 
     fn folding_ranges(&self, uri: &Url) -> Option<Vec<FoldingRange>> {
-        let inner = self.lock_inner();
-        let doc = inner.document(uri)?;
-        let model = inner.workspace.get_model(uri.as_str())?;
-        let normalized = crate::parser::normalize_newlines(&doc.text);
+        let mut inner = self.lock_inner();
+        let text = inner.document(uri)?.text.clone();
+        let directives = inner
+            .workspace
+            .get_model(uri.as_str())?
+            .macro_directives
+            .clone();
+        let normalized = crate::parser::normalize_newlines(&text);
         let index = LineIndex::new(&normalized);
-        let report = crate::expand::expand_report(&doc.text);
-        let mut ranges =
-            WrittenView::new(uri, &doc.text, model, &report.model_map, None, false, false).folds();
+        let mut ranges = Vec::new();
+        let mut roots = inner.known_owner_roots(uri);
+        if roots.is_empty() && is_model_root(uri) {
+            roots.push(uri.clone());
+        }
+        for root in &roots {
+            inner.prepare_root(root);
+            let Some(model) = inner.workspace.get_effective_model(root.as_str()) else {
+                continue;
+            };
+            // Model blocks can span include files. A fold needs only its two
+            // written endpoints in this file, not a single-source whole span.
+            let endpoints: Vec<_> = model
+                .statements
+                .iter()
+                .filter(|statement| {
+                    statement.kind == crate::model::StatementKind::Block && statement.complete
+                })
+                .filter_map(|statement| {
+                    let opener = model.expanded_tokens.get(statement.opener_range.start)?;
+                    let closer = statement
+                        .token_range
+                        .end
+                        .checked_sub(1)
+                        .and_then(|last| model.expanded_tokens.get(last))?;
+                    Some((statement.name.clone(), opener.span, closer.span))
+                })
+                .collect();
+            for (name, opener, closer) in endpoints {
+                let Some((start_file, start_span)) =
+                    inner.workspace.map_effective_origin(root.as_str(), opener)
+                else {
+                    continue;
+                };
+                let Some((end_file, end_span)) =
+                    inner.workspace.map_effective_origin(root.as_str(), closer)
+                else {
+                    continue;
+                };
+                let owner = crate::include_resolver::normalize_uri(uri.as_str());
+                if crate::include_resolver::normalize_uri(&start_file) != owner
+                    || crate::include_resolver::normalize_uri(&end_file) != owner
+                {
+                    continue;
+                }
+                let start = index.position_utf16(&text, start_span.start);
+                let end = index.position_utf16(&text, end_span.end);
+                if start.line < end.line
+                    && !ranges.iter().any(|range: &FoldingRange| {
+                        range.start_line == start.line && range.end_line == end.line
+                    })
+                {
+                    ranges.push(FoldingRange {
+                        start_line: start.line,
+                        end_line: end.line,
+                        start_character: None,
+                        end_character: None,
+                        kind: Some(FoldingRangeKind::Region),
+                        collapsed_text: Some(format!("{name} ... end;")),
+                    });
+                }
+            }
+        }
+        if roots.is_empty() {
+            let model = inner.workspace.get_model(uri.as_str())?;
+            let report = crate::expand::expand_report(&text);
+            ranges.extend(
+                WrittenView::new(uri, &text, model, &report.model_map, None, false, false).folds(),
+            );
+        }
         let mut stack: Vec<&crate::model::MacroDirective> = Vec::new();
         const COND: &[&str] = &["if", "ifdef", "ifndef"];
-        for directive in &model.macro_directives {
+        for directive in &directives {
             let kind = directive.kind.as_str();
             if COND.contains(&kind) || kind == "for" {
                 stack.push(directive);
@@ -1285,8 +1356,8 @@ impl Backend {
                     .is_some_and(|d| COND.contains(&d.kind.as_str()))
             {
                 let opener = stack.pop().unwrap();
-                let start = index.position_utf16(&doc.text, opener.span.start);
-                let end = index.position_utf16(&doc.text, directive.span.end);
+                let start = index.position_utf16(&text, opener.span.start);
+                let end = index.position_utf16(&text, directive.span.end);
                 if start.line < end.line {
                     ranges.push(FoldingRange {
                         start_line: start.line,
@@ -1299,8 +1370,8 @@ impl Backend {
                 }
             } else if kind == "endfor" && stack.last().is_some_and(|d| d.kind == "for") {
                 let opener = stack.pop().unwrap();
-                let start = index.position_utf16(&doc.text, opener.span.start);
-                let end = index.position_utf16(&doc.text, directive.span.end);
+                let start = index.position_utf16(&text, opener.span.start);
+                let end = index.position_utf16(&text, directive.span.end);
                 if start.line < end.line {
                     ranges.push(FoldingRange {
                         start_line: start.line,
@@ -1313,7 +1384,7 @@ impl Backend {
                 }
             }
         }
-        for (start_line, end_line) in block_comment_folds(&doc.text) {
+        for (start_line, end_line) in block_comment_folds(&text) {
             ranges.push(FoldingRange {
                 start_line,
                 start_character: None,
@@ -1848,6 +1919,9 @@ impl Backend {
         let source_lines = matches!(requested, Some("source"))
             .then(|| inner.workspace.source_line_segments(uri.as_str()))
             .unwrap_or_default();
+        let source_evaluations = matches!(requested, Some("source"))
+            .then(|| inner.workspace.source_evaluations(uri.as_str()))
+            .unwrap_or_default();
         let model = matches!(requested, Some("readable") | Some("source"))
             .then(|| inner.workspace.get_effective_model(uri.as_str()))
             .flatten();
@@ -1859,10 +1933,14 @@ impl Backend {
             Some("readable") => {
                 crate::preview_layout::readable(&report, model).map(DisplayLayout::Readable)
             }
-            Some("source") => {
-                crate::preview_source::source(&report, model, &source_gaps, &source_lines)
-                    .map(DisplayLayout::Source)
-            }
+            Some("source") => crate::preview_source::source_with_evaluations(
+                &report,
+                model,
+                &source_gaps,
+                &source_lines,
+                &source_evaluations,
+            )
+            .map(DisplayLayout::Source),
             _ => None,
         });
         let source_unproven = matches!(

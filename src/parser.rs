@@ -154,12 +154,61 @@ pub fn parse(text: &str) -> Model {
 }
 
 pub(crate) fn parse_with_lines(text: &str, line_segments: &[(crate::span::Span, u32)]) -> Model {
+    parse_with_lines_and_evaluations(text, line_segments, &[])
+}
+
+pub(crate) fn parse_with_lines_and_evaluations(
+    text: &str,
+    line_segments: &[(crate::span::Span, u32)],
+    evaluations: &[crate::macro_expand::MacroReplay],
+) -> Model {
+    parse_with_lines_and_evaluations_budget(
+        text,
+        line_segments,
+        evaluations,
+        &mut crate::macro_expr::MacroBudget::new(),
+    )
+}
+
+/// Parse a loaded child while charging its work to the root include walk.
+pub(crate) fn parse_with_budget(text: &str, budget: &mut crate::macro_expr::MacroBudget) -> Model {
+    parse_with_lines_and_evaluations_budget(text, &[], &[], budget)
+}
+
+fn parse_with_lines_and_evaluations_budget(
+    text: &str,
+    line_segments: &[(crate::span::Span, u32)],
+    evaluations: &[crate::macro_expand::MacroReplay],
+    budget: &mut crate::macro_expr::MacroBudget,
+) -> Model {
+    // Reserve source work before normalization, raw token allocation, or the
+    // independent written-macro scan. A refused guard copies no source text.
+    if let Err(crate::macro_expand::MacroEvalError::Limit(limit)) =
+        budget.spend_work(text.len().max(1))
+    {
+        let span = Span::new(0, 0);
+        return Model {
+            macro_incomplete_span: Some(span),
+            incomplete_reasons: vec![crate::macro_expand::IncompleteReason {
+                span,
+                code: "I211",
+                message: crate::macro_expand::i211_limit_message(limit),
+            }],
+            ..Model::default()
+        };
+    }
     let source = normalize_newlines(text);
     let raw_tokens = tokenize(&source);
     let (includes, includepaths, macro_directives, macro_interps) =
-        collect_include_dirs(&source, &raw_tokens);
+        collect_include_dirs(&source, &crate::macro_expand::scan_macro_tokens(&source));
     let (tokens, macro_type_errors, macro_incomplete_span, incomplete_reasons) =
-        crate::macro_expand::expand_macros_with_status_lines(&source, raw_tokens, line_segments);
+        crate::macro_expand::expand_macros_with_status_lines_and_evaluations_budget(
+            &source,
+            raw_tokens,
+            line_segments,
+            evaluations,
+            budget,
+        );
     let (mut model, _ranges) = parse_expanded(&source, tokens);
     model.includes = includes;
     model.includepaths = includepaths;
@@ -188,6 +237,7 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         eq_token_ranges: Vec::new(),
         hetero_eq_token_ranges: Vec::new(),
         verbatim_ranges: Vec::new(),
+        native_ranges: Vec::new(),
         symbol_list_id: 1,
         in_model: false,
         in_equation_body: false,
@@ -834,7 +884,10 @@ fn collect_include_dirs(
 fn parse_dir_kind_arg(text: &str) -> Option<(String, Option<String>)> {
     let rest = text.trim_start().strip_prefix("@#")?;
     let rest = rest.trim_start();
-    let ident = leading_ident(rest)?;
+    let ident = crate::macro_expand::directive_name(text);
+    if ident.is_empty() {
+        return None;
+    }
     let kind = ident.to_ascii_lowercase();
     let arg = rest[ident.len()..].trim();
     let argument = if arg.is_empty() {
@@ -854,8 +907,12 @@ pub(crate) fn collapse_continuations(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
+    let mut in_string = false;
     while i < bytes.len() {
-        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+        if bytes[i] == b'"' {
+            in_string = !in_string;
+        }
+        if !in_string && bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
             let mut j = i + 2;
             while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
                 j += 1;
@@ -1010,6 +1067,8 @@ struct Parser<'a> {
     hetero_eq_token_ranges: Vec<Vec<Range<usize>>>,
     /// Token ranges of `verbatim; ? end;` bodies, whose text 7.1 passes through raw.
     verbatim_ranges: Vec<Range<usize>>,
+    /// Token ranges already read as native text, independently of written spans.
+    native_ranges: Vec<Range<usize>>,
     /// Bumped once per statement that lists names, so `CommandSymbol::list_id`
     /// groups one statement's list.
     symbol_list_id: u32,
@@ -1308,6 +1367,8 @@ impl Parser<'_> {
                 self.parse_dotted_statement();
             } else if self.at_handed_over_statement() && self.at_statement_boundary() {
                 self.parse_handed_over_statement();
+            } else if self.skip_generated_native_line() {
+                recognized = false;
             } else if let Some(end) = self.native_statement_end() {
                 self.skip_native_statement(end);
                 recognized = false;
@@ -5591,6 +5652,46 @@ impl Parser<'_> {
         })
     }
 
+    /// Macro output is not scanned again. Generated macro markers and unknown
+    /// identifier heads stay native through the emitted `NATIVE` boundary.
+    fn skip_generated_native_line(&mut self) -> bool {
+        let head = &self.tokens[self.i];
+        if !generated_native_candidate(head, self.src) {
+            return false;
+        }
+        if head.kind == TokenKind::Ident
+            && self
+                .intern
+                .lookup(head.text(self.src))
+                .is_some_and(|name| self.is_statement_head_symbol(name))
+        {
+            return false;
+        }
+        let Some(emitted) = head.emitted.clone() else {
+            return false;
+        };
+        let written_head = head.span;
+        let end = crate::native_line::native_region_end(
+            &emitted.source.text,
+            emitted.span.start as usize,
+        );
+        let from = self.i;
+        while !self.at(TokenKind::Eof)
+            && self.tokens[self.i].emitted.as_ref().is_some_and(|token| {
+                std::sync::Arc::ptr_eq(&token.source, &emitted.source)
+                    && (token.span.start as usize) < end
+            })
+        {
+            self.i += 1;
+        }
+        self.native_ranges.push(from..self.i);
+        self.model.ms_unparsed_spans.push(Span {
+            start: written_head.start,
+            end: emitted.source.written_end(end).max(written_head.end),
+        });
+        true
+    }
+
     /// The end offset of a top-level statement 7.1 reads as native MATLAB text: it
     /// makes no language claim on the line, so neither may we beyond leaving it be.
     ///
@@ -5639,6 +5740,8 @@ impl Parser<'_> {
 
     /// Claim a native statement's span and step over it, recording no row.
     fn skip_native_statement(&mut self, end: usize) {
+        self.native_ranges
+            .push(self.i..(self.i + end + 1).min(self.tokens.len()));
         let start = self.tokens[self.i].span.start;
         let end_span = if self.kind_at(end) == Some(TokenKind::Semi) {
             self.tokens[self.i + end].span.end
@@ -9195,6 +9298,9 @@ impl Parser<'_> {
             if self.verbatim_ranges.iter().any(|range| range.contains(&i)) {
                 continue;
             }
+            if self.native_ranges.iter().any(|range| range.contains(&i)) {
+                continue;
+            }
             if self.in_native_line_assignment(i)
                 && self.lexeme(tok).len() > 1
                 && self.lexeme(tok).ends_with('"')
@@ -11682,6 +11788,8 @@ pub(crate) fn join_lexemes_recorded(
 ) -> String {
     let mut out = String::new();
     let mut prev: Option<TokenKind> = None;
+    let mut generated_native: Option<(std::sync::Arc<crate::native_line::EmittedSource>, usize)> =
+        None;
     for (index, tok) in tokens.iter().enumerate() {
         if tok.kind == TokenKind::Eof {
             continue;
@@ -11689,6 +11797,28 @@ pub(crate) fn join_lexemes_recorded(
         let piece = tok.text(src);
         if piece.is_empty() {
             continue;
+        }
+        if generated_native.as_ref().is_some_and(|(source, end)| {
+            tok.emitted.as_ref().is_some_and(|token| {
+                std::sync::Arc::ptr_eq(source, &token.source) && (token.span.start as usize) >= *end
+            })
+        }) {
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            prev = None;
+            generated_native = None;
+        }
+        if generated_native.is_none() && generated_native_candidate(tok, src) {
+            if let Some(emitted) = &tok.emitted {
+                generated_native = Some((
+                    emitted.source.clone(),
+                    crate::native_line::native_region_end(
+                        &emitted.source.text,
+                        emitted.span.start as usize,
+                    ),
+                ));
+            }
         }
         if let Some(p) = prev {
             if !tok.glue_left && needs_space(p, tok.kind) {
@@ -11701,6 +11831,13 @@ pub(crate) fn join_lexemes_recorded(
         prev = Some(tok.kind);
     }
     out
+}
+
+fn generated_native_candidate(token: &Token, src: &str) -> bool {
+    token.lexeme.is_some()
+        && (matches!(token.kind, TokenKind::MacroDir | TokenKind::MacroInterp)
+            || (token.kind == TokenKind::Ident
+                && !crate::command_skip::is_pin_statement_keyword(token.text(src))))
 }
 
 fn tight_right(kind: TokenKind) -> bool {
@@ -12020,6 +12157,44 @@ fn statement_is_end_word(raw: &str) -> bool {
 mod tests {
     use super::*;
     use crate::parse;
+
+    #[test]
+    fn source_guard_withholds_before_copying_or_scanning() {
+        let mut budget = crate::macro_expr::MacroBudget::new();
+        budget
+            .spend_work(crate::macro_expr::MACRO_WORK_CAP - 4)
+            .unwrap();
+        let model = parse_with_budget("@#if 1\nvar y; model; y=0; end;\n", &mut budget);
+        assert!(model.source.is_empty());
+        assert!(model.macro_directives.is_empty());
+        assert!(model.macro_type_errors.is_empty());
+        assert_eq!(model.macro_incomplete_span, Some(Span::new(0, 0)));
+        assert_eq!(model.incomplete_reasons.len(), 1);
+        assert_eq!(model.incomplete_reasons[0].code, "I211");
+        assert!(model.incomplete_reasons[0]
+            .message
+            .contains("iteration work"));
+        assert_eq!(budget.remaining_work(), 4);
+        let diagnostics = crate::diagnostic::analyze(&model);
+        assert!(diagnostics.iter().any(|row| row.code == "I211"));
+        assert!(
+            !diagnostics.iter().any(|row| row.code.starts_with('E')),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn loaded_child_parse_uses_the_supplied_root_counter() {
+        let mut budget = crate::macro_expr::MacroBudget::new();
+        let text = "var y; model; y=0; end;\n";
+        let model = parse_with_budget(text, &mut budget);
+        assert_eq!(model.equations.len(), 1);
+        assert!(budget.remaining_work() < crate::macro_expr::MACRO_WORK_CAP - text.len());
+        budget.spend_work(budget.remaining_work() - 1).unwrap();
+        let next = parse_with_budget(text, &mut budget);
+        assert!(next.source.is_empty());
+        assert_eq!(next.incomplete_reasons[0].code, "I211");
+    }
 
     fn parse_lhs(src: &str) -> (crate::model::Model, ExprId) {
         let model = parse(&format!("model;\n{src};\nend;\n"));

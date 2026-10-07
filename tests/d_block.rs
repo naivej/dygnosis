@@ -900,7 +900,7 @@ fn e282_model_local_outside() {
 #[test]
 fn e283_if_string_not_bool() {
     let diags = analyze(&parse(
-        "var y; varexo e; parameters rho; rho = 0.9; @#if \"hello\"\n@#endif\nmodel; y = rho*y(-1)+e; end;",
+        "var y; varexo e; parameters rho; rho = 0.9;\n@#if \"hello\"\n@#endif\nmodel; y = rho*y(-1)+e; end;",
     ));
     assert_eq!(
         find(&diags, "E283").message,
@@ -911,7 +911,7 @@ fn e283_if_string_not_bool() {
 #[test]
 fn e284_for_tuple_arity() {
     let diags = analyze(&parse(
-        "var y; varexo e; parameters rho; rho = 0.9; @#for (a, b) in [(1, 2, 3)]\n@#define z = a\n@#endfor\nmodel; y = rho*y(-1)+e; end;",
+        "var y; varexo e; parameters rho; rho = 0.9;\n@#for (a, b) in [(1, 2, 3)]\n@#define z = a\n@#endfor\nmodel; y = rho*y(-1)+e; end;",
     ));
     assert!(find(&diags, "E284")
         .message
@@ -921,12 +921,44 @@ fn e284_for_tuple_arity() {
 #[test]
 fn e285_plus_type_mismatch() {
     let diags = analyze(&parse(
-        "var y; varexo e; parameters rho; rho = 0.9; @#define x = \"a\"\n@#define y = x + 1\nmodel; y = rho*y(-1)+e; end;",
+        "var y; varexo e; parameters rho; rho = 0.9;\n@#define x = \"a\"\n@#define y = x + 1\nmodel; y = rho*y(-1)+e; end;",
     ));
     assert_eq!(
         find(&diags, "E285").message,
         "Type mismatch for operands of + operator"
     );
+}
+
+#[test]
+fn macro_type_controls_require_pinned_line_start_directives() {
+    let inputs = [
+        ("var y; varexo e; parameters rho; rho = 0.9; @#if \"hello\"\n@#endif\nmodel; y=rho*y(-1)+e; end;", "E062", "syntax error, unexpected ENDIF, expecting end of file", "E283", "The condition must evaluate to a boolean or a double"),
+        ("var y; varexo e; parameters rho; rho = 0.9; @#for (a,b) in [(1,2,3)]\n@#define z=a\n@#endfor\nmodel; y=rho*y(-1)+e; end;", "E062", "syntax error, unexpected ENDFOR, expecting end of file", "E284", "Encountered tuple of size 3 but only have 2 index variables"),
+        ("var y; varexo e; parameters rho; rho = 0.9; @#define x=\"a\"\n@#define y=x+1\nmodel; y=rho*y(-1)+e; end;", "E063", "Unknown variable x", "E285", "Type mismatch for operands of + operator"),
+    ];
+    let binary = std::path::PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    for (inline, inline_code, inline_needle, code, needle) in inputs {
+        let line_start = inline.replacen("; @#", ";\n@#", 1);
+        assert_eq!(
+            find(&analyze(&parse(inline)), inline_code).message,
+            inline_needle
+        );
+        assert_eq!(find(&analyze(&parse(&line_start)), code).message, needle);
+        if binary.is_file() {
+            for (source, expected) in [(inline, inline_needle), (line_start.as_str(), needle)] {
+                let result = run_preprocessor(
+                    source,
+                    &binary,
+                    None,
+                    Duration::from_secs(30),
+                    JsonStage::Check,
+                );
+                let text = result.raw_stdout + &result.raw_stderr;
+                assert!(!result.success, "{text}");
+                assert!(text.contains(expected), "{text}");
+            }
+        }
+    }
 }
 
 // --- 0.6.0 slice 06: every `BLOCK_OPENERS` name is a legal declaration name ---

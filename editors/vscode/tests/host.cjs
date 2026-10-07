@@ -80,14 +80,15 @@ async function metadataAction(document, code, title) {
     action = actions?.find(item => item.title === title);
     return !!action;
   }, `real ${title} code action`);
-  assert.ok(action.edit instanceof vscode.WorkspaceEdit, `${title} must return a native workspace edit`);
+  assert.equal(action.edit, undefined, `${title} keeps its edit behind the revision guard`);
+  assert.equal(action.command?.command, "dygnosis.applyDiagnosticEdit", `${title} must use the guarded native action`);
   return action;
 }
 async function applyUndoReapplyMetadata(service, document, code, title, accept) {
   const original = document.getText();
   const first = await metadataAction(document, code, title);
   assert.equal(document.getText(), original, "requesting a code action must not write metadata");
-  assert.equal(await vscode.workspace.applyEdit(first.edit), true);
+  assert.equal(await vscode.commands.executeCommand(first.command.command, ...first.command.arguments), true);
   const changed = document.getText();
   assert.notEqual(changed, original); accept(changed);
   await currentSnapshot(service, document, () => service.modelInfo(document.uri), `${title} applied snapshot`);
@@ -100,7 +101,7 @@ async function applyUndoReapplyMetadata(service, document, code, title, accept) 
   await waitFor(() => document.getText() === original, `native undo of ${title}`);
   await currentSnapshot(service, document, () => service.modelInfo(document.uri), `${title} undo snapshot`);
   const reapplied = await metadataAction(document, code, title);
-  assert.equal(await vscode.workspace.applyEdit(reapplied.edit), true);
+  assert.equal(await vscode.commands.executeCommand(reapplied.command.command, ...reapplied.command.arguments), true);
   assert.equal(document.getText(), changed, `${title} must produce the same edit after undo`);
   await currentSnapshot(service, document, () => service.modelInfo(document.uri), `${title} reapplied snapshot`);
 }
@@ -125,6 +126,54 @@ async function checkNativeMetadata(service, workspaceRoot, evidence) {
     assert.equal((text.match(/\[name='eq[12]'\]/g) || []).length, 2);
   });
   evidence.checks.push("real equation-tag and long-name actions apply, undo, reapply, and do not repeat");
+}
+
+async function checkMacroPreview(service, workspaceRoot, evidence) {
+  const names = ["home_1", "home_2", "foreign_1", "foreign_2"];
+  for (const name of names) await writeObservedInput(service, path.join(workspaceRoot, `${name}.inc`), `${name}=0;\n@#echo "${name}"\n`);
+  const filename = path.join(workspaceRoot, "macro-preview.mod");
+  const source = '@#define countries=["home","foreign"]\n' +
+    '@#define names=[c+"_"+(string)i for (c,i) in countries*(1:2)]\n' +
+    '@#if 1 in 1:3\n@#echo "range"\n@#endif\n' +
+    '@#for n in names\nvar @{n};\n@#endfor\nmodel;\n' +
+    '@#for n in names\n@#include n+".inc"\n@#endfor\nend;\n';
+  await writeObservedInput(service, filename, source);
+  const document = await vscode.workspace.openTextDocument(filename);
+  await vscode.window.showTextDocument(document);
+  const info = await currentSnapshot(service, document, () => service.modelInfo(document.uri), "macro preview counts", value => value.n_equations === 4);
+  assert.equal(info.n_endogenous, 4);
+  await vscode.commands.executeCommand("dygnosis.showEffectiveModel");
+  const preview = vscode.window.activeTextEditor;
+  const expanded = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, document.uri));
+  assert.equal(expanded.complete, true);
+  assert.equal(expanded.navigation.filter(row => row.kind === "equation").length, 4);
+  assert.deepEqual(expanded.macro_messages.map(message => message.message), ["range", ...names]);
+  assert.equal(preview.document.getText(), expanded.effective_text);
+  for (const name of names) assert.ok(expanded.effective_text.includes(`${name}=0;`));
+  assert.ok(expanded.macro_ranges.length > 0);
+  const row = expanded.navigation.find(item => item.kind === "equation" && item.written_locations.some(location => location.uri.endsWith("home_1.inc")));
+  assert.ok(row);
+  const point = new vscode.Position(row.effective_range.start.line, row.effective_range.start.character + 1);
+  preview.selection = new vscode.Selection(point, point);
+  await vscode.commands.executeCommand("dygnosis.goToWrittenSource");
+  assert.ok(vscode.window.activeTextEditor.document.uri.fsPath.endsWith("home_1.inc"));
+  const edit = new vscode.WorkspaceEdit();
+  edit.insert(document.uri, document.positionAt(document.getText().length), '@#echo missing_macro\n@#echo "late"\n');
+  assert.equal(await vscode.workspace.applyEdit(edit), true);
+  const failedInfo = await currentSnapshot(service, document, () => service.modelInfo(document.uri), "failing macro status", value => value.status === "incomplete");
+  assert.equal(Object.hasOwn(failedInfo, "n_equations"), false);
+  await vscode.window.showTextDocument(preview.document);
+  await vscode.commands.executeCommand("dygnosis.refreshEffectiveModel");
+  const failed = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, document.uri));
+  assert.equal(failed.complete, false);
+  assert.equal(failed.status, "incomplete");
+  assert.deepEqual(failed.navigation, []);
+  assert.deepEqual(failed.macro_ranges, []);
+  assert.deepEqual(failed.macro_messages.map(message => message.message), ["range", ...names]);
+  await waitFor(() => vscode.window.activeTextEditor.document.getText().startsWith("// INCOMPLETE EXPANSION"), "Refresh publishes the incomplete virtual document");
+  assert.ok(vscode.window.activeTextEditor.document.getText().endsWith(failed.effective_text));
+  await waitFor(() => vscode.languages.getDiagnostics(document.uri).some(diagnostic => diagnosticCode(diagnostic) === "E063"), "failing macro Problems");
+  evidence.checks.push("range, Cartesian and comprehension names, expression includes, exact preview text, macro ranges, written jump, edit/Refresh, debug order and fatal status");
 }
 exports.run = async function run() {
   const resultFile = process.env.DYGNOSIS_HOST_RESULT;
@@ -217,8 +266,9 @@ exports.run = async function run() {
       return vscode.window.activeTextEditor.document.uri.toString() === document.uri.toString();
     }, "effective preview jumps to its verified written equation");
     assert.equal(vscode.window.activeTextEditor.selection.start.line, previewRow.written_locations[0].range.start.line);
-    assert.equal(vscode.window.activeTextEditor.selection.start.character, previewRow.written_locations[0].range.start.character);
-    evidence.checks.push("native preview source action uses the engine's exact written range");
+    const writtenCharacter = previewRow.written_locations[0].range.start.character + (previewResult.source_navigation ? 1 : 0);
+    assert.equal(vscode.window.activeTextEditor.selection.start.character, writtenCharacter, "source preview maps the clicked character; fallback uses the equation range");
+    evidence.checks.push("native preview source action maps the exact clicked written character");
     const previewRootPath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "preview-include.mod");
     const previewBodyPath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, "preview-body.inc");
     await writeObservedInput(service, previewBodyPath, "y=3;\n");
@@ -278,10 +328,11 @@ exports.run = async function run() {
     feature.register = register;
     evidence.checks.push("native include link retains mod owner; unsaved include refreshes Outline/model revision");
     await checkNativeMetadata(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
+    await checkMacroPreview(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
     await service.restart(); assert.ok(service.client);
     await service.shutdown(); assert.equal(service.client, undefined);
     evidence.checks.push("restart/shutdown");
     evidence.passed = true;
-  } catch (error) { evidence.passed = false; evidence.error = String(error); throw error; }
+  } catch (error) { evidence.passed = false; evidence.error = String(error.stack || error); throw error; }
   finally { if (resultFile) await fs.writeFile(resultFile, JSON.stringify(evidence, null, 2)); }
 };

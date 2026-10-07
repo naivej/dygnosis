@@ -4,7 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::equations::equations;
 use crate::lexer::{tokenize, Token};
-use crate::macro_expand::{expand_macros_traced_with_lines, FrameRec, MacroMessage, TokenTrace};
+use crate::macro_expand::{
+    expand_macros_traced_with_lines_and_evaluations, FrameRec, MacroMessage, MacroReplay,
+    TokenTrace,
+};
 use crate::model_map::{
     EquationOccurrence, SourceFrame, SourceOccurrence, WrittenModelMap, WrittenSegment,
 };
@@ -102,6 +105,23 @@ pub(crate) struct SpliceSegment {
     pub origin: Span,
     /// 1-based line of `origin.start` in the written file.
     pub line: u32,
+    /// Original macro header evaluated at this position before copied output.
+    /// This metadata is neither emitted text nor a written macro statement.
+    pub evaluation: Option<String>,
+}
+
+pub(crate) fn splice_evaluations(map: &[SpliceSegment]) -> Vec<MacroReplay> {
+    map.iter()
+        .filter_map(|segment| {
+            segment.evaluation.as_ref().map(|directive| MacroReplay {
+                span: Span::new(
+                    segment.spliced.start as usize,
+                    segment.spliced.start as usize,
+                ),
+                directive: directive.clone(),
+            })
+        })
+        .collect()
 }
 
 pub fn expand_report(text: &str) -> ExpandReport {
@@ -111,8 +131,37 @@ pub fn expand_report(text: &str) -> ExpandReport {
         file: None,
         origin: Span::new(0, source.len()),
         line: 1,
+        evaluation: None,
     }];
     expand_report_from_spliced(&source, &map, None)
+}
+
+/// Normalize an already emitted fatal prefix without running macro processing.
+pub(crate) fn compact_emitted_prefix(prefix: &str) -> String {
+    let source = std::sync::Arc::new(crate::native_line::EmittedSource {
+        text: prefix.to_string(),
+        origins: vec![crate::native_line::EmittedOrigin {
+            emitted: Span::new(0, prefix.len()),
+            written: Span::new(0, prefix.len()),
+            copied: true,
+        }],
+    });
+    let mut tokens = tokenize(prefix);
+    for token in &mut tokens {
+        // These characters reached the model lexer after macro execution.
+        // Retain that fact even when the emitted spelling looks like a macro.
+        if matches!(
+            token.kind,
+            crate::lexer::TokenKind::MacroDir | crate::lexer::TokenKind::MacroInterp
+        ) {
+            token.lexeme = Some(token.text(prefix).to_string());
+        }
+        token.emitted = Some(crate::native_line::EmittedToken {
+            source: source.clone(),
+            span: token.span,
+        });
+    }
+    join_lexemes_recorded(prefix, &tokens, |_, _| {})
 }
 
 pub(crate) enum NavigationSource {
@@ -132,10 +181,12 @@ pub(crate) fn expand_report_from_spliced(
     let raw = tokenize(&source);
     let line_segments: Vec<(Span, u32)> = map
         .iter()
+        .filter(|segment| !segment.spliced.is_empty())
         .map(|segment| (segment.spliced, segment.line))
         .collect();
+    let evaluations = splice_evaluations(map);
     let (tokens, traces, arena, incomplete, macro_navigation_complete, messages) =
-        expand_macros_traced_with_lines(&source, raw, &line_segments);
+        expand_macros_traced_with_lines_and_evaluations(&source, raw, &line_segments, &evaluations);
     let macro_messages = locate_macro_messages(map, messages);
     debug_assert_eq!(tokens.len(), traces.len());
     let mut emitted = vec![None; tokens.len()];
@@ -152,10 +203,17 @@ pub(crate) fn expand_report_from_spliced(
         let text = normalize_newlines(text);
         let navigation_lines: Vec<(Span, u32)> = segments
             .iter()
+            .filter(|segment| !segment.spliced.is_empty())
             .map(|segment| (segment.spliced, segment.line))
             .collect();
+        let navigation_evaluations = splice_evaluations(segments);
         let (actual, actual_traces, actual_arena, incomplete, macro_navigation_complete, _) =
-            expand_macros_traced_with_lines(&text, tokenize(&text), &navigation_lines);
+            expand_macros_traced_with_lines_and_evaluations(
+                &text,
+                tokenize(&text),
+                &navigation_lines,
+                &navigation_evaluations,
+            );
         let matches = !incomplete
             && macro_navigation_complete
             && actual.len() == tokens.len()
@@ -684,4 +742,30 @@ fn lookup(map: &[SpliceSegment], pos: u32) -> Option<&SpliceSegment> {
     map.iter()
         .find(|s| pos >= s.spliced.start && pos < s.spliced.end)
         .or_else(|| map.last().filter(|s| pos == s.spliced.end))
+}
+
+#[cfg(test)]
+mod prefix_tests {
+    use super::*;
+
+    #[test]
+    fn fatal_prefix_uses_the_same_compact_join() {
+        let text = "var y; model; y=0; end;\n";
+        assert_eq!(
+            compact_emitted_prefix(text),
+            expand_report(text).effective_text
+        );
+    }
+
+    #[test]
+    fn fatal_prefix_does_not_execute_generated_macro_markers() {
+        for marker in ["@#echo 123", "@#define x=1", "@{missing}"] {
+            let prefix = format!("{marker}\nvar y; model; y=0; end;\n");
+            let compact = compact_emitted_prefix(&prefix);
+            assert!(
+                compact.starts_with(&format!("{marker}\nvar y")),
+                "{compact}"
+            );
+        }
+    }
 }

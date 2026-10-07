@@ -64,7 +64,7 @@ fn action_fixture(name: &str) -> String {
 fn function_macro_expands_call_in_equation() {
     let src = action_fixture("function");
     let report = expand_report(&src);
-    assert_eq!(report.n_equations, 1);
+    assert_eq!(report.n_equations, 1, "{:?}", analyze(&parse(&src)));
     assert!(
         report.effective_text.contains("y = 2"),
         "{}",
@@ -448,7 +448,7 @@ fn recursive_macro_function_and_large_loop_do_not_claim_complete_views() {
     assert_eq!(shadowed_diags[0].message, "Unknown variable x");
     for src in [
         "@#define f()=f()\nvar y; model; y=@{f()}; end;",
-        "@#define nums=1:10001\nvar y; model; @#for i in nums\ny=0;\n@#endfor\nend;",
+        "@#define nums=1:10001\nvar y; model;\n@#for i in nums\ny=0;\n@#endfor\nend;",
     ] {
         let report = expand_report(src);
         assert!(!report.complete, "{}", report.effective_text);
@@ -1865,7 +1865,7 @@ fn incomplete_reasons_name_expression_limit_and_official_errors() {
         analyze(&parse(depth))[0].message,
         "Macro expansion stopped at the expression depth limit; some model checks were withheld."
     );
-    let big = "@#define nums=1:10001\nvar y; model; @#for i in nums\ny=0;\n@#endfor\nend;";
+    let big = "@#define nums=1:10001\nvar y; model;\n@#for i in nums\ny=0;\n@#endfor\nend;";
     assert_eq!(
         analyze(&parse(big))[0].message,
         "Macro expansion stopped at the range size limit; some model checks were withheld."

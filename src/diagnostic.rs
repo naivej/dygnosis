@@ -150,10 +150,6 @@ fn dedupe_macro_diagnostics(diagnostics: impl IntoIterator<Item = Diagnostic>) -
 /// Keep analysis positions through every selection and suppression decision.
 /// Only the completed collection receives display ranges.
 fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
-    let macro_syntax = crate::check_e060::check_e062(model);
-    if !macro_syntax.is_empty() {
-        return macro_syntax;
-    }
     // Macro processing runs before the .mod parser. A failed definition may
     // otherwise turn its later interpolation into a spurious equation error.
     if !model.macro_type_errors.is_empty() {
@@ -164,10 +160,6 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     if !model.incomplete_reasons.is_empty() || model.macro_incomplete_span.is_some() {
         // The remaining source still contains macro syntax, so any ordinary
         // parse/name/count diagnostic could describe a tree Dynare never sees.
-        let explicit_error = crate::check_e060::check_e064(model);
-        if !explicit_error.is_empty() {
-            return explicit_error;
-        }
         if !model.incomplete_reasons.is_empty() {
             return dedupe_macro_diagnostics(model.incomplete_reasons.iter().map(|reason| {
                 Diagnostic::new(
@@ -186,6 +178,10 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
                 "Macro expansion is incomplete; some model checks were withheld.",
             )];
         }
+    }
+    let macro_syntax = crate::check_e060::check_e062(model);
+    if !macro_syntax.is_empty() {
+        return macro_syntax;
     }
     let parse_diags = crate::check_parse::check_parse(model);
     if !parse_diags.is_empty() {
@@ -455,6 +451,14 @@ pub(crate) fn check_in_workspace_with_origins(ws: &mut Workspace, abs_path: &str
 
 fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticSet> {
     let revision = ws.input_revision(abs_path)?;
+    if let Some((file, span, code, message)) = ws.macro_file_refusal(abs_path) {
+        let text: Arc<str> = Arc::from(crate::parser::normalize_newlines(ws.get_source(&file)?));
+        return Some(DiagnosticSet {
+            root: root_key(ws, abs_path),
+            diagnostics: vec![Diagnostic::new(span, Severity::Error, code, message)],
+            origins: vec![Some(DiagnosticOrigin { file, text, span })],
+        });
+    }
     let model = ws.get_effective_model(abs_path)?.clone();
     let mut diags = analyze_positions(&model);
     let records = ws.include_records(abs_path).cloned().unwrap_or_default();

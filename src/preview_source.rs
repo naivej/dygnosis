@@ -2,7 +2,9 @@
 
 use crate::expand::ExpandReport;
 use crate::lexer::{tokenize, Token, TokenKind};
-use crate::macro_expand::{expand_macros_with_source_layout, SourceFragment, SourceLayoutGap};
+use crate::macro_expand::{
+    expand_macros_with_source_layout_and_evaluations, MacroReplay, SourceFragment, SourceLayoutGap,
+};
 use crate::model::Model;
 use crate::parser::join_lexemes_recorded;
 use crate::span::Span;
@@ -22,18 +24,30 @@ pub(crate) struct SourcePreview {
 ///
 /// `gaps` comes from the include splice: leftover directive indent and line
 /// endings that must not appear as written display text.
+#[cfg(test)]
 pub(crate) fn source(
     report: &ExpandReport,
     model: &Model,
     gaps: &[SourceLayoutGap],
     line_segments: &[(Span, u32)],
 ) -> Option<SourcePreview> {
+    source_with_evaluations(report, model, gaps, line_segments, &[])
+}
+
+pub(crate) fn source_with_evaluations(
+    report: &ExpandReport,
+    model: &Model,
+    gaps: &[SourceLayoutGap],
+    line_segments: &[(Span, u32)],
+    evaluations: &[MacroReplay],
+) -> Option<SourcePreview> {
     let original = &report.effective_text;
-    let (tokens, _, _, layout) = expand_macros_with_source_layout(
+    let (tokens, _, _, layout) = expand_macros_with_source_layout_and_evaluations(
         &model.source,
         tokenize(&model.source),
         gaps,
         line_segments,
+        evaluations,
     );
     let copy = join_lexemes_recorded(&model.source, &tokens, |_, _| {});
     if copy != *original {
@@ -136,7 +150,27 @@ mod tests {
         let model = ws.get_effective_model(root).unwrap().clone();
         let report = ws.expand_report(root).unwrap().clone();
         let gaps = ws.source_layout_gaps(root);
-        source(&report, &model, &gaps, &[]).expect("source layout")
+        let lines = ws.source_line_segments(root);
+        let evaluations = ws.source_evaluations(root);
+        source_with_evaluations(&report, &model, &gaps, &lines, &evaluations)
+            .expect("source layout")
+    }
+
+    #[test]
+    fn include_collection_effects_reach_source_layout() {
+        let root = "/preview-replay/root.mod";
+        let text = "@#define k=0\nvar y; model;\n@#for i in [k for k in [1,2]]\n@#include \"body.inc\"\n@#endfor\nend;\n";
+        let layout = preview_with_includes(
+            root,
+            text,
+            &[(
+                "/preview-replay/body.inc",
+                "@#if k==2\ny=1;\n@#else\ny=0;\n@#endif\n",
+            )],
+        );
+        assert!(layout.proven, "{layout:?}");
+        assert_eq!(layout.text.matches("y=1;").count(), 2, "{}", layout.text);
+        assert!(!layout.text.contains("y=0;"), "{}", layout.text);
     }
 
     #[test]

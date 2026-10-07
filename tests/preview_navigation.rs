@@ -270,7 +270,7 @@ fn incomplete_macro_parse_and_missing_include_withhold_navigation() {
 }
 
 #[tokio::test]
-async fn missing_macro_terminators_withhold_only_new_navigation_in_both_transports() {
+async fn missing_macro_terminators_withhold_model_facts_in_both_transports() {
     let base = "var y; model; y=0; end;\n";
     let (service, _socket) = new_service();
     let backend = service.inner();
@@ -289,14 +289,15 @@ async fn missing_macro_terminators_withhold_only_new_navigation_in_both_transpor
         let closed = format!("{unclosed}\n{close_suffix}");
         let unclosed_report = expand_report(&unclosed);
         let closed_report = expand_report(&closed);
-        // Termination is a new navigation proof, not a silent change to legacy expansion.
-        assert!(unclosed_report.complete && closed_report.complete);
+        // The pin parses the whole macro file before interpreting its text.
+        assert!(!unclosed_report.complete);
+        assert!(closed_report.complete);
         assert!(!unclosed_report.navigation_complete, "{unclosed}");
         assert!(closed_report.navigation_complete, "{closed}");
-        assert_eq!(unclosed_report.effective_text, closed_report.effective_text);
-        assert_eq!(unclosed_report.origins, closed_report.origins);
-        assert_eq!(unclosed_report.n_equations, closed_report.n_equations);
-        assert_eq!(unclosed_report.model_map, closed_report.model_map);
+        assert_eq!(unclosed_report.n_equations, 0);
+        assert!(unclosed_report.origins.is_empty());
+        assert!(!unclosed_report.model_map.complete);
+        assert_eq!(closed_report.n_equations, 1);
         assert!(!dygnosis::check_e062(&dygnosis::parse(&unclosed)).is_empty());
         assert!(dygnosis::check_e062(&dygnosis::parse(&closed)).is_empty());
         for (text, expected_complete) in [(&unclosed, false), (&closed, true)] {
@@ -313,9 +314,15 @@ async fn missing_macro_terminators_withhold_only_new_navigation_in_both_transpor
                     assert_eq!(result["status"], "incomplete");
                 }
             }
-            assert_eq!(mcp["n_equations"], 1);
-            assert_eq!(mcp["origins"].as_array().unwrap().len(), 1);
-            assert_eq!(lsp["origins"].as_array().unwrap().len(), 1);
+            assert_eq!(mcp["n_equations"], usize::from(expected_complete));
+            assert_eq!(
+                mcp["origins"].as_array().unwrap().len(),
+                usize::from(expected_complete)
+            );
+            assert_eq!(
+                lsp["origins"].as_array().unwrap().len(),
+                usize::from(expected_complete)
+            );
             assert_eq!(mcp["effective_text"], lsp["effective_text"]);
         }
     }
@@ -325,8 +332,8 @@ async fn missing_macro_terminators_withhold_only_new_navigation_in_both_transpor
         let closed = format!("{unclosed}{closer}\n");
         for (text, expected_complete) in [(&unclosed, false), (&closed, true)] {
             let report = expand_report(text);
-            assert!(report.complete);
-            assert_eq!(report.n_equations, 1);
+            assert_eq!(report.complete, expected_complete);
+            assert_eq!(report.n_equations, usize::from(expected_complete));
             assert_eq!(report.navigation_complete, expected_complete);
             let mcp = dynare_expand(text, None, None);
             open(backend, &root, text, 2).await;
@@ -337,7 +344,10 @@ async fn missing_macro_terminators_withhold_only_new_navigation_in_both_transpor
                     result["navigation"].as_array().unwrap().len(),
                     usize::from(expected_complete)
                 );
-                assert_eq!(result["origins"].as_array().unwrap().len(), 1);
+                assert_eq!(
+                    result["origins"].as_array().unwrap().len(),
+                    usize::from(expected_complete)
+                );
             }
         }
     }
@@ -363,9 +373,9 @@ async fn included_closers_cannot_make_an_unterminated_written_file_navigable() {
         for result in [&mcp, &lsp] {
             assert_eq!(result["complete"], false, "{result}");
             assert_eq!(result["navigation"], json!([]));
-            assert_eq!(result["origins"].as_array().unwrap().len(), 1);
+            assert_eq!(result["origins"].as_array().unwrap().len(), 0);
         }
-        assert_eq!(mcp["n_equations"], 1);
+        assert_eq!(mcp["n_equations"], 0);
         let valid_source = "var y; model;\n@#include \"split-block.inc\"\nend;";
         let valid_body = format!("{opener}\ny=0;\n{closer}\n");
         let files = HashMap::from([
@@ -397,8 +407,9 @@ async fn branch_structure_proof_agrees_in_free_mapped_and_lsp_previews() {
     ] {
         let source = format!("@#if 1\nvar y; model; y=0; end;\n{branches}@#endif\n");
         let report = expand_report(&source);
-        assert!(report.complete && report.model_map.complete);
-        assert_eq!(report.n_equations, 1);
+        assert_eq!(report.complete, expected_complete);
+        assert_eq!(report.model_map.complete, expected_complete);
+        assert_eq!(report.n_equations, usize::from(expected_complete));
         assert_eq!(report.navigation_complete, expected_complete);
         assert_eq!(
             dygnosis::check_e062(&dygnosis::parse(&source)).is_empty(),
@@ -418,7 +429,10 @@ async fn branch_structure_proof_agrees_in_free_mapped_and_lsp_previews() {
                 result["navigation"].as_array().unwrap().len(),
                 usize::from(expected_complete)
             );
-            assert_eq!(result["origins"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                result["origins"].as_array().unwrap().len(),
+                usize::from(expected_complete)
+            );
             if !expected_complete {
                 assert_eq!(result["status"], "incomplete");
             }
@@ -918,10 +932,13 @@ async fn readable_incomplete_previews_keep_partial_text_and_withhold_navigation(
         assert_eq!(readable["complete"], false, "{readable}");
         assert_eq!(readable["status"], "incomplete");
         assert_eq!(readable["navigation"], json!([]));
-        assert!(readable["effective_text"]
-            .as_str()
-            .unwrap()
-            .starts_with("var y ;\n"));
+        assert!(
+            readable["effective_text"]
+                .as_str()
+                .unwrap()
+                .starts_with("var y ;\n"),
+            "{source}: {readable}"
+        );
         same_preview_facts(&compact, &readable);
     }
 }
@@ -1006,10 +1023,16 @@ async fn source_incomplete_previews_withhold_navigation() {
     assert_eq!(source_view["complete"], false, "{source_view}");
     assert_eq!(source_view["status"], "incomplete");
     assert_eq!(source_view["navigation"], json!([]));
-    assert!(source_view["effective_text"]
-        .as_str()
-        .unwrap()
-        .contains("y=@{missing}"));
+    let text = source_view["effective_text"].as_str().unwrap();
+    assert!(text.contains("var y"), "{source_view}");
+    assert!(
+        !text.contains("@{missing}"),
+        "the failed interpolation is not emitted: {source_view}"
+    );
+    assert!(
+        !text.contains("end;"),
+        "text after the failure is not emitted: {source_view}"
+    );
 }
 
 #[tokio::test]
@@ -1411,7 +1434,7 @@ async fn source_navigation_mixed_newlines_keep_names_and_include_boundaries() {
     let include = Url::parse("file:///C:/dygnosis-preview/mixed.inc").unwrap();
     let (service, _socket) = new_service();
     let backend = service.inner();
-    let source = "@#define j 1\nvar y;\n// root\r\n@#include \"mixed.inc\"\r\nmodel; y=1; end;\n";
+    let source = "@#define j=1\nvar y;\n// root\r\n@#include \"mixed.inc\"\r\nmodel; y=1; end;\n";
     let body = "// include\nparameters beta_@{j};\r\n";
     open(backend, &root, source, 1).await;
     open(backend, &include, body, 1).await;
@@ -1448,6 +1471,27 @@ async fn source_navigation_mixed_newlines_keep_names_and_include_boundaries() {
         text.len(),
         "all characters have a written source: {view}"
     );
+}
+
+#[tokio::test]
+async fn source_preview_keeps_loop_iterations_without_include_calls() {
+    let root = Url::parse("file:///C:/dygnosis-preview/no-hit.mod").unwrap();
+    let first = Url::parse("file:///C:/dygnosis-preview/1.inc").unwrap();
+    let second = Url::parse("file:///C:/dygnosis-preview/2.inc").unwrap();
+    let source = "var y1 y2 y3;\nmodel;\n@#for i in [1,2,3]\ny@{i}=@{i};\n@#if i<=2\n@#include (string)i+\".inc\"\n@#endif\n@#endfor\nend;\n@#echo i\n";
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(backend, &first, "", 1).await;
+    open(backend, &second, "", 1).await;
+    open(backend, &root, source, 1).await;
+    let compact = preview(backend, &root).await;
+    let source_view = source_preview(backend, &root).await;
+    assert_eq!(source_view["complete"], true, "{source_view}");
+    same_preview_facts(&compact, &source_view);
+    assert_eq!(source_view["navigation"].as_array().unwrap().len(), 3);
+    let text = source_view["effective_text"].as_str().unwrap();
+    assert_eq!(text, "var y1 y2 y3;\nmodel;\ny1=1;\ny2=2;\ny3=3;\nend;\n");
+    assert_eq!(source_view["macro_messages"][0]["message"], "3");
 }
 
 #[tokio::test]

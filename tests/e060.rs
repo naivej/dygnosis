@@ -293,7 +293,12 @@ fn e061_nested_missing() {
 
 #[test]
 fn e062_unterminated_if() {
-    assert_fire("e060/e062_if.mod", "E062", "Unterminated @#if", "@#if FOO");
+    assert_fire(
+        "e060/e062_if.mod",
+        "E062",
+        "syntax error, unexpected end of file, expecting ENDIF",
+        "@#if FOO",
+    );
 }
 
 #[test]
@@ -301,7 +306,7 @@ fn e062_unterminated_for() {
     assert_fire(
         "e060/e062_for.mod",
         "E062",
-        "Unterminated @#for",
+        "syntax error, unexpected end of file",
         "@#for i in 1:2",
     );
 }
@@ -311,7 +316,7 @@ fn e062_stray_endif() {
     assert_fire(
         "e060/e062_stray_endif.mod",
         "E062",
-        "Stray @#endif",
+        "syntax error, unexpected ENDIF, expecting end of file",
         "@#endif",
     );
 }
@@ -321,7 +326,7 @@ fn e062_mismatch_if_endfor() {
     assert_fire(
         "e060/e062_mismatch.mod",
         "E062",
-        "Mismatched @#endfor",
+        "syntax error, unexpected ENDFOR, expecting ENDIF",
         "@#endfor",
     );
 }
@@ -333,7 +338,7 @@ fn e062_duplicate_else() {
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].code, "E062");
     assert!(
-        got[0].message.contains("Duplicate @#else"),
+        got[0].message == "syntax error, unexpected ELSE, expecting ENDIF",
         "duplicate else, got {}",
         got[0].message
     );
@@ -345,7 +350,7 @@ fn e062_elseif_after_else() {
     assert_fire(
         "e060/e062_elseif.mod",
         "E062",
-        "@#elseif after @#else",
+        "syntax error, unexpected ELSEIF, expecting ENDIF",
         "@#elseif BAR",
     );
 }
@@ -404,13 +409,62 @@ fn e064_error_quoted() {
 }
 
 #[test]
-fn e064_error_no_argument() {
+fn e062_error_no_argument() {
     let text = check_mod("e060/e064_noarg.mod");
     let got = rust_family(&text);
     assert_eq!(got.len(), 1, "{got:?}");
-    assert_eq!(got[0].code, "E064");
-    assert_eq!(got[0].message, "Macro-processing error");
+    assert_eq!(got[0].code, "E062");
+    assert_eq!(got[0].message, "syntax error, unexpected EOL");
     assert_span(&text, &got[0], "@#error");
+}
+
+#[test]
+fn e062_sentences_agree_with_the_pinned_macro_parser() {
+    let binary = PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
+    if !binary.is_file() {
+        eprintln!("SKIP E062 sentences: Dynare 7.2 is absent");
+        return;
+    }
+    for (file, needle) in [
+        (
+            "e062_if",
+            "syntax error, unexpected end of file, expecting ENDIF",
+        ),
+        ("e062_for", "syntax error, unexpected end of file"),
+        (
+            "e062_stray_endif",
+            "syntax error, unexpected ENDIF, expecting end of file",
+        ),
+        (
+            "e062_mismatch",
+            "syntax error, unexpected ENDFOR, expecting ENDIF",
+        ),
+        (
+            "e062_dup_else",
+            "syntax error, unexpected ELSE, expecting ENDIF",
+        ),
+        (
+            "e062_elseif",
+            "syntax error, unexpected ELSEIF, expecting ENDIF",
+        ),
+        ("e064_noarg", "syntax error, unexpected EOL"),
+    ] {
+        let source = check_mod(&format!("e060/{file}.mod"));
+        let result = dygnosis::run_preprocessor(
+            &source,
+            &binary,
+            None,
+            std::time::Duration::from_secs(30),
+            dygnosis::JsonStage::Check,
+        );
+        let text = result.raw_stdout + &result.raw_stderr;
+        assert!(!result.success, "{file}: {text}");
+        assert!(text.contains(needle), "{file}: {text}");
+        let rows = rust_family(&source);
+        assert_eq!(rows.len(), 1, "{file}: {rows:?}");
+        assert_eq!(rows[0].code, "E062");
+        assert_eq!(rows[0].message, needle, "{file}");
+    }
 }
 
 #[test]

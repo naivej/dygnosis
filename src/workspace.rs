@@ -6,8 +6,12 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+static INPUT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 use crate::companion::{self, CompanionKind, CompanionRecord};
 use crate::expand::{expand_report_from_spliced, ExpandReport, NavigationSource, SpliceSegment};
@@ -15,6 +19,8 @@ use crate::include_resolver::{
     is_virtual_uri, normalize_separators, normalize_uri, path_key, resolve_companion_path,
     resolve_include_path, resolve_scoped_include_path, uri_to_path,
 };
+use crate::macro_expand::{IncompleteReason, MacroEvalError};
+use crate::macro_expr::MacroBudget;
 use crate::model::Model;
 use crate::parser::parse;
 use crate::span::Span;
@@ -69,6 +75,7 @@ struct Doc {
     source: String,
     model: Model,
     overlay: bool,
+    input_generation: u64,
 }
 
 /// One joined include source and its written-file map. The model, expand view,
@@ -81,12 +88,34 @@ struct SplicedSource {
     includes_complete: bool,
     navigation: NavigationSource,
     include_search: Vec<PathBuf>,
+    /// A bound reached before joined text could be allocated or scanned.
+    limit: Option<IncompleteReason>,
+    /// First refusal in a separately read macro file, before joined parsing.
+    refusal: Option<crate::macro_expand::MacroFileRefusal>,
+    /// Actual text and debug messages emitted before an incomplete execution.
+    emitted_prefix: Option<String>,
+    macro_messages: Vec<crate::macro_expand::MacroMessage>,
 }
+
+type SplicedPieces = (
+    String,
+    Vec<SpliceSegment>,
+    Vec<crate::macro_expand::SourceLayoutGap>,
+);
 
 #[derive(Clone, Debug)]
 struct IncludeHit {
     path: String,
-    bindings: Vec<(String, String)>,
+    resolved: bool,
+    iterations: Vec<(Span, usize)>,
+    call: usize,
+    parent_calls: Vec<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct IncludeIteration {
+    frame: usize,
+    input: String,
 }
 
 /// Executed resolutions of one written include directive.
@@ -97,25 +126,30 @@ struct SitePlan {
     unresolved: bool,
 }
 
-type IncludeTargets = HashMap<(String, Span), SitePlan>;
+#[derive(Default)]
+struct IncludeTargets {
+    sites: HashMap<(String, Span), SitePlan>,
+    loop_occurrences: Vec<crate::macro_expand::MacroLoopOccurrence>,
+}
 
 fn note_unresolved(targets: &mut IncludeTargets, site: (String, Span)) {
-    targets.entry(site).or_default().unresolved = true;
+    targets.sites.entry(site).or_default().unresolved = true;
 }
 
 fn note_resolved(
     targets: &mut IncludeTargets,
     site: (String, Span),
     path: String,
-    bindings: &[(String, String)],
+    event: &crate::macro_expand::MacroFileEvent<'_>,
+    resolved: bool,
 ) {
-    let plan = targets.entry(site).or_default();
-    if plan.hits.last().is_some_and(|hit| hit.path == path) {
-        return;
-    }
+    let plan = targets.sites.entry(site).or_default();
     plan.hits.push(IncludeHit {
         path,
-        bindings: bindings.to_vec(),
+        resolved,
+        iterations: event.iterations.to_vec(),
+        call: event.call,
+        parent_calls: event.parent_calls.to_vec(),
     });
 }
 
@@ -144,6 +178,9 @@ struct InputFile {
     exists: bool,
     directory: bool,
     identity: Option<String>,
+    length: Option<u64>,
+    modified: Option<std::time::SystemTime>,
+    overlay_generation: Option<u64>,
 }
 
 /// Compact provenance retained by project reports after parsed caches expire.
@@ -260,8 +297,17 @@ impl Workspace {
         ws
     }
 
+    fn overlay_generation(&self, key: &str, source: &str) -> u64 {
+        self.docs
+            .get(key)
+            .filter(|doc| doc.source == source)
+            .map(|doc| doc.input_generation)
+            .unwrap_or_else(|| INPUT_GENERATION.fetch_add(1, Ordering::Relaxed))
+    }
+
     /// Store one overlay under `key` exactly. No disk and no path folding.
     fn insert_overlay(&mut self, key: &str, source: String) {
+        let input_generation = self.overlay_generation(key, &source);
         let model = parse(&source);
         self.docs.insert(
             key.to_string(),
@@ -269,6 +315,7 @@ impl Workspace {
                 source,
                 model,
                 overlay: true,
+                input_generation,
             }),
         );
         self.effective.clear();
@@ -289,6 +336,7 @@ impl Workspace {
     pub fn update_document(&mut self, uri: &str, source: impl Into<String>) {
         let key = normalize_uri(uri);
         let source = source.into();
+        let input_generation = self.overlay_generation(&key, &source);
         let model = parse(&source);
         self.docs.insert(
             key.clone(),
@@ -296,6 +344,7 @@ impl Workspace {
                 source,
                 model,
                 overlay: true,
+                input_generation,
             }),
         );
         // Other roots may have spliced this file.
@@ -337,6 +386,7 @@ impl Workspace {
                 source,
                 model,
                 overlay: false,
+                input_generation: 0,
             }),
         );
         // Other roots may have spliced this file.
@@ -497,6 +547,9 @@ impl Workspace {
             state.exists.hash(&mut hash);
             state.directory.hash(&mut hash);
             state.identity.hash(&mut hash);
+            state.length.hash(&mut hash);
+            state.modified.hash(&mut hash);
+            state.overlay_generation.hash(&mut hash);
         }
         self.input_snapshots.insert(key, snapshot);
         Some(format!("{:016x}", hash.finish()))
@@ -550,10 +603,15 @@ impl Workspace {
         if let Some(doc) = self.docs.get(key).filter(|doc| doc.overlay) {
             InputFile {
                 overlay: true,
-                bytes: Some(doc.source.as_bytes().to_vec()),
+                bytes: (doc.source.len() <= crate::macro_expr::MACRO_WORK_CAP)
+                    .then(|| doc.source.as_bytes().to_vec()),
                 exists: true,
                 directory: false,
                 identity,
+                length: Some(doc.source.len() as u64),
+                modified: None,
+                overlay_generation: (doc.source.len() > crate::macro_expr::MACRO_WORK_CAP)
+                    .then_some(doc.input_generation),
             }
         } else {
             let metadata = (!is_virtual_uri(key))
@@ -561,14 +619,24 @@ impl Workspace {
                 .flatten();
             InputFile {
                 overlay: false,
-                bytes: if is_virtual_uri(key) {
+                bytes: if is_virtual_uri(key)
+                    || metadata
+                        .as_ref()
+                        .is_some_and(|value| value.len() > crate::macro_expr::MACRO_WORK_CAP as u64)
+                {
                     None
                 } else {
-                    std::fs::read(key).ok()
+                    read_input_bytes(Path::new(key))
                 },
                 exists: metadata.is_some(),
-                directory: metadata.is_some_and(|metadata| metadata.is_dir()),
+                directory: metadata.as_ref().is_some_and(|metadata| metadata.is_dir()),
                 identity,
+                length: metadata.as_ref().map(std::fs::Metadata::len),
+                modified: metadata
+                    .as_ref()
+                    .filter(|value| value.len() > crate::macro_expr::MACRO_WORK_CAP as u64)
+                    .and_then(|value| value.modified().ok()),
+                overlay_generation: None,
             }
         }
     }
@@ -587,7 +655,8 @@ impl Workspace {
                 return true;
             };
             let Some(bytes) = state.bytes.as_ref() else {
-                return false;
+                return document.source.len() > crate::macro_expr::MACRO_WORK_CAP
+                    && state.length == Some(document.source.len() as u64);
             };
             let decoded = String::from_utf8(bytes.clone())
                 .unwrap_or_else(|_| bytes.iter().map(|&byte| byte as char).collect());
@@ -701,32 +770,63 @@ impl Workspace {
         let key = self.ensure_loaded(uri)?;
         if !self.effective.contains_key(&key) {
             let spliced = self.spliced_source(&key);
-            let root = self
-                .docs
-                .get(&key)
-                .map(|doc| doc.source.clone())
-                .unwrap_or_default();
             let fatal = self.records.get(&key).and_then(|records| {
                 let span = records
                     .unresolved
                     .first()
                     .map(|item| item.span)
                     .or_else(|| records.cycles.first().map(|item| item.span))?;
-                Some((span, fatal_include_cut(records)))
+                Some(span)
             });
-            let mut model = if let Some((_, Some(cut))) = fatal {
-                let cut = (cut as usize).min(root.len());
-                parse(&root[..cut])
-            } else {
+            let mut model = {
                 let lines: Vec<_> = spliced
                     .segments
                     .iter()
                     .map(|segment| (segment.spliced, segment.line))
                     .collect();
-                crate::parser::parse_with_lines(&spliced.text, &lines)
+                let evaluations = crate::expand::splice_evaluations(&spliced.segments);
+                crate::parser::parse_with_lines_and_evaluations(&spliced.text, &lines, &evaluations)
             };
-            if let Some((span, _)) = fatal {
+            if let Some(span) = fatal {
                 model.macro_incomplete_span.get_or_insert(span);
+            }
+            if let Some(reason) = &spliced.limit {
+                // The retained prefix is not a complete macro program. Its
+                // missing closers and undefined child bindings are not errors
+                // in the written file; the resource reason owns this stop.
+                model.macro_type_errors.clear();
+                model.incomplete_reasons.clear();
+                model.macro_incomplete_span.get_or_insert(reason.span);
+                model.incomplete_reasons.push(reason.clone());
+            }
+            if let Some((file, written, code, message)) = &spliced.refusal {
+                let span = spliced
+                    .segments
+                    .iter()
+                    .find_map(|segment| {
+                        (segment.file.as_deref() == Some(file.as_str())
+                            && written.start >= segment.origin.start
+                            && written.start <= segment.origin.end)
+                            .then(|| {
+                                Span::new(
+                                    (segment.spliced.start + written.start - segment.origin.start)
+                                        as usize,
+                                    (segment.spliced.start + written.end.min(segment.origin.end)
+                                        - segment.origin.start)
+                                        as usize,
+                                )
+                            })
+                    })
+                    .unwrap_or_default();
+                if !model
+                    .macro_type_errors
+                    .iter()
+                    .any(|(_, existing, text)| existing == code && text == message)
+                {
+                    model.macro_type_errors = vec![(span, *code, message.clone())];
+                }
+                model.macro_incomplete_span.get_or_insert(span);
+                model.incomplete_reasons.clear();
             }
             self.effective.insert(key.clone(), model);
         }
@@ -782,41 +882,35 @@ impl Workspace {
         let key = self.ensure_loaded(uri)?;
         if !self.expand.contains_key(&key) {
             let spliced = self.spliced_source(&key);
-            let root = self
-                .docs
-                .get(&key)
-                .map(|doc| doc.source.clone())
-                .unwrap_or_default();
-            let (incomplete, cut) = self
+            let incomplete = self
                 .records
                 .get(&key)
-                .map(|records| {
-                    (
-                        !records.unresolved.is_empty() || !records.cycles.is_empty(),
-                        fatal_include_cut(records),
-                    )
-                })
-                .unwrap_or((false, None));
+                .map(|records| !records.unresolved.is_empty() || !records.cycles.is_empty())
+                .unwrap_or(false);
             let mut report = expand_report_from_spliced(
                 &spliced.text,
                 &spliced.segments,
                 Some(&spliced.navigation),
             );
+            if spliced.limit.is_some() || spliced.refusal.is_some() {
+                report.complete = false;
+                report.navigation_complete = false;
+                report.n_equations = 0;
+                report.navigation.clear();
+                report.origins.clear();
+                report.aggregate_origins.clear();
+                report.heterogeneous_origins.clear();
+            }
             if incomplete {
                 report.complete = false;
                 report.n_equations = 0;
-                if let Some(cut) = cut {
-                    let cut = (cut as usize).min(spliced.text.len()).min(root.len());
-                    let prefix = if spliced.text.as_bytes().get(..cut) == root.as_bytes().get(..cut)
-                    {
-                        &spliced.text[..cut]
-                    } else {
-                        &root[..cut]
-                    };
-                    let prefix_report = expand_report_from_spliced(prefix, &[], None);
-                    report.effective_text = prefix_report.effective_text;
-                    report.macro_messages = prefix_report.macro_messages;
-                }
+            }
+            if let Some(prefix) = &spliced.emitted_prefix {
+                report.effective_text = crate::expand::compact_emitted_prefix(prefix);
+                report.macro_messages = spliced.macro_messages.clone();
+                report.navigation_complete = false;
+                report.navigation.clear();
+                report.origins.clear();
             }
             self.expand.insert(key.clone(), report);
         }
@@ -925,19 +1019,41 @@ impl Workspace {
         self.docs.get(key).map(|d| &d.model)
     }
 
-    fn source_for_key(&mut self, key: &str) -> Option<String> {
+    fn source_for_key(
+        &mut self,
+        key: &str,
+        budget: &mut MacroBudget,
+    ) -> Result<Option<String>, MacroEvalError> {
         if let Some(doc) = self.docs.get(key) {
-            return Some(doc.source.clone());
+            budget.spend_work(doc.source.len().max(1))?;
+            return Ok(Some(doc.source.clone()));
         }
         if self.overlay_only {
-            return None;
+            return Ok(None);
         }
         let path = PathBuf::from(key);
-        if path.exists() {
-            self.load_from_disk(&path)?;
-            return self.docs.get(key).map(|d| d.source.clone());
-        }
-        None
+        let Some(source) = read_include_text(&path, budget)? else {
+            return Ok(None);
+        };
+        let model = crate::parser::parse_with_budget(&source, budget);
+        budget.spend_work(source.len().max(1))?;
+        let returned = source.clone();
+        self.docs.insert(
+            key.to_string(),
+            Arc::new(Doc {
+                source,
+                model,
+                overlay: false,
+                input_generation: 0,
+            }),
+        );
+        // Loading this written input can invalidate other cached roots.
+        self.effective.clear();
+        self.spliced.clear();
+        self.expand.clear();
+        self.records.clear();
+        self.companions.clear();
+        Ok(Some(returned))
     }
 
     fn known_keys(&self) -> HashSet<String> {
@@ -1100,10 +1216,7 @@ impl Workspace {
         let Some(root) = self.docs.get(root_key).map(|doc| doc.source.clone()) else {
             return Vec::new();
         };
-        let cut = self
-            .records
-            .get(root_key)
-            .and_then(|records| fatal_include_cut(records));
+        let cut = self.records.get(root_key).and_then(fatal_include_cut);
         let (source, model) = if let Some(cut) = cut {
             let text = root[..(cut as usize).min(root.len())].to_string();
             let model = parse(&text);
@@ -1138,12 +1251,12 @@ impl Workspace {
     fn walk_graph(&mut self, root_key: &str) -> IncludeWalk {
         self.dependency_candidates.remove(root_key);
         let mut records = IncludeRecords::default();
-        let mut targets = IncludeTargets::new();
+        let mut targets = IncludeTargets::default();
         let mut active_search = Vec::new();
         let mut seen_sites = HashSet::new();
         let mut seen_cycles = HashSet::new();
         let source = self.docs.get(root_key).expect("loaded root").source.clone();
-        let proof = crate::macro_expand::walk_macro_files(root_key, &source, |event| {
+        let mut proof = crate::macro_expand::walk_macro_files(root_key, &source, |event| {
             if !event.certain {
                 if matches!(
                     event.directive,
@@ -1168,7 +1281,7 @@ impl Workspace {
                         .insert(path_key(&added));
                 }
                 let valid = if self.overlay_only {
-                    self.overlay_directory_exists(root_key, path)
+                    !path.is_empty() && self.overlay_directory_exists(root_key, path)
                 } else {
                     !path.is_empty() && added.is_dir()
                 };
@@ -1184,7 +1297,6 @@ impl Workspace {
             };
             let filename = filename.to_string();
             let site = (event.file.to_string(), event.span);
-            let first_visit = seen_sites.insert(site.clone());
             let root_span = event
                 .parents
                 .first()
@@ -1192,8 +1304,9 @@ impl Workspace {
                 .unwrap_or(event.span);
             let Some(path) = self.resolve_filename(root_key, event.file, &filename, &active_search)
             else {
+                note_resolved(&mut targets, site.clone(), filename.clone(), &event, false);
                 note_unresolved(&mut targets, site);
-                if first_visit {
+                if seen_sites.insert((event.file.to_string(), event.span)) {
                     let mut searched = Vec::new();
                     if let Some(parent) = Path::new(event.file).parent() {
                         searched.push(parent.display().to_string());
@@ -1260,7 +1373,7 @@ impl Workspace {
                 note_unresolved(&mut targets, site);
                 return None;
             }
-            note_resolved(&mut targets, site, target.clone(), event.bindings);
+            note_resolved(&mut targets, site, target.clone(), &event, true);
             if !records.resolved.iter().any(|record| record.path == path) {
                 records.resolved.push(ResolvedInclude {
                     filename,
@@ -1268,12 +1381,20 @@ impl Workspace {
                     path,
                 });
             }
-            let source = self.source_for_key(&target)?;
+            let source = match self.source_for_key(&target, event.budget) {
+                Ok(Some(source)) => source,
+                Ok(None) => return None,
+                Err(MacroEvalError::Limit(limit)) => {
+                    return Some(crate::macro_expand::MacroFileLoad::Limit(limit))
+                }
+                Err(_) => return Some(crate::macro_expand::MacroFileLoad::Limit("iteration work")),
+            };
             Some(crate::macro_expand::MacroFileLoad::Source {
                 file: target,
                 source,
             })
         });
+        targets.loop_occurrences = std::mem::take(&mut proof.loop_occurrences);
         let included = records
             .resolved
             .iter()
@@ -1296,16 +1417,52 @@ impl Workspace {
         // records and joined source only after the ordered walk has finished.
         let IncludeWalk {
             records,
-            proof,
+            mut proof,
             targets,
             search: include_search,
         } = self.walk_graph(key);
-        let (text, segments, gaps) =
-            self.splice_with_map(key, &proof.sites, &targets, &mut Vec::new());
+        let result = self.splice_with_map(
+            key,
+            &proof.sites,
+            &targets,
+            &mut Vec::new(),
+            None,
+            &mut proof.budget,
+        );
+        let (pieces, splice_limit) = match result {
+            Ok(pieces) => (pieces, None),
+            Err(MacroEvalError::Limit(limit)) => {
+                let span = proof
+                    .sites
+                    .iter()
+                    .filter_map(|(file, span)| (file == key).then_some(*span))
+                    .min_by_key(|span| span.start)
+                    .unwrap_or_default();
+                (self.splice_limit_prefix(key, span), Some((span, limit)))
+            }
+            Err(_) => (
+                self.splice_limit_prefix(key, Span::default()),
+                Some((Span::default(), "iteration work")),
+            ),
+        };
+        let (text, segments, gaps) = pieces;
+        let limit = splice_limit.or_else(|| proof.limit.as_ref().map(|(file, span, limit)| {
+            let root_span = if file == key { *span } else {
+                proof.sites.iter()
+                    .filter_map(|(file, span)| (file == key).then_some(*span))
+                    .min_by_key(|span| span.start).unwrap_or_default()
+            };
+            (root_span, *limit)
+        })).map(|(span, limit)| IncompleteReason {
+            span,
+            code: "I211",
+            message: format!("Macro expansion stopped at the {limit} limit; some model checks were withheld."),
+        });
         let targets_complete = targets
+            .sites
             .values()
             .all(|plan| !plan.unresolved && !plan.hits.is_empty());
-        let navigation = if proof.complete && targets_complete {
+        let navigation = if proof.complete && targets_complete && limit.is_none() {
             NavigationSource::Mapped {
                 text: text.clone(),
                 segments: segments.clone(),
@@ -1314,12 +1471,16 @@ impl Workspace {
             NavigationSource::Unavailable
         };
         // Include availability is separate from macro syntax/evaluation. An
-        // executed malformed file still needs its normal diagnostics.
+        // executed malformed file still needs its normal diagnostics. The
+        // original file walk owns availability: the joined buffer can retain
+        // dormant includes and synthetic headers whose values are metadata.
+        // Model/preview expansion checks that buffer with the same metadata.
         let includes_complete = records.unresolved.is_empty()
             && records.cycles.is_empty()
             && targets_complete
-            && (!crate::macro_expand::has_include_directives(&text)
-                || crate::macro_expand::required_includes_complete(&text));
+            && limit.is_none()
+            && (proof.complete || !crate::macro_expand::has_include_directives(&text));
+        let incomplete_execution = !proof.complete || !includes_complete || limit.is_some();
         let source = Arc::new(SplicedSource {
             text,
             segments,
@@ -1327,10 +1488,49 @@ impl Workspace {
             includes_complete,
             navigation,
             include_search,
+            limit,
+            refusal: proof.refusal,
+            emitted_prefix: incomplete_execution.then_some(proof.output),
+            macro_messages: proof.messages,
         });
         self.records.insert(key.to_string(), records);
         self.spliced.insert(key.to_string(), Arc::clone(&source));
         source
+    }
+
+    /// Written ownership of the first macro refusal, independent of a splice.
+    pub(crate) fn macro_file_refusal(
+        &mut self,
+        uri: &str,
+    ) -> Option<crate::macro_expand::MacroFileRefusal> {
+        let key = self.ensure_loaded(uri)?;
+        self.spliced_source(&key).refusal.clone()
+    }
+
+    /// Retain a small written prefix when an include cannot be safely joined.
+    fn splice_limit_prefix(&self, key: &str, span: Span) -> SplicedPieces {
+        let Some(source) = self.docs.get(key).map(|doc| doc.source.as_str()) else {
+            return (String::new(), Vec::new(), Vec::new());
+        };
+        let end = (span.end as usize).min(source.len());
+        let end = if end <= crate::macro_expr::STRING_CAP {
+            end
+        } else {
+            0
+        };
+        let text = source[..end].to_string();
+        let segments = if end == 0 {
+            Vec::new()
+        } else {
+            vec![SpliceSegment {
+                spliced: Span::new(0, end),
+                file: Some(key.to_string()),
+                origin: Span::new(0, end),
+                line: 1,
+                evaluation: None,
+            }]
+        };
+        (text, segments, Vec::new())
     }
 
     /// Spliced offsets where the next byte belongs to a different written file.
@@ -1342,6 +1542,9 @@ impl Workspace {
         let mut cuts = Vec::new();
         let mut previous = None;
         for segment in &spliced.segments {
+            if segment.spliced.is_empty() {
+                continue;
+            }
             if previous.is_some() && previous != Some(segment.file.as_deref()) {
                 cuts.push(segment.spliced.start);
             }
@@ -1389,8 +1592,20 @@ impl Workspace {
         self.spliced_source(&key)
             .segments
             .iter()
+            .filter(|segment| !segment.spliced.is_empty())
             .map(|segment| (segment.spliced, segment.line))
             .collect()
+    }
+
+    /// Evaluate original expressions at the points removed by include splicing.
+    pub(crate) fn source_evaluations(
+        &mut self,
+        uri: &str,
+    ) -> Vec<crate::macro_expand::MacroReplay> {
+        let Some(key) = self.ensure_loaded(uri) else {
+            return Vec::new();
+        };
+        crate::expand::splice_evaluations(&self.spliced_source(&key).segments)
     }
 
     /// Splice only executed sites, using the targets selected in execution order.
@@ -1401,38 +1616,45 @@ impl Workspace {
         sites: &HashSet<(String, Span)>,
         targets: &IncludeTargets,
         stack: &mut Vec<String>,
-    ) -> (
-        String,
-        Vec<SpliceSegment>,
-        Vec<crate::macro_expand::SourceLayoutGap>,
-    ) {
+        call: Option<usize>,
+        budget: &mut MacroBudget,
+    ) -> Result<SplicedPieces, MacroEvalError> {
         if stack.iter().any(|file| file == key) {
-            return (String::new(), Vec::new(), Vec::new());
+            return Ok((String::new(), Vec::new(), Vec::new()));
         }
-        let Some(source) = self.docs.get(key).map(|document| document.source.clone()) else {
-            return (String::new(), Vec::new(), Vec::new());
+        let Some(source) = self.docs.get(key).map(|document| document.source.as_str()) else {
+            return Ok((String::new(), Vec::new(), Vec::new()));
         };
+        if stack.len() >= crate::macro_expr::EXEC_DEPTH_CAP {
+            return Err(MacroEvalError::Limit("execution depth"));
+        }
+        budget.spend_work(source.len().max(1))?;
         stack.push(key.to_string());
         let mut replacements = Vec::new();
         let mut seen_spans = HashSet::new();
         let mut claimed_loops: Vec<Span> = Vec::new();
         let mut series = Vec::new();
+        budget.spend_work(sites.len().max(1))?;
         for (file, span) in sites {
             if file != key {
                 continue;
             }
-            let Some(plan) = targets.get(&(key.to_string(), *span)) else {
+            let Some(plan) = targets.sites.get(&(key.to_string(), *span)) else {
                 continue;
             };
-            if plan.unresolved || plan.hits.is_empty() {
+            let hits: Vec<_> = hits_for_call(plan, call).collect();
+            if hits.is_empty() {
                 continue;
             }
-            if plan.hits.len() > 1 {
+            let varies = hits.iter().any(|hit| hit.path != hits[0].path)
+                || self.descendants_vary(&hits[0].path, targets, &mut HashSet::new(), 0, budget)?;
+            if varies {
                 series.push(*span);
             }
         }
         let mut grouped: Vec<Span> = Vec::new();
         for &span in &series {
+            budget.spend_work(grouped.len() + claimed_loops.len() + 1)?;
             if grouped.contains(&span) {
                 continue;
             }
@@ -1442,27 +1664,39 @@ impl Workspace {
             {
                 continue;
             }
-            let loops = crate::macro_expand::loops_containing(&source, span);
+            let loops = crate::macro_expand::loops_containing(source, span, budget)?;
             let Some(outer) = loops.first() else {
                 let site = (key.to_string(), span);
-                let Some(plan) = targets.get(&site) else {
+                let Some(plan) = targets.sites.get(&site) else {
                     continue;
                 };
-                let hits = plan.hits.clone();
-                let (body, segments, gaps) = self.concat_include_hits(&hits, sites, targets, stack);
+                let hits: Vec<_> = hits_for_call(plan, call).collect();
+                let (body, mut segments, gaps) =
+                    self.concat_include_hits(&hits, sites, targets, stack, budget)?;
+                prepend_evaluation(&mut segments, key, source, span, budget)?;
                 replacements.push((span, body, segments, gaps));
                 seen_spans.insert(span);
                 grouped.push(span);
                 continue;
             };
             let for_span = Span::new(outer.header.start as usize, outer.closer.end as usize);
+            budget.spend_work(series.len().max(1))?;
             let group: Vec<Span> = series
                 .iter()
                 .copied()
                 .filter(|site| for_span.start <= site.start && site.end <= for_span.end)
                 .collect();
-            let (body, segments, gaps) =
-                self.unroll_loop_includes(key, &source, &loops, &group, sites, targets, stack);
+            let (body, segments, gaps) = self.unroll_loop_includes(
+                key,
+                source,
+                &loops,
+                sites,
+                targets,
+                stack,
+                call,
+                &[],
+                budget,
+            )?;
             replacements.push((for_span, body, segments, gaps));
             claimed_loops.push(for_span);
             seen_spans.insert(for_span);
@@ -1471,6 +1705,7 @@ impl Workspace {
                 grouped.push(site);
             }
         }
+        budget.spend_work(sites.len().saturating_mul(claimed_loops.len() + 2).max(1))?;
         let stable_sites: Vec<Span> = sites
             .iter()
             .filter_map(|(file, span)| (file == key).then_some(*span))
@@ -1484,42 +1719,44 @@ impl Workspace {
         for span in stable_sites {
             seen_spans.insert(span);
             let site = (key.to_string(), span);
-            let Some(plan) = targets.get(&site) else {
+            let Some(plan) = targets.sites.get(&site) else {
                 continue;
             };
-            if plan.unresolved || plan.hits.len() != 1 {
+            let Some(hit) = hits_for_call(plan, call).next() else {
+                continue;
+            };
+            if !hit.resolved {
                 continue;
             }
-            let (body, segments, gaps) =
-                self.splice_with_map(&plan.hits[0].path, sites, targets, stack);
+            let (body, mut segments, gaps) =
+                self.splice_with_map(&hit.path, sites, targets, stack, Some(hit.call), budget)?;
+            prepend_evaluation(&mut segments, key, source, span, budget)?;
             replacements.push((span, body, segments, gaps));
         }
         stack.pop();
-        apply_replacements_mapped(&source, &replacements, Some(key.to_string()))
+        apply_replacements_mapped(source, replacements, Some(key.to_string()), budget)
     }
 
     fn concat_include_hits(
         &self,
-        hits: &[IncludeHit],
+        hits: &[&IncludeHit],
         sites: &HashSet<(String, Span)>,
         targets: &IncludeTargets,
         stack: &mut Vec<String>,
-    ) -> (
-        String,
-        Vec<SpliceSegment>,
-        Vec<crate::macro_expand::SourceLayoutGap>,
-    ) {
+        budget: &mut MacroBudget,
+    ) -> Result<SplicedPieces, MacroEvalError> {
         let mut text = String::new();
         let mut segments = Vec::new();
         let mut gaps = Vec::new();
         for hit in hits {
             let (body, nested, nested_gaps) =
-                self.splice_with_map(&hit.path, sites, targets, stack);
+                self.splice_with_map(&hit.path, sites, targets, stack, Some(hit.call), budget)?;
+            budget.spend_work(body.len() + nested.len() + nested_gaps.len() + 1)?;
             let offset = text.len() as u32;
             for mut segment in nested {
                 segment.spliced.start += offset;
                 segment.spliced.end += offset;
-                if segment.spliced.start < segment.spliced.end {
+                if segment.spliced.start < segment.spliced.end || segment.evaluation.is_some() {
                     segments.push(segment);
                 }
             }
@@ -1531,7 +1768,7 @@ impl Workspace {
                 text.push('\n');
             }
         }
-        (text, segments, gaps)
+        Ok((text, segments, gaps))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1540,52 +1777,61 @@ impl Workspace {
         key: &str,
         source: &str,
         loops: &[crate::macro_expand::ContainingLoop],
-        group: &[Span],
         sites: &HashSet<(String, Span)>,
         targets: &IncludeTargets,
         stack: &mut Vec<String>,
-    ) -> (
-        String,
-        Vec<SpliceSegment>,
-        Vec<crate::macro_expand::SourceLayoutGap>,
-    ) {
+        call: Option<usize>,
+        context: &[(Span, usize)],
+        budget: &mut MacroBudget,
+    ) -> Result<SplicedPieces, MacroEvalError> {
         let Some(outer) = loops.first() else {
-            return (String::new(), Vec::new(), Vec::new());
+            return Ok((String::new(), Vec::new(), Vec::new()));
         };
-        let keys = iteration_keys(key, &outer.variables, group, targets);
+        if budget.exec_depth >= crate::macro_expr::EXEC_DEPTH_CAP {
+            return Err(MacroEvalError::Limit("execution depth"));
+        }
+        budget.exec_depth += 1;
+        let keys = iteration_keys(key, outer.header, targets, call, context, budget)?;
         let mut text = String::new();
         let mut segments = Vec::new();
         let mut gaps = Vec::new();
+        push_evaluation(&mut segments, 0, key, source, outer.header, budget)?;
         for iteration in keys {
-            let bindings = iteration
-                .iter()
-                .zip(outer.variables.iter())
-                .map(|(value, name)| (name.clone(), value.clone()))
-                .collect::<Vec<_>>();
+            push_loop_input(
+                &mut segments,
+                text.len(),
+                key,
+                source,
+                outer.header,
+                &iteration.input,
+                budget,
+            )?;
             push_generated(
                 &mut text,
                 &mut segments,
-                &one_shot_header(&outer.variables, &bindings),
+                &one_shot_header_budget(&outer.variables, budget)?,
                 key,
                 outer.header,
                 source,
-            );
+                budget,
+            )?;
             self.copy_loop_body(
                 key,
                 source,
                 outer.body_start,
                 outer.body_end,
-                &outer.variables,
-                &iteration,
-                &loops[1..],
-                &bindings,
+                outer.header,
+                iteration.frame,
+                context,
                 sites,
                 targets,
                 stack,
+                call,
                 &mut text,
                 &mut segments,
                 &mut gaps,
-            );
+                budget,
+            )?;
             push_generated(
                 &mut text,
                 &mut segments,
@@ -1593,9 +1839,44 @@ impl Workspace {
                 key,
                 outer.closer,
                 source,
-            );
+                budget,
+            )?;
         }
-        (text, segments, gaps)
+        budget.exec_depth -= 1;
+        Ok((text, segments, gaps))
+    }
+
+    fn descendants_vary(
+        &self,
+        file: &str,
+        targets: &IncludeTargets,
+        seen: &mut HashSet<String>,
+        depth: usize,
+        budget: &mut MacroBudget,
+    ) -> Result<bool, MacroEvalError> {
+        budget.spend_work(file.len() + targets.sites.len() + 1)?;
+        if !seen.insert(file.to_string()) {
+            return Ok(false);
+        }
+        if depth >= crate::macro_expr::EXEC_DEPTH_CAP {
+            return Err(MacroEvalError::Limit("execution depth"));
+        }
+        for ((owner, _), plan) in &targets.sites {
+            if owner != file {
+                continue;
+            }
+            budget.spend_work(plan.hits.len().max(1))?;
+            let Some(first) = plan.hits.first() else {
+                continue;
+            };
+            if plan.hits.iter().any(|hit| hit.path != first.path) {
+                return Ok(true);
+            }
+            if self.descendants_vary(&first.path, targets, seen, depth + 1, budget)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1605,53 +1886,64 @@ impl Workspace {
         source: &str,
         from: u32,
         to: u32,
-        outer_vars: &[String],
-        iteration: &[String],
-        inner_loops: &[crate::macro_expand::ContainingLoop],
-        bindings: &[(String, String)],
+        header: Span,
+        frame: usize,
+        parent_context: &[(Span, usize)],
         sites: &HashSet<(String, Span)>,
         targets: &IncludeTargets,
         stack: &mut Vec<String>,
+        call: Option<usize>,
         text: &mut String,
         segments: &mut Vec<SpliceSegment>,
         gaps: &mut Vec<crate::macro_expand::SourceLayoutGap>,
-    ) {
+        budget: &mut MacroBudget,
+    ) -> Result<(), MacroEvalError> {
+        budget.spend_work(parent_context.len() + sites.len() + 1)?;
+        let mut context = parent_context.to_vec();
+        context.push((header, frame));
         let mut cuts: Vec<(u32, u32, BodyCut)> = Vec::new();
-        for loop_dir in inner_loops {
-            if loop_dir.header.start >= from && loop_dir.header.end <= to {
-                cuts.push((
-                    loop_dir.header.start,
-                    loop_dir.header.end,
-                    BodyCut::Header(one_shot_header(&loop_dir.variables, bindings)),
-                ));
-            }
-        }
         for (file, span) in sites {
             if file != key || span.start < from || span.end > to {
                 continue;
             }
-            let Some(plan) = targets.get(&(key.to_string(), *span)) else {
-                continue;
-            };
-            if plan.unresolved {
+            let loops = crate::macro_expand::loops_containing(source, *span, budget)?;
+            let nested = loops
+                .iter()
+                .position(|item| item.header == header)
+                .and_then(|index| loops.get(index + 1));
+            if let Some(nested) = nested {
+                budget.spend_work(
+                    cuts.len() + nested.variables.iter().map(String::len).sum::<usize>() + 1,
+                )?;
+                if !cuts
+                    .iter()
+                    .any(|(start, _, _)| *start == nested.header.start)
+                {
+                    cuts.push((
+                        nested.header.start,
+                        nested.closer.end,
+                        BodyCut::Loop(nested.clone()),
+                    ));
+                }
                 continue;
             }
-            let matched: Vec<_> = plan
-                .hits
-                .iter()
-                .filter(|hit| hit_key(outer_vars, &hit.bindings) == iteration)
-                .collect();
-            let path = if matched.len() == 1 {
-                Some(matched[0].path.clone())
-            } else if plan.hits.len() == 1 {
-                Some(plan.hits[0].path.clone())
-            } else {
-                None
-            };
-            let Some(path) = path else {
+            let Some(plan) = targets.sites.get(&(key.to_string(), *span)) else {
                 continue;
             };
-            cuts.push((span.start, span.end, BodyCut::Child(path)));
+            budget.spend_work(plan.hits.len().saturating_mul(context.len() + 1).max(1))?;
+            let Some(hit) = hits_for_call(plan, call).find(|hit| in_iteration(hit, &context))
+            else {
+                continue;
+            };
+            if !hit.resolved {
+                continue;
+            }
+            budget.spend_work(hit.path.len().max(1))?;
+            cuts.push((
+                span.start,
+                span.end,
+                BodyCut::Child(hit.path.clone(), hit.call),
+            ));
         }
         cuts.sort_by_key(|(start, _, _)| *start);
         let mut cursor = from;
@@ -1666,41 +1958,60 @@ impl Workspace {
                 cursor as usize,
                 start as usize,
                 Some(key),
-            );
-            match cut {
-                BodyCut::Header(header) => {
-                    push_generated(text, segments, &header, key, Span { start, end }, source);
+                budget,
+            )?;
+            let (body, nested, nested_gaps) = match cut {
+                BodyCut::Loop(nested) => self.unroll_loop_includes(
+                    key,
+                    source,
+                    &[nested],
+                    sites,
+                    targets,
+                    stack,
+                    call,
+                    &context,
+                    budget,
+                )?,
+                BodyCut::Child(path, child_call) => {
+                    let (body, mut nested, gaps) = self.splice_with_map(
+                        &path,
+                        sites,
+                        targets,
+                        stack,
+                        Some(child_call),
+                        budget,
+                    )?;
+                    prepend_evaluation(&mut nested, key, source, Span { start, end }, budget)?;
+                    (body, nested, gaps)
                 }
-                BodyCut::Child(path) => {
-                    let (body, nested, nested_gaps) =
-                        self.splice_with_map(&path, sites, targets, stack);
-                    let offset = text.len() as u32;
-                    for mut segment in nested {
-                        segment.spliced.start += offset;
-                        segment.spliced.end += offset;
-                        if segment.spliced.start < segment.spliced.end {
-                            segments.push(segment);
-                        }
-                    }
-                    for gap in nested_gaps {
-                        gaps.push(gap.shift(offset));
-                    }
-                    text.push_str(&body);
-                    if (end as usize) > (start as usize)
-                        && source.as_bytes().get((end as usize) - 1) == Some(&b'\n')
-                        && !body.ends_with('\n')
-                        && !body.ends_with('\r')
-                    {
-                        let at = text.len() as u32;
-                        text.push('\n');
-                        gaps.push(crate::macro_expand::SourceLayoutGap::SyntheticNewline(
-                            crate::span::Span {
-                                start: at,
-                                end: at + 1,
-                            },
-                        ));
-                    }
+            };
+            budget.spend_work(body.len() + nested.len() + nested_gaps.len() + 1)?;
+            let offset = text.len() as u32;
+            for mut segment in nested {
+                segment.spliced.start += offset;
+                segment.spliced.end += offset;
+                if segment.spliced.start < segment.spliced.end || segment.evaluation.is_some() {
+                    segments.push(segment);
                 }
+            }
+            for gap in nested_gaps {
+                gaps.push(gap.shift(offset));
+            }
+            text.push_str(&body);
+            if source.as_bytes().get(end as usize) == Some(&b'\n') {
+                gaps.push(crate::macro_expand::SourceLayoutGap::Omit(Span::new(
+                    text.len(),
+                    text.len() + 1,
+                )));
+            } else if end > start
+                && source.as_bytes().get(end as usize - 1) == Some(&b'\n')
+                && !body.ends_with('\n')
+            {
+                let at = text.len();
+                text.push('\n');
+                gaps.push(crate::macro_expand::SourceLayoutGap::SyntheticNewline(
+                    Span::new(at, at + 1),
+                ));
             }
             cursor = end;
         }
@@ -1711,91 +2022,161 @@ impl Workspace {
             cursor as usize,
             to as usize,
             Some(key),
-        );
+            budget,
+        )?;
+        Ok(())
     }
 }
 
 enum BodyCut {
-    Header(String),
-    Child(String),
+    Loop(crate::macro_expand::ContainingLoop),
+    Child(String, usize),
 }
 
-/// Values of the loop variables on one executed iteration, in variable order.
-fn hit_key(variables: &[String], bindings: &[(String, String)]) -> Vec<String> {
-    variables
+/// Include calls in one execution of their written file.
+fn hits_for_call(plan: &SitePlan, call: Option<usize>) -> impl Iterator<Item = &IncludeHit> {
+    plan.hits
         .iter()
-        .map(|name| {
-            bindings
-                .iter()
-                .find(|(bound, _)| bound == name)
-                .map(|(_, value)| value.clone())
-                .unwrap_or_default()
-        })
-        .collect()
+        .filter(move |hit| hit.parent_calls.last().copied() == call)
 }
 
-/// Loop iterations in execution order. The site that ran most often supplies
-/// the order; a site skipped by `@#if` only adds iterations it actually ran.
+fn in_iteration(hit: &IncludeHit, context: &[(Span, usize)]) -> bool {
+    context.iter().all(|entry| hit.iterations.contains(entry))
+}
+
 fn iteration_keys(
     file: &str,
-    variables: &[String],
-    group: &[Span],
+    header: Span,
     targets: &IncludeTargets,
-) -> Vec<Vec<String>> {
-    let mut best: Option<Span> = None;
-    let mut best_len = 0usize;
-    for span in group {
-        let len = targets
-            .get(&(file.to_string(), *span))
-            .map(|plan| plan.hits.len())
-            .unwrap_or(0);
-        if len > best_len {
-            best_len = len;
-            best = Some(*span);
-        }
-    }
+    call: Option<usize>,
+    context: &[(Span, usize)],
+    budget: &mut MacroBudget,
+) -> Result<Vec<IncludeIteration>, MacroEvalError> {
+    budget.spend_work(
+        targets
+            .loop_occurrences
+            .len()
+            .saturating_mul(context.len() + file.len() + 1)
+            .max(1),
+    )?;
     let mut keys = Vec::new();
-    let mut push_span = |span: Span| {
-        let Some(plan) = targets.get(&(file.to_string(), span)) else {
-            return;
-        };
-        for hit in &plan.hits {
-            let key = hit_key(variables, &hit.bindings);
-            if !keys.contains(&key) {
-                keys.push(key);
-            }
+    for occurrence in &targets.loop_occurrences {
+        if occurrence.file != file || occurrence.header != header || occurrence.parent_call != call
+        {
+            continue;
         }
-    };
-    if let Some(span) = best {
-        push_span(span);
+        budget.spend_work(context.len().saturating_mul(occurrence.context.len() + 1))?;
+        if !context
+            .iter()
+            .all(|entry| occurrence.context.contains(entry))
+        {
+            continue;
+        }
+        budget.spend_work(occurrence.input.len() + 1)?;
+        keys.push(IncludeIteration {
+            frame: occurrence.id,
+            input: occurrence.input.clone(),
+        });
     }
-    for span in group {
-        push_span(*span);
-    }
-    keys
+    Ok(keys)
 }
 
-fn one_shot_header(variables: &[String], bindings: &[(String, String)]) -> String {
-    let value_of = |name: &str| {
-        bindings
-            .iter()
-            .find(|(bound, _)| bound == name)
-            .map(|(_, value)| value.as_str())
-            .unwrap_or("0")
-    };
+fn one_shot_header(variables: &[String]) -> String {
     if variables.len() == 1 {
-        format!("@#for {} in [{}]\n", variables[0], value_of(&variables[0]))
-    } else if variables.is_empty() {
-        "@#for _i in [0]\n".to_string()
+        format!("@#for {} in [0]\n", variables[0])
     } else {
         let names = variables.join(", ");
-        let values = variables
-            .iter()
-            .map(|name| value_of(name))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("@#for ({names}) in [({values})]\n")
+        format!("@#for ({names}) in [0]\n")
     }
+}
+
+fn one_shot_header_budget(
+    variables: &[String],
+    budget: &mut MacroBudget,
+) -> Result<String, MacroEvalError> {
+    let bytes =
+        variables.iter().map(String::len).sum::<usize>() + variables.len().saturating_mul(8) + 32;
+    budget.spend_work(bytes)?;
+    Ok(one_shot_header(variables))
+}
+
+fn push_loop_input(
+    segments: &mut Vec<SpliceSegment>,
+    at: usize,
+    file: &str,
+    source: &str,
+    origin: Span,
+    input: &str,
+    budget: &mut MacroBudget,
+) -> Result<(), MacroEvalError> {
+    budget.spend_work(input.len() + crate::macro_expand::FOR_INPUT_PREFIX.len() + 1)?;
+    let mut marker =
+        String::with_capacity(crate::macro_expand::FOR_INPUT_PREFIX.len() + input.len());
+    marker.push_str(crate::macro_expand::FOR_INPUT_PREFIX);
+    marker.push_str(input);
+    push_evaluation_text(segments, at, file, source, origin, &marker, budget)
+}
+
+fn push_evaluation(
+    segments: &mut Vec<SpliceSegment>,
+    at: usize,
+    file: &str,
+    source: &str,
+    origin: Span,
+    budget: &mut MacroBudget,
+) -> Result<(), MacroEvalError> {
+    let Some(directive) = source.get(origin.start as usize..origin.end as usize) else {
+        return Ok(());
+    };
+    push_evaluation_text(segments, at, file, source, origin, directive, budget)
+}
+
+fn push_evaluation_text(
+    segments: &mut Vec<SpliceSegment>,
+    at: usize,
+    file: &str,
+    source: &str,
+    origin: Span,
+    directive: &str,
+    budget: &mut MacroBudget,
+) -> Result<(), MacroEvalError> {
+    if source.get(..origin.start as usize).is_none() {
+        return Err(MacroEvalError::Limit("source mapping"));
+    }
+    budget.spend_work(directive.len() + file.len() + origin.start as usize + 1)?;
+    let line = 1 + source[..origin.start as usize]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count() as u32;
+    segments.push(SpliceSegment {
+        spliced: Span::new(at, at),
+        file: Some(file.to_string()),
+        origin,
+        line,
+        evaluation: Some(directive.to_string()),
+    });
+    Ok(())
+}
+
+fn prepend_evaluation(
+    segments: &mut Vec<SpliceSegment>,
+    file: &str,
+    source: &str,
+    origin: Span,
+    budget: &mut MacroBudget,
+) -> Result<(), MacroEvalError> {
+    if source
+        .get(origin.start as usize..origin.end as usize)
+        .is_none()
+    {
+        return Ok(());
+    }
+    push_evaluation(segments, 0, file, source, origin, budget)?;
+    budget.spend_work(segments.len().max(1))?;
+    // A parent include evaluates before any nested header or include at this point.
+    let marker = segments.pop().expect("evaluation marker");
+    segments.insert(0, marker);
+    Ok(())
 }
 
 fn push_generated(
@@ -1805,10 +2186,12 @@ fn push_generated(
     file: &str,
     origin: Span,
     source: &str,
-) {
+    budget: &mut MacroBudget,
+) -> Result<(), MacroEvalError> {
     if piece.is_empty() {
-        return;
+        return Ok(());
     }
+    budget.spend_work(piece.len() + (origin.start as usize).min(source.len()) + 1)?;
     let line = if (origin.start as usize) <= source.len() {
         1 + source[..origin.start as usize]
             .bytes()
@@ -1827,31 +2210,31 @@ fn push_generated(
         file: Some(file.to_string()),
         origin,
         line,
+        evaluation: None,
     });
+    Ok(())
 }
 
 fn apply_replacements_mapped(
     source: &str,
-    replacements: &[(
+    replacements: Vec<(
         Span,
         String,
         Vec<SpliceSegment>,
         Vec<crate::macro_expand::SourceLayoutGap>,
-    )],
+    )>,
     file: Option<String>,
-) -> (
-    String,
-    Vec<SpliceSegment>,
-    Vec<crate::macro_expand::SourceLayoutGap>,
-) {
+    budget: &mut MacroBudget,
+) -> Result<SplicedPieces, MacroEvalError> {
+    budget.spend_work(source.len().max(1) + replacements.len())?;
     let mut out = String::with_capacity(source.len());
     let mut last = 0usize;
-    let mut ordered = replacements.to_vec();
+    let mut ordered = replacements;
     ordered.sort_by_key(|(span, _, _, _)| span.start);
     let mut segments = Vec::new();
     let mut gaps = Vec::new();
     // Directive trailing newlines land at these spliced offsets once copied.
-    let mut newline_marks: Vec<(u32, bool)> = Vec::new();
+    let mut newline_marks: Vec<(u32, usize, bool)> = Vec::new();
     for (span, body, nested, nested_gaps) in ordered {
         let start = span.start as usize;
         let end = span.end as usize;
@@ -1866,7 +2249,8 @@ fn apply_replacements_mapped(
             last,
             start,
             file.as_deref(),
-        );
+            budget,
+        )?;
         let indent_from = (line.start as usize).max(last);
         if indent_from < start {
             let indent_len = (start - indent_from) as u32;
@@ -1877,10 +2261,11 @@ fn apply_replacements_mapped(
             }));
         }
         let offset = out.len() as u32;
+        budget.spend_work(body.len() + nested.len() + nested_gaps.len() + 1)?;
         for mut seg in nested {
             seg.spliced.start += offset;
             seg.spliced.end += offset;
-            if seg.spliced.start < seg.spliced.end {
+            if seg.spliced.start < seg.spliced.end || seg.evaluation.is_some() {
                 segments.push(seg);
             }
         }
@@ -1889,16 +2274,22 @@ fn apply_replacements_mapped(
         }
         out.push_str(&body);
         let consumed_newline = end > start && source.as_bytes()[end - 1] == b'\n';
-        let following_newline = end < source.len() && source.as_bytes()[end] == b'\n';
-        if following_newline {
+        let following_newline = if source[end..].starts_with("\r\n") {
+            2
+        } else if source.as_bytes().get(end) == Some(&b'\n') {
+            1
+        } else {
+            0
+        };
+        if following_newline > 0 {
             let synthetic = !body.is_empty() && !body.ends_with('\n') && !body.ends_with('\r');
-            newline_marks.push((out.len() as u32, synthetic));
+            newline_marks.push((out.len() as u32, following_newline, synthetic));
         } else if consumed_newline && !body.ends_with('\n') && !body.ends_with('\r') {
             // The directive span owns the line break. Put it back so the next
             // written line stays on its own line, including an empty include.
             let at = out.len() as u32;
             out.push('\n');
-            newline_marks.push((at, !body.is_empty()));
+            newline_marks.push((at, 1, !body.is_empty()));
         }
         last = end;
     }
@@ -1909,12 +2300,13 @@ fn apply_replacements_mapped(
         last,
         source.len(),
         file.as_deref(),
-    );
-    for (at, synthetic) in newline_marks {
-        if (at as usize) < out.len() && out.as_bytes()[at as usize] == b'\n' {
+        budget,
+    )?;
+    for (at, bytes, synthetic) in newline_marks {
+        if (at as usize) < out.len() && matches!(out.as_bytes()[at as usize], b'\n' | b'\r') {
             let span = Span {
                 start: at,
-                end: at + 1,
+                end: at + bytes as u32,
             };
             gaps.push(if synthetic {
                 crate::macro_expand::SourceLayoutGap::SyntheticNewline(span)
@@ -1924,7 +2316,7 @@ fn apply_replacements_mapped(
         }
     }
     gaps.sort_by_key(|gap| gap.span().start);
-    (out, segments, gaps)
+    Ok((out, segments, gaps))
 }
 
 fn push_root_piece(
@@ -1934,10 +2326,12 @@ fn push_root_piece(
     from: usize,
     to: usize,
     file: Option<&str>,
-) {
+    budget: &mut MacroBudget,
+) -> Result<(), MacroEvalError> {
     if from >= to {
-        return;
+        return Ok(());
     }
+    budget.spend_work(to + 1)?;
     let offset = out.len() as u32;
     let len = (to - from) as u32;
     let line = 1 + source[..from].bytes().filter(|byte| *byte == b'\n').count() as u32;
@@ -1949,8 +2343,10 @@ fn push_root_piece(
         file: file.map(str::to_string),
         origin: Span::new(from, to),
         line,
+        evaluation: None,
     });
     out.push_str(&source[from..to]);
+    Ok(())
 }
 
 /// Overlay key: `\` becomes `/`, trailing slashes drop. No disk and no `..` fold.
@@ -2049,11 +2445,122 @@ fn append_unique(base: &[PathBuf], extra: &[PathBuf]) -> Vec<PathBuf> {
     out
 }
 
+/// Bound include IO and decoding before the shared parser sees any bytes.
+fn read_include_text(
+    path: &Path,
+    budget: &mut MacroBudget,
+) -> Result<Option<String>, MacroEvalError> {
+    let Ok(file) = std::fs::File::open(path) else {
+        return Ok(None);
+    };
+    let Ok(metadata) = file.metadata() else {
+        return Ok(None);
+    };
+    let bytes = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
+    let allowed = budget.remaining_work() / 2;
+    if bytes > allowed {
+        return Err(MacroEvalError::Limit("iteration work"));
+    }
+    // Count IO and UTF-8 validation first, including one byte to detect growth.
+    budget.spend_work(bytes.saturating_mul(2).saturating_add(1))?;
+    let mut input = Vec::with_capacity(bytes);
+    if file.take(bytes as u64 + 1).read_to_end(&mut input).is_err() {
+        return Ok(None);
+    }
+    if input.len() > bytes {
+        return Err(MacroEvalError::Limit("iteration work"));
+    }
+    match String::from_utf8(input) {
+        Ok(source) => Ok(Some(source)),
+        Err(error) => {
+            let bytes = error.into_bytes();
+            let length = bytes.len() + bytes.iter().filter(|byte| **byte >= 128).count();
+            budget.spend_work(length.max(1))?;
+            Ok(Some(bytes.into_iter().map(char::from).collect()))
+        }
+    }
+}
+
+/// Inputs above the macro work bound retain metadata, without a full byte copy.
+fn read_input_bytes(path: &Path) -> Option<Vec<u8>> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.take(crate::macro_expr::MACRO_WORK_CAP as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() <= crate::macro_expr::MACRO_WORK_CAP).then_some(bytes)
+}
+
 fn read_text(path: &Path) -> Option<String> {
     let bytes = std::fs::read(path).ok()?;
     match String::from_utf8(bytes.clone()) {
         Ok(s) => Some(s),
         Err(_) => Some(bytes.iter().map(|&b| b as char).collect()),
+    }
+}
+
+#[cfg(test)]
+mod include_load_budget_tests {
+    use super::*;
+
+    #[test]
+    fn cached_child_is_refused_before_a_full_source_copy() {
+        let mut workspace = Workspace::new();
+        let child = "@#if 0\n".to_string() + &" ".repeat(1_024) + "\n@#endif\n";
+        workspace.update_document("/budget/child.inc", child);
+        let key = normalize_uri("/budget/child.inc");
+        let mut budget = MacroBudget::new();
+        budget.spend_work(budget.remaining_work() - 8).unwrap();
+        assert!(matches!(
+            workspace.source_for_key(&key, &mut budget),
+            Err(MacroEvalError::Limit("iteration work"))
+        ));
+        assert_eq!(budget.remaining_work(), 8);
+    }
+
+    #[test]
+    fn disk_child_is_bounded_before_read_and_initial_parse() {
+        let folder = std::env::temp_dir().join(format!(
+            "dyg-include-budget-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("child.inc");
+        std::fs::write(&file, " ".repeat(1_024)).unwrap();
+        let mut workspace = Workspace::new();
+        let mut budget = MacroBudget::new();
+        budget.spend_work(budget.remaining_work() - 8).unwrap();
+        let key = path_key(&file);
+        assert!(matches!(
+            workspace.source_for_key(&key, &mut budget),
+            Err(MacroEvalError::Limit("iteration work"))
+        ));
+        assert!(!workspace.docs.contains_key(&key));
+        assert_eq!(budget.remaining_work(), 8);
+        let resolved = folder.canonicalize().unwrap();
+        let temporary = std::env::temp_dir().canonicalize().unwrap();
+        assert!(resolved.starts_with(&temporary) && resolved != temporary);
+        std::fs::remove_dir_all(resolved).unwrap();
+    }
+
+    #[test]
+    fn oversized_overlay_edits_change_revision_without_copying_contents() {
+        let mut workspace = Workspace::new();
+        let source = " ".repeat(crate::macro_expr::MACRO_WORK_CAP + 1);
+        workspace.update_document("/budget/root.mod", source.clone());
+        let first = workspace.input_revision("/budget/root.mod").unwrap();
+        workspace.update_document("/budget/root.mod", source.clone());
+        assert_eq!(first, workspace.input_revision("/budget/root.mod").unwrap());
+        let mut changed = source;
+        changed.replace_range(0..1, "x");
+        workspace.update_document("/budget/root.mod", changed);
+        assert_ne!(first, workspace.input_revision("/budget/root.mod").unwrap());
+        let key = normalize_uri("/budget/root.mod");
+        assert!(workspace.input_file(&key).bytes.is_none());
     }
 }
 

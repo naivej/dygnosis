@@ -264,7 +264,7 @@ fn free_expand_report_whole_eq_for_uris_none() {
 }
 
 #[test]
-fn free_expand_report_include_eq_does_not_splice() {
+fn free_expand_report_include_eq_keeps_prefix_and_withholds_facts() {
     let src = read_mod(&expand_fixture("include_eq.mod"));
     let free = expand_report(&src);
     assert!(
@@ -277,7 +277,10 @@ fn free_expand_report_include_eq_does_not_splice() {
         "free expand missing y = 1: {}",
         free.effective_text
     );
-    assert_eq!(free.n_equations, 1);
+    assert!(!free.complete);
+    assert_eq!(free.n_equations, 0);
+    assert!(free.origins.is_empty());
+    assert!(free.navigation.is_empty());
 }
 
 #[test]

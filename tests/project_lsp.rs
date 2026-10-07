@@ -688,15 +688,21 @@ async fn directory_and_loader_reads_are_revision_inputs() {
     let previous_revision = root(&before, &files.uri("root.mod"))["revision"].clone();
     let items = wire.pull(&files.uri("root.mod")).await;
     assert!(has_code(&items, "E304"));
-    assert!(has_code(&items, "E306"));
+    assert!(!has_code(&items, "E306"));
     fs::create_dir(files.0.join("missing")).unwrap();
-    files.write("params.data", "y 0\n");
     wire.changed(&files.uri("missing"), 1);
+    let directory_ready = wire.complete().await;
+    let directory_revision = root(&directory_ready, &files.uri("root.mod"))["revision"].clone();
+    assert_ne!(directory_revision, previous_revision);
+    let items = wire.pull(&files.uri("root.mod")).await;
+    assert!(!has_code(&items, "E304"));
+    assert!(has_code(&items, "E306"));
+    files.write("params.data", "y 0\n");
     wire.changed(&files.uri("params.data"), 1);
     let after = wire.complete().await;
     assert_ne!(
         root(&after, &files.uri("root.mod"))["revision"],
-        previous_revision
+        directory_revision
     );
     let items = wire.pull(&files.uri("root.mod")).await;
     assert!(!has_code(&items, "E304"));

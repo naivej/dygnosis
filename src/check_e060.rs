@@ -75,6 +75,17 @@ pub fn check_e061(records: &IncludeRecords) -> Vec<Diagnostic> {
 }
 
 pub fn check_e062(model: &Model) -> Vec<Diagnostic> {
+    let recorded: Vec<_> = model
+        .macro_type_errors
+        .iter()
+        .filter(|(_, code, _)| *code == "E062")
+        .map(|(span, code, message)| {
+            Diagnostic::new(*span, Severity::Error, *code, message.clone())
+        })
+        .collect();
+    if !recorded.is_empty() || model.macro_incomplete() {
+        return recorded;
+    }
     let mut diagnostics = Vec::new();
     let mut stack: Vec<&MacroDirective> = Vec::new();
     let mut seen_else: Vec<bool> = Vec::new();
@@ -319,10 +330,6 @@ pub fn check_e060_family(ws: &mut Workspace, uri: &str) -> Vec<Diagnostic> {
 }
 
 pub fn check_e060_family_on_model(model: &Model) -> Vec<Diagnostic> {
-    let syntax = check_e062(model);
-    if !syntax.is_empty() {
-        return syntax;
-    }
     if !model.macro_type_errors.is_empty() {
         return model
             .macro_type_errors
@@ -331,6 +338,13 @@ pub fn check_e060_family_on_model(model: &Model) -> Vec<Diagnostic> {
                 Diagnostic::new(*span, Severity::Error, *code, message.clone())
             })
             .collect();
+    }
+    if model.macro_incomplete() {
+        return Vec::new();
+    }
+    let syntax = check_e062(model);
+    if !syntax.is_empty() {
+        return syntax;
     }
     let mut out = syntax;
     out.extend(check_e063(model));

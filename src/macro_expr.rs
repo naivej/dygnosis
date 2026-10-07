@@ -49,6 +49,11 @@ impl MacroBudget {
         }
     }
 
+    /// Available work before the next file read, clone, or parse allocation.
+    pub(crate) fn remaining_work(&self) -> usize {
+        self.work_left
+    }
+
     /// Count an operation. `amount` is the work about to be done.
     pub(crate) fn spend_work(&mut self, amount: usize) -> Result<(), MacroEvalError> {
         if amount > self.work_left {
@@ -337,6 +342,7 @@ fn push_render_list<'a>(
 struct ValCost {
     nodes: usize,
     bytes: usize,
+    function_params: usize,
 }
 
 /// Heap walk. Rejects an over-deep or oversized value before any clone.
@@ -344,6 +350,7 @@ fn measure_val(value: &MacroVal) -> Result<ValCost, MacroEvalError> {
     let mut stack = vec![(value, 1usize)];
     let mut nodes = 0usize;
     let mut bytes = 0usize;
+    let mut function_params = 0usize;
     while let Some((value, depth)) = stack.pop() {
         if depth > VALUE_DEPTH_CAP {
             return Err(MacroEvalError::Limit("value depth"));
@@ -367,6 +374,7 @@ fn measure_val(value: &MacroVal) -> Result<ValCost, MacroEvalError> {
                 }
             }
             MacroVal::Function { params, body } => {
+                function_params = function_params.saturating_add(params.len());
                 bytes = bytes.saturating_add(body.len());
                 for param in params {
                     bytes = bytes.saturating_add(param.len());
@@ -386,7 +394,11 @@ fn measure_val(value: &MacroVal) -> Result<ValCost, MacroEvalError> {
             }
         }
     }
-    Ok(ValCost { nodes, bytes })
+    Ok(ValCost {
+        nodes,
+        bytes,
+        function_params,
+    })
 }
 
 /// Copy a stored value only after depth, bytes, and work have been accepted.
@@ -397,6 +409,161 @@ pub(crate) fn clone_macro_val(
     let cost = measure_val(value)?;
     budget.spend_work(cost.nodes.max(1).saturating_add(cost.bytes))?;
     Ok(value.clone())
+}
+
+/// Private occurrence payload. Flat preorder avoids JSON's nested-value depth
+/// limit and keeps exact real bits separate from the public 15-digit printer.
+#[derive(serde::Serialize, serde::Deserialize)]
+enum ReplayAtom {
+    RealBits(u64),
+    Int(i64),
+    Bool(bool),
+    Text(String),
+    Bytes(Vec<u8>),
+    Tuple(usize),
+    Array(usize),
+    Function { params: Vec<String>, body: String },
+    Unresolved,
+}
+
+pub(crate) fn encode_replay_value(
+    value: &MacroVal,
+    budget: &mut MacroBudget,
+) -> Result<String, MacroEvalError> {
+    let cost = measure_val(value)?;
+    let function_params = cost.function_params;
+    // JSON can escape each input byte as six bytes. The fixed part covers tag,
+    // punctuation, count/bits digits, and each function-parameter separator.
+    let encoded_bound = cost
+        .bytes
+        .saturating_mul(6)
+        .saturating_add(cost.nodes.saturating_mul(64))
+        .saturating_add(function_params.saturating_mul(4))
+        .saturating_add(2);
+    let allocation =
+        encoded_bound
+            .saturating_add(cost.bytes)
+            .saturating_add(cost.nodes.saturating_mul(
+                std::mem::size_of::<ReplayAtom>() + std::mem::size_of::<&MacroVal>(),
+            ))
+            .saturating_add(function_params.saturating_mul(std::mem::size_of::<String>()));
+    budget.spend_work(allocation.saturating_add(cost.nodes))?;
+    let mut atoms = Vec::with_capacity(cost.nodes);
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        atoms.push(match value {
+            MacroVal::Real(number) => ReplayAtom::RealBits(number.to_bits()),
+            MacroVal::Int(number) => ReplayAtom::Int(*number),
+            MacroVal::Bool(value) => ReplayAtom::Bool(*value),
+            MacroVal::Text(value) => ReplayAtom::Text(value.clone()),
+            MacroVal::Bytes(value) => ReplayAtom::Bytes(value.clone()),
+            MacroVal::Tuple(items) => {
+                pending.extend(items.iter().rev());
+                ReplayAtom::Tuple(items.len())
+            }
+            MacroVal::Array(items) => {
+                pending.extend(items.iter().rev());
+                ReplayAtom::Array(items.len())
+            }
+            MacroVal::Function { params, body } => ReplayAtom::Function {
+                params: params.clone(),
+                body: body.clone(),
+            },
+            MacroVal::Unresolved => ReplayAtom::Unresolved,
+        });
+    }
+    let encoded =
+        serde_json::to_string(&atoms).map_err(|_| MacroEvalError::Limit("source mapping"))?;
+    debug_assert!(encoded.len() <= encoded_bound);
+    Ok(encoded)
+}
+
+pub(crate) fn decode_replay_value(
+    encoded: &str,
+    budget: &mut MacroBudget,
+) -> Result<MacroVal, MacroEvalError> {
+    // Each atom has at least eight fixed JSON bytes; each function parameter
+    // has at least three quote/separator bytes. These distinct parts fund both
+    // geometrically growing vectors. Three extra units cover strings and the
+    // parser's scratch buffer. Fixed slack covers minimum small-Vec capacities.
+    let per_byte = (2 * std::mem::size_of::<ReplayAtom>())
+        .div_ceil(8)
+        .max((2 * std::mem::size_of::<String>()).div_ceil(3))
+        + 3;
+    let parse_bound = encoded.len().saturating_mul(per_byte).saturating_add(
+        4 * std::mem::size_of::<ReplayAtom>() + 4 * std::mem::size_of::<String>() + 8,
+    );
+    budget.spend_work(parse_bound)?;
+    let atoms: Vec<ReplayAtom> =
+        serde_json::from_str(encoded).map_err(|_| MacroEvalError::Limit("source mapping"))?;
+    if atoms.is_empty() || atoms.len() > MACRO_WORK_CAP {
+        return Err(MacroEvalError::Limit("source mapping"));
+    }
+    budget.spend_work(
+        atoms
+            .len()
+            .saturating_mul(std::mem::size_of::<(MacroVal, usize)>())
+            .saturating_add(atoms.len()),
+    )?;
+    let mut values: Vec<(MacroVal, usize)> = Vec::with_capacity(atoms.len());
+    for atom in atoms.into_iter().rev() {
+        let (value, depth) = match atom {
+            ReplayAtom::RealBits(bits) => (MacroVal::Real(f64::from_bits(bits)), 1),
+            ReplayAtom::Int(number) => (MacroVal::Int(number), 1),
+            ReplayAtom::Bool(value) => (MacroVal::Bool(value), 1),
+            ReplayAtom::Text(value) => (MacroVal::Text(value), 1),
+            ReplayAtom::Bytes(value) => (MacroVal::Bytes(value), 1),
+            ReplayAtom::Function { params, body } => (MacroVal::Function { params, body }, 1),
+            ReplayAtom::Unresolved => (MacroVal::Unresolved, 1),
+            ReplayAtom::Tuple(count) | ReplayAtom::Array(count) => {
+                if count > RANGE_CAP || count > values.len() {
+                    return Err(MacroEvalError::Limit("source mapping"));
+                }
+                let depth = values[values.len() - count..]
+                    .iter()
+                    .map(|(_, depth)| *depth)
+                    .max()
+                    .unwrap_or(0)
+                    .saturating_add(1);
+                if depth > VALUE_DEPTH_CAP {
+                    return Err(MacroEvalError::Limit("value depth"));
+                }
+                budget.spend_work(
+                    count
+                        .saturating_mul(std::mem::size_of::<MacroVal>())
+                        .saturating_add(1),
+                )?;
+                let tuple = matches!(atom, ReplayAtom::Tuple(_));
+                let mut items = Vec::with_capacity(count);
+                for _ in 0..count {
+                    items.push(
+                        values
+                            .pop()
+                            .ok_or(MacroEvalError::Limit("source mapping"))?
+                            .0,
+                    );
+                }
+                (
+                    if tuple {
+                        MacroVal::Tuple(items)
+                    } else {
+                        MacroVal::Array(items)
+                    },
+                    depth,
+                )
+            }
+        };
+        values.push((value, depth));
+    }
+    if values.len() != 1 {
+        return Err(MacroEvalError::Limit("source mapping"));
+    }
+    let value = values
+        .pop()
+        .ok_or(MacroEvalError::Limit("source mapping"))?
+        .0;
+    measure_val(&value)?;
+    Ok(value)
 }
 
 fn reject_unmapped_bytes(value: &MacroVal) -> Result<(), MacroEvalError> {
@@ -441,7 +608,19 @@ pub(crate) fn eval_macro_expr_budget(
     budget: &mut MacroBudget,
 ) -> Result<MacroVal, MacroEvalError> {
     let source = prepare_source(source, budget)?;
-    let expr = parse_expr(source.trim())?;
+    let expr = parse_expr(&source)?;
+    eval_expr(&expr, defines, None, 0, 0, budget)
+}
+
+/// Interpolation uses the tokenizer's `eval` state: newlines are whitespace,
+/// while `//` and directive continuations remain expression tokens.
+pub(crate) fn eval_macro_expr_interpolation_budget(
+    source: &str,
+    defines: &mut HashMap<String, MacroVal>,
+    budget: &mut MacroBudget,
+) -> Result<MacroVal, MacroEvalError> {
+    charge_source(budget, source)?;
+    let expr = parse_expr_context(source, ExprContext::Interpolation)?;
     eval_expr(&expr, defines, None, 0, 0, budget)
 }
 
@@ -455,7 +634,100 @@ pub(crate) fn check_macro_syntax_budget(
     budget: &mut MacroBudget,
 ) -> Result<(), MacroEvalError> {
     let source = prepare_source(source, budget)?;
-    parse_expr(source.trim()).map(|_| ())
+    parse_expr(&source).map(|_| ())
+}
+
+pub(crate) fn check_macro_syntax_interpolation_budget(
+    source: &str,
+    budget: &mut MacroBudget,
+) -> Result<(), MacroEvalError> {
+    charge_source(budget, source)?;
+    parse_expr_context(source, ExprContext::Interpolation).map(|_| ())
+}
+
+/// `ifdef` and `ifndef` inspect a written variable expression's name.
+pub(crate) fn macro_condition_variable_budget(
+    source: &str,
+    budget: &mut MacroBudget,
+) -> Result<Option<String>, MacroEvalError> {
+    let source = prepare_source(source, budget)?;
+    Ok(variable_name(&parse_expr(&source)?).map(str::to_owned))
+}
+
+/// Validate the pinned `expr IN expr [WHEN expr]` loop header before execution.
+pub(crate) fn check_macro_for_header_budget(
+    source: &str,
+    budget: &mut MacroBudget,
+) -> Result<Vec<String>, MacroEvalError> {
+    let source = prepare_source(source, budget)?;
+    let mut lexer = Lexer::new(&source, ExprContext::Directive);
+    let vars = lexer.parse_bp_with_colon(51)?;
+    if !lexer.eat("in") {
+        return Err(lexer.or_fail(MacroEvalError::SyntaxUnexpected(lexer.peek.name())));
+    }
+    lexer.parse_bp_with_colon(0)?;
+    if lexer.eat("when") {
+        lexer.parse_bp_with_colon(0)?;
+    }
+    lexer.take_fail()?;
+    if lexer.peek != Tok::End {
+        return Err(MacroEvalError::SyntaxUnexpected(lexer.peek.name()));
+    }
+    if let Some(name) = variable_name(&vars) {
+        return Ok(vec![name.to_owned()]);
+    }
+    let Expr::Tuple(items) = vars else {
+        return Err(official(
+            "E062",
+            "For loop indices must be a variable or a tuple",
+        ));
+    };
+    items
+        .iter()
+        .map(|item| {
+            variable_name(item)
+                .map(str::to_owned)
+                .ok_or_else(|| official("E062", "For loop indices must be variables"))
+        })
+        .collect()
+}
+
+/// Validate a macro variable or function definition without evaluating it.
+pub(crate) fn check_macro_definition_budget(
+    source: &str,
+    budget: &mut MacroBudget,
+) -> Result<(), MacroEvalError> {
+    let source = prepare_source(source, budget)?;
+    let mut lexer = Lexer::new(&source, ExprContext::Directive);
+    if !matches!(lexer.peek, Tok::Ident(_)) {
+        return Err(MacroEvalError::SyntaxUnexpected(lexer.peek.name()));
+    }
+    lexer.bump();
+    let function = lexer.eat("(");
+    if function && !lexer.eat(")") {
+        loop {
+            if !matches!(lexer.peek, Tok::Ident(_)) {
+                return Err(MacroEvalError::SyntaxUnexpected(lexer.peek.name()));
+            }
+            lexer.bump();
+            if lexer.eat(")") {
+                break;
+            }
+            if !lexer.eat(",") {
+                return Err(MacroEvalError::SyntaxUnexpected(lexer.peek.name()));
+            }
+        }
+    }
+    if lexer.eat("=") {
+        lexer.parse_bp_with_colon(0)?;
+    } else if function || lexer.peek != Tok::End {
+        return Err(MacroEvalError::SyntaxUnexpected(lexer.peek.name()));
+    }
+    lexer.take_fail()?;
+    if lexer.peek != Tok::End {
+        return Err(MacroEvalError::SyntaxUnexpected(lexer.peek.name()));
+    }
+    Ok(())
 }
 
 /// Print a function body the way `Environment::print` prints an expression.
@@ -469,7 +741,7 @@ pub(crate) fn print_expression_budget(
     budget: &mut MacroBudget,
 ) -> Result<String, MacroEvalError> {
     let source = prepare_source(source, budget)?;
-    let expr = parse_expr(source.trim())?;
+    let expr = parse_expr(&source)?;
     let mut len = 0usize;
     print_walk(&expr, &mut |chunk| len = len.saturating_add(chunk.len()));
     if len > STRING_CAP {
@@ -493,12 +765,16 @@ fn prepare_source(source: &str, budget: &mut MacroBudget) -> Result<String, Macr
     Ok(unfold_continuations(source))
 }
 
-fn unfold_continuations(source: &str) -> String {
+pub(crate) fn unfold_continuations(source: &str) -> String {
     let bytes = source.as_bytes();
     let mut out = String::with_capacity(source.len());
     let mut i = 0;
+    let mut quoted = false;
     while i < bytes.len() {
-        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+        if bytes[i] == b'"' {
+            quoted = !quoted;
+        }
+        if !quoted && bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
             let mut j = i + 2;
             while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
                 j += 1;
@@ -720,7 +996,24 @@ fn box_expr(expr: Expr) -> Result<Box<Expr>, MacroEvalError> {
 }
 
 fn parse_expr(source: &str) -> Result<Expr, MacroEvalError> {
-    let mut lexer = Lexer::new(source);
+    parse_expr_context(source, ExprContext::Directive)
+}
+
+fn variable_name(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Var(name) | Expr::Index { name, .. } => Some(name),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ExprContext {
+    Directive,
+    Interpolation,
+}
+
+fn parse_expr_context(source: &str, context: ExprContext) -> Result<Expr, MacroEvalError> {
+    let mut lexer = Lexer::new(source, context);
     if lexer.peek == Tok::End {
         return Err(lexer.or_fail(MacroEvalError::SyntaxEol));
     }
@@ -734,6 +1027,7 @@ fn parse_expr(source: &str) -> Result<Expr, MacroEvalError> {
 
 struct Lexer<'a> {
     src: &'a str,
+    context: ExprContext,
     pos: usize,
     peek: Tok,
     depth: u16,
@@ -762,9 +1056,10 @@ impl Tok {
 }
 
 impl<'a> Lexer<'a> {
-    fn new(src: &'a str) -> Self {
+    fn new(src: &'a str, context: ExprContext) -> Self {
         let mut lexer = Self {
             src,
+            context,
             pos: 0,
             peek: Tok::End,
             depth: 0,
@@ -845,7 +1140,7 @@ impl<'a> Lexer<'a> {
             if rest.is_empty() {
                 return;
             }
-            if rest.starts_with("//") {
+            if matches!(self.context, ExprContext::Directive) && rest.starts_with("//") {
                 if let Some(end) = rest.find(['\n', '\r']) {
                     self.pos += end;
                 } else {
@@ -853,9 +1148,26 @@ impl<'a> Lexer<'a> {
                 }
                 continue;
             }
-            let ch = rest.chars().next().unwrap();
-            if ch.is_whitespace() {
-                self.pos += ch.len_utf8();
+            if rest.starts_with([' ', '\t']) {
+                self.pos += 1;
+                continue;
+            }
+            if matches!(self.context, ExprContext::Interpolation) {
+                if rest.starts_with("\r\n") {
+                    self.pos += 2;
+                    continue;
+                }
+                if rest.starts_with('\n') {
+                    self.pos += 1;
+                    continue;
+                }
+            }
+            if matches!(self.context, ExprContext::Directive) && rest == "\n" {
+                self.pos += 1;
+                continue;
+            }
+            if matches!(self.context, ExprContext::Directive) && rest == "\r\n" {
+                self.pos += 2;
                 continue;
             }
             return;
@@ -947,12 +1259,12 @@ impl<'a> Lexer<'a> {
             Tok::Ident(name) => {
                 self.bump();
                 if self.eat("(") {
-                    let args = self.parse_commas(")")?;
+                    let args = self.parse_commas(")", true)?;
                     fit_all(&args)?;
                     return Ok(Expr::Call { name, args });
                 }
                 if self.eat("[") {
-                    let indexes = self.parse_commas("]")?;
+                    let indexes = self.parse_commas("]", true)?;
                     fit_all(&indexes)?;
                     return Ok(Expr::Index { name, indexes });
                 }
@@ -1030,7 +1342,7 @@ impl<'a> Lexer<'a> {
         if !self.eat("(") {
             return Err(self.or_fail(MacroEvalError::SyntaxUnexpected(self.peek.name())));
         }
-        let args = self.parse_commas(")")?;
+        let args = self.parse_commas(")", false)?;
         let builtin = match (spelling, args.len()) {
             ("length", 1) => Builtin::Length,
             ("isempty", 1) => Builtin::IsEmpty,
@@ -1094,15 +1406,24 @@ impl<'a> Lexer<'a> {
         if self.eat(")") {
             return Ok(Expr::Tuple(Vec::new()));
         }
+        let leading_comma = self.eat(",");
         let first = self.parse_bp_with_colon(0)?;
-        if self.eat(")") {
+        if !leading_comma && self.eat(")") {
             return Ok(first);
+        }
+        if leading_comma && self.eat(")") {
+            return Ok(Expr::Tuple(vec![first]));
         }
         if !self.eat(",") {
             return Err(self.or_fail(MacroEvalError::SyntaxUnexpected(self.peek.name())));
         }
         let mut items = vec![first];
         if !self.eat(")") {
+            // `expr COMMA` is a singleton tuple production; its recursive
+            // `tuple_comma_expr COMMA expr` permits `(1,,2)`.
+            if !leading_comma {
+                self.eat(",");
+            }
             loop {
                 if self.peek == Tok::End {
                     return Err(self.or_fail(MacroEvalError::SyntaxEol));
@@ -1128,11 +1449,20 @@ impl<'a> Lexer<'a> {
         if self.eat("]") {
             return Ok(Expr::Array(Vec::new()));
         }
+        // `comma_expr` can start with its empty production before a comma.
+        if self.eat(",") {
+            if matches!(self.peek, Tok::Word("]", _)) {
+                return Err(MacroEvalError::SyntaxUnexpected("RBRACKET"));
+            }
+            let items = self.parse_commas("]", false)?;
+            fit_all(&items)?;
+            return Ok(Expr::Array(items));
+        }
         let first = self.parse_bp_with_colon(0)?;
         if self.eat("for") {
             // The loop name stops before `in`. A looser parse would consume
             // `i in [1,2]` as the name.
-            let vars = self.parse_bp_with_colon(200)?;
+            let vars = self.parse_bp_with_colon(51)?;
             if !self.eat("in") {
                 return Err(self.or_fail(MacroEvalError::SyntaxUnexpected(self.peek.name())));
             }
@@ -1197,10 +1527,17 @@ impl<'a> Lexer<'a> {
         Ok(Expr::Array(items))
     }
 
-    fn parse_commas(&mut self, end: &str) -> Result<Vec<Expr>, MacroEvalError> {
+    fn parse_commas(
+        &mut self,
+        end: &str,
+        leading_comma: bool,
+    ) -> Result<Vec<Expr>, MacroEvalError> {
         let mut args = Vec::new();
         if self.eat(end) {
             return Ok(args);
+        }
+        if leading_comma {
+            self.eat(",");
         }
         loop {
             if self.peek == Tok::End {
@@ -1257,6 +1594,7 @@ fn keyword(rest: &str) -> Option<(&'static str, &'static str)> {
         ("&&", "AND"),
         ("==", "EQUAL_EQUAL"),
         ("!=", "NOT_EQUAL"),
+        ("=", "EQUAL"),
         ("<=", "LESS_EQUAL"),
         (">=", "GREATER_EQUAL"),
         ("defined", "DEFINED"),
@@ -1321,9 +1659,12 @@ fn keyword(rest: &str) -> Option<(&'static str, &'static str)> {
         ("|", "UNION"),
         ("&", "INTERSECTION"),
     ];
-    let lower = rest.to_ascii_lowercase();
     for (spelling, name) in WORDS {
-        if lower.starts_with(spelling) && boundary(rest, spelling.len()) {
+        if rest
+            .get(..spelling.len())
+            .is_some_and(|word| word.eq_ignore_ascii_case(spelling))
+            && boundary(rest, spelling.len())
+        {
             return Some((*spelling, *name));
         }
     }
@@ -1350,16 +1691,28 @@ fn is_number_start(rest: &str) -> bool {
         return true;
     }
     b[0] == b'.' && b.get(1).is_some_and(|c| c.is_ascii_digit())
-        || rest.to_ascii_lowercase().starts_with("nan")
-        || rest.to_ascii_lowercase().starts_with("inf")
+        || ((rest
+            .get(..3)
+            .is_some_and(|word| word.eq_ignore_ascii_case("nan"))
+            || rest
+                .get(..3)
+                .is_some_and(|word| word.eq_ignore_ascii_case("inf")))
+            && boundary(rest, 3))
 }
 
 fn scan_number(rest: &str) -> (f64, usize) {
-    let lower = rest.to_ascii_lowercase();
-    if lower.starts_with("nan") && boundary(rest, 3) {
+    if rest
+        .get(..3)
+        .is_some_and(|word| word.eq_ignore_ascii_case("nan"))
+        && boundary(rest, 3)
+    {
         return (f64::NAN, 3);
     }
-    if lower.starts_with("inf") && boundary(rest, 3) {
+    if rest
+        .get(..3)
+        .is_some_and(|word| word.eq_ignore_ascii_case("inf"))
+        && boundary(rest, 3)
+    {
         return (f64::INFINITY, 3);
     }
     let bytes = rest.as_bytes();
@@ -1562,7 +1915,6 @@ fn eval_expr(
             budget,
         ),
         Expr::Index { name, indexes } => {
-            let target = lookup_var(global, local.as_deref(), name, budget)?;
             let mut flat = Vec::new();
             for index in indexes {
                 let value = eval_expr(
@@ -1575,6 +1927,7 @@ fn eval_expr(
                 )?;
                 flatten_index(value, &mut flat)?;
             }
+            let target = lookup_var(global, local.as_deref(), name, budget)?;
             if indexes.is_empty() {
                 return Ok(target);
             }
@@ -1656,7 +2009,7 @@ fn eval_call(
             ),
         ));
     }
-    let parsed = parse_expr(&body)?;
+    let parsed = parse_expr(&unfold_continuations(&body))?;
     let mut callee = HashMap::new();
     for (param, arg) in params.iter().zip(args) {
         let value = eval_expr(
@@ -1705,6 +2058,12 @@ fn eval_comprehension(
     if items.len() > RANGE_CAP {
         return Err(MacroEvalError::Limit("collection size"));
     }
+    if variable_name(vars).is_none() && !matches!(vars, Expr::Tuple(_)) {
+        return Err(official(
+            "E285",
+            "the loop variables must be either a tuple or a variable",
+        ));
+    }
     let mut values = Vec::new();
     for item in items {
         budget.spend_work(1)?;
@@ -1750,9 +2109,9 @@ fn bind_comprehension(
     budget: &mut MacroBudget,
 ) -> Result<(), MacroEvalError> {
     match vars {
-        Expr::Var(name) => {
+        Expr::Var(name) | Expr::Index { name, .. } => {
             let owned = clone_macro_val(item, budget)?;
-            bind_name(global, local, name.clone(), owned);
+            bind_name(global, local, name.clone(), owned)?;
             Ok(())
         }
         Expr::Tuple(names) => {
@@ -1765,22 +2124,18 @@ fn bind_comprehension(
             if names.len() != values.len() {
                 return Err(official(
                     "E284",
-                    "The number of elements in the input set tuple are not the same as the number of elements in the output expression tuple",
+                    "The number of elements in the input  set tuple are not the same as the number of elements in the output expression tuple",
                 ));
             }
             for (name, value) in names.iter().zip(values) {
-                let Expr::Var(name) = name else {
+                let Some(name) = variable_name(name) else {
                     return Err(official(
                         "E285",
                         "Output expression tuple must be comprised of variable names",
                     ));
                 };
                 let owned = clone_macro_val(value, budget)?;
-                if let Some(local) = local.as_deref_mut() {
-                    local.insert(name.clone(), owned);
-                } else {
-                    global.insert(name.clone(), owned);
-                }
+                bind_name(global, local.as_deref_mut(), name.to_owned(), owned)?;
             }
             Ok(())
         }
@@ -1796,12 +2151,19 @@ fn bind_name(
     local: Option<&mut HashMap<String, MacroVal>>,
     name: String,
     value: MacroVal,
-) {
+) -> Result<(), MacroEvalError> {
     if let Some(local) = local {
         local.insert(name, value);
     } else {
+        if matches!(global.get(&name), Some(MacroVal::Function { .. })) {
+            return Err(official(
+                "E285",
+                format!("Variable {name} was previously defined as a function"),
+            ));
+        }
         global.insert(name, value);
     }
+    Ok(())
 }
 
 fn lookup_var(
@@ -1856,6 +2218,18 @@ fn eval_binary(
         return eval_logic(
             op, lhs, right, global, local, call_depth, expr_depth, budget,
         );
+    }
+    if op == BinOp::In {
+        let rhs = eval_expr(
+            right,
+            global,
+            local.as_deref_mut(),
+            call_depth,
+            expr_depth,
+            budget,
+        )?;
+        let lhs = eval_expr(left, global, local, call_depth, expr_depth, budget)?;
+        return eval_values(op, lhs, rhs, budget);
     }
     let lhs = eval_expr(
         left,
@@ -2605,8 +2979,8 @@ fn eval_builtin(op: Builtin, args: &[MacroVal]) -> Result<MacroVal, MacroEvalErr
         Builtin::IsTuple => Ok(MacroVal::Bool(matches!(args[0], MacroVal::Tuple(_)))),
         Builtin::IsArray => Ok(MacroVal::Bool(matches!(args[0], MacroVal::Array(_)))),
         Builtin::Sum => sum_of(&args[0]),
-        Builtin::Max => real_binary(&args[0], &args[1], "max", f64::max),
-        Builtin::Min => real_binary(&args[0], &args[1], "min", f64::min),
+        Builtin::Max => real_binary(&args[0], &args[1], "max", |a, b| if a < b { b } else { a }),
+        Builtin::Min => real_binary(&args[0], &args[1], "min", |a, b| if b < a { b } else { a }),
         Builtin::Mod => real_binary(&args[0], &args[1], "mod", |a, b| a % b),
         Builtin::Normpdf3 => normpdf3(&args[0], &args[1], &args[2]),
         Builtin::Normcdf3 => normcdf3(&args[0], &args[1], &args[2]),
@@ -2694,6 +3068,7 @@ fn real_binary(
 ) -> Result<MacroVal, MacroEvalError> {
     match (numeric(left), numeric(right)) {
         (Some(a), Some(b)) => Ok(MacroVal::Real(op(a, b))),
+        (None, _) => Err(missing_named(name)),
         _ => Err(official(
             "E285",
             format!("Type mismatch for operands of `{name}` operator"),
@@ -2703,7 +3078,7 @@ fn real_binary(
 
 fn normpdf_standard(value: f64) -> f64 {
     let scale = (2.0 * std::f64::consts::PI).sqrt();
-    (-value * value / 2.0).exp() / scale
+    1.0 / (scale * (value * value / 2.0).exp())
 }
 
 fn normcdf_standard(value: f64) -> f64 {
@@ -2734,6 +3109,9 @@ fn lgamma_real(z: f64) -> f64 {
 }
 
 fn normpdf3(x: &MacroVal, mean: &MacroVal, sigma: &MacroVal) -> Result<MacroVal, MacroEvalError> {
+    if numeric(x).is_none() {
+        return Err(missing_named("normpdf"));
+    }
     let (Some(x), Some(mean), Some(sigma)) = (numeric(x), numeric(mean), numeric(sigma)) else {
         return Err(official(
             "E285",
@@ -2747,6 +3125,9 @@ fn normpdf3(x: &MacroVal, mean: &MacroVal, sigma: &MacroVal) -> Result<MacroVal,
 }
 
 fn normcdf3(x: &MacroVal, mean: &MacroVal, sigma: &MacroVal) -> Result<MacroVal, MacroEvalError> {
+    if numeric(x).is_none() {
+        return Err(missing_named("normcdf"));
+    }
     let (Some(x), Some(mean), Some(sigma)) = (numeric(x), numeric(mean), numeric(sigma)) else {
         return Err(official(
             "E285",
@@ -2762,28 +3143,14 @@ fn materialize_range(
     end: f64,
     budget: &mut MacroBudget,
 ) -> Result<MacroVal, MacroEvalError> {
-    if !start.is_finite() || !step.is_finite() || !end.is_finite() || step == 0.0 {
-        return Ok(MacroVal::Array(Vec::new()));
-    }
-    if (step > 0.0 && start > end) || (step < 0.0 && start < end) {
-        return Ok(MacroVal::Array(Vec::new()));
-    }
-    let steps = ((end - start) / step).abs();
-    if !steps.is_finite() || steps > RANGE_CAP as f64 {
-        return Err(MacroEvalError::Limit("range size"));
-    }
-    let count = (steps.floor() as usize).saturating_add(1);
-    if count > RANGE_CAP {
-        return Err(MacroEvalError::Limit("range size"));
-    }
-    budget.spend_work(count)?;
-    let mut out = Vec::with_capacity(count);
+    let mut out = Vec::new();
     let mut i = start;
     if step > 0.0 {
         while i <= end {
             if out.len() >= RANGE_CAP {
                 return Err(MacroEvalError::Limit("range size"));
             }
+            budget.spend_work(1)?;
             out.push(MacroVal::Real(i));
             let next = i + step;
             if next == i {
@@ -2791,11 +3158,12 @@ fn materialize_range(
             }
             i = next;
         }
-    } else {
+    } else if step < 0.0 {
         while i >= end {
             if out.len() >= RANGE_CAP {
                 return Err(MacroEvalError::Limit("range size"));
             }
+            budget.spend_work(1)?;
             out.push(MacroVal::Real(i));
             let next = i + step;
             if next == i {
@@ -2835,7 +3203,7 @@ fn flatten_index(value: MacroVal, out: &mut Vec<i64>) -> Result<(), MacroEvalErr
                     _ => {
                         return Err(official(
                             "E285",
-                            "You can only index a variable with an int or an int array",
+                            "You cannot index a variable with a nested array",
                         ))
                     }
                 }
@@ -3428,6 +3796,199 @@ impl<'a> Lexer<'a> {
 mod tests {
     use super::*;
 
+    fn replay_round_trip(value: &MacroVal) -> MacroVal {
+        let encoded = encode_replay_value(value, &mut MacroBudget::new()).unwrap();
+        decode_replay_value(&encoded, &mut MacroBudget::new()).unwrap()
+    }
+
+    #[test]
+    fn private_replay_preserves_value_bits_and_collection_shape() {
+        let number = 1.0_f64 / 3.0;
+        let MacroVal::Real(round_trip) = replay_round_trip(&MacroVal::Real(number)) else {
+            panic!("real type");
+        };
+        assert_eq!(round_trip.to_bits(), number.to_bits());
+        // Public display is deliberately lossy; replay is not parsed from it.
+        assert_ne!(
+            format_real(number).parse::<f64>().unwrap().to_bits(),
+            number.to_bits()
+        );
+        for value in [
+            0.0_f64,
+            -0.0,
+            f64::INFINITY,
+            f64::from_bits(0x7ff8_0000_0000_0042),
+        ] {
+            let MacroVal::Real(round_trip) = replay_round_trip(&MacroVal::Real(value)) else {
+                panic!("real type");
+            };
+            assert_eq!(round_trip.to_bits(), value.to_bits());
+        }
+        let tuple = MacroVal::Tuple(vec![MacroVal::Real(1.0)]);
+        assert!(matches!(replay_round_trip(&tuple), MacroVal::Tuple(items) if items.len()==1));
+        let input = MacroVal::Tuple(vec![MacroVal::Real(1.0), MacroVal::Real(2.0)]);
+        assert!(values_equal(&replay_round_trip(&input), &input));
+        let bytes = MacroVal::Bytes(vec![0xc3]);
+        let decoded = replay_round_trip(&bytes);
+        assert!(matches!(&decoded, MacroVal::Bytes(value) if value == &[0xc3]));
+        assert_eq!(interpolate(&length_of(&decoded).unwrap()), "1");
+        let text = MacroVal::Text("quoted \"text\"\\\n\t\u{0}".into());
+        assert!(values_equal(&replay_round_trip(&text), &text));
+        let array = MacroVal::Array(vec![
+            MacroVal::Array(Vec::new()),
+            tuple,
+            input,
+            MacroVal::Bool(true),
+            MacroVal::Int(-9),
+        ]);
+        assert!(values_equal(&replay_round_trip(&array), &array));
+    }
+
+    #[test]
+    fn flat_replay_handles_supported_depth_without_json_recursion() {
+        let mut value = MacroVal::Real(1.0);
+        for _ in 1..VALUE_DEPTH_CAP {
+            value = MacroVal::Tuple(vec![value]);
+        }
+        let decoded = replay_round_trip(&value);
+        assert!(values_equal(&decoded, &value));
+        let mut too_deep = Vec::new();
+        for _ in 0..VALUE_DEPTH_CAP {
+            too_deep.push(ReplayAtom::Tuple(1));
+        }
+        too_deep.push(ReplayAtom::RealBits(1.0_f64.to_bits()));
+        let encoded = serde_json::to_string(&too_deep).unwrap();
+        assert!(matches!(
+            decode_replay_value(&encoded, &mut MacroBudget::new()),
+            Err(MacroEvalError::Limit("value depth"))
+        ));
+    }
+
+    #[test]
+    fn replay_checks_work_and_counts_before_value_allocation() {
+        let mut budget = MacroBudget::new();
+        budget.spend_work(MACRO_WORK_CAP - 1).unwrap();
+        assert!(matches!(
+            encode_replay_value(&MacroVal::Text("text".into()), &mut budget),
+            Err(MacroEvalError::Limit("iteration work"))
+        ));
+        let mut budget = MacroBudget::new();
+        budget.spend_work(MACRO_WORK_CAP - 1).unwrap();
+        assert!(matches!(
+            decode_replay_value("[{\"Bool\":true}]", &mut budget),
+            Err(MacroEvalError::Limit("iteration work"))
+        ));
+        let invalid = "{invalid}";
+        let mut budget = MacroBudget::new();
+        budget
+            .spend_work(MACRO_WORK_CAP - invalid.len() - 1)
+            .unwrap();
+        // Input-byte charging alone would reach serde's syntax error. The
+        // allocation guard must stop before serde examines malformed input.
+        assert!(matches!(
+            decode_replay_value(invalid, &mut budget),
+            Err(MacroEvalError::Limit("iteration work"))
+        ));
+        for malformed in [
+            "[]",
+            "[{\"Tuple\":10001}]",
+            "[{\"Array\":1}]",
+            "[{\"Bool\":true},{\"Bool\":false}]",
+        ] {
+            assert!(
+                matches!(
+                    decode_replay_value(malformed, &mut MacroBudget::new()),
+                    Err(MacroEvalError::Limit("source mapping"))
+                ),
+                "{malformed}"
+            );
+        }
+    }
+
+    #[test]
+    fn expression_context_preserves_pinned_tokens() {
+        assert_eq!(printed("1 // trailing directive comment"), "1");
+        assert_eq!(printed("1 + \\\\ // continuation comment\n2"), "3");
+        assert_eq!(printed("\"a\\\\\nb\""), "a\\\\\nb");
+        let mut defines = HashMap::new();
+        let mut budget = MacroBudget::new();
+        let value =
+            eval_macro_expr_interpolation_budget("1 +\r\n2", &mut defines, &mut budget).unwrap();
+        assert_eq!(interpolate(&value), "3");
+        for source in ["1 //2", "1 + \\\\ \n2"] {
+            assert!(
+                matches!(
+                    eval_macro_expr_interpolation_budget(
+                        source,
+                        &mut defines,
+                        &mut MacroBudget::new()
+                    ),
+                    Err(MacroEvalError::SyntaxUnexpected(_))
+                ),
+                "{source}"
+            );
+        }
+        for source in ["1\u{a0}+2", "\u{a0}1", "1\u{a0}"] {
+            assert!(
+                matches!(
+                    eval_macro_expr(source, &mut defines),
+                    Err(MacroEvalError::SyntaxUnexpected("TEXT"))
+                ),
+                "{source}"
+            );
+            assert!(
+                check_macro_syntax_interpolation_budget(source, &mut MacroBudget::new()).is_err(),
+                "{source}"
+            );
+        }
+        assert!(matches!(
+            check_macro_syntax("length(,1)"),
+            Err(MacroEvalError::SyntaxUnexpected("COMMA"))
+        ));
+    }
+
+    #[test]
+    fn directive_validation_uses_expression_ast_without_evaluation() {
+        for source in [
+            "flag",
+            "x=missing",
+            "f()=missing",
+            "f(x,y)=x+y",
+            "f(x)=x+\\\\\n1",
+        ] {
+            check_macro_definition_budget(source, &mut MacroBudget::new()).unwrap();
+        }
+        for source in ["true", "x=1+", "f(,x)=1", "f(x)", "x[1]=2"] {
+            assert!(
+                check_macro_definition_budget(source, &mut MacroBudget::new()).is_err(),
+                "{source}"
+            );
+        }
+        assert_eq!(
+            check_macro_for_header_budget("(i,j) in missing when unknown", &mut MacroBudget::new())
+                .unwrap(),
+            ["i", "j"]
+        );
+        assert_eq!(
+            check_macro_for_header_budget("a[missing] in []", &mut MacroBudget::new()).unwrap(),
+            ["a"]
+        );
+        assert!(
+            check_macro_for_header_budget("() in [()]", &mut MacroBudget::new())
+                .unwrap()
+                .is_empty()
+        );
+        assert!(check_macro_for_header_budget("(a,1) in []", &mut MacroBudget::new()).is_err());
+        assert_eq!(
+            macro_condition_variable_budget("a[missing]", &mut MacroBudget::new()).unwrap(),
+            Some("a".into())
+        );
+        assert_eq!(
+            macro_condition_variable_budget("1+1", &mut MacroBudget::new()).unwrap(),
+            None
+        );
+    }
+
     fn val(source: &str) -> MacroVal {
         eval_macro_expr(source, &mut HashMap::new()).unwrap_or_else(|err| {
             panic!("{source}: {err:?}");
@@ -3884,7 +4445,7 @@ mod tests {
         );
         assert_eq!(
             refused("[(a,b) for (a,b) in [(1,2,3)]]"),
-            "E284: The number of elements in the input set tuple are not the same as the number of elements in the output expression tuple"
+            "E284: The number of elements in the input  set tuple are not the same as the number of elements in the output expression tuple"
         );
         match eval_macro_expr("[1] & 2", &mut HashMap::new()) {
             Err(MacroEvalError::Official { message, .. }) => {

@@ -280,7 +280,7 @@ const HONESTY_FIRE: &[HonestyRow] = &[
             workspace_only: false,
         },
         their_needle: "syntax error",
-        our_needle: "Unterminated",
+        our_needle: "syntax error, unexpected end of file, expecting ENDIF",
         stage: JsonStage::Check,
     },
     HonestyRow {

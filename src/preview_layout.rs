@@ -3,8 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::expand::ExpandReport;
-use crate::lexer::{tokenize, TokenKind};
-use crate::macro_expand::expand_macros_with_status;
+use crate::lexer::TokenKind;
 use crate::model::{ExecutionStep, Model, StatementKind};
 use crate::parser::join_lexemes_recorded;
 use crate::span::Span;
@@ -16,12 +15,11 @@ pub(crate) struct PreviewLayout {
 
 pub(crate) fn readable(report: &ExpandReport, model: &Model) -> Option<PreviewLayout> {
     let original = &report.effective_text;
-    // Statement facts must come from the original source parse: compact text
-    // loses the newline that ends native text in Dynare's lexer. Replay only
-    // token expansion to prove the same emitted copy and record token offsets.
-    let (tokens, _, _, _) = expand_macros_with_status(&model.source, tokenize(&model.source));
+    // Use the tokens that produced the statement facts. Re-execution from
+    // joined text would omit private include-expression replay points.
+    let tokens = &model.expanded_tokens;
     let mut emitted = vec![None; tokens.len()];
-    let copy = join_lexemes_recorded(&model.source, &tokens, |index, span| {
+    let copy = join_lexemes_recorded(&model.source, tokens, |index, span| {
         emitted[index] = Some(span);
     });
     if copy != *original {

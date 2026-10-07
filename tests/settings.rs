@@ -563,7 +563,7 @@ async fn close_and_delete_revisions_preserve_live_overlays_and_clear_missing_roo
 }
 
 #[tokio::test]
-async fn incomplete_file_previews_keep_verified_origins_for_missing_and_cyclic_includes() {
+async fn failed_includes_withhold_facts_and_keep_only_earlier_text() {
     let files = Files::new();
     files.write("cycle.inc", "@#include \"cycle.mod\"\n");
     let (service, _socket) = new_service();
@@ -573,7 +573,7 @@ async fn incomplete_file_previews_keep_verified_origins_for_missing_and_cyclic_i
         ("cycle.mod", "cycle.inc", "W062"),
     ] {
         let uri = files.uri(name);
-        let text = format!("@#include \"{target}\"\nvar y;\nmodel;\ny=0;\nend;\n");
+        let text = format!("var y;\nmodel;\ny=0;\nend;\n@#include \"{target}\"\n");
         open(backend, uri.clone(), &text).await;
         let effective = backend
             .execute_command(ExecuteCommandParams {
@@ -586,10 +586,15 @@ async fn incomplete_file_previews_keep_verified_origins_for_missing_and_cyclic_i
             .unwrap();
         assert_eq!(effective["status"], "incomplete", "{name}");
         let origins = effective["origins"].as_array().unwrap();
-        assert_eq!(origins.len(), 1, "{name}");
-        assert_eq!(origins[0]["range"]["start"]["line"], 3, "{name}");
-        assert_eq!(origins[0]["index"], 0, "{name}");
-        assert!(origins[0].get("origin_uri").is_some(), "{name}");
+        assert!(origins.is_empty(), "{name}");
+        assert_eq!(effective["navigation"], json!([]), "{name}");
+        assert!(
+            effective["effective_text"]
+                .as_str()
+                .unwrap()
+                .contains("y = 0"),
+            "{effective}"
+        );
         assert!(
             codes(backend, uri).await.contains(&code.to_owned()),
             "{name}"

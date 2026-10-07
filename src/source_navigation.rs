@@ -520,7 +520,7 @@ mod tests {
             "var y;\n@#if 1\ny=c;\n@#endif\nmodel;\ny=1;\nend;\n",
             "var y;\n@#if 0\nbad=1;\n@#else\ny=c;\n@#endif\nmodel;\ny=1;\nend;\n",
             "var y;\n@#if 0\nbad=1;\n@#elseif 1\ny=c;\n@#endif\nmodel;\ny=1;\nend;\n",
-            "var y;\n@#define FLAG 1\n@#ifdef FLAG\ny=c;\n@#endif\nmodel;\ny=1;\nend;\n",
+            "var y;\n@#define FLAG = 1\n@#ifdef FLAG\ny=c;\n@#endif\nmodel;\ny=1;\nend;\n",
             "var y;\n@#ifndef FLAG\ny=c;\n@#endif\nmodel;\ny=1;\nend;\n",
         ] {
             let (display, ranges) = tint(src);

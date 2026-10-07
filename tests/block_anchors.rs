@@ -499,11 +499,11 @@ fn shared_include_summary_multiplicity_remains_separate_for_each_root() {
     let files = std::collections::HashMap::from([
         (
             "a.mod".to_string(),
-            "var x y; @#include \"shared.inc\"\n".to_string(),
+            "var x y;\n@#include \"shared.inc\"\n".to_string(),
         ),
         (
             "b.mod".to_string(),
-            "var x y z; @#include \"shared.inc\"\n".to_string(),
+            "var x y z;\n@#include \"shared.inc\"\n".to_string(),
         ),
         (
             "shared.inc".to_string(),

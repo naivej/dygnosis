@@ -6,6 +6,8 @@ With the bundled engine or an engine that supports source layout, the preview ke
 
 Macro interpolation also expands inside quoted values, `//` comments, and `%` comments. For example, a loop over `j` with `[name='eq@{j}']` and `long_name='Output @{j}'` produces `eq1`, `eq2`, and their corresponding labels. Each repeated equation keeps its own source. A replacement is read again as model text, including when it joins a name (`var y@{""}z` is `yz`), closes or opens a comment, or closes the surrounding quote. A loop that includes a different file on each pass includes each of those files. `@#echo` and `@#echomacrovars` print in the Dygnosis output channel when you open or refresh this preview. They are not Problems. `@#echomacrovars(save)` writes assignment text into the preview, using the line number in the file that contains the directive. An older engine omits those messages. The first fatal macro error stops the preview body after the messages already printed.
 
+Macro expressions follow Dynare's evaluation order, including changes a comprehension makes to macro variables. Syntax is checked in every branch of each file that is read before that file runs. A child cannot close a macro block in its parent.
+
 ![Written source beside the read-only effective preview](assets/effective-model.png)
 
 1. The written `.mod` file stays editable in the primary editor column.

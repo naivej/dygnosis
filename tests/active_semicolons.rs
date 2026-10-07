@@ -112,20 +112,20 @@ fn semicolon_controls_keep_real_reports_and_drop_discarded_ones() {
 #[test]
 fn assignment_and_parenthesis_scans_use_the_same_active_tokens() {
     let false_assignment =
-        "parameters beta alpha;\nbeta = @#if 0\n1\nalpha = 2\n@#else\n1 + alpha = 2;\n@#endif\n";
+        "parameters beta alpha;\nbeta =\n@#if 0\n1\nalpha = 2\n@#else\n1 + alpha = 2;\n@#endif\n";
     assert!(
         has_needle(false_assignment, MERGED),
         "active merged assignment must still report: {}",
         messages(false_assignment).join(" | ")
     );
-    let discarded_only = "parameters beta;\nbeta = @#if 0\n1\nalpha = 2\n@#else\n0.99;\n@#endif\n";
+    let discarded_only = "parameters beta;\nbeta =\n@#if 0\n1\nalpha = 2\n@#else\n0.99;\n@#endif\n";
     assert!(
         !has_needle(discarded_only, MERGED),
         "{}",
         messages(discarded_only).join(" | ")
     );
     let bracket_would_suppress =
-        "parameters beta alpha;\nbeta = @#if 0\n[1]\nalpha = 2\n@#else\n1 + alpha = 2;\n@#endif\n";
+        "parameters beta alpha;\nbeta =\n@#if 0\n[1]\nalpha = 2\n@#else\n1 + alpha = 2;\n@#endif\n";
     assert!(
         has_needle(bracket_would_suppress, MERGED),
         "discarded brackets must not hide the active merge: {}",
@@ -145,6 +145,38 @@ fn assignment_and_parenthesis_scans_use_the_same_active_tokens() {
         "{}",
         messages(real_paren).join(" | ")
     );
+}
+
+#[test]
+fn assignment_macro_controls_use_pinned_line_start_syntax() {
+    let inline =
+        "parameters beta alpha;\nbeta = @#if 0\n1\nalpha = 2\n@#else\n1 + alpha = 2;\n@#endif\n";
+    let fire = inline.replace("beta = @#if", "beta =\n@#if");
+    let quiet = "parameters beta;\nbeta =\n@#if 0\n1\nalpha = 2\n@#else\n0.99;\n@#endif\n";
+    assert!(analyze(&parse(inline)).iter().any(|row| row.code == "E062"
+        && row.message == "syntax error, unexpected ELSE, expecting end of file"));
+    assert!(!has_needle(inline, MERGED));
+    assert!(has_needle(&fire, MERGED));
+    assert!(!has_needle(quiet, MERGED));
+    let Some(binary) = pinned_dynare_72() else {
+        return;
+    };
+    for (source, refuses, needle) in [
+        (inline, true, "syntax error, unexpected ELSE"),
+        (fire.as_str(), true, "syntax error, unexpected EQUAL"),
+        (quiet, false, ""),
+    ] {
+        let result = run_preprocessor(
+            source,
+            &binary,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Check,
+        );
+        let text = result.raw_stdout + &result.raw_stderr;
+        assert_eq!(!result.success, refuses, "{text}");
+        assert!(text.contains(needle), "{text}");
+    }
 }
 
 #[test]
@@ -643,7 +675,8 @@ end;
 
     let assignment = "\
 parameters beta alpha;
-beta = @#if 0
+beta =
+@#if 0
 1
 alpha = 2
 @#else

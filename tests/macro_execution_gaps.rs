@@ -525,15 +525,15 @@ var y; model; y=0; end;
         report.effective_text
     );
 
-    // Source text, not `@{s}`: copying a macro string also spends its byte
-    // length as iteration work, so that shape stops before the output cap.
+    // Copied model text also spends byte and origin work before allocation,
+    // so repeated text reaches the work cap before the output byte ceiling.
     let line = "x".repeat(1000);
     let emit = format!("@#for i in 1:9000\n{line}\n@#endfor\nvar y; model; y=0; end;\n");
     let diags = analyze(&parse(&emit));
     assert!(
         diags
             .iter()
-            .any(|row| row.code == "I211" && row.message.contains("output size")),
+            .any(|row| row.code == "I211" && row.message.contains("iteration work")),
         "{diags:?}"
     );
     let report = expand_report(&emit);

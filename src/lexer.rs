@@ -30,6 +30,10 @@ pub enum TokenKind {
     Perpendicular,
     MacroDir,
     MacroInterp,
+    /// Private expansion metadata; no written character lexes as this kind.
+    MacroReplay,
+    /// Pinned fallback TEXT preceding a macro keyword; no direct lexer token.
+    MacroPrefix,
     /// `.` that is not the start of a number (`.5` stays Number).
     Dot,
     Eof,
@@ -218,7 +222,7 @@ impl Lexer<'_> {
                 self.bump();
                 TokenKind::Hash
             }
-            '@' if self.starts("@#") => {
+            '@' if self.starts("@#") && self.macro_line_start() => {
                 self.scan_macro_dir();
                 TokenKind::MacroDir
             }
@@ -356,27 +360,21 @@ impl Lexer<'_> {
     }
 
     fn scan_macro_dir(&mut self) {
-        // `@#` plus backslash-continued lines — one token.
-        loop {
-            let line_start = self.pos;
-            self.skip_line();
-            let line = &self.src[line_start..self.pos];
-            if !macro_line_continues(line) {
-                break;
-            }
-            if self.peek() == '\n' {
-                self.bump();
-            }
-        }
+        self.pos = crate::macro_expand::scan_directive_end(self.src, self.pos);
+    }
+
+    fn macro_line_start(&self) -> bool {
+        let start = self.src[..self.pos]
+            .rfind('\n')
+            .map(|offset| offset + 1)
+            .unwrap_or(0);
+        self.src[start..self.pos]
+            .bytes()
+            .all(|byte| matches!(byte, b' ' | b'\t'))
     }
 
     fn scan_macro_interp(&mut self) {
-        self.pos += 2;
-        if let Some(end) = self.src[self.pos..].find('}') {
-            self.pos += end + 1;
-        } else {
-            self.pos = self.src.len();
-        }
+        self.pos = crate::macro_expand::scan_interp_end(self.src, self.pos);
     }
 
     fn scan_string(&mut self, quote: char) {
@@ -461,19 +459,6 @@ impl Lexer<'_> {
             self.pos += c.len_utf8();
         }
     }
-}
-
-/// Pinned continuation is two backslashes, optional spaces, and an optional
-/// `//` comment. One backslash is ordinary text.
-pub(crate) fn macro_line_continues(line: &str) -> bool {
-    let trimmed = line.trim_end_matches([' ', '\t', '\r']);
-    if trimmed.ends_with("\\\\") {
-        return true;
-    }
-    if let Some(mark) = trimmed.rfind("//") {
-        return trimmed[..mark].trim_end().ends_with("\\\\");
-    }
-    false
 }
 
 #[cfg(test)]

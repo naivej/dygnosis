@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "3dd23945f9eb5387b3b434e8544676ab021ce563d2611cbecd8259cd620830c4",
+  "fingerprint": "c212940b12cba8868fe03db5d6ebfadac9624c0492e16e4609af82d58a2020c3",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -637,7 +637,7 @@
       "code": "E062",
       "kind": "shared",
       "title": "Macro syntax error",
-      "markdown": "### E062: Macro syntax error\n\nA Dynare macro `@#if` block has no matching `@#endif`, a `@#for` block has no matching `@#endfor` or has an empty body, a function definition ends while its expression still needs an operand, or a membership expression is malformed. Dynare refuses during macro parsing: an empty loop body prints `syntax error, unexpected ENDFOR`, a trailing operator in `@#define f(x) = x+` prints `syntax error, unexpected EOL`, and an unparenthesized chain such as `1 in [1] in [true]` prints `syntax error, unexpected IN`. A blank line or comment counts as a loop body; an empty iteration array with a nonempty body is valid.\n\n**Warrant**\n\nFor unmatched blocks, the editor names the opener or stray closer and points at that directive; Dynare's bison location does not. For an empty loop body, the editor selects the closing keyword without leading indentation or a trailing comment.\n\n**Fix**\n\nClose the macro block with the matching directive, add the intended loop body, complete the function expression before the end of the definition, or parenthesize each membership test.\n"
+      "markdown": "### E062: Macro syntax error\n\nA macro directive or expression does not match Dynare syntax. Each file is parsed before its macros run, including inactive branches, empty iterations, and function bodies. An included file is parsed separately; it cannot close a block in its parent. Dynare refuses: an empty loop body prints `syntax error, unexpected ENDFOR`, a trailing operator in `@#define f(x) = x+` prints `syntax error, unexpected EOL`, and an unparenthesized chain such as `1 in [1] in [true]` prints `syntax error, unexpected IN`. A blank line or comment counts as a loop body; an empty iteration array with a nonempty body is valid.\n\n**Warrant**\n\nThe range selects the written directive or expression that owns the refusal. An empty loop body selects the closing keyword without indentation or a trailing comment. Syntax messages retain the pinned unexpected token; a redundant expected-token list can be omitted to keep the line short.\n\n**Fix**\n\nClose the macro block with the matching directive, add the intended loop body, complete the function expression before the end of the definition, or parenthesize each membership test.\n"
     },
     {
       "code": "E063",
@@ -2581,7 +2581,7 @@
       "code": "I211",
       "kind": "added",
       "title": "Macro expansion incomplete",
-      "markdown": "### I211: Macro expansion incomplete\n\nDygnosis stopped this macro expansion. A limit note names that limit: expression depth, value depth, execution depth, string size, range size, collection size, output size, message size, iteration work, or a non-UTF-8 byte slice. An unsupported expression names that expression. A supported macro expression is expanded; this note is not a Dynare refusal. Official macro Errors keep precedence. A limit stops later directives in that file. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nShrink the named macro expression, or run the official Dynare preprocessor for its full expansion.\n"
+      "markdown": "### I211: Macro expansion incomplete\n\nDygnosis stopped this macro expansion. A limit note names that limit: expression depth, value depth, execution depth, string size, range size, collection size, output size, message size, iteration work, source mapping, source context, or a non-UTF-8 byte slice. An unsupported expression names that expression. A supported macro expression is expanded; this note is not a Dynare refusal. Official macro Errors keep precedence. A limit stops later directives in that root, including enclosing files and loops. Source mapping or source context means the emitted text cannot retain the required written-file proof. A non-UTF-8 byte slice cannot cross a text or include-path contract; internal byte length and indexing still work. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nShrink the named macro expression, or run the official Dynare preprocessor for its full expansion.\n"
     },
     {
       "code": "W010",

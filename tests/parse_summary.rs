@@ -87,8 +87,21 @@ fn parse_summary_matches_expected_on_US_RE09_rep() {
 }
 
 #[test]
-fn parse_summary_matches_expected_on_swff_single_file() {
-    assert_parse_summary("swff", include_str!("expected/swff.parse_summary.json"));
+fn parse_summary_swff_single_file_withholds_the_unread_include_suffix() {
+    let text = std::fs::read_to_string(copilot_mod("swff")).unwrap();
+    let model = parse(&text);
+    assert!(model.macro_incomplete());
+    let got = model.summary();
+    let expected: ParseSummary =
+        serde_json::from_str(include_str!("expected/swff.parse_summary.json")).unwrap();
+    // Written declarations precede the include. The model and shocks follow
+    // it and need the workspace's include resolver (checked below).
+    assert_eq!(got.endogenous, expected.endogenous);
+    assert_eq!(got.exogenous, expected.exogenous);
+    assert_eq!(got.parameters, expected.parameters);
+    assert_eq!(got.n_model_equations, 0);
+    assert!(!got.has_model_block);
+    assert!(!got.has_shocks_block);
 }
 
 #[test]
