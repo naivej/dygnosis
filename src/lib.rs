@@ -79,6 +79,7 @@ mod signature_help;
 mod source_navigation;
 pub mod span;
 pub mod timing;
+mod usage;
 pub mod workspace;
 pub(crate) mod workspace_diagnose;
 

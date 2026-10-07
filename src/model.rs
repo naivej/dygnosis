@@ -1043,6 +1043,8 @@ pub struct Model {
     pub execution_steps: Vec<ExecutionStep>,
     pub assignment_syntax: HashMap<ExprId, AssignmentSyntax>,
     pub numeric_literals: HashMap<ExprId, f64>,
+    /// Exact Parse constant spelling, including macro-produced numeric tokens.
+    pub(crate) numeric_literal_texts: HashMap<ExprId, String>,
     pub opaque_tokens: HashMap<usize, Vec<crate::lexer::Token>>,
     pub written_declarations: Vec<WrittenDeclaration>,
     pub written_equations: Vec<WrittenEquation>,
@@ -2042,6 +2044,12 @@ pub struct ParseIssue {
 pub enum ParseIssueKind {
     /// Pinned Bison syntax sentence while reading a new surface.
     BisonSyntax(String),
+    /// A complete command lacks its final `;`. The refusing token still owns
+    /// the official message and range; active tokens prove the edit separately.
+    BisonMissingSemi {
+        message: String,
+        active_tokens: std::ops::Range<usize>,
+    },
     MissingEnd {
         keyword: String,
         last_stmt_semi: Option<u32>,

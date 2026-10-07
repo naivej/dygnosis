@@ -378,6 +378,86 @@ async fn full_change_reanalyzes() {
 }
 
 #[tokio::test]
+async fn slice21_checks_follow_unsaved_full_changes() {
+    let uri = file_url(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("slice21-unsaved.mod"));
+    let text = "var y r; varexo e; parameters p; p=.5;\nmodel; y=p+e; end;\nsteady_state_model; y=0; end;\nplanner_objective y^2; ramsey_model(instruments=(r));\n";
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.into(), 1))
+        .await;
+    let items = pull_items(
+        service
+            .inner()
+            .diagnostic(pull_params(uri.clone()))
+            .await
+            .unwrap(),
+    );
+    assert!(
+        !items
+            .iter()
+            .any(|d| matches!(diag_code(d).as_str(), "W022" | "W042")),
+        "{items:?}"
+    );
+
+    service
+        .inner()
+        .did_change(change_params(
+            uri.clone(),
+            text.replace("y=p+e", "y=0*p+e"),
+            2,
+        ))
+        .await;
+    let items = pull_items(
+        service
+            .inner()
+            .diagnostic(pull_params(uri.clone()))
+            .await
+            .unwrap(),
+    );
+    let p = items
+        .iter()
+        .find(|d| diag_code(d) == "W022")
+        .expect("unused p after edit");
+    assert_eq!(p.message, "Parameter(s) p not used in the model");
+    assert_eq!(p.severity, Some(DiagnosticSeverity::WARNING));
+
+    service
+        .inner()
+        .did_change(change_params(
+            uri.clone(),
+            text.replace("y=p+e", "y=p+0*e"),
+            3,
+        ))
+        .await;
+    let items = pull_items(
+        service
+            .inner()
+            .diagnostic(pull_params(uri.clone()))
+            .await
+            .unwrap(),
+    );
+    assert!(
+        items
+            .iter()
+            .any(|d| diag_code(d) == "E021" && d.severity == Some(DiagnosticSeverity::ERROR)),
+        "{items:?}"
+    );
+
+    service
+        .inner()
+        .did_change(change_params(uri.clone(), format!("{text}resid(1);"), 4))
+        .await;
+    let items = pull_items(service.inner().diagnostic(pull_params(uri)).await.unwrap());
+    assert!(
+        items.iter().any(|d| diag_code(d) == "E001"
+            && d.message == "syntax error, unexpected INT_NUMBER, expecting NON_ZERO"),
+        "{items:?}"
+    );
+    assert!(!items.iter().any(|d| diag_code(d) == "E271"), "{items:?}");
+}
+
+#[tokio::test]
 async fn watched_files_invalidates_overlay() {
     let dir = std::env::temp_dir().join(format!(
         "dygnosis-lsp-{}-{}",

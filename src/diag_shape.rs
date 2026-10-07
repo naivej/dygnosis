@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::intern::Name;
 use crate::lexer::{tokenize, Token, TokenKind};
-use crate::model::{Equation, Model};
+use crate::model::{Equation, Model, PolicyCommand};
 use crate::span::{LineIndex, Span};
 
 const I050_MESSAGE: &str = "No initval or steady_state_model block. Add an initval block with initial guesses, or a steady_state_model block with closed-form assignments.";
@@ -483,6 +483,22 @@ fn check_w042(model: &Model) -> Vec<Diagnostic> {
     if model.steady_state_equations.is_empty() {
         return Vec::new();
     }
+    // Parsing finishes before steady_state_model.checkPass. These recorded
+    // policy refusals therefore prevent this warning even when the offending
+    // command follows the block. Statement indices retain macro execution
+    // order when written spans repeat or run backwards.
+    if !crate::check_d_open::check_ramsey_statements(model).is_empty()
+        || model
+            .policy_command_statements
+            .iter()
+            .any(|statement| !statement.discount_parameter_valid)
+        || model
+            .instrument_uses
+            .iter()
+            .any(|instrument| instrument.kind != Some("var"))
+    {
+        return Vec::new();
+    }
     let static_eqs: Vec<&Equation> = model
         .equations
         .iter()
@@ -493,9 +509,33 @@ fn check_w042(model: &Model) -> Vec<Diagnostic> {
     }
 
     let assigned = ss_assigned_names(model);
+    // checkPass keeps a shared instrument list: each supplied Ramsey or
+    // discretionary list replaces it. A successful Ramsey statement enables
+    // the exemption, including on a mixed-policy file that later refuses at
+    // E202. A Ramsey statement without a list leaves the current list intact.
+    let has_ramsey = model.policy_command_statements.iter().any(|statement| {
+        matches!(
+            statement.command,
+            PolicyCommand::RamseyModel | PolicyCommand::RamseyPolicy
+        )
+    });
+    let last_instrument_statement = model
+        .instrument_uses
+        .iter()
+        .map(|instrument| instrument.command_index)
+        .max();
+    let ramsey_instruments: HashSet<Name> = model
+        .instrument_uses
+        .iter()
+        .filter(|instrument| {
+            has_ramsey && Some(instrument.command_index) == last_instrument_statement
+        })
+        .map(|instrument| instrument.name)
+        .collect();
     let missing: Vec<String> = model
         .final_endogenous()
         .iter()
+        .filter(|d| !ramsey_instruments.contains(&d.name))
         .map(|d| model.name(d.name).to_string())
         .filter(|n| !assigned.contains(n))
         .collect();

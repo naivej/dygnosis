@@ -12,7 +12,6 @@ c = betta * c(+1);
 end;
 
 shocks;
-var e; stderr 0.01;
 var e; stderr sigma_z;
 end;
 

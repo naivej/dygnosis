@@ -429,6 +429,13 @@ fn format_recorded_issues(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
             ParseIssueKind::BisonSyntax(message) => {
                 out.push(e001(issue.span, message.clone(), None));
             }
+            ParseIssueKind::BisonMissingSemi {
+                message,
+                active_tokens,
+            } => {
+                let fix = command_separator_edit(model, index, active_tokens);
+                out.push(e001(issue.span, message.clone(), fix));
+            }
             ParseIssueKind::MissingEnd {
                 keyword,
                 next_block_label,
@@ -1428,6 +1435,47 @@ fn proved_separator_edge(src: &str, tokens: &[Token], index: usize, at: u32) -> 
         return !shares_generated_span(tokens, index, false);
     }
     false
+}
+
+/// A semicolon edit needs one complete resid production and a proved written
+/// edge. Macro copies retain their edge; pieces inside interpolation do not.
+fn command_separator_edit(
+    model: &Model,
+    index: &LineIndex,
+    active_tokens: &std::ops::Range<usize>,
+) -> Option<TextEdit> {
+    let tokens = execution_tokens(model, active_tokens)?;
+    let complete = match tokens {
+        [head] => {
+            head.kind == TokenKind::Ident && head.text(&model.source).eq_ignore_ascii_case("resid")
+        }
+        [head, open, option, close] => {
+            head.kind == TokenKind::Ident
+                && head.text(&model.source).eq_ignore_ascii_case("resid")
+                && open.kind == TokenKind::LParen
+                && option.kind == TokenKind::Ident
+                && option.text(&model.source).eq_ignore_ascii_case("non_zero")
+                && close.kind == TokenKind::RParen
+        }
+        _ => false,
+    };
+    let last_i = tokens.len().checked_sub(1)?;
+    let at = tokens[last_i].span.end;
+    // Include the refusing token. It can be another piece of the same
+    // interpolation, even though it is outside the complete command prefix.
+    let proof_end = (active_tokens.end + 1).min(model.expanded_tokens.len());
+    let proof = execution_tokens(model, &(active_tokens.start..proof_end))?;
+    if !complete || !proved_separator_edge(&model.source, proof, last_i, at) {
+        return None;
+    }
+    let position = index.position(&model.source, at);
+    Some(TextEdit {
+        start_line: position.line,
+        start_char: position.character,
+        end_line: position.line,
+        end_char: position.character,
+        new_text: ";".to_string(),
+    })
 }
 
 const EXPR_UNARY_BP: u8 = 7;

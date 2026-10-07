@@ -166,13 +166,22 @@ fn w010_clean_archives_empty() {
 fn w010_unassigned_referenced_param() {
     let text = check_mod("w010/w010_ref.mod");
     let got = rust_family(&text);
-    assert_eq!(got.len(), 1);
-    assert_eq!(got[0].code, "W010");
-    assert_eq!(got[0].severity, 2);
-    assert!(got[0]
+    assert_eq!(got.len(), 2);
+    let unassigned = by_code(&got, "W010");
+    assert_eq!(unassigned.severity, 2);
+    assert!(unassigned
         .message
         .contains("Parameter 'orphan_p' is declared but never assigned"));
-    assert_last_ident(&text, &got[0], "parameters rho betta orphan_p;", "orphan_p");
+    assert_last_ident(
+        &text,
+        unassigned,
+        "parameters rho betta orphan_p;",
+        "orphan_p",
+    );
+    assert_eq!(
+        by_code(&got, "W022").message,
+        "Parameter(s) orphan_p not used in the model"
+    );
 }
 
 #[test]
@@ -340,10 +349,9 @@ fn w022_unused_assigned_param() {
 #[test]
 fn w022_param_used_only_in_stderr() {
     let got = rust_family(&check_mod("w010/w022_stderr.mod"));
-    assert!(
-        got.is_empty(),
-        "W022 stderr sigma_z should be empty, got {got:?}"
-    );
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].code, "W022");
+    assert_eq!(got[0].message, "Parameter(s) sigma_z not used in the model");
 }
 
 #[test]
@@ -358,8 +366,7 @@ fn w022_param_used_only_in_ss() {
 #[test]
 fn w022_param_used_only_in_initval() {
     let got = rust_family(&check_mod("w010/w022_initval.mod"));
-    assert!(
-        got.is_empty(),
-        "W022 initval kss should be empty, got {got:?}"
-    );
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].code, "W022");
+    assert_eq!(got[0].message, "Parameter(s) kss not used in the model");
 }

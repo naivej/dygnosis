@@ -4,6 +4,8 @@ Dygnosis diagnostics appear in the editor and Problems panel. Related locations 
 
 Complete files without a `model` block receive the applicable unused-parameter (W022), unused-exogenous (E021), and unused-endogenous (E186) checks. E021 stops the later E186 check. A declaration in an include keeps its diagnostic in that file. An empty aggregate `model; end;` instead reports E001, `syntax error, unexpected END`, on `end`; it receives no later unused-endogenous check or writing summary.
 
+Unused-parameter and exogenous checks do not count terms that Dynare discards while reading equations, such as `0*p`. The editor still shows the written equation and references. W022 counts parameters used or assigned in `steady_state_model`; calibration, initial values, and shock expressions alone do not count as model uses. For a conditional Ramsey steady state, W042 excludes the policy instruments. Discretionary policy alone keeps the missing-assignment warnings.
+
 ![Live diagnostics in the editor and Problems panel](assets/diagnostics.png)
 
 1. The editor marks the diagnostic range while you edit or after save.

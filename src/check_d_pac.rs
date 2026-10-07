@@ -445,18 +445,14 @@ fn unused_implicit_exogenous(model: &Model) -> Vec<(Name, Span)> {
             declared.extend(model.exprs.walk_idents(lhs).map(|reference| reference.name));
         }
     }
-    let mut exempt = HashSet::new();
+    let usage = crate::usage::Usage::new(model);
+    let exempt = usage.exogenous_exemptions();
+    let used_in_model = usage.model_names();
     let mut expressions = Vec::new();
     for command in &model.semi_structural_commands {
         if command.kind == SemiStructuralKind::VarExpectationModel {
             if let Some(expression) = expression_option(command, "expression") {
                 expressions.push(expression);
-            }
-        } else if command.kind == SemiStructuralKind::PacModel {
-            if let Some(growth) = expression_option(command, "growth") {
-                if let Some(id) = growth.expr {
-                    exempt.extend(model.exprs.walk_idents(id).map(|reference| reference.name));
-                }
             }
         }
     }
@@ -466,15 +462,6 @@ fn unused_implicit_exogenous(model: &Model) -> Vec<(Name, Span)> {
                 PacTargetInfoRow::Target(expression) => expressions.push(expression),
                 PacTargetInfoRow::Component(component) => {
                     expressions.push(&component.component);
-                    for row in &component.rows {
-                        if let PacTargetComponentRow::Growth(growth) = row {
-                            if let Some(id) = growth.expr {
-                                exempt.extend(
-                                    model.exprs.walk_idents(id).map(|reference| reference.name),
-                                );
-                            }
-                        }
-                    }
                 }
                 PacTargetInfoRow::AuxnameTargetNonstationary { .. } => {}
             }
@@ -491,13 +478,7 @@ fn unused_implicit_exogenous(model: &Model) -> Vec<(Name, Span)> {
             {
                 continue;
             }
-            let used_in_model = model.equations.iter().any(|equation| {
-                model
-                    .ident_refs(equation)
-                    .iter()
-                    .any(|other| other.name == reference.name)
-            });
-            if !used_in_model {
+            if !used_in_model.contains(&reference.name) {
                 unused.push((reference.name, reference.span));
             }
         }

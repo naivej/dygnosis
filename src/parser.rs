@@ -29,7 +29,9 @@ use crate::model::{
 use crate::span::Span;
 
 mod pac_parser;
+mod resid_parser;
 mod shock_parser;
+mod statement_keywords;
 
 #[derive(Clone, Debug)]
 enum FoldKey {
@@ -1193,7 +1195,9 @@ impl Parser<'_> {
                     .intern
                     .lookup(self.tokens[self.i].text(self.src))
                     .is_none_or(|name| self.assignment_head_is_native(name));
-            if !native_assignment && self.refuse_active_row(false) {
+            let resid_limit = (self.at_ident_ci("resid") && self.at_statement_boundary())
+                .then(|| self.resid_syntax_limit());
+            if !native_assignment && self.refuse_active_row_with_limit(false, false, resid_limit) {
                 self.advance_initial_source_cursor();
                 continue;
             }
@@ -1238,7 +1242,9 @@ impl Parser<'_> {
             // `model = 0.2;` and `steady = 0.9;` are not assignments and not
             // blocks. The `<INITIAL>` rule returns the keyword, and the grammar
             // wants `;` or `(`.
-            if self.at_keyword_followed_by_eq() {
+            if self.at_ident_ci("resid") && self.at_statement_boundary() {
+                recognized = self.parse_resid();
+            } else if self.at_keyword_followed_by_eq() {
                 self.record_issue(ParseIssue {
                     kind: ParseIssueKind::UnexpectedEqual,
                     span: self.tokens[self.i + 1].span,
@@ -1250,8 +1256,7 @@ impl Parser<'_> {
                 self.record_statement(from, None, None);
                 self.advance_initial_source_cursor();
                 continue;
-            }
-            if self.at_ident_ci("var") {
+            } else if self.at_ident_ci("var") {
                 let decls = self.parse_declaration("var");
                 self.record_decl_roles(&decls, EstimatedNameRole::Endogenous);
                 self.model.endogenous.extend(decls);
@@ -10324,6 +10329,9 @@ impl Parser<'_> {
             if let Some(value) = value {
                 self.model.numeric_literals.insert(id, value);
             }
+            self.model
+                .numeric_literal_texts
+                .insert(id, self.lexeme(&tok).to_string());
             return Some(id);
         }
         if self.at(TokenKind::String) {

@@ -157,7 +157,9 @@ pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
     // (a plain exogenous used only there accepts at check). A
     // heterogeneous-declared exogenous is exempt: the binary accepts one that
     // no tree, block, or shock row uses at all.
-    let referenced = model_and_het_eq_refs(model);
+    let usage = crate::usage::Usage::new(model);
+    let mut referenced = usage.model_names();
+    referenced.extend(usage.exogenous_exemptions());
     // `Model::exogenous` holds `varexo_det` names too; 7.1's unused check covers
     // plain `varexo` only, so filter them out as the other plain-`varexo`
     // readers do — an unused `varexo_det` is accepted there.
@@ -253,16 +255,7 @@ pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
     if !has_usage_model_or_complete_root(model) {
         return Vec::new();
     }
-    let mut referenced = model_and_het_eq_refs(model);
-    for eq in &model.steady_state_equations {
-        for r in model.ident_refs(eq) {
-            referenced.insert(r.name);
-        }
-    }
-    extend_shocks_idents(model, &mut referenced);
-    walk_assignment_idents(model, &model.param_assignments, &mut referenced);
-    walk_assignment_idents(model, &model.helper_assignments, &mut referenced);
-    walk_assignment_idents(model, &model.initval, &mut referenced);
+    let referenced = crate::usage::Usage::new(model).parameter_names();
 
     let mut diagnostics = Vec::new();
     for p in model.final_parameters() {
@@ -509,36 +502,6 @@ fn unused_decls<'a>(
         ));
     }
     diagnostics
-}
-
-fn extend_shocks_idents(model: &Model, referenced: &mut HashSet<Name>) {
-    let Some(span) = model.shocks_block else {
-        return;
-    };
-    let parameters = model.final_parameters();
-    for tok in tokenize(&model.source) {
-        if tok.kind != TokenKind::Ident {
-            continue;
-        }
-        if tok.span.start < span.start || tok.span.end > span.end {
-            continue;
-        }
-        let text = tok.text(&model.source);
-        if let Some(d) = parameters.iter().find(|d| model.name(d.name) == text) {
-            referenced.insert(d.name);
-        }
-    }
-}
-
-fn walk_assignment_idents(model: &Model, rows: &[Assignment], referenced: &mut HashSet<Name>) {
-    for a in rows {
-        let Some(id) = a.expr else {
-            continue;
-        };
-        for r in model.exprs.walk_idents(id) {
-            referenced.insert(r.name);
-        }
-    }
 }
 
 fn eval_expr(model: &Model, id: ExprId, known: &HashMap<Name, f64>) -> Option<f64> {

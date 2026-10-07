@@ -404,7 +404,7 @@ fn walk_nodes<'a>(model: &'a Model, id: ExprId, f: &mut impl FnMut(&'a crate::ex
     }
 }
 
-fn check_ramsey_statements(model: &Model) -> Vec<Diagnostic> {
+pub(crate) fn check_ramsey_statements(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let mut saw_model = false;
     let mut saw_policy = false;

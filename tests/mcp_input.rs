@@ -141,3 +141,64 @@ fn seven_tools_validate_nonempty_maps_on_the_wire() {
         assert_eq!(without_map["result"], empty_map["result"], "{name}");
     }
 }
+
+#[test]
+fn slice21_checks_use_unsaved_root_and_include_text_on_the_wire() {
+    let mut wire = McpWire::new();
+    let root = "var y r; varexo e; parameters p; p=.5;\n@#include \"body.inc\"\nsteady_state_model; y=0; end;\nplanner_objective y^2; ramsey_model(instruments=(r));\n";
+    let mut args = json!({
+        "active_file": "main.mod",
+        "file_content": root,
+        "files": {"main.mod": "", "body.inc": "model; y=0*p+e; end;"}
+    });
+    let reply = wire.call("dynare_diagnose", args.clone());
+    let decode = |reply: &Value| -> Vec<Value> {
+        assert!(reply.get("error").is_none(), "{reply}");
+        serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+    };
+    let diagnostics = decode(&reply);
+    let p = diagnostics
+        .iter()
+        .find(|d| d["code"] == "W022")
+        .expect("unused p");
+    assert_eq!(p["message"], "Parameter(s) p not used in the model");
+    assert!(
+        p["file"].is_null(),
+        "root-owned diagnostics omit the file key"
+    );
+    assert!(
+        !diagnostics.iter().any(|d| d["code"] == "W042"),
+        "{diagnostics:?}"
+    );
+
+    args["files"]["body.inc"] = json!("model; y=p+0*e; end;");
+    let diagnostics = decode(&wire.call("dynare_diagnose", args.clone()));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d["code"] == "E021" && d["file"].is_null()),
+        "{diagnostics:?}"
+    );
+
+    args["files"]["body.inc"] = json!("model; y=p+e; end;");
+    args["file_content"] = json!(format!("{root}resid(1);"));
+    let diagnostics = decode(&wire.call("dynare_diagnose", args.clone()));
+    assert!(
+        diagnostics.iter().any(|d| d["code"] == "E001"
+            && d["message"] == "syntax error, unexpected INT_NUMBER, expecting NON_ZERO"),
+        "{diagnostics:?}"
+    );
+    assert!(
+        !diagnostics.iter().any(|d| d["code"] == "E271"),
+        "{diagnostics:?}"
+    );
+
+    args["file_content"] = json!(format!("{root}resid(non_zero);"));
+    let diagnostics = decode(&wire.call("dynare_diagnose", args));
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| matches!(d["code"].as_str(), Some("E001" | "E021" | "W022" | "W042"))),
+        "{diagnostics:?}"
+    );
+}
