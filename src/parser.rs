@@ -8562,11 +8562,33 @@ impl Parser<'_> {
                 },
             );
         }
-        let stmt_end = if self.at(TokenKind::Semi) {
+        let saw_semi = self.at(TokenKind::Semi);
+        let stmt_end = if saw_semi {
             self.tokens[self.i].span.end
         } else {
             self.current_start()
         };
+        // The line scan stops on `@#endif`, so an active assignment whose next
+        // expanded token is `model`, another block, or EOF never reaches it.
+        // Dynare still refuses that file (`unexpected IDENTIFIER` / end of file).
+        if !saw_semi
+            && !self.in_native_assignment
+            && (self.at(TokenKind::Eof) || self.at_follower_keyword() || self.at_block_stop())
+        {
+            let issue_end = self
+                .tokens
+                .get(self.i.saturating_sub(1))
+                .filter(|token| token.kind != TokenKind::Eof && token.span.end >= tok.span.start)
+                .map(|token| token.span.end)
+                .unwrap_or(stmt_end);
+            self.record_issue(ParseIssue {
+                kind: ParseIssueKind::MissingAssignSemi { name: name.clone() },
+                span: Span {
+                    start: tok.span.start,
+                    end: issue_end,
+                },
+            });
+        }
         self.eat(TokenKind::Semi);
         let expression = join_lexemes(self.src, &self.tokens[expr_i..expr_end_i]);
         let id = self.intern.intern(&name);
@@ -9235,6 +9257,7 @@ impl Parser<'_> {
         family_spans.extend(cmd_spans);
         family_spans.sort_by_key(|span| (span.start, span.end));
         let trailing = trailing_code_line(&self.tokens, src);
+        let inactive = crate::macro_expand::inactive_macro_spans(src);
         let lines: Vec<&str> = src.split('\n').collect();
         for (i, line) in lines.iter().enumerate() {
             let i = i as u32;
@@ -9249,7 +9272,10 @@ impl Parser<'_> {
                     .map(|l| l.len() + 1)
                     .sum::<usize>() as u32
             };
-            if inside_span(line_start, &blocks) || inside_span(line_start, &family_spans) {
+            if inside_span(line_start, &blocks)
+                || inside_span(line_start, &family_spans)
+                || inside_span(line_start, &inactive)
+            {
                 continue;
             }
             let trimmed_start = line.len() - line.trim_start().len();
@@ -9300,15 +9326,23 @@ impl Parser<'_> {
                             && (after.starts_with('(') || after.starts_with(';')))
                 });
                 if follower {
-                    self.model.parse_issues.push(ParseIssue {
-                        kind: ParseIssueKind::MissingAssignSemi {
-                            name: name.to_string(),
-                        },
-                        span: Span {
-                            start: line_start,
-                            end: line_start + line.len() as u32,
-                        },
+                    let end = line_start + line.len() as u32;
+                    let already = self.model.parse_issues.iter().any(|issue| {
+                        matches!(issue.kind, ParseIssueKind::MissingAssignSemi { .. })
+                            && issue.span.start <= end
+                            && line_start <= issue.span.end
                     });
+                    if !already {
+                        self.model.parse_issues.push(ParseIssue {
+                            kind: ParseIssueKind::MissingAssignSemi {
+                                name: name.to_string(),
+                            },
+                            span: Span {
+                                start: line_start,
+                                end,
+                            },
+                        });
+                    }
                 }
                 break;
             }

@@ -670,6 +670,143 @@ fn pinned_dynare_72() -> Option<PathBuf> {
 }
 
 #[test]
+fn active_assignment_hidden_by_endif_is_a_missing_semicolon() {
+    let before_model = "\
+@#define ramsey_yes = 0
+parameters ramsey_yes_para;
+var y;
+@#if ramsey_yes == 1
+ramsey_yes_para=1;
+@#else
+ramsey_yes_para=0
+@#endif
+model;
+y = 0;
+end;
+";
+    let diags = check_parse(&parse(before_model));
+    let hit = diags
+        .iter()
+        .find(|diag| diag.message.contains("ramsey_yes_para"))
+        .expect("active assignment before model");
+    assert!(
+        hit.message.contains("is missing its terminating semicolon"),
+        "{}",
+        hit.message
+    );
+    assert!(hit.fix.is_some(), "{hit:?}");
+    let fixed = auto_fix(before_model);
+    assert!(fixed.contains("ramsey_yes_para=0;\n@#endif"), "{fixed}");
+    assert!(
+        fixed.contains("@#if ramsey_yes == 1\nramsey_yes_para=1;\n@#else"),
+        "discarded branch changed: {fixed}"
+    );
+    assert!(
+        !check_parse(&parse(&fixed))
+            .iter()
+            .any(|diag| diag.message.contains("missing its terminating semicolon")),
+        "{fixed}"
+    );
+
+    let at_eof = "\
+@#define cobb_douglas_yes = 0
+parameters CD_yes_para;
+@#if cobb_douglas_yes == 1
+CD_yes_para=1;
+@#else
+CD_yes_para=0
+@#endif
+";
+    assert!(
+        has_needle(
+            at_eof,
+            "Parameter assignment 'CD_yes_para' is missing its terminating semicolon"
+        ),
+        "{}",
+        messages(at_eof).join(" | ")
+    );
+    let eof_fixed = auto_fix(at_eof);
+    assert!(eof_fixed.contains("CD_yes_para=0;\n@#endif"), "{eof_fixed}");
+    assert!(!has_needle(&eof_fixed, "missing its terminating semicolon"));
+
+    let discarded = "\
+@#define flag = 1
+parameters beta;
+var y;
+@#if flag == 1
+beta = 0.99;
+@#else
+beta = 1
+model;
+@#endif
+model;
+y = 0;
+end;
+";
+    assert!(
+        !has_needle(discarded, "missing its terminating semicolon"),
+        "{}",
+        messages(discarded).join(" | ")
+    );
+    assert_eq!(auto_fix(discarded), discarded);
+
+    let native = "aaaa = 1\n";
+    assert!(
+        !has_needle(native, "missing its terminating semicolon"),
+        "{}",
+        messages(native).join(" | ")
+    );
+}
+
+#[test]
+fn honesty_assignment_before_endif() {
+    let Some(preprocessor) = pinned_dynare_72() else {
+        eprintln!("skipping honesty: Dynare 7.2 is absent");
+        return;
+    };
+    let missing = "\
+@#define ramsey_yes = 0
+parameters ramsey_yes_para;
+var y;
+@#if ramsey_yes == 1
+ramsey_yes_para=1;
+@#else
+ramsey_yes_para=0
+@#endif
+model;
+y = 0;
+end;
+";
+    let at_eof = "\
+parameters CD_yes_para;
+@#define cobb_douglas_yes = 0
+@#if cobb_douglas_yes == 1
+CD_yes_para=1;
+@#else
+CD_yes_para=0
+@#endif
+";
+    for (label, text, needle) in [
+        ("before-model", missing, "unexpected IDENTIFIER"),
+        ("eof", at_eof, "unexpected end of file"),
+    ] {
+        let result = run_preprocessor(
+            text,
+            &preprocessor,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Check,
+        );
+        let combined = format!("{}\n{}", result.raw_stdout, result.raw_stderr);
+        assert!(!result.success, "{label} was accepted:\n{combined}");
+        assert!(
+            combined.contains(needle),
+            "{label} missing {needle}: {combined}"
+        );
+    }
+}
+
+#[test]
 fn honesty_at_check_for_the_semicolon_repairs() {
     let Some(preprocessor) = pinned_dynare_72() else {
         eprintln!("skipping honesty: Dynare 7.2 is absent");
