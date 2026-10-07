@@ -192,7 +192,7 @@ fn declaration_owners_and_opaque_barriers_keep_final_type_queries() {
 
 #[test]
 fn retained_native_scalar_helpers_have_ordered_links_but_calls_stay_opaque() {
-    let model = parse("helper=2; parameters p; p=helper+1; native_call();\n");
+    let model = parse("helper=2;\nparameters p;\np=helper+1;\nnative_call();\n");
     assert_eq!(model.statements[0].kind, StatementKind::Assignment);
     assert_eq!(
         model.statements[0].assignment,

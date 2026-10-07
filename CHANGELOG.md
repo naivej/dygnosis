@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A native MATLAB assignment may read `oo_.steady_state` after `steady` or `perfect_foresight_solver`. The left-hand side is an unknown name, a `steady_state_model` value, or an external function. A declared parameter, a `#` local, and a `model_local_variable` still refuse a bare namespace name.
 - The bundled agent skill is renamed to **use-dynare** (folder `.agents/skills/use-dynare/`). Upstream credit to EconSolider/dynare-copilot is unchanged.
 - **use-dynare** no longer teaches how to launch MATLAB or Octave. Numerical Dynare runs go through the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit).
 - **I210** (Number written in an equation) is no longer reported. A number written in an equation, including a square such as `x^2`, does not establish a problem.

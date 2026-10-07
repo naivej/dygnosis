@@ -61,6 +61,7 @@ pub mod model;
 pub mod model_diff;
 pub mod model_info;
 pub mod model_map;
+mod native_line;
 pub mod parser;
 mod pinned_options;
 pub mod preprocessor;

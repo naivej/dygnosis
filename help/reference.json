@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "9c0ed508700b6e7a52469be57f3cee548e8335477abcfff40965bcffc4c60168",
+  "fingerprint": "3dd23945f9eb5387b3b434e8544676ab021ce563d2611cbecd8259cd620830c4",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -1321,7 +1321,7 @@
       "code": "E275",
       "kind": "shared",
       "title": "Namespace-qualified symbol",
-      "markdown": "### E275: Namespace-qualified symbol\n\nAn expression uses a bare namespace-qualified value such as `pkg.foo` where that variable form is not allowed. Dynare refuses: `Namespace-qualified symbol {ns}.{name} not allowed in this context`. A qualified function call such as `pkg.foo(1)` is a different form and is allowed in a steady-state RHS. An assignment with this refusal does not also emit W011 for the same expression.\n\n**Fix**\n\nUse a declared value without a namespace prefix, or supply the intended function arguments.\n"
+      "markdown": "### E275: Namespace-qualified symbol\n\nAn expression uses a bare namespace-qualified value such as `pkg.foo` where that variable form is not allowed. Dynare refuses: `Namespace-qualified symbol {ns}.{name} not allowed in this context`. A qualified function call such as `pkg.foo(1)` is a different form and is allowed in a steady-state RHS. An assignment with this refusal does not also emit W011 for the same expression. A top-level assignment whose head is absent from the symbol table, a mod-file local, or an external function is native MATLAB, not this expression.\n\n**Fix**\n\nUse a declared value without a namespace prefix, or supply the intended function arguments.\n"
     },
     {
       "code": "E276",

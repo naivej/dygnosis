@@ -1837,6 +1837,11 @@ fn merged_assignment_diags(
         .iter()
         .chain(&model.helper_assignments)
     {
+        // A true native line stores MATLAB text and no expression. `nobs = 1`
+        // inside `data(nobs=1)` is not a second Dynare assignment.
+        if a.native && a.expr.is_none() {
+            continue;
+        }
         consider(
             a.span,
             a.active_tokens.clone(),

@@ -8430,12 +8430,30 @@ impl Parser<'_> {
         }
     }
 
+    /// Dynare `NATIVE` is an unknown name, a mod-file local, or an external
+    /// function. A `#` local and `model_local_variable` also set
+    /// `in_native_assignment`. Those heads stay expressions.
+    fn assignment_head_is_native(&self, name: Name) -> bool {
+        if self.generated_policy_discount == Some(name) {
+            return false;
+        }
+        match self.model.final_symbol_kind(name) {
+            Some("mod_file_local" | "external_function") => true,
+            Some(_) => false,
+            None => self.declaration_of(name).is_none(),
+        }
+    }
+
     fn parse_top_assignment(&mut self) {
         let head = self.tokens[self.i].text(self.src).to_string();
         let name = self.intern.intern(&head);
         self.in_native_assignment =
             !self.is_statement_head_symbol(name) && self.generated_policy_discount != Some(name);
-        let assignment = self.parse_named_assignment();
+        let assignment = if self.assignment_head_is_native(name) {
+            self.parse_native_line_assignment()
+        } else {
+            self.parse_named_assignment()
+        };
         self.in_native_assignment = false;
         let Some(assignment) = assignment else {
             return;
@@ -8471,6 +8489,55 @@ impl Parser<'_> {
         true
     }
 
+    /// A true native assignment. The right-hand side is MATLAB text through
+    /// the pinned `NATIVE` end, so it is not a Dynare expression.
+    fn parse_native_line_assignment(&mut self) -> Option<Assignment> {
+        if !self.looks_like_assignment_start() {
+            self.skip_to_stmt_end();
+            self.eat(TokenKind::Semi);
+            return None;
+        }
+        let target_token = self.i;
+        let tok = self.bump();
+        let name = self.lexeme(&tok).to_string();
+        let region_end = crate::native_line::native_region_end(self.src, tok.span.start as usize);
+        let expr_i = self.i;
+        while !self.at(TokenKind::Eof) && (self.tokens[self.i].span.start as usize) < region_end {
+            self.bump();
+        }
+        let expr_end_i = self.i;
+        let eq_end = if expr_end_i > expr_i && self.tokens[expr_i].kind == TokenKind::Eq {
+            self.tokens[expr_i].span.end
+        } else {
+            tok.span.end
+        };
+        let stmt_end = if expr_end_i > expr_i {
+            self.tokens[expr_end_i - 1].span.end
+        } else {
+            tok.span.end
+        };
+        let expression = self
+            .src
+            .get(eq_end as usize..stmt_end as usize)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let id = self.intern.intern(&name);
+        self.record_write(id, target_token);
+        Some(Assignment {
+            symbol_type_context: self.model.symbol_context(),
+            name: id,
+            expression,
+            span: Span {
+                start: tok.span.start,
+                end: stmt_end,
+            },
+            expr: None,
+            native: true,
+            active_tokens: target_token..expr_end_i,
+        })
+    }
+
     fn parse_named_assignment(&mut self) -> Option<Assignment> {
         if !self.looks_like_assignment_start() {
             self.skip_to_stmt_end();
@@ -8489,8 +8556,10 @@ impl Parser<'_> {
             // A declared assignment keeps a following `name =` in the same
             // statement so a missing `;` is visible. Native MATLAB text stays
             // a separate statement; 7.2 accepts `aaaa = 1` then `bbbb = 2`.
+            // A name after `.` is a field (`xx.data(...)`), not a statement.
+            let after_dot = self.i > 0 && self.tokens[self.i - 1].kind == TokenKind::Dot;
             if (self.in_native_assignment && self.looks_like_assignment_start())
-                || self.at_follower_keyword()
+                || (self.at_follower_keyword() && !after_dot)
                 || self.at_block_stop()
             {
                 break;

@@ -22,13 +22,15 @@ fn values(text: &str) -> Vec<(String, Option<f64>, bool)> {
 
 #[test]
 fn assignments_follow_execution_and_legacy_final_readers_keep_their_meaning() {
-    let text = "helper=2; parameters p; p=helper+1; helper=p*2; p=helper+1;";
-    let actual = values(text);
+    let declared = "parameters helper p;\nhelper=2;\np=helper+1;\nhelper=p*2;\np=helper+1;";
+    let actual = values(declared);
     assert_eq!(
         actual.iter().map(|row| row.1).collect::<Vec<_>>(),
         [Some(2.0), Some(3.0), Some(6.0), Some(7.0)]
     );
-    assert_eq!(assigned_number(&parse(text), "p"), None);
+    let native = "helper=2;\nparameters p;\np=helper+1;\nhelper=p*2;\np=helper+1;";
+    assert!(values(native).iter().all(|row| row.1.is_none()));
+    assert_eq!(assigned_number(&parse(native), "p"), None);
     assert_eq!(
         assigned_number(&parse("parameters p; p=1/(1/0);"), "p"),
         Some(0.0)
@@ -71,7 +73,7 @@ fn arithmetic_is_finite_and_unknown_assignments_do_not_reuse_older_values() {
 #[test]
 fn skipped_native_rhs_text_and_unbalanced_parentheses_are_not_scalar_proofs() {
     for expression in ["2.*3", "2:3", "(2", "2+", "2@", "[2,3]", "2,3"] {
-        let text = format!("parameters p; p=2; helper={expression}; p=p+1;");
+        let text = format!("parameters p;\np=2;\nhelper={expression};\np=p+1;");
         let actual = values(&text);
         assert!(actual[1].1.is_none(), "{expression}: {actual:?}");
         assert!(
@@ -79,7 +81,7 @@ fn skipped_native_rhs_text_and_unbalanced_parentheses_are_not_scalar_proofs() {
             "{expression}: {actual:?}"
         );
     }
-    assert_eq!(values("helper=(2 /* comment */ +3);")[0].1, Some(5.0));
+    assert_eq!(values("helper=(2 /* comment */ +3);")[0].1, None);
 }
 
 #[test]
@@ -99,10 +101,10 @@ fn mutations_invalidate_state_and_explicit_assignments_restore_it() {
             "{barrier}"
         );
     }
-    let actual = values("parameters p q; p=2; helper=recalibrate(); q=p+1; p=3; q=p+1;");
+    let actual = values("parameters p q;\np=2;\nhelper=recalibrate();\nq=p+1;\np=3;\nq=p+1;");
     assert_eq!(actual[2].1, None);
     assert_eq!(actual[4].1, Some(4.0));
-    assert_eq!(values("p=2; parameters p q; q=p+1;")[1].1, None);
+    assert_eq!(values("p=2;\nparameters p q;\nq=p+1;")[1].1, None);
 }
 
 #[test]
@@ -129,13 +131,14 @@ fn native_control_flow_never_establishes_unconditional_values_inside_a_branch() 
 #[test]
 fn written_native_callee_shadows_survive_unknown_values_and_invalidate_later_knowledge() {
     let fresh =
-        values("parameters a b c d e; a=1; exp=exp(a); b=a+1; c=exp(a); d=a+1; a=2; e=a+1;");
+        values("parameters a b c d e;\na=1;\nexp=exp(a);\nb=a+1;\nc=exp(a);\nd=a+1;\na=2;\ne=a+1;");
     assert_eq!(fresh[1].1, None);
-    assert_eq!(fresh[2].1, Some(2.0));
+    assert_eq!(fresh[2].1, None);
     assert_eq!(fresh[4].1, None);
     assert_eq!(fresh[6].1, Some(3.0));
     for assignment in ["exp=2;", "exp=unknown;"] {
-        let text = format!("{assignment} parameters a b c d; a=1; b=exp(a); c=a+1; a=2; d=a+1;");
+        let text =
+            format!("{assignment}\nparameters a b c d;\na=1;\nb=exp(a);\nc=a+1;\na=2;\nd=a+1;");
         let actual = values(&text);
         assert_eq!(actual[2].1, None, "{assignment}: {actual:?}");
         assert_eq!(actual[3].1, None, "{assignment}: {actual:?}");
@@ -199,7 +202,7 @@ async fn hints_are_per_assignment_and_live_settings_clear_and_restore_them() {
     open(
         server,
         &root,
-        "helper=2; parameters p; p=helper+1; helper=p*2; p=helper+1;",
+        "parameters helper p;\nhelper=2;\np=helper+1;\nhelper=p*2;\np=helper+1;",
     )
     .await;
     assert_eq!(
