@@ -49,7 +49,7 @@
     "used": false
   },
   "implementation_cross_check": {
-    "path": ".agents/skills/dynare-copilot/references/examples/US_MI07_rep.mod",
+    "path": ".agents/skills/use-dynare/references/examples/US_MI07_rep.mod",
     "exists": true,
     "sha256": "0f9a3f7e520f0b9e2b5e67ad8fe9402aec02f6a65bae5e0d1b1bce43f0ee42ab",
     "used_as": "implementation_cross_check",

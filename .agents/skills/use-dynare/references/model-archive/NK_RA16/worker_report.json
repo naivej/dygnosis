@@ -29,7 +29,7 @@
     "raw_pdf_path_exists_checked": true,
     "raw_pdf_body_read": false,
     "appendix_normalization_exists": false,
-    "implementation_cross_check": ".agents/skills/dynare-copilot/references/examples/NK_RA16_rep.mod",
+    "implementation_cross_check": ".agents/skills/use-dynare/references/examples/NK_RA16_rep.mod",
     "raw_mmb_implementation_cross_check": "raw/mmb/mmci-cli/models/NK_RA16/NK_RA16.mod"
   },
   "proposed_catalog_row": {

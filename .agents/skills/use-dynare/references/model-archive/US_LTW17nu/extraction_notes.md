@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check Details
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/US_LTW17nu_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/US_LTW17nu_rep.mod`.
 - Used only as `implementation_cross_check`; no Dynare command was run.
 - Variant-specific findings from `.mod`:
   - `alphag = 0`, which removes government spending from utility.

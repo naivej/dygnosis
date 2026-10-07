@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_MI07AL_rep.mod` does not exist.
+- `.agents/skills/use-dynare/references/examples/US_MI07AL_rep.mod` does not exist.
 - `raw/mmb/mmci-cli/models/US_MI07AL/US_MI07AL.mod` exists and was read only as `implementation_cross_check`.
 - The implementation confirms a `model(linear)` structure with core variables `i`, `pi`, `pi_tilde`, `x`, `x_tilde`, `r_n`, and `u`.
 - The implementation adds Modelbase reporting variables and policy-rule aliases: `interest`, `inflation`, `inflationq`, `inflationql`, `inflationql2`, `inflationqls`, `outputgap`, and `output`.

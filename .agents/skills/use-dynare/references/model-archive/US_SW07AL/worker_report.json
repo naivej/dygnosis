@@ -11,13 +11,13 @@
     ".agents/skills/mmb-model-archive-builder/SKILL.md",
     ".agents/skills/mmb-model-archive-builder/references/subagent-task-template.md",
     "docs/MODEL_ARCHIVE_BUILD_PLAN.md",
-    ".agents/skills/dynare-copilot/references/derivation-style.md",
-    ".agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md",
+    ".agents/skills/use-dynare/references/derivation-style.md",
+    ".agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md",
     "raw/mmb_mineru/model_index.csv row for US_SW07AL",
     "raw/mmb_mineru/runs/us_sw07al__learning_in_an_estimated_medium_scale_dsge_model__4c268cb2/full.md",
     "raw/mmb_papers/Learning in an estimated medium-scale DSGE model.pdf existence check",
     "docs/mmb_appendix_full_normalizations/US_SW07AL.md existence check",
-    ".agents/skills/dynare-copilot/references/examples/US_SW07AL_rep.mod existence check"
+    ".agents/skills/use-dynare/references/examples/US_SW07AL_rep.mod existence check"
   ],
   "source_quality": {
     "title_match": "exact",

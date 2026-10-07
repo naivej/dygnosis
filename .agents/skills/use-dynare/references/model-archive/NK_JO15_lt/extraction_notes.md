@@ -22,7 +22,7 @@
 
 ## Implementation Cross-Check
 
-- Checked `.agents/skills/dynare-copilot/references/examples/NK_JO15_lt_rep.mod` only as `implementation_cross_check`.
+- Checked `.agents/skills/use-dynare/references/examples/NK_JO15_lt_rep.mod` only as `implementation_cross_check`.
 - Confirmed:
   - `model(linear)` form.
   - Low-trade openness calibration `alpha = 0.1`.

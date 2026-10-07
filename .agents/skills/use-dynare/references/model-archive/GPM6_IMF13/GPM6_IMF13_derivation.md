@@ -2,7 +2,7 @@
 
 > Status: `needs_review`. The indexed paper-side source is a 2008 U.S. small quarterly projection model paper, while the implementation cross-check identifies `GPM6_IMF13` as a six-region 2013 Global Projection Model. This entry records the paper-side equations that are actually supported by the linked source and flags the model/source mismatch as a `source_index_issue`.
 >
-> Provenance: `raw/mmb_mineru/model_index.csv` row `GPM6_IMF13`; source Markdown `raw/mmb_mineru/runs/gpm6_imf13_us_pm08_us_pm08fl__a_small_quarterly_projection_model_of_the_us_economy__a2e8676b/full.md`; raw PDF `raw/mmb_papers/A small quarterly projection model of the US economy.pdf`; MinerU run `a2e8676b-943b-4810-bcb5-d716951a7fa4`. Optional appendix normalization was not present. Implementation cross-check: `.agents/skills/dynare-copilot/references/examples/GPM6_IMF13_rep.mod`.
+> Provenance: `raw/mmb_mineru/model_index.csv` row `GPM6_IMF13`; source Markdown `raw/mmb_mineru/runs/gpm6_imf13_us_pm08_us_pm08fl__a_small_quarterly_projection_model_of_the_us_economy__a2e8676b/full.md`; raw PDF `raw/mmb_papers/A small quarterly projection model of the US economy.pdf`; MinerU run `a2e8676b-943b-4810-bcb5-d716951a7fa4`. Optional appendix normalization was not present. Implementation cross-check: `.agents/skills/use-dynare/references/examples/GPM6_IMF13_rep.mod`.
 
 ## 1. Model Overview
 

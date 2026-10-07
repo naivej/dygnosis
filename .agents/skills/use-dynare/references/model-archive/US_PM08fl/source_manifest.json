@@ -49,7 +49,7 @@
       "role": "not_available"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_PM08fl_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_PM08fl_rep.mod",
       "sha256": "f4b4f676a9fb253e20dfb0d621fb2b94e6697c340c2648ef2c4250514b2e77c4",
       "exists": true,
       "role": "implementation_cross_check",
@@ -66,8 +66,8 @@
     "source_order_followed": [
       ".agents/skills/mmb-model-archive-builder/SKILL.md",
       "docs/MODEL_ARCHIVE_BUILD_PLAN.md",
-      ".agents/skills/dynare-copilot/references/derivation-style.md",
-      ".agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md",
+      ".agents/skills/use-dynare/references/derivation-style.md",
+      ".agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md",
       "raw/mmb_mineru/model_index.csv row for US_PM08fl",
       "primary_full_md_path",
       "raw_pdf_path existence check",

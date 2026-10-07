@@ -23,7 +23,7 @@ Implementation files were used only as `implementation_cross_check`:
 
 - `raw/mmb/mmci-cli/models/US_FRB22_mcap/US_FRB22_mcap.mod`
 - `raw/mmb/mmci-cli/models/US_FRB22_mcap/US_FRB22_mcap.json`
-- `.agents/skills/dynare-copilot/references/examples/US_FRB22_rep.mod`
+- `.agents/skills/use-dynare/references/examples/US_FRB22_rep.mod`
 
 The local `US_FRB22_mcap.mod` header identifies this as the variant in which financial market expectations are model consistent, while other expectations are based on a small VAR. A non-runtime text count found 309 endogenous `var` tokens, 120 `varexo` tokens, and 274 named model equations.
 

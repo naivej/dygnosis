@@ -45,7 +45,7 @@
     },
     "appendix_normalization": null,
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_ET14_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_ET14_rep.mod",
       "sha256": "fa2224f5e6f77007c7279b8ae6fd34323bfc774c59103a2a216815eb1f61cadc",
       "used_for": [
         "variable coverage",

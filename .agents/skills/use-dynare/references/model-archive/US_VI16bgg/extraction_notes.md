@@ -14,12 +14,12 @@
 - Status: `needs_review`.
 - The main Markdown source contains Table 1 with linearized model equations, but the paper states that the online appendix contains full model details.
 - Optimization problems in Section 2 are therefore structural summaries, while the numbered equations in Sections 3-5 are anchored to Table 1 when present.
-- The AR(1) shock process signs are not printed in Table 1 and were taken from `.agents/skills/dynare-copilot/references/examples/US_VI16bgg_rep.mod` as `implementation_cross_check`.
+- The AR(1) shock process signs are not printed in Table 1 and were taken from `.agents/skills/use-dynare/references/examples/US_VI16bgg_rep.mod` as `implementation_cross_check`.
 - The employment Phillips curve is printed in Table 1, but the US implementation comments it out. The derivation keeps it as source-stated optional content and marks this as a review issue.
 
 ## Implementation Cross-Check
 
-- File read: `.agents/skills/dynare-copilot/references/examples/US_VI16bgg_rep.mod`.
+- File read: `.agents/skills/use-dynare/references/examples/US_VI16bgg_rep.mod`.
 - Cross-check findings:
   - Confirms `model(linear)`.
   - Confirms US SW-BGG variable set: `y c i w l pi r rn zk u k q rk ext_pr n` plus flexible-price counterparts.

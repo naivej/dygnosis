@@ -22,7 +22,7 @@ Status: `needs_review`
 
 ## Implementation Cross-Check
 
-- Read `.agents/skills/dynare-copilot/references/examples/EA_CW05fm_rep.mod` only as `implementation_cross_check`.
+- Read `.agents/skills/use-dynare/references/examples/EA_CW05fm_rep.mod` only as `implementation_cross_check`.
 - The `.mod` confirms:
   - `model(linear)`;
   - modelbase variables `interest`, `inflation`, `outputgap`;

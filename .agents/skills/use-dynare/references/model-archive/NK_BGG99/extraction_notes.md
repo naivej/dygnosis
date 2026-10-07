@@ -6,7 +6,7 @@
 - Primary Markdown: `raw/mmb_mineru/runs/nk_bgg99_nk_bgg99al__the_financial_accelerator_in_a_quantitative_business__e6291ccb/full.md`.
 - Raw PDF path exists: `raw/mmb_papers/The financial accelerator in a quantitative business.pdf`.
 - No appendix normalization file exists at `docs/mmb_appendix_full_normalizations/NK_BGG99.md`.
-- Implementation cross-check exists at `.agents/skills/dynare-copilot/references/examples/NK_BGG99_rep.mod`.
+- Implementation cross-check exists at `.agents/skills/use-dynare/references/examples/NK_BGG99_rep.mod`.
 
 ## Formula Quality
 
@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_BGG99_rep.mod` was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/NK_BGG99_rep.mod` was used only as `implementation_cross_check`.
 - The implementation uses `model(linear)`.
 - The implementation variables include `cH`, `hH`, `piH`, `rH`, `r_nH`, `qH`, `kH`, `nH`, `r_kH`, `yH`, `xH`, `iH`, `aH`, `c_eH`, `gH`, `pi_t1H`, and `premiumH`.
 - The implementation shocks are `e_a`, `e_g`, and `e_rn`.

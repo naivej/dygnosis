@@ -147,13 +147,13 @@ If the tools stay unavailable:
 ## 7. Install this skill
 
 Copy the **whole skill folder** — `SKILL.md`, `LICENSE` and `references/` with its catalogs, example
-models, archive and scripts — from a Dygnosis checkout (folder `.agents/skills/dynare-copilot/`) into
+models, archive and scripts — from a Dygnosis checkout (folder `.agents/skills/use-dynare/`) into
 the host's skill location. The folder name must equal the `name` in the `SKILL.md` frontmatter.
 
 | Host | Project location | Personal location |
 |---|---|---|
-| Claude Code | `.claude/skills/dynare-copilot/` | `~/.claude/skills/dynare-copilot/` |
-| Codex | `.agents/skills/dynare-copilot/` (the current folder up to the repository root) | `~/.agents/skills/dynare-copilot/` |
+| Claude Code | `.claude/skills/use-dynare/` | `~/.claude/skills/use-dynare/` |
+| Codex | `.agents/skills/use-dynare/` (the current folder up to the repository root) | `~/.agents/skills/use-dynare/` |
 | Cursor | `.agents/skills/` or `.cursor/skills/` | `~/.agents/skills/` or `~/.cursor/skills/` |
 
 Claude Code does not read `.agents/skills`. Cursor also reads `.claude/skills` and `.codex/skills`.

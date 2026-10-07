@@ -364,7 +364,7 @@ g_t=\rho_g g_{t-1}+\varepsilon_t^g.
 - **Open economy**: savers trade foreign bonds and satisfy an international risk-sharing condition; borrowers cannot finance expenditures in international markets.
 - **Currency board**: the nominal exchange rate is fixed, $`\widehat e_t=0`$, and monetary conditions are transmitted through terms of trade and foreign variables rather than a Taylor rule.
 - **Model form**: final implementation form is log-linear `model(linear)`. Lower-case hatted variables in the paper correspond to log deviations; variables such as interest and inflation are deviations from trend/steady state.
-- **Implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/HK_FP13_rep.mod` contains 33 endogenous variables and 13 exogenous innovations; it confirms the linear form, borrower/saver split, sectoral shocks, foreign blocks, and two active shock standard deviations for `epsd_s` and `epsd_b` in the Rep-MMB run.
+- **Implementation cross-check**: `.agents/skills/use-dynare/references/examples/HK_FP13_rep.mod` contains 33 endogenous variables and 13 exogenous innovations; it confirms the linear form, borrower/saver split, sectoral shocks, foreign blocks, and two active shock standard deviations for `epsd_s` and `epsd_b` in the Rep-MMB run.
 
 ## 8. Variable & Parameter Reference Table
 

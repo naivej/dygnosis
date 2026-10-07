@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_FLMF18_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_FLMF18_rep.mod`.
 - Used only to confirm variable coverage, shock names, switch names, and timing/form conventions.
 - Confirmed shocks include `EZ`, `EOMEGA`, `EA`, `EG`, `EERR`, and `EGG`.
 - Confirmed level/log dual naming with `N`-prefixed level variables and logged reporting variables such as `Y=ln(NY)`, `Q=ln(NQ)`, and `R=ln(NR)`.

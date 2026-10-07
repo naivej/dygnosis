@@ -11,7 +11,7 @@ Source: Filardo, Andrew; Lombardi, Marco; Montoro, Carlos; Ferrari, Massimo (201
 - **Key mechanism**: The real commodity price is endogenous. Commodity demand comes from importer household consumption and final-goods production; commodity supply comes from a dominant exporter and a competitive fringe. Monetary policy may misdiagnose commodity-price changes as supply or demand driven.
 - **Policy experiments**: Efficient/natural/benchmark policy rules, commodity supply and aggregate demand shocks, and misdiagnosis exercises.
 - **Form**: The paper presents nonlinear equilibrium conditions and log-linear benchmark equations. The MMB implementation uses nonlinear level equations plus log transformations and first-order `stoch_simul`; the operational decision rules are linearized around steady state. This entry records both source nonlinear blocks and the log-linear policy/benchmark form.
-- **Main sources**: `raw/mmb_mineru/runs/nk_flmf18__monetary_policy_spillovers_global_commoditiy_prices_and_cooperation__837579b4/full.md`; implementation cross-check only: `.agents/skills/dynare-copilot/references/examples/NK_FLMF18_rep.mod`.
+- **Main sources**: `raw/mmb_mineru/runs/nk_flmf18__monetary_policy_spillovers_global_commoditiy_prices_and_cooperation__837579b4/full.md`; implementation cross-check only: `.agents/skills/use-dynare/references/examples/NK_FLMF18_rep.mod`.
 
 ## 2. Optimization Problems
 

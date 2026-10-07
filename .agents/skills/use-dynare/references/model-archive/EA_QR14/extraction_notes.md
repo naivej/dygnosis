@@ -18,7 +18,7 @@ Status: `needs_review`.
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EA_QR14_rep.mod` exists and was used only to check variable names, shock names, timing, policy rule structure, and steady-state initialization.
+- `.agents/skills/use-dynare/references/examples/EA_QR14_rep.mod` exists and was used only to check variable names, shock names, timing, policy rule structure, and steady-state initialization.
 - The `.mod` implements a nonlinear exponentiated stationary model and uses first-order simulation. This differs in presentation from the paper appendix, which lists linearized conditions.
 - The `.mod` confirms the model has saver and borrower blocks in both countries, housing stock laws with lagged investment, credit-to-GDP macroprudential rules, international premium shock, risk shocks, preference shocks, sectoral technology shocks, and a common unit-root technology shock.
 

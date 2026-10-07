@@ -12,7 +12,7 @@
 
 - English derivation was drafted first using the required eight-section structure.
 - The paper-side Markdown gives the main model blocks in sections 5.1-5.4 but says the full stationary equilibrium is characterized in appendix 3. That appendix was not available as a local normalization file.
-- The `.mod` file `.agents/skills/dynare-copilot/references/examples/US_FV15_rep.mod` was read only as `implementation_cross_check`.
+- The `.mod` file `.agents/skills/use-dynare/references/examples/US_FV15_rep.mod` was read only as `implementation_cross_check`.
 
 ## Formula Quality
 
@@ -24,7 +24,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_FV15_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_FV15_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms endogenous variables `d`, `c`, `mu_z`, `mu_I`, `mu_A`, `lambda`, `R`, `PI`, `r`, `x`, `u`, `q`, `f`, `ld`, `w`, `wstar`, `PIstarw`, `PIstar`, `g1`, `g2`, `yd`, `mc`, `k`, `vp`, `vw`, `l`, `phi`, `F`, `sigma_dt`, `sigma_phit`, `sigma_mut`, `sigma_At`, `sigma_mt`, `gammaPIt`, `gammayt`, and `yg`.
 - The `.mod` confirms exogenous innovations `epsd`, `epsphi`, `epsmu_I`, `epsA`, `epsm`, `ud`, `uphi`, `umu`, `uA`, `um`, `epspi`, and `epsy`.
 - The `.mod` declares `predetermined_variables k`, matching the timing note that production uses predetermined capital.

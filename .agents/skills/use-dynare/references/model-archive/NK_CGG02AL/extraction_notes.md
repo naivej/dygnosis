@@ -7,7 +7,7 @@
 - Primary source Markdown: `raw/mmb_mineru/runs/nk_cgg02_nk_cgg02al__a_simple_framework_for_international_monetary_policy_analysis__8ffaf5fd/full.md`.
 - Raw PDF path exists: `raw/mmb_papers/A simple framework for international monetary policy analysis.pdf`.
 - No model-specific appendix normalization was present at `docs/mmb_appendix_full_normalizations/NK_CGG02AL.md`.
-- No optional implementation cross-check file was present at `.agents/skills/dynare-copilot/references/examples/NK_CGG02AL_rep.mod`.
+- No optional implementation cross-check file was present at `.agents/skills/use-dynare/references/examples/NK_CGG02AL_rep.mod`.
 
 ## Formula Quality
 

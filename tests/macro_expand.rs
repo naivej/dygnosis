@@ -35,14 +35,14 @@ fn lexemes<'a>(src: &'a str, tokens: &'a [Token]) -> Vec<&'a str> {
 
 fn copilot_archive(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".agents/skills/dynare-copilot/references/model-archive")
+        .join(".agents/skills/use-dynare/references/model-archive")
         .join(name)
         .join(format!("{name}.mod"))
 }
 
 fn copilot_example(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".agents/skills/dynare-copilot/references/examples")
+        .join(".agents/skills/use-dynare/references/examples")
         .join(format!("{name}.mod"))
 }
 

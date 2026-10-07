@@ -57,7 +57,7 @@
       "source_role": "hand-normalized online-appendix formula inventory when present"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/EA_CW05fm_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/EA_CW05fm_rep.mod",
       "sha256": "188c61e31b19c5516c0beadca399231ce5f3ca4ff9a656d6fa98af45646e9beb",
       "exists_at_extraction": true,
       "source_role": "MMB implementation cross-check only; not paper-side mathematical source"

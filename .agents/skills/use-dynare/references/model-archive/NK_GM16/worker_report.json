@@ -13,7 +13,7 @@
     "primary_full_md_path": "raw/mmb_mineru/runs/nk_gm16__understanding_the_gains_from_wage_flexibility_the_exchange_rate_connecti__f3573fbb/full.md",
     "raw_pdf_path": "raw/mmb_papers/Understanding the Gains from Wage Flexibility- The Exchange Rate Connection.pdf",
     "appendix_normalization_path": null,
-    "implementation_cross_check_path": ".agents/skills/dynare-copilot/references/examples/NK_GM16_rep.mod"
+    "implementation_cross_check_path": ".agents/skills/use-dynare/references/examples/NK_GM16_rep.mod"
   },
   "actions": [
     "Read required archive build plan and derivation style references.",

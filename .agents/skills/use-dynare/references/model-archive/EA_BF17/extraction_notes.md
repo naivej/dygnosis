@@ -16,12 +16,12 @@
 - The primary Markdown states that the two DSGE models are presented in the Online Appendix. The local MinerU text does not include the Online Appendix model-equation block.
 - The Markdown contains useful model-identification evidence: Model 1 is the separable Gali-style baseline; Model 2 has nonseparable preferences between consumption and real money balances and a money-augmented policy rule; observed variables are output, inflation, short-term interest rate, and real money balances; shocks are markup, technology, monetary policy, and money shocks.
 - Parameter and prior tables are present for `beta`, `alpha`, `theta`, `nu`, `sigma`, `b`, `eta`, `epsilon`, Taylor-rule coefficients, shock persistence, and shock standard errors.
-- The derivation uses reduced equations cross-checked against `.agents/skills/dynare-copilot/references/examples/EA_BF17_rep.mod` and marks coefficient-level source uncertainty as `needs_review`.
+- The derivation uses reduced equations cross-checked against `.agents/skills/use-dynare/references/examples/EA_BF17_rep.mod` and marks coefficient-level source uncertainty as `needs_review`.
 - No PDF body was opened; raw PDF existence and hash were recorded for provenance only.
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/EA_BF17_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/EA_BF17_rep.mod`.
 - Used only as `implementation_cross_check`, not as paper-side mathematical evidence.
 - Confirmed log-linear implementation variables: `y, pi, r, mp, yf, mpf, ep, ei, em, at, ygap`.
 - Confirmed exogenous innovations: `up, ui, um, ua`.

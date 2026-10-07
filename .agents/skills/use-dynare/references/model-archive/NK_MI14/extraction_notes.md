@@ -26,7 +26,7 @@ Consequences:
 
 ## Implementation Cross-Check
 
-Read `.agents/skills/dynare-copilot/references/examples/NK_MI14_rep.mod` only as `implementation_cross_check`.
+Read `.agents/skills/use-dynare/references/examples/NK_MI14_rep.mod` only as `implementation_cross_check`.
 
 Used for:
 
@@ -41,7 +41,7 @@ Not used for:
 - claiming paper-side equations;
 - replacing source equations;
 - runtime validation;
-- promotion to `.agents/skills/dynare-copilot/references/model-archive/`.
+- promotion to `.agents/skills/use-dynare/references/model-archive/`.
 
 ## Deferred Issues
 

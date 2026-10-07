@@ -17,7 +17,7 @@ Status: `needs_review`
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_RS99_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_RS99_rep.mod` exists and was read only as `implementation_cross_check`.
 - Cross-check findings:
   - Endogenous variables: `pi`, `y`, `i`, `pibar`, `ibar`.
   - Exogenous shocks: `eps`, `eta`.

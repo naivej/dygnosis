@@ -6,7 +6,7 @@
 - Primary Markdown: `raw/mmb_mineru/runs/bra_samba08__samba_stochastic_analytical_model_with_a_bayesian_approach__8681ba38/full.md`.
 - Raw PDF path checked and exists: `raw/mmb_papers/Stochastic analytical model with a bayesian approach 2011.pdf`.
 - Appendix normalization: none found at `docs/mmb_appendix_full_normalizations/BRA_SAMBA08.md`.
-- Implementation cross-check found: `.agents/skills/dynare-copilot/references/examples/BRA_SAMBA08_rep.mod`.
+- Implementation cross-check found: `.agents/skills/use-dynare/references/examples/BRA_SAMBA08_rep.mod`.
 - Source-review issue: the model index row is labeled 2008, but the primary source title is the 2011 Banco Central do Brasil working paper. The row also contains `primary source title differs from model title; review variant mapping`.
 
 ## Formula Quality

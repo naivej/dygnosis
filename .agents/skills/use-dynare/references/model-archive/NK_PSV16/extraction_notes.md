@@ -20,7 +20,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_PSV16_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_PSV16_rep.mod`.
 - Used only to identify the implemented variable set, calibration constants, linearized BGG baseline equations, and timing conventions.
 - Dynare was not run.
 - The `.mod` confirms endogenous variables: `y c i g ce n rk r q k x a h pi rn qtilde`.

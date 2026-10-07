@@ -7,7 +7,7 @@
 - Primary Markdown: `raw/mmb_mineru/runs/nk_gn25__energy_price_shocks_unemployment_and_monetary_policy__ca6f092e/full.md`.
 - Raw PDF exists at `raw/mmb_papers/Energy price shocks, unemployment, and monetary policy.pdf`; PDF body was not read because the Markdown contained the model equations needed for a first-pass extraction.
 - No optional normalization file was present at `docs/mmb_appendix_full_normalizations/NK_GN25.md`.
-- No optional implementation cross-check file was present at `.agents/skills/dynare-copilot/references/examples/NK_GN25_rep.mod`.
+- No optional implementation cross-check file was present at `.agents/skills/use-dynare/references/examples/NK_GN25_rep.mod`.
 - Shared `catalog.csv` and `status.csv` were not edited because this task explicitly assigns ownership only over `mmb-paper-derivations/derivations/NK_GN25/`.
 
 ## Formula Quality
@@ -21,7 +21,7 @@
 
 ## Implementation Cross-Check
 
-- No local `.agents/skills/dynare-copilot/references/examples/NK_GN25_rep.mod` file exists.
+- No local `.agents/skills/use-dynare/references/examples/NK_GN25_rep.mod` file exists.
 - No `.mod` source was used as a mathematical source.
 - Variable and timing coverage were inferred from the paper-side Markdown only.
 

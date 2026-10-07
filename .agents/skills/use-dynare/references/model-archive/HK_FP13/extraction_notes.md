@@ -20,7 +20,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/HK_FP13_rep.mod` was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/HK_FP13_rep.mod` was used only as `implementation_cross_check`.
 - The implementation confirms:
   - `model (linear)` form;
   - borrower/saver split (`c_b`, `c_s`, `d_b`, `d_s`, `b_b`, `psi`);

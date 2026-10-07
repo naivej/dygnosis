@@ -43,7 +43,7 @@
     "sha256": null
   },
   "implementation_cross_check": {
-    "path": ".agents/skills/dynare-copilot/references/examples/US_CCTW10_rep.mod",
+    "path": ".agents/skills/use-dynare/references/examples/US_CCTW10_rep.mod",
     "sha256": "6eec22c82b6835718c58f0ed87647aca59e60793291d504bbca85f0d6c7becc8",
     "used_for": [
       "variable coverage",

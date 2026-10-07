@@ -25,4 +25,4 @@ For MATLAB integration, see the [MATLAB extension for VS Code](https://github.co
 
 ## License
 
-[GPL-3.0-or-later](../../LICENSE). The bundled dynare-copilot skill retains its upstream [MIT license](https://github.com/EconSolider/dynare-copilot/blob/main/LICENSE).
+[GPL-3.0-or-later](../../LICENSE). The bundled use-dynare skill retains its upstream [MIT license](https://github.com/EconSolider/dynare-copilot/blob/main/LICENSE).

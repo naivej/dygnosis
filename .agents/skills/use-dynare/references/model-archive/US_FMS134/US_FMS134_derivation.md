@@ -11,7 +11,7 @@ Model ID: `US_FMS134`. Status: `needs_review`.
 - **Frictions**: external habit in consumption services, investment adjustment costs, variable capital utilization, monopolistic competition, Calvo price and wage rigidities with indexation, seven structural shocks, and endogenous government spending.
 - **Form**: `model(linear)`. The paper states that the estimated model is log-linearized and cast in state-space form; the MMB implementation cross-check confirms a linear Dynare model. Variables below are stationary log deviations or observation equations unless a steady-state object is explicitly named.
 - **Runtime validation**: not performed. Dynare was not run.
-- **Provenance boundary**: paper-side Markdown is the source. `.agents/skills/dynare-copilot/references/examples/US_FMS134_rep.mod` is used only as `implementation_cross_check`.
+- **Provenance boundary**: paper-side Markdown is the source. `.agents/skills/use-dynare/references/examples/US_FMS134_rep.mod` is used only as `implementation_cross_check`.
 
 ## 2. Optimization Problems
 

@@ -48,7 +48,7 @@
       "used_as": null
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_GMAS25ppi_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_GMAS25ppi_rep.mod",
       "sha256": null,
       "exists": false,
       "used_as": null

@@ -1,6 +1,6 @@
 # NK_PSV16 - Derivation (optimization problems and equilibrium conditions)
 
-> This derivation is a first-pass private archive entry for Model ID `NK_PSV16`. It is source-backed by the MinerU Markdown of Pancrazi, Seoane, and Vukotic (2016), "The price of capital and the financial accelerator", and uses `.agents/skills/dynare-copilot/references/examples/NK_PSV16_rep.mod` only as `implementation_cross_check`. Runtime validation was not performed.
+> This derivation is a first-pass private archive entry for Model ID `NK_PSV16`. It is source-backed by the MinerU Markdown of Pancrazi, Seoane, and Vukotic (2016), "The price of capital and the financial accelerator", and uses `.agents/skills/use-dynare/references/examples/NK_PSV16_rep.mod` only as `implementation_cross_check`. Runtime validation was not performed.
 
 ## 1. Model Overview
 

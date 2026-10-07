@@ -60,7 +60,7 @@
     },
     {
       "role": "implementation_cross_check",
-      "path": ".agents/skills/dynare-copilot/references/examples/US_FGKR15_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_FGKR15_rep.mod",
       "sha256": "e73fb539d63ae342cee8873927719699d9a7b34783e993672300457cc06c6857",
       "used_for": [
         "variable coverage",

@@ -2,7 +2,7 @@
 
 > Archive draft for source-backed model extraction. Runtime validation was not performed.
 
-Provenance: `NK_JO15_lt`, Jang and Okano (2015), "Productivity Shocks and Monetary Policy in a Two-Country Model", Front. Econ. China, 10(1), 7-37, DOI `10.1016/j.jpolmod.2015.03.017`. Primary source Markdown: `raw/mmb_mineru/runs/nk_jo15_ht_nk_jo15_lt__productivity_shocks_and_monetary_policy_in_a_two_country_model__f031feec/full.md`. Raw PDF path checked: `raw/mmb_papers/Productivity Shocks and Monetary Policy in a Two-Country Model.pdf`. MinerU run id: `f031feec-a81e-43ec-ac7a-f89bd2d73785`. Appendix normalization: none found. Implementation cross-check: `.agents/skills/dynare-copilot/references/examples/NK_JO15_lt_rep.mod`.
+Provenance: `NK_JO15_lt`, Jang and Okano (2015), "Productivity Shocks and Monetary Policy in a Two-Country Model", Front. Econ. China, 10(1), 7-37, DOI `10.1016/j.jpolmod.2015.03.017`. Primary source Markdown: `raw/mmb_mineru/runs/nk_jo15_ht_nk_jo15_lt__productivity_shocks_and_monetary_policy_in_a_two_country_model__f031feec/full.md`. Raw PDF path checked: `raw/mmb_papers/Productivity Shocks and Monetary Policy in a Two-Country Model.pdf`. MinerU run id: `f031feec-a81e-43ec-ac7a-f89bd2d73785`. Appendix normalization: none found. Implementation cross-check: `.agents/skills/use-dynare/references/examples/NK_JO15_lt_rep.mod`.
 
 ## 1. Model Overview
 

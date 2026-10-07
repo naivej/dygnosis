@@ -9,7 +9,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "e001.rs::e001_clean_archive_files_are_empty",
       "cluster": "",
       "notes": "clean archive: no E001"
@@ -21,7 +21,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "e001.rs::e001_clean_archive_files_are_empty",
       "cluster": "",
       "notes": "clean archive: no E001"
@@ -33,7 +33,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/lk2024/lk2024.mod",
       "source": "e001.rs::e001_clean_archive_files_are_empty",
       "cluster": "",
       "notes": "clean archive: no E001"
@@ -45,7 +45,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "e001.rs::e001_clean_archive_files_are_empty",
       "cluster": "",
       "notes": "govt option lists are parse-clean; no fake E001; reuse, do not mutate for W130"
@@ -545,7 +545,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "auto_fix.rs::apply_matches_python_required_rows",
       "cluster": "",
       "notes": "identity auto_fix on clean archives including govt_rbc"
@@ -555,7 +555,7 @@
       "codes": [],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "auto_fix.rs::apply_matches_python_required_rows",
       "cluster": "",
       "notes": "auto_fix on archive"
@@ -565,7 +565,7 @@
       "codes": [],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/lk2024/lk2024.mod",
       "source": "auto_fix.rs::apply_matches_python_required_rows",
       "cluster": "",
       "notes": "auto_fix on archive"
@@ -577,7 +577,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "auto_fix.rs::apply_identity_on_clean_archives",
       "cluster": "",
       "notes": "identity auto_fix; no fake MoM E001"
@@ -587,7 +587,7 @@
       "codes": [],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "auto_fix.rs::cascade_clean_trend_is_empty",
       "cluster": "",
       "notes": "thin codes empty"
@@ -611,7 +611,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "auto_fix.rs::cascade_govt_rbc_has_no_option_list_e001",
       "cluster": "",
       "notes": "no option-list E001; leftover Warnings allowed"
@@ -635,7 +635,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "e010.rs::e010_unmodified_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "unmodified archive E010 family"
@@ -647,7 +647,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "e010.rs::e010_unmodified_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "unmodified archive E010 family"
@@ -659,7 +659,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "e010.rs::e010_unmodified_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "unmodified archive E010 family"
@@ -671,7 +671,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/lk2024/lk2024.mod",
       "source": "e010.rs::e010_unmodified_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "unmodified archive E010 family"
@@ -824,7 +824,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "e030.rs::e030_unmodified_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "unmodified archive E030"
@@ -837,7 +837,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "e030.rs::e030_unmodified_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "unmodified archive E030"
@@ -850,7 +850,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "e030.rs::e030_unmodified_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "unmodified archive E030"
@@ -863,7 +863,7 @@
       ],
       "kind": "archive",
       "package": "parse",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/lk2024/lk2024.mod",
       "source": "e030.rs::e030_unmodified_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "unmodified archive E030"
@@ -1040,7 +1040,7 @@
       ],
       "kind": "archive",
       "package": "e020",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "d_e020.rs::e020_unmodified_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "unmodified archive E020 family empty"
@@ -1055,7 +1055,7 @@
       ],
       "kind": "archive",
       "package": "e020",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "d_e020.rs::e020_unmodified_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "unmodified archive E020 family empty"
@@ -1070,7 +1070,7 @@
       ],
       "kind": "archive",
       "package": "e020",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "d_e020.rs::e020_unmodified_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "unmodified archive E020 family empty"
@@ -1085,7 +1085,7 @@
       ],
       "kind": "archive",
       "package": "e020",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/lk2024/lk2024.mod",
       "source": "d_e020.rs::e020_unmodified_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "unmodified archive E020 family empty"
@@ -1210,7 +1210,7 @@
       ],
       "kind": "archive",
       "package": "shape",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "d_e040.rs::shape_clean_trend_rbc_gov_inv",
       "cluster": "",
       "notes": "FAMILY empty"
@@ -1222,7 +1222,7 @@
       ],
       "kind": "archive",
       "package": "shape",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "d_e040.rs::shape_clean_sims_wu_2019",
       "cluster": "",
       "notes": "archive I050; do not duplicate"
@@ -1243,7 +1243,7 @@
       ],
       "kind": "archive",
       "package": "shape",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "d_e040.rs::shape_clean_govt_rbc_irf_matching",
       "cluster": "",
       "notes": "FAMILY empty (parse-clean; not E001 cascade)"
@@ -1255,7 +1255,7 @@
       ],
       "kind": "archive",
       "package": "shape",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/lk2024/lk2024.mod",
       "source": "d_e040.rs::shape_clean_lk2024",
       "cluster": "",
       "notes": "archive I050; do not duplicate"
@@ -1441,7 +1441,7 @@
       ],
       "kind": "archive",
       "package": "include",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/swff/swff.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/swff/swff.mod",
       "source": "e060.rs::e060_clean_fixtures_empty",
       "cluster": "",
       "notes": "clean include archive"
@@ -1459,7 +1459,7 @@
       ],
       "kind": "archive",
       "package": "include",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/zlb_qe/zlb_qe.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/zlb_qe/zlb_qe.mod",
       "source": "e060.rs::e060_clean_fixtures_empty",
       "cluster": "",
       "notes": "clean include archive"
@@ -1477,7 +1477,7 @@
       ],
       "kind": "archive",
       "package": "include",
-      "fixture": ".agents/skills/dynare-copilot/references/examples/US_RE09_rep.mod",
+      "fixture": ".agents/skills/use-dynare/references/examples/US_RE09_rep.mod",
       "source": "e060.rs::e060_clean_fixtures_empty",
       "cluster": "",
       "notes": "clean example with includes"
@@ -1794,7 +1794,7 @@
       ],
       "kind": "archive",
       "package": "w010",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "w010.rs::w010_clean_archives_empty",
       "cluster": "",
       "notes": "clean archive W010 family empty"
@@ -1811,7 +1811,7 @@
       ],
       "kind": "archive",
       "package": "w010",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "w010.rs::w010_clean_archives_empty",
       "cluster": "",
       "notes": "clean archive W010 family empty"
@@ -1828,7 +1828,7 @@
       ],
       "kind": "archive",
       "package": "w010",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "w010.rs::w010_clean_archives_empty",
       "cluster": "",
       "notes": "clean archive W010 family empty"
@@ -1845,7 +1845,7 @@
       ],
       "kind": "archive",
       "package": "w010",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/lk2024/lk2024.mod",
       "source": "w010.rs::w010_clean_archives_empty",
       "cluster": "",
       "notes": "clean archive W010 family empty"
@@ -2019,7 +2019,7 @@
       ],
       "kind": "archive",
       "package": "est",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "w090.rs::w090_unmodified_govt_empty",
       "cluster": "",
       "notes": "estimation archive empty FAMILY (E001 is other family)"
@@ -2036,7 +2036,7 @@
       ],
       "kind": "archive",
       "package": "est",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "w090.rs::w090_clean_extra_empty",
       "cluster": "",
       "notes": "no estimation \u2192 empty FAMILY"
@@ -2053,7 +2053,7 @@
       ],
       "kind": "archive",
       "package": "est",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "w090.rs::w090_clean_extra_empty",
       "cluster": "",
       "notes": "no estimation \u2192 empty FAMILY"
@@ -2070,7 +2070,7 @@
       ],
       "kind": "archive",
       "package": "est",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/lk2024/lk2024.mod",
       "source": "w090.rs::w090_clean_extra_empty",
       "cluster": "",
       "notes": "no estimation \u2192 empty FAMILY"
@@ -2270,7 +2270,7 @@
       ],
       "kind": "archive",
       "package": "est",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "w100.rs::w100_clean_four_empty",
       "cluster": "",
       "notes": "clean archive no policy FAMILY"
@@ -2285,7 +2285,7 @@
       ],
       "kind": "archive",
       "package": "est",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "w100.rs::w100_clean_four_empty",
       "cluster": "",
       "notes": "clean archive no policy FAMILY"
@@ -2300,7 +2300,7 @@
       ],
       "kind": "archive",
       "package": "est",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "w100.rs::w100_clean_four_empty",
       "cluster": "",
       "notes": "clean archive no policy FAMILY"
@@ -2315,7 +2315,7 @@
       ],
       "kind": "archive",
       "package": "est",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/lk2024/lk2024.mod",
       "source": "w100.rs::w100_clean_four_empty",
       "cluster": "",
       "notes": "clean archive no policy FAMILY"
@@ -2545,7 +2545,7 @@
       ],
       "kind": "archive",
       "package": "est",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "w110.rs::w110_clean_four_empty",
       "cluster": "",
       "notes": "clean archive shocks FAMILY empty"
@@ -2560,7 +2560,7 @@
       ],
       "kind": "archive",
       "package": "est",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "w110.rs::w110_clean_four_empty",
       "cluster": "",
       "notes": "clean archive shocks FAMILY empty"
@@ -2575,7 +2575,7 @@
       ],
       "kind": "archive",
       "package": "est",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "w110.rs::w110_clean_four_empty",
       "cluster": "",
       "notes": "clean archive shocks FAMILY empty"
@@ -2590,7 +2590,7 @@
       ],
       "kind": "archive",
       "package": "est",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/lk2024/lk2024.mod",
       "source": "w110.rs::w110_clean_four_empty",
       "cluster": "",
       "notes": "clean archive shocks FAMILY empty"
@@ -2744,7 +2744,7 @@
       ],
       "kind": "archive",
       "package": "w120",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "w120.rs::w120_clean_four_empty",
       "cluster": "",
       "notes": "clean archive W120 family empty"
@@ -2758,7 +2758,7 @@
       ],
       "kind": "archive",
       "package": "w120",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "w120.rs::w120_clean_four_empty",
       "cluster": "",
       "notes": "clean archive W120 family empty"
@@ -2772,7 +2772,7 @@
       ],
       "kind": "archive",
       "package": "w120",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "w120.rs::w120_clean_four_empty",
       "cluster": "",
       "notes": "clean archive W120 family empty"
@@ -2786,7 +2786,7 @@
       ],
       "kind": "archive",
       "package": "w120",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/lk2024/lk2024.mod",
       "source": "w120.rs::w120_clean_four_empty",
       "cluster": "",
       "notes": "clean archive W120 family empty"
@@ -3221,7 +3221,7 @@
       ],
       "kind": "archive",
       "package": "w130",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/trend_rbc_gov_inv/trend_rbc_gov_inv.mod",
       "source": "w130.rs::w130_clean_four_empty",
       "cluster": "",
       "notes": "clean archive W130 family empty (do not mutate govt_rbc for W130)"
@@ -3236,7 +3236,7 @@
       ],
       "kind": "archive",
       "package": "w130",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "w130.rs::w130_clean_four_empty",
       "cluster": "",
       "notes": "clean archive W130 family empty (do not mutate govt_rbc for W130)"
@@ -3251,7 +3251,7 @@
       ],
       "kind": "archive",
       "package": "w130",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/govt_rbc_irf_matching/govt_rbc_irf_matching.mod",
       "source": "w130.rs::w130_clean_four_empty",
       "cluster": "",
       "notes": "clean archive W130 family empty (do not mutate govt_rbc for W130)"
@@ -3266,7 +3266,7 @@
       ],
       "kind": "archive",
       "package": "w130",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/lk2024/lk2024.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/lk2024/lk2024.mod",
       "source": "w130.rs::w130_clean_four_empty",
       "cluster": "",
       "notes": "clean archive W130 family empty (do not mutate govt_rbc for W130)"
@@ -4059,7 +4059,7 @@
       ],
       "kind": "archive",
       "package": "other",
-      "fixture": ".agents/skills/dynare-copilot/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
+      "fixture": ".agents/skills/use-dynare/references/model-archive/sims_wu_2019/sims_wu_2019.mod",
       "source": "check.rs::i050_uses_recorded_rust_message",
       "cluster": "",
       "notes": "CLI prints recorded I050; archive not a new file"

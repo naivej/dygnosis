@@ -14,7 +14,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_GM05_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/NK_GM05_rep.mod` exists and was used only as `implementation_cross_check`.
 - The example confirms the MMB representation is `model(linear)` and uses endogenous variables `pih`, `x`, `y`, `ynat`, `rnat`, `r`, `s`, `pi`, `p`, `ph`, `e`, `ystar`, `a`, and `pistar`.
 - The example fixes the active policy to strict domestic inflation targeting with `pih = 0`; DITR, CITR, PEG, and UIP alternatives are present as commented implementation choices.
 - The example sets foreign inflation to zero (`pistar = 0`) and uses shocks `a_` and `ystar_`.

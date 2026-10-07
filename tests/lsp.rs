@@ -14,7 +14,7 @@ const I050_MESSAGE: &str = "No initval or steady_state_model block. Add an initv
 
 fn copilot_mod(archive_dir: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".agents/skills/dynare-copilot/references/model-archive")
+        .join(".agents/skills/use-dynare/references/model-archive")
         .join(archive_dir)
         .join(format!("{archive_dir}.mod"));
     // Canonicalize so file URLs have no `..` (Url round-trip must match HashMap keys).
@@ -55,7 +55,7 @@ fn expand_open(name: &str) -> (Url, String) {
 
 fn copilot_example(name: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".agents/skills/dynare-copilot/references/examples")
+        .join(".agents/skills/use-dynare/references/examples")
         .join(format!("{name}.mod"));
     path.canonicalize()
         .unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()))
@@ -803,7 +803,7 @@ fn first_assignment_betta(text: &str) -> usize {
 
 fn copilot_file(archive_dir: &str, name: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".agents/skills/dynare-copilot/references/model-archive")
+        .join(".agents/skills/use-dynare/references/model-archive")
         .join(archive_dir)
         .join(name);
     path.canonicalize()

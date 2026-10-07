@@ -10,7 +10,7 @@
 - Model title match score: `1.0000`
 - Raw PDF path exists: yes
 - Appendix normalization: none found at `docs/mmb_appendix_full_normalizations/NK_GMAS25cpi.md`
-- Implementation cross-check: none found at `.agents/skills/dynare-copilot/references/examples/NK_GMAS25cpi_rep.mod`
+- Implementation cross-check: none found at `.agents/skills/use-dynare/references/examples/NK_GMAS25cpi_rep.mod`
 
 ## Formula Quality
 
@@ -22,7 +22,7 @@
 
 ## Implementation Cross-Check
 
-- No `.agents/skills/dynare-copilot/references/examples/NK_GMAS25cpi_rep.mod` file exists.
+- No `.agents/skills/use-dynare/references/examples/NK_GMAS25cpi_rep.mod` file exists.
 - No implementation-side variables, calibration values, or timing conventions were used as derivation evidence.
 
 ## Deferred Issues

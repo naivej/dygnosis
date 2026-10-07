@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_CFP10_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_CFP10_rep.mod`.
 - Used only for variable names, shock names, timing, and equation coverage.
 - The `.mod` confirms the linear variables `y, yeff, yg, R, pi, z, phi, e, q, d, L, u, r, w, a, eps_pi, n, eps_R`.
 - The `.mod` confirms four innovations: `eta_a`, `eta_pi`, `eta_n`, and `eta_R`.

@@ -12,11 +12,11 @@
   ],
   "source_files_read": [
     "docs/MODEL_ARCHIVE_BUILD_PLAN.md",
-    ".agents/skills/dynare-copilot/references/derivation-style.md",
-    ".agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md",
+    ".agents/skills/use-dynare/references/derivation-style.md",
+    ".agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md",
     "raw/mmb_mineru/model_index.csv",
     "raw/mmb_mineru/runs/nk_et14__unconventional_government_debt_purchases_as_a_supplement_to_conventional__f7e430ba/full.md",
-    ".agents/skills/dynare-copilot/references/examples/NK_ET14_rep.mod"
+    ".agents/skills/use-dynare/references/examples/NK_ET14_rep.mod"
   ],
   "pdf": {
     "path": "raw/mmb_papers/Unconventional government debt purchases as a supplement to conventional monetary policy.pdf",
@@ -28,7 +28,7 @@
     "exists": false
   },
   "implementation_cross_check": {
-    "path": ".agents/skills/dynare-copilot/references/examples/NK_ET14_rep.mod",
+    "path": ".agents/skills/use-dynare/references/examples/NK_ET14_rep.mod",
     "used": true,
     "paper_source": false
   },

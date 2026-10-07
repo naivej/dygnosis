@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/US_CFP17exo_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/US_CFP17exo_rep.mod`.
 - The implementation declares `model(linear)`.
 - Shock names cross-checked: `eps_a`, `eps_mp`, `eps_i`, `eps_psi`, `eps_mk`, `eps_mkw`, `eps_b2`, `eps_rn`.
 - The implementation uses `b2 = -bb2` and an AR(2) `bb2` rule for the exogenous debt/QE policy block.

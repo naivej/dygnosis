@@ -37,7 +37,7 @@
       "role": "not_available"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_GG24_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_GG24_rep.mod",
       "exists": false,
       "role": "implementation_cross_check",
       "dynare_run": false

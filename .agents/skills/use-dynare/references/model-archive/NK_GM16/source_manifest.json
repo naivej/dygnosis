@@ -42,7 +42,7 @@
       "used": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_GM16_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_GM16_rep.mod",
       "sha256": "e9ab5b6654ee2f1edb86e0c8b8b9e9ec502795407f151443572a1b95b89dc1f0",
       "used_for": [
         "confirmed model(linear) form",

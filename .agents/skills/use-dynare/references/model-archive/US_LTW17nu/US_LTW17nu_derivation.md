@@ -7,7 +7,7 @@ Provenance: `US_LTW17nu`, Leeper, Traum, and Walker (2017), "Clearing Up the Fis
 ## 1. Model Overview
 
 - **Model**: US medium-scale New Keynesian fiscal multiplier model with nominal rigidities, real frictions, fiscal feedback rules, long-maturity nominal government debt, and steady-state distortionary taxes.
-- **Variant**: `US_LTW17nu`, the no-government-spending-in-utility variant. The paper nests a model with government spending in utility, but the MMB implementation sets `alphag = 0` and `thet = 0.8`; this variant-specific restriction comes from `.agents/skills/dynare-copilot/references/examples/US_LTW17nu_rep.mod` as `implementation_cross_check`.
+- **Variant**: `US_LTW17nu`, the no-government-spending-in-utility variant. The paper nests a model with government spending in utility, but the MMB implementation sets `alphag = 0` and `thet = 0.8`; this variant-specific restriction comes from `.agents/skills/use-dynare/references/examples/US_LTW17nu_rep.mod` as `implementation_cross_check`.
 - **Agents and blocks**: savers, optionally non-savers in the paper-side general model, final-good and intermediate-good firms, labor agency and wage setters, monetary authority, and fiscal authority.
 - **Form**: log-linearized `model(linear)` implementation. Paper equations are presented in levels and hatted percentage deviations; the MMB `.mod` implements the `nu` variant as linear equations around a deterministic steady state.
 - **Review status**: first-pass formula quality is `needs_review` because several OCR equations in the source Markdown are malformed and the variant-specific `nu` restrictions are inferred from the implementation cross-check rather than from a standalone paper subsection.

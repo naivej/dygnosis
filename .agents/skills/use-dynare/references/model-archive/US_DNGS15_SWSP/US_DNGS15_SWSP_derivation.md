@@ -2,7 +2,7 @@
 
 > Private MMB archive draft. Runtime validation was not performed. Status: `needs_review`.
 
-Provenance: model `US_DNGS15_SWSP`, Del Negro, Giannoni, and Schorfheide (2015), "Inflation in the Great Recession and New Keynesian Models," *American Economic Journal: Macroeconomics* 7(1), 168-196, DOI `10.1257/mac.20140097`. Primary source Markdown: `raw/mmb_mineru/runs/us_dngs15_us_dngs15_sw_us_dngs15_swsp_us_dngs15__infation_in_the_great_recession_and_new_keynesian_models__c8e184ab/full.md`; raw PDF: `raw/mmb_papers/Infation in the Great recession and New Keynesian models.pdf`; MinerU run id `c8e184ab-3624-4257-9ea5-7ec1cf904fbb`. The file `.agents/skills/dynare-copilot/references/examples/US_DNGS15_SWSP_rep.mod` was used only as `implementation_cross_check`.
+Provenance: model `US_DNGS15_SWSP`, Del Negro, Giannoni, and Schorfheide (2015), "Inflation in the Great Recession and New Keynesian Models," *American Economic Journal: Macroeconomics* 7(1), 168-196, DOI `10.1257/mac.20140097`. Primary source Markdown: `raw/mmb_mineru/runs/us_dngs15_us_dngs15_sw_us_dngs15_swsp_us_dngs15__infation_in_the_great_recession_and_new_keynesian_models__c8e184ab/full.md`; raw PDF: `raw/mmb_papers/Infation in the Great recession and New Keynesian models.pdf`; MinerU run id `c8e184ab-3624-4257-9ea5-7ec1cf904fbb`. The file `.agents/skills/use-dynare/references/examples/US_DNGS15_SWSP_rep.mod` was used only as `implementation_cross_check`.
 
 ## 1. Model Overview
 

@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_LTW17rot_rep.mod` was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_LTW17rot_rep.mod` was read only as `implementation_cross_check`.
 - The `.mod` identifies this MMB variant as the rule-of-thumb-consumer version and declares `model(linear)`.
 - Cross-check observations:
   - endogenous variables include `cs`, `cn`, `R`, `i`, `k`, `v`, `l`, `y`, `gc`, `c`, `q`, `rk`, `w`, `pi`, `b`, `sb`, `tauk`, `taul`, `tauc`, `r`, `z`, `mc`, `kbar`, `lambda`, `Pb`, `cstar`, fiscal accounting variables, observables, and a parallel flexprice block;

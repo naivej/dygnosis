@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/HK_FPP11_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/HK_FPP11_rep.mod` exists and was used only as `implementation_cross_check`.
 - Cross-check confirms `model(linear)` and the MMB variable set: `x`, `q_dach`, `r`, `rr`, `pi_H`, `a`, `y_stern`, `pi`, `s`, `e`, `y`, `y_n`, `shock_eta`.
 - Cross-check confirms exogenous innovations `epsa`, `epsy`, `mu_p`, and `epseta`.
 - The replication file notes two author-confirmed typos in the original code: `gamma=0.13` rather than `0.03`, and a minus sign on the foreign-demand shock term in natural output. These notes were not treated as paper-side sources, but they support the `needs_review` flag for implementation provenance.

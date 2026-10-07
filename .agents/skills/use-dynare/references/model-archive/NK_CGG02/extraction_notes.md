@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_CGG02_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/NK_CGG02_rep.mod` exists and was used only as `implementation_cross_check`.
 - The cross-check confirms `model(linear)`, the MMB variable set, and the calibration composites `kappa0`, `kappa`, `sigma0`, `delta1`, and `lambda`.
 - The `.mod` includes exogenous innovations `inf_`, `a_`, `infstar_`, `ystar_`, `astar_`, `rstar_`, and `interest_`. The foreign-output innovation is recorded as implementation-specific because the paper presents the symmetric foreign block analytically.
 - No Dynare run was performed.

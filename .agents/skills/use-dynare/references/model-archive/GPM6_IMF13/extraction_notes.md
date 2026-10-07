@@ -4,7 +4,7 @@
 
 - `raw/mmb_mineru/model_index.csv` row `GPM6_IMF13` points to `raw/mmb_mineru/runs/gpm6_imf13_us_pm08_us_pm08fl__a_small_quarterly_projection_model_of_the_us_economy__a2e8676b/full.md`.
 - First-page sniff of the primary Markdown shows "A Small Quarterly Projection Model of the US Economy", December 2008, with authors Ioan Carabenciov, Igor Ermolaev, Charles Freedman, Michel Juillard, Ondra Kamenik, Dmitry Korshunov, and Douglas Laxton.
-- The indexed model is `GPM6_IMF13`, but `.agents/skills/dynare-copilot/references/examples/GPM6_IMF13_rep.mod` identifies the implementation as the six-region 2013 GPM6 model. This is a high-priority `source_index_issue`.
+- The indexed model is `GPM6_IMF13`, but `.agents/skills/use-dynare/references/examples/GPM6_IMF13_rep.mod` identifies the implementation as the six-region 2013 GPM6 model. This is a high-priority `source_index_issue`.
 - Alternate MinerU run `86500816-7954-4f67-b157-79058ffc0fde` was inspected through the run index and path search; it is the same U.S. small quarterly projection model source, not an unambiguous 2013 GPM6 source.
 - Raw PDF exists at `raw/mmb_papers/A small quarterly projection model of the US economy.pdf`; per task instructions, the PDF body was not read.
 - No `docs/mmb_appendix_full_normalizations/GPM6_IMF13.md` file was present.
@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- Existing file: `.agents/skills/dynare-copilot/references/examples/GPM6_IMF13_rep.mod`.
+- Existing file: `.agents/skills/use-dynare/references/examples/GPM6_IMF13_rep.mod`.
 - Use level: `implementation_cross_check` only.
 - It identifies regions `EA6`, `EU`, `JA`, `LA6`, `RC6`, and `US`.
 - It repeats the U.S. small projection block and extends similar blocks to other regions, adding real effective exchange-rate measures, trade/spillover factors, long real-rate averages, regional residual processes, and steady-state assignments.

@@ -54,7 +54,7 @@
       "role": "not_available"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_GK11_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_GK11_rep.mod",
       "exists": true,
       "sha256": "a58fe42653d92d719c5a5bbf1acdb23a6a675100e7f3be9ee49793280db0fb95",
       "bytes": 11943,

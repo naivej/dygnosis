@@ -21,7 +21,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_GS14_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_GS14_rep.mod`.
 - Used only as `implementation_cross_check`, not as a paper-side mathematical source.
 - Cross-check confirmed endogenous variables, exogenous shock names `e_A_e` and `e_mk_y`, log-level `exp(...)` implementation, first-order simulation, and the gross-rate implementation of the augmented Taylor rule.
 - Cross-check also exposed auxiliary variables `Y1`, `lev`, `spread`, and `rr`, which are recorded as implementation/diagnostic identities where appropriate.

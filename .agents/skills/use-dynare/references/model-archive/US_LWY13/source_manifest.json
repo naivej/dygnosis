@@ -43,7 +43,7 @@
       "source_role": "hand-normalized online-appendix formula inventory when present"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_LWY13_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_LWY13_rep.mod",
       "sha256": "d8800f8f72e23f2c0ea73f61651ad121f357dc7a295e8e266955957f4fa9ced9",
       "exists": true,
       "used_as": "implementation_cross_check",

@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/US_FMS134_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/US_FMS134_rep.mod`.
 - Cross-check confirms:
   - `model(linear)` form.
   - Sticky and flexible blocks.

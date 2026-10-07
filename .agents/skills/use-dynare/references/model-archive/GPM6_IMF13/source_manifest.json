@@ -59,7 +59,7 @@
       "exists": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/GPM6_IMF13_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/GPM6_IMF13_rep.mod",
       "sha256": "dcd8ac67de08e9cb6c1616f32da7b02f70fc3fa1a8f6618a90edcdeab2c4935d",
       "exists": true,
       "source_role": "implementation_cross_check_only",

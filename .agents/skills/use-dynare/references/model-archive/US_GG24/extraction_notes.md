@@ -20,7 +20,7 @@ Status: `needs_review`.
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_GG24_rep.mod` was checked for existence and was not present.
+- `.agents/skills/use-dynare/references/examples/US_GG24_rep.mod` was checked for existence and was not present.
 - No MMB `.mod` file was used as a mathematical source.
 - Dynare was not run.
 

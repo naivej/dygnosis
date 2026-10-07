@@ -35,7 +35,7 @@
     "sha256": null
   },
   "implementation_cross_check": {
-    "path": ".agents/skills/dynare-copilot/references/examples/NK_GHP16_rep.mod",
+    "path": ".agents/skills/use-dynare/references/examples/NK_GHP16_rep.mod",
     "exists": true,
     "sha256": "f9c7e5c16148edd3fe16b6528ba98c73a3e57b3c0ccda9c408baf82d99a40488",
     "use_scope": "implementation_cross_check_only",

@@ -2,7 +2,7 @@
 
 > First-pass private archive entry. Status: `needs_review`. Runtime validation was not performed.
 
-Provenance: `EA_ALSV06` is based on Javier Andres, J. David Lopez-Salido, and Javier Valles, "Money in an estimated business cycle model of the euro area", *The Economic Journal* 116, April 2006, pp. 457-477, DOI `10.1111/j.1468-0297.2006.01088.x`. The extraction uses `raw/mmb_mineru/runs/ea_alsv06__money_in_an_estimated_business_cycle_model_of_the_euro_area__21baa95d/full.md`. The raw PDF path exists at `raw/mmb_papers/Money in an estimated business cycle model of the euro area.pdf` but the PDF body was not read. No appendix normalization exists for this model. The MMB replication file `.agents/skills/dynare-copilot/references/examples/EA_ALSV06_rep.mod` was used only as an implementation cross-check.
+Provenance: `EA_ALSV06` is based on Javier Andres, J. David Lopez-Salido, and Javier Valles, "Money in an estimated business cycle model of the euro area", *The Economic Journal* 116, April 2006, pp. 457-477, DOI `10.1111/j.1468-0297.2006.01088.x`. The extraction uses `raw/mmb_mineru/runs/ea_alsv06__money_in_an_estimated_business_cycle_model_of_the_euro_area__21baa95d/full.md`. The raw PDF path exists at `raw/mmb_papers/Money in an estimated business cycle model of the euro area.pdf` but the PDF body was not read. No appendix normalization exists for this model. The MMB replication file `.agents/skills/use-dynare/references/examples/EA_ALSV06_rep.mod` was used only as an implementation cross-check.
 
 ## 1. Model Overview
 

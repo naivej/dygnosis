@@ -380,7 +380,7 @@ Status: `needs_review`. A reviewer should reconstruct the full stationary steady
 - Risk timing: entrepreneurs buying capital in period $`t`$ face idiosyncratic dispersion $`\sigma_t`$ over $`\omega`$ realized in the subsequent production/payoff period. The MMB implementation uses lagged `sigma(-1)` in several default-share functions and future $`\sigma`$ in contract optimality.
 - Monetary policy rule: displayed by the paper directly in linearized net-interest-rate form.
 - Model form: source equilibrium is nonlinear/stationary-scaled; estimation and many reported experiments use first-order perturbation. Marked `needs_review` because several conditions are only fully listed in the online appendix/code, not in the article body.
-- `.mod` use: `.agents/skills/dynare-copilot/references/examples/US_CMR14_rep.mod` was used only to cross-check variable coverage, timing, and shock names. Dynare was not run.
+- `.mod` use: `.agents/skills/use-dynare/references/examples/US_CMR14_rep.mod` was used only to cross-check variable coverage, timing, and shock names. Dynare was not run.
 
 ## 8. Variable & Parameter Reference Table
 

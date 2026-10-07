@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_CW09_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_CW09_rep.mod`.
 - Used only to check variable names, shocks, calibration objects, and timing conventions.
 - The implementation uses level variables such as `lambda_b`, `lambda_s`, `Pi`, `Y`, `K`, `F`, `Delta`, `b`, `G`, `omega`, `Z`, `b_g`, and auxiliary hatted variables for deviations/annualizations.
 - The implementation includes eleven exogenous shocks: `e_C_bar_s`, `e_C_bar_b`, `e_G`, `e_H_bar`, `e_mu_w`, `e_tau`, `e_epsilon_m`, `e_Xi_tilde`, `e_chi_tilde`, `e_Z`, and `e_b_g`.

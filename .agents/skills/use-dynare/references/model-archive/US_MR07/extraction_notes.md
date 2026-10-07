@@ -13,12 +13,12 @@
 - The available Markdown contains the journal article body and the five key reduced-form relations: price-setting / aggregate supply, IS, wage-setting, production, and Taylor rule.
 - The paper states that detailed model presentation, equilibrium definition, loglinearization, and coefficient formulas are in an appendix available in the working-paper version. That appendix is not present in the required source set for this entry.
 - The long real interest rate notation around equation (2) has OCR noise. The archive derivation records the economic object and marks exact index notation as `needs_review`.
-- The natural-output closed form used in the derivation is marked `needs_review` because it is cross-checked from `.agents/skills/dynare-copilot/references/examples/US_MR07_rep.mod`, not directly printed in the available Markdown source.
+- The natural-output closed form used in the derivation is marked `needs_review` because it is cross-checked from `.agents/skills/use-dynare/references/examples/US_MR07_rep.mod`, not directly printed in the available Markdown source.
 - Productivity is described in the paper text as a productivity-growth AR(1) shock. The `.mod` represents this through a second-order process for productivity level plus `da = a - a(-1)`. This mapping is marked `needs_review`.
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_MR07_rep.mod` was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_MR07_rep.mod` was read only as `implementation_cross_check`.
 - The implementation confirms `model(linear)`, endogenous variables `x pi y yn i l p w R g a e v gam da`, exogenous innovations `g_e a_e e_e v_e gam_e`, and parameters `delta lambda omega beta phi_p phi_y mu theta psi gamma rho_g rho_a rho_e rho_v rho_gam`.
 - The implementation approximates the infinite sticky-information sums with 30 lag terms for `p`, `w`, `l`, `R`, and `y`.
 - The implementation uses `y100 = y(+150)` as a proxy for long-run output.

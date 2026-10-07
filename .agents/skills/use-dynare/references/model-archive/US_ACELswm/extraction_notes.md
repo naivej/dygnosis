@@ -11,12 +11,12 @@
 
 - Status: `needs_review`.
 - The paper-side Markdown contains the nonlinear model economy, timing, final-good aggregation, intermediate-firm technology, household preferences and budget, wage aggregation, monetary policy processes, market-clearing equations, reduced inflation equation, and steady-state calibration discussion.
-- The paper references a separate technical appendix for the computational linear equilibrium system. That appendix is not present as a normalized source for this model. Therefore the linear equilibrium equations in the derivation are marked `needs_review` and identified as `implementation_cross_check` when they come from `.agents/skills/dynare-copilot/references/examples/US_ACELswm_rep.mod`.
+- The paper references a separate technical appendix for the computational linear equilibrium system. That appendix is not present as a normalized source for this model. Therefore the linear equilibrium equations in the derivation are marked `needs_review` and identified as `implementation_cross_check` when they come from `.agents/skills/use-dynare/references/examples/US_ACELswm_rep.mod`.
 - No long prose was copied from the paper. Equations were extracted or summarized into archive form.
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_ACELswm_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_ACELswm_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms `model(linear)`, the sticky-price block, the flexible-price allocation block, lead/pred timing auxiliaries, the parameter calibration, and the four exogenous innovations.
 - The `.mod` states this MMB file produces the right monetary-policy-shock IRFs for the ACEL model without the cost channel (`nu = 0`) and warns that technology-shock answers are wrong because variables are predetermined.
 - The `.mod` was not treated as paper-side evidence and was not run.

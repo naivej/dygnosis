@@ -38,7 +38,7 @@
     }
   },
   "implementation_cross_check": {
-    "path": ".agents/skills/dynare-copilot/references/examples/US_ACELm_rep.mod",
+    "path": ".agents/skills/use-dynare/references/examples/US_ACELm_rep.mod",
     "sha256": "d9915e4aa848fd5c8fa0f1817c9c3173712466b9e17cd8e38229c384edf7696d",
     "used_for": [
       "variable coverage",

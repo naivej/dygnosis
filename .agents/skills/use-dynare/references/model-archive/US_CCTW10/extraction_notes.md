@@ -15,7 +15,7 @@
 
 ## Implementation Cross-Check
 
-- Read `.agents/skills/dynare-copilot/references/examples/US_CCTW10_rep.mod` only as an implementation cross-check.
+- Read `.agents/skills/use-dynare/references/examples/US_CCTW10_rep.mod` only as an implementation cross-check.
 - Cross-check observations:
   - The model is a log-linear Smets-Wouters implementation with flexible and sticky economy blocks.
   - It includes Ricardian consumption (`c_nlc`, `c_nlcf`) and rule-of-thumb consumption (`c_lc`, `c_lcf`).

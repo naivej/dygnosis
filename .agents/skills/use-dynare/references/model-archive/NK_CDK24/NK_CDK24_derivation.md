@@ -413,7 +413,7 @@ Baseline calibration targets reported in the paper include:
 - **Open-economy timing**: The real exchange rate is forward-looking through UIP, $`\hat q_t=E_t[\hat q_{t+1}]-(\hat r_t-E_t[\hat\pi_{t+1}])`$.
 - **Households**: Constrained households consume current disposable labor income; unconstrained households can smooth through domestic and foreign bonds.
 - **No capital stock in baseline extracted block**: Production uses labor and imported energy. There is no physical capital accumulation equation in the baseline paper-side model block.
-- **Runtime validation**: Not performed. No `.mod` cross-check file was present at `.agents/skills/dynare-copilot/references/examples/NK_CDK24_rep.mod`.
+- **Runtime validation**: Not performed. No `.mod` cross-check file was present at `.agents/skills/use-dynare/references/examples/NK_CDK24_rep.mod`.
 
 ## 8. Variable & Parameter Reference Table
 

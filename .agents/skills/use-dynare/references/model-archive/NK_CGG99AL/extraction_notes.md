@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- Optional implementation file `.agents/skills/dynare-copilot/references/examples/NK_CGG99AL_rep.mod` does not exist.
+- Optional implementation file `.agents/skills/use-dynare/references/examples/NK_CGG99AL_rep.mod` does not exist.
 - Optional appendix normalization `docs/mmb_appendix_full_normalizations/NK_CGG99AL.md` does not exist.
 - No MMB `.mod` file was used as a mathematical source.
 

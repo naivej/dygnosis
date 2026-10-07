@@ -48,7 +48,7 @@
       "used_for": []
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_GS14_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_GS14_rep.mod",
       "sha256": "74869cc48a6d862d4e4942b903f85b3f96e3113909c38809c095efcd935ec37c",
       "exists_checked": true,
       "used_for": [

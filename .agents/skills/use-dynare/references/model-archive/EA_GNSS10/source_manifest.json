@@ -77,7 +77,7 @@
       "exists": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/EA_GNSS10_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/EA_GNSS10_rep.mod",
       "sha256": "cf639266d077fee837fd5309a900f683dc345c6c6476d049462fce2fda1ee960",
       "exists": true,
       "used_as": "implementation_cross_check"
@@ -103,7 +103,7 @@
       "source_role": "hand-normalized online-appendix formula inventory when present"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/EA_GNSS10_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/EA_GNSS10_rep.mod",
       "sha256": "cf639266d077fee837fd5309a900f683dc345c6c6476d049462fce2fda1ee960",
       "exists_at_extraction": true,
       "source_role": "MMB implementation cross-check only; not paper-side mathematical source"

@@ -46,7 +46,7 @@ impl Ord for Diag {
 
 fn copilot_mod(archive_dir: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".agents/skills/dynare-copilot/references/model-archive")
+        .join(".agents/skills/use-dynare/references/model-archive")
         .join(archive_dir)
         .join(format!("{archive_dir}.mod"))
 }

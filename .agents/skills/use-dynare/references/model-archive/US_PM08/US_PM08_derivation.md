@@ -207,7 +207,7 @@ The paper is expressed in gaps, growth rates, and annualized rates rather than a
 - **Stocks**: There is no physical capital stock. Potential output, NAIRU, equilibrium real rate, and BLT equilibrium are latent state/trend variables.
 - **Inflation units**: Quarterly inflation is annualized; year-on-year inflation is a four-quarter log difference. The implemented stationary identity uses the average of four quarterly annualized rates.
 - **Form**: Linear/stationary `model(linear)`. No nonlinear Dynare execution was performed.
-- **Implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/US_PM08_rep.mod` confirms a stationary `model(linear)` block with variables `RR_USh`, `RR_US_BARh`, `UNR_US_GAP`, `PIE_USh`, `PIE_US4h`, `Y_US`, `RS_USh`, expectation-reporting variables, and BLT shock-distribution auxiliaries. This was used only as `implementation_cross_check`.
+- **Implementation cross-check**: `.agents/skills/use-dynare/references/examples/US_PM08_rep.mod` confirms a stationary `model(linear)` block with variables `RR_USh`, `RR_US_BARh`, `UNR_US_GAP`, `PIE_USh`, `PIE_US4h`, `Y_US`, `RS_USh`, expectation-reporting variables, and BLT shock-distribution auxiliaries. This was used only as `implementation_cross_check`.
 
 ## 8. Variable & Parameter Reference Table
 

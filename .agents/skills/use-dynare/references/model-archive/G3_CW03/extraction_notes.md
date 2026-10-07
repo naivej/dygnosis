@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- Read `.agents/skills/dynare-copilot/references/examples/G3_CW03_rep.mod` only as `implementation_cross_check`.
+- Read `.agents/skills/use-dynare/references/examples/G3_CW03_rep.mod` only as `implementation_cross_check`.
 - Cross-check confirmed `model(linear)`, the three country suffixes, 8-quarter long-rate horizons for euro area/U.S., 12-quarter horizon for Japan, the real exchange-rate identities, and the `one = one(-1)` constant process.
 - Cross-check was not used as a paper-side mathematical source.
 
@@ -27,5 +27,5 @@
 - Human review should compare the normalized (F5)-(F9) contract equations against the PDF if exact contract-wage algebra is required.
 - Human review should decide whether `interest_` is an intentionally inactive MMB shock placeholder or should be represented in a future runnable model.
 - Runtime validation, Blanchard-Kahn checks, residual checks, and IRF reproduction were not assigned and were not run.
-- No promotion was made to `.agents/skills/dynare-copilot/references/model-archive/`.
+- No promotion was made to `.agents/skills/use-dynare/references/model-archive/`.
 

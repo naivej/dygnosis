@@ -12,7 +12,7 @@
 
 - English derivation was drafted first using the eight required sections.
 - The entry targets the paper's baseline risk-shock model with BGG financial frictions and risk-news signals.
-- The `.mod` file `.agents/skills/dynare-copilot/references/examples/US_CMR14_rep.mod` was read only as `implementation_cross_check`.
+- The `.mod` file `.agents/skills/use-dynare/references/examples/US_CMR14_rep.mod` was read only as `implementation_cross_check`.
 - Shared `catalog.csv` and `status.csv` were not edited, per user instruction.
 
 ## Formula Quality
@@ -20,7 +20,7 @@
 - Overall formula status: `needs_review`.
 - The article body gives the main model blocks: final-good aggregator, production technology, Calvo price and wage indexation, household preferences and budget, raw-capital accumulation, BGG financial contract, monetary policy rule, resource constraint, adjustment costs, and news-shock process.
 - The article explicitly says a detailed list of equations is in the online Appendix and code. That detailed paper-side appendix is not present as a normalized local source for `US_CMR14`.
-- Stationary-scaled FOCs for price/wage auxiliaries, marginal cost, investment, and bond Euler equations were cross-checked against `.agents/skills/dynare-copilot/references/examples/US_CMR14_rep.mod`; these are marked `needs_review` because `.mod` is not paper-side authority.
+- Stationary-scaled FOCs for price/wage auxiliaries, marginal cost, investment, and bond Euler equations were cross-checked against `.agents/skills/use-dynare/references/examples/US_CMR14_rep.mod`; these are marked `needs_review` because `.mod` is not paper-side authority.
 - The household budget equation in the Markdown has visible OCR damage around long-bond notation and tax symbols.
 - The resource constraint and monitoring-cost expression are source-backed but have possible scaling/price-normalization ambiguity in OCR.
 - No PDF body was opened because the Markdown supplied enough structure for a first-pass `needs_review` draft and the task contract says not to read the PDF body by default.

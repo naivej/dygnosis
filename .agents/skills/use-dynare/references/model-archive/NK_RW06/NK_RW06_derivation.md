@@ -9,7 +9,7 @@
 - **Core mechanism**: a New Keynesian sticky-price model with a cost channel. Firms borrow working capital to pay the wage bill, so the nominal interest rate enters real marginal cost and the Phillips curve directly.
 - **Agents and blocks**: representative household, monopolistically competitive Calvo price setters, financial intermediaries, government/fiscal demand, and the monetary authority.
 - **Form**: log-linear/linearized equilibrium conditions around steady state. The MMB implementation uses `model(linear)` with variables `x`, `pi`, and `R`, and one composite demand shock `u`.
-- **Policy experiment represented in MMB**: a simple interest-rate rule cross-checked from `.agents/skills/dynare-copilot/references/examples/NK_RW06_rep.mod`, not the paper's full commitment/discretion optimal-control system.
+- **Policy experiment represented in MMB**: a simple interest-rate rule cross-checked from `.agents/skills/use-dynare/references/examples/NK_RW06_rep.mod`, not the paper's full commitment/discretion optimal-control system.
 
 ## 2. Optimization Problems
 

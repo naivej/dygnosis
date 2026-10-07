@@ -11,7 +11,7 @@ Model ID: `US_LTW17`. Status: `needs_review`.
 - **Fiscal structure**: government spending, transfers, capital taxes, labor taxes, consumption taxes, long-maturity nominal debt, and a primary surplus identity.
 - **Form**: `model(linear)`. The paper describes a DSGE model and subsequent log-linear solution; the MMB implementation cross-check confirms `model (linear)`. Variables in equations below are percentage/log deviations from the balanced-growth steady state unless explicitly described as a level or steady-state object.
 - **Runtime validation**: not performed. Dynare was not run.
-- **Provenance boundary**: the paper-side Markdown is the mathematical source. `.agents/skills/dynare-copilot/references/examples/US_LTW17_rep.mod` is used only as `implementation_cross_check`.
+- **Provenance boundary**: the paper-side Markdown is the mathematical source. `.agents/skills/use-dynare/references/examples/US_LTW17_rep.mod` is used only as `implementation_cross_check`.
 
 ## 2. Optimization Problems
 

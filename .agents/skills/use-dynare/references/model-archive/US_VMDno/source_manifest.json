@@ -46,7 +46,7 @@
       "exists": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_VMDno_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_VMDno_rep.mod",
       "sha256": "4f7070f4644f0ea9a77a303644ad25a53427d09b952da89fc2e4b9c95387a63e",
       "exists": true,
       "used_for": [

@@ -41,7 +41,7 @@
     },
     {
       "role": "implementation_cross_check",
-      "path": ".agents/skills/dynare-copilot/references/examples/US_IN10_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_IN10_rep.mod",
       "sha256": "c3204594eaf7ece1fc9893f8b851b89b1c333be2c0bb149e7a7a2da6bac6465c",
       "used_for": [
         "variable coverage",

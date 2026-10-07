@@ -642,7 +642,7 @@ The long-run relative price and inflation targets are embedded in the CPI/PPI bl
 - **Rest of world**: `c` is a VAR block rather than a fully micro-founded DSGE region in this paper version.
 - **Price/wage adjustment**: source text specifies Rotemberg adjustment costs with indexation to lagged and steady-state inflation. Exact wage FOCs require the unavailable equation summary.
 - **Model form**: nonlinear levels with selected log-deviation policy and VAR processes; not a pure `model(linear)` derivation.
-- **Implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/DEREA_GEAR16_rep.mod` confirms broad variable coverage, country-`a`/country-`b` symmetry, fiscal shocks, and nonlinear timing. It is not used as paper-side mathematical evidence.
+- **Implementation cross-check**: `.agents/skills/use-dynare/references/examples/DEREA_GEAR16_rep.mod` confirms broad variable coverage, country-`a`/country-`b` symmetry, fiscal shocks, and nonlinear timing. It is not used as paper-side mathematical evidence.
 
 ## 8. Variable & Parameter Reference Table
 

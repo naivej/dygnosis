@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- Read `.agents/skills/dynare-copilot/references/examples/NK_ST13_rep.mod` only as `implementation_cross_check`.
+- Read `.agents/skills/use-dynare/references/examples/NK_ST13_rep.mod` only as `implementation_cross_check`.
 - No Dynare run was performed.
 - Cross-check confirmed the implementation variables for consumption, investment, output, labor, wage, capital, deposits, bonds, loans, loan/deposit rates, multipliers, SDF, inflation, marginal cost, marginal products, intermediation costs, inside-money premium, external finance premium, $`\alpha_t`$, $`\omega_t`$, $`A_t`$, and $`\theta_t`$.
 - Cross-check also confirmed a parallel frictionless block in the implementation. The archive derivation documents the paper-side baseline and notes the frictionless implementation as a reference block rather than a separate paper source.

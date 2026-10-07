@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_RA07_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_RA07_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms a `model(linear)` implementation with endogenous variables `pi`, `mc`, `rk`, `w`, `r`, `a`, `u`, `n`, `c`, `l`, `q`, `i`, `k`, `y`, and `g`.
 - The `.mod` confirms exogenous innovations `epsp`, `epsz`, `epsa`, and `epsg`.
 - The `.mod` adds `n=l` because of inconsistent labor notation in the source. The derivation records this identity as implementation-only, not as a paper-side source equation.

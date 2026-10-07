@@ -22,7 +22,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_GK11_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/NK_GK11_rep.mod` exists and was read only as `implementation_cross_check`.
 - The example confirms the broad variable coverage: `Y`, `Ym`, `K`, `Keff`, `L`, `I`, `C`, `G`, `Q`, `varrho`, `Lambda`, `Rk`, `R`, `N`, `Ne`, `Nn`, `nu`, `eta`, `phi`, `z`, `x`, `Pm`, `w`, `VMPK`, `U`, `X`, `D`, `F`, `Z`, `i`, `prem`, `delta`, `In`, `Welf`, `infl`, `inflstar`, `a`, `ksi`, `g`.
 - The example also carries shocks `e_a`, `e_ksi`, `e_g`, `e_Ne`, and `e_i`. The `e_Ne` wealth shock is marked as implementation cross-check only because it is not a core paper-side process in the source extraction.
 - No formulas were sourced solely from the `.mod`; it was used to detect omissions and timing conventions.

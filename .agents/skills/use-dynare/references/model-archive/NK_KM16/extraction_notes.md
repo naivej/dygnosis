@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_KM16_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_KM16_rep.mod`.
 - Used only for implementation coverage, timing, and variable-name checks.
 - The example confirms:
   - separate natural/flexible-price and sticky-price blocks;

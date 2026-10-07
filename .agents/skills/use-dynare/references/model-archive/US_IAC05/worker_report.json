@@ -20,7 +20,7 @@
     "raw_pdf_path": "raw/mmb_papers/House prices, borrowing constraints, and monetary policy in the business cycle.pdf",
     "mineru_run_id": "4002ee39-61e1-4470-a4e8-b5386cfee9a2",
     "appendix_normalization_path": null,
-    "implementation_cross_check_path": ".agents/skills/dynare-copilot/references/examples/US_IAC05_rep.mod"
+    "implementation_cross_check_path": ".agents/skills/use-dynare/references/examples/US_IAC05_rep.mod"
   },
   "proposed_catalog_row": {
     "ModelID": "US_IAC05",

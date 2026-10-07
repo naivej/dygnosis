@@ -11,7 +11,7 @@ Source: Kai Christoffel, Keith Kuester, and Tobias Linzert (2009), "The role of 
 - **Primary experiment**: monetary-policy transmission and labor-market counterfactuals in the calibrated Section 3 economy; the Rep-MMB implementation cross-check is a `model(linear)` file.
 - **Agents and sectors**: a representative large family, retail final-good aggregators, Calvo wholesale firms, labor-good firms, matched workers, government, and a Taylor-rule monetary authority.
 - **Form**: log-linear / hat-variable system around a zero-inflation steady state. Equations below use hats for log deviations from steady state unless a variable is already a rate/share in the source appendix. Several OCR equations from the MinerU Markdown are readable but not source-level verified against the PDF; those are marked `needs_review`.
-- **Implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/NK_CKL09_rep.mod` confirms the Rep-MMB file is the calibrated Section 3 version and uses variables such as `ct`, `lambdat`, `Pit`, `Rt`, `nt`, `ut`, `vt`, `wt`, `wstart`, `Jstart`, `Deltastart`, `deltaFt`, and `deltaWt`.
+- **Implementation cross-check**: `.agents/skills/use-dynare/references/examples/NK_CKL09_rep.mod` confirms the Rep-MMB file is the calibrated Section 3 version and uses variables such as `ct`, `lambdat`, `Pit`, `Rt`, `nt`, `ut`, `vt`, `wt`, `wstart`, `Jstart`, `Deltastart`, `deltaFt`, and `deltaWt`.
 
 ## 2. Optimization Problems
 

@@ -8,7 +8,7 @@
 - **Archive model id**: `EA_GNSS10`.
 - **Main financial mechanism**: impatient households and entrepreneurs borrow from banks against collateral; banks fund loans with deposits and bank capital, set sticky retail rates, and face a cost when their capital-to-assets ratio deviates from target.
 - **Form**: the paper states that the model is log-linearized around the steady state. The equations below keep the paper's nonlinear levels for constraints and the implementable equilibrium form where useful, but this first-pass archive entry should be treated as a log-linear model entry until source-level review is completed.
-- **Implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/EA_GNSS10_rep.mod` confirms the implemented blocks and shock names, but is not used as paper-side evidence.
+- **Implementation cross-check**: `.agents/skills/use-dynare/references/examples/EA_GNSS10_rep.mod` confirms the implemented blocks and shock names, but is not used as paper-side evidence.
 
 ## 2. Optimization Problems
 

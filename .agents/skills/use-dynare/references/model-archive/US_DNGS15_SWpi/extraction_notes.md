@@ -7,7 +7,7 @@
 - The source path and `primary_source_title` contain the OCR/file-name typo `Infation`; the article title in the Markdown body and model-index paper title are otherwise matched. `model_title_match_score = 0.9912`.
 - `raw_pdf_path` exists at `raw/mmb_papers/Infation in the Great recession and New Keynesian models.pdf`. The PDF body was not opened because Markdown was sufficient for a first-pass `needs_review` draft.
 - `docs/mmb_appendix_full_normalizations/US_DNGS15_SWpi.md` does not exist.
-- `.agents/skills/dynare-copilot/references/examples/US_DNGS15_SWpi_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_DNGS15_SWpi_rep.mod` exists and was used only as `implementation_cross_check`.
 
 ## Formula Quality
 

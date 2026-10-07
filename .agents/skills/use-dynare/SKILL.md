@@ -1,5 +1,5 @@
 ---
-name: dynare-copilot
+name: use-dynare
 description: Write, modify, review, run, and debug Dynare .mod models (DSGE, RBC, NK, HANK, OLG) with Dygnosis static checks over MCP and Dynare runs in MATLAB or Octave. Use when the user writes or translates model equations into a .mod file, replicates a published model, edits or extends an existing .mod, debugs Dynare errors (Blanchard-Kahn conditions, steady state not found, singular Jacobian, timing mistakes), sets up stoch_simul, perfect foresight, estimation, method_of_moments, shock_decomposition, optimal policy, OccBin, or identification experiments, or produces publication-grade IRF figures. Also use when a Dynare task needs the Dygnosis MCP tools and they are not connected. Do not write Dynare from memory; timing conventions and block syntax are easy to get wrong.
 ---
 # Dynare models with Dygnosis

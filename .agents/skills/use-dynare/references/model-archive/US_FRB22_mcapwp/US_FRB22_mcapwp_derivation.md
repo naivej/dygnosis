@@ -167,6 +167,6 @@ Form convention: linearized macroeconometric model. Use `needs_review` for any c
 Implementation cross-check counts:
 
 - `US_FRB22_mcapwp.mod`: 319 endogenous `var` tokens before `varexo`; 124 `varexo` tokens before `parameters`; 274 named equations in the `model` block.
-- `.agents/skills/dynare-copilot/references/examples/US_FRB22_rep.mod`: generic FRB22 example with 284 endogenous `var` tokens and 117 `varexo` tokens.
+- `.agents/skills/use-dynare/references/examples/US_FRB22_rep.mod`: generic FRB22 example with 284 endogenous `var` tokens and 117 `varexo` tokens.
 
 First-pass archive status: `needs_review`, because the paper-side Markdown does not expose the full equation list, OCR has placeholder characters in some printed policy-rule formulas, and the MMB `.mod` equation system has not been source-level reconciled with the paper/package documentation.

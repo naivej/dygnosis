@@ -59,7 +59,7 @@
     "used": false
   },
   "implementation_cross_check": {
-    "path": ".agents/skills/dynare-copilot/references/examples/US_CMR10_rep.mod",
+    "path": ".agents/skills/use-dynare/references/examples/US_CMR10_rep.mod",
     "exists": true,
     "sha256": "e3540119c4e7c08485b409ae644523d92447d496fa054751978d5cb326243f79",
     "used_as": "implementation_cross_check",
@@ -127,7 +127,7 @@
       "source_role": "hand-normalized online-appendix formula inventory when present"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_CMR10_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_CMR10_rep.mod",
       "sha256": "e3540119c4e7c08485b409ae644523d92447d496fa054751978d5cb326243f79",
       "exists_at_extraction": true,
       "source_role": "MMB implementation cross-check only; not paper-side mathematical source"

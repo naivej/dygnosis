@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_CKL09_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_CKL09_rep.mod`.
 - Confirmed `model(linear)` form.
 - Confirmed calibrated Section 3 parameter values: `bet=0.992`, `epsilon=11`, `habit=0.6`, `sig=1.5`, `omega=0.75`, `xi=0.6`, `eta=0.5`, `gamma=0.83`, `vtheta=0.03`, `alp=0.66`, `gamma_R=0.85`, `gamma_Pi=1.5`, `gamma_y=0.5`, and `gamma_dy=0`.
 - Confirmed state and shock names used in the archive table: `ebt`, `gt`, `emoneyt`, `zt`, `ebargaint`, `ekappat`, `esept`, and `eCt`.

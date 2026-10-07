@@ -26,7 +26,7 @@ Status: `needs_review`.
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/ESREA_FIMOD12_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/ESREA_FIMOD12_rep.mod` exists and was used only as `implementation_cross_check`.
 - Cross-check confirmed the home/foreign duplicated structure, key variable names, nonlinear model form, fiscal-rule shocks, matching variables, Calvo auxiliaries, public-capital accumulation, terms of trade, current account, and union Taylor rule.
 - The `.mod` file was not treated as a paper-side mathematical source.
 
@@ -36,5 +36,5 @@ Status: `needs_review`.
 - Several fiscal-rule variants differ between the paper's generic rules and the MMB implementation's operational equations.
 - PDF body was not read; raw PDF existence and hash were recorded only.
 - Dynare was not run.
-- No derivation was promoted into `.agents/skills/dynare-copilot/references/model-archive/`.
+- No derivation was promoted into `.agents/skills/use-dynare/references/model-archive/`.
 

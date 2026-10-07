@@ -92,7 +92,7 @@ The policy shock $`\xi_t`$ has stochastic volatility, and $`\gamma_{\Pi t}`$ and
 
 ## 3. First-Order Conditions
 
-The paper states the household and firm problems but refers the full stationary equilibrium system to the appendix. The numbered equations below are a first-pass normalized equilibrium inventory from the paper-side model description, with implementation coverage checked against `.agents/skills/dynare-copilot/references/examples/US_FV15_rep.mod`. Conditions depending on appendix-only algebra remain `needs_review`.
+The paper states the household and firm problems but refers the full stationary equilibrium system to the appendix. The numbered equations below are a first-pass normalized equilibrium inventory from the paper-side model description, with implementation coverage checked against `.agents/skills/use-dynare/references/examples/US_FV15_rep.mod`. Conditions depending on appendix-only algebra remain `needs_review`.
 
 - **(F1) Marginal utility with habits**:
 

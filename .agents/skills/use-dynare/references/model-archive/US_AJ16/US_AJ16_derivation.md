@@ -10,7 +10,7 @@
 - **Source Markdown**: `raw/mmb_mineru/runs/us_aj16__financial_intermediation_investment_dynamics_and_business_cycle_fluctuat__68cd7c2d/full.md`.
 - **Raw PDF**: `raw/mmb_papers/Financial intermediation, investment dynamics, and business cycle fluctuations.pdf`.
 - **MinerU run id**: `68cd7c2d-56de-47eb-b378-19705191b4ce`.
-- **Implementation cross-check only**: `.agents/skills/dynare-copilot/references/examples/US_AJ16_rep.mod`.
+- **Implementation cross-check only**: `.agents/skills/use-dynare/references/examples/US_AJ16_rep.mod`.
 - **Agents**: a representative household with heterogeneous members, financial intermediaries, final-good producers, monopolistically competitive intermediate-good producers, investment-good producers, employment agencies, a monetary authority, and a fiscal authority.
 - **Core mechanism**: members receive idiosyncratic capital-installation technologies. High-technology members sell equity claims to finance investment, intermediate types keep installed capital, and low-technology members buy equity and government bonds. Competitive intermediaries create a bid-ask wedge between the equity sale price and purchase price. Persistent and transitory shocks to the intermediation wedge drive credit spreads, financing gaps, investment, and aggregate activity.
 - **Model form**: the paper solves a stationary, log-linear approximation around steady state. The MMB implementation is written in log-deviation/stationary variables and uses `stoch_simul(..., order=1)`, so this entry treats the archive form as a log-linearized estimated DSGE system rather than a complete nonlinear replication.

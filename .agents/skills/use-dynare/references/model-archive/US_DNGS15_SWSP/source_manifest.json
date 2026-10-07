@@ -38,7 +38,7 @@
       "exists": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_DNGS15_SWSP_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_DNGS15_SWSP_rep.mod",
       "sha256": "cafb346308e37f3d36b777172db98170535d417bef6065f87cd57833199ba42d",
       "role": "implementation_cross_check_only",
       "runtime_validation": "not_performed"

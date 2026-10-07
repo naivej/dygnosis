@@ -47,7 +47,7 @@
       "source_role": "not_available"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_LTW17gz_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_LTW17gz_rep.mod",
       "sha256": "2923a899ad8a4d6e43563a199aff6144b5dd9616509811cc5b9b3d41fd6fff20",
       "used_for": [
         "variable coverage",

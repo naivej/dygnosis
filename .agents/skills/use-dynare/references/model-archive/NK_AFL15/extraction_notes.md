@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- Read `.agents/skills/dynare-copilot/references/examples/NK_AFL15_rep.mod` only as implementation cross-check.
+- Read `.agents/skills/use-dynare/references/examples/NK_AFL15_rep.mod` only as implementation cross-check.
 - Cross-check confirms the core MMB variables: `c`, `pai`, `rn`, `k`, `z`, `y`, `mc`, `n`, `q`, `inv`, `rok`, `a`, `g`, `uc`, `un`, `Fk`, `Fn`, `bk`, `d`, `deprat`, `ra`, `br`, `fai`, `rd`, `crun`, `cpai`, `rsh`.
 - The implementation uses production capital as `k(-1)` and current accumulation as `k`, which is consistent with the paper's $`K_{t+1}`$ chosen at time $`t`$ convention after an index shift.
 - Implementation-only differences were not treated as paper-side source facts: `vR`, `vQ`, gross-rate normalization, and calibration values such as `BETTA=0.995` and `ALFA=1/3`.

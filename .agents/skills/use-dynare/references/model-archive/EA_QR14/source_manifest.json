@@ -48,7 +48,7 @@
       ]
     },
     {
-      "path": ".agents/skills/dynare-copilot/references/examples/EA_QR14_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/EA_QR14_rep.mod",
       "spans": [
         "variable, shock, and parameter declarations",
         "model block equation comments and nonlinear counterparts",

@@ -43,7 +43,7 @@
       "used_for_derivation": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_BGG99AL_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_BGG99AL_rep.mod",
       "exists": false,
       "used_for_derivation": false,
       "notes": "No model-specific example file was present; no MMB .mod file was used as a mathematical source."

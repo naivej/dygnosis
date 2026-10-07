@@ -18,11 +18,11 @@
   },
   "sources_read": [
     "docs/MODEL_ARCHIVE_BUILD_PLAN.md",
-    ".agents/skills/dynare-copilot/references/derivation-style.md",
-    ".agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md",
+    ".agents/skills/use-dynare/references/derivation-style.md",
+    ".agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md",
     "raw/mmb_mineru/model_index.csv",
     "raw/mmb_mineru/runs/nk_gs14__should_monetary_policy_lean_against_the_wind_an_analysis_based_on_a_dsge__0f9b3acb/full.md",
-    ".agents/skills/dynare-copilot/references/examples/NK_GS14_rep.mod"
+    ".agents/skills/use-dynare/references/examples/NK_GS14_rep.mod"
   ],
   "raw_pdf_path_exists": true,
   "raw_pdf_body_read": false,

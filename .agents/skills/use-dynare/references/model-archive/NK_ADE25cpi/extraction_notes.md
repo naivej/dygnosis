@@ -6,7 +6,7 @@
 - Primary Markdown: `raw/mmb_mineru/runs/nk_ade25cpi_nk_ade25ppi__trade_wars_and_the_optimal_design_of_monetary_rules__2eb96dcd/full.md`.
 - Raw paper PDF exists at `raw/mmb_papers/Trade Wars and the Optimal Design of Monetary Rules.pdf`; the PDF body was not read.
 - No normalized appendix Markdown exists at `docs/mmb_appendix_full_normalizations/NK_ADE25cpi.md`.
-- No example replication file exists at `.agents/skills/dynare-copilot/references/examples/NK_ADE25cpi_rep.mod`.
+- No example replication file exists at `.agents/skills/use-dynare/references/examples/NK_ADE25cpi_rep.mod`.
 
 ## Formula Source And Quality
 

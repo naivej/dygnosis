@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_DNGS15_SWSP_rep.mod` confirms `model(linear)`, spread observables, the financial-friction variables `Rktil`, `n`, and `sigw`, and the parallel flexible-price/wage block.
+- `.agents/skills/use-dynare/references/examples/US_DNGS15_SWSP_rep.mod` confirms `model(linear)`, spread observables, the financial-friction variables `Rktil`, `n`, and `sigw`, and the parallel flexible-price/wage block.
 - `raw/mmb/mmci-cli/models/US_DNGS15_SWSP/US_DNGS15_SWSP.mod` confirms the MMB policy-rule interface variables `interest`, `inflation`, `inflationq`, `outputgap`, `output`, and `fispol`.
 - The `.mod` files were not treated as paper-side mathematical sources and Dynare was not run.
 

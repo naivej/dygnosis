@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/UK_SM11_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/UK_SM11_rep.mod`.
 - Dynare was not run.
 - The implementation confirms `model(linear)`, the 12 exogenous innovations, the core variable names, and the existence of a flexible-price auxiliary block used for gaps.
 - Differences from paper notation are implementation-level:

@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- Read `.agents/skills/dynare-copilot/references/examples/NK_PP17_rep.mod` only as `implementation_cross_check`.
+- Read `.agents/skills/use-dynare/references/examples/NK_PP17_rep.mod` only as `implementation_cross_check`.
 - Confirmed `model(linear)`.
 - Confirmed endogenous variables: `y`, `yg`, `R`, `pi`, `phi`, `n`, `del`, `S`, `z`, `a`, `ns`, `eps_m`, `eps_R`, `lam`.
 - Confirmed exogenous innovations: `eta_a`, `eta_m`, `eta_n`, `eta_R`, `eta_l`.

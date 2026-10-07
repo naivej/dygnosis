@@ -385,7 +385,7 @@ For `US_CFP17endo`, the policy steady state also satisfies $`\bar{tp}=0`$ in dev
 - **Capital timing**: the paper writes nonlinear accumulation as $`K_{t+1}=(1-\delta)K_t+I_t`$ and log-linear accumulation as $`k_{t+1}=(1-\delta)k_t+\delta(\mu_t+i_t)`$. The `.mod` indexes current production by `k(-1)` and writes `k = (1-delta)*k(-1)+delta*(i+muinv)`, so `k` is a predetermined stock available for next-period production.
 - **Bond timing**: perpetual bond price $`Q_t`$ prices a new issue at time $`t`$; $`F_t`$ is the stock of investment-bond obligations and $`F_t-\kappa F_{t-1}`$ is new issuance. The loan return uses next-period bond price, $`r_{t+1}^L=\kappa q_{t+1}/R_{ss}^L-q_t`$.
 - **Endogenous-debt convention**: `US_CFP17endo` pegs the term premium. The long-government-bond quantity adjusts endogenously through the FI balance-sheet identity, while the short-rate rule continues to set the deposit/T-bill rate.
-- **Implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/US_CFP17endo_rep.mod` confirms variable names, shocks, and the endogenous closure, but it is not a paper-side mathematical source.
+- **Implementation cross-check**: `.agents/skills/use-dynare/references/examples/US_CFP17endo_rep.mod` confirms variable names, shocks, and the endogenous closure, but it is not a paper-side mathematical source.
 
 ## 8. Variable & Parameter Reference Table
 

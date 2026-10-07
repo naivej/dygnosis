@@ -41,7 +41,7 @@
       "sha256": null
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_CGG02AL_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_CGG02AL_rep.mod",
       "exists": false,
       "sha256": null,
       "used": false

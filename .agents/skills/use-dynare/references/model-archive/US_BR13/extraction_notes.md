@@ -6,7 +6,7 @@
 - `primary_full_md_path` exists and its header/title/authors match the index row.
 - `raw_pdf_path` exists and is recorded for provenance. The PDF body was not read because the Markdown contained the benchmark model equations needed for this first-pass extraction.
 - No `docs/mmb_appendix_full_normalizations/US_BR13.md` file exists.
-- No `.agents/skills/dynare-copilot/references/examples/US_BR13_rep.mod` file exists, so no implementation cross-check was available.
+- No `.agents/skills/use-dynare/references/examples/US_BR13_rep.mod` file exists, so no implementation cross-check was available.
 
 ## Formula Quality
 
@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- `.mod` file: not found at `.agents/skills/dynare-copilot/references/examples/US_BR13_rep.mod`.
+- `.mod` file: not found at `.agents/skills/use-dynare/references/examples/US_BR13_rep.mod`.
 - Cross-check status: not performed.
 - Dynare runtime validation: not performed, per user instruction.
 

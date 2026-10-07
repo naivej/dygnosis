@@ -6,7 +6,7 @@
 - First-page/first-80-line sniff matched the expected title and authors: "Macroprudential rules and monetary policy when financial frictions matter"; Jeannine Bailliu, Cesaire Meh, Yahong Zhang.
 - `raw_pdf_path` exists at `raw/mmb_papers/Macroprudential rules and monetary policy when financial frictions matter.pdf`. The PDF body was not opened because Markdown was sufficient for a first-pass `needs_review` draft.
 - `docs/mmb_appendix_full_normalizations/CA_BMZ12.md` does not exist.
-- `.agents/skills/dynare-copilot/references/examples/CA_BMZ12_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/CA_BMZ12_rep.mod` exists and was used only as `implementation_cross_check`.
 
 ## Formula Quality
 

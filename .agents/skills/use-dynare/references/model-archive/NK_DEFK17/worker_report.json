@@ -18,13 +18,13 @@
   "source_order_completed": [
     ".agents/skills/mmb-model-archive-builder/SKILL.md",
     "docs/MODEL_ARCHIVE_BUILD_PLAN.md",
-    ".agents/skills/dynare-copilot/references/derivation-style.md",
-    ".agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md",
+    ".agents/skills/use-dynare/references/derivation-style.md",
+    ".agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md",
     "raw/mmb_mineru/model_index.csv row for NK_DEFK17",
     "raw/mmb_mineru/runs/nk_defk17__the_great_escape_a_quantitative_evaluation_of_the_fed_s_liquidity_facili__b6479bed/full.md",
     "raw PDF existence check",
     "appendix normalization absence check",
-    ".agents/skills/dynare-copilot/references/examples/NK_DEFK17_rep.mod as implementation_cross_check"
+    ".agents/skills/use-dynare/references/examples/NK_DEFK17_rep.mod as implementation_cross_check"
   ],
   "source_manifest_summary": {
     "primary_full_md": "raw/mmb_mineru/runs/nk_defk17__the_great_escape_a_quantitative_evaluation_of_the_fed_s_liquidity_facili__b6479bed/full.md",
@@ -34,7 +34,7 @@
       "b6479bed-1e6a-4753-a815-218bb09c8cd4"
     ],
     "appendix_normalization_exists": false,
-    "implementation_cross_check": ".agents/skills/dynare-copilot/references/examples/NK_DEFK17_rep.mod"
+    "implementation_cross_check": ".agents/skills/use-dynare/references/examples/NK_DEFK17_rep.mod"
   },
   "proposed_catalog_csv_row": {
     "ModelID": "NK_DEFK17",

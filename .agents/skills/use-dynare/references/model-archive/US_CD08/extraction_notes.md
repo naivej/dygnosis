@@ -6,7 +6,7 @@
 - Primary Markdown: `raw/mmb_mineru/runs/us_cd08__the_financial_accelerator_in_an_estimated_new_keynesian_model__a324933c/full.md`.
 - Raw PDF path exists: `raw/mmb_papers/The financial accelerator in an estimated New Keynesian model.pdf`.
 - No appendix normalization file exists at `docs/mmb_appendix_full_normalizations/US_CD08.md`.
-- Implementation cross-check exists at `.agents/skills/dynare-copilot/references/examples/US_CD08_rep.mod`.
+- Implementation cross-check exists at `.agents/skills/use-dynare/references/examples/US_CD08_rep.mod`.
 
 ## Formula Quality
 
@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_CD08_rep.mod` was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_CD08_rep.mod` was used only as `implementation_cross_check`.
 - The implementation uses `model(linear)`.
 - The implementation variables are `lambda`, `c`, `b`, `m`, `e`, `r`, `h`, `w`, `y`, `k`, `a`, `i`, `cost`, `z`, `mu`, `pi`, `q`, `x`, `f`, `n`, and `rp`.
 - The implementation shocks are `e_r`, `u_x`, `u_a`, `u_e`, and `u_b`.

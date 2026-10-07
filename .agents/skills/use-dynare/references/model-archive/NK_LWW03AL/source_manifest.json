@@ -66,9 +66,9 @@
     },
     {
       "role": "sibling_implementation_cross_check",
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_LWW03_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_LWW03_rep.mod",
       "read_status": "read",
-      "source_boundary": "Sibling rational-expectations implementation only; no NK_LWW03AL example exists in .agents/skills/dynare-copilot/references/examples."
+      "source_boundary": "Sibling rational-expectations implementation only; no NK_LWW03AL example exists in .agents/skills/use-dynare/references/examples."
     }
   ],
   "source_index_issue": {

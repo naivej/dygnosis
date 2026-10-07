@@ -17,8 +17,8 @@
   "source_reading": {
     "skill": ".agents/skills/mmb-model-archive-builder/SKILL.md",
     "build_plan": "docs/MODEL_ARCHIVE_BUILD_PLAN.md",
-    "style_guide": ".agents/skills/dynare-copilot/references/derivation-style.md",
-    "example_derivation": ".agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md",
+    "style_guide": ".agents/skills/use-dynare/references/derivation-style.md",
+    "example_derivation": ".agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md",
     "model_index_row": "raw/mmb_mineru/model_index.csv:NK_CGG02AL",
     "primary_full_md_path": "raw/mmb_mineru/runs/nk_cgg02_nk_cgg02al__a_simple_framework_for_international_monetary_policy_analysis__8ffaf5fd/full.md",
     "appendix_normalization_exists": false,

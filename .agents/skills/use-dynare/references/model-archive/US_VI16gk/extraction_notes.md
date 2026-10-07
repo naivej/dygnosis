@@ -21,7 +21,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_VI16gk_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_VI16gk_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms:
   - `model(linear)` form;
   - US SWGK variable set with `ext_pr`, `lev`, `Lambda`, `v`, `d`, `z`, `x`, `n`, `ne`, `nn`, and flexible counterparts with `f` suffixes;

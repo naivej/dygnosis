@@ -63,7 +63,7 @@
         "notes": "Variant metadata and shock list; used only as implementation cross-check."
       },
       {
-        "path": ".agents/skills/dynare-copilot/references/examples/US_FRB22_rep.mod",
+        "path": ".agents/skills/use-dynare/references/examples/US_FRB22_rep.mod",
         "sha256": "6273f5596a491acaa3efd2a477379671879e571a60a3d26b1edc59519d82586d",
         "notes": "Generic FRB22 example; used only as implementation cross-check."
       }

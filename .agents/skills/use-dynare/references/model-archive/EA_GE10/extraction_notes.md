@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EA_GE10_rep.mod` was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EA_GE10_rep.mod` was read only as `implementation_cross_check`.
 - The `.mod` confirms the Rep-MMB variable set: `r c l inv q k nw rk y pi z mc a x eb el S g rn wp EMP ypot cf invf qf rkf rf kf wpf lf zf mcf`.
 - The `.mod` confirms exogenous shocks: `ux ub ul ua ur ug ulambdapi uw`.
 - The `.mod` implements sticky-price/sticky-wage equations and a flexible-price counterpart for `ypot`.

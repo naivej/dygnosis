@@ -24,7 +24,7 @@ Status: `needs_review`
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EA_DKR11_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EA_DKR11_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms a nonlinear model with variables for saver and borrower consumption/housing, entrepreneur debt and collateral cutoffs, household and entrepreneur default functions, sectoral production, Calvo price and wage blocks, bank capital, loan/deposit rates, and the observed data series.
 - The `.mod` also confirms shock-name families such as `E_A`, `E_A_D`, `E_B`, `E_G`, `E_H`, `E_R_D`, `E_R_L`, `E_R_L_E`, `E_SIG_HH`, `E_SIG`, `E_Bankcap`, and `E_R`.
 - Information learned only from the `.mod` was not treated as paper-side mathematical evidence.
@@ -32,7 +32,7 @@ Status: `needs_review`
 ## Deferred Issues
 
 - No Dynare run was performed.
-- The entry was not promoted to `.agents/skills/dynare-copilot/references/model-archive/`.
+- The entry was not promoted to `.agents/skills/use-dynare/references/model-archive/`.
 - Formula-by-formula reconciliation to the full MMB implementation equation count is deferred.
 - Steady-state logic is summarized from Appendix 2 and remains `needs_review`; the full implementation steady-state alias block was not adopted as source evidence.
 - Shared `catalog.csv` and `status.csv` were not edited. Proposed rows are in `worker_report.json`.

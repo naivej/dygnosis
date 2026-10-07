@@ -24,7 +24,7 @@
 
 ## Implementation Cross-Check
 
-- Read `.agents/skills/dynare-copilot/references/examples/DEREA_GEAR16_rep.mod`.
+- Read `.agents/skills/use-dynare/references/examples/DEREA_GEAR16_rep.mod`.
 - Used only as `implementation_cross_check`, not as a paper-side source.
 - Cross-check confirms:
   - large country-`a`/country-`b` symmetric blocks;

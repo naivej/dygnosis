@@ -13,7 +13,7 @@
 
 - English derivation was drafted first using the required eight-section structure.
 - The paper is a cross-model policy-rule evaluation article. It summarizes FRB-US qualitatively and prints the policy-rule/loss-function equations, but it does not print the full FRB-US structural equation system.
-- The `.mod` file `.agents/skills/dynare-copilot/references/examples/US_FRB03_rep.mod` was read only as `implementation_cross_check`.
+- The `.mod` file `.agents/skills/use-dynare/references/examples/US_FRB03_rep.mod` was read only as `implementation_cross_check`.
 
 ## Formula Quality
 
@@ -25,7 +25,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_FRB03_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_FRB03_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms this is the linearized version of the FRB-US model used in LWW (2003).
 - The `.mod` maps modelbase variables as `interest = rffe`, `inflation = (1/4)*(picnia + picnia(-1) + picnia(-2) + picnia(-3))`, `inflationq = picnia`, `outputgap = xgap2`, and `output = xgdp*100`.
 - The `.mod` uses `interest_` as the active shock in the final shock block and comments out longer simulation commands in favor of a no-moments `stoch_simul` setup.

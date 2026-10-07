@@ -19,7 +19,7 @@
 - `raw/mmb/mmci-cli/models/NK_LWW03AL/NK_LWW03AL.mod` and `.json` were read only as `implementation_cross_check`.
 - The `.json` metadata marks `"al": true`, category `Adaptive learning model`, variables including `ygap`, `pdot`, `rff`, `rstar`, `drff`, `pdotsh`, `pinf4`, and shocks `interest_`, `pdotsh_`, and `rstar_`.
 - The `.mod` implements the same small linear AD-AS core as `NK_LWW03`, adds a Modelbase policy-rule interface, and saves `AL_Info` with forward variables `ygap`, `pdot`, `inflationq`, long states `rstar`, `interest`, `inflationq`, `inflationql`, `inflationql2`, and short states `interest`, `outputgap`.
-- `.agents/skills/dynare-copilot/references/examples/NK_LWW03_rep.mod` exists only for sibling `NK_LWW03`; no `NK_LWW03AL_rep.mod` exists in the skill examples. The sibling file was used only to confirm the rational-expectations core and not as a paper source.
+- `.agents/skills/use-dynare/references/examples/NK_LWW03_rep.mod` exists only for sibling `NK_LWW03`; no `NK_LWW03AL_rep.mod` exists in the skill examples. The sibling file was used only to confirm the rational-expectations core and not as a paper source.
 - Dynare was not run.
 
 ## Deferred Issues

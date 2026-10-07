@@ -13,16 +13,16 @@
 - `.agents/skills/mmb-model-archive-builder/SKILL.md`
 - `docs/MMB_MODEL_ARCHIVE_SUBAGENT_TASK.md`
 - `docs/MODEL_ARCHIVE_BUILD_PLAN.md`
-- `.agents/skills/dynare-copilot/references/derivation-style.md`
-- `.agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md`
+- `.agents/skills/use-dynare/references/derivation-style.md`
+- `.agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md`
 - `raw/mmb_mineru/model_index.csv`
 - primary `full.md`
-- `.agents/skills/dynare-copilot/references/examples/EAUS_NAWM08_rep.mod`
+- `.agents/skills/use-dynare/references/examples/EAUS_NAWM08_rep.mod`
 
 ## Optional Source Availability
 
 - Appendix normalization was checked at `docs/mmb_appendix_full_normalizations/EAUS_NAWM08.md`; no file exists.
-- Implementation cross-check exists at `.agents/skills/dynare-copilot/references/examples/EAUS_NAWM08_rep.mod`.
+- Implementation cross-check exists at `.agents/skills/use-dynare/references/examples/EAUS_NAWM08_rep.mod`.
 
 ## Formula Quality
 
@@ -46,5 +46,5 @@
 - The exact investment FOC derivative convention in equation (5) and the import-adjustment $`\Gamma^\dagger`$ terms should be checked.
 - The government budget constraint timing in the implementation differs from the paper's next-period stock notation and should be audited before promotion.
 - Dynare runtime validation was not run.
-- The entry was not promoted to `.agents/skills/dynare-copilot/references/model-archive/`.
+- The entry was not promoted to `.agents/skills/use-dynare/references/model-archive/`.
 

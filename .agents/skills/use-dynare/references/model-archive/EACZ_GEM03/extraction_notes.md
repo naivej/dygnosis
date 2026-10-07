@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EACZ_GEM03_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EACZ_GEM03_rep.mod` exists and was read only as `implementation_cross_check`.
 - Cross-check evidence used:
   - Home variables use suffix `H`; Foreign variables use suffix `F`.
   - The MMB file is a nonlinear `model` block, not `model(linear)`.

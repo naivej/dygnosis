@@ -6,17 +6,17 @@
 - Extraction date: 2026-06-17
 - Scope: private derivation archive draft only.
 - Runtime validation: not performed.
-- Promotion to `.agents/skills/dynare-copilot/references/model-archive/`: not performed.
+- Promotion to `.agents/skills/use-dynare/references/model-archive/`: not performed.
 
 ## Sources Read
 
 - `docs/MODEL_ARCHIVE_BUILD_PLAN.md`
-- `.agents/skills/dynare-copilot/references/derivation-style.md`
-- `.agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md`
+- `.agents/skills/use-dynare/references/derivation-style.md`
+- `.agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md`
 - `raw/mmb_mineru/model_index.csv`
 - `raw/mmb_mineru/runs/us_sw07__shocks_and_frictions_in_us_business_cycles_a_bayesian_dsge_approach__5e0f76f1/full.md`
 - `docs/mmb_appendix_full_normalizations/US_SW07.md`
-- `.agents/skills/dynare-copilot/references/examples/US_SW07_rep.mod` as implementation cross-check only.
+- `.agents/skills/use-dynare/references/examples/US_SW07_rep.mod` as implementation cross-check only.
 
 ## Source Match
 

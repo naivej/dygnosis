@@ -23,7 +23,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_JPT11_rep.mod` was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_JPT11_rep.mod` was read only as `implementation_cross_check`.
 - Cross-check observations:
   - The implementation uses `model(linear)`.
   - The implementation declares the baseline and flexible-star blocks for output, capital, labor, marginal product of capital, wages, marginal cost, marginal utility, consumption, rates, utilization, investment, physical capital, wage gap, and GDP.

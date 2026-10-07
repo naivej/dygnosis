@@ -2,7 +2,7 @@
 
 > This derivation is a source-backed private archive draft for later Dynare work. Runtime validation was not performed.
 
-Provenance: `NK_GLSV07`, Galí, Jordi; López-Salido, J. David; Vallés, Javier, "Understanding the effects of government spending on consumption", Journal of the European Economic Association 5(1), 227-270, 2007, DOI `10.1162/jeea.2007.5.1.227`. Source Markdown: `raw/mmb_mineru/runs/nk_glsv07__understanding_the_effects_of_government_spending_on_consumption__47e78a28/full.md`; raw PDF checked for existence only: `raw/mmb_papers/Understanding the effects of government spending on consumption.pdf`; MinerU run id `47e78a28-668e-4d2c-a7ff-9274c85dd958`. Implementation cross-check only: `.agents/skills/dynare-copilot/references/examples/NK_GLSV07_rep.mod`.
+Provenance: `NK_GLSV07`, Galí, Jordi; López-Salido, J. David; Vallés, Javier, "Understanding the effects of government spending on consumption", Journal of the European Economic Association 5(1), 227-270, 2007, DOI `10.1162/jeea.2007.5.1.227`. Source Markdown: `raw/mmb_mineru/runs/nk_glsv07__understanding_the_effects_of_government_spending_on_consumption__47e78a28/full.md`; raw PDF checked for existence only: `raw/mmb_papers/Understanding the effects of government spending on consumption.pdf`; MinerU run id `47e78a28-668e-4d2c-a7ff-9274c85dd958`. Implementation cross-check only: `.agents/skills/use-dynare/references/examples/NK_GLSV07_rep.mod`.
 
 ## 1. Model Overview
 

@@ -25,7 +25,7 @@
 
 ## Implementation Cross-Check
 
-- `raw/mmb/mmci-cli/models/US_ACELt/US_ACELt.mod` and `.agents/skills/dynare-copilot/references/examples/US_ACELt_rep.mod` were read only as `implementation_cross_check`.
+- `raw/mmb/mmci-cli/models/US_ACELt/US_ACELt.mod` and `.agents/skills/use-dynare/references/examples/US_ACELt_rep.mod` were read only as `implementation_cross_check`.
 - The `.mod` confirms:
   - `model(linear)` form;
   - sticky-price and flexible-price blocks;

@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- Read `.agents/skills/dynare-copilot/references/examples/US_ACELswt_rep.mod` only as implementation cross-check.
+- Read `.agents/skills/use-dynare/references/examples/US_ACELswt_rep.mod` only as implementation cross-check.
 - The `.mod` declares `model(linear)` and uses sticky-price variables plus flexible-price counterparts.
 - The implementation includes 16 commented sticky-price equations, analogous flexible-price equations, and shock processes for monetary, neutral technology, embodied technology, and transitory neutral technology shocks.
 - The file comments state that this version produces correct impulse responses to neutral and investment-specific technology shocks without the cost channel (`nu = 0`), but wrong answers to monetary policy shocks because variables are not predetermined. This is recorded as an implementation caveat, not a source-paper claim.

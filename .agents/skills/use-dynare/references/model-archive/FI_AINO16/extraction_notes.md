@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/FI_AINO16_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/FI_AINO16_rep.mod` exists and was read only as `implementation_cross_check`.
 - It confirms the MMB implementation uses `model(linear)`.
 - It lists endogenous variables, shocks, banking variables, and the author's later corrections to Tobin's Q, net wholesale loan rate, and wage Phillips curve equations.
 - Information learned only from the `.mod` is marked as implementation cross-check and was not treated as paper-side mathematical source.

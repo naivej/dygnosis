@@ -40,7 +40,7 @@
       "role": "not_available"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_GM07_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_GM07_rep.mod",
       "sha256": "ecf50b60c3cc4a62ea8a6001dc699c3b06e84e0f815e2fa04080a496ad1acefe",
       "exists": true,
       "role": "implementation_cross_check_only"

@@ -12,7 +12,7 @@ Provenance: `US_RE09`, Robert Reis (2009), "A sticky-information general-equilib
 - **Key rigidities**: Sticky information is pervasive. Consumers update information with probability $`\delta`$, workers with probability $`\omega`$, and firms with probability $`\lambda`$.
 - **Shocks**: Productivity growth, aggregate demand, goods markup, wage markup, and monetary policy shocks.
 - **Form**: `model(linear)` / log-linear reduced-form system around the nonstochastic Pareto-optimum steady state. Variables such as $`y_t`$, $`p_t`$, $`w_t`$, $`l_t`$, $`i_t`$, and shocks are log levels, log deviations, or differences as defined in the paper-side reduced-form section.
-- **Implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/US_RE09_rep.mod` confirms the MMB replication uses a finite 16-lag approximation to the infinite sticky-information expectations sums. This `.mod` file was not used as a paper-side mathematical source.
+- **Implementation cross-check**: `.agents/skills/use-dynare/references/examples/US_RE09_rep.mod` confirms the MMB replication uses a finite 16-lag approximation to the infinite sticky-information expectations sums. This `.mod` file was not used as a paper-side mathematical source.
 
 ## 2. Optimization Problems
 

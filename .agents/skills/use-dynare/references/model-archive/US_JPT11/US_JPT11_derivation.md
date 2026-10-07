@@ -12,7 +12,7 @@ Provenance: `US_JPT11`, Alejandro Justiniano, Giorgio E. Primiceri, and Andrea T
 - **Nominal frictions**: Calvo sticky prices with price indexation and Calvo sticky wages with wage indexation.
 - **Real frictions**: External habit formation, variable capital utilization, investment adjustment costs, fixed costs in intermediate production, government spending shocks, and intertemporal preference shocks.
 - **Shocks**: Neutral technology growth, IST growth, MEI, price markup, wage markup, intertemporal preference, government spending, and monetary policy.
-- **Form**: The paper states that the stationary transformed model is log-linearly approximated around the nonstochastic steady state. The implementation cross-check `.agents/skills/dynare-copilot/references/examples/US_JPT11_rep.mod` uses `model(linear)`. This `.mod` file was used only as `implementation_cross_check`, not as a paper-side source.
+- **Form**: The paper states that the stationary transformed model is log-linearly approximated around the nonstochastic steady state. The implementation cross-check `.agents/skills/use-dynare/references/examples/US_JPT11_rep.mod` uses `model(linear)`. This `.mod` file was used only as `implementation_cross_check`, not as a paper-side source.
 
 ## 2. Optimization Problems
 

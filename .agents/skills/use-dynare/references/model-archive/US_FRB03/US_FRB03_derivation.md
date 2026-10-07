@@ -213,7 +213,7 @@ i_t=i_{t-1}=r^{\ast}+\pi^{\ast}.
 - **Forecast horizons**: $`\theta`$ and $`\kappa`$ are measured in quarters. The robust benchmark uses $`\theta=4`$ and $`\kappa=0`$.
 - **Model form**: Linear rational-expectations macroeconometric model. The MMB implementation is a linearized FRB-US model and is not a nonlinear optimization-based DSGE system in this source.
 - **Stock/timing convention**: The paper-side Markdown does not print stock timing for the full FRB-US model. The `.mod` cross-check contains many lagged stocks and forward-looking expectation terms, but those details remain `needs_review` until checked against FRB-US documentation.
-- **Source boundary**: `.agents/skills/dynare-copilot/references/examples/US_FRB03_rep.mod` was used only to identify coverage, naming, timing clues, and implementation conventions. It is not treated as the paper-side mathematical source.
+- **Source boundary**: `.agents/skills/use-dynare/references/examples/US_FRB03_rep.mod` was used only to identify coverage, naming, timing clues, and implementation conventions. It is not treated as the paper-side mathematical source.
 - **Runtime validation**: Not performed. No Dynare run, BK check, residual check, or IRF validation was executed.
 
 ## 8. Variable & Parameter Reference Table

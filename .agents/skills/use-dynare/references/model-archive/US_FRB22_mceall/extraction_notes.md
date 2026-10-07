@@ -21,7 +21,7 @@ Status: `needs_review`
 
 ## Implementation Cross-Check
 
-- No skill-example file exists at `.agents/skills/dynare-copilot/references/examples/US_FRB22_mceall_rep.mod`.
+- No skill-example file exists at `.agents/skills/use-dynare/references/examples/US_FRB22_mceall_rep.mod`.
 - Cross-check files used:
   - `raw/mmb/mmci-cli/models/US_FRB22_mceall/US_FRB22_mceall.mod`
   - `raw/mmb/mmci-cli/models/US_FRB22_mceall/US_FRB22_mceall.json`

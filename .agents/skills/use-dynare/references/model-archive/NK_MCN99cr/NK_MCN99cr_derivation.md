@@ -12,7 +12,7 @@
 - **MinerU run id**: `b43633f6-1141-457a-af12-8edc3db54f79`.
 - **Model form**: log-linear `model(linear)` in the Rep-MMB implementation. Lower-case variables are logs or log deviations; the nominal interest rate is in quarterly fractional units. The implemented variant is the Calvo-Rotemberg aggregate-supply version, not the paper's P-bar variant.
 - **Agents and blocks**: infinitely lived households that consume, hold real money balances, bonds, and capital, and also produce differentiated goods; demand aggregation; exogenous investment/capacity-output processes; Calvo-Rotemberg price adjustment; monetary policy rule.
-- **Implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/NK_MCN99cr_rep.mod` is used only to identify the Rep-MMB variable set and selected policy-rule variant. It was not used as a paper-side mathematical source.
+- **Implementation cross-check**: `.agents/skills/use-dynare/references/examples/NK_MCN99cr_rep.mod` is used only to identify the Rep-MMB variable set and selected policy-rule variant. It was not used as a paper-side mathematical source.
 
 ## 2. Optimization Problems
 

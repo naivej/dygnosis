@@ -21,7 +21,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_PM08_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_PM08_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms a stationary `model(linear)` form, MMB variable names (`RR_USh`, `RR_US_BARh`, `UNR_US_GAP`, `PIE_USh`, `PIE_US4h`, `Y_US`, `RS_USh`), shock names, expectation-reporting variables, and the BLT distributed-lag implementation.
 - The `.mod` was not treated as paper-side mathematical evidence and was not run.
 

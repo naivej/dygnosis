@@ -346,7 +346,7 @@ Runtime validation status: not performed. Dynare was not run.
 - **Expectations timing**: lead variables $`y^f_t`$ are forecast with beliefs known at $`t-1`$ and information in $`Z_t`$ / $`Z_{t-1}`$ as specified in the learning recursion. The paper uses Kalman-filtered model variables when the variables are not observed.
 - **Learning variants**: MSV learning uses the model's state and exogenous variables; MSV-plus-constant also learns constants; VAR learning restricts the belief equations to observed variables and a constant.
 - **Projection facility**: when learning dynamics imply explosive temporary transition matrices, the paper follows the learning literature by excluding those updates.
-- **Implementation cross-check**: no `.agents/skills/dynare-copilot/references/examples/US_SW07AL_rep.mod` file exists. A related `US_SW07_rep.mod` exists but was not used as assigned cross-check evidence for this model.
+- **Implementation cross-check**: no `.agents/skills/use-dynare/references/examples/US_SW07AL_rep.mod` file exists. A related `US_SW07_rep.mod` exists but was not used as assigned cross-check evidence for this model.
 
 ## 8. Variable & Parameter Reference Table
 

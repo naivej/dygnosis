@@ -6,7 +6,7 @@
 - First-page/metadata sniff matched the expected title and authors: "Optimal Monetary Policy in a Model of the Credit Channel"; Fiorella De Fiore and Oreste Tristani.
 - `raw_pdf_path` exists at `raw/mmb_papers/Optimal Monetary Policy in a Model of the Credit Channel.pdf`. The PDF body was not opened because the Markdown was sufficient for a first-pass `needs_review` draft.
 - `docs/mmb_appendix_full_normalizations/NK_DT12.md` does not exist.
-- `.agents/skills/dynare-copilot/references/examples/NK_DT12_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/NK_DT12_rep.mod` exists and was used only as `implementation_cross_check`.
 
 ## Formula Quality
 

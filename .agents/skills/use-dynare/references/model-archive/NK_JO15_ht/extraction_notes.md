@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- Optional file read as implementation cross-check only: `.agents/skills/dynare-copilot/references/examples/NK_JO15_ht_rep.mod`.
+- Optional file read as implementation cross-check only: `.agents/skills/use-dynare/references/examples/NK_JO15_ht_rep.mod`.
 - Cross-check facts used:
   - Model is `model(linear)`.
   - Variant is "High level of trade" with `alpha=0.9`.

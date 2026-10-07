@@ -20,7 +20,7 @@
 
 ## Implementation Cross-Check
 
-- Checked `.agents/skills/dynare-copilot/references/examples/NK_BGEU10_rep.mod`.
+- Checked `.agents/skills/use-dynare/references/examples/NK_BGEU10_rep.mod`.
 - Cross-check confirms `model(linear)`, endogenous variables `pi`, `uhat`, `a`, `eta`, `inflation`, exogenous shock `a_`, and Europe calibration values `x=0.25`, `u=0.1`, `B=5/42`, `ra=0.9`.
 - The `.mod` file uses `a = ra*a(-1) - a_`, so the named innovation has the opposite sign from a generic productivity innovation.
 - The `.mod` file was not used as paper-side mathematical evidence.

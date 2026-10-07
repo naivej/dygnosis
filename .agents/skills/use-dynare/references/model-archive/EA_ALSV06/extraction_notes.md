@@ -19,7 +19,7 @@ Status: `needs_review`
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EA_ALSV06_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EA_ALSV06_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` declares endogenous variables `y m r mu pi mc a e z`, exogenous shocks `epsa epse epsz epsr`, and uses `model(linear)`.
 - The `.mod` comments identify the variant as "Working Paper, separable preferences, CRRA specification and habits".
 - The `.mod` confirms the same core block: IS relation, money demand, interest-rate rule, money-growth identity, Phillips curve, marginal cost, and three AR(1) state processes.

@@ -20,7 +20,7 @@
 
 ## Implementation Cross-Check
 
-- Read `.agents/skills/dynare-copilot/references/examples/EA_SW03_rep.mod` only as `implementation_cross_check`.
+- Read `.agents/skills/use-dynare/references/examples/EA_SW03_rep.mod` only as `implementation_cross_check`.
 - Cross-check confirmed `model(linear)`.
 - Cross-check confirmed major variables: `c`, `inve`, `pk`, `kp`, `pinf`, `w`, `r`, `rk`, `lab`, `y`, `empl`, `mc`, plus flexible-price counterparts.
 - Cross-check confirmed capital timing through lagged installed capital terms such as `kp(-1)` and `kpf(-1)`.

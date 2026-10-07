@@ -10,8 +10,8 @@
   ],
   "sources_read": [
     "docs/MODEL_ARCHIVE_BUILD_PLAN.md",
-    ".agents/skills/dynare-copilot/references/derivation-style.md",
-    ".agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md",
+    ".agents/skills/use-dynare/references/derivation-style.md",
+    ".agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md",
     "raw/mmb_mineru/model_index.csv",
     "raw/mmb_mineru/runs/nk_bgg99_nk_bgg99al__the_financial_accelerator_in_a_quantitative_business__e6291ccb/full.md"
   ],
@@ -20,7 +20,7 @@
   ],
   "missing_optional_sources": [
     "docs/mmb_appendix_full_normalizations/NK_BGG99AL.md",
-    ".agents/skills/dynare-copilot/references/examples/NK_BGG99AL_rep.mod"
+    ".agents/skills/use-dynare/references/examples/NK_BGG99AL_rep.mod"
   ],
   "shared_indexes_modified": false,
   "git_staged": false,

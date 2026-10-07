@@ -379,7 +379,7 @@ with growth normalization handled by the stationary transformation.
 - **Debt timing**: government bonds $`b_t`$ are end-of-period real debt; the budget constraint carries $`b_{t-1}R_{t-1}/\Pi_t`$ into period $`t`$.
 - **Fiscal shocks**: $`\epsilon_{x,t}`$ move fiscal instruments; $`u_{x,t}`$ move the log standard deviations $`\sigma_{x,t}`$. The main experiment shocks $`u_{\tau_k,t}`$.
 - **Model form**: nonlinear stationary equilibrium with balanced growth. Paper-side quantitative results use third-order perturbation because volatility shocks matter directly at higher order.
-- **Implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/US_FGKR15_rep.mod` uses log/exponentiated variables including `ct`, `yt`, `invt`, `kt`, `kbt`, `ht`, `mct`, `wt`, `inflt`, `Rt`, tax rates, and volatility states. It was not run.
+- **Implementation cross-check**: `.agents/skills/use-dynare/references/examples/US_FGKR15_rep.mod` uses log/exponentiated variables including `ct`, `yt`, `invt`, `kt`, `kbt`, `ht`, `mct`, `wt`, `inflt`, `Rt`, tax rates, and volatility states. It was not run.
 
 ## 8. Variable & Parameter Reference Table
 

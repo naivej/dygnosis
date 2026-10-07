@@ -26,7 +26,7 @@ Status: `needs_review`
 
 ## Implementation Cross-Check
 
-- Cross-check file read: `.agents/skills/dynare-copilot/references/examples/EA_CW05ta_rep.mod`.
+- Cross-check file read: `.agents/skills/use-dynare/references/examples/EA_CW05ta_rep.mod`.
 - Confirmed variant: Taylor (1980) nominal wage contracting model.
 - Confirmed form: `model(linear)`.
 - Confirmed MMB aliases: `interest = is`, `inflation = infl`, `outputgap = q`.

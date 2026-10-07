@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- Read `.agents/skills/dynare-copilot/references/examples/NK_KRS12_rep.mod` only as `implementation_cross_check`.
+- Read `.agents/skills/use-dynare/references/examples/NK_KRS12_rep.mod` only as `implementation_cross_check`.
 - Confirmed `Model(linear);`, endogenous names, exogenous shocks `eps_A`, `eps_D`, `eps_v`, and the augmented Taylor plus macroprudential policy regime.
 - Did not run Dynare.
 - Potential-output auxiliary equations (`yCstar`, `yDstar`, `dstar`) are present in the implementation but are not fully derived in the paper appendix. They are mentioned as implementation details rather than promoted into the paper-side equation list.

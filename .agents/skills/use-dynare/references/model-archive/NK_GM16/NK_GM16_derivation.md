@@ -8,7 +8,7 @@
 - **Paper**: Jordi Gali and Tommaso Monacelli (2016), "Understanding the Gains from Wage Flexibility: The Exchange Rate Connection," *American Economic Review*, 106(12), 3829-3868.
 - **DOI**: `10.1257/aer.20131658`
 - **Core economy**: small open New Keynesian economy with sticky domestic prices, sticky nominal wages, complete international financial markets, law of one price, export demand, no capital accumulation in the baseline, and exogenous domestic, technology, payroll-tax, export, and world-interest-rate disturbances.
-- **MMB implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/NK_GM16_rep.mod` implements the currency-union regime with `model(linear)` and `e = 0`.
+- **MMB implementation cross-check**: `.agents/skills/use-dynare/references/examples/NK_GM16_rep.mod` implements the currency-union regime with `model(linear)` and `e = 0`.
 - **Model form**: log-linear equilibrium system around a zero-inflation symmetric steady state. Lowercase variables are log deviations from steady state; gap variables are deviations from flexible-price-and-wage natural allocations.
 - **Policy regimes**: the paper discusses strict domestic inflation targeting (`\pi_{H,t}=0`) and currency union / hard peg (`e_t=0`). The MMB replication file activates the currency-union regime.
 - **Provenance sources**: source Markdown `raw/mmb_mineru/runs/nk_gm16__understanding_the_gains_from_wage_flexibility_the_exchange_rate_connecti__f3573fbb/full.md`; raw PDF `raw/mmb_papers/Understanding the Gains from Wage Flexibility- The Exchange Rate Connection.pdf`; no appendix-normalization file was found.

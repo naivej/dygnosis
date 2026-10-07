@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_CK08_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_CK08_rep.mod`.
 - Used only for variable coverage, shock names, timing, and `model(linear)` confirmation.
 - The replication file states that the original model is monthly and the MMB file is recalibrated to quarterly frequency.
 - Cross-check confirms endogenous variables including `ct`, `deltaFt`, `deltaWt`, `Deltastart`, `ht`, `Jstart`, `lambdat`, `mct`, `mt`, `nt`, `Pit`, `Piannt`, `qt`, `Rt`, `st`, `ut`, `vt`, `wstart`, `wt`, `xLt`, `yt`, and shock states `ebt`, `emoneyt`, `gt`, `zt`.

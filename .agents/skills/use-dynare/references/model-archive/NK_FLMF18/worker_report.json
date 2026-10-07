@@ -15,7 +15,7 @@
     "raw_pdf_exists": true,
     "raw_pdf_body_read": false,
     "appendix_normalization_path": null,
-    "implementation_cross_check_path": ".agents/skills/dynare-copilot/references/examples/NK_FLMF18_rep.mod"
+    "implementation_cross_check_path": ".agents/skills/use-dynare/references/examples/NK_FLMF18_rep.mod"
   },
   "validation": {
     "git_diff_check_model_folder": "passed",

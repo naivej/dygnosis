@@ -6,7 +6,7 @@
 - First-page/first-80-line sniff matched the expected title and authors: "Inflation in the Great Recession and New Keynesian Models"; Marco Del Negro, Marc P. Giannoni, Frank Schorfheide.
 - The row's `raw_pdf_path` exists at `raw/mmb_papers/Infation in the Great recession and New Keynesian models.pdf`. The PDF body was not opened because the Markdown was sufficient for a first-pass `needs_review` draft and the user did not request targeted PDF checking.
 - `docs/mmb_appendix_full_normalizations/US_DNGS15_SW.md` does not exist.
-- `.agents/skills/dynare-copilot/references/examples/US_DNGS15_SW_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_DNGS15_SW_rep.mod` exists and was used only as `implementation_cross_check`.
 
 ## Formula Quality
 

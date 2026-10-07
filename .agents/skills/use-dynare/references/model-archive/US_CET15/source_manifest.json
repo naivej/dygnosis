@@ -40,7 +40,7 @@
     "sha256": null
   },
   "implementation_cross_check": {
-    "path": ".agents/skills/dynare-copilot/references/examples/US_CET15_rep.mod",
+    "path": ".agents/skills/use-dynare/references/examples/US_CET15_rep.mod",
     "exists": true,
     "sha256": "240dfcd215207f8b74d1f6973f7a4f8e55f03b40830bc3621a2398bd262e2b42",
     "use_scope": "implementation_cross_check_only",

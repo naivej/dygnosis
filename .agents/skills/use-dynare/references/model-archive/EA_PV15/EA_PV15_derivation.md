@@ -1,6 +1,6 @@
 # EA_PV15 -- Derivation (Optimization Problems + First-Order Conditions)
 
-> Status: `needs_review`. This first-pass archive entry is based on the MinerU Markdown source, with `.agents/skills/dynare-copilot/references/examples/EA_PV15_rep.mod` used only as `implementation_cross_check`. Runtime validation was not performed.
+> Status: `needs_review`. This first-pass archive entry is based on the MinerU Markdown source, with `.agents/skills/use-dynare/references/examples/EA_PV15_rep.mod` used only as `implementation_cross_check`. Runtime validation was not performed.
 
 Source: Jean-Christophe Poutineau and Gauthier Vermandel (2015), "Cross-border banking flows spillovers in the eurozone: Evidence from an estimated DSGE model", *Journal of Economic Dynamics and Control* 51, 378-403. DOI: `10.1016/j.jedc.2014.11.006`.
 

@@ -21,7 +21,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_YR13AL_rep.mod` does not exist.
+- `.agents/skills/use-dynare/references/examples/US_YR13AL_rep.mod` does not exist.
 - No `.mod` implementation was used as evidence.
 
 ## Deferred Issues

@@ -45,7 +45,7 @@
     },
     "appendix_normalization": null,
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/EA_SW03_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/EA_SW03_rep.mod",
       "sha256": "58145d997a26a0082caae465b42a275b292dc2eb8e78684f54b4a503168a9a87",
       "used_for": [
         "model(linear) confirmation",

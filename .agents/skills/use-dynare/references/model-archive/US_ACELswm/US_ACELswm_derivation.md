@@ -1,6 +1,6 @@
 # US_ACELswm -- Derivation (optimization problems + first-order conditions)
 
-> Archive status: `needs_review`. This first-pass derivation is based on the MinerU Markdown for Altig, Christiano, Eichenbaum, and Linde (2005), with `.agents/skills/dynare-copilot/references/examples/US_ACELswm_rep.mod` used only as `implementation_cross_check`. Runtime validation was not performed.
+> Archive status: `needs_review`. This first-pass derivation is based on the MinerU Markdown for Altig, Christiano, Eichenbaum, and Linde (2005), with `.agents/skills/use-dynare/references/examples/US_ACELswm_rep.mod` used only as `implementation_cross_check`. Runtime validation was not performed.
 
 > Equation labels run continuously from (F1) through (F53); formulas use matching LaTeX `\tag{F#}` labels.
 

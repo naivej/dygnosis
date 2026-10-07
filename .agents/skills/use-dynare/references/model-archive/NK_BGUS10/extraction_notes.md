@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_BGUS10_rep.mod` confirms:
+- `.agents/skills/use-dynare/references/examples/NK_BGUS10_rep.mod` confirms:
   - `model(linear)` form;
   - endogenous variables `pi, mc, xhat, c, a, n, uhat, i, xhatf, cf, nf, uhatf, r, y, yf`;
   - one technology innovation `a_`;

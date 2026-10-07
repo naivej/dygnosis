@@ -13,7 +13,7 @@
 - English derivation was drafted first using the required eight-section structure.
 - The source paper contains nonlinear primitive problems and a log-linearized model. The MMB implementation cross-check is explicitly a linearized model, so the archive entry records `model(linear)` / log-linearized form.
 - `US_CFP17endo` is treated as the endogenous-debt variant because the implementation cross-check sets `term_prem = 0` and `term_premf = 0`.
-- The `.mod` file `.agents/skills/dynare-copilot/references/examples/US_CFP17endo_rep.mod` was read only as `implementation_cross_check`.
+- The `.mod` file `.agents/skills/use-dynare/references/examples/US_CFP17endo_rep.mod` was read only as `implementation_cross_check`.
 
 ## Formula Quality
 
@@ -25,7 +25,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_CFP17endo_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_CFP17endo_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms a linearized implementation and declares sticky-price variables plus flexible-price counterparts with `f` suffixes.
 - The `.mod` confirms endogenous policy variables `term_prem = 0` and `term_premf = 0`, with `bb2`/`b2` acting as the long-bond quantity variable.
 - The `.mod` uses `k(-1)` in production and writes capital accumulation as `k = (1-delta)*k(-1)+delta*(i+muinv)`, confirming predetermined capital timing.

@@ -13,7 +13,7 @@
 
 - English derivation was drafted first using the required eight-section structure.
 - The paper-side extraction focuses on equations (2.1), (3.1)-(3.18), and (5.1)-(5.5): the policy rule, household problem, CES price index, intertemporal budget, decision-lag IS equation, Calvo reset-pricing block, and shock-reconstruction equations.
-- The `.mod` file `.agents/skills/dynare-copilot/references/examples/NK_RW97_rep.mod` was read only as `implementation_cross_check`.
+- The `.mod` file `.agents/skills/use-dynare/references/examples/NK_RW97_rep.mod` was read only as `implementation_cross_check`.
 - Shared `catalog.csv` and `status.csv` were not edited. Proposed rows are recorded in `worker_report.json`.
 
 ## Formula Quality
@@ -26,7 +26,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_RW97_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/NK_RW97_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms `model(linear)` with endogenous variables `pi`, `y`, `ynat`, `rnat`, `i`, `x`, `u`, and `g`.
 - The `.mod` implements a reduced Woodford-style system: NKPC, AR(1) cost-push shock, IS equation in the output gap, natural real rate, natural output, output-gap identity, AR(1) autonomous-spending shock, and Taylor rule.
 - The `.mod` has shocks `u_` and `g_`; it does not include the paper's separate monetary-policy shock $`\epsilon_t`$.

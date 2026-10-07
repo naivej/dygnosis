@@ -20,7 +20,7 @@
 
 ## Implementation Cross-Check
 
-- Read `.agents/skills/dynare-copilot/references/examples/NK_RW97_rep.mod` only as implementation cross-check.
+- Read `.agents/skills/use-dynare/references/examples/NK_RW97_rep.mod` only as implementation cross-check.
 - Cross-check confirms a compact `model(linear)` representation with endogenous variables `pi`, `y`, `ynat`, `rnat`, `i`, `x`, `u`, and `g`.
 - Cross-check confirms exogenous innovations `u_` and `g_`, and parameters `beta`, `sigma`, `alpha`, `theta`, `omega`, `kappa`, `rhou`, `rhog`, `phipi`, and `phix`.
 - Cross-check equations include the standard compact NK Phillips curve, output-gap IS equation, natural-rate equation, natural-output equation, output-gap identity, AR(1) shocks, and a simple contemporaneous policy rule.

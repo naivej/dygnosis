@@ -55,7 +55,7 @@
       "paper_side_source": false
     },
     "example_rep_mod": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_ADE25cpi_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_ADE25cpi_rep.mod",
       "exists": false
     }
   },

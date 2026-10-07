@@ -39,7 +39,7 @@
     "status": "missing"
   },
   "implementation_cross_check": {
-    "path": ".agents/skills/dynare-copilot/references/examples/US_CCF12_rep.mod",
+    "path": ".agents/skills/use-dynare/references/examples/US_CCF12_rep.mod",
     "sha256": "6ebe6a0b4844c1b1407655f3f2841863b9f1cf5ac86ab1f3fb55bd650e22dd19",
     "exists": true,
     "role": "implementation_cross_check_only",

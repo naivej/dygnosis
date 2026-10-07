@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/RBC_DTT11_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/RBC_DTT11_rep.mod` exists and was read only as `implementation_cross_check`.
 - The implementation is labeled as a replication of simple Taylor-rule outcomes with constant government spending share and no entrepreneurial consumption.
 - The `.mod` notes that `fo_t`, `CapG_t`, `co_t`, `ho_t`, `dumnum_t`, `dumden_t`, `Util`, and `Welf` are linearized while other variables are log-linearized.
 - Endogenous variable and shock coverage from the `.mod` was used to fill the reference table and exogenous-process section.

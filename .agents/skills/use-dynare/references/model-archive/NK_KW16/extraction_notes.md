@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_KW16_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_KW16_rep.mod`.
 - Used only for variable names, shock names, timing, equation coverage, and steady-state sequencing.
 - The `.mod` confirms the nonlinear/log-level `exp()` implementation and does not use `model(linear)`.
 - The `.mod` confirms endogenous variables including `Y, Ym, L, w, C, U_c, Lambda, I, K, Q, a, ksi, Pm, infl, inflstar, F, Z, Dis, Rd, i, Rk, Rb, Rp, ERk, ERb, prem, prem2, Phi, portf_B, N, Om, D, nu_k, nu_b, nu_n, G, g, Gy, T, B`.

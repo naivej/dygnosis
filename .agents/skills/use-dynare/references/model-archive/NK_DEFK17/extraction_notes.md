@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_DEFK17_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/NK_DEFK17_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms a nonlinear MMB implementation with endogenous variables `C`, `Inv`, `S_Inv`, `dS_Inv`, `H`, `Y`, `tau`, `K`, `N`, `Ng`, `LY`, `Q`, `pI`, `RK`, `rK`, `rr`, `rr0`, `ERQ`, `w`, `infl_w`, `X1w`, `X2w`, `mc`, `infl`, `X1p`, `X2p`, `Delta_p`, `CY`, `Spr`, `phi`, `QK`, and `GDP`.
 - The `.mod` confirms the single exogenous innovation `e_phi`.
 - The `.mod` includes implementation-specific timing, including production with `K(-1)` and the investment equation using lagged `N`, `LY`, and `Y`. This was recorded in the derivation but not treated as paper-side mathematical evidence.

@@ -24,7 +24,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/US_PV15_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/US_PV15_rep.mod`.
 - Used only as `implementation_cross_check`, not as paper-side mathematical source.
 - Cross-check confirmed:
   - Nonlinear Dynare `model` block, not `model(linear)`.

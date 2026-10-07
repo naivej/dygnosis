@@ -21,7 +21,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_LWW03_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_LWW03_rep.mod`.
 - Used only as `implementation_cross_check`; Dynare was not run.
 - Observed form: `model(linear)`.
 - Observed endogenous variables: `ygap`, `pdot`, `rff`, `rstar`, `drff`, `pdotsh`.

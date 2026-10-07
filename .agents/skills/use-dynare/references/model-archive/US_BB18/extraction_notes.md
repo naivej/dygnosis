@@ -24,7 +24,7 @@ Remaining limitations:
 
 ## Implementation Cross-Check
 
-Read `.agents/skills/dynare-copilot/references/examples/US_BB18_rep.mod` only as `implementation_cross_check`.
+Read `.agents/skills/use-dynare/references/examples/US_BB18_rep.mod` only as `implementation_cross_check`.
 
 Used for:
 
@@ -38,7 +38,7 @@ Not used for:
 
 - claiming paper-side equations where the Markdown is silent or malformed;
 - runtime validation;
-- promotion to `.agents/skills/dynare-copilot/references/model-archive/`.
+- promotion to `.agents/skills/use-dynare/references/model-archive/`.
 
 ## Deferred Issues
 

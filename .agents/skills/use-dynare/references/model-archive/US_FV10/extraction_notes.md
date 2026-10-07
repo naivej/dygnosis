@@ -19,7 +19,7 @@ Status: `needs_review`.
 
 ## Implementation Cross-Check
 
-- Read `.agents/skills/dynare-copilot/references/examples/US_FV10_rep.mod` only as `implementation_cross_check`.
+- Read `.agents/skills/use-dynare/references/examples/US_FV10_rep.mod` only as `implementation_cross_check`.
 - The `.mod` comments identify Fernández-Villaverde and Rubio-Ramírez (2006), "A Baseline DSGE Model", as the detailed equation source and Fernández-Villaverde (2010) as the parameterization source. For this reason, `.mod` equations were not treated as primary mathematical evidence.
 - Cross-check confirmed variable and shock coverage: `c`, `lambda`, `R`, `PI`, `r`, `x`, `u`, `q`, `f`, `ld`, `w`, `wstar`, `PIstarw`, `PIstar`, `g1`, `g2`, `yd`, `mc`, `k`, `vp`, `vw`, `l`, `d`, `phi`, `mu_I`, `mu_A`, `mu_z`, `yg`, and shocks `epsd`, `epsphi`, `epsmu_I`, `epsA`, `epsm`.
 - Cross-check confirmed capital as predetermined and production using lagged capital.

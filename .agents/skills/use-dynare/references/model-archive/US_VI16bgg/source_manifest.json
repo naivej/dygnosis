@@ -51,7 +51,7 @@
     },
     {
       "role": "implementation_cross_check",
-      "path": ".agents/skills/dynare-copilot/references/examples/US_VI16bgg_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_VI16bgg_rep.mod",
       "sha256": "61de3808a65a5c9c444c087a1b0fec30aa8e4ae58ae68cf9c2940d7d4d6e8a4f",
       "used_for": [
         "model(linear) confirmation",

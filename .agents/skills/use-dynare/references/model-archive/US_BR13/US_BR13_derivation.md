@@ -249,7 +249,7 @@ The benchmark calibration and estimates reported in the source are:
 - **Linearization**: all equations are log-linear or deviations from steady state. Hatted variables are proportional deviations from steady state; lowercase non-hatted variables are deviations from steady state.
 - **Expectations**: $`E_t`$ denotes model-consistent expectations; $`\hat\pi^e`$ variables are perceived expectations that can combine current inflation with rational expectations through $`\lambda`$.
 - **Stocks**: the benchmark model has no capital stock. The main persistent states are lagged consumption, lagged real consumption wage, lagged nominal interest rate, lagged real oil price, and lagged flexible-price employment.
-- **Implementation cross-check**: no `.agents/skills/dynare-copilot/references/examples/US_BR13_rep.mod` file exists in this checkout, so no `.mod` cross-check was used.
+- **Implementation cross-check**: no `.agents/skills/use-dynare/references/examples/US_BR13_rep.mod` file exists in this checkout, so no `.mod` cross-check was used.
 - **Runtime validation**: not performed; Dynare was not run.
 
 ## 8. Variable & Parameter Reference Table

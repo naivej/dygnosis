@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_GK09lin_rep.mod` exists and was used only as an implementation cross-check.
+- `.agents/skills/use-dynare/references/examples/NK_GK09lin_rep.mod` exists and was used only as an implementation cross-check.
 - The `.mod` confirms `model(linear)`, the four shocks `e_rn`, `e_a`, `e_epsilon`, and `e_n`, and core variables including `nu`, `eta`, `x`, `z`, `phi`, `n`, `ne`, `nn`, `q`, `k`, `delta`, `u`, `l`, `y`, `i`, `c`, `pmn`, `pi`, `rn`, `epsilon`, `a`, `efp`, `lambda`, `rk`, `psi`, `phic`, `f`, `f1`, `pistar`, `ym`, `mc`, `d`, and `in`.
 - The `.mod` steady-state calculations were used to identify implementation normalization and parameter names, but were not treated as paper-side mathematical source.
 

@@ -47,7 +47,7 @@
       "exists": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/G3_CW03_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/G3_CW03_rep.mod",
       "sha256": "b0b1b07bfc194fb243fb4712e29e7ccd062068b360eac598b2a1a20cf51203da",
       "exists": true,
       "used_as": "implementation_cross_check_only"

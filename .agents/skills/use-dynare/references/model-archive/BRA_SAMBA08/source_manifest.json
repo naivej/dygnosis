@@ -21,7 +21,7 @@
     "primary_full_md_path": "raw/mmb_mineru/runs/bra_samba08__samba_stochastic_analytical_model_with_a_bayesian_approach__8681ba38/full.md",
     "raw_pdf_path": "raw/mmb_papers/Stochastic analytical model with a bayesian approach 2011.pdf",
     "appendix_normalization_path": null,
-    "implementation_cross_check": ".agents/skills/dynare-copilot/references/examples/BRA_SAMBA08_rep.mod"
+    "implementation_cross_check": ".agents/skills/use-dynare/references/examples/BRA_SAMBA08_rep.mod"
   },
   "source_existence": {
     "primary_full_md_path_exists": true,

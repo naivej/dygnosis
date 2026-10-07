@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_RW06_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/NK_RW06_rep.mod` exists and was read only as `implementation_cross_check`.
 - The MMB implementation is `model(linear)` with endogenous variables `x`, `pi`, and `R`; exogenous variable `u`; and parameters `sigma`, `eta`, `beta`, `omega`, `kappa`, `phipi`, and `phix`.
 - The implementation equations correspond to the reduced IS curve, cost-channel Phillips curve, and simple policy rule:
   - `x=x(+1)-(1/sigma)*(R-pi(+1))+u`

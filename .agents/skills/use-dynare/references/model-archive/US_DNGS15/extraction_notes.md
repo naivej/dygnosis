@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/US_DNGS15_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/US_DNGS15_rep.mod`.
 - Used only as implementation evidence for variable names, shock names, timing, the `model(linear)` form, and the flexible-price auxiliary economy.
 - The `.mod` file includes sticky-price variables, flexible-price variables, nine shocks, and a financial-frictions block with `Rktil`, `sigw`, and `n`.
 - The `.mod` file treats the flexible-price economy as having no financial frictions in the auxiliary arbitrage condition.

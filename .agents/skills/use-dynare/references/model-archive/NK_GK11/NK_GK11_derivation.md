@@ -1,6 +1,6 @@
 # NK_GK11 Derivation: Gertler-Karadi (2011)
 
-Provenance: `NK_GK11`, Mark Gertler and Peter Karadi (2011), "A model of unconventional monetary policy", *Journal of Monetary Economics* 58(1), 17-34. DOI: `10.1016/j.jmoneco.2010.10.004`. Main source: `raw/mmb_mineru/runs/nk_gk09lin_nk_gk11__a_model_of_unconvetional_monetary_policy__e6192938/full.md`. Raw PDF exists at `raw/mmb_papers/A Model of Unconvetional Monetary Policy.pdf`; PDF body was not read. MinerU run id used for extraction: `e6192938-5688-49c7-9621-66ca2478274f`. Appendix normalization: none found. Implementation cross-check: `.agents/skills/dynare-copilot/references/examples/NK_GK11_rep.mod`.
+Provenance: `NK_GK11`, Mark Gertler and Peter Karadi (2011), "A model of unconventional monetary policy", *Journal of Monetary Economics* 58(1), 17-34. DOI: `10.1016/j.jmoneco.2010.10.004`. Main source: `raw/mmb_mineru/runs/nk_gk09lin_nk_gk11__a_model_of_unconvetional_monetary_policy__e6192938/full.md`. Raw PDF exists at `raw/mmb_papers/A Model of Unconvetional Monetary Policy.pdf`; PDF body was not read. MinerU run id used for extraction: `e6192938-5688-49c7-9621-66ca2478274f`. Appendix normalization: none found. Implementation cross-check: `.agents/skills/use-dynare/references/examples/NK_GK11_rep.mod`.
 
 Runtime validation was not performed. This is a first-pass source-backed derivation and remains `needs_review`, mainly because several MinerU equations contain OCR quirks in subscripts and Greek-letter rendering.
 

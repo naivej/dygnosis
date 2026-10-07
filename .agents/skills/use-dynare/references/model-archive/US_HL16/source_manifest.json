@@ -41,7 +41,7 @@
       "source_role": "not_available"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_HL16_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_HL16_rep.mod",
       "sha256": "469922a901f05304952f5fe8cc88bb4503c4265c6dde14f9f6021d1344c1f373",
       "exists": true,
       "source_role": "implementation_cross_check",

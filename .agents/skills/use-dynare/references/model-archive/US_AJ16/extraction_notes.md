@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_AJ16_rep.mod` was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_AJ16_rep.mod` was read only as `implementation_cross_check`.
 - Cross-check confirmed the implemented surface includes:
   - endogenous variables for equity prices `Q_t_A`, `Q_t_B`, investment price `QK`, capital/equity `Kbar`/`N_t`, financing observables `FGS`, `Spread_t`, seller/keeper shares `chi_s`, `chi_k`, `chi_w`, and financial shocks `etau_q_t`, `ctau_q_t`, `tau_q_t`;
   - exogenous shocks `eps_z`, `eps_g`, `eps_i`, `eps_tau`, `eps_tau_trans`, `eps_beta`, `eps_p`, `eps_w`, and measurement errors `eps_meas`, `eps_meas_sp`;

@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_IR11_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_IR11_rep.mod` exists and was read only as `implementation_cross_check`.
 - Cross-check confirms the MMB implementation is `model(linear)`.
 - Cross-check endogenous names: `a`, `lambda`, `y`, `z`, `r`, `pi`, `e`, `g`, `q`, `x`, plus reporting variables `inflationq`, `interest`, `output`, `Z_au`.
 - Cross-check exogenous names: `epsa`, `epse`, `epsz`, `epsr`.

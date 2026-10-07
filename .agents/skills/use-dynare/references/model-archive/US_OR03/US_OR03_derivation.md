@@ -119,7 +119,7 @@ The Rep-MMB implementation selects the original Taylor rule and writes it with i
 f_t = 2+\pi_t+0.5(\pi_t-2)+0.5y_t+\varepsilon^f_t.
 ```
 
-This selected rule is recorded as `implementation_cross_check` evidence because it comes from `.agents/skills/dynare-copilot/references/examples/US_OR03_rep.mod`, not from a paper-side mathematical source.
+This selected rule is recorded as `implementation_cross_check` evidence because it comes from `.agents/skills/use-dynare/references/examples/US_OR03_rep.mod`, not from a paper-side mathematical source.
 
 ## 4. Market Clearing & Identities
 

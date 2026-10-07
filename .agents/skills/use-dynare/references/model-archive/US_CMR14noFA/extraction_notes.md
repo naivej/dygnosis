@@ -12,7 +12,7 @@
 
 - English derivation was drafted first using the eight required sections.
 - The entry targets `US_CMR14noFA`, the no-financial-frictions CEE-style variant described in the paper, not the baseline CMR14 model with risk shocks and BGG financial accelerator.
-- The `.mod` file `.agents/skills/dynare-copilot/references/examples/US_CMR14noFA_rep.mod` was read only as `implementation_cross_check`.
+- The `.mod` file `.agents/skills/use-dynare/references/examples/US_CMR14noFA_rep.mod` was read only as `implementation_cross_check`.
 - Dynare was not run.
 
 ## Formula Quality

@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_RE09_rep.mod` was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_RE09_rep.mod` was read only as `implementation_cross_check`.
 - Cross-check observations:
   - The implementation uses `model(linear)`.
   - The implementation declares endogenous variables `y a l p w yinfn i R pi outputgap yclas deltaa g nuu gam eps z zwage zoutput`.

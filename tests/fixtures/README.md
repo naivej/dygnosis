@@ -2,7 +2,7 @@
 
 Small original `.mod` files that prove a diagnostic fires or stays quiet.
 
-A complete working model is **not** here. Use `.agents/skills/dynare-copilot/references/` (`model-archive/` then `examples/`) for that. Trees and how tests assert inventory: [`dev_logs/0.1/0.1.0/masterplan.md`](../../../dev_logs/0.1/0.1.0/masterplan.md) (Fixtures).
+A complete working model is **not** here. Use `.agents/skills/use-dynare/references/` (`model-archive/` then `examples/`) for that. Trees and how tests assert inventory: [`dev_logs/0.1/0.1.0/masterplan.md`](../../../dev_logs/0.1/0.1.0/masterplan.md) (Fixtures).
 
 ## Which folder
 

@@ -22,7 +22,7 @@ Status: `needs_review`.
 
 ## Implementation Cross-Check
 
-The file `.agents/skills/dynare-copilot/references/examples/US_LTW17gz_rep.mod` was used only as `implementation_cross_check`.
+The file `.agents/skills/use-dynare/references/examples/US_LTW17gz_rep.mod` was used only as `implementation_cross_check`.
 
 Confirmed cross-check points:
 

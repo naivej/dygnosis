@@ -40,7 +40,7 @@
       "exists": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/RBC_DTT11_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/RBC_DTT11_rep.mod",
       "sha256": "cef20bccb65bb40e3f9579e0d5758d79736c41f111322dbb7e3fedf407d2b791",
       "used_only_as": "implementation_cross_check",
       "dynare_run_performed": false,

@@ -6,7 +6,7 @@
 - Primary Markdown: `raw/mmb_mineru/runs/us_vgmp15__the_effects_of_oil_price_shocks_in_a_new_keynesian_framework_with_capita__b2b0e207/full.md`.
 - Raw PDF path exists: `raw/mmb_papers/The effects of oil price shocks in a new-Keynesian framework with capital accumulation.pdf`.
 - No appendix normalization file exists at `docs/mmb_appendix_full_normalizations/US_VGMP15.md`.
-- No implementation cross-check exists at `.agents/skills/dynare-copilot/references/examples/US_VGMP15_rep.mod`.
+- No implementation cross-check exists at `.agents/skills/use-dynare/references/examples/US_VGMP15_rep.mod`.
 
 ## Source Sniff
 
@@ -25,7 +25,7 @@
 
 ## Implementation Cross-Check
 
-- No `.agents/skills/dynare-copilot/references/examples/US_VGMP15_rep.mod` file exists.
+- No `.agents/skills/use-dynare/references/examples/US_VGMP15_rep.mod` file exists.
 - No Dynare implementation was used as a source or cross-check.
 
 ## Deferred Issues

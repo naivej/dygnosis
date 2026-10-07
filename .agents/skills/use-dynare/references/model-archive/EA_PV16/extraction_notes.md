@@ -17,7 +17,7 @@ Status: `needs_review`
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EA_PV16_rep.mod` was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EA_PV16_rep.mod` was used only as `implementation_cross_check`.
 - The implementation confirms coverage of `EA_bl`, `EA_blcb`, `EA_blnlc`, `EA_bs`, `EA_pbl`, `EA_dm`, `EA_eps_qe`, `EA_deltabl`, `EA_gamb`, `EA_kbl`, `EA_sbl`, `EA_rhoqe`, and `EA_tqe`.
 - The implementation includes a nonlinear model block and many baseline QUEST equations, but those equations were not copied as paper-side math evidence.
 

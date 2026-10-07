@@ -42,7 +42,7 @@
       "sha256": null
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_CGG02_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_CGG02_rep.mod",
       "exists": true,
       "sha256": "7ad2ea34edb73a95d57b53901eb7afd8e7b01a85f45ff2d044940b422e7ff907",
       "used_as": "implementation_cross_check_only"
@@ -113,7 +113,7 @@
       "source_role": "hand-normalized online-appendix formula inventory when present"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_CGG02_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_CGG02_rep.mod",
       "sha256": "7ad2ea34edb73a95d57b53901eb7afd8e7b01a85f45ff2d044940b422e7ff907",
       "exists_at_extraction": true,
       "source_role": "MMB implementation cross-check only; not paper-side mathematical source"

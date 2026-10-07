@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_MI07_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_MI07_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms variable names `i`, `pi`, `pi_tilde`, `x`, `x_tilde`, `r_n`, `u`, exogenous innovations `v_r`, `v_u`, and a `model(linear)` rational-expectations equation subset.
 - The `.mod` implements the rational-expectations comparison calibration with large habit/indexation values, not the baseline learning recursion. It was not used as paper-side evidence and was not run.
 

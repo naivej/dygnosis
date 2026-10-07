@@ -277,7 +277,7 @@ fn included_tagged_branch_does_not_merge() {
 
 fn archive_text() -> (PathBuf, String, String) {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".agents/skills/dynare-copilot/references/examples/NK_CDK24_RANK_rep.mod");
+        .join(".agents/skills/use-dynare/references/examples/NK_CDK24_RANK_rep.mod");
     let raw =
         fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
     let text = raw.replace("\r\n", "\n");

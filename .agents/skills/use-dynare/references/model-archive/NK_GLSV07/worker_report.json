@@ -16,7 +16,7 @@
     "raw_pdf_path_exists_checked": true,
     "raw_pdf_body_read": false,
     "appendix_normalization": null,
-    "implementation_cross_check": ".agents/skills/dynare-copilot/references/examples/NK_GLSV07_rep.mod"
+    "implementation_cross_check": ".agents/skills/use-dynare/references/examples/NK_GLSV07_rep.mod"
   },
   "outputs": {
     "english_derivation": "written",

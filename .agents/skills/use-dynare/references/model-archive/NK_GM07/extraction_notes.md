@@ -21,7 +21,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_GM07_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_GM07_rep.mod`.
 - Used only as `implementation_cross_check`, not as a paper-side mathematical source.
 - Cross-check confirmed the MMB variable set: `dp, mc, omega, lambda, xi, w, n, m, c, q, p, h, b, a1, a2, a3, EFP, rT, rIB, rL, rB`.
 - Cross-check confirmed exogenous innovations: `eps_h, eps_a1, eps_a2, eps_a3, eps_i`.

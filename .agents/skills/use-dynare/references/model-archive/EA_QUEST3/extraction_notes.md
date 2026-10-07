@@ -22,7 +22,7 @@ Status: `needs_review`
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EA_QUEST3_rep.mod` was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EA_QUEST3_rep.mod` was read only as `implementation_cross_check`.
 - The implementation confirms:
   - a large linearized/log-growth Dynare representation;
   - variables for monetary policy, fiscal policy, open-economy blocks, liquidity-constrained consumption, output gap, and smoothed employment/utilization;

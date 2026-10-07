@@ -4,14 +4,14 @@ use dygnosis::{parse, ParseSummary};
 
 fn copilot_mod(archive_dir: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".agents/skills/dynare-copilot/references/model-archive")
+        .join(".agents/skills/use-dynare/references/model-archive")
         .join(archive_dir)
         .join(format!("{archive_dir}.mod"))
 }
 
 fn copilot_example(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".agents/skills/dynare-copilot/references/examples")
+        .join(".agents/skills/use-dynare/references/examples")
         .join(format!("{name}.mod"))
 }
 
@@ -30,7 +30,7 @@ fn assert_parse_summary(archive_dir: &str, expected_json: &str) {
 
 fn swff_inc_assignment_names() -> Vec<String> {
     let inc = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".agents/skills/dynare-copilot/references/model-archive/swff/swff_params.inc");
+        .join(".agents/skills/use-dynare/references/model-archive/swff/swff_params.inc");
     let text = std::fs::read_to_string(&inc)
         .unwrap_or_else(|e| panic!("fixture missing at {}: {e}", inc.display()))
         .replace("\r\n", "\n");

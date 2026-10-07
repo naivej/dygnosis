@@ -7,7 +7,7 @@
 - Raw PDF path exists: `raw/mmb_papers/The financial accelerator in a quantitative business.pdf`.
 - PDF body was not read because the MinerU Markdown contained the required model and appendix equations for this first-pass extraction.
 - No model-specific appendix normalization was found at `docs/mmb_appendix_full_normalizations/NK_BGG99AL.md`.
-- No model-specific implementation example was found at `.agents/skills/dynare-copilot/references/examples/NK_BGG99AL_rep.mod`.
+- No model-specific implementation example was found at `.agents/skills/use-dynare/references/examples/NK_BGG99AL_rep.mod`.
 
 ## Formula Quality
 
@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- No `.agents/skills/dynare-copilot/references/examples/NK_BGG99AL_rep.mod` file exists.
+- No `.agents/skills/use-dynare/references/examples/NK_BGG99AL_rep.mod` file exists.
 - No MMB `.mod` implementation was used as a mathematical source.
 - Deferred implementation questions include exact Dynare variable naming, whether `AL` means accelerator with investment lag in the MMB implementation, and how the published log-linear equations map to the actual MMB equation count.
 

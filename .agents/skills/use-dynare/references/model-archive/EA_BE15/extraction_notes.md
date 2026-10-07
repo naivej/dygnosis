@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/EA_BE15_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/EA_BE15_rep.mod`.
 - Used only as `implementation_cross_check`, not as paper-side mathematical evidence.
 - Confirmed `model(linear)`.
 - Confirmed endogenous variables: `y, pi, ir, mp, mn, yf, mpf, mnf, ea, eu, ei, ep, en, vel, rr, ygap`.

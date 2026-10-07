@@ -57,7 +57,7 @@
       "notes": "Used only for variable names, model(linear) form, sticky/flexible block coverage, modelbase interest-rule substitution, shock names, calibration values, and technology-shock timing comments."
     },
     "repo_example_mod": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_ACELt_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_ACELt_rep.mod",
       "exists": true,
       "sha256": "d0ba973563e076b734c219bc1410c7828e456dcefb766a25bcedd157d0940b00",
       "used_as": "implementation_cross_check",

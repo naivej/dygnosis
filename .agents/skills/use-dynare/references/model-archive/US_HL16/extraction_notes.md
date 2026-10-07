@@ -23,7 +23,7 @@ Status: `needs_review`
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_HL16_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_HL16_rep.mod` exists and was read only as `implementation_cross_check`.
 - The implementation uses `model(linear)`, 32 core endogenous variables plus observables, and nine innovations: `epsilon_p`, `epsilon_z`, `epsilon_i`, `epsilon_d`, `epsilon_h`, `epsilon_e`, `epsilon_nu_h`, `epsilon_nu_e`, and `epsilon_psi`.
 - The `.mod` confirms log-linear implementation variables such as `c_b`, `c_s`, `q_psi`, `k_B`, `l_h`, `l_e`, `i_h`, `i_e`, `i_d`, and shock processes, but no paper-side equation was sourced solely from the `.mod`.
 - Dynare was not run.

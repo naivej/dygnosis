@@ -10,7 +10,7 @@
 ## Extraction Scope
 
 - The English derivation was drafted first from the MinerU Markdown.
-- `.agents/skills/dynare-copilot/references/examples/EA_PV15_rep.mod` was used only as `implementation_cross_check`, mainly to confirm variable names, `model(linear)`, shock naming, and timing conventions.
+- `.agents/skills/use-dynare/references/examples/EA_PV15_rep.mod` was used only as `implementation_cross_check`, mainly to confirm variable names, `model(linear)`, shock naming, and timing conventions.
 - Shared `catalog.csv` and `status.csv` were not edited by request.
 
 ## Formula Quality

@@ -1,6 +1,6 @@
 # US_CPS10 - Derivation (optimization problems and linear equilibrium system)
 
-> Archive status: needs_review. Runtime validation was not performed. The paper-side source prints the structural primitives and estimation targets; the full Rep-MMB `model(linear)` equations are cross-checked against `.agents/skills/dynare-copilot/references/examples/US_CPS10_rep.mod` as implementation evidence only.
+> Archive status: needs_review. Runtime validation was not performed. The paper-side source prints the structural primitives and estimation targets; the full Rep-MMB `model(linear)` equations are cross-checked against `.agents/skills/use-dynare/references/examples/US_CPS10_rep.mod` as implementation evidence only.
 
 ## 1. Model Overview
 

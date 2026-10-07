@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_CCF12_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_CCF12_rep.mod` exists and was read only as `implementation_cross_check`.
 - The implementation identifies the model as linearized and uses `model(linear)`.
 - The `.mod` comments map many linear equations to online Appendix D labels, including intermediate-goods production, capital, household Euler equations, wage setting, government debt, LSAP long-bond policy, risk premium, monetary policy, and the aggregate resource constraint.
 - No equation in the derivation was treated as paper-side sourced solely because it appears in the `.mod`.

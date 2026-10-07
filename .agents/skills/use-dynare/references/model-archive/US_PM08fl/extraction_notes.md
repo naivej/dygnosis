@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- File: `.agents/skills/dynare-copilot/references/examples/US_PM08fl_rep.mod`.
+- File: `.agents/skills/use-dynare/references/examples/US_PM08fl_rep.mod`.
 - Used only as `implementation_cross_check`, not as a paper-side mathematical source.
 - Confirmed the MMB variant is the stationary financial-real-linkages version with `model(linear)`.
 - Confirmed implementation endogenous variables: `RR_USh`, `RR_US_BARh`, `UNR_US_GAP`, `PIE_USh`, `PIE_US4h`, `Y_US`, `RS_USh`, `E4_PIE_US4h`, `E1_Y_USh`, `E1_PIE_USh`, `E`, `E2`.

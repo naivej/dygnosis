@@ -10,7 +10,7 @@ Source: Gnocci, Stefano; Hauser, Daniela; Pappa, Evi (2016), "Housework and Fisc
 - **Experiment**: government-consumption expenditure shock with persistent AR(1) government spending; MMB implementation simulates a first-order approximation.
 - **Agents and blocks**: representative household, monopolistically competitive market-good firms, fiscal authority, and central bank.
 - **Form**: nonlinear equilibrium conditions in levels with an MMB log-variable implementation. The paper also presents simplified log-linear mechanisms, but this archive entry records the full nonlinear Section 2 model as the primary derivation.
-- **Source quality**: the MinerU Markdown contains the main model equations. Calvo auxiliary recursions and the exact MMB simplification of the Taylor rule are cross-checked against `.agents/skills/dynare-copilot/references/examples/NK_GHP16_rep.mod` as `implementation_cross_check` only.
+- **Source quality**: the MinerU Markdown contains the main model equations. Calvo auxiliary recursions and the exact MMB simplification of the Taylor rule are cross-checked against `.agents/skills/use-dynare/references/examples/NK_GHP16_rep.mod` as `implementation_cross_check` only.
 
 ## 2. Optimization Problems
 

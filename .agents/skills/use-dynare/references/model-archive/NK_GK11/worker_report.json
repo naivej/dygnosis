@@ -29,7 +29,7 @@
     "raw_pdf_path_exists_checked": true,
     "raw_pdf_body_read": false,
     "appendix_normalization_exists": false,
-    "implementation_cross_check": ".agents/skills/dynare-copilot/references/examples/NK_GK11_rep.mod"
+    "implementation_cross_check": ".agents/skills/use-dynare/references/examples/NK_GK11_rep.mod"
   },
   "proposed_catalog_row": {
     "ModelID": "NK_GK11",

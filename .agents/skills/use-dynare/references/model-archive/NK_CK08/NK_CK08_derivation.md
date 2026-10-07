@@ -10,7 +10,7 @@ Provenance: Kai Christoffel and Keith Kuester (2008), "Resuscitating the wage ch
 - **Archive form**: linearized equilibrium system, `model(linear)`, around a monthly steady state. Variables with hats denote log deviations from steady state, except rate/inflation variables following the paper's appendix and the MMB implementation.
 - **Main agents and blocks**: representative family, retail bundlers, wholesale price setters, labor-good firms, matched workers, vacancy-posting firms, monetary authority, and Ricardian fiscal authority.
 - **Key mechanism**: wages affect the labor-good price and hence marginal cost directly; fixed costs make labor-firm profits small and amplify vacancy/unemployment responses.
-- **Implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/NK_CK08_rep.mod` is a quarterly recalibration of the monthly paper model. It confirms a `model(linear)` block and variable coverage, but it is not used as a paper-side source.
+- **Implementation cross-check**: `.agents/skills/use-dynare/references/examples/NK_CK08_rep.mod` is a quarterly recalibration of the monthly paper model. It confirms a `model(linear)` block and variable coverage, but it is not used as a paper-side source.
 
 ## 2. Optimization Problems
 

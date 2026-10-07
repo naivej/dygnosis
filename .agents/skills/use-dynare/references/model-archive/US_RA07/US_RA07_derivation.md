@@ -252,7 +252,7 @@ Source-backed fixed steady-state/calibration values include:
 - **Capital timing**: $`k_{t-1}`$ is predetermined beginning-of-period capital used in production; $`k_t`$ is the end-of-period capital stock after investment.
 - **Capital utilization**: $`u_t`$ is chosen in the period and affects current capital services.
 - **Interest rate**: $`r_t`$ is the nominal policy-rate deviation in the linearized rule and enters real rates through expected inflation terms.
-- **Implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/US_RA07_rep.mod` confirms a 15-variable `model(linear)` implementation with shocks `epsp`, `epsz`, `epsa`, and `epsg`. This `.mod` was not used as a paper-side mathematical source and Dynare was not run.
+- **Implementation cross-check**: `.agents/skills/use-dynare/references/examples/US_RA07_rep.mod` confirms a 15-variable `model(linear)` implementation with shocks `epsp`, `epsz`, `epsa`, and `epsg`. This `.mod` was not used as a paper-side mathematical source and Dynare was not run.
 
 ## 8. Variable & Parameter Reference Table
 

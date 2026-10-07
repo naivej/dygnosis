@@ -2,7 +2,7 @@
 
 > First-pass private MMB archive entry. Status: `needs_review`; formulas come from MinerU Markdown OCR and were not checked against the PDF body.
 
-Provenance: `EA_QR14`, Dominic Quint and Pau Rabanal (2014), "Monetary and Macroprudential Policy in an Estimated DSGE Model of the Euro Area", *International Journal of Central Banking* 10(2), 169-236. DOI recorded in `model_index.csv`: `10.5089/9781484333693.001`. Main source: `raw/mmb_mineru/runs/ea_qr14__monetary_and_macroprudential_policy_in_an_estimated_dsge_model_of_the_eu__78d59631/full.md`. Raw PDF exists at `raw/mmb_papers/Monetary and Macroprudential Policy in an Estimated DSGE Model of the Euro Area.pdf`; PDF body was not read. MinerU run id: `78d59631-1509-497c-b15f-d57584562569`. Appendix normalization: none found. Implementation cross-check: `.agents/skills/dynare-copilot/references/examples/EA_QR14_rep.mod`.
+Provenance: `EA_QR14`, Dominic Quint and Pau Rabanal (2014), "Monetary and Macroprudential Policy in an Estimated DSGE Model of the Euro Area", *International Journal of Central Banking* 10(2), 169-236. DOI recorded in `model_index.csv`: `10.5089/9781484333693.001`. Main source: `raw/mmb_mineru/runs/ea_qr14__monetary_and_macroprudential_policy_in_an_estimated_dsge_model_of_the_eu__78d59631/full.md`. Raw PDF exists at `raw/mmb_papers/Monetary and Macroprudential Policy in an Estimated DSGE Model of the Euro Area.pdf`; PDF body was not read. MinerU run id: `78d59631-1509-497c-b15f-d57584562569`. Appendix normalization: none found. Implementation cross-check: `.agents/skills/use-dynare/references/examples/EA_QR14_rep.mod`.
 
 ## 1. Model Overview
 

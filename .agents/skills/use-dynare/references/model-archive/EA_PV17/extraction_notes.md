@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EA_PV17_rep.mod` was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EA_PV17_rep.mod` was used only as `implementation_cross_check`.
 - Cross-check findings:
   - EA and RoW are implemented symmetrically with `ea_`/`r_` and `EA_`/`R_` prefixes.
   - QE appears through `EA_blcb`, `EA_eps_qe`, `EA_rhoqe`, and `EA_tqe`, consistent with the paper's central-bank long-bond purchase block.

@@ -35,7 +35,7 @@
     },
     "appendix_normalization": null,
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/UK_SM11_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/UK_SM11_rep.mod",
       "sha256": "348ca8056fa18a58aea649de827cbf9f1c3d55adb0b5e0ab126a8ad54c110ea0",
       "usage": "Variable names, model(linear) form, equation coverage, shock names, and flexible-price auxiliary block only; not treated as paper-side mathematical source."
     },

@@ -23,8 +23,8 @@ Status: `needs_review`
 
 ## Implementation Cross-Check
 
-- Expected file `.agents/skills/dynare-copilot/references/examples/US_SW07AL_rep.mod` does not exist.
-- Related file `.agents/skills/dynare-copilot/references/examples/US_SW07_rep.mod` exists, but it was not used as assigned cross-check evidence for `US_SW07AL`.
+- Expected file `.agents/skills/use-dynare/references/examples/US_SW07AL_rep.mod` does not exist.
+- Related file `.agents/skills/use-dynare/references/examples/US_SW07_rep.mod` exists, but it was not used as assigned cross-check evidence for `US_SW07AL`.
 - No `.mod` file was treated as a paper-side mathematical source.
 
 ## Deferred Issues

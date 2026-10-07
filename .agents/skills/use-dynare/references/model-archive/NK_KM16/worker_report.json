@@ -10,12 +10,12 @@
   ],
   "sources_read": [
     "docs/MODEL_ARCHIVE_BUILD_PLAN.md",
-    ".agents/skills/dynare-copilot/references/derivation-style.md",
-    ".agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md",
+    ".agents/skills/use-dynare/references/derivation-style.md",
+    ".agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md",
     "raw/mmb_mineru/model_index.csv",
     "raw/mmb_mineru/index.csv",
     "raw/mmb_mineru/runs/nk_km16__public_debt_and_changing_inflation_targets__e715ef78/full.md",
-    ".agents/skills/dynare-copilot/references/examples/NK_KM16_rep.mod"
+    ".agents/skills/use-dynare/references/examples/NK_KM16_rep.mod"
   ],
   "raw_pdf": {
     "path": "raw/mmb_papers/Public Debt and Changing Inflation Targets.pdf",
@@ -28,7 +28,7 @@
   },
   "implementation_cross_check": {
     "performed": true,
-    "path": ".agents/skills/dynare-copilot/references/examples/NK_KM16_rep.mod",
+    "path": ".agents/skills/use-dynare/references/examples/NK_KM16_rep.mod",
     "used_as": "implementation_cross_check_only"
   },
   "validations": {

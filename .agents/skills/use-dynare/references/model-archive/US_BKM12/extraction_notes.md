@@ -6,7 +6,7 @@
 - Extraction date: 2026-06-17
 - Scope: private derivation archive draft only.
 - Runtime validation: not performed.
-- Promotion to `.agents/skills/dynare-copilot/references/model-archive/`: not performed.
+- Promotion to `.agents/skills/use-dynare/references/model-archive/`: not performed.
 - Shared `catalog.csv` / `status.csv`: not edited by user instruction.
 
 ## Sources Read
@@ -14,11 +14,11 @@
 - `.agents/skills/mmb-model-archive-builder/SKILL.md`
 - `.agents/skills/mmb-model-archive-builder/references/subagent-task-template.md`
 - `docs/MODEL_ARCHIVE_BUILD_PLAN.md`
-- `.agents/skills/dynare-copilot/references/derivation-style.md`
-- `.agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md`
+- `.agents/skills/use-dynare/references/derivation-style.md`
+- `.agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md`
 - `raw/mmb_mineru/model_index.csv`
 - `raw/mmb_mineru/runs/us_bkm12__reset_price_inflation_and_the_impact_of_monetary_policy_shocks__f65547b5/full.md`
-- `.agents/skills/dynare-copilot/references/examples/US_BKM12_rep.mod` as implementation cross-check only.
+- `.agents/skills/use-dynare/references/examples/US_BKM12_rep.mod` as implementation cross-check only.
 - `raw/mmb_papers/Reset Price Inflation and the Impact of Monetary Policy Shocks.pdf` was checked for existence and hashed, but the PDF body was not read.
 
 ## Source Match

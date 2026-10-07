@@ -7,7 +7,7 @@
 - First-page sniff matched the expected title and authors.
 - Raw PDF path exists: `raw/mmb_papers/Fiscal foresight and information flows.pdf`.
 - No appendix normalization file exists at `docs/mmb_appendix_full_normalizations/US_LWY13.md`.
-- Implementation cross-check exists at `.agents/skills/dynare-copilot/references/examples/US_LWY13_rep.mod`.
+- Implementation cross-check exists at `.agents/skills/use-dynare/references/examples/US_LWY13_rep.mod`.
 
 ## Formula Quality
 
@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_LWY13_rep.mod` was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_LWY13_rep.mod` was used only as `implementation_cross_check`.
 - The implementation uses `model(linear)`.
 - Endogenous variables include Ricardian and non-Ricardian consumption (`cr`, `cnr`), interest and inflation variables, investment, capital, utilization, labor, output, government variables, capital and labor taxes, flexible-price counterparts, output gap, and MMB reporting variables.
 - Exogenous innovations include technology, preference, investment, wage markup, price markup, capital-tax, labor-tax, and transfer shocks; MMB also exposes `interest_` and `fiscal_`.

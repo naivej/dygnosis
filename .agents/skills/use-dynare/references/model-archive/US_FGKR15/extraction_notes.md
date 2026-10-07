@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_FGKR15_rep.mod` was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_FGKR15_rep.mod` was read only as `implementation_cross_check`.
 - Cross-check confirmed variable groups: `ct`, `yt`, `invt`, `kt`, `kbt`, `ht`, `mct`, `wt`, `inflt`, `Rt`, tax rates, fiscal volatility states, preference and technology states.
 - Cross-check confirmed the model uses production capital dated `kt(-1)`, book capital dated `kbt(-1)`, end-of-period government debt, and fiscal volatility shocks `ukt`, `uct`, `ugt`, `uwt`.
 - Dynare was not run.

@@ -15,7 +15,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_MCN99cr_rep.mod` declares endogenous variables `pi p y R v m i eta ytilde ybar`, exogenous shocks `u_ e_ ey_ ev_`, and parameters matching the source estimates and policy-rule coefficients.
+- `.agents/skills/use-dynare/references/examples/NK_MCN99cr_rep.mod` declares endogenous variables `pi p y R v m i eta ytilde ybar`, exogenous shocks `u_ e_ ey_ ev_`, and parameters matching the source estimates and policy-rule coefficients.
 - The `.mod` file uses `model(linear)` and an active Taylor-type rule `R = mu1*pi + mu2*ytilde + mu3*R(-1)`.
 - The active implementation calibration is `sigm=.203`, `CssYss=.81`, `IssYss=.19`, `Rss=.014`, `rhov=.3233`, `rhoeta=.9346`, `bet=.99`, `thetac1=.3`, `mu1=1.5`, `mu2=0`, and `mu3=0`.
 - The `.mod` file was not run and was not treated as a source for paper equations.

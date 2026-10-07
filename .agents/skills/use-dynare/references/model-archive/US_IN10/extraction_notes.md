@@ -19,7 +19,7 @@ Status: `needs_review`
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_IN10_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_IN10_rep.mod` exists and was read only as `implementation_cross_check`.
 - Cross-check confirms a large log-linearized/detrended implementation with variables for patient and impatient households, flexible-price/flexible-wage counterparts, housing and nonhousing capital, collateral multiplier, price/wage markups, and the nine exogenous innovations `eps_c`, `eps_e`, `eps_h`, `eps_j`, `eps_k`, `eps_p`, `eps_s`, `eps_t`, `eps_z`.
 - Cross-check confirms stock timing: production uses lagged `kc`, `kh`, and housing accumulation uses lagged household housing stocks.
 - Dynare was not run.

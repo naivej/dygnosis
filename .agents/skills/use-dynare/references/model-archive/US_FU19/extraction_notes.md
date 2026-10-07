@@ -6,7 +6,7 @@
 - Extraction date: 2026-06-17
 - Scope: private derivation archive draft only.
 - Runtime validation: not performed.
-- Promotion to `.agents/skills/dynare-copilot/references/model-archive/`: not performed.
+- Promotion to `.agents/skills/use-dynare/references/model-archive/`: not performed.
 - Shared indexes: `catalog.csv` and `status.csv` were not edited.
 
 ## Sources Read
@@ -14,12 +14,12 @@
 - `.agents/skills/mmb-model-archive-builder/SKILL.md`
 - `.agents/skills/mmb-model-archive-builder/references/subagent-task-template.md`
 - `docs/MODEL_ARCHIVE_BUILD_PLAN.md`
-- `.agents/skills/dynare-copilot/references/derivation-style.md`
-- `.agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md`
+- `.agents/skills/use-dynare/references/derivation-style.md`
+- `.agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md`
 - `raw/mmb_mineru/model_index.csv`
 - `raw/mmb_mineru/runs/us_fu19__accounting_for_post_crisis_inflation_a_retro_analysis__efab411e/full.md`
 - `raw/mmb_mineru/runs/us_fu19__accounting_for_post_crisis_inflation_a_retro_analysis__9554deb8/full.md` for first-page/title comparison only.
-- `.agents/skills/dynare-copilot/references/examples/US_FU19_rep.mod` as `implementation_cross_check` only.
+- `.agents/skills/use-dynare/references/examples/US_FU19_rep.mod` as `implementation_cross_check` only.
 
 No `docs/mmb_appendix_full_normalizations/US_FU19.md` file exists.
 

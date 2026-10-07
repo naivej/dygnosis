@@ -14,7 +14,7 @@
     "primary_full_md_path": "raw/mmb_mineru/runs/nk_gssz17__inflation_dynamics_during_the_financial_crisis__85a7350a/full.md",
     "raw_pdf_path": "raw/mmb_papers/Inflation Dynamics during the Financial Crisis.pdf",
     "appendix_normalization_path": null,
-    "implementation_cross_check_path": ".agents/skills/dynare-copilot/references/examples/NK_GSSZ17_rep.mod"
+    "implementation_cross_check_path": ".agents/skills/use-dynare/references/examples/NK_GSSZ17_rep.mod"
   },
   "source_boundary": {
     "raw_pdf_exists_checked": true,

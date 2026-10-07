@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/EA_VI16bgg_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/EA_VI16bgg_rep.mod`.
 - Used only as `implementation_cross_check`.
 - Confirmed `model(linear)`.
 - Confirmed endogenous variables: sticky block variables, flexible-price counterparts, and seven endogenous shock states.

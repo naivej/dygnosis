@@ -23,7 +23,7 @@ Core equations (1)-(57) are mostly readable in MinerU Markdown. The following it
 
 ## Implementation Cross-Check
 
-The file `.agents/skills/dynare-copilot/references/examples/NK_MM10_rep.mod` was read only as `implementation_cross_check`.
+The file `.agents/skills/use-dynare/references/examples/NK_MM10_rep.mod` was read only as `implementation_cross_check`.
 
 Useful cross-checks from the implementation:
 

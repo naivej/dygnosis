@@ -15,7 +15,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EA_AWM05_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EA_AWM05_rep.mod` exists and was read only as `implementation_cross_check`.
 - The implementation is declared as `model(linear)`.
 - The implementation header cites "An Area-Wide Model (AWM) for the Euro Area" by Gabriel Fagan, Jerome Henry, and Ricardo Mestre. This is the underlying AWM model documentation, while the indexed paper is the Dieppe-Kuester-McAdam policy-rule application.
 - Cross-check highlights:

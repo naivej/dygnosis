@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EA_SWW14_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EA_SWW14_rep.mod` exists and was used only as `implementation_cross_check`.
 - The `.mod` confirms `model(linear)`, the endogenous variable list, eight structural innovations, a flexible-price/wage counterpart block, output-gap definition, shock processes, and measurement equations.
 - Information learned only from the `.mod`, such as explicit flexible-block equations and exact Rep-MMB ASCII names, is labeled as implementation cross-check rather than paper-side source evidence.
 - Dynare was not run.

@@ -36,7 +36,7 @@
       "exists": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_LWW03_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_LWW03_rep.mod",
       "sha256": "29694758b5cff10d24051609bfec5486ca15d5b5cc1c584f3d04c93086ff8805",
       "role": "implementation_cross_check_only",
       "dynare_run_performed": false,

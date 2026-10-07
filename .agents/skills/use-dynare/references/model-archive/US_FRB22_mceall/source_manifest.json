@@ -90,7 +90,7 @@
     },
     {
       "role": "skill_example_mod",
-      "path": ".agents/skills/dynare-copilot/references/examples/US_FRB22_mceall_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_FRB22_mceall_rep.mod",
       "exists": false,
       "sha256": null
     },

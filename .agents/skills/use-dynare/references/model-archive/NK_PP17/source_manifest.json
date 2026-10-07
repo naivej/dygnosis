@@ -30,7 +30,7 @@
     },
     "appendix_normalization": null,
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_PP17_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_PP17_rep.mod",
       "sha256": "e2848badf725b8ece10c2fb52e3b7e31324a888bdc1fce08305604789181a120",
       "used_for": [
         "model(linear) form confirmation",

@@ -21,7 +21,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_ET14_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_ET14_rep.mod`.
 - Used only as `implementation_cross_check`, not as a paper-side source.
 - The `.mod` confirmed the variable set: `Y C s G Pi L ChiC Ps PQ PB w ChiL F K A b q qbar qCB i iQ D theta nu ksi Pss`.
 - The `.mod` confirmed seven innovations: `epsC epsL epsA epsthet epsG epsnu epsksi`.

@@ -21,7 +21,7 @@
     "raw_pdf_path": "raw/mmb_papers/Financial frictions in the Euro Area and the United States- a Bayesian assessment.pdf",
     "mineru_run_id": "ed2f2b1d-60d9-4da9-a9c6-b57af3b7e740",
     "appendix_normalization_path": null,
-    "implementation_cross_check_path": ".agents/skills/dynare-copilot/references/examples/EA_VI16bgg_rep.mod"
+    "implementation_cross_check_path": ".agents/skills/use-dynare/references/examples/EA_VI16bgg_rep.mod"
   },
   "proposed_catalog_row": {
     "ModelID": "EA_VI16bgg",

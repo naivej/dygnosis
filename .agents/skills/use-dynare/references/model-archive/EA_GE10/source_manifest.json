@@ -43,7 +43,7 @@
       "source_role": "hand-normalized online-appendix formula inventory when present"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/EA_GE10_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/EA_GE10_rep.mod",
       "sha256": "5a56d51ff0024f648c8992b5dc17acd2b0a3baaa5b0e40fd1b8884e808f56085",
       "exists_at_extraction": true,
       "source_role": "MMB implementation cross-check only; not paper-side mathematical source"
@@ -69,7 +69,7 @@
   },
   "implementation_cross_check": {
     "performed": true,
-    "source": ".agents/skills/dynare-copilot/references/examples/EA_GE10_rep.mod",
+    "source": ".agents/skills/use-dynare/references/examples/EA_GE10_rep.mod",
     "summary": "Rep-MMB implementation confirms linearized variables, capital timing through lags, premium variable S, flexible-price counterpart for ypot, and shocks ub/ul/ux/ua/ur/ug/uw/ulambdapi."
   },
   "created_by": "Codex",

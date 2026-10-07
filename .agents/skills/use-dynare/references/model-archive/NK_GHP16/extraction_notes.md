@@ -25,7 +25,7 @@ Consequences:
 
 ## Implementation Cross-Check
 
-Read `.agents/skills/dynare-copilot/references/examples/NK_GHP16_rep.mod` only as `implementation_cross_check`.
+Read `.agents/skills/use-dynare/references/examples/NK_GHP16_rep.mod` only as `implementation_cross_check`.
 
 Used for:
 
@@ -41,7 +41,7 @@ Not used for:
 
 - claiming paper-side equations when the Markdown did not print them;
 - runtime validation;
-- promotion to `.agents/skills/dynare-copilot/references/model-archive/`.
+- promotion to `.agents/skills/use-dynare/references/model-archive/`.
 
 ## Deferred Issues
 

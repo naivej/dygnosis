@@ -18,7 +18,7 @@ Status: `needs_review`
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EA_CKL09_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EA_CKL09_rep.mod` exists and was used only as `implementation_cross_check`.
 - Cross-check findings:
   - The implementation uses `model(linear)`.
   - Endogenous variables include `ct`, `lambdat`, `mct`, `mt`, `nt`, `Pit`, `Piannt`, `qt`, `Rt`, `st`, `ut`, `vt`, `wstart`, `wt`, `xLt`, `yt`, wage-surplus auxiliaries, and flexible-price/flexible-wage counterparts.

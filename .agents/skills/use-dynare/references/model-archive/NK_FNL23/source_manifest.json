@@ -30,7 +30,7 @@
     },
     "appendix_normalization_path": null,
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_FNL23_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_FNL23_rep.mod",
       "sha256": "fd4632c81dcedd213c528e1e3916c2c7aa43849b3e9e8510579867496a3c2e10",
       "bytes": 7687,
       "role": "implementation_cross_check_only"

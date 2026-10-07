@@ -51,7 +51,7 @@
     {
       "check": "implementation_cross_check",
       "status": "performed",
-      "notes": "Read .agents/skills/dynare-copilot/references/examples/EA_ALSV06_rep.mod only as implementation cross-check."
+      "notes": "Read .agents/skills/use-dynare/references/examples/EA_ALSV06_rep.mod only as implementation cross-check."
     },
     {
       "check": "runtime_validation",

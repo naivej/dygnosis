@@ -8,7 +8,7 @@
 - **Authors/year**: Ferre De Graeve, 2008.
 - **DOI**: `10.1016/j.jedc.2008.02.008`.
 - **Source**: `raw/mmb_mineru/runs/us_dg08__the_external_finance_premium_and_the_macroeconomy_us_post_wwii_evidence__6112c2c0/full.md`; raw PDF `raw/mmb_papers/The external finance premium and the macroeconomy- US post-WWII evidence..pdf`.
-- **MMB implementation cross-check**: `.agents/skills/dynare-copilot/references/examples/US_DG08_rep.mod`.
+- **MMB implementation cross-check**: `.agents/skills/use-dynare/references/examples/US_DG08_rep.mod`.
 - **Purpose**: Estimate a US post-WWII medium-scale DSGE model with a Bernanke-Gertler-Gilchrist financial accelerator and infer a model-consistent external finance premium from macro data.
 - **Agents**: households with habit and differentiated labor, monopolistically competitive intermediate-goods firms with sticky prices, final-goods firms, capital-goods producers with investment adjustment costs, entrepreneurs financed by internal net worth and bank loans, financial intermediaries with costly state verification, and a monetary authority.
 - **Form**: log-linearized `model(linear)`. Variables with hats are log or level deviations from steady state as in the paper and implementation. First-pass formula status is `needs_review` because several OCR symbols and implementation normalizations require paper-level checking.

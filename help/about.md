@@ -33,7 +33,7 @@ Diercks, Philip Howard and Mehrdad Samadi. That repository accompanies
 *LLMacro: A Language Server for Dynare — Structured Context for AI-Assisted
 Macroeconomic Modeling*. Equation, tag and extraction ideas are informed by the
 Dynare Team's [modBuilder](https://git.dynare.org/Dynare/modBuilder).
-The bundled workflow skill is adapted from
+The bundled use-dynare skill is adapted from
 [EconSolider/dynare-copilot](https://github.com/EconSolider/dynare-copilot) and
 retains its upstream [MIT license](https://github.com/EconSolider/dynare-copilot/blob/main/LICENSE).
 Dygnosis uses

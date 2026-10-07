@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_FNL23_rep.mod` exists and was used only as an implementation cross-check.
+- `.agents/skills/use-dynare/references/examples/NK_FNL23_rep.mod` exists and was used only as an implementation cross-check.
 - The `.mod` confirms core variable coverage: household marginal utility, green and brown rates, sectoral capital/labor/output, pollution, abatement, Tobin's Q, resource constraint, central-bank bond holdings, and spread.
 - The `.mod` adds simulation conveniences or implementation choices not treated as paper-side source equations here: investment-specific shocks, government-spending shocks, monetary-policy shocks, and a fixed-zero abatement setting in the shown business-cycle code path.
 

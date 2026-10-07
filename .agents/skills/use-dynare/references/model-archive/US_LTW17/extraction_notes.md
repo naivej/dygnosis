@@ -12,12 +12,12 @@
 
 - Status is `needs_review`.
 - The primary Markdown source gives the main model section: production, marginal cost, Calvo pricing problem, labor aggregation, saver and non-saver household descriptions, non-saver budget constraint, monetary rule, fiscal rules, aggregation, calibration, policy regimes, and multiplier definition.
-- The OCR source does not provide a clean complete appendix-level list of log-linear first-order conditions. FOCs and identities that are reconstructed from `.agents/skills/dynare-copilot/references/examples/US_LTW17_rep.mod` are marked `needs_review` in the English derivation.
+- The OCR source does not provide a clean complete appendix-level list of log-linear first-order conditions. FOCs and identities that are reconstructed from `.agents/skills/use-dynare/references/examples/US_LTW17_rep.mod` are marked `needs_review` in the English derivation.
 - The dynamic equations are written in the linear implementation form for this model ID, not as a full nonlinear derivation.
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_LTW17_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_LTW17_rep.mod` exists and was used only as `implementation_cross_check`.
 - The `.mod` confirms `model (linear)`, endogenous variables, eight structural innovations, active monetary/passive fiscal baseline coefficients, and the model block equations for production, factors, marginal cost, Phillips/wage equations, saver Euler, capital, fiscal rules, government budget, measurement equations, and shock processes.
 - The `.mod` contains expectation-helper identities for forward variables; these are not treated as separate economic equations in the derivation.
 - No `.mod` expression is treated as paper-side mathematical evidence unless independently described by the paper-side Markdown.

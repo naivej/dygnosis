@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/CL_MS07_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/CL_MS07_rep.mod` exists and was read only as `implementation_cross_check`.
 - Cross-check confirms `model(linear)`, the principal endogenous variable names, fourteen exogenous innovations, the two monetary-policy regimes, capital timing with `k_hat(-1)`, and the flexible-price companion block.
 - The `.mod` file was not treated as paper-side mathematical evidence.
 

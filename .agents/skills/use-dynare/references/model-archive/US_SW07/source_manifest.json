@@ -45,14 +45,14 @@
       "source_role": "hand-normalized online-appendix formula inventory"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_SW07_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_SW07_rep.mod",
       "sha256": "84e8c3c0933a1075a049137b7958f5206f6802a982384edce5e329a53c62cf7e",
       "exists_at_extraction": true,
       "source_role": "MMB implementation cross-check only; not a source for paper-side derivation"
     }
   },
   "catalog_cross_reference": {
-    "path": ".agents/skills/dynare-copilot/references/catalog.csv",
+    "path": ".agents/skills/use-dynare/references/catalog.csv",
     "row_model_id": "US_SW07_rep",
     "category": "2. Estimated DSGE Benchmarks (Smets-Wouters Type)",
     "model_type": "Medium-scale New Keynesian DSGE (Bayesian estimated) -benchmark model"

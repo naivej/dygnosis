@@ -6,7 +6,7 @@
 - Primary Markdown source: `raw/mmb_mineru/runs/g2_sigma08__trade_adjustment_and_the_composition_of_trade__2bcd14af/full.md`.
 - Raw PDF path exists: `raw/mmb_papers/Trade adjustment and the composition of trade.pdf`.
 - No optional normalization appendix exists at `docs/mmb_appendix_full_normalizations/G2_SIGMA08.md`.
-- Optional implementation cross-check exists at `.agents/skills/dynare-copilot/references/examples/G2_SIGMA08_rep.mod`.
+- Optional implementation cross-check exists at `.agents/skills/use-dynare/references/examples/G2_SIGMA08_rep.mod`.
 
 ## Formula Quality
 

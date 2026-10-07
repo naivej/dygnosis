@@ -29,7 +29,7 @@
     },
     "appendix_normalization": null,
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_KRS12_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_KRS12_rep.mod",
       "sha256": "828d926be590ee2effb75f2d2e505c3ae81e8f2bd2f19dcb95a705f102e23136",
       "used_for": [
         "model(linear) confirmation",

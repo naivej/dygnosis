@@ -38,7 +38,7 @@
       "use": null
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_FV10_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_FV10_rep.mod",
       "sha256": "ff15f7c17efe73727350e25e334386428f6ae4b11429af020ae0f711d4a504f4",
       "exists": true,
       "use": "implementation_cross_check_only",

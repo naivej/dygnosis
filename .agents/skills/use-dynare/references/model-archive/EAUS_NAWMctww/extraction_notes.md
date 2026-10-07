@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EAUS_NAWMctww_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EAUS_NAWMctww_rep.mod` exists and was read only as `implementation_cross_check`.
 - Cross-check findings:
   - The replication file is a nonlinear `model;` block, not `model(linear)`.
   - It contains both euro-area (`EA_`) and U.S. (`US_`) blocks, with U.S. variables used as common comparison variables for the fiscal-consolidation application.
@@ -30,5 +30,5 @@
 - Full NAWM steady-state derivation remains deferred. The derivation records paper restrictions and implementation calibration values but does not claim a reviewed steady-state solution.
 - Calvo wage and price recursions need source-level verification against the original NAWM paper or a reviewed technical appendix before status can advance beyond `needs_review`.
 - Exact timing of the foreign-bond accumulation identity should be checked in a targeted source review.
-- The archive entry should not be promoted to `.agents/skills/dynare-copilot/references/model-archive/` until a runnable implementation and validation evidence exist.
+- The archive entry should not be promoted to `.agents/skills/use-dynare/references/model-archive/` until a runnable implementation and validation evidence exist.
 

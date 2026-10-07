@@ -20,7 +20,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/US_CFOP14_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/US_CFOP14_rep.mod`.
 - Used only for variable coverage, timing conventions, shock names, and confirmation that the MMB implementation is `model(linear)`.
 - Not used as a paper-side mathematical source.
 - Dynare was not run.

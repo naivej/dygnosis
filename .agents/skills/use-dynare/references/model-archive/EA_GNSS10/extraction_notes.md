@@ -20,7 +20,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/EA_GNSS10_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/EA_GNSS10_rep.mod`.
 - Used only as `implementation_cross_check`, not as paper-side mathematical evidence.
 - Confirmed the implemented blocks: patient households, impatient households, capital producers, entrepreneurs, banks, retailers, labor market/unions, aggregation/equilibrium, monetary policy, exogenous processes, and auxiliary variables.
 - Confirmed 13 exogenous innovations: `e_A_e`, `e_eps_K_b`, `e_j`, `e_l`, `e_me`, `e_mi`, `e_mk_be`, `e_mk_bh`, `e_mk_d`, `e_r_ib`, `e_qk`, `e_y`, and `e_z`.

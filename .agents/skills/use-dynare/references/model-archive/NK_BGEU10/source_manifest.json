@@ -32,7 +32,7 @@
     },
     "appendix_normalization": null,
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_BGEU10_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_BGEU10_rep.mod",
       "sha256": "0591ed1a61cbde1c61be337e1ec685047208b0f642fd527be892710ed20a4d1e",
       "used_for": [
         "model(linear) form",

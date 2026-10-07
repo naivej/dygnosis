@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_NS14_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_NS14_rep.mod`.
 - Used only for variable names, shock names, timing, and equation coverage.
 - The `.mod` confirms `model(linear)`.
 - The `.mod` confirms endogenous variables `c, cf, r, pi, pif, piH, piF, l, lf, pH, p, pf, sH, sF, y, yf, g, gf, w, wf, i, if, k, kf, ny, nyf, q`.

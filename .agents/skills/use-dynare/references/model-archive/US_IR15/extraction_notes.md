@@ -12,7 +12,7 @@
 
 - English derivation was drafted first using the required eight-section structure.
 - The source model is an empirical affine term-structure/state-space model, not a household-firm DSGE model. Therefore section 2 records the pricing-kernel/no-arbitrage object rather than invented household or firm optimization problems.
-- The `.mod` file `.agents/skills/dynare-copilot/references/examples/US_IR15_rep.mod` was read only as `implementation_cross_check`.
+- The `.mod` file `.agents/skills/use-dynare/references/examples/US_IR15_rep.mod` was read only as `implementation_cross_check`.
 
 ## Formula Quality
 
@@ -24,7 +24,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_IR15_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_IR15_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms `model(linear)` and state variables `g_r`, `g_pi`, `g_y`, `tau`, and `v`.
 - The `.mod` uses observables/derived variables for yields and premiums at 4, 8, 12, 16, and 20 quarters: `y_4`, `y_8`, `y_12`, `y_16`, `y_20`, `P_y_*`, and annualized `*_a` variables.
 - The `.mod` uses shocks `epsilon_r`, `epsilon_pi`, `epsilon_y`, `epsilon_tau`, `epsilon_v`, plus measurement errors `eta_4`, `eta_8`, and `eta_16`.

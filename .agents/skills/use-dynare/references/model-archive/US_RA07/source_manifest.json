@@ -46,7 +46,7 @@
       "source_role": "hand-normalized appendix formula inventory when present"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_RA07_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_RA07_rep.mod",
       "sha256": "028586a2448513b50815a1a7204da55c3d35732e26d2a87af7679fd88fd38885",
       "exists": true,
       "used_as": "implementation_cross_check",

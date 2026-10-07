@@ -52,7 +52,7 @@
       "source_role": "hand-normalized online-appendix formula inventory when present"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_CMR14noFA_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_CMR14noFA_rep.mod",
       "sha256": "aba42064e182c89f324693127708c78216d05f6b9894ba7b0aeaa419bdcf5e98",
       "exists_at_extraction": true,
       "source_role": "MMB implementation cross-check only; not paper-side mathematical source",
@@ -71,7 +71,7 @@
       ]
     },
     {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_CMR14noFA_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_CMR14noFA_rep.mod",
       "spans": [
         "active endogenous variables and exogenous shocks",
         "equation comments Eqn 1-Eqn 20",

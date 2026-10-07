@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_DG08_rep.mod` was read only as implementation_cross_check.
+- `.agents/skills/use-dynare/references/examples/US_DG08_rep.mod` was read only as implementation_cross_check.
 - Cross-check confirms `model(linear)`, the main endogenous variables, shock names, the flexible-price counterpart block, and MMB posterior-mode parameter values.
 - Cross-check was used to express `Prem = Rkforward - R`, `Rkforward = Rk(+1)`, the Fisher identity, AR(1) shock names, and the expanded utilization/bankruptcy terms in the resource constraint.
 - Dynare was not run.

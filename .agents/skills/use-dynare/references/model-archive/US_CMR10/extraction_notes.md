@@ -22,7 +22,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_CMR10_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_CMR10_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms the US suffix convention (`*U`), a nonlinear `model;` block, a parallel flexible-price block, variables corresponding to the archive table, and AR(1)-style shock equations.
 - The `.mod` was not treated as paper-side evidence and was not run.
 

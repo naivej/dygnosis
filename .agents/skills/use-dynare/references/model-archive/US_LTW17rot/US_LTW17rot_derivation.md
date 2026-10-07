@@ -1,6 +1,6 @@
 # US_LTW17rot -- Derivation (Optimization Problems + First-Order Conditions)
 
-> Status: needs_review. This first-pass archive entry extracts the paper-side model structure from MinerU Markdown and uses `.agents/skills/dynare-copilot/references/examples/US_LTW17rot_rep.mod` only as an implementation_cross_check. Runtime validation was not performed.
+> Status: needs_review. This first-pass archive entry extracts the paper-side model structure from MinerU Markdown and uses `.agents/skills/use-dynare/references/examples/US_LTW17rot_rep.mod` only as an implementation_cross_check. Runtime validation was not performed.
 
 Provenance: `US_LTW17rot`, Leeper, Traum, and Walker (2017), "Clearing Up the Fiscal Multiplier Morass," American Economic Review 107(8): 2409-2454, DOI `10.1257/aer.20111196`. Source Markdown: `raw/mmb_mineru/runs/us_ltw17_us_ltw17gz_us_ltw17nu_us_ltw17rot__clearing_up_the_fiscal_multiplier_morass__f1cc32b3/full.md`. Raw PDF: `raw/mmb_papers/Clearing Up the Fiscal Multiplier Morass.pdf`.
 

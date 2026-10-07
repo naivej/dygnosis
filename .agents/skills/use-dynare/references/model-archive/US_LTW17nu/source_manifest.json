@@ -47,7 +47,7 @@
       "used": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_LTW17nu_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_LTW17nu_rep.mod",
       "exists": true,
       "sha256": "5142f694f3355b983a9d46bc1e630a16f73fcfe0bcb37742a7c0149dfd18e221",
       "used_only_as": "implementation_cross_check",

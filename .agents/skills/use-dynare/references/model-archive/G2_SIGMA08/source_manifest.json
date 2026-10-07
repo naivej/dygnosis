@@ -42,7 +42,7 @@
       "available": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/G2_SIGMA08_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/G2_SIGMA08_rep.mod",
       "sha256": "8e2973e1742d8e1d2fecb3e4dbe589124301cec274c8d84db6d75c39de1b1da5",
       "used_only_for": [
         "model(linear) form",

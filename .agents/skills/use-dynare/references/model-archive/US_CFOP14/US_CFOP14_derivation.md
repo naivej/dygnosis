@@ -2,7 +2,7 @@
 
 > Status: `needs_review`. This first-pass archive entry is source-backed by MinerU Markdown and an implementation cross-check. Runtime validation was not performed.
 
-Provenance: `US_CFOP14`, Carlstrom, Charles T.; Fuerst, Timothy S.; Ortiz, Alberto; Paustian, Matthias (2014), "Estimating contract indexation in a financial accelerator model", Journal of Economic Dynamics & Control 46, pp. 130-194, DOI `10.1016/j.jedc.2014.06.009`. Source Markdown: `raw/mmb_mineru/runs/us_cfop14__estimating_contract_indexation_in_a_financial_accelerator_model__06425d65/full.md`; raw PDF: `raw/mmb_papers/Estimating contract indexation in a financial accelerator model.pdf`; MinerU run id: `06425d65-581e-4e92-98d4-a90b7f9fa804`. No appendix-normalization file was found. Implementation cross-check: `.agents/skills/dynare-copilot/references/examples/US_CFOP14_rep.mod`.
+Provenance: `US_CFOP14`, Carlstrom, Charles T.; Fuerst, Timothy S.; Ortiz, Alberto; Paustian, Matthias (2014), "Estimating contract indexation in a financial accelerator model", Journal of Economic Dynamics & Control 46, pp. 130-194, DOI `10.1016/j.jedc.2014.06.009`. Source Markdown: `raw/mmb_mineru/runs/us_cfop14__estimating_contract_indexation_in_a_financial_accelerator_model__06425d65/full.md`; raw PDF: `raw/mmb_papers/Estimating contract indexation in a financial accelerator model.pdf`; MinerU run id: `06425d65-581e-4e92-98d4-a90b7f9fa804`. No appendix-normalization file was found. Implementation cross-check: `.agents/skills/use-dynare/references/examples/US_CFOP14_rep.mod`.
 
 ## 1. Model Overview
 

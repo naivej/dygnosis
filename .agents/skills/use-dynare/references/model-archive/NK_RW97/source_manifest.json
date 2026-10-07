@@ -48,7 +48,7 @@
       "source_role": "hand-normalized online-appendix formula inventory when present"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_RW97_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_RW97_rep.mod",
       "sha256": "ef583599df41851ded0a374cf3265e9bbba6fbfd992a0e8c50ebeaf080779b1f",
       "exists": true,
       "used_as": "implementation_cross_check",
@@ -75,7 +75,7 @@
       ]
     },
     {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_RW97_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_RW97_rep.mod",
       "spans": [
         "variable and shock declarations",
         "parameter calibration",

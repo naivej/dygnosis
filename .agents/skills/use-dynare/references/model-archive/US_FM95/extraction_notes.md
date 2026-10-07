@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_FM95_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_FM95_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms endogenous names `p`, `x`, `ytilde`, `ypsilon`, `f`, `infl`, and `rho`; shocks `epsilon_p`, `epsilon_y`, and `interest_`; parameters `s`, `f0`-`f3`, `D`, `a0`, `a1`, `a2`, `arho`, and `gamma`; and `model(linear)`.
 - The `.mod` includes an LWW-style interest-rate rule and parameterization attributed to later Fuhrer/LWW sources, while the QJE paper uses a nominal-output-growth reaction function for policy experiments. The archive records both but treats the QJE rule as paper-side and the LWW rule as implementation-side.
 - The `.mod` was not run.

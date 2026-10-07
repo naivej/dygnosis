@@ -7,11 +7,11 @@
   "sources_read": [
     ".agents/skills/mmb-model-archive-builder/SKILL.md",
     "docs/MODEL_ARCHIVE_BUILD_PLAN.md",
-    ".agents/skills/dynare-copilot/references/derivation-style.md",
-    ".agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md",
+    ".agents/skills/use-dynare/references/derivation-style.md",
+    ".agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md",
     "raw/mmb_mineru/model_index.csv row model_id=NK_GK13",
     "raw/mmb_mineru/runs/nk_gk13__qe_1_vs_2_vs_3_a_framework_for_analyzing_large_scale_asset_purchases_as__77fee003/full.md",
-    ".agents/skills/dynare-copilot/references/examples/NK_GK13_rep.mod"
+    ".agents/skills/use-dynare/references/examples/NK_GK13_rep.mod"
   ],
   "sources_checked_not_read": [
     "raw/mmb_papers/A framework for analyzing large-scale asset purchases as a monetary policy tool.pdf"

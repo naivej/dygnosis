@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_KK14_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_KK14_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` file confirms a `model(linear)` implementation with variables for marginal utility, MRS, consumption, hours, wage, Tobin's Q, investment, capital, utilization, rental rate, inflation, policy rate, government debt, taxes, tax revenues, government consumption, transfers, measured GDP, investment/technology/preference shock states, and fiscal/monetary innovations.
 - The `.mod` file was used to identify likely variable coverage, timing conventions, shock names, and calibration targets. It was not used as paper-side mathematical evidence.
 - Dynare was not run.

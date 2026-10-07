@@ -47,7 +47,7 @@
       "exists": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_YR13AL_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_YR13AL_rep.mod",
       "exists": false,
       "used": false
     }

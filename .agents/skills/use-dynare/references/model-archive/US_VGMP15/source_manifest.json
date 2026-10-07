@@ -49,7 +49,7 @@
       "source_role": "hand-normalized online-appendix formula inventory when present"
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_VGMP15_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_VGMP15_rep.mod",
       "sha256": null,
       "exists": false,
       "used_as": "implementation_cross_check"

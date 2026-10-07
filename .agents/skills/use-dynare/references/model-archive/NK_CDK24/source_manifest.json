@@ -32,7 +32,7 @@
     ],
     "appendix_normalization_path": null,
     "appendix_normalization_used": false,
-    "implementation_cross_check_path": ".agents/skills/dynare-copilot/references/examples/NK_CDK24_rep.mod",
+    "implementation_cross_check_path": ".agents/skills/use-dynare/references/examples/NK_CDK24_rep.mod",
     "implementation_cross_check_exists": false,
     "implementation_cross_check_used": false
   },

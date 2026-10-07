@@ -15,7 +15,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_CGG99_rep.mod` was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/NK_CGG99_rep.mod` was read only as `implementation_cross_check`.
 - Cross-check confirmed endogenous variables `x`, `i`, `pi`; shocks `demand_`, `inflation_`; `model(linear)` form; hybrid IS curve; hybrid Phillips curve; and a partial-adjustment expected-inflation policy rule.
 - The file comments state that the variant uses the extended model starting on page 1691, adds output persistence and endogenous inflation, uses Rotemberg-Woodford parameter choices, and uses backward-looking shares of output and inflation.
 

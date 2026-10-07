@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file exists: `.agents/skills/dynare-copilot/references/examples/CA_LS07_rep.mod`.
+- Cross-check file exists: `.agents/skills/use-dynare/references/examples/CA_LS07_rep.mod`.
 - Used only as `implementation_cross_check`.
 - Confirms `model(linear)`, endogenous variables `y R pi z deltaq deltay_star y_bar y_star deltae pi_star inflationq interest`, exogenous shocks `epsR epsq epsy_star epspi_star epsz`, and Canadian replication parameter values.
 - No Dynare execution was performed.

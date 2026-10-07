@@ -58,7 +58,7 @@
       "used_for": []
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/EA_SWW14_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/EA_SWW14_rep.mod",
       "sha256": "128f72c62d5629ae7b2022280737adfe583660a5de6bce6b9c8e6b9570c42a86",
       "exists": true,
       "line_count": 312,

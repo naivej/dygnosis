@@ -20,7 +20,7 @@
 ## Implementation Cross-Check
 
 - No optional normalization file exists at `docs/mmb_appendix_full_normalizations/NK_GMAS25ppi.md`.
-- No optional example implementation exists at `.agents/skills/dynare-copilot/references/examples/NK_GMAS25ppi_rep.mod`.
+- No optional example implementation exists at `.agents/skills/use-dynare/references/examples/NK_GMAS25ppi_rep.mod`.
 - No MMB `.mod` file was used as a paper-side mathematical source.
 
 ## Variant Notes

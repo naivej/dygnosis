@@ -12,7 +12,7 @@ This folder stores source-backed MMB derivation Markdown exported from the priva
 
 ## Copyright Boundary
 
-`dynare-copilot` is a public repository. Full MinerU `full.md` paper text is therefore **not vendored here**. Metadata records the private `dsge-evaluation` source Markdown relative path and SHA256 hash so the private source can be matched and audited without redistributing full paper text.
+`use-dynare` ships in a public repository. Full MinerU `full.md` paper text is therefore **not vendored here**. Metadata records the private `dsge-evaluation` source Markdown relative path and SHA256 hash so the private source can be matched and audited without redistributing full paper text.
 
 ## Snapshot
 

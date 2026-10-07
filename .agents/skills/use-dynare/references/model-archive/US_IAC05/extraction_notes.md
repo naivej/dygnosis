@@ -20,7 +20,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_IAC05_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_IAC05_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` confirms the reduced log-linear model variables: `Yhat`, `chat`, `c1hat`, `c2hat`, `Ihat`, `Khat`, `Xhat`, `qhat`, `bhat`, `b2hat`, `hhat`, `h2hat`, `pihat`, `Rhat`, `rrhat`, `jhat`, `Ahat`, and `uhat`.
 - The `.mod` confirms exogenous innovations: `ejhat`, `euhat`, `eAhat`, `eRhat`.
 - The `.mod` was not copied as a source of paper mathematics and was not executed.

@@ -41,7 +41,7 @@
       "exists": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/US_CFP17exo_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/US_CFP17exo_rep.mod",
       "sha256": "fc322e00b3ec1f9c8656c5674b50794ede4333845d5fb3aebf61623d3e42c918",
       "exists": true,
       "runtime_validation": "not_performed",

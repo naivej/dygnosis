@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EA_SR07_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EA_SR07_rep.mod` exists and was used only as `implementation_cross_check`.
 - The `.mod` confirms `model(linear)` and labels the main model block with B1-B23 equations: domestic/import/export Phillips curves, wage equation, Euler equation, investment FOC, real-balances FOC, capital FOC, UIP, resource constraint, capital law of motion, utilization, loan market clearing, net foreign assets, relative prices, CPI inflation, output, employment, fiscal VAR, foreign VAR, and AR shock processes.
 - No `.mod` expression is treated as paper-side mathematical evidence unless it is separately described in the Markdown source.
 

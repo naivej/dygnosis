@@ -24,7 +24,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_RA16_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/NK_RA16_rep.mod` exists and was read only as `implementation_cross_check`.
 - `raw/mmb/mmci-cli/models/NK_RA16/NK_RA16.mod` and `.json` exist and were inspected only for implementation coverage.
 - The implementation confirms `model(linear)`, variable capital utilization, flex-price counterparts, and broad variables: `Y`, `GDP`, `I`, `K`, `l`, `U`, `Cp`, `C`, `Ce`, `Cb`, `varrho`, `R`, `Rk`, `rk`, `Rb`, `Rl`, `w`, `a`, `Q`, `Pi`, `mc`, `N`, `V`, `phi_e`, `omega_bar_prime`, `L`, `Lr`, `Le`, `g`, `Nb`, `phi_b`, `z`, `Lambda`, spreads, `R4`, and `Pi4`.
 - The implementation declares conventional shocks `e_i`, `e_a`, and `e_g`; the raw MMB model maps modelbase shocks `interest_` and `fiscal_`. Bank and entrepreneur net-worth shocks are source-stated for crisis experiments but not retained in the final Rep-MMB `shocks` block.

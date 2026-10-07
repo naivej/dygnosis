@@ -16,7 +16,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_YR13_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_YR13_rep.mod` exists and was read only as `implementation_cross_check`.
 - Cross-check confirms `model(linear)`, the adaptive-learning model label, endogenous variables including `c`, `inve`, `y`, `lab`, `pinf`, `w`, `r`, `pk`, `rk`, `nw`, `prem`, `pinf4`, and exogenous shocks `ea`, `eb`, `eqs`, `epinf`, `ew`, `em`.
 - Cross-check also confirms derived steady-state objects such as `cgamma`, `cbetabar`, `cr`, `crk`, `cw`, `cik`, `cky`, `ciy`, `ccy`, `crkky`, `cwhlc`, and `cwly`.
 - The `.mod` file was not used as a paper-side source and Dynare was not run.
@@ -26,5 +26,5 @@
 - Reconstruct a complete SW07 household, price, wage, and marginal-cost derivation from the cited source if this model is promoted beyond first-pass archive status.
 - Perform targeted PDF formula review for all equations marked `needs_review`.
 - Rebuild a full steady-state ordering if a runnable archive entry is later required.
-- Runtime validation, Blanchard-Kahn checks, and promotion to `.agents/skills/dynare-copilot/references/model-archive/` are deferred.
+- Runtime validation, Blanchard-Kahn checks, and promotion to `.agents/skills/use-dynare/references/model-archive/` are deferred.
 

@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- Optional cross-check file was not present: `.agents/skills/dynare-copilot/references/examples/NK_CDK24_rep.mod`.
+- Optional cross-check file was not present: `.agents/skills/use-dynare/references/examples/NK_CDK24_rep.mod`.
 - No MMB `.mod` file was used as a mathematical source.
 
 ## Scope Choices

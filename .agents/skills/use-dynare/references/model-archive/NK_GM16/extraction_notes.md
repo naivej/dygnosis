@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/NK_GM16_rep.mod` exists and was used only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/NK_GM16_rep.mod` exists and was used only as `implementation_cross_check`.
 - The `.mod` confirms `model(linear)`, all variables are log deviations from respective steady states, and the active policy regime is currency union (`e=0`).
 - The `.mod` confirms endogenous names including `y`, `c`, `s`, `z`, `zx1`, `zx2`, `i`, `dpc`, `e`, `p`, `n`, `a`, `dp`, `t`, `wp`, `dw`, `w`, `pc`, `r`, `de`, gap variables, natural variables, and graph transforms.
 - The `.mod` graph variables `ngraph`, `igraph`, `rgraph`, and `sgraph` were recorded as reporting transformations, not as independent economic conditions.

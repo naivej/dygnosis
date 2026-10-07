@@ -15,7 +15,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/EAES_RA09_rep.mod` exists and was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/EAES_RA09_rep.mod` exists and was read only as `implementation_cross_check`.
 - The `.mod` file confirms a `model(linear)` implementation with variables for consumption, marginal utility, real exchange rate, sectoral prices, sectoral labor, sectoral outputs, home/foreign CPI, EMU CPI, GDP growth, common monetary policy, sectoral productivity, and sectoral demand shocks.
 - The `.mod` file sets positive estimated trends to zero for Rep-MMB IRF matching. The derivation records this as an implementation convention, not a paper-side mathematical source.
 - Dynare was not run.

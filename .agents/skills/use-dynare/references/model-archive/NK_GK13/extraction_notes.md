@@ -22,7 +22,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/NK_GK13_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/NK_GK13_rep.mod`.
 - Used only to check variable coverage, shock names, purchase-rule separation, timing, and the fact that the implementation is linearized around logged steady states.
 - The `.mod` contains endogenous variables including `Ym Y D K Keff L I C G Q varrho Lambda Z Ne Nn Rk Rb qn mu_s mu_b nu phi x Omega Pm X F H ir ib prem_K prem_B w qn_rf iir prem_ib rb q qB N Kb Bb Dep Nbook phibook Kbook Qfair Qbook qnbook Kh Bh irstar Welf a ksi g shock_ir infl inflstar psi Gamma shock_psi shock_Gamma ... zlb`.
 - The `.mod` contains shocks `e_a e_ksi e_g e_Ne e_ir e_psi e_Gamma e_zlb`.

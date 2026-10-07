@@ -56,7 +56,7 @@
     "sha256": null
   },
   "implementation_cross_check": {
-    "path": ".agents/skills/dynare-copilot/references/examples/US_ACELswm_rep.mod",
+    "path": ".agents/skills/use-dynare/references/examples/US_ACELswm_rep.mod",
     "exists": true,
     "sha256": "60138c44bb14b6326a2a234e5268d82b81182536dac80afe43d71222fb9866a6",
     "used_as": "implementation_cross_check",

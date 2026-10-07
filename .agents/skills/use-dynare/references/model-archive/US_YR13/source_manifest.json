@@ -60,7 +60,7 @@
     "used": false
   },
   "implementation_cross_check": {
-    "path": ".agents/skills/dynare-copilot/references/examples/US_YR13_rep.mod",
+    "path": ".agents/skills/use-dynare/references/examples/US_YR13_rep.mod",
     "exists": true,
     "sha256": "d5a5d761941dd46d9f9c183ac5ea19dee9c254d9ba784bc66ae68b25a3409b91",
     "used_as": "implementation_cross_check",

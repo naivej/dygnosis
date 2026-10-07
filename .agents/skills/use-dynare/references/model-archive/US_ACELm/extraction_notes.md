@@ -17,7 +17,7 @@
 
 ## Implementation Cross-Check
 
-- `.agents/skills/dynare-copilot/references/examples/US_ACELm_rep.mod` was read only as `implementation_cross_check`.
+- `.agents/skills/use-dynare/references/examples/US_ACELm_rep.mod` was read only as `implementation_cross_check`.
 - The `.mod` confirms `model(linear)`, sticky-price and flexible-price blocks, money-growth policy, neutral technology, embodied technology, and an added transitory neutral technology shock.
 - The `.mod` comments identify technical-appendix equations 1 through 16, but these were not treated as paper-side source equations.
 - Dynare was not run.

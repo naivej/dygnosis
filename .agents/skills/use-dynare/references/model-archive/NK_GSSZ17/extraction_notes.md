@@ -18,7 +18,7 @@
 
 ## Implementation Cross-Check
 
-- Optional cross-check file read: `.agents/skills/dynare-copilot/references/examples/NK_GSSZ17_rep.mod`.
+- Optional cross-check file read: `.agents/skills/use-dynare/references/examples/NK_GSSZ17_rep.mod`.
 - Used only to check variable coverage, shock names, timing conventions, and model-block form.
 - The implementation includes variables such as `xi`, `s`, `c`, `x`, `pt`, `y`, `h`, `pii`, `A`, `D`, `w`, `pS`, `m`, `dt`, `z`, `abar`, `mu`, `v`, `lambda`, `R`, `varrho`, `F`, and flexible-price counterparts.
 - The implementation uses exogenous shocks `eA`, `eR`, `eF`, and `eD`.

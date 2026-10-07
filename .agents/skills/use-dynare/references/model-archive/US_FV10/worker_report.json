@@ -11,13 +11,13 @@
     "skill": ".agents/skills/mmb-model-archive-builder/SKILL.md",
     "task_contract": ".agents/skills/mmb-model-archive-builder/references/subagent-task-template.md",
     "build_plan": "docs/MODEL_ARCHIVE_BUILD_PLAN.md",
-    "style": ".agents/skills/dynare-copilot/references/derivation-style.md",
-    "example": ".agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md",
+    "style": ".agents/skills/use-dynare/references/derivation-style.md",
+    "example": ".agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md",
     "model_index": "raw/mmb_mineru/model_index.csv",
     "primary_full_md": "raw/mmb_mineru/runs/us_fv10__the_econometrics_of_dsge_models__99400522/full.md",
     "raw_pdf": "raw/mmb_papers/The Econometrics of DSGE Models.pdf",
     "appendix_normalization": null,
-    "implementation_cross_check": ".agents/skills/dynare-copilot/references/examples/US_FV10_rep.mod"
+    "implementation_cross_check": ".agents/skills/use-dynare/references/examples/US_FV10_rep.mod"
   },
   "proposed_catalog_row": {
     "ModelID": "US_FV10",

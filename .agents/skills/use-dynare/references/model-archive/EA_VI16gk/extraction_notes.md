@@ -19,7 +19,7 @@
 
 ## Implementation Cross-Check
 
-- Cross-check file: `.agents/skills/dynare-copilot/references/examples/EA_VI16gk_rep.mod`.
+- Cross-check file: `.agents/skills/use-dynare/references/examples/EA_VI16gk_rep.mod`.
 - Used only to check:
   - `model(linear)` form;
   - variable names for the EA SWGK variant;

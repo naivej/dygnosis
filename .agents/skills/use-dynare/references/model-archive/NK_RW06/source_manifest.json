@@ -43,7 +43,7 @@
       "exists": false
     },
     "implementation_cross_check": {
-      "path": ".agents/skills/dynare-copilot/references/examples/NK_RW06_rep.mod",
+      "path": ".agents/skills/use-dynare/references/examples/NK_RW06_rep.mod",
       "sha256": "629ab4fa833a5c61af49ada7e1b3b19c72a832c69ae200895f70c566c8a17dac",
       "exists": true,
       "used_as": "implementation_cross_check_only",

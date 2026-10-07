@@ -81,7 +81,7 @@ const MCP_SEVERITIES: &[&str] = &["ERROR", "WARNING", "INFORMATION", "HINT"];
 
 fn copilot_file(archive_dir: &str, filename: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".agents/skills/dynare-copilot/references/model-archive")
+        .join(".agents/skills/use-dynare/references/model-archive")
         .join(archive_dir)
         .join(filename)
 }
@@ -108,7 +108,7 @@ fn fixture_mod(rel: &str) -> String {
 
 fn read_example(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".agents/skills/dynare-copilot/references/examples")
+        .join(".agents/skills/use-dynare/references/examples")
         .join(format!("{name}.mod"));
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("example missing at {}: {e}", path.display()))

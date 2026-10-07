@@ -18,14 +18,14 @@
   "source_order_completed": [
     ".agents/skills/mmb-model-archive-builder/SKILL.md",
     "docs/MODEL_ARCHIVE_BUILD_PLAN.md",
-    ".agents/skills/dynare-copilot/references/derivation-style.md",
-    ".agents/skills/dynare-copilot/references/model-archive/bgg_financial/bgg_financial_derivation.md",
+    ".agents/skills/use-dynare/references/derivation-style.md",
+    ".agents/skills/use-dynare/references/model-archive/bgg_financial/bgg_financial_derivation.md",
     "raw/mmb_mineru/model_index.csv row for US_FU19",
     "raw/mmb_mineru/runs/us_fu19__accounting_for_post_crisis_inflation_a_retro_analysis__efab411e/full.md",
     "first-page/title sniff of alternate MinerU run 9554deb8",
     "raw PDF existence check",
     "appendix normalization absence check",
-    ".agents/skills/dynare-copilot/references/examples/US_FU19_rep.mod as implementation_cross_check"
+    ".agents/skills/use-dynare/references/examples/US_FU19_rep.mod as implementation_cross_check"
   ],
   "source_manifest_summary": {
     "primary_full_md": "raw/mmb_mineru/runs/us_fu19__accounting_for_post_crisis_inflation_a_retro_analysis__efab411e/full.md",
@@ -36,7 +36,7 @@
       "9554deb8-9b94-41f0-a478-ad9c637a6e86"
     ],
     "appendix_normalization_exists": false,
-    "implementation_cross_check": ".agents/skills/dynare-copilot/references/examples/US_FU19_rep.mod"
+    "implementation_cross_check": ".agents/skills/use-dynare/references/examples/US_FU19_rep.mod"
   },
   "proposed_catalog_csv_row": {
     "ModelID": "US_FU19",
