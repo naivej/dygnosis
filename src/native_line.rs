@@ -4,6 +4,54 @@
 //! that newline continues the line. A block comment returns to `NATIVE`.
 //! `... /*` stays native until `*/` followed by whitespace and a newline.
 
+use crate::span::Span;
+
+/// Macro output and its written origins. Native boundaries use this text;
+/// written offsets can repeat or go backwards during a macro loop.
+#[derive(Debug)]
+pub(crate) struct EmittedSource {
+    pub text: String,
+    pub origins: Vec<EmittedOrigin>,
+}
+
+#[derive(Debug)]
+pub(crate) struct EmittedOrigin {
+    pub emitted: Span,
+    pub written: Span,
+    pub copied: bool,
+}
+
+impl EmittedSource {
+    /// Map a region's end, including trivia that produced no token.
+    pub fn written_end(&self, end: usize) -> u32 {
+        let after = self
+            .origins
+            .partition_point(|origin| (origin.emitted.start as usize) < end);
+        let Some(origin) = after.checked_sub(1).map(|i| &self.origins[i]) else {
+            return 0;
+        };
+        if origin.copied {
+            origin.written.start + (end as u32).min(origin.emitted.end) - origin.emitted.start
+        } else {
+            origin.written.end
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct EmittedToken {
+    pub source: std::sync::Arc<EmittedSource>,
+    pub span: Span,
+}
+
+impl std::fmt::Debug for EmittedToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EmittedToken")
+            .field("span", &self.span)
+            .finish()
+    }
+}
+
 /// Byte index of the newline that ends the native region, or `src.len()` at EOF.
 ///
 /// `start` is the first byte of the native head. The newline itself is not

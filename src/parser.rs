@@ -1484,6 +1484,14 @@ impl Parser<'_> {
             crate::model::AssignmentIndex::Parameter(i) => self.model.param_assignments[i].native,
             crate::model::AssignmentIndex::Helper(i) => self.model.helper_assignments[i].native,
         });
+        let span = match assignment {
+            Some(crate::model::AssignmentIndex::Helper(i))
+                if native && self.model.helper_assignments[i].expr.is_none() =>
+            {
+                self.model.helper_assignments[i].span
+            }
+            _ => self.covering_tokens(from..self.i),
+        };
         self.model.statements.push(Statement {
             id,
             kind,
@@ -1491,7 +1499,7 @@ impl Parser<'_> {
             token_range: from..self.i,
             opener_range: from..opener_end,
             keyword_span: self.tokens[from].span,
-            span: self.covering_tokens(from..self.i),
+            span,
             complete,
             category,
             subtype,
@@ -8500,25 +8508,37 @@ impl Parser<'_> {
         let target_token = self.i;
         let tok = self.bump();
         let name = self.lexeme(&tok).to_string();
-        let region_end = crate::native_line::native_region_end(self.src, tok.span.start as usize);
+        let emitted = tok.emitted.clone();
+        let (native_src, start) = emitted
+            .as_ref()
+            .map_or((self.src, tok.span.start as usize), |token| {
+                (token.source.text.as_str(), token.span.start as usize)
+            });
+        let region_end = crate::native_line::native_region_end(native_src, start);
         let expr_i = self.i;
-        while !self.at(TokenKind::Eof) && (self.tokens[self.i].span.start as usize) < region_end {
+        while !self.at(TokenKind::Eof)
+            && self.tokens[self.i]
+                .emitted
+                .as_ref()
+                .map_or(self.tokens[self.i].span.start, |token| token.span.start)
+                < region_end as u32
+        {
             self.bump();
         }
         let expr_end_i = self.i;
         let eq_end = if expr_end_i > expr_i && self.tokens[expr_i].kind == TokenKind::Eq {
-            self.tokens[expr_i].span.end
+            self.tokens[expr_i]
+                .emitted
+                .as_ref()
+                .map_or(self.tokens[expr_i].span.end, |token| token.span.end)
         } else {
-            tok.span.end
+            start as u32
         };
-        let stmt_end = if expr_end_i > expr_i {
-            self.tokens[expr_end_i - 1].span.end
-        } else {
-            tok.span.end
-        };
-        let expression = self
-            .src
-            .get(eq_end as usize..stmt_end as usize)
+        let stmt_end = emitted.as_ref().map_or(region_end as u32, |token| {
+            token.source.written_end(region_end).max(tok.span.end)
+        });
+        let expression = native_src
+            .get(eq_end as usize..region_end)
             .unwrap_or("")
             .trim()
             .to_string();
@@ -9148,6 +9168,22 @@ impl Parser<'_> {
         self.model.parse_issues.push(issue);
     }
 
+    fn in_native_line_assignment(&self, token: usize) -> bool {
+        // Helper rows are appended in parse order, including macro copies.
+        let next = self
+            .model
+            .helper_assignments
+            .partition_point(|assignment| assignment.active_tokens.end <= token);
+        self.model
+            .helper_assignments
+            .get(next)
+            .is_some_and(|assignment| {
+                assignment.native
+                    && assignment.expr.is_none()
+                    && assignment.active_tokens.contains(&token)
+            })
+    }
+
     /// 7.1's lexer accepts only single-quoted strings, so a double-quoted one is lexer
     /// junk wherever the grammar reads a string. `verbatim` bodies pass raw text through.
     fn record_double_quoted_strings(&mut self) {
@@ -9157,6 +9193,12 @@ impl Parser<'_> {
                 continue;
             }
             if self.verbatim_ranges.iter().any(|range| range.contains(&i)) {
+                continue;
+            }
+            if self.in_native_line_assignment(i)
+                && self.lexeme(tok).len() > 1
+                && self.lexeme(tok).ends_with('"')
+            {
                 continue;
             }
             issues.push(ParseIssue {
@@ -9285,7 +9327,10 @@ impl Parser<'_> {
             return;
         }
         let blocks = complete_block_ranges(&self.tokens, self.src);
-        for tok in &self.tokens {
+        for (i, tok) in self.tokens.iter().enumerate() {
+            if self.in_native_line_assignment(i) {
+                continue;
+            }
             if tok.kind != TokenKind::Ident {
                 continue;
             }

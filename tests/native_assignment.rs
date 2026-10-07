@@ -267,6 +267,86 @@ fn a_pre_block_native_assignment_still_records_w012() {
 }
 
 #[test]
+fn native_strings_trivia_and_continued_keywords_make_no_syntax_claim() {
+    let sources = [
+        "parameters rho; rho=1;\nproof = \"native\";\n",
+        "parameters rho; rho=1; proof = \"native\";\n",
+        "parameters rho; rho=1;\nproof = 1; /* keep\ngoing */ é\n",
+        "parameters rho; rho=1; proof = 1; /* keep\ngoing */ é\n",
+        "var y; model; y=1; end;\nproof = 1 ...\nparamters = 1;\n",
+        "var y; varexo e; model; y=e; end;\nproof = 1 ...\nshoks = 1;\n",
+    ];
+    for source in sources {
+        quiet(source, "E001");
+        let control = format!("{source}parameters control;\ncontrol = pp.rho;\n");
+        assert_eq!(message(&diags(&control), "E275"), NAMESPACE);
+        agree(&control, "E275");
+        if let Some(pp) = find_preprocessor(None) {
+            let check =
+                run_preprocessor(source, &pp, None, Duration::from_secs(30), JsonStage::Check);
+            assert!(
+                check.success,
+                "{source}: {}{}",
+                check.raw_stdout, check.raw_stderr
+            );
+        }
+    }
+    let declared = "parameters rho;\nrho = \"native\";\n";
+    assert!(has(&diags(declared), "E001"));
+    // A lone double quote has no matching NATIVE string rule.
+    assert!(has(&diags("proof = \"\n"), "E001"));
+}
+
+#[test]
+fn native_boundaries_follow_macro_output_in_execution_order() {
+    let looped = "parameters rho;\n@#for i in 1:2\n@#if i == 2\nrho = pp.rho;\n@#endif\nproof = 1;\n@#endfor\n";
+    let model = parse(looped);
+    assert_eq!(model.helper_assignments.len(), 2);
+    assert_eq!(model.param_assignments.len(), 1);
+    assert_eq!(message(&analyze(&model), "E275"), NAMESPACE);
+    agree(looped, "E275");
+
+    let continued =
+        "parameters rho;\nrho = 0.9;\n@#define tail = \"...\"\nproof = 1 @{tail}\nrho = pp.rho;\n";
+    quiet(continued, "E275");
+    agree(continued, "E275");
+    assert_eq!(parse(continued).param_assignments.len(), 1);
+    assert!(parse(continued).helper_assignments[0]
+        .expression
+        .contains("pp.rho"));
+
+    if let Some(pp) = find_preprocessor(None) {
+        let check = run_preprocessor(looped, &pp, None, Duration::from_secs(30), JsonStage::Check);
+        assert!(!check.success);
+        assert!(format!("{}{}", check.raw_stdout, check.raw_stderr).contains(NAMESPACE));
+        let check = run_preprocessor(
+            continued,
+            &pp,
+            None,
+            Duration::from_secs(30),
+            JsonStage::Check,
+        );
+        assert!(check.success, "{}{}", check.raw_stdout, check.raw_stderr);
+    }
+}
+
+#[test]
+fn full_archive_is_quiet_for_native_assignment_claims_on_all_transports() {
+    let source =
+        include_str!("../.agents/skills/use-dynare/references/examples/NK_FNL23_rep_trans.mod");
+    assert!(source
+        .lines()
+        .nth(310)
+        .unwrap()
+        .contains("oo_.steady_state(8)"));
+    for code in ["E001", "E275"] {
+        quiet(source, code);
+        agree(source, code);
+    }
+    assert!(has(&diags(source), "W022"));
+}
+
+#[test]
 fn dynare_accepts_the_native_heads_and_refuses_the_model_local_heads() {
     let Some(pp) = find_preprocessor(None) else {
         eprintln!("skipping honesty: Dynare preprocessor is absent");

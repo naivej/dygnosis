@@ -1251,6 +1251,25 @@ fn realize_model_tokens(
     }
     out.push(Token::new(TokenKind::Eof, Span::new(src.len(), src.len())));
     out_traces.push(TokenTrace { frames: Vec::new() });
+    let origins = contribs
+        .iter()
+        .map(|contrib| crate::native_line::EmittedOrigin {
+            emitted: Span::new(contrib.emit_start, contrib.emit_end),
+            written: contrib.span,
+            copied: emitted.get(contrib.emit_start..contrib.emit_end)
+                == src.get(contrib.span.start as usize..contrib.span.end as usize),
+        })
+        .collect();
+    let emitted = std::sync::Arc::new(crate::native_line::EmittedSource {
+        text: emitted,
+        origins,
+    });
+    for (token, lexed) in out.iter_mut().zip(&lexed) {
+        token.emitted = Some(crate::native_line::EmittedToken {
+            source: emitted.clone(),
+            span: lexed.span,
+        });
+    }
     Ok((out, out_traces))
 }
 

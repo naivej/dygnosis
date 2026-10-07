@@ -39,6 +39,8 @@ pub enum TokenKind {
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
+    /// Position before macro output was mapped back to the written source.
+    pub(crate) emitted: Option<crate::native_line::EmittedToken>,
     /// Synthesized text after expansion; `None` means `src[span]`.
     pub lexeme: Option<String>,
     /// Lexical adjacency inside one interpolation, before its spans are mapped
@@ -59,6 +61,7 @@ impl Token {
         Self {
             kind,
             span,
+            emitted: None,
             lexeme: None,
             expanded_adjacent_next: None,
             glue_left: false,
@@ -71,6 +74,7 @@ impl Token {
         Self {
             kind,
             span,
+            emitted: None,
             lexeme: Some(lexeme.into()),
             expanded_adjacent_next: None,
             glue_left: false,
