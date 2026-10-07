@@ -12,8 +12,8 @@ write the closed-form (analytical) solution in a `steady_state_model` block.** U
 guess only when there is no closed form (SKILL.md "New model", "Stage 4 (steady state)" in
 workflow-detail.md).
 
-Solving the steady state is numerical work that only Dynare does (`steady`, `resid`, run under MATLAB or
-Octave). Dygnosis checks the written blocks statically; it does not compute residuals or prove that a
+Solving the steady state is numerical work that only Dynare does (`steady`, `resid`, run under MATLAB).
+Dygnosis checks the written blocks statically; it does not compute residuals or prove that a
 steady state exists. Static checks that apply:
 
 - W042: an endogenous variable has no assignment in `steady_state_model` (Dynare warns and falls back to
@@ -198,9 +198,10 @@ counts once.
 
 ## Verify the steady state (Dynare)
 
-Run these in Dynare through the route the host offers (a MATLAB MCP server, `matlab -batch "…"`,
-`octave --eval "…"`); if no route exists, give the commands to the user (debugging.md "Run-and-fix
-loop"). Do not infer a steady state or the Blanchard-Kahn conditions from static checks.
+Run these in Dynare under MATLAB with the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit)
+(SKILL.md "Numerical runs"); if MATLAB is unavailable, give the commands to the user
+(debugging.md "Run-and-fix loop"). Do not infer a steady state or the Blanchard-Kahn conditions from
+static checks.
 
 - `steady;` prints the steady-state values; with a steady-state file it also checks that they solve the
   static model.

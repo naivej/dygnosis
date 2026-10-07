@@ -102,10 +102,10 @@ options of a command, use `dynare_list_options`.
   `oo_.variance_decomposition_ME`.
 - `oo_.conditional_variance_decomposition` (and `oo_.conditional_variance_decomposition_ME`).
 
-Read these fields in MATLAB or Octave after the run, through the execution route that the host
-offers (MATLAB MCP, `matlab -batch "…"` or `octave --eval "…"`; see
-[matlab-workflow.md](matlab-workflow.md)). Do not infer moments, IRFs or the steady state from
-static checks. If no route exists, say what you could not run and give the exact commands.
+Read these fields in MATLAB after the run, through the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit)
+(SKILL.md "Numerical runs"; see also [matlab-workflow.md](matlab-workflow.md)). Do not infer moments,
+IRFs or the steady state from static checks. If MATLAB is unavailable, say what you could not run and
+give the exact Dynare commands.
 
 ## Decision rule structure `oo_.dr`
 

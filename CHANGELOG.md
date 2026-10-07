@@ -3,6 +3,7 @@
 ## Unreleased
 
 - The bundled agent skill is renamed to **use-dynare** (folder `.agents/skills/use-dynare/`). Upstream credit to EconSolider/dynare-copilot is unchanged.
+- **use-dynare** no longer teaches how to launch MATLAB or Octave. Numerical Dynare runs go through the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit).
 - **I210** (Number written in an equation) is no longer reported. A number written in an equation, including a square such as `x^2`, does not establish a problem.
 - A missing-semicolon report counts only the active equation. A discarded macro branch no longer looks like a second equation or an unmatched parenthesis. A real missing semicolon still reports E001, and its edit stays at the proved location.
 - A quick fix applies only to the selected check. Another check at the same place is not substituted. With no check selected, each offered fix names its check. Ignore and Explain follow the same selection. Refactor templates stay separate. A captured Quick Fix, naming action, or refactor template runs only while the file and check that offered it are still current. A later edit, a withdrawn or ignored check, a new model check that does not repeat that revision, or a change of model owner does not apply that captured action again.

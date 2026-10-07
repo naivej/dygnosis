@@ -47,50 +47,34 @@ Read the Warnings and decide on each one. Information diagnostics are metadata n
 If Dygnosis is not connected, follow `references/dygnosis-setup.md`. If setup is blocked, say in the
 report that the static check was not run, and continue.
 
-### 2. Find the environment (once per session)
+### 2. Connect MATLAB and find Dynare (once per session)
 
-Find each item. Do not assume a path.
+Use the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit) to connect the
+agent to MATLAB and to run MATLAB code. This skill does not teach how to install or launch MATLAB.
 
 | Item | How to find it |
 |---|---|
+| MATLAB session | MATLAB Agentic Toolkit (MCP tools such as `evaluate_matlab_code` and `run_matlab_file`, plus its MATLAB skills). If those tools are absent, point the user at the toolkit and mark numerical runs as not done. |
 | `<dynare-root>`: the Dynare folder that contains `matlab/` and `examples/` | Ask the user, or read an existing `addpath` in the project (`run_*.m`, `startup.m`). Typical install locations: Windows `C:/dynare/<x.y>`, macOS `/Applications/Dynare/<x.y>`, Linux packages `/usr/lib/dynare` (manual, "Installation and configuration"). If several versions are installed, use the one the user or the project names; otherwise use the newest and say which. |
 | Dynare version | After `addpath`, run `disp(dynare_version)`. Dygnosis checks against Dynare 7.2; report the version you ran. |
-| MATLAB or Octave | `matlab` or `octave` on the PATH (`where matlab` on Windows, `which matlab` elsewhere), or ask the user. Dynare 7.2 supports MATLAB R2020a to R2026a and Octave 8.4.0 to 11.3.0 with the `statistics` and `datatypes` packages; for another Dynare version, check the manual of that version. |
-| Execution route | See below. |
 | Working folder | The folder of the `.mod` file. |
 
-Execution routes, in order of preference:
-
-- **MATLAB MCP server.** Tool names differ between servers. Use the tool that evaluates MATLAB code and
-  returns its output. The workspace stays alive between calls.
-- **Terminal MATLAB.** `matlab -batch "…"` runs the statements and exits. A MATLAB error gives a nonzero
-  exit code. The workspace is lost at exit.
-- **Terminal Octave.** `octave --eval "…"` (on some installations `octave-cli --eval "…"`). Under
-  Octave the `.mod` file must not have the name of an Octave or Dynare command, for example `test.mod`
-  or `example.mod` (manual, "Running Dynare").
-- **No route.** Do not guess numbers. In the report, say which runs were not done and give the user the
-  exact commands of steps 3 and 4.
+Dynare 7.2 supports MATLAB R2020a to R2026a. Do not guess numerical results when MATLAB is unavailable:
+say which runs were not done and give the user the Dynare commands of steps 3 and 4.
 
 ### 3. Initialize
 
-In a session that stays open (MATLAB MCP route):
+Run these in the connected MATLAB session:
 
 ```matlab
 addpath('<dynare-root>/matlab');   % the matlab subfolder only, not its subfolders
 cd('<folder of the .mod>');
 ```
 
-In a terminal route, put the initialization and the run in one call:
-
-```text
-matlab -batch "addpath('<dynare-root>/matlab'); cd('<model-dir>'); dynare <model> noclearall nointeractive nograph"
-octave --eval "addpath('<dynare-root>/matlab'); cd('<model-dir>'); dynare <model> noclearall nointeractive nograph"
-```
-
 ### 4. Loop (round n = 1, at most 5 rounds)
 
-1. **Run** `dynare <model> noclearall` (file name without `.mod`). Add `nograph` while you debug. In a
-   terminal route also add `nointeractive`, so that Dynare does not wait for input.
+1. **Run** `dynare <model> noclearall` (file name without `.mod`). Add `nograph` while you debug. Add
+   `nointeractive` when the session must not wait for input.
 2. **Read the output and branch:**
    - Preprocessor `ERROR: <model>.mod: line A, col B: …`: use the error table. Run `dynare_diagnose`
      again; most preprocessor refusals are Dygnosis Errors too.
@@ -119,9 +103,8 @@ oo_.heterogeneity.dr.G  % sequence-space Jacobians after heterogeneity_solve
 M_.endo_names           % order of the endogenous variables
 ```
 
-In a terminal route the workspace ends with the call. Print what you need in the same call, or load the
-file that Dynare writes: `M_`, `oo_` and `options_` are in `<model>/Output/<model>_results.mat`
-(manual, "Running Dynare", Output).
+Dynare also writes `M_`, `oo_` and `options_` to `<model>/Output/<model>_results.mat` (manual,
+"Running Dynare", Output). Load that file when the workspace no longer holds the results.
 
 You can run the diagnostic commands `resid;`, `model_diagnostics;`, `model_info;` and `check;` at any
 time in the session. For slow solves and repeated plotting, see `references/matlab-workflow.md`.

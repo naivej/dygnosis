@@ -99,7 +99,8 @@ Use one `file_tag` (and `output_file_tag` when you name the output) across the c
 
 ## Numerical run
 
-Run official Dynare under MATLAB or Octave (`SKILL.md` "Numerical runs"). MS-SBVAR uses the
+Run official Dynare under MATLAB (`SKILL.md` "Numerical runs", via the
+[MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit)). MS-SBVAR uses the
 `switch_dw` mex: the Dynare install must include it, and the data file must be in place. Keep one
 `file_tag` from estimation through probabilities, the marginal data density, IRFs and the forecast.
 Start with a small `mh_replic` to check the setup, then raise it. Read `oo_.ms`.

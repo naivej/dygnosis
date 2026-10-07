@@ -118,10 +118,10 @@ Two kinds of check:
   timing classes with `dynare_model_info` (R2). Tool use: dygnosis-workflow.md. Connection:
   dygnosis-setup.md. A static check never shows a steady state, the Blanchard-Kahn conditions,
   determinacy or IRFs.
-- **Numerical run (Dynare).** From Stage 4: official Dynare under MATLAB or Octave, through the
-  execution route the host offers. The loop, the routes and the stop limits are in debugging.md
-  "Run-and-fix loop". If no route exists, say what you could not run and give the user the exact
-  commands.
+- **Numerical run (Dynare).** From Stage 4: official Dynare under MATLAB with the
+  [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit). The loop and the stop
+  limits are in debugging.md "Run-and-fix loop". If MATLAB is unavailable, say what you could not run
+  and give the user the exact Dynare commands.
 
 Before you diagnose an error yourself, check known-issues.md and debugging.md (read-only references).
 If you fix a problem they do not cover, describe the symptom, cause and fix in the report (SKILL.md
@@ -351,7 +351,7 @@ Read run-script.md. Join the parts (`.mod`, steady-state `.m`, plot script, self
 self-contained run script `run_<model>.m` that reruns everything in one step. Make the run script call
 the plot script: this is the step most often missed. If the project already has a `main` script, hook
 into it instead of starting a new one. Run it once (debugging.md "Run-and-fix loop") and confirm that it
-runs end to end and writes its output files. If no execution route exists, deliver the script and say
+runs end to end and writes its output files. If MATLAB is unavailable, deliver the script and say
 that it was not run.
 
 ## Final checks

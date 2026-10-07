@@ -40,7 +40,7 @@ shock names for the plot calls.
 ```matlab
 % =====================================================================
 %  run_<model>.m  -  <one line: this script solves model X and produces Y>
-%  Usage: run the file (F5, run('run_<model>.m') or matlab -batch).
+%  Usage: run the file (F5, run('run_<model>.m'), or the MATLAB Agentic Toolkit).
 %  No manual path setup or change of folder is needed.
 % =====================================================================
 clear; close all; clc;
@@ -78,7 +78,7 @@ Steps 1, 2 and 5 fit almost every task. Fill steps 3 and 4 for the model and the
 
 - **Step 1, Dynare path.** Do not copy a fixed install path from another machine. Find the path on
   the machine that runs the script and write it into the placeholder `<dynare-root>/matlab`. For
-  example, run `which dynare` in that MATLAB or Octave session, or find the folder that contains
+  example, run `which dynare` in the MATLAB session, or find the folder that contains
   `matlab/dynare.m`. Say in the report which path you wrote. If Dynare is already on the path, the
   `addpath` line is skipped.
 - **Step 1, folder.** `mfilename('fullpath')` is empty when the code is pasted into a session instead
@@ -153,14 +153,9 @@ log variables). Use `'Scenarios',{ooA,ooB}` to compare scenarios.
 
 ## Run it
 
-Run the script through the route that SKILL.md "Numerical runs" finds: a MATLAB MCP server, a
-terminal `matlab -batch`, or `octave --eval`. If no route exists, say what was not run and give the
-user the commands:
-
-```text
-matlab -batch "run('<project>/run_<model>.m')"
-octave --eval "run('<project>/run_<model>.m')"
-```
+Run the script through the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit)
+as SKILL.md "Numerical runs" describes. If MATLAB is unavailable, say what was not run and give the
+user the Dynare commands to run the script.
 
 Only a run gives the steady state, the Blanchard-Kahn conditions and the IRFs. Do not infer them from
 static checks.

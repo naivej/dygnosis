@@ -1,6 +1,6 @@
 ---
 name: use-dynare
-description: Write, modify, review, run, and debug Dynare .mod models (DSGE, RBC, NK, HANK, OLG) with Dygnosis static checks over MCP and Dynare runs in MATLAB or Octave. Use when the user writes or translates model equations into a .mod file, replicates a published model, edits or extends an existing .mod, debugs Dynare errors (Blanchard-Kahn conditions, steady state not found, singular Jacobian, timing mistakes), sets up stoch_simul, perfect foresight, estimation, method_of_moments, shock_decomposition, optimal policy, OccBin, or identification experiments, or produces publication-grade IRF figures. Also use when a Dynare task needs the Dygnosis MCP tools and they are not connected. Do not write Dynare from memory; timing conventions and block syntax are easy to get wrong.
+description: Write, modify, review, run, and debug Dynare .mod models (DSGE, RBC, NK, HANK, OLG) with Dygnosis static checks over MCP and Dynare numerical runs under MATLAB. Use when the user writes or translates model equations into a .mod file, replicates a published model, edits or extends an existing .mod, debugs Dynare errors (Blanchard-Kahn conditions, steady state not found, singular Jacobian, timing mistakes), sets up stoch_simul, perfect foresight, estimation, method_of_moments, shock_decomposition, optimal policy, OccBin, or identification experiments, or produces publication-grade IRF figures. Also use when a Dynare task needs the Dygnosis MCP tools and they are not connected. For connecting to MATLAB and running MATLAB code, use the MATLAB Agentic Toolkit. Do not write Dynare from memory; timing conventions and block syntax are easy to get wrong.
 ---
 # Dynare models with Dygnosis
 
@@ -13,8 +13,9 @@ Keep two kinds of evidence apart:
 - **Static evidence** comes from Dygnosis, an MCP server whose tools start with `dynare_`. It reads the
   source: parse errors, declarations, written timing, equation counts, includes, and the checks Dynare
   refuses before MATLAB runs.
-- **Numerical evidence** comes from official Dynare under MATLAB or Octave: steady state, residuals,
-  Blanchard-Kahn conditions, IRFs, moments, estimation.
+- **Numerical evidence** comes from official Dynare under MATLAB: steady state, residuals,
+  Blanchard-Kahn conditions, IRFs, moments, estimation. Connect and run MATLAB with the
+  [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit).
 
 A clean Dygnosis result does not show that a steady state exists, that the model is determinate, or that
 the economics is right. Never report one kind of evidence as the other.
@@ -231,16 +232,17 @@ next one.
 
 ## Numerical runs
 
-Numerical evidence comes from official Dynare under MATLAB or Octave.
+Numerical evidence comes from official Dynare under MATLAB.
 
-1. Find the installed Dynare (root folder and version), a MATLAB or Octave executable, and a way for
-   this host to run it: a MATLAB MCP server, a terminal `matlab -batch "…"`, or `octave --eval "…"`.
-2. Fix the Dygnosis Errors before the first run.
-3. Follow the "Run-and-fix loop" in `references/debugging.md`: at most five rounds; stop and report when
+1. Connect to MATLAB with the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit)
+   (MATLAB MCP tools and MATLAB skills). This skill does not teach how to install or launch MATLAB.
+2. Put Dynare on the MATLAB path and work in the model folder (`references/debugging.md`).
+3. Fix the Dygnosis Errors before the first run.
+4. Follow the "Run-and-fix loop" in `references/debugging.md`: at most five rounds; stop and report when
    the same error appears twice.
-4. On an error, look in `references/known-issues.md` and the error table of `references/debugging.md`
+5. On an error, look in `references/known-issues.md` and the error table of `references/debugging.md`
    before you diagnose it yourself.
-5. If no route exists, say what was not run and give the user the exact commands.
+6. If MATLAB is unavailable, say what was not run and give the user the Dynare commands to run.
 
 ## Report
 

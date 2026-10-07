@@ -138,8 +138,8 @@ If the tools stay unavailable:
 
 - Tell the user what is missing: the executable, the configuration, an approval, a trust decision, or a
   reload.
-- Continue the work that does not need Dygnosis: reading and writing the model, and Dynare runs when an
-  execution route exists.
+- Continue the work that does not need Dygnosis: reading and writing the model, and Dynare runs when
+  MATLAB is connected ([MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit)).
 - Label the evidence: "Dygnosis checks were not run". Editor diagnostics from the VS Code extension are
   Dygnosis results; name them as editor diagnostics.
 - No command-line program replaces the MCP tools. `dynare_workspace_diagnose` also needs MCP.

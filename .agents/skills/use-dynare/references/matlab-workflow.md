@@ -5,25 +5,14 @@ large models) and you must change plots, normalizations or comparisons many time
 several models or scenarios (HANK against RANK, baseline against counterfactual); or when you package a
 run as a script that can run again.
 
-This file answers one question: how to organize the MATLAB or Octave scripts so that the expensive solve
+This file answers one question: how to organize the MATLAB scripts so that the expensive solve
 runs once and the cheap analysis can change freely, and how to catch errors with analytical benchmarks.
 It complements the "Run-and-fix loop" in `references/debugging.md`: the loop makes the `.mod` run; this
 file covers what you do after it runs.
 
-## Execution routes
-
-The scripts below run in MATLAB or Octave. A MATLAB MCP server is one route, not a requirement.
-
-| Route | Run a script | Workspace after the call |
-|---|---|---|
-| MATLAB MCP server | the server tool that evaluates MATLAB code: `run_<model>` | kept |
-| Terminal MATLAB | `matlab -batch "cd('<project>'); run_<model>"` | lost |
-| Terminal Octave | `octave --eval "cd('<project>'); run_<model>"` | lost |
-
-How to find `<dynare-root>`, the executable and the route: `references/debugging.md`, "Run-and-fix
-loop". In a terminal route a `.mat` cache is the only way to keep results from one call to the next,
-which makes the split below more important. If no route exists, deliver the scripts and give the user
-the commands.
+Run the scripts through the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit).
+How to find `<dynare-root>` and connect MATLAB: `references/debugging.md`, "Run-and-fix loop". If
+MATLAB is unavailable, deliver the scripts and give the user the Dynare commands.
 
 ## Principle: the solve is expensive, the analysis is cheap and changes often
 
@@ -79,7 +68,7 @@ and freezes; `analyze_*.m` makes the plots. In a project with one file, put the 
 too (full skeleton: `references/run-script.md`).
 
 ```matlab
-addpath('<dynare-root>/matlab');         % self-contained: a clean MATLAB or Octave finds Dynare
+addpath('<dynare-root>/matlab');         % self-contained: a clean MATLAB finds Dynare
 cd(fileparts(mfilename('fullpath')));    % go to the folder of this script; avoids a wrong working folder
 dynare <model> noclearall nointeractive  % noclearall keeps oo_; nointeractive does not wait for input
 save('<model>_oo.mat', 'oo_', 'M_', 'options_');
@@ -143,7 +132,7 @@ structure.
 Time iteration, HANK calibration, homotopy and other iterative solvers print `||Δpolicy||`, residual
 norms and similar at each step, often hundreds or thousands of lines. That trace helps while you debug.
 **When the solver converges reliably, turn it off.** The output (and your context) stays readable, and
-less text comes back through the execution route. How to silence it depends on the solver and its
+less text comes back through the MATLAB session. How to silence it depends on the solver and its
 options (some have a `verbose` or `quiet` switch or an `options_` field). Do not let iteration logs
 hide the steady-state residuals and the Blanchard-Kahn result that you need to read.
 

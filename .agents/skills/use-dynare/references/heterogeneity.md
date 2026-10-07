@@ -207,8 +207,8 @@ sequence-jacobian toolkit of Auclert et al. 2021):
 ## Running
 
 - Use a Dynare version that includes the heterogeneity framework; Dygnosis follows Dynare 7.2.
-- Run official Dynare under MATLAB or Octave through the route the host offers (a MATLAB MCP server,
-  `matlab -batch "…"`, `octave --eval "…"`). If no route exists, say what could not be run and give the
+- Run official Dynare under MATLAB with the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit)
+  (SKILL.md "Numerical runs"). If MATLAB is unavailable, say what could not be run and give the
   commands to the user.
 - Run an official example first (`krusell_smith_1998.mod`, `hank_one_asset.mod`) to confirm the
   installation, then adapt it to your model.

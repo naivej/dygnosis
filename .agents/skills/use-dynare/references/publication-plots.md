@@ -36,8 +36,8 @@ or when the user declines.
 4. For percent deviations, plot log variables: helper variables such as `log_y = log(y);`, or the
    `loglinear` option (see stochastic-simulation.md). Then keep the default `Scale` 100.
 5. Call the function after the `dynare` run, in the run script (run-script.md) or in the session.
-   Run it through the MATLAB route the host offers (MATLAB MCP server or `matlab -batch`). Check that
-   the figure files exist.
+   Run it through the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit)
+   (SKILL.md "Numerical runs"). Check that the figure files exist.
 
 ## `plot_irfs_pub` calls
 
