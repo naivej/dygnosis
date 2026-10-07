@@ -1,6 +1,6 @@
 ---
 name: use-dynare
-description: Write, modify, review, run, and debug Dynare .mod models (DSGE, RBC, NK, HANK, OLG) with Dygnosis static checks over MCP and Dynare numerical runs under MATLAB. Use when the user writes or translates model equations into a .mod file, replicates a published model, edits or extends an existing .mod, debugs Dynare errors (Blanchard-Kahn conditions, steady state not found, singular Jacobian, timing mistakes), sets up stoch_simul, perfect foresight, estimation, method_of_moments, shock_decomposition, optimal policy, OccBin, or identification experiments, or produces publication-grade IRF figures. Also use when a Dynare task needs the Dygnosis MCP tools and they are not connected. For connecting to MATLAB and running MATLAB code, use the MATLAB Agentic Toolkit. Do not write Dynare from memory; timing conventions and block syntax are easy to get wrong.
+description: Dynare .mod files: write, review, replicate, edit, debug, and run experiments (stochastic simulation, higher-order perturbation, perfect foresight, estimation, method of moments, shock decomposition, forecasting, identification, optimal policy, OccBin, heterogeneity, Markov-switching), and produce publication figures. Use when the user works on a .mod or a DSGE, RBC, NK, or HANK model, or when the Dygnosis MCP tools are missing. Numerical runs go through the MATLAB Agentic Toolkit.
 ---
 # Dynare models with Dygnosis
 
@@ -27,7 +27,7 @@ Read the references for the selected task only. Do not load all of them.
 1. **Choose the task** with "Route the task".
 2. **Establish tool access** with "Tool access".
 3. **Inspect or write**: "Existing model" or "New model".
-4. **Check** with Dygnosis after each substantive change.
+4. **Check** with Dygnosis after each edit to a declaration, an equation, or a command.
 5. **Run** the requested experiment in Dynare when the task needs numbers ("Numerical runs").
 6. **Report** the evidence ("Report").
 
@@ -85,33 +85,13 @@ Three local sources answer different questions. Use them together. Details:
 
 | Question | Source | Take | Do not copy |
 |---|---|---|---|
-| How to model the economics: first-order conditions, mechanisms, calibration, timing | Model reference library `references/catalog.csv` (149 MMB replication models in `references/examples/<ModelID>.mod`) | Equation logic, parameter values, timing | Code form, especially of linearized versions |
-| How to write a Dynare block or command | Programming library `references/catalog-code.csv` (89 examples in `references/examples-code/<Folder>/<CodeID>.mod`: Pfeifer DSGE_mod and the `Dynare_Course/` chapters) | Options, block structure, interfaces | Equations and calibration |
+| How to model the economics: first-order conditions, mechanisms, calibration, timing | Model reference library `references/catalog.csv` (MMB replications in `references/examples/<ModelID>.mod`) | Equation logic, parameter values, timing | Code form, especially of linearized versions |
+| How to write a Dynare block or command | Programming library `references/catalog-code.csv` (Pfeifer DSGE_mod and the `Dynare_Course/` chapters in `references/examples-code/<Folder>/<CodeID>.mod`) | Options, block structure, interfaces | Equations and calibration |
 | Details of a built-in command in the installed version | Official examples in `<dynare-root>/examples/` | Syntax, version compatibility | Equations and calibration |
 
 If neither library matches, search `references/model-archive-catalog.csv` (column `Status`: `runnable`
 models have a `.mod`; `derivation-only (needs_review)` entries have only a derivation note, which is an
 unverified first pass). Then search the web for the paper. Check that a file exists before you read it.
-
-Official examples (relative to `<dynare-root>/examples/`; checked in Dynare 7.2):
-
-| Topic | Files |
-|---|---|
-| NK baseline with a steady-state file | `stochastic_simulations/nk_baseline.mod`, `nk_baseline_steadystate.m` |
-| Analytical steady state with a helper function | `stochastic_simulations/collard_2001_analytical_steady_state.mod`, `collard_2001_analytical_steady_state_helper.m` |
-| Simulated against theoretical moments | `stochastic_simulations/collard_2001_simulated_moments.mod`, `collard_2001_theoretical_moments.mod` |
-| Trend shocks (Aguiar-Gopinath 2007) | `stochastic_simulations/aguiar_gopinath_2007_trend.mod` |
-| Bayesian estimation (Schorfheide 2000) | `estimation/schorfheide_2000.mod`, `schorfheide_2000_data.m` |
-| IRF matching | `estimation/rbc_irf_matching.mod`, `rbc_irf_matching_data.csv`, `rbc_irf_matching_transformations.m` |
-| Prior restrictions (Galí 2015) | `estimation/gali_2015.mod`, `gali_2015_prior_restrictions.m` |
-| Ramsey and OSR | `optimal_policy/nk_ramsey_osr.mod` |
-| Ramsey with a steady-state file | `optimal_policy/nk_ramsey_steady_file.mod`, `nk_ramsey_steady_file_steadystate.m` |
-| OccBin | `occbin/rbc_occbin.mod` |
-| Perfect foresight | `perfect_foresight/perfect_foresight_rbc.mod` |
-| Perfect foresight with expectation errors | `perfect_foresight/perfect_foresight_expectation_errors.mod` |
-| One-asset and two-asset HANK, Krusell-Smith | `heterogeneity/hank_one_asset.mod`, `hank_two_assets.mod`, `krusell_smith_1998.mod`, each with `*_steady_state.mod` |
-| Multi-country model with the macro processor (BKK 1992) | `macroprocessor/bkk_1992.mod` |
-| Semi-structural PAC model | `semistructural/pac_model.mod` |
 
 ## Existing model
 
@@ -132,8 +112,9 @@ Use this path when the user has a `.mod` file and wants a change, an extension, 
 4. **Edit in small steps.** Rename symbols with `dynare_find_references` and `dynare_rename`. After each
    change, run `dynare_diagnose` again. Use `dynare_compare_models` to review the structural effect.
 5. **Steady state.** If the change affects the steady state (a new utility function, new variables),
-   update it with `references/steady-state.md` and run `steady; resid; check;` in Dynare.
-6. **Self-check** with the matching items of the final checklist in `references/debugging.md`.
+   update it with `references/steady-state.md` and run `steady; resid; check;` in Dynare. The pass is
+   the steady-state pass in "Numerical runs".
+6. **Self-check** with the final checklist in `references/debugging.md`.
 7. **Report** ("Report"). Separate problems that existed before from problems that your change caused.
 
 ## New model
@@ -169,8 +150,8 @@ next one.
   and assign the parameters. Check: `dynare_diagnose` shows no Error; `dynare_equations` `count_gap` is
   zero (R4); `dynare_model_info` shows the intended timing (R2).
 - **Stage 4 (steady state).** Write `steady_state_model` from section 6 of the derivation note (use
-  `initval` guesses only without a closed form), then `steady; resid; check;`. Numerical pass: all
-  residuals are zero and `check` prints `The order and rank conditions are verified.`
+  `initval` guesses only without a closed form), then `steady; resid; check;`. Numerical pass: the
+  steady-state pass in "Numerical runs".
 - **Stage 5 (experiment).** Write `shocks` and the experiment command, for example
   `stoch_simul(order=1, irf=20, nograph);`. Numerical pass: Blanchard-Kahn conditions satisfied, IRFs
   finite.
@@ -183,21 +164,18 @@ next one.
 ## Writing rules
 
 - **R1 Labels and comments.** Write comments, derivation notes and messages in the user's language.
-  Keep identifiers, `long_name` values, equation tags and TeX names in English ASCII. This is house
-  style: Dynare 7.2 accepts UTF-8 in comments and quoted strings, but ASCII labels keep MATLAB, Octave,
-  TeX and plot output portable. For a new model or a substantial extension, tag every equation and give
-  every declaration a TeX name and `long_name`:
+  Keep identifiers, `long_name` values, equation tags and TeX names in English ASCII. What Dynare
+  accepts is in "R1 details" (`references/workflow-detail.md`). For a new model or a substantial
+  extension, tag every equation and give every declaration a TeX name and `long_name`:
   `var c $C$ (long_name='Consumption');` and `[name='euler'] …`. Dygnosis Information I208 and I209
-  find missing tags and missing `long_name`. The conventions of an
-  existing file, small edits and explicit user preferences come first. Missing metadata is not a Dynare
-  error.
+  find missing tags and missing `long_name`. The conventions of an existing file, small edits and
+  explicit user preferences come first. Missing metadata is not a Dynare error.
 - **R2 Timing.** The timing of a variable reflects when it is decided. Default "stock at the end of the
   period" convention: `y = k(-1)^alppha*…;` and `k = invest + (1-delta)*k(-1);`. Alternative:
   `predetermined_variables k;` with `y = k^alppha*…;` and `k(+1) = invest + (1-delta)*k;`. Use one
   convention per file. Check the result with `dynare_model_info` (`predetermined`, `forward_looking`) and
-  the `idents` of `dynare_equations`. Classification and counts use Dynare timing after the
-  predetermined-variable convention conversion. Per-use `timing` stays the written offset;
-  `dynare_timing` is the converted offset.
+  the `idents` of `dynare_equations`. How to read `timing` and `dynare_timing`:
+  `references/dygnosis-workflow.md`. Longer notes: "R2 details" in `references/workflow-detail.md`.
 - **R3 Exogenous processes.** For stochastic commands (`stoch_simul`, `estimation`, …), declare the
   innovations in `varexo` and write persistent processes as endogenous variables:
   `var z; varexo eps_z; z = rhoz*z(-1) + eps_z;`. In perfect foresight an exogenous variable can carry
@@ -214,11 +192,11 @@ next one.
   user-written steady-state file, no MATLAB function names such as `alpha`, `beta`, `gamma` (write
   `alppha`, `betta`, `gam`). House style also avoids `e` and `E`. The 7.2 preprocessor accepts these
   names and Dygnosis does not report them, so a clean check does not clear them.
-- **R6 Nonsmooth functions.** Under perturbation (`stoch_simul`, `estimation`, …) do not apply `max`,
-  `min`, `abs`, `sign` or comparison operators to endogenous variables: the derivatives at the kink are
-  wrong. Use OccBin, or perfect foresight with the `lmmcp` option and a complementarity condition
-  after the equation: `r = … + e ⟂ r > -1.94478;` (ASCII: `_|_`). The older `mcp` equation tag is
-  obsolete (Dygnosis W170). Dygnosis reports W200, and E210/E211 in `model(linear)`.
+- **R6 Nonsmooth functions.** Under perturbation (`stoch_simul`, `estimation`, …) keep `max`, `min`,
+  `abs`, `sign` and comparison operators off endogenous variables: the derivatives at the kink are
+  wrong. Use OccBin, or perfect foresight with `lmmcp` and a complementarity condition (`⟂`, ASCII
+  `_|_`; the form is in `references/perfect-foresight.md`). The older `mcp` equation tag is obsolete
+  (Dygnosis W170). Dygnosis reports W200, and E210/E211 in `model(linear)`.
 - **R7 Statement syntax.** End each statement with `;` and each block with `end;`. Write one statement
   per line. Assign each parameter before it is used. The preprocessor passes an unrecognized top-level
   line to MATLAB unchanged, so a typo can become MATLAB code. Dygnosis reports parse errors (E001),
@@ -235,7 +213,7 @@ next one.
 Numerical evidence comes from official Dynare under MATLAB.
 
 1. Connect to MATLAB with the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit)
-   (MATLAB MCP tools and MATLAB skills). This skill does not teach how to install or launch MATLAB.
+   (MATLAB MCP tools and MATLAB skills).
 2. Put Dynare on the MATLAB path and work in the model folder (`references/debugging.md`).
 3. Fix the Dygnosis Errors before the first run.
 4. Follow the "Run-and-fix loop" in `references/debugging.md`: at most five rounds; stop and report when
@@ -244,9 +222,12 @@ Numerical evidence comes from official Dynare under MATLAB.
    before you diagnose it yourself.
 6. If MATLAB is unavailable, say what was not run and give the user the Dynare commands to run.
 
+**Steady-state pass.** `resid(non_zero);` prints `All residuals are zero`, and `check;` prints
+`The order and rank conditions are verified.`
+
 ## Report
 
-Include what applies to the task:
+Account for every item below. Write the item, or name it as not applicable.
 
 1. The delivered files: `.mod`, derivation note, steady-state file, run script, figures.
 2. The model and the experiment in one or two sentences, and the timing convention of stock variables.
@@ -254,7 +235,7 @@ Include what applies to the task:
    and the completeness of the expansion. Name what was not checked.
 4. Numerical evidence: Dynare version, commands and outcome (steady-state residuals, rank condition,
    key numbers), or the execution limit and the commands for the user. For a numerical steady state,
-   say that `resid;` is close to zero and `check;` passed.
+   say whether the steady-state pass in "Numerical runs" held.
 5. Sources: the paper, appendix or reference implementation you used, as in the file header. Mark each
    reconstructed block as "reconstructed, not checked against the source", and name each missing source.
 6. Each problem you solved that `references/known-issues.md` does not cover: symptom, cause, fix.

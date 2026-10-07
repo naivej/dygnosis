@@ -16,16 +16,10 @@ then start the next block. Do not derive all four blocks before you write anythi
 
 **Conventions for the whole file** (SKILL.md "Writing rules"):
 
-- **R2 Timing.** In Dynare the timing of a variable reflects when it is decided. A stock decided in
-  period $t$ is $X_t$ and is used from $t+1$. Capital $K_t$ is the stock at the end of the period, so
-  production in $t$ uses $K_{t-1}$, and the law of motion has $K_t$ on the left. In the `.mod`:
-  `y = k(-1)^alppha*…;` and `k = invest + (1-delta)*k(-1);`. The alternative is
-  `predetermined_variables k;` with `y = k^alppha*…;` and `k(+1) = invest + (1-delta)*k;`. Use one
-  convention per file. Check the written timing with `dynare_model_info` (timing classes) and the
-  per-equation identifiers in `dynare_equations` (`references/dygnosis-workflow.md`).
-- **R8 Nonlinear by default.** Write the original nonlinear FOCs and let Dynare approximate them. Do not
-  linearize by hand. Each block below gives the nonlinear form; linearized forms (such as the NKPC in gap
-  form) appear only where marked "Linearized result".
+- **R2 Timing.** Apply R2. One convention per file. Check with `dynare_model_info` and
+  `dynare_equations` (`references/dygnosis-workflow.md`).
+- **R8 Nonlinear by default.** Apply R8. Each block below gives the nonlinear form; linearized forms
+  (such as the NKPC in gap form) appear only where marked "Linearized result".
 - **Agents that do not optimize get no FOC.** Exogenous government spending, a mechanical central-bank
   rule and pure budget identities (such as $T_t=G_t$) have no optimization problem. Put their relations in
   market clearing and identities, or in exogenous processes (see section C).
@@ -239,13 +233,8 @@ the two forms are equivalent.
 > $\phi_{\pi}>1$. If `check` reports that the Blanchard-Kahn conditions fail, look here first. Only
 > `check` decides; do not infer determinacy from the parameter values.
 >
-> **Zero lower bound on the nominal interest rate (ZLB).** Under perturbation (`stoch_simul`, `estimation`)
-> do not write the ZLB with `max`, `min`, `abs`, `sign` or comparison operators: derivatives at the kink
-> are wrong (R6; Dygnosis W200). Use OccBin (`references/occbin.md`), or perfect foresight with the
-> `lmmcp` option of `perfect_foresight_solver` and a complementarity condition written after the
-> equation with `⟂` (ASCII `_|_`), as in the manual: `r = … + e ⟂ r > -1.94478;`
-> (`references/perfect-foresight.md`). The older `[mcp='…']` equation tag is obsolete (Dygnosis W170).
-> In `model(linear)` Dygnosis reports nonsmooth operators as errors (E210, E211).
+> **Zero lower bound on the nominal interest rate (ZLB).** Apply R6. OccBin: `references/occbin.md`.
+> Perfect foresight with `lmmcp`: `references/perfect-foresight.md`.
 
 **Common alternative rules.** Use the Taylor rule with smoothing as the default and say so. Ask when
 the user has not chosen and the rule matters for the experiment.
@@ -360,8 +349,7 @@ follow `references/heterogeneity.md`.
 4. **Steady state.** Write the steady-state version of the four blocks (time subscripts removed) in
    section 6 of the derivation note, in an order that can be evaluated top to bottom, then copy it into
    `steady_state_model` (`references/steady-state.md`).
-5. **Form and names.** Nonlinear by default (R8). ASCII names in the `.mod`: `betta`, `alppha`,
-   `invest`, … (R5). Timing as in R2. Equation tags, TeX names and `long_name` as in R1.
+5. **Form and names.** R8, R5, R2, and R1.
 6. **Static check, then run.** After you write the `.mod`, run `dynare_diagnose` and read `count_gap` in
    `dynare_equations` (`references/dygnosis-workflow.md`). Steady state, Blanchard-Kahn conditions and
    determinacy come only from running Dynare (`resid`, `steady`, `check`); never infer them from static

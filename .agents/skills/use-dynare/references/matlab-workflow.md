@@ -117,7 +117,7 @@ the solve and compare before you trust the plot:
 |---|---|---|
 | RANK balanced-budget government spending | output multiplier = 1 (exact) | wrong normalization or `Scale` (for example divided by 100 once too often) |
 | RANK lump-sum transfer | output effect = 0 (Ricardian equivalence) | wrong shock definition, wrong sign |
-| Steady-state ratios | `C/Y`, `I/Y`, `K/Y` in plausible ranges | calibration or steady-state algebra error |
+| Steady-state ratios | `C/Y`, `I/Y`, `K/Y` (debugging.md, "Wrong numbers without an error") | calibration or steady-state algebra error |
 | Monetary policy shock | a contraction lowers output and inflation | wrong sign in the Taylor rule, timing error |
 
 Example: the government spending multiplier should be about 1, but the script prints 0.01. This shows

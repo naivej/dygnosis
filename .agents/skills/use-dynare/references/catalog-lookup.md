@@ -25,7 +25,7 @@ separately; usually you need both. The model archive (end of this file) is a thi
 
 ### What it is
 
-- `references/catalog.csv`: an index of 149 replicable macroeconomic models from the **rep-mmb
+- `references/catalog.csv`: an index of the replicable macroeconomic models from the **rep-mmb
   replication archive** of the Macroeconomic Model Database (MMB) (macromodelbase.com/rep-mmb; upstream
   repository IMFS-MMB/mmb-rep).
 - `references/examples/<ModelID>.mod`: one Dynare replication `.mod` per paper. **The file name is the
@@ -41,28 +41,28 @@ separately; usually you need both. The model archive (end of this file) is a thi
 - **Year** is text and can carry notes (for example `2008 (Working Paper; published 2011 …)`); grep it,
   do not compare it as a number.
 - **ModelType** = model family and **whether it is linearized** (important; see "Copy warnings").
-- **Category** = one of 14 topic buckets (coarse filter, below).
+- **Category** = one of the topic buckets below (coarse filter).
 - **KeyFeatures** = free-text mechanism tags (`financial accelerator`, `search-and-matching`,
   `two-country`, `housing`, `Bayesian estimation`, …): the main grep target.
 
 ### The 14 categories (filter by bucket first, then grep the mechanism)
 
-| Category | Models |
-|----------|--------|
-| 1. Baseline NK / Monetary Policy Rules | 14 |
-| 2. Estimated DSGE Benchmarks (Smets-Wouters Type) | 17 |
-| 3. Financial Accelerator / BGG-type Credit Frictions | 22 |
-| 4. Banking Sector / Bank Capital Channel | 18 |
-| 5. Labour Market Frictions (Search & Matching) | 10 |
-| 6. Open Economy / Multi-Country | 14 |
-| 7. Fiscal Policy / Government Spending | 13 |
-| 8. Housing / Collateral Constraints | 5 |
-| 9. Unconventional Monetary Policy / QE | 6 |
-| 10. Energy & Commodities | 4 |
-| 11. Money-in-the-Model | 6 |
-| 12. Learning & Expectations Formation | 3 |
-| 13. Macroprudential Policy | 4 |
-| 14. Large Official Policy Models | 13 |
+| Category |
+|----------|
+| 1. Baseline NK / Monetary Policy Rules |
+| 2. Estimated DSGE Benchmarks (Smets-Wouters Type) |
+| 3. Financial Accelerator / BGG-type Credit Frictions |
+| 4. Banking Sector / Bank Capital Channel |
+| 5. Labour Market Frictions (Search & Matching) |
+| 6. Open Economy / Multi-Country |
+| 7. Fiscal Policy / Government Spending |
+| 8. Housing / Collateral Constraints |
+| 9. Unconventional Monetary Policy / QE |
+| 10. Energy & Commodities |
+| 11. Money-in-the-Model |
+| 12. Learning & Expectations Formation |
+| 13. Macroprudential Policy |
+| 14. Large Official Policy Models |
 
 ### Lookup steps (model reference library)
 
@@ -83,11 +83,11 @@ separately; usually you need both. The model archive (end of this file) is a thi
 
 ### What it is
 
-- `references/catalog-code.csv`: an index of 89 Dynare programming examples from two sources:
-  - **DSGE_mod** (41 rows): Johannes Pfeifer's DSGE_mod repository
+- `references/catalog-code.csv`: an index of the Dynare programming examples from two sources:
+  - **DSGE_mod**: Johannes Pfeifer's DSGE_mod repository
     ([github.com/JohannesPfeifer/DSGE_mod](https://github.com/JohannesPfeifer/DSGE_mod)). Each file shows
     how a command or module is used in a paper replication.
-  - **Dynare course** (48 rows; `Folder` starts with `Dynare_Course/`): teaching examples from Pfeifer's
+  - **Dynare course** (`Folder` starts with `Dynare_Course/`): teaching examples from Pfeifer's
     "Advanced Dynare" course, **organized by Dynare feature**, chapter by chapter. The same RBC/NK model
     runs through several chapters, so these show most cleanly how to use a command or option. Prefer them
     when you copy command syntax.
@@ -129,7 +129,7 @@ last section points to these runnable examples. You can also grep the `DynareFea
   `Folder` + `CodeID` to build the path.
 - **Folder** = the subfolder under `examples-code/`.
 - **DynareFeatures** = the Dynare programming features the file shows best: the main grep target.
-- **Category** = one of 11 feature buckets (coarse filter):
+- **Category** = one of the feature buckets below (coarse filter):
 
 | Category | Example CodeIDs |
 |----------|-----------------|
@@ -165,7 +165,7 @@ last section points to these runnable examples. You can also grep the `DynareFea
 ## Copy warnings
 
 **Model reference library:**
-- `ModelType` contains `(linearized)` (21 rows): that `.mod` is a linearized version. Take the equation
+- `ModelType` contains `(linearized)`: that `.mod` is a linearized version. Take the equation
   content, mechanism, timing and calibration; do not copy the linearized form. Write the nonlinear model
   (R8), unless the user asks for a linear model or the source gives only the linearized system.
 - A reference does not replace Stage 1 (derivation note).
@@ -202,10 +202,10 @@ reports deprecated commands and options (W150) and model-block names that your f
 entry has its own folder `references/model-archive/<ModelID>/`. The `Status` column separates two kinds
 of entry:
 
-- **`runnable`** (8 entries): models from earlier tasks. The folder holds what a rerun needs (`.mod`,
+- **`runnable`**: models from earlier tasks. The folder holds what a rerun needs (`.mod`,
   derivation note, and where used an external steady-state file, run script, helper functions or
   parameter include).
-- **`derivation-only (needs_review)`** (161 entries): MMB paper derivations. The folder has only the
+- **`derivation-only (needs_review)`**: MMB paper derivations. The folder has only the
   derivation note (`<ModelID>_derivation.md`) plus
   extraction notes and a source manifest. There is **no `.mod`** and no steady-state or run file. Most are
   first-pass extractions marked `needs_review`: use them as derivation references, not as runnable
@@ -215,7 +215,7 @@ Search both ways: grep `model-archive-catalog.csv` for mechanism tags (note `Sta
 folder names in `model-archive/` (skip folders that start with `_`, such as `_mmb-provenance/`; they are
 not models). On a hit, read `Status` first: a `runnable` entry can be read and run as a whole folder; a
 `derivation-only` entry gives the economic structure only. For a derivation-only `<ModelID>`, also check
-`catalog.csv` for `<ModelID>_rep`: 138 of the 161 have a runnable MMB replication in
+`catalog.csv` for `<ModelID>_rep`: a runnable MMB replication may be in
 `references/examples/`.
 
 The archive is read-only. Do not write new entries into the installed skill. Archive a model only when

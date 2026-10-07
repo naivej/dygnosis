@@ -112,7 +112,7 @@ need the tools. Do not reinstall or rewrite the configuration to get around the 
 
 After you connect or reconnect:
 
-1. List the tools. Expect fifteen tools whose names start with `dynare_`.
+1. List the tools whose names start with `dynare_`.
 2. Call `dynare_diagnose` with this text as `file_content`:
 
    ```text

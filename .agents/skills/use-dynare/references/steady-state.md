@@ -133,7 +133,7 @@ steady;        // Dynare solves the static model from this guess
   the omitted endogenous variables.
 - A good guess is the hard part. Build complex models step by step and use economically sensible values
   (great ratios, labor about 1/3).
-- Check with `resid;` before solving (near 0 once solved). If `steady` fails, adjust
+- Check with `resid;` before solving. The steady-state pass is SKILL.md "Numerical runs". If `steady` fails, adjust
   `steady(solve_algo=..., maxit=..., tolf=...)`; the algorithms are listed below.
 
 ## Option C: hand-written steady-state file
@@ -147,9 +147,7 @@ model file. It is more powerful but easier to get wrong; `steady_state_model` is
   writes `NK_baseline_steadystate.m`; it calibrates labor disutility inside the file) and
   `<dynare-root>/examples/optimal_policy/nk_ramsey_steady_file_steadystate.m` (a steady state
   conditional on the Ramsey instrument; see optimal-policy.md).
-- Names (R5): the file runs as MATLAB code, so do not name parameters or variables after MATLAB functions
-  such as `alpha`, `beta`, `gamma`; write `alppha`, `betta`, `gam`. The preprocessor accepts these names
-  and Dygnosis does not report them, so a clean check does not clear them.
+- Names: R5 (SKILL.md "Writing rules"). This file runs as MATLAB code, so R5 applies to every name in it.
 
 ## Homotopy: when a good guess still does not converge
 
@@ -210,7 +208,7 @@ static checks.
   find the wrong equation.
 - `check;` reports the eigenvalues and whether the Blanchard-Kahn conditions hold
   (`references/debugging.md`).
-- After the run, read `oo_.steady_state`: no NaN, economically plausible values.
+- After the run, read `oo_.steady_state`: no NaN. Ratio checks: debugging.md "Wrong numbers without an error".
 - Heterogeneous-agent models are different: Dynare refuses `steady` and `check` there (E474); use the
   `heterogeneity_*` steady-state commands (heterogeneity.md).
 

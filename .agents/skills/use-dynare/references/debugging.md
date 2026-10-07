@@ -50,7 +50,7 @@ report that the static check was not run, and continue.
 ### 2. Connect MATLAB and find Dynare (once per session)
 
 Use the [MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit) to connect the
-agent to MATLAB and to run MATLAB code. This skill does not teach how to install or launch MATLAB.
+agent to MATLAB and to run MATLAB code.
 
 | Item | How to find it |
 |---|---|
@@ -89,13 +89,24 @@ cd('<folder of the .mod>');
    tried, and what you need (better initial values, the correct calibration target, a data file, the
    missing source). Do not retry without new information.
 
+Options for that `dynare` call:
+
+| Option | Use |
+|---|---|
+| `noclearall` | Keeps `M_` and `oo_` between runs. Default in this loop. |
+| `nograph` | No graphs while debugging. |
+| `nointeractive` | The session does not wait for input. |
+| `nostrict` | Warn and continue when endogenous variables outnumber equations, an undeclared symbol is assigned in `initval` or `endval`, an undeclared symbol is in the model block, or a declared exogenous variable is unused. |
+| `json=compute` | Write JSON under `<model>/model/json/`. In a file comment write `json=compute`, with no spaces around `=`. |
+| `nodisplay` | Option of a computing command such as `stoch_simul(nodisplay)`, not of the `dynare` command. |
+
 ### 5. Verify (after Stage 5 runs clean)
 
 Read the results and summarize them for the user:
 
 ```matlab
 oo_.dr.eigval           % eigenvalues computed by check (Blanchard-Kahn conditions)
-oo_.steady_state        % steady state in declaration order: no NaN, plausible ratios
+oo_.steady_state        % steady state in declaration order: no NaN
 oo_.mean, oo_.var       % moments after stoch_simul (theoretical without the periods option)
 oo_.irfs                % IRFs after stoch_simul: oo_.irfs.<var>_<shock>
 oo_.endo_simul          % paths after perfect_foresight_solver
@@ -111,50 +122,32 @@ time in the session. For slow solves and repeated plotting, see `references/matl
 
 ## Final checklist
 
-Apply it to each file (rule IDs: SKILL.md "Writing rules"). "Static" names the Dygnosis check;
-"Numerical" needs a Dynare run; "Review" means no tool decides it.
+Apply it to each file (rule IDs: SKILL.md "Writing rules"). For each item, record the result, or name
+it as not applicable. "Static" names the Dygnosis check; "Numerical" needs a Dynare run; "Review"
+means no tool decides it.
 
-1. **Equation count (R4).** A plain model has as many equations as endogenous variables. With
-   `ramsey_model` or `discretionary_policy`: one equation fewer for each policy instrument.
-   Heterogeneous models: count each heterogeneity dimension separately. Static: `dynare_equations`
-   `count_gap`; E188 or W013 (heterogeneous: E192, W208).
-2. **Timing (R2).** State variables enter with a lag (`k(-1)` in production). The law of motion has the
-   end-of-period stock on the left (`k = invest + (1-delta)*k(-1)`). Control variables have no lead in
-   their own definition. Check that no `k` stands where `k(-1)` is meant. Static: `dynare_model_info`
-   and the `idents` of `dynare_equations` show the written timing. Review: compare it with the
-   derivation note; no tool knows the intended timing.
-3. **Exogenous processes (R3).** With stochastic commands, every persistent process (AR and similar) is
-   an endogenous variable; only its innovation is in `varexo`. Static: W211 (exogenous variable with a
-   lead).
-4. **Names (R5).** No `i`, `inv`, `e`, `E`; no name of a Dynare command or built-in function; with a
-   user-written steady-state file, no `alpha`, `beta`, `gamma` (write `alppha`, `betta`, `gam`).
-   Review: the Dynare 7.2 preprocessor accepts these names and Dygnosis does not report them.
-5. **Parameters assigned before use (R7),** especially before `steady_state_model`, which is evaluated
-   from top to bottom. Static: W010 (never assigned), E130 (used before assignment in
-   `steady_state_model`).
+1. **Equation count (R4).** Static: `dynare_equations` `count_gap`. A plain model needs `delta` 0.
+   With `ramsey_model` or `discretionary_policy`, `delta` equals minus the number of policy
+   instruments. Heterogeneous models: E192, W208. Codes: E188, W013.
+2. **Timing (R2).** Static: `dynare_model_info` and the `idents` of `dynare_equations`. Under the
+   default convention, a stock in `forward_looking` or `mixed` is a timing slip. Review: compare with
+   the derivation note.
+3. **Exogenous processes (R3).** Static: W211 (exogenous variable with a lead).
+4. **Names (R5).** Review by reading. Dygnosis does not report these names.
+5. **Parameters assigned before use (R7).** Static: W010 (never assigned), E130 (used before assignment
+   in `steady_state_model`).
 6. **Shocks block matches the experiment.** Stochastic: `stderr`, `var … = …`, `corr`. Perfect
    foresight: `periods` and `values`. Static: E205 (perfect foresight and stochastic commands in one
    file), W120 (stochastic command without a stochastic exogenous variable), W060 (IRF without a written
    shock size).
-7. **Steady state exists and is consistent.** Prefer `steady_state_model`; otherwise give an `initval`
-   guess for every endogenous variable. Then `steady; resid; check;`. Static (presence only): I050,
-   W042, W052. Numerical: existence and residuals.
-8. **No nonsmooth functions under perturbation (R6):** no `max`, `min`, `abs`, `sign` or comparison
-   operators on endogenous variables with `stoch_simul`, `estimation` and similar. Static: W200; in
-   `model(linear)` E210 and E211.
-9. **Statement syntax (R7).** End each statement with `;` and each block with `end;`; one statement per
-   line. The preprocessor passes an unrecognized top-level line to MATLAB unchanged. Static: E001
-   (parse error), W012 (assignment to an undeclared name), W057 (equation outside the model block).
-10. **Labels and comments (R1).** Comments follow the user's language. Identifiers, `long_name` values,
-    equation tags and TeX names are English ASCII (house style). Dynare 7.2 accepts non-ASCII text in
-    comments, `long_name`, TeX names and `[name=…]` tags; it refuses a non-ASCII character in an
-    identifier, an equation or a shock statement (E001, `character unrecognized by lexer`). Static:
-    I208 and I209 find missing tags and missing `long_name`
-    (Information, not Dynare refusals).
-11. **Form (R8).** Write the original nonlinear equations by default. Use `model(linear);` only when the
-    user asks for a linear model or the source gives only a linearized system. In a nonlinear model,
-    give shock standard deviations as decimals (1% is `stderr 0.01`). Static: W140 (nonlinear operator
-    in a linear model).
+7. **Steady state.** Static (presence only): I050, W042, W052. Numerical: the steady-state pass in
+   SKILL.md "Numerical runs".
+8. **Nonsmooth functions under perturbation (R6).** Static: W200; in `model(linear)` E210 and E211.
+9. **Statement syntax (R7).** Static: E001 (parse error), W012 (assignment to an undeclared name),
+   W057 (equation outside the model block).
+10. **Labels and comments (R1).** Static: I208 (missing equation tag), I209 (missing `long_name`).
+    A non-ASCII identifier, equation, or shock statement is E001.
+11. **Form (R8).** Static: W140 (nonlinear operator in a linear model).
 12. **Experiment set,** one family: `stoch_simul`, `perfect_foresight_setup` with
     `perfect_foresight_solver`, `estimation`, `method_of_moments`, `ramsey_model`,
     `discretionary_policy`, `osr`, or the `heterogeneity_*` commands. Static: `dynare_list_options`
@@ -202,8 +195,8 @@ run shows it.
 - A non-ASCII character in an identifier, an equation or a shock statement (`var café;`). Rename with
   ASCII (R1).
 - A double-quoted string in Dynare syntax. Use single quotes.
-- Non-ASCII text in comments, `long_name`, TeX names and `[name=…]` tags is accepted by Dynare 7.2; it
-  is not the cause.
+- A comment or a quoted string is not the cause. What Dynare accepts: "R1 details" in
+  `references/workflow-detail.md`.
 
 **`Unknown symbol: <name>`** (Static: E020)
 - A name in the model block that is not declared, often a typo. Declare it or correct it.
@@ -313,10 +306,10 @@ Numerical, Dynare commands in the `.mod` or the session:
 - `model_diagnostics;`: sanity checks of the model and the steady state.
 - `model_info;`: state, forward-looking and static variables, and the block structure. This is the
   Dynare command, not the Dygnosis tool `dynare_model_info`.
-- `steady;`: prints the steady state; check that the ratios are plausible.
+- `steady;`: prints the steady state. Ratio checks: "Wrong numbers without an error" above.
 
-Report the results as SKILL.md "Report" describes. For a numerically solved steady state, say that
-`resid;` is close to zero and that `check;` passed.
+Report the results as SKILL.md "Report" describes. For a numerically solved steady state, say whether
+the steady-state pass in SKILL.md "Numerical runs" held.
 
 ---
 
@@ -357,29 +350,6 @@ of these two options. Block types:
 conditions fail, use `model_info;` to check which variables Dynare treats as state and forward-looking
 variables, and compare with what you intended.
 
-## Options of the `dynare` command (add as needed in the loop)
-
-| Option | Use |
-|---|---|
-| `noclearall` | Do not clear the global variables (keeps `M_`, `oo_` between runs). Default in this skill's loop. |
-| `nograph` | No graphs; faster. |
-| `console` | Console mode: no graph windows (like the `nodisplay` option of the computing commands) and no graphical wait bars. |
-| `nointeractive` | Do not request user input. |
-| `savemacro[=FILENAME]` | Save the file after macro expansion (default `FILENAME_macroexp.mod`). |
-| `onlymacro` | Run the macro processor only. |
-| `onlymodel` | Write only the model information in the driver; no computing tasks (shocks and parameter values are still written). |
-| `nostrict` | Warn and continue when there are more endogenous variables than equations, an undeclared symbol is assigned in `initval` or `endval`, an undeclared symbol is in the model block (it becomes exogenous), or a declared exogenous variable is not used in the model block. |
-| `warn_uninit` | Warn for each variable or parameter that is not initialized. |
-| `exclude_eqs=[name1, name2]` / `include_eqs=…` | Exclude or keep equations by their `name` tag; useful for variants. |
-| `transform_unary_ops` | Replace `exp`, `log`, `sin`, … in the model block with auxiliary variables. |
-| `json=parse\|check\|transform\|compute` | Write a JSON version of the model to `<model>/model/json/`. |
-| `output=first\|second\|third` | Write derivatives at least up to this order; `first` is faster while you debug the steady state. |
-| `language=matlab\|julia`, `use_dll`, `fast` | Target language; compile the model into a DLL; do not rewrite unchanged output files. |
-
-`nodisplay` is an option of the computing commands (for example `stoch_simul(nodisplay)`), not of the
-`dynare` command. Options can also go in the first line of the `.mod` file, as a one-line comment:
-`// --+ options: savemacro, json=compute +--`. Write `json=compute`, not `json = compute`.
-
 ## Reading preprocessor errors (line numbers)
 
 Errors have the form `ERROR: file.mod: line A, col B: <message>` (also `cols B-C`, or
@@ -397,9 +367,5 @@ recognize is passed to `driver.m` as native MATLAB code.
 
 ## Naming advice of the manual (R5)
 
-Dynare is not case-sensitive here. Variables and parameters must not have the name of a Dynare command
-or built-in function (for example `Ln`, `shocks`). With a user-written steady-state file, avoid names of
-MATLAB functions, in particular correctly spelled Greek letters (`alpha`, `beta`, `gamma`; write
-`alppha`, `betta`, `gam`). Do not name a variable or parameter `i` (imaginary unit, loop index); name
-investment `invest`. Do not use `inv` either: it is the inverse operator. The 7.2 preprocessor accepts
-all of these names, so the advice protects against MATLAB-side conflicts, not against a refusal.
+Apply R5 (SKILL.md "Writing rules"). Checklist item 4 is the review. Dygnosis does not report these
+names.

@@ -29,7 +29,7 @@ conditions, determinacy, correct economics or a successful experiment. Those nee
 
 | Need | Tool and use |
 |---|---|
-| Check the current model | `dynare_diagnose`. Run it before a change (baseline) and after each substantive change. |
+| Check the current model | `dynare_diagnose`. Run it before a change (baseline) and after each edit to a declaration, an equation, or a command. |
 | Check several saved models or a folder | `dynare_workspace_diagnose`. Report each failed root separately. |
 | Symbols, timing classes, blocks, counts | `dynare_model_info`: `endogenous`, `predetermined`, `forward_looking`, `static`, `mixed`, counts, block flags. |
 | Find an equation and its source location; check the equation count | `dynare_equations`: rows with tags, `idents` (written `timing`, `dynare_timing`, timing class), `origin`, and `count_gap`. |

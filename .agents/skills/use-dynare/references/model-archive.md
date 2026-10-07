@@ -16,8 +16,8 @@ them; read it first on every hit.
 
 | `Status` | Content | How to use it |
 | -------- | ------- | ------------- |
-| `runnable` (8 entries) | Models from earlier modeling tasks: `.mod` plus, where used, steady-state and helper `.m` files | Read the files; the folder can be run as a whole |
-| `derivation-only (needs_review)` (161 entries) | MMB paper derivations, consolidated from `mmb-paper-derivations`. **Derivation notes only, no `.mod`, no steady-state file.** Mostly first-pass extractions, not validated by a Dynare run | **Read the derivation for the economic structure** (FOCs, timing, mechanism). Check the equations against the paper before they go into Dynare. Do not treat them as runnable implementations |
+| `runnable` | Models from earlier modeling tasks: `.mod` plus, where used, steady-state and helper `.m` files | Read the files; the folder can be run as a whole |
+| `derivation-only (needs_review)` | MMB paper derivations, consolidated from `mmb-paper-derivations`. **Derivation notes only, no `.mod`, no steady-state file.** Mostly first-pass extractions, not validated by a Dynare run | **Read the derivation for the economic structure** (FOCs, timing, mechanism). Check the equations against the paper before they go into Dynare. Do not treat them as runnable implementations |
 
 ## Folder layout
 
@@ -36,7 +36,7 @@ references/
     │   ├── <ModelID>_derivation.md   <- derivation note
     │   ├── extraction_notes.md       <- extraction notes
     │   ├── source_manifest.json      <- paper source manifest (private source path + SHA256, no full text)
-    │   └── worker_report.json        <- extraction report (present in 160 of 161 entries)
+    │   └── worker_report.json        <- extraction report
     └── _mmb-provenance/              <- provenance metadata of the MMB derivations (leading "_" = not a model; skip it)
         ├── metadata/                 <- model_metadata.csv, source_metadata.csv, sha256_manifest.csv, excluded_or_missing.csv, ...
         └── README.md                 <- copyright boundary and snapshot notes
@@ -75,7 +75,7 @@ so one grep pattern works on both files.
 | `Year` | Year of the paper; for a custom model, the year it was built |
 | `ModelType` | Model family and whether it is linearized, for example `NK nonlinear`, `RBC nonlinear` |
 | `Economy` | `Closed economy`, `Open economy`, `Euro Area`, … |
-| `Category` | One of the 14 buckets in `references/catalog-lookup.md`, for example `3. Financial Accelerator / BGG-type Credit Frictions`. Two runnable entries use other labels (`6. Financial Frictions / Credit Frictions`, `12. Growth / Demographics / OLG`), so grep `KeyFeatures` as well |
+| `Category` | One of the buckets in `references/catalog-lookup.md`, for example `3. Financial Accelerator / BGG-type Credit Frictions`. Some runnable entries use other labels (`6. Financial Frictions / Credit Frictions`, `12. Growth / Demographics / OLG`), so grep `KeyFeatures` as well |
 | `KeyFeatures` | Free-text mechanism tags for grep, for example `financial accelerator, Calvo pricing, @#define switch` |
 | `DateAdded` | Date the entry was added, `YYYY-MM-DD` |
 | `Status` | `runnable` (has a `.mod` and reruns) or `derivation-only (needs_review)` (derivation reference only, no `.mod`) |
@@ -92,7 +92,7 @@ Example rows (format; the shipped rows may differ):
 
 ## 1. Search (SKILL.md "New model", step "Sources")
 
-Search the archive after `catalog.csv` (149 MMB models) has no close hit. **Search both ways**: grep the
+Search the archive after `catalog.csv` has no close hit. **Search both ways**: grep the
 catalog text, and list the **folder names** (folder = `ModelID`; the mechanism is sometimes visible in
 the name, and the folder list also catches entries that a catalog row describes badly):
 
@@ -115,7 +115,7 @@ On a hit, **read `Status` first**, then open `references/model-archive/<ModelID>
 - `derivation-only (needs_review)`: there is no `.mod`. Read `<ModelID>_derivation.md` for the FOC
   structure, timing convention, mechanism and calibration hints. These are unvalidated first-pass
   extractions: check every equation against the paper before it goes into Dynare. Also check
-  `catalog.csv` for `<ModelID>_rep`: 138 of the 161 entries have a runnable MMB replication in
+  `catalog.csv` for `<ModelID>_rep`: a runnable MMB replication may be in
   `references/examples/`.
 
 ---

@@ -106,7 +106,7 @@ todo item.
 | 1 | `<model>_derivation.md` | eight sections; section 8 count; Walras-law check |
 | 2 | file header and declarations | static check |
 | 3 | calibration and `model` block | static check: diagnostics, `count_gap`, timing classes |
-| 4 | steady state and `resid; steady; check;` | static check, then numerical run |
+| 4 | steady state and `resid; steady; check;` | static check, then the steady-state pass |
 | 5 | `shocks` and the experiment command | static check, then numerical run |
 | 5b | calls to the plot scripts | numerical run: the figure files exist |
 | 5c | `run_<model>.m` | numerical run: the script runs end to end |
@@ -127,8 +127,7 @@ Before you diagnose an error yourself, check known-issues.md and debugging.md (r
 If you fix a problem they do not cover, describe the symptom, cause and fix in the report (SKILL.md
 "Report").
 
-Form (R8): write the nonlinear equations by default. Use `model(linear);` only when the user asks for a
-linear model or the source gives only a linearized system. Details: "R8 details" below.
+Form: R8 (SKILL.md). Details: "R8 details" below.
 
 ## Stage 1 (derivation note)
 
@@ -143,26 +142,9 @@ state comes from. If the user says to skip it, skip it and state the risk once: 
 timing translation is then not cross-checked, and a mathematical error shows up only as wrong numbers or
 a Blanchard-Kahn failure after the run.
 
-Output: a separate markdown file `<model>_derivation.md` (not inside the `.mod`). Follow
-derivation-style.md for the structure, the LaTeX rules, the FOC numbering and the symbol table. For what
-goes into each agent's problem, see modeling-blocks.md. The eight sections:
-
-1. Model overview: which model, source, the experiment in this file, the agents.
-2. Optimization problems: per agent, the objective and the budget, technology and resource constraints
-   (LaTeX).
-3. First-order conditions (FOC): per agent (Euler equation, labor supply, capital, price setting, policy
-   rule and so on), numbered (F1), (F2), ...
-4. Market clearing and aggregate identities: resource constraint, factor-market clearing, aggregation
-   (heterogeneous agents by their shares).
-5. Exogenous processes: form and persistence of each AR process or shock.
-6. Steady-state solution: the steady-state system and the closed-form or reverse-solve steps, in an
-   order that evaluates from top to bottom, ready to copy into `steady_state_model`. A linearized model:
-   state that the steady state is zero.
-7. Timing and form conventions: stock at the end or at the beginning of the period (R2), logs or
-   levels, nonlinear by default (R8).
-8. Variable and parameter table (preview of Stage 2): endogenous variables, exogenous variables and
-   parameters that appear in the FOCs, with the equation that determines each endogenous variable, so
-   that the equation count can be checked against the variable count.
+Output: a separate markdown file `<model>_derivation.md` (not inside the `.mod`). The eight sections,
+their order, the LaTeX rules, the FOC numbering and the symbol table are in derivation-style.md. For
+what goes into each agent's problem, see modeling-blocks.md.
 
 Two required checks. Each prevents a Blanchard-Kahn failure later.
 
@@ -262,10 +244,8 @@ Static check:
   RBC with `y = exp(z)*k(-1)^alppha*n^(1-alppha);` and an Euler equation in `c(+1)` and `y(+1)`, the
   classes are `predetermined` = `k`, `z`; `forward_looking` = `y`, `c`; `static` = `invest`, `n`,
   `log_y`. Under the default convention, a stock in `forward_looking` or `mixed` usually means a timing
-  slip (for example `k` instead of `k(-1)` in production makes `k` `mixed`). Classification uses Dynare
-  timing after the predetermined-variable convention conversion: a variable listed in
-  `predetermined_variables` and written as `k(+1)` is classified as predetermined. Per-use `timing`
-  stays the written offset; `dynare_timing` is the converted offset.
+  slip (for example `k` instead of `k(-1)` in production makes `k` `mixed`). How to read `timing` and
+  `dynare_timing`: `references/dygnosis-workflow.md`.
 
 Count mismatch: compare with the section 8 table row by row (which FOC was not translated, which variable
 is declared extra or is missing). Then see debugging.md (equation count, and the error, cause and fix
@@ -290,17 +270,11 @@ Static check: `dynare_diagnose`. Look for E130 (use before assignment in `steady
 (endogenous variable missing from `steady_state_model`) and W131 (variable assigned twice in
 `steady_state_model`). The Stage 3 W010 for reverse-solved parameters is now gone.
 
-Numerical run (Dynare):
-
-- `resid`: all residuals near zero. With `resid(non_zero);` Dynare prints `All residuals are zero`.
-- `steady`: no NaN; plausible ratios (C/Y, I/Y, K/Y).
-- `check`: prints `There are N eigenvalue(s) larger than 1 in modulus for M forward-looking
-  variable(s).` and then `The order and rank conditions are verified.`
-
-Pass: `steady` succeeds, the residuals are near zero, and `check` verifies the Blanchard-Kahn
-conditions. Stage 5 adds only shocks and commands, which do not change the eigenvalues, so fix a
-Blanchard-Kahn failure here. With `ramsey_model` or `discretionary_policy`, the optimal-policy command
-changes the system: follow optimal-policy.md for where `steady` and `check` go.
+Numerical run (Dynare). Pass: the steady-state pass in SKILL.md "Numerical runs". `steady` also
+prints the levels; report C/Y, I/Y and K/Y. Stage 5 adds only shocks and commands, which do not
+change the eigenvalues, so fix a Blanchard-Kahn failure here. With `ramsey_model` or
+`discretionary_policy`, the optimal-policy command changes the system: follow optimal-policy.md for
+where `steady` and `check` go.
 
 Fail: see steady-state.md and debugging.md. The equation with a large residual often exposes a
 steady-state algebra error or a typo in the model. If the steady state in the note is wrong, fix the note
@@ -321,10 +295,10 @@ Static check: `dynare_diagnose` (for example W060 IRF with no written shock size
 with no stochastic exogenous variable, E215 or E235 for `discretionary_policy`). `dynare_list_options`
 lists the valid options of a command.
 
-Numerical run (Dynare). Pass: the Blanchard-Kahn conditions hold, the command finishes and produces its
-output (policy function, moments and IRFs; transition path; posterior), the IRFs have no NaN or Inf, and
-the results are plausible. Fail: for a Blanchard-Kahn failure, check timing (R2), signs and the equation
-count (R4) first; for everything else, debugging.md "Run-and-fix loop".
+Numerical run (Dynare). Pass: the Blanchard-Kahn conditions hold, the command finishes, and the IRFs
+are finite. Wrong numbers with no error: debugging.md "Wrong numbers without an error". Fail: for a
+Blanchard-Kahn failure, check timing (R2), signs and the equation count (R4) first; for everything
+else, debugging.md "Run-and-fix loop".
 
 ## Stage 5b (plots)
 
@@ -361,7 +335,7 @@ Before the report:
 1. Static: run `dynare_diagnose` on the finished file (`dynare_workspace_diagnose` for a project of
    several files). No Error. Fix each Warning, or say in the report why it stays. Information I208
    and I209 shows missing metadata (R1).
-2. Go through the final checklist in debugging.md (the items that apply).
+2. Go through the final checklist in debugging.md.
 3. A model with several agents: the equation that Walras's law makes redundant is not in the model
    block (Stage 1, check 2).
 4. Numerical: the last Dynare run of the finished file was clean (steady state, Blanchard-Kahn
@@ -421,56 +395,43 @@ stoch_simul(order=1, irf=40) ... ;
 
 ## House style (from DSGE_mod)
 
-1. A file header block (user's language): model, sources, experiment, conventions, agent features.
-2. Every variable and parameter with a TeX name and an English `long_name`:
-   `var c $C$ (long_name='Consumption');`.
-3. Every equation with an English `[name='...']` (ideally the paper's equation number) and a comment
-   above it (user's language).
-4. Calibration targets reverse-solved inside `steady_state_model` (for example `l=0.33` solves for
+Labels, comments, equation tags and `long_name`: R1. Also:
+
+1. Calibration targets reverse-solved inside `steady_state_model` (for example `l=0.33` solves for
    `psi`).
-5. Helper variables `log_x = log(x);` for reporting and observation equations, each with its own
-   `[name='...']` and `long_name`.
-6. For estimation, observation equations preferably in growth rates (steady state 0, robust to trends).
-7. Variants and repeated structures with the macro processor (macro-processor.md).
-8. Fixed order: `resid; steady; check;` before the experiment commands.
+2. For estimation, observation equations preferably in growth rates (steady state 0, robust to trends).
+3. Variants and repeated structures with the macro processor (macro-processor.md).
+4. Fixed order: `resid; steady; check;` before the experiment commands.
 
 ## Rule details
 
 ### R1 details (labels and comments)
 
-- Comments follow the user's language and say enough: the model, the meaning of each equation, the
-  timing choice, the source of each parameter value. Use `//` at the end of a line, `/* */` blocks, and
-  the file header.
-- Put an equation's comment on its own line above `[name='...']`, not on the same line as the tag.
+SKILL.md R1 is the rule. Additions:
+
+- Say enough in comments: the model, the meaning of each equation, the timing choice, the source of
+  each parameter value. Use `//` at the end of a line, `/* */` blocks, and the file header.
+- Put an equation's comment on its own line above `[name='...']`.
 - A declaration line may end with a short comment (for example `// consumption`).
-- Identifiers, `long_name` values, equation tags and TeX names stay English ASCII. Dynare 7.2 accepts
-  UTF-8 in comments and quoted strings; ASCII labels keep MATLAB/Octave output, TeX and plots portable.
-- New models and substantial extensions: every equation has `[name='...']`, every declaration a TeX
-  name and a `long_name`, helper variables such as `log_y` included. Dygnosis Information I208 (equation
-  without a name tag) and I209 (declaration without `long_name`) find the gaps. Missing metadata is
-  not a Dynare refusal.
-- The conventions of an existing file, a small edit, or an explicit user preference take precedence.
+- Dynare 7.2 accepts non-ASCII text in comments, `long_name`, TeX names and `[name=…]` tags. It
+  refuses a non-ASCII character in an identifier, an equation, or a shock statement (E001,
+  `character unrecognized by lexer`). ASCII labels keep MATLAB, Octave, TeX and plot output portable.
 
 ### R2 details (timing)
 
-- The time index of a variable is the period in which it is decided. Default: the "stock at the end of
-  the period" convention.
+SKILL.md R2 is the rule, including both conventions. Additions:
+
 - A control (forward-looking) variable is decided in the current period: its own definition has no
   lead. It can appear with `(+1)` inside an expectation, for example `c(+1)` in the Euler equation.
-- A predetermined (state) variable was decided in the previous period, so the current-period equations
-  use its lag: production uses `k(-1)`, the law of motion is `k = invest + (1-delta)*k(-1);`.
-- Write leads and lags as `x(+1)`, `x(-2)`. Parameters have no time index (Dygnosis W121 reports a
-  parameter with a lead or lag).
-- The "stock at the beginning of the period" convention: `predetermined_variables k;`, production uses
-  `k`, the law of motion is `k(+1) = invest + (1-delta)*k;`.
-- One convention per file. Check the timing classes with `dynare_model_info` and the per-equation
-  `idents` in `dynare_equations` (Stage 3). Classification uses Dynare timing; per-use `timing` stays
-  written.
+- A predetermined (state) variable was decided in the previous period, so current-period equations use
+  its lag.
+- Write leads and lags as `x(+1)`, `x(-2)`. Parameters have no time index (Dygnosis W121).
+- Read `timing` and `dynare_timing` in `references/dygnosis-workflow.md`. The Stage 3 check shows the
+  classes for a small RBC.
 
 ### R8 details (nonlinear by default)
 
-Write the original nonlinear equations (first-order conditions, constraints, exogenous processes) and let
-Dynare approximate them. Do not linearize by hand. Reasons:
+SKILL.md R8 is the rule. Reasons:
 
 - Hand linearization is a frequent source of hidden errors, and Dynare cannot detect them.
 - Only a nonlinear model supports higher-order perturbation (`order=2`, `order=3`: welfare, risk
@@ -478,18 +439,11 @@ Dynare approximate them. Do not linearize by hand. Reasons:
 - The steady state has an economic meaning, so you can check the main ratios.
 - The same file can switch between first order, second order and perfect foresight.
 
-Write `model(linear);` (variables are percentage or log deviations; the steady state is usually all
-zero) only when:
+In `model(linear)`, variables are percentage or log deviations, and the steady state is usually all
+zero. The two cases that allow `model(linear)` are in SKILL.md R8.
 
-1. the user asks for a linear model, or
-2. the source gives only a linearized system.
-
-Otherwise always write the nonlinear model; there is nothing else to decide.
-
-`discretionary_policy` does not by itself require `model(linear)`. The manual ("Optimal policy under
-discretion") requires a quadratic objective and either a linear model or a first-order solution with an
-analytical steady state. Dygnosis reports `discretionary_policy` without `instruments` (E215) and with an
-order greater than 1 (E235). Details: optimal-policy.md. In `model(linear)`, Dygnosis W140 reports a
+`discretionary_policy`: SKILL.md R8. Dygnosis reports it without `instruments` (E215) and with an order
+greater than 1 (E235). Details: optimal-policy.md. In `model(linear)`, Dygnosis W140 reports a
 nonlinear operator and E210/E211 a nonsmooth one.
 
 With a nonlinear model:
