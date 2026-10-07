@@ -420,7 +420,7 @@ fn merged_diag(text: &str) -> dygnosis::Diagnostic {
     check_parse(&parse(text))
         .into_iter()
         .find(|diag| diag.message.contains(MERGED))
-        .unwrap_or_else(|| panic!("missing merge: {}", messages(text).join(" | ")))
+        .unwrap_or_else(|| panic!("missing merge: {text}\n{}", messages(text).join(" | ")))
 }
 
 /// Apply the stored edit and require the library owner gate to accept that same edit.

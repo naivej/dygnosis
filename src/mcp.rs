@@ -111,10 +111,12 @@ pub(crate) fn macro_incomplete_status() -> Value {
     json!({"status": "incomplete", "message": MACRO_INCOMPLETE_MESSAGE})
 }
 
-fn incomplete_model_status(model: &Model, includes_complete: bool) -> Option<Value> {
-    if model.macro_incomplete() {
+pub(crate) fn incomplete_model_status(model: &Model, includes_complete: bool) -> Option<Value> {
+    if !includes_complete {
+        Some(crate::model_info::model_incomplete_status())
+    } else if model.macro_incomplete() {
         Some(macro_incomplete_status())
-    } else if !includes_complete || !crate::model_map::parser_complete(model) {
+    } else if !crate::model_map::parser_complete(model) {
         Some(crate::model_info::model_incomplete_status())
     } else {
         None
@@ -361,6 +363,7 @@ pub fn dynare_expand(
         "root_file": unit.root_file,
         "revision": unit.revision,
         "complete": unit.complete,
+        "macro_messages": macro_messages_json(&unit.report.macro_messages, &unit),
     });
     result["navigation"] = if unit.complete {
         crate::preview_navigation::navigation_json(
@@ -387,6 +390,11 @@ pub fn dynare_expand(
     };
     if !unit.complete {
         result["status"] = json!("incomplete");
+    }
+    // A missing include is not spliced. The root equations that follow it are
+    // not a finished expansion, so the count stays zero.
+    if !unit.includes_complete {
+        result["n_equations"] = json!(0);
     }
     if has_heterogeneous {
         result["n_aggregate_equations"] = json!(unit.report.aggregate_origins.len());
@@ -547,6 +555,7 @@ impl McpUnit {
                 heterogeneous_origins: Vec::new(),
                 aggregate_row_origins: Vec::new(),
                 heterogeneous_row_origins: Vec::new(),
+                macro_messages: Vec::new(),
             });
         let mut sources = HashMap::new();
         let includes_complete = ws.includes_complete(active);
@@ -651,6 +660,28 @@ fn origin_frame_json(frame: &OriginFrame, unit: &McpUnit) -> Option<Value> {
         v["origin_uri"] = json!(uri);
     }
     Some(v)
+}
+
+fn macro_messages_json(messages: &[crate::macro_expand::MacroMessage], unit: &McpUnit) -> Value {
+    json!(messages
+        .iter()
+        .map(|message| {
+            let text = message
+                .file
+                .as_deref()
+                .and_then(|file| unit.sources.get(file).map(String::as_str))
+                .unwrap_or(unit.raw.as_str());
+            let mut row = json!({
+                "kind": message.kind,
+                "message": message.message,
+                "location": range_json(message.span, text),
+            });
+            if let Some(file) = &message.file {
+                row["file"] = json!(file);
+            }
+            row
+        })
+        .collect::<Vec<_>>())
 }
 
 fn range_json(span: Span, text: &str) -> Value {
@@ -2013,7 +2044,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_expand",
         input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "Return model text after include and macro expansion, before equation transformation, with verified written source and macro locations. Interpolation inside quoted tags, declaration labels and options expands when the replacement preserves the surrounding quote and line. Lines and Unicode-scalar columns are one-based. complete=false means expansion is incomplete and authoritative equation counts or source jumps are withheld."
+        description = "Return model text after include and macro expansion, before equation transformation, with verified written source and macro locations. macro_messages lists executed @#echo and @#echomacrovars output in order; @#echomacrovars(save) is generated assignment text in effective_text, not a message. Lines and Unicode-scalar columns are one-based. complete=false means expansion is incomplete and authoritative equation counts or source jumps are withheld."
     )]
     fn expand_tool(
         &self,

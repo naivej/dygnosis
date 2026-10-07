@@ -12,6 +12,9 @@ name = "dygnosis"
 path = "src/main.rs"
 
 [dependencies]
+# Musl libm, pure Rust. Used for `tgamma` / `lgamma` / `erf` / `erfc` so those
+# builtins are not local series. https://github.com/rust-lang/libm
+libm = "0.2.16"
 clap = { version = "4", features = ["derive"] }
 regex = "1"
 rmcp = { version = "3.2.0", default-features = false, features = ["macros", "server", "transport-io"] }

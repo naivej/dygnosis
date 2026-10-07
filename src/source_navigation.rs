@@ -417,7 +417,7 @@ mod tests {
     fn regions(text: &str) -> (String, Vec<Region>) {
         let report = expand_report(text);
         let model = parse(text);
-        let layout = source(&report, &model, &[]).expect("source layout");
+        let layout = source(&report, &model, &[], &[]).expect("source layout");
         let built = build_regions(&layout.text, &layout.fragments, &[]);
         (layout.text, built)
     }
@@ -425,7 +425,7 @@ mod tests {
     fn tint(text: &str) -> (String, Vec<Span>) {
         let report = expand_report(text);
         let model = parse(text);
-        let layout = source(&report, &model, &[]).expect("source layout");
+        let layout = source(&report, &model, &[], &[]).expect("source layout");
         let ranges = macro_display_ranges(&layout.text, &layout.fragments, &[], &[]);
         (layout.text, ranges)
     }
@@ -445,7 +445,7 @@ mod tests {
         let gaps = ws.source_layout_gaps(root);
         let cuts = ws.source_file_cuts(root);
         let includes = ws.source_include_spans(root);
-        let layout = source(&report, &model, &gaps).expect("source layout");
+        let layout = source(&report, &model, &gaps, &[]).expect("source layout");
         let ranges = macro_display_ranges(&layout.text, &layout.fragments, &cuts, &includes);
         (layout.text, ranges, includes)
     }

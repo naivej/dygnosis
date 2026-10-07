@@ -1508,23 +1508,16 @@ async fn incomplete_status_keeps_independent_errors_and_written_include_location
             .unwrap()
             .unwrap();
         let reasons = info["incomplete_reasons"].as_array().unwrap();
-        assert_eq!(reasons.len(), 2, "{info}");
+        // E061 stops the root. The later `@#define n = 1 in "x"` is not evaluated.
+        assert_eq!(reasons.len(), 1, "{info}");
+        assert_eq!(reasons[0]["code"], "E061");
         assert_eq!(reasons[0]["location"]["range"]["start"]["line"], line);
-        assert_eq!(reasons[1]["location"]["range"]["start"]["line"], line + 1);
-        let include = reasons
-            .iter()
-            .find(|reason| reason["code"] == "E061")
-            .unwrap();
         assert_eq!(
-            json_slice(source, &include["location"]["range"], true),
+            json_slice(source, &reasons[0]["location"]["range"], true),
             "@#include \"absent.inc\""
         );
-        assert_eq!(include["location"]["uri"], root.as_str());
-        let operand = reasons
-            .iter()
-            .find(|reason| reason["code"] == "E285")
-            .unwrap();
-        assert!(json_slice(source, &operand["location"]["range"], true).contains("1 in \"x\""));
+        assert_eq!(reasons[0]["location"]["uri"], root.as_str());
+        assert!(reasons.iter().all(|reason| reason["code"] != "E285"));
     }
 }
 

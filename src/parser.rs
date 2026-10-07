@@ -6,7 +6,6 @@ use std::ops::Range;
 use crate::expr::{BinOp, ExprId, ExprKind, UnOp};
 use crate::intern::{Interner, Name};
 use crate::lexer::{tokenize, Token, TokenKind};
-use crate::macro_expand::expand_macros_with_status;
 use crate::model::{
     Assignment, CalibrationRange, ConditionalForecastPath, ConditionalForecastPaths, DataStatement,
     Decl, DottedHead, DottedKind, DottedStatement, Equation, EstimationStatement, FamilyOption,
@@ -151,12 +150,16 @@ impl FoldKey {
 }
 
 pub fn parse(text: &str) -> Model {
+    parse_with_lines(text, &[])
+}
+
+pub(crate) fn parse_with_lines(text: &str, line_segments: &[(crate::span::Span, u32)]) -> Model {
     let source = normalize_newlines(text);
     let raw_tokens = tokenize(&source);
     let (includes, includepaths, macro_directives, macro_interps) =
         collect_include_dirs(&source, &raw_tokens);
     let (tokens, macro_type_errors, macro_incomplete_span, incomplete_reasons) =
-        expand_macros_with_status(&source, raw_tokens);
+        crate::macro_expand::expand_macros_with_status_lines(&source, raw_tokens, line_segments);
     let (mut model, _ranges) = parse_expanded(&source, tokens);
     model.includes = includes;
     model.includepaths = includepaths;
@@ -847,15 +850,20 @@ fn interp_inner(text: &str) -> String {
     rest.strip_suffix('}').unwrap_or(rest).to_string()
 }
 
-fn collapse_continuations(text: &str) -> String {
+pub(crate) fn collapse_continuations(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            let mut j = i + 1;
+        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+            let mut j = i + 2;
             while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
                 j += 1;
+            }
+            if j + 1 < bytes.len() && bytes[j] == b'/' && bytes[j + 1] == b'/' {
+                while j < bytes.len() && bytes[j] != b'\n' && bytes[j] != b'\r' {
+                    j += 1;
+                }
             }
             if j < bytes.len() && (bytes[j] == b'\n' || bytes[j] == b'\r') {
                 let mut k = i;
@@ -891,10 +899,11 @@ fn directive_arg<'a>(text: &'a str, keyword: &str) -> Option<&'a str> {
 }
 
 fn strip_word_ci<'a>(text: &'a str, word: &str) -> Option<&'a str> {
-    if text.len() < word.len() || !text[..word.len()].eq_ignore_ascii_case(word) {
+    let head = text.get(..word.len())?;
+    if !head.eq_ignore_ascii_case(word) {
         return None;
     }
-    let after = &text[word.len()..];
+    let after = text.get(word.len()..)?;
     if after
         .chars()
         .next()
@@ -8477,7 +8486,10 @@ impl Parser<'_> {
         let expr = self.parse_expr();
         let parsed_end_i = self.i;
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
-            if self.looks_like_assignment_start()
+            // A declared assignment keeps a following `name =` in the same
+            // statement so a missing `;` is visible. Native MATLAB text stays
+            // a separate statement; 7.2 accepts `aaaa = 1` then `bbbb = 2`.
+            if (self.in_native_assignment && self.looks_like_assignment_start())
                 || self.at_follower_keyword()
                 || self.at_block_stop()
             {
@@ -11531,7 +11543,7 @@ pub(crate) fn join_lexemes_recorded(
             continue;
         }
         if let Some(p) = prev {
-            if needs_space(p, tok.kind) {
+            if !tok.glue_left && needs_space(p, tok.kind) {
                 out.push(' ');
             }
         }

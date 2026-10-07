@@ -1,6 +1,6 @@
 {
   "version": "0.11.7",
-  "fingerprint": "cea0f2cd78af38f7d9968d57eca8c09195811083697daf7244abafb3c29b86ff",
+  "fingerprint": "8f445a11068f57d986494b177cb2db0ec681bdbe4de292b6a346fd9d5448bd90",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -184,7 +184,7 @@
     },
     {
       "name": "dynare_expand",
-      "description": "Return model text after include and macro expansion, before equation transformation, with verified written source and macro locations. Interpolation inside quoted tags, declaration labels and options expands when the replacement preserves the surrounding quote and line. Lines and Unicode-scalar columns are one-based. complete=false means expansion is incomplete and authoritative equation counts or source jumps are withheld.",
+      "description": "Return model text after include and macro expansion, before equation transformation, with verified written source and macro locations. macro_messages lists executed @#echo and @#echomacrovars output in order; @#echomacrovars(save) is generated assignment text in effective_text, not a message. Lines and Unicode-scalar columns are one-based. complete=false means expansion is incomplete and authoritative equation counts or source jumps are withheld.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -1501,7 +1501,7 @@
       "code": "E305",
       "kind": "shared",
       "title": "@#includepath argument is not a string",
-      "markdown": "### E305: @#includepath argument is not a string\n\nThe ``@#includepath`` argument does not evaluate to a string. Dynare refuses: `File name does not evaluate to a string`.\n\n**Fix**\n\nQuote the directory: ``@#includepath \"mydir\"``.\n"
+      "markdown": "### E305: @#includepath argument is not a string\n\nAn ``@#include`` or ``@#includepath`` argument does not evaluate to a string. Dynare refuses: `File name does not evaluate to a string`.\n\n**Fix**\n\nUse a string expression, for example ``@#include \"helper.inc\"`` or ``@#includepath \"mydir\"``.\n"
     },
     {
       "code": "E306",
@@ -2581,7 +2581,7 @@
       "code": "I211",
       "kind": "added",
       "title": "Macro expansion incomplete",
-      "markdown": "### I211: Macro expansion incomplete\n\nDygnosis could not finish expanding this macro directive or interpolation. The Information names the unsupported valid expression or the local limit that stopped expansion. This includes a quoted replacement that closes its surrounding quote or adds a line break. The source may be valid Dynare syntax; this Information is not a Dynare refusal. Official macro Errors keep precedence. Independent active failures are reported once each; repeated copies of the same written failure are not duplicated. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nInspect the named macro expression or limit, or run the official Dynare preprocessor for its full expansion.\n"
+      "markdown": "### I211: Macro expansion incomplete\n\nDygnosis stopped this macro expansion at an explicit local limit: expression depth, range or collection size, output size, message size, or iteration work. The Information names that limit. A supported macro expression is expanded; this note is not a Dynare refusal. Official macro Errors keep precedence. A limit stops later directives in that file. Model checks that need the expanded text were withheld, and the status hover under Dynare: incomplete repeats each retained reason.\n\n**Next step**\n\nShrink the named macro expression, or run the official Dynare preprocessor for its full expansion.\n"
     },
     {
       "code": "W010",

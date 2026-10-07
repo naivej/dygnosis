@@ -2,13 +2,13 @@ import * as vscode from "vscode";
 import type { DygnosisClient, InputInvalidation, NavigationGuard } from "./client";
 import { sameWrittenLocation } from "./model_view";
 import type { EffectivePreviewRegistry, EffectivePreviewSession } from "./preview";
-import { effectivePreviewArguments } from "./preview";
+import { appendMacroMessages, effectivePreviewArguments } from "./preview";
 import { location, record } from "./protocol";
 import type { Location, Position, Range } from "./protocol";
 import { booleanSetting, listSetting, macroTintOnlyChange } from "./settings";
 
 /** The input-only event and native placement option are integrated with 0.11.2. */
-export interface OriginJumpClient extends Pick<DygnosisClient, "client" | "currentInstance" | "log" | "failure" | "revalidate" | "execute"> {
+export interface OriginJumpClient extends Pick<DygnosisClient, "client" | "currentInstance" | "log" | "failure" | "revalidate" | "execute" | "output"> {
   readonly onDidInvalidate: vscode.Event<InputInvalidation>;
   openLocation(location: Location, root?: vscode.Uri, guard?: NavigationGuard, options?: { viewColumn?: vscode.ViewColumn; reuseOpen?: boolean }): Promise<void>;
 }
@@ -341,6 +341,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
         if (!info || !current()) return;
       }
       if (!record(result) || typeof result.effective_text !== "string") throw new Error("This engine cannot refresh the effective model. Update dynare.serverPath or use the bundled binary.");
+      appendMacroMessages(service.output, result);
       if (!current()) return;
       state.payload = payload; state.instance = instance; state.stale = !payload?.complete;
       if (!previews.replace(state.session, result)) return;

@@ -26,10 +26,15 @@ pub(crate) fn source(
     report: &ExpandReport,
     model: &Model,
     gaps: &[SourceLayoutGap],
+    line_segments: &[(Span, u32)],
 ) -> Option<SourcePreview> {
     let original = &report.effective_text;
-    let (tokens, _, _, layout) =
-        expand_macros_with_source_layout(&model.source, tokenize(&model.source), gaps);
+    let (tokens, _, _, layout) = expand_macros_with_source_layout(
+        &model.source,
+        tokenize(&model.source),
+        gaps,
+        line_segments,
+    );
     let copy = join_lexemes_recorded(&model.source, &tokens, |_, _| {});
     if copy != *original {
         return None;
@@ -119,7 +124,7 @@ mod tests {
     fn preview(text: &str) -> SourcePreview {
         let report = expand_report(text);
         let model = parse(text);
-        source(&report, &model, &[]).expect("source layout")
+        source(&report, &model, &[], &[]).expect("source layout")
     }
 
     fn preview_with_includes(root: &str, root_text: &str, files: &[(&str, &str)]) -> SourcePreview {
@@ -131,7 +136,7 @@ mod tests {
         let model = ws.get_effective_model(root).unwrap().clone();
         let report = ws.expand_report(root).unwrap().clone();
         let gaps = ws.source_layout_gaps(root);
-        source(&report, &model, &gaps).expect("source layout")
+        source(&report, &model, &gaps, &[]).expect("source layout")
     }
 
     #[test]
@@ -290,7 +295,7 @@ mod tests {
         let text = "var y;\nmodel;\ny=1;\nend;\n";
         let mut report = expand_report(text);
         let model = parse(text);
-        let ok = source(&report, &model, &[]).expect("source layout");
+        let ok = source(&report, &model, &[], &[]).expect("source layout");
         assert!(!report.navigation.is_empty());
         assert!(ok.proven, "{ok:?}");
         assert_eq!(ok.ranges.len(), report.navigation.len());
@@ -298,7 +303,7 @@ mod tests {
         // keeps an empty range list and clears proven so showEffectiveModel
         // returns incomplete with empty navigation instead of indexing past it.
         report.navigation[0].effective_span = Span::new(usize::MAX / 2, usize::MAX / 2 + 1);
-        let short = source(&report, &model, &[]).expect("source layout");
+        let short = source(&report, &model, &[], &[]).expect("source layout");
         assert!(
             short.ranges.len() < report.navigation.len(),
             "{:?} vs {}",

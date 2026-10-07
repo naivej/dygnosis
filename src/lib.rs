@@ -55,6 +55,7 @@ pub mod intern;
 mod lag_fold;
 pub mod lexer;
 pub mod macro_expand;
+mod macro_expr;
 pub mod mcp;
 pub mod model;
 pub mod model_diff;

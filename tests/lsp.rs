@@ -3211,7 +3211,7 @@ async fn compare_models_declines_incomplete_macro_in_root_and_include() {
         .inner()
         .did_open(open_params(
             incomplete.clone(),
-            "@#define n=length([1,2])\nvar y; model; y=@{n}; end;".into(),
+            "@#define n=1:10001\nvar y; model; y=@{n}; end;".into(),
             1,
         ))
         .await;
@@ -3219,7 +3219,7 @@ async fn compare_models_declines_incomplete_macro_in_root_and_include() {
         .inner()
         .did_open(open_params(
             child,
-            "@#define n=length([1,2])\nvar y; model; y=@{n}; end;".into(),
+            "@#define n=1:10001\nvar y; model; y=@{n}; end;".into(),
             1,
         ))
         .await;
@@ -3251,7 +3251,7 @@ async fn compare_models_declines_incomplete_macro_in_root_and_include() {
 }
 
 #[tokio::test]
-async fn show_effective_model_marks_unsupported_macro_incomplete() {
+async fn show_effective_model_evaluates_length() {
     let text = std::fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/macro_action/unsupported_builtin.mod"),
@@ -3264,9 +3264,13 @@ async fn show_effective_model_marks_unsupported_macro_incomplete() {
         .did_open(open_params(uri.clone(), text, 1))
         .await;
     let payload = show_effective_payload(&service, &uri).await;
-    assert_eq!(payload["status"], "incomplete");
-    assert!(payload["effective_text"].as_str().unwrap().contains("@{n}"));
-    assert_eq!(payload["origins"], serde_json::json!([]));
+    assert!(payload.get("status").is_none(), "{payload}");
+    assert!(payload["effective_text"]
+        .as_str()
+        .unwrap()
+        .contains("y = 2"));
+    assert_ne!(payload["origins"], serde_json::json!([]));
+    assert!(payload["macro_messages"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -3773,4 +3777,34 @@ async fn signature_help_emoji_on_the_line_does_not_shift_the_option() {
         .await
         .expect("emoji signature");
     assert_eq!(active_signature_option(&help).as_deref(), Some("order"));
+}
+
+#[tokio::test]
+async fn show_effective_model_stops_after_a_missing_include() {
+    let text = "\
+@#echo \"before\"
+@#include \"absent.inc\"
+@#echo \"after missing\"
+var y; model; y=0; end;
+";
+    let uri = Url::parse("file:///macro_fatal_stop.mod").unwrap();
+    let (service, _socket) = new_service();
+    service
+        .inner()
+        .did_open(open_params(uri.clone(), text.into(), 1))
+        .await;
+    let payload = show_effective_payload(&service, &uri).await;
+    assert_eq!(payload["complete"], false, "{payload}");
+    assert_eq!(payload["status"], "incomplete", "{payload}");
+    let messages = payload["macro_messages"].as_array().unwrap();
+    assert!(messages
+        .iter()
+        .any(|row| row["kind"] == "echo" && row["message"].as_str().unwrap().contains("before")));
+    assert!(!messages
+        .iter()
+        .any(|row| row["message"].as_str().unwrap_or("").contains("after")));
+    assert!(messages[0].get("range").is_some(), "{messages:?}");
+    let effective = payload["effective_text"].as_str().unwrap();
+    assert!(!effective.contains("y = 0"), "{effective}");
+    assert!(!effective.contains("after missing"), "{effective}");
 }

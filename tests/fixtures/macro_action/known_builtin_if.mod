@@ -1,4 +1,4 @@
-// inventory: a pinned builtin beyond this evaluator remains valid and incomplete
+// inventory: isempty of a non-empty array is false, so the else branch is active
 var y;
 model;
 @#if isempty([1])

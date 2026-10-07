@@ -2074,6 +2074,7 @@ fn legacy_expand_payload(payload: &Value) -> Value {
         "root_file",
         "revision",
         "complete",
+        "macro_messages",
     ] {
         object.remove(field);
     }
@@ -2134,7 +2135,9 @@ fn dynare_expand_include_eq_raw_no_splice() {
         "raw expand spliced include: {effective}"
     );
     assert!(effective.contains("y = 1"), "{effective}");
-    assert_eq!(payload["n_equations"], 1);
+    assert_eq!(payload["complete"], false);
+    assert_eq!(payload["status"], "incomplete");
+    assert_eq!(payload["n_equations"], 0);
 }
 
 #[test]
@@ -2593,18 +2596,21 @@ fn dynare_related_files_synthetic_prior_and_irf() {
     files.insert("trans.m".to_string(), "% trans\n".to_string());
     let rows = dynare_related_files(&files["kinds.mod"], Some("kinds.mod"), Some(&files));
     assert_related_shape(&rows, &files);
+    // The missing include stops the root, so the later estimation option is not read.
     let expected = json!([
         {"filename": "missing.inc", "kind": "include", "resolved": false},
         {"filename": "kinds_prior_restrictions.m", "kind": "prior_restrictions", "resolved": true},
-        {"filename": "trans", "kind": "irf_matching_file", "resolved": true},
     ]);
     assert_eq!(compact_related(&rows), expected);
     assert_eq!(
         related_row(&rows, "prior_restrictions", "kinds_prior_restrictions.m")["path"],
         "kinds_prior_restrictions.m"
     );
-    assert_eq!(
-        related_row(&rows, "irf_matching_file", "trans")["path"],
-        "trans.m"
+    assert!(
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["kind"] != "irf_matching_file"),
+        "{rows}"
     );
 }

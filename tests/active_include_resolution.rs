@@ -170,16 +170,18 @@ fn evaluated_include_path_uses_executed_macro_definitions() {
         assert_eq!(preview["navigation"].as_array().unwrap().len(), 1);
         assert_pinned(&directory.0, &source, None);
     }
-    let unsupported = "@#includepath (string) \"visible\"\n@#include \"chosen.inc\"\n";
-    let files = files_for(unsupported);
-    let diagnostics = dynare_diagnose(unsupported, Some(&root), Some(&files));
+    let cast_path = "@#includepath (string) \"visible\"\n@#include \"chosen.inc\"\n";
+    let files = files_for(cast_path);
+    let diagnostics = dynare_diagnose(cast_path, Some(&root), Some(&files));
     assert!(
         !diagnostics.iter().any(|d| d.severity == "ERROR"),
         "{diagnostics:?}"
     );
-    let info = dynare_model_info(unsupported, Some(&root), Some(&files));
-    assert_eq!(info["status"], "incomplete", "{info}");
-    assert_pinned(&directory.0, unsupported, None);
+    assert_eq!(
+        dynare_model_info(cast_path, Some(&root), Some(&files))["n_equations"],
+        1
+    );
+    assert_pinned(&directory.0, cast_path, None);
 }
 
 #[test]
@@ -315,16 +317,16 @@ fn one_loop_index_binds_the_tuple_and_multiple_indices_enforce_arity() {
             assert_eq!(dynare_model_info(&source, None, None)["n_equations"], 1);
         }
     }
-    let unsupported = "@#for(i) in [(1,2)]\n\n@#endfor\nvar y; model; y=@{i[1]}; end;\n";
-    let diagnostics = dynare_diagnose(unsupported, None, None);
+    let tuple_index = "@#for(i) in [(1,2)]\n\n@#endfor\nvar y; model; y=@{i[1]}; end;\n";
+    let diagnostics = dynare_diagnose(tuple_index, None, None);
     assert!(
-        !diagnostics.iter().any(|d| d.severity == "ERROR"),
+        diagnostics
+            .iter()
+            .any(|d| { d.code == "E285" && d.message == "You cannot index a tuple" }),
         "{diagnostics:?}"
     );
-    let info = dynare_model_info(unsupported, None, None);
-    assert_eq!(info["status"], "incomplete", "{info}");
     let directory = Scratch::new();
-    assert_pinned(&directory.0, unsupported, Some("You cannot index a tuple"));
+    assert_pinned(&directory.0, tuple_index, Some("You cannot index a tuple"));
 }
 
 #[test]
@@ -503,8 +505,8 @@ fn only_executed_search_paths_choose_files_and_uncertain_paths_stay_incomplete()
         .iter()
         .any(|d| d.code == "E061"));
     let info = dynare_model_info(source, Some(&root), Some(&files));
-    assert_eq!(info["status"], "incomplete", "{info}");
-    assert!(info.get("n_equations").is_none());
+    assert_eq!(info["n_equations"], 1, "{info}");
+    assert!(info.get("status").is_none(), "{info}");
 }
 
 #[test]

@@ -44,6 +44,14 @@ pub struct Token {
     /// Lexical adjacency inside one interpolation, before its spans are mapped
     /// to the written source. `None` uses the ordinary source-span boundary.
     pub(crate) expanded_adjacent_next: Option<bool>,
+    /// The emitted text had no space before this token. The preview joiner
+    /// must not invent one. Ordinary model tokens stay spaced by kind.
+    pub(crate) glue_left: bool,
+    /// This token was recognized inside a block comment. Its side effects run,
+    /// and its replacement text stays out of the model token stream.
+    pub(crate) comment_context: bool,
+    /// Bytes already charged to the root output budget by value rendering.
+    pub(crate) output_prepaid: usize,
 }
 
 impl Token {
@@ -53,6 +61,9 @@ impl Token {
             span,
             lexeme: None,
             expanded_adjacent_next: None,
+            glue_left: false,
+            comment_context: false,
+            output_prepaid: 0,
         }
     }
 
@@ -62,6 +73,9 @@ impl Token {
             span,
             lexeme: Some(lexeme.into()),
             expanded_adjacent_next: None,
+            glue_left: false,
+            comment_context: false,
+            output_prepaid: 0,
         }
     }
 
@@ -74,7 +88,12 @@ impl Token {
 }
 
 pub fn tokenize(src: &str) -> Vec<Token> {
-    let mut lexer = Lexer { src, pos: 0 };
+    let mut lexer = Lexer {
+        src,
+        pos: 0,
+        in_comment: false,
+        comment_bol: false,
+    };
     let mut tokens = Vec::new();
     loop {
         let tok = lexer.next_token();
@@ -90,11 +109,25 @@ pub fn tokenize(src: &str) -> Vec<Token> {
 struct Lexer<'a> {
     src: &'a str,
     pos: usize,
+    in_comment: bool,
+    comment_bol: bool,
 }
 
 impl Lexer<'_> {
     fn next_token(&mut self) -> Token {
-        self.skip_trivia();
+        loop {
+            if self.in_comment {
+                if let Some(token) = self.next_comment_token() {
+                    return token;
+                }
+                continue;
+            }
+            self.skip_trivia();
+            if self.in_comment {
+                continue;
+            }
+            break;
+        }
         let start = self.pos;
         if self.pos >= self.src.len() {
             return Token::new(TokenKind::Eof, Span::new(start, start));
@@ -221,12 +254,68 @@ impl Lexer<'_> {
                 self.bump();
                 TokenKind::Perpendicular
             }
+            ch if !ch.is_ascii()
+                && (ch as u32) <= 0xFFFF
+                && self
+                    .peek_nth(1)
+                    .is_some_and(|next| next.is_ascii_alphanumeric() || next == '_') =>
+            {
+                // `€x` is one name. A non-BMP character such as an emoji stays
+                // trivia, so `😀😀y` is still the name `y`.
+                self.scan_ident();
+                TokenKind::Ident
+            }
             _ => {
                 self.bump();
                 return self.next_token();
             }
         };
         Token::new(kind, Span::new(start, self.pos))
+    }
+
+    fn next_comment_token(&mut self) -> Option<Token> {
+        loop {
+            if self.pos >= self.src.len() {
+                self.in_comment = false;
+                return None;
+            }
+            let ch = self.peek();
+            if ch == '\n' {
+                self.bump();
+                self.comment_bol = true;
+                continue;
+            }
+            if matches!(ch, ' ' | '\t' | '\r') {
+                self.bump();
+                continue;
+            }
+            if self.starts("*/") {
+                self.pos += 2;
+                self.in_comment = false;
+                self.comment_bol = false;
+                return None;
+            }
+            if self.comment_bol && self.starts("@#") {
+                let start = self.pos;
+                self.scan_macro_dir();
+                self.comment_bol = false;
+                return Some(self.comment_token(TokenKind::MacroDir, start));
+            }
+            if self.starts("@{") {
+                let start = self.pos;
+                self.scan_macro_interp();
+                self.comment_bol = false;
+                return Some(self.comment_token(TokenKind::MacroInterp, start));
+            }
+            self.comment_bol = false;
+            self.bump();
+        }
+    }
+
+    fn comment_token(&self, kind: TokenKind, start: usize) -> Token {
+        let mut token = Token::new(kind, Span::new(start, self.pos));
+        token.comment_context = true;
+        token
     }
 
     fn skip_trivia(&mut self) {
@@ -242,12 +331,9 @@ impl Lexer<'_> {
             }
             if self.starts("/*") {
                 self.pos += 2;
-                if let Some(end) = self.src[self.pos..].find("*/") {
-                    self.pos += end + 2;
-                } else {
-                    self.pos = self.src.len();
-                }
-                continue;
+                self.in_comment = true;
+                self.comment_bol = false;
+                return;
             }
             break;
         }
@@ -271,7 +357,7 @@ impl Lexer<'_> {
             let line_start = self.pos;
             self.skip_line();
             let line = &self.src[line_start..self.pos];
-            if !line.trim_end().ends_with('\\') {
+            if !macro_line_continues(line) {
                 break;
             }
             if self.peek() == '\n' {
@@ -371,6 +457,19 @@ impl Lexer<'_> {
             self.pos += c.len_utf8();
         }
     }
+}
+
+/// Pinned continuation is two backslashes, optional spaces, and an optional
+/// `//` comment. One backslash is ordinary text.
+pub(crate) fn macro_line_continues(line: &str) -> bool {
+    let trimmed = line.trim_end_matches([' ', '\t', '\r']);
+    if trimmed.ends_with("\\\\") {
+        return true;
+    }
+    if let Some(mark) = trimmed.rfind("//") {
+        return trimmed[..mark].trim_end().ends_with("\\\\");
+    }
+    false
 }
 
 #[cfg(test)]

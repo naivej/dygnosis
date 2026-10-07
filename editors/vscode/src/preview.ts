@@ -19,6 +19,18 @@ export interface EffectivePreviewRegistry extends vscode.Disposable {
   get(uri: vscode.Uri): EffectivePreviewSession | undefined;
   replace(session: EffectivePreviewSession, result: unknown): boolean;
 }
+/** Older engines omit this array. Messages stay out of the Problems list. */
+export function appendMacroMessages(output: vscode.OutputChannel, result: unknown): void {
+  if (!record(result) || !Array.isArray(result.macro_messages)) return;
+  for (const item of result.macro_messages) {
+    if (!record(item) || typeof item.message !== "string") continue;
+    const kind = item.kind === "macrovars" ? "echomacrovars" : "echo";
+    const line = record(item.range) && record(item.range.start) && typeof item.range.start.line === "number"
+      ? item.range.start.line + 1
+      : record(item.location) && typeof item.location.line === "number" ? item.location.line : "?";
+    output.appendLine(`@#${kind} (line ${line}): ${item.message.replace(/\n$/, "")}`);
+  }
+}
 function previewText(result: unknown): string | undefined {
   return record(result) && typeof result.effective_text === "string"
     ? (result.status === "incomplete" ? "// INCOMPLETE EXPANSION — this preview is partial.\n" : "") + result.effective_text : undefined;
@@ -73,6 +85,7 @@ export function registerEffectivePreview(service: DygnosisClient): EffectivePrev
       const result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, root, true));
       if (!await validRoot()) return;
       if (!record(result) || typeof result.effective_text !== "string") throw new Error("This engine cannot show the effective model. Update dynare.serverPath or use the bundled binary.");
+      appendMacroMessages(service.output, result);
       const uri = vscode.Uri.from({ scheme: "dygnosis-effective", path: `/${++sequence}/${root.path.split("/").at(-1) ?? "model.mod"}` });
       const rendered = previewText(result)!;
       text.set(uri.toString(), rendered);

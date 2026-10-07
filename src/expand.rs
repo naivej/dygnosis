@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::equations::equations;
 use crate::lexer::{tokenize, Token};
-use crate::macro_expand::{expand_macros_traced_with_status, FrameRec, TokenTrace};
+use crate::macro_expand::{expand_macros_traced_with_lines, FrameRec, MacroMessage, TokenTrace};
 use crate::model_map::{
     EquationOccurrence, SourceFrame, SourceOccurrence, WrittenModelMap, WrittenSegment,
 };
@@ -34,6 +34,10 @@ pub struct ExpandReport {
     /// Entries follow the parsed aggregate/block vectors.
     pub(crate) aggregate_row_origins: Vec<Option<RowOrigin>>,
     pub(crate) heterogeneous_row_origins: Vec<Vec<Option<RowOrigin>>>,
+    /// `@#echo` and `@#echomacrovars` results in execution order. Spans are in
+    /// the written file named by `file`, or in the expanded buffer when `file`
+    /// is absent.
+    pub macro_messages: Vec<MacroMessage>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,6 +100,8 @@ pub(crate) struct SpliceSegment {
     pub spliced: Span,
     pub file: Option<String>,
     pub origin: Span,
+    /// 1-based line of `origin.start` in the written file.
+    pub line: u32,
 }
 
 pub fn expand_report(text: &str) -> ExpandReport {
@@ -104,6 +110,7 @@ pub fn expand_report(text: &str) -> ExpandReport {
         spliced: Span::new(0, source.len()),
         file: None,
         origin: Span::new(0, source.len()),
+        line: 1,
     }];
     expand_report_from_spliced(&source, &map, None)
 }
@@ -123,8 +130,13 @@ pub(crate) fn expand_report_from_spliced(
 ) -> ExpandReport {
     let source = normalize_newlines(spliced);
     let raw = tokenize(&source);
-    let (tokens, traces, arena, incomplete, macro_navigation_complete) =
-        expand_macros_traced_with_status(&source, raw);
+    let line_segments: Vec<(Span, u32)> = map
+        .iter()
+        .map(|segment| (segment.spliced, segment.line))
+        .collect();
+    let (tokens, traces, arena, incomplete, macro_navigation_complete, messages) =
+        expand_macros_traced_with_lines(&source, raw, &line_segments);
+    let macro_messages = locate_macro_messages(map, messages);
     debug_assert_eq!(tokens.len(), traces.len());
     let mut emitted = vec![None; tokens.len()];
     let effective_text = join_lexemes_recorded(&source, &tokens, |index, span| {
@@ -138,8 +150,12 @@ pub(crate) fn expand_report_from_spliced(
     // the same expander, without another parser or any diagnostic changes.
     let verified = if let Some(NavigationSource::Mapped { text, segments }) = written_navigation {
         let text = normalize_newlines(text);
-        let (actual, actual_traces, actual_arena, incomplete, macro_navigation_complete) =
-            expand_macros_traced_with_status(&text, tokenize(&text));
+        let navigation_lines: Vec<(Span, u32)> = segments
+            .iter()
+            .map(|segment| (segment.spliced, segment.line))
+            .collect();
+        let (actual, actual_traces, actual_arena, incomplete, macro_navigation_complete, _) =
+            expand_macros_traced_with_lines(&text, tokenize(&text), &navigation_lines);
         let matches = !incomplete
             && macro_navigation_complete
             && actual.len() == tokens.len()
@@ -238,6 +254,7 @@ pub(crate) fn expand_report_from_spliced(
             heterogeneous_origins: Vec::new(),
             aggregate_row_origins: Vec::new(),
             heterogeneous_row_origins: Vec::new(),
+            macro_messages: macro_messages.clone(),
         };
     }
     debug_assert_eq!(model.equations.len(), ranges.aggregate.len());
@@ -339,7 +356,47 @@ pub(crate) fn expand_report_from_spliced(
         heterogeneous_origins,
         aggregate_row_origins,
         heterogeneous_row_origins,
+        macro_messages,
     }
+}
+
+fn locate_macro_messages(map: &[SpliceSegment], messages: Vec<MacroMessage>) -> Vec<MacroMessage> {
+    messages
+        .into_iter()
+        .map(|message| {
+            let Some(segment) = map
+                .iter()
+                .find(|segment| {
+                    message.span.start >= segment.spliced.start
+                        && message.span.end <= segment.spliced.end
+                })
+                .or_else(|| {
+                    // The directive scanner consumes a newline the splicer added
+                    // after a child that did not end with one. The written
+                    // directive is still the child segment.
+                    map.iter().find(|segment| {
+                        message.span.start >= segment.spliced.start
+                            && message.span.start < segment.spliced.end
+                            && message.span.end > segment.spliced.end
+                            && message.span.end - segment.spliced.end <= 2
+                    })
+                })
+            else {
+                return message;
+            };
+            let shift = segment.origin.start as i64 - segment.spliced.start as i64;
+            let end = message.span.end.min(segment.spliced.end);
+            MacroMessage {
+                kind: message.kind,
+                message: message.message,
+                span: Span::new(
+                    (message.span.start as i64 + shift) as usize,
+                    (end as i64 + shift) as usize,
+                ),
+                file: segment.file.clone(),
+            }
+        })
+        .collect()
 }
 
 fn build_model_map(

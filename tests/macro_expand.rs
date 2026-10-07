@@ -154,7 +154,7 @@ fn tuple_loop_binds_each_element_and_keeps_origins() {
                 )
             })
             .collect::<Vec<_>>(),
-        [("(i,j)", "(1,2)"), ("(i,j)", "(3,4)")]
+        [("(i,j)", "(1, 2)"), ("(i,j)", "(3, 4)")]
     );
     let diags = analyze(&parse(&src));
     assert!(
@@ -234,15 +234,19 @@ fn interpolation_respects_operator_and_identifier_boundaries() {
 }
 
 #[test]
-fn context_sensitive_replacement_is_explicitly_incomplete() {
+fn context_sensitive_replacement_keeps_comments_as_trivia() {
     let source = "@#define rhs=\"y/*note*/+1\"\nvar y; model; y=@{rhs}; end;";
     let report = expand_report(source);
-    assert!(!report.complete);
-    assert_eq!(report.n_equations, 0);
-    assert!(report.effective_text.contains("@{rhs}"));
-    let diagnostics = analyze(&parse(source));
-    assert_eq!(diagnostics.len(), 1);
-    assert_eq!(diagnostics[0].code, "I211");
+    assert!(report.complete, "{}", report.effective_text);
+    assert_eq!(report.n_equations, 1);
+    assert!(
+        report.effective_text.contains("y = y+1") || report.effective_text.contains("y=y+1"),
+        "{}",
+        report.effective_text
+    );
+    assert!(!analyze(&parse(source))
+        .iter()
+        .any(|diag| diag.code == "I211"));
 }
 
 #[test]
@@ -260,40 +264,36 @@ fn undefined_bare_define_reports_macro_error_at_directive() {
 }
 
 #[test]
-fn valid_unsupported_macro_stays_explicitly_incomplete() {
+fn valid_length_builtin_expands_for_both_transports() {
     let src = action_fixture("unsupported_builtin");
     let report = expand_report(&src);
-    assert!(!report.complete);
-    assert_eq!(report.n_equations, 0);
+    assert!(report.complete, "{}", report.effective_text);
+    assert_eq!(report.n_equations, 1);
     assert!(
-        report.effective_text.contains("@{n}"),
+        report.effective_text.contains("y = 2"),
         "{}",
         report.effective_text
     );
-    assert_eq!(analyze(&parse(&src))[0].code, "I211");
+    assert!(!analyze(&parse(&src)).iter().any(|diag| diag.code == "I211"));
     let public = dygnosis::mcp::dynare_expand(&src, None, None);
-    assert_eq!(public["status"], "incomplete");
-    assert_eq!(public["n_equations"], 0);
-    assert_eq!(
-        dygnosis::mcp::dynare_model_info(&src, None, None)["status"],
-        "incomplete"
+    assert_eq!(public["complete"], true);
+    assert!(public.get("status").is_none(), "{public}");
+    assert_eq!(public["n_equations"], 1);
+    let info = dygnosis::mcp::dynare_model_info(&src, None, None);
+    assert!(info.get("status").is_none(), "{info}");
+    assert_eq!(info["n_equations"], 1);
+    let equations = dygnosis::mcp::dynare_equations(&src, None, None, None, None);
+    assert!(equations.get("status").is_none(), "{equations}");
+    let compared = dygnosis::mcp::dynare_compare_models(
+        &src,
+        "var y; model; y=0; end;",
+        None,
+        None,
+        None,
+        None,
+        None,
     );
-    assert_eq!(
-        dygnosis::mcp::dynare_equations(&src, None, None, None, None)["status"],
-        "incomplete"
-    );
-    assert_eq!(
-        dygnosis::mcp::dynare_compare_models(
-            &src,
-            "var y; model; y=0; end;",
-            None,
-            None,
-            None,
-            None,
-            None
-        )["status"],
-        "incomplete"
-    );
+    assert_ne!(compared["status"], "incomplete", "{compared}");
     let extraction = dygnosis::mcp::dynare_extract(
         &src,
         None,
@@ -303,29 +303,29 @@ fn valid_unsupported_macro_stays_explicitly_incomplete() {
         None,
     )
     .expect("extract result");
-    assert_eq!(extraction["status"], "unsupported_context");
+    assert_ne!(extraction["status"], "incomplete");
 }
 
 #[test]
 fn incomplete_macro_analysis_is_visible_in_formatted_lines_and_mcp_diagnosis() {
-    let src = action_fixture("unsupported_builtin");
-    let path = "tests/fixtures/macro_action/unsupported_builtin.mod";
-    let set = dygnosis::check_file_with_origins(&src, path);
+    let src = "@#define nums = 1:10001\nvar y; model; y=@{nums}; end;\n";
+    let path = "limit.mod";
+    let set = dygnosis::check_file_with_origins(src, path);
     let note = set
         .diagnostics
         .iter()
         .find(|diag| diag.code == "I211")
         .expect("incomplete-analysis Information");
     assert_eq!(note.span.start, src.find("@#define").unwrap() as u32);
-    let printed = dygnosis::format_check_lines_with_origins(path, &set, &src);
+    let printed = dygnosis::format_check_lines_with_origins(path, &set, src);
     assert!(printed.contains("INFO [I211]"), "{printed}");
     assert!(!printed.contains("No issues found"), "{printed}");
-    let mcp = dygnosis::mcp::dynare_diagnose(&src, None, None);
+    let mcp = dygnosis::mcp::dynare_diagnose(src, None, None);
     let item = mcp
         .iter()
         .find(|diag| diag.code == "I211")
         .expect("MCP I211");
-    assert_eq!((item.line, item.column), (2, 1));
+    assert_eq!((item.line, item.column), (1, 1));
 }
 
 #[test]
@@ -377,7 +377,7 @@ fn incomplete_macro_with_load_file_withholds_untrusted_workspace_facts() {
     let (incomplete_errors, incomplete_codes) = disk_codes(incomplete);
     assert_eq!(incomplete_errors, 0, "{incomplete_codes:?}");
     assert!(
-        incomplete_codes.iter().any(|(code, _)| code == "I211"),
+        incomplete_codes.iter().all(|(code, _)| code != "I211"),
         "{incomplete_codes:?}"
     );
     assert!(
@@ -385,16 +385,21 @@ fn incomplete_macro_with_load_file_withholds_untrusted_workspace_facts() {
         "{incomplete_codes:?}"
     );
     let mapped_incomplete = mapped(incomplete, Some("p_1 0.5\n"));
-    assert_eq!(mapped_incomplete.len(), 1, "{mapped_incomplete:?}");
-    assert_eq!(mapped_incomplete[0].code, "I211");
+    assert!(
+        mapped_incomplete.iter().all(|item| item.code != "I211"),
+        "{mapped_incomplete:?}"
+    );
+    assert!(
+        mapped_incomplete.iter().all(|item| item.code != "W204"),
+        "{mapped_incomplete:?}"
+    );
 
-    // The pinned preprocessor skips this false branch. Until `length` can be
-    // evaluated here, the workspace must not claim its file is missing.
+    // `length([])` is 0, so the load stays dormant and the missing file is not read.
     let uncertain_branch = "@#if length([])\nload_params_and_steady_state('missing_values.txt');\n@#endif\nvar y; model; y=0; end;\n";
     let (branch_errors, branch_codes) = disk_codes(uncertain_branch);
     assert_eq!(branch_errors, 0, "{branch_codes:?}");
     assert!(
-        branch_codes.iter().any(|(code, _)| code == "I211"),
+        branch_codes.iter().all(|(code, _)| code != "I211"),
         "{branch_codes:?}"
     );
     assert!(
@@ -402,8 +407,12 @@ fn incomplete_macro_with_load_file_withholds_untrusted_workspace_facts() {
         "{branch_codes:?}"
     );
     let mapped_branch = mapped(uncertain_branch, None);
-    assert_eq!(mapped_branch.len(), 1, "{mapped_branch:?}");
-    assert_eq!(mapped_branch[0].code, "I211");
+    assert!(
+        mapped_branch
+            .iter()
+            .all(|item| item.code != "E306" && item.code != "I211"),
+        "{mapped_branch:?}"
+    );
 
     std::fs::write(&values, "ghost 0.5\n").expect("write unknown name");
     let (_ghost_errors, ghost_codes) = disk_codes(complete);
@@ -433,8 +442,12 @@ fn incomplete_macro_with_load_file_withholds_untrusted_workspace_facts() {
 
 #[test]
 fn recursive_macro_function_and_large_loop_do_not_claim_complete_views() {
+    let shadowed = "@#define f(x)=f(x)\nvar y; model; y=@{f(1)}; end;";
+    let shadowed_diags = analyze(&parse(shadowed));
+    assert_eq!(shadowed_diags[0].code, "E063", "{shadowed_diags:?}");
+    assert_eq!(shadowed_diags[0].message, "Unknown variable x");
     for src in [
-        "@#define f(x)=f(x)\nvar y; model; y=@{f(1)}; end;",
+        "@#define f()=f()\nvar y; model; y=@{f()}; end;",
         "@#define nums=1:10001\nvar y; model; @#for i in nums\ny=0;\n@#endfor\nend;",
     ] {
         let report = expand_report(src);
@@ -493,9 +506,10 @@ fn recognized_unevaluated_builtins_and_casts_do_not_claim_unknown_function() {
         "@#define x=(real) 1\nvar y; model; y=@{x}; end;".to_string(),
     ] {
         let report = expand_report(&src);
-        assert!(!report.complete, "{}", report.effective_text);
-        let diags = analyze(&parse(&src));
-        assert_eq!(diags[0].code, "I211", "{diags:?}");
+        assert!(report.complete, "{}", report.effective_text);
+        assert!(!analyze(&parse(&src))
+            .iter()
+            .any(|diag| diag.code == "I211" || diag.code == "E063"));
     }
 }
 
@@ -504,10 +518,10 @@ fn valid_array_and_string_operators_stay_incomplete_without_type_errors() {
     for expression in ["[1]+[2]", "\"a\"<\"b\""] {
         let source = format!("@#define x={expression}\nvar y; model; y=1; end;");
         let report = expand_report(&source);
-        assert!(!report.complete, "{expression}: {}", report.effective_text);
-        let diagnostics = analyze(&parse(&source));
-        assert_eq!(diagnostics.len(), 1, "{expression}: {diagnostics:?}");
-        assert_eq!(diagnostics[0].code, "I211");
+        assert!(report.complete, "{expression}: {}", report.effective_text);
+        assert!(!analyze(&parse(&source))
+            .iter()
+            .any(|diag| diag.code == "I211" || diag.code == "E285"));
     }
 }
 
@@ -528,13 +542,15 @@ fn unused_malformed_function_refuses_before_model_analysis() {
 fn valid_unsupported_conditional_retains_source_without_false_error() {
     let src = "var y; model;\n@#if length([1])\ny=1;\n@#else\ny=0;\n@#endif\nend;";
     let report = expand_report(src);
-    assert!(!report.complete);
-    assert_eq!(report.n_equations, 0);
-    assert!(report.effective_text.contains("@#if length([1])"));
-    let note = analyze(&parse(src));
-    assert_eq!(note.len(), 1, "{note:?}");
-    assert_eq!(note[0].code, "I211");
-    assert_eq!(note[0].span.start, src.find("@#if").unwrap() as u32);
+    assert!(report.complete, "{}", report.effective_text);
+    assert_eq!(report.n_equations, 1);
+    assert!(
+        report.effective_text.contains("y = 1"),
+        "{}",
+        report.effective_text
+    );
+    assert!(!report.effective_text.contains("y = 0"));
+    assert!(!analyze(&parse(src)).iter().any(|diag| diag.code == "I211"));
 }
 
 #[test]
@@ -555,6 +571,72 @@ fn interpolation_is_macro_interp_token() {
             TokenKind::RParen,
             TokenKind::Eof,
         ]
+    );
+}
+
+#[test]
+fn echo_messages_save_text_and_comment_directives_follow_the_preprocessor() {
+    let source =
+        "@#define x = 3\n@#echo \"hi\"\n@#echo x\n@#echomacrovars\nvar y; model; y=@{x}; end;\n";
+    let report = expand_report(source);
+    assert!(report.complete, "{}", report.effective_text);
+    assert_eq!(
+        report.macro_messages.len(),
+        3,
+        "{:?}",
+        report.macro_messages
+    );
+    assert_eq!(report.macro_messages[0].kind, "echo");
+    assert_eq!(report.macro_messages[0].message, "hi");
+    assert_eq!(report.macro_messages[1].message, "3");
+    assert!(
+        report.macro_messages[2].message.contains("x = 3"),
+        "{:?}",
+        report.macro_messages[2]
+    );
+    let public = dygnosis::mcp::dynare_expand(source, None, None);
+    assert_eq!(public["macro_messages"][0]["message"], "hi");
+    assert_eq!(public["macro_messages"][0]["location"]["line"], 2);
+
+    let save = "@#define x = 3\n@#echomacrovars(save)\nvar y; model; y=1; end;\n";
+    let saved = expand_report(save);
+    assert!(
+        saved.effective_text.contains("macrovars_line_2"),
+        "{}",
+        saved.effective_text
+    );
+    assert!(saved.macro_messages.is_empty());
+
+    let commented = "/*\n@#define x = 1\n*/\nvar y; model; y=@{x}; end;";
+    let commented_report = expand_report(commented);
+    assert!(
+        commented_report.complete,
+        "{}",
+        commented_report.effective_text
+    );
+    assert!(
+        commented_report.effective_text.contains("y = 1"),
+        "{}",
+        commented_report.effective_text
+    );
+    assert!(!commented_report.effective_text.contains("@#define"));
+
+    let mapped = "@#define rows = [i for i in [1,2]]\nvar y; model; y=@{i}; end;";
+    let mapped_report = expand_report(mapped);
+    assert!(mapped_report.complete, "{}", mapped_report.effective_text);
+    assert!(
+        mapped_report.effective_text.contains("y = 2"),
+        "{}",
+        mapped_report.effective_text
+    );
+
+    let bound = "/*\n@{[i for i in [1,2]]}\n*/\nvar y; model; y=@{i}; end;";
+    let bound_report = expand_report(bound);
+    assert!(bound_report.complete, "{}", bound_report.effective_text);
+    assert!(
+        bound_report.effective_text.contains("y = 2"),
+        "{}",
+        bound_report.effective_text
     );
 }
 
@@ -1167,19 +1249,30 @@ fn quoted_failures_keep_proven_macro_errors_and_unsafe_valid_values_incomplete()
     for source in [
         "@#define v=\"left',sector='right\"\nvar y(long_name='@{v}'); model; y=1; end;",
         "var y; model; [name='eq@{length([1,2])}'] y=1; end;",
-        "var y; model; [name='eq@{missing'] y=1; end;",
     ] {
         let report = expand_report(source);
-        assert!(!report.complete, "{source}");
-        assert_eq!(report.navigation, []);
-        let diagnostics = analyze(&parse(source));
-        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-        assert_eq!(diagnostics[0].code, "I211");
-        assert_eq!(
-            dygnosis::dynare_equations(source, None, None, None, None)["status"],
-            "incomplete"
+        assert!(report.complete, "{source}: {}", report.effective_text);
+        assert!(!analyze(&parse(source))
+            .iter()
+            .any(|row| row.code == "I211" || row.code.starts_with('E')));
+        assert!(
+            dygnosis::dynare_equations(source, None, None, None, None)
+                .get("status")
+                .is_none(),
+            "{source}"
         );
     }
+    let limited = "var y; model; [name='eq@{1:10001}'] y=1; end;";
+    let report = expand_report(limited);
+    assert!(!report.complete, "{limited}");
+    assert_eq!(report.navigation, []);
+    let diagnostics = analyze(&parse(limited));
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "I211");
+    assert_eq!(
+        dygnosis::dynare_equations(limited, None, None, None, None)["status"],
+        "incomplete"
+    );
     let inactive = "@#if 0\nvar z(long_name='@{missing}');\n@#endif\nvar y; model; y=1; end;";
     assert!(expand_report(inactive).complete);
     assert!(!analyze(&parse(inactive))
@@ -1344,25 +1437,6 @@ fn assert_membership_branch(condition: &str, expect_hit: bool) {
     );
 }
 
-fn assert_membership_incomplete(condition: &str) {
-    let source = membership_branch(condition);
-    let report = expand_report(&source);
-    assert!(
-        !report.complete,
-        "{condition}: expected incomplete {}",
-        report.effective_text
-    );
-    let diagnostics = analyze(&parse(&source));
-    assert!(
-        diagnostics.iter().any(|row| row.code == "I211"),
-        "{condition}: expected I211, got {diagnostics:?}"
-    );
-    assert!(
-        !diagnostics.iter().any(|row| row.code == "E285"),
-        "{condition}: unexpected E285 {diagnostics:?}"
-    );
-}
-
 #[test]
 fn macro_membership_hits_misses_types_and_nesting() {
     assert_membership_branch(r#""8" in ["8"]"#, true);
@@ -1378,13 +1452,13 @@ fn macro_membership_hits_misses_types_and_nesting() {
     assert_membership_branch("2 in (1,2)", true);
     assert_membership_branch("3 in (1,2)", false);
     // A still-Range right operand is incomplete until range materialization.
-    assert_membership_incomplete("1 in 1:3");
-    assert_membership_incomplete("0 in 1:3");
-    assert_membership_incomplete("1.0 in 1:3");
+    assert_membership_branch("1 in 1:3", true);
+    assert_membership_branch("0 in 1:3", false);
+    assert_membership_branch("1.0 in 1:3", true);
     assert_membership_branch("1 in [1,2,3]", true);
     assert_membership_branch("1 in [1:3]", false);
     assert_membership_branch("(1:3) in [1:3]", true);
-    assert_membership_branch("(1:3) in [[1,2,3]]", false);
+    assert_membership_branch("(1:3) in [[1,2,3]]", true);
     assert_membership_branch("(1:3) in [1,2,3]", false);
     assert_membership_branch("1+1 in [2]", true);
     assert_membership_branch("1 in [1] == true", true);
@@ -1504,8 +1578,8 @@ fn macro_membership_honesty_and_reach_audit() {
         return;
     };
 
-    // Dynare materializes `1:3` to an array before `contains`, so `1 in 1:3`
-    // hits there. This evaluator leaves a still-Range right operand incomplete.
+    // Dynare materializes `1:3` before `in`, so `1 in 1:3` is true and
+    // `1 in [1:3]` is false because the outer array holds one nested array.
     for (condition, expect_hit) in [
         (r#""8"in["8"]"#, true),
         ("1in[1]", true),
@@ -1640,6 +1714,20 @@ fn macro_membership_honesty_and_reach_audit() {
             "Second argument of `in` operator must be an array",
             false,
         ),
+        (
+            "chained-index",
+            "@#define v = [10, 20]\nvar y; model; y = @{v[1][1]}; end;".to_string(),
+            "E062",
+            "syntax error, unexpected LBRACKET",
+            true,
+        ),
+        (
+            "parenthesized-index",
+            "@#define v = [10, 20]\nvar y; model; y = @{(v)[1]}; end;".to_string(),
+            "E062",
+            "syntax error, unexpected LBRACKET",
+            true,
+        ),
     ];
     for (label, source, code, needle, should_fire) in cases {
         let ours = analyze(&parse(&source));
@@ -1751,27 +1839,28 @@ fn incomplete_reasons_name_expression_limit_and_official_errors() {
         "{}",
         e061.message
     );
-    assert!(!parse(missing).macro_incomplete());
-
-    let unsup = "@#define n = length([1,2])\nvar y; model; y=@{n}; end;\n";
-    let diags = analyze(&parse(unsup));
-    assert_eq!(diags.len(), 1, "{diags:?}");
-    assert_eq!(diags[0].code, "I211");
-    assert_eq!(
-        diags[0].message,
-        "Macro expression 'length([1,2])' could not be evaluated; some model checks were withheld."
+    let mut workspace = dygnosis::Workspace::new();
+    workspace.update_document("absent_root.mod", missing);
+    let stopped = workspace.get_effective_model("absent_root.mod").unwrap();
+    assert!(
+        stopped.macro_incomplete(),
+        "an unspliced include stops expansion"
     );
-    assert_eq!(parse(unsup).incomplete_reasons.len(), 1);
+    assert!(
+        stopped.written_equations.is_empty(),
+        "equations after a missing include are not parsed"
+    );
+
+    let supported = "@#define n = length([1,2])\nvar y; model; y=@{n}; end;\n";
+    assert!(expand_report(supported).complete);
+    assert!(!analyze(&parse(supported)).iter().any(|d| d.code == "I211"));
+    assert!(parse(supported).incomplete_reasons.is_empty());
 
     let range_in = "@#if 1 in 1:3\nvar y; model; y=0; end;\n@#endif\n";
-    let diags = analyze(&parse(range_in));
-    assert_eq!(diags[0].code, "I211");
-    assert_eq!(
-        diags[0].message,
-        "Macro expression '1 in 1:3' could not be evaluated; some model checks were withheld."
-    );
+    assert!(expand_report(range_in).complete);
+    assert!(!analyze(&parse(range_in)).iter().any(|d| d.code == "I211"));
 
-    let depth = "@#define f(x)=f(x)\nvar y; model; y=@{f(1)}; end;";
+    let depth = "@#define f()=f()\nvar y; model; y=@{f()}; end;";
     assert_eq!(
         analyze(&parse(depth))[0].message,
         "Macro expansion stopped at the expression depth limit; some model checks were withheld."
@@ -1800,12 +1889,23 @@ fn incomplete_reasons_dedupe_loops_keep_independent_failures_and_skip_dormant() 
 
     let two =
         "@#define a = length([1])\n@#define b = length([2])\nvar y; model; y=@{a}+@{b}; end;\n";
-    let diags = analyze(&parse(two));
-    assert_eq!(diags.len(), 2, "{diags:?}");
-    assert!(diags.iter().all(|d| d.code == "I211"));
-    assert!(diags[0].span.start < diags[1].span.start);
-    assert!(diags[0].message.contains("length([1])"));
-    assert!(diags[1].message.contains("length([2])"));
+    let report = expand_report(two);
+    assert!(report.complete, "{}", report.effective_text);
+    assert!(
+        report.effective_text.contains("1") && report.effective_text.contains('+'),
+        "{}",
+        report.effective_text
+    );
+    assert!(!analyze(&parse(two)).iter().any(|d| d.code == "I211"));
+
+    let two_limits = "@#define a = 1:10001\n@#define b = 1:10002\nvar y; model; y=0; end;\n";
+    let diags = analyze(&parse(two_limits));
+    assert_eq!(
+        diags.iter().filter(|d| d.code == "I211").count(),
+        1,
+        "{diags:?}"
+    );
+    assert!(diags[0].message.contains("range size"), "{diags:?}");
 
     let dormant = "@#if 0\ny=@{missing};\n@#endif\nvar y; model; y=0; end;\n";
     assert!(!parse(dormant).macro_incomplete());
@@ -1863,7 +1963,7 @@ fn incomplete_reason_records_match_diagnostics_for_hover() {
     use dygnosis::model_info::incomplete_reason_records;
     use dygnosis::workspace::Workspace;
 
-    let unsup = "@#define n = length([1])\nvar y; model; y=@{n}; end;\n";
+    let unsup = "@#define nums = 1:10001\nvar y; model; y=0; end;\n";
     let model = parse(unsup);
     let diags = analyze(&model);
     let reasons = incomplete_reason_records(&model, None);
@@ -1897,16 +1997,16 @@ fn incomplete_reason_records_match_diagnostics_for_hover() {
 
 #[test]
 fn quoted_incomplete_reason_names_the_interpolation_that_failed() {
-    let source = "var y; model; [name='eq@{1}_@{length([1,2])}'] y=1; end;";
+    let source = "var y; model; [name='eq@{1}_@{1:10001}'] y=1; end;";
     let model = parse(source);
     let reason = analyze(&model)
         .into_iter()
         .find(|diagnostic| diagnostic.code == "I211")
         .unwrap();
-    assert!(reason.message.contains("'length([1,2])'"), "{reason:?}");
+    assert!(reason.message.contains("range size"), "{reason:?}");
     assert_eq!(
         &source[reason.span.start as usize..reason.span.end as usize],
-        "@{length([1,2])}"
+        "@{1:10001}"
     );
 }
 

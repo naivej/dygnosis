@@ -464,6 +464,13 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
         // An unevaluated macro can change declarations, command options, and
         // which includes exist. Keep only the macro result already established
         // by analyze; file and companion checks would use an unfinished tree.
+        // `@#includepath` that is not a directory is E304 and stops before the
+        // next include, the same way `IncludePath::interpret` does.
+        let include_dirs = crate::check_d_open::check_workspace_d_open(ws, &model, abs_path);
+        if include_dirs.iter().any(|diag| diag.code == "E304") {
+            diags.retain(|diag| diag.code != "I211");
+            diags.extend(include_dirs.into_iter().filter(|diag| diag.code == "E304"));
+        }
         let mut source_texts = HashMap::new();
         let origins = diags
             .iter()

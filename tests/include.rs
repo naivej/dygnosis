@@ -102,9 +102,14 @@ fn bare_identifier_include_is_skipped() {
 
 #[test]
 fn backslash_continued_include_is_recorded() {
-    let model = parse("@#include \\\n\"helper.inc\"\nvar y;\n");
+    let model = parse("@#include \\\\\n\"helper.inc\"\nvar y;\n");
     assert_eq!(model.includes.len(), 1);
     assert_eq!(model.includes[0].filename, "helper.inc");
+    let single = parse("@#include \\\n\"helper.inc\"\nvar y;\n");
+    assert!(single
+        .includes
+        .iter()
+        .all(|include| include.filename != "helper.inc"));
 }
 
 #[test]
@@ -293,9 +298,12 @@ fn cycle_records_include_swff_mod() {
     no_include_codes(ws.get_model(uri).unwrap());
     let effective = ws.get_effective_model(uri).unwrap();
     assert!(
-        !effective.source.contains("@#include"),
-        "cyclic edge must splice empty, leftover @#: {}",
-        effective.source
+        effective.macro_incomplete(),
+        "a cyclic include is fatal and must stop the root"
+    );
+    assert!(
+        effective.written_equations.is_empty(),
+        "equations after the cyclic include must not be parsed"
     );
 }
 
@@ -425,6 +433,13 @@ fn effective_unresolved_splices_empty() {
     let uri = virtual_uri("empty_splice.mod");
     ws.update_document(&uri, src);
     let effective = ws.get_effective_model(&uri).unwrap();
-    assert!(effective.includes.is_empty());
     assert!(effective.param_assignments.is_empty());
+    assert!(
+        effective.macro_incomplete(),
+        "a missing include is fatal and must stop the root"
+    );
+    assert!(
+        effective.written_equations.is_empty(),
+        "equations after the missing include must not be parsed"
+    );
 }

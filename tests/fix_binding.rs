@@ -555,7 +555,7 @@ async fn refactor_template_carries_the_open_version_and_stays_separate() {
         .expect("template");
     assert_eq!(template.kind.as_ref(), Some(&CodeActionKind::REFACTOR));
     assert_ne!(template.is_preferred, Some(true));
-    let edits = action_edits(&template);
+    let edits = action_edits(template);
     assert_eq!(edits.len(), 1);
     assert_eq!(edits[0].1, Some(1));
     assert!(refactor

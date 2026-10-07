@@ -1753,8 +1753,17 @@ impl Backend {
         let Some(model_b) = inner.workspace.get_effective_model(uri_b.as_str()).cloned() else {
             return json!({"error": format!("No parsed model for uri_b: {uri_b}"), "code": "URI_B_NOT_FOUND"});
         };
-        if model_a.macro_incomplete() || model_b.macro_incomplete() {
-            return crate::mcp::macro_incomplete_status();
+        if let Some(status) = crate::mcp::incomplete_model_status(
+            &model_a,
+            inner.workspace.includes_complete(uri_a.as_str()),
+        )
+        .or_else(|| {
+            crate::mcp::incomplete_model_status(
+                &model_b,
+                inner.workspace.includes_complete(uri_b.as_str()),
+            )
+        }) {
+            return status;
         }
         let diff = compare_models_with_sources(
             &model_a,
@@ -1836,6 +1845,9 @@ impl Backend {
         let source_gaps = matches!(requested, Some("source"))
             .then(|| inner.workspace.source_layout_gaps(uri.as_str()))
             .unwrap_or_default();
+        let source_lines = matches!(requested, Some("source"))
+            .then(|| inner.workspace.source_line_segments(uri.as_str()))
+            .unwrap_or_default();
         let model = matches!(requested, Some("readable") | Some("source"))
             .then(|| inner.workspace.get_effective_model(uri.as_str()))
             .flatten();
@@ -1847,8 +1859,10 @@ impl Backend {
             Some("readable") => {
                 crate::preview_layout::readable(&report, model).map(DisplayLayout::Readable)
             }
-            Some("source") => crate::preview_source::source(&report, model, &source_gaps)
-                .map(DisplayLayout::Source),
+            Some("source") => {
+                crate::preview_source::source(&report, model, &source_gaps, &source_lines)
+                    .map(DisplayLayout::Source)
+            }
             _ => None,
         });
         let source_unproven = matches!(
@@ -1882,6 +1896,7 @@ impl Backend {
                 .iter().filter_map(|path| Url::from_file_path(path).ok()).collect::<Vec<_>>(),
             "effective_text": effective_text,
             "origins": origins,
+            "macro_messages": lsp_macro_messages(&inner.workspace, uri.as_str(), &report),
         });
         result["navigation"] = if complete {
             let index = LineIndex::new(effective_text);
@@ -2676,7 +2691,7 @@ pub fn initialize_result() -> InitializeResult {
                 "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true},
                 "modelInfoChanged": true,
                 "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1},
-                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true},
+                "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
                 ,"projectDiagnostics": {"schema_version":project::SCHEMA_VERSION,"status_command":"dynare/projectStatus","recheck_command":"dynare/recheckProject","cancel_command":"dynare/cancelProject","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/projectStatusChanged","typing_pause_ms":250}
             }})),
@@ -3031,6 +3046,38 @@ fn lsp_pos_from_scalar(index: &LineIndex, text: &str, line: u32, character: u32)
     let byte = index.offset(text, crate::span::Position { line, character });
     let pos = index.position_utf16(text, byte);
     Position::new(pos.line, pos.character)
+}
+
+fn lsp_macro_messages(
+    workspace: &crate::workspace::Workspace,
+    root: &str,
+    report: &crate::expand::ExpandReport,
+) -> Vec<serde_json::Value> {
+    report
+        .macro_messages
+        .iter()
+        .map(|message| {
+            let source = message
+                .file
+                .as_deref()
+                .and_then(|file| workspace.get_source(file))
+                .or_else(|| workspace.get_source(root));
+            let mut row = serde_json::json!({
+                "kind": message.kind,
+                "message": message.message,
+            });
+            if let Some(source) = source {
+                let index = LineIndex::new(source);
+                row["range"] = serde_json::json!(span_range(&index, source, message.span));
+            }
+            if let Some(file) = &message.file {
+                if let Some(uri) = file_url_from_path_key(file) {
+                    row["uri"] = serde_json::json!(uri);
+                }
+            }
+            row
+        })
+        .collect()
 }
 
 fn span_range(index: &LineIndex, text: &str, span: Span) -> Range {

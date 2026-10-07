@@ -83,7 +83,70 @@ struct SplicedSource {
     include_search: Vec<PathBuf>,
 }
 
-type IncludeTargets = HashMap<(String, Span), Option<String>>;
+#[derive(Clone, Debug)]
+struct IncludeHit {
+    path: String,
+    bindings: Vec<(String, String)>,
+}
+
+/// Executed resolutions of one written include directive.
+#[derive(Clone, Debug, Default)]
+struct SitePlan {
+    hits: Vec<IncludeHit>,
+    /// Missing, cyclic, or not certain. The directive stays in the spliced text.
+    unresolved: bool,
+}
+
+type IncludeTargets = HashMap<(String, Span), SitePlan>;
+
+fn note_unresolved(targets: &mut IncludeTargets, site: (String, Span)) {
+    targets.entry(site).or_default().unresolved = true;
+}
+
+fn note_resolved(
+    targets: &mut IncludeTargets,
+    site: (String, Span),
+    path: String,
+    bindings: &[(String, String)],
+) {
+    let plan = targets.entry(site).or_default();
+    if plan.hits.last().is_some_and(|hit| hit.path == path) {
+        return;
+    }
+    plan.hits.push(IncludeHit {
+        path,
+        bindings: bindings.to_vec(),
+    });
+}
+
+/// Nesting of `@#if` / `@#for` before `byte`. A top-level directive has depth 0.
+fn directive_depth(source: &str, byte: u32) -> i32 {
+    let end = (byte as usize).min(source.len());
+    let mut depth = 0i32;
+    for line in source[..end].split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("@#if") || trimmed.starts_with("@#for") {
+            depth += 1;
+        } else if trimmed.starts_with("@#endif") || trimmed.starts_with("@#endfor") {
+            depth = depth.saturating_sub(1);
+        }
+    }
+    depth
+}
+
+/// End of the earliest missing or cyclic include that is not inside `@#if` / `@#for`.
+/// An include inside a branch still reports E061, and the equations after that
+/// branch stay in the root.
+fn top_level_fatal_cut(source: &str, records: &IncludeRecords) -> Option<u32> {
+    records
+        .unresolved
+        .iter()
+        .map(|item| item.span)
+        .chain(records.cycles.iter().map(|item| item.span))
+        .filter(|span| directive_depth(source, span.start) == 0)
+        .map(|span| span.end)
+        .min()
+}
 
 struct IncludeWalk {
     records: IncludeRecords,
@@ -656,7 +719,33 @@ impl Workspace {
         let key = self.ensure_loaded(uri)?;
         if !self.effective.contains_key(&key) {
             let spliced = self.spliced_source(&key);
-            let model = parse(&spliced.text);
+            let root = self
+                .docs
+                .get(&key)
+                .map(|doc| doc.source.clone())
+                .unwrap_or_default();
+            let fatal = self.records.get(&key).and_then(|records| {
+                let span = records
+                    .unresolved
+                    .first()
+                    .map(|item| item.span)
+                    .or_else(|| records.cycles.first().map(|item| item.span))?;
+                Some((span, top_level_fatal_cut(&root, records)))
+            });
+            let mut model = if let Some((_, Some(cut))) = fatal {
+                let cut = (cut as usize).min(root.len());
+                parse(&root[..cut])
+            } else {
+                let lines: Vec<_> = spliced
+                    .segments
+                    .iter()
+                    .map(|segment| (segment.spliced, segment.line))
+                    .collect();
+                crate::parser::parse_with_lines(&spliced.text, &lines)
+            };
+            if let Some((span, _)) = fatal {
+                model.macro_incomplete_span.get_or_insert(span);
+            }
             self.effective.insert(key.clone(), model);
         }
         self.effective.get(&key)
@@ -711,11 +800,42 @@ impl Workspace {
         let key = self.ensure_loaded(uri)?;
         if !self.expand.contains_key(&key) {
             let spliced = self.spliced_source(&key);
-            let report = expand_report_from_spliced(
+            let root = self
+                .docs
+                .get(&key)
+                .map(|doc| doc.source.clone())
+                .unwrap_or_default();
+            let (incomplete, cut) = self
+                .records
+                .get(&key)
+                .map(|records| {
+                    (
+                        !records.unresolved.is_empty() || !records.cycles.is_empty(),
+                        top_level_fatal_cut(&root, records),
+                    )
+                })
+                .unwrap_or((false, None));
+            let mut report = expand_report_from_spliced(
                 &spliced.text,
                 &spliced.segments,
                 Some(&spliced.navigation),
             );
+            if incomplete {
+                report.complete = false;
+                report.n_equations = 0;
+                if let Some(cut) = cut {
+                    let cut = (cut as usize).min(spliced.text.len()).min(root.len());
+                    let prefix = if spliced.text.as_bytes().get(..cut) == root.as_bytes().get(..cut)
+                    {
+                        &spliced.text[..cut]
+                    } else {
+                        &root[..cut]
+                    };
+                    let prefix_report = expand_report_from_spliced(prefix, &[], None);
+                    report.effective_text = prefix_report.effective_text;
+                    report.macro_messages = prefix_report.macro_messages;
+                }
+            }
             self.expand.insert(key.clone(), report);
         }
         self.expand.get(&key)
@@ -994,11 +1114,24 @@ impl Workspace {
     }
 
     fn build_companions(&mut self, root_key: &str) -> Vec<CompanionRecord> {
-        let Some(doc) = self.docs.get(root_key) else {
+        let _ = self.spliced_source(root_key);
+        let Some(root) = self.docs.get(root_key).map(|doc| doc.source.clone()) else {
             return Vec::new();
         };
-        let source = doc.model.source.clone();
-        let model = doc.model.clone();
+        let cut = self
+            .records
+            .get(root_key)
+            .and_then(|records| top_level_fatal_cut(&root, records));
+        let (source, model) = if let Some(cut) = cut {
+            let text = root[..(cut as usize).min(root.len())].to_string();
+            let model = parse(&text);
+            (text, model)
+        } else {
+            let Some(doc) = self.docs.get(root_key) else {
+                return Vec::new();
+            };
+            (doc.model.source.clone(), doc.model.clone())
+        };
         let stem = Path::new(root_key)
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
@@ -1032,13 +1165,12 @@ impl Workspace {
             if !event.certain {
                 if matches!(
                     event.directive,
-                    crate::macro_expand::MacroFileDirective::Include
+                    crate::macro_expand::MacroFileDirective::Include(_)
                 ) {
-                    targets.insert((event.file.to_string(), event.span), None);
+                    note_unresolved(&mut targets, (event.file.to_string(), event.span));
                 }
                 return None;
             }
-            let document = self.docs.get(event.file)?;
             if let crate::macro_expand::MacroFileDirective::IncludePath(path) = event.directive {
                 let added = if self.overlay_only {
                     PathBuf::from(overlay_includepath_key(root_key, path))
@@ -1065,12 +1197,10 @@ impl Workspace {
                 active_search = append_unique(&active_search, &added);
                 return Some(crate::macro_expand::MacroFileLoad::Path);
             }
-            let directive = document
-                .model
-                .includes
-                .iter()
-                .find(|directive| directive.span == event.span)?
-                .clone();
+            let crate::macro_expand::MacroFileDirective::Include(filename) = event.directive else {
+                return None;
+            };
+            let filename = filename.to_string();
             let site = (event.file.to_string(), event.span);
             let first_visit = seen_sites.insert(site.clone());
             let root_span = event
@@ -1078,10 +1208,9 @@ impl Workspace {
                 .first()
                 .map(|(_, span)| *span)
                 .unwrap_or(event.span);
-            let Some(path) =
-                self.resolve_filename(root_key, event.file, &directive.filename, &active_search)
+            let Some(path) = self.resolve_filename(root_key, event.file, &filename, &active_search)
             else {
-                targets.insert(site, None);
+                note_unresolved(&mut targets, site);
                 if first_visit {
                     let mut searched = Vec::new();
                     if let Some(parent) = Path::new(event.file).parent() {
@@ -1094,7 +1223,7 @@ impl Workspace {
                         }
                     }
                     records.unresolved.push(UnresolvedInclude {
-                        filename: directive.filename,
+                        filename: filename.clone(),
                         span: root_span,
                         included_from: (!event.parents.is_empty())
                             .then(|| file_basename(event.file)),
@@ -1146,20 +1275,13 @@ impl Workspace {
                         },
                     });
                 }
-                targets.insert(site, None);
+                note_unresolved(&mut targets, site);
                 return None;
             }
-            targets
-                .entry(site)
-                .and_modify(|existing| {
-                    if existing.as_deref() != Some(target.as_str()) {
-                        *existing = None;
-                    }
-                })
-                .or_insert_with(|| Some(target.clone()));
-            if first_visit {
+            note_resolved(&mut targets, site, target.clone(), event.bindings);
+            if !records.resolved.iter().any(|record| record.path == path) {
                 records.resolved.push(ResolvedInclude {
-                    filename: directive.filename,
+                    filename,
                     span: event.span,
                     path,
                 });
@@ -1198,7 +1320,9 @@ impl Workspace {
         } = self.walk_graph(key);
         let (text, segments, gaps) =
             self.splice_with_map(key, &proof.sites, &targets, &mut Vec::new());
-        let targets_complete = targets.values().all(Option::is_some);
+        let targets_complete = targets
+            .values()
+            .all(|plan| !plan.unresolved && !plan.hits.is_empty());
         let navigation = if proof.complete && targets_complete {
             NavigationSource::Mapped {
                 text: text.clone(),
@@ -1275,6 +1399,18 @@ impl Workspace {
         self.spliced_source(&key).gaps.clone()
     }
 
+    /// Written line of each spliced piece, for save-text line numbers.
+    pub(crate) fn source_line_segments(&mut self, uri: &str) -> Vec<(crate::span::Span, u32)> {
+        let Some(key) = self.ensure_loaded(uri) else {
+            return Vec::new();
+        };
+        self.spliced_source(&key)
+            .segments
+            .iter()
+            .map(|segment| (segment.spliced, segment.line))
+            .collect()
+    }
+
     /// Splice only executed sites, using the targets selected in execution order.
     /// Dormant directives stay in place so ordinary branch expansion skips them.
     fn splice_with_map(
@@ -1291,25 +1427,425 @@ impl Workspace {
         if stack.iter().any(|file| file == key) {
             return (String::new(), Vec::new(), Vec::new());
         }
-        let Some(document) = self.docs.get(key) else {
+        let Some(source) = self.docs.get(key).map(|document| document.source.clone()) else {
             return (String::new(), Vec::new(), Vec::new());
         };
         stack.push(key.to_string());
         let mut replacements = Vec::new();
-        for directive in &document.model.includes {
-            let site = (key.to_string(), directive.span);
-            if sites.contains(&site) {
-                let (body, segments, gaps) = targets
-                    .get(&site)
-                    .and_then(Option::as_deref)
-                    .map(|target| self.splice_with_map(target, sites, targets, stack))
-                    .unwrap_or_default();
-                replacements.push((directive.span, body, segments, gaps));
+        let mut seen_spans = HashSet::new();
+        let mut claimed_loops: Vec<Span> = Vec::new();
+        let mut series = Vec::new();
+        for (file, span) in sites {
+            if file != key {
+                continue;
+            }
+            let Some(plan) = targets.get(&(key.to_string(), *span)) else {
+                continue;
+            };
+            if plan.unresolved || plan.hits.is_empty() {
+                continue;
+            }
+            if plan.hits.len() > 1 {
+                series.push(*span);
             }
         }
+        let mut grouped: Vec<Span> = Vec::new();
+        for &span in &series {
+            if grouped.contains(&span) {
+                continue;
+            }
+            if claimed_loops
+                .iter()
+                .any(|claimed| claimed.start <= span.start && span.end <= claimed.end)
+            {
+                continue;
+            }
+            let loops = crate::macro_expand::loops_containing(&source, span);
+            let Some(outer) = loops.first() else {
+                let site = (key.to_string(), span);
+                let Some(plan) = targets.get(&site) else {
+                    continue;
+                };
+                let hits = plan.hits.clone();
+                let (body, segments, gaps) = self.concat_include_hits(&hits, sites, targets, stack);
+                replacements.push((span, body, segments, gaps));
+                seen_spans.insert(span);
+                grouped.push(span);
+                continue;
+            };
+            let for_span = Span::new(outer.header.start as usize, outer.closer.end as usize);
+            let group: Vec<Span> = series
+                .iter()
+                .copied()
+                .filter(|site| for_span.start <= site.start && site.end <= for_span.end)
+                .collect();
+            let (body, segments, gaps) =
+                self.unroll_loop_includes(key, &source, &loops, &group, sites, targets, stack);
+            replacements.push((for_span, body, segments, gaps));
+            claimed_loops.push(for_span);
+            seen_spans.insert(for_span);
+            for site in group {
+                seen_spans.insert(site);
+                grouped.push(site);
+            }
+        }
+        let stable_sites: Vec<Span> = sites
+            .iter()
+            .filter_map(|(file, span)| (file == key).then_some(*span))
+            .filter(|span| !seen_spans.contains(span))
+            .filter(|span| {
+                !claimed_loops
+                    .iter()
+                    .any(|claimed| claimed.start <= span.start && span.end <= claimed.end)
+            })
+            .collect();
+        for span in stable_sites {
+            seen_spans.insert(span);
+            let site = (key.to_string(), span);
+            let Some(plan) = targets.get(&site) else {
+                continue;
+            };
+            if plan.unresolved || plan.hits.len() != 1 {
+                continue;
+            }
+            let (body, segments, gaps) =
+                self.splice_with_map(&plan.hits[0].path, sites, targets, stack);
+            replacements.push((span, body, segments, gaps));
+        }
         stack.pop();
-        apply_replacements_mapped(&document.source, &replacements, Some(key.to_string()))
+        apply_replacements_mapped(&source, &replacements, Some(key.to_string()))
     }
+
+    fn concat_include_hits(
+        &self,
+        hits: &[IncludeHit],
+        sites: &HashSet<(String, Span)>,
+        targets: &IncludeTargets,
+        stack: &mut Vec<String>,
+    ) -> (
+        String,
+        Vec<SpliceSegment>,
+        Vec<crate::macro_expand::SourceLayoutGap>,
+    ) {
+        let mut text = String::new();
+        let mut segments = Vec::new();
+        let mut gaps = Vec::new();
+        for hit in hits {
+            let (body, nested, nested_gaps) =
+                self.splice_with_map(&hit.path, sites, targets, stack);
+            let offset = text.len() as u32;
+            for mut segment in nested {
+                segment.spliced.start += offset;
+                segment.spliced.end += offset;
+                if segment.spliced.start < segment.spliced.end {
+                    segments.push(segment);
+                }
+            }
+            for gap in nested_gaps {
+                gaps.push(gap.shift(offset));
+            }
+            text.push_str(&body);
+            if !text.ends_with('\n') {
+                text.push('\n');
+            }
+        }
+        (text, segments, gaps)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn unroll_loop_includes(
+        &self,
+        key: &str,
+        source: &str,
+        loops: &[crate::macro_expand::ContainingLoop],
+        group: &[Span],
+        sites: &HashSet<(String, Span)>,
+        targets: &IncludeTargets,
+        stack: &mut Vec<String>,
+    ) -> (
+        String,
+        Vec<SpliceSegment>,
+        Vec<crate::macro_expand::SourceLayoutGap>,
+    ) {
+        let Some(outer) = loops.first() else {
+            return (String::new(), Vec::new(), Vec::new());
+        };
+        let keys = iteration_keys(key, &outer.variables, group, targets);
+        let mut text = String::new();
+        let mut segments = Vec::new();
+        let mut gaps = Vec::new();
+        for iteration in keys {
+            let bindings = iteration
+                .iter()
+                .zip(outer.variables.iter())
+                .map(|(value, name)| (name.clone(), value.clone()))
+                .collect::<Vec<_>>();
+            push_generated(
+                &mut text,
+                &mut segments,
+                &one_shot_header(&outer.variables, &bindings),
+                key,
+                outer.header,
+                source,
+            );
+            self.copy_loop_body(
+                key,
+                source,
+                outer.body_start,
+                outer.body_end,
+                &outer.variables,
+                &iteration,
+                &loops[1..],
+                &bindings,
+                sites,
+                targets,
+                stack,
+                &mut text,
+                &mut segments,
+                &mut gaps,
+            );
+            push_generated(
+                &mut text,
+                &mut segments,
+                "@#endfor\n",
+                key,
+                outer.closer,
+                source,
+            );
+        }
+        (text, segments, gaps)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn copy_loop_body(
+        &self,
+        key: &str,
+        source: &str,
+        from: u32,
+        to: u32,
+        outer_vars: &[String],
+        iteration: &[String],
+        inner_loops: &[crate::macro_expand::ContainingLoop],
+        bindings: &[(String, String)],
+        sites: &HashSet<(String, Span)>,
+        targets: &IncludeTargets,
+        stack: &mut Vec<String>,
+        text: &mut String,
+        segments: &mut Vec<SpliceSegment>,
+        gaps: &mut Vec<crate::macro_expand::SourceLayoutGap>,
+    ) {
+        let mut cuts: Vec<(u32, u32, BodyCut)> = Vec::new();
+        for loop_dir in inner_loops {
+            if loop_dir.header.start >= from && loop_dir.header.end <= to {
+                cuts.push((
+                    loop_dir.header.start,
+                    loop_dir.header.end,
+                    BodyCut::Header(one_shot_header(&loop_dir.variables, bindings)),
+                ));
+            }
+        }
+        for (file, span) in sites {
+            if file != key || span.start < from || span.end > to {
+                continue;
+            }
+            let Some(plan) = targets.get(&(key.to_string(), *span)) else {
+                continue;
+            };
+            if plan.unresolved {
+                continue;
+            }
+            let matched: Vec<_> = plan
+                .hits
+                .iter()
+                .filter(|hit| hit_key(outer_vars, &hit.bindings) == iteration)
+                .collect();
+            let path = if matched.len() == 1 {
+                Some(matched[0].path.clone())
+            } else if plan.hits.len() == 1 {
+                Some(plan.hits[0].path.clone())
+            } else {
+                None
+            };
+            let Some(path) = path else {
+                continue;
+            };
+            cuts.push((span.start, span.end, BodyCut::Child(path)));
+        }
+        cuts.sort_by_key(|(start, _, _)| *start);
+        let mut cursor = from;
+        for (start, end, cut) in cuts {
+            if start < cursor || end > to {
+                continue;
+            }
+            push_root_piece(
+                text,
+                segments,
+                source,
+                cursor as usize,
+                start as usize,
+                Some(key),
+            );
+            match cut {
+                BodyCut::Header(header) => {
+                    push_generated(text, segments, &header, key, Span { start, end }, source);
+                }
+                BodyCut::Child(path) => {
+                    let (body, nested, nested_gaps) =
+                        self.splice_with_map(&path, sites, targets, stack);
+                    let offset = text.len() as u32;
+                    for mut segment in nested {
+                        segment.spliced.start += offset;
+                        segment.spliced.end += offset;
+                        if segment.spliced.start < segment.spliced.end {
+                            segments.push(segment);
+                        }
+                    }
+                    for gap in nested_gaps {
+                        gaps.push(gap.shift(offset));
+                    }
+                    text.push_str(&body);
+                    if (end as usize) > (start as usize)
+                        && source.as_bytes().get((end as usize) - 1) == Some(&b'\n')
+                        && !body.ends_with('\n')
+                        && !body.ends_with('\r')
+                    {
+                        let at = text.len() as u32;
+                        text.push('\n');
+                        gaps.push(crate::macro_expand::SourceLayoutGap::SyntheticNewline(
+                            crate::span::Span {
+                                start: at,
+                                end: at + 1,
+                            },
+                        ));
+                    }
+                }
+            }
+            cursor = end;
+        }
+        push_root_piece(
+            text,
+            segments,
+            source,
+            cursor as usize,
+            to as usize,
+            Some(key),
+        );
+    }
+}
+
+enum BodyCut {
+    Header(String),
+    Child(String),
+}
+
+/// Values of the loop variables on one executed iteration, in variable order.
+fn hit_key(variables: &[String], bindings: &[(String, String)]) -> Vec<String> {
+    variables
+        .iter()
+        .map(|name| {
+            bindings
+                .iter()
+                .find(|(bound, _)| bound == name)
+                .map(|(_, value)| value.clone())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// Loop iterations in execution order. The site that ran most often supplies
+/// the order; a site skipped by `@#if` only adds iterations it actually ran.
+fn iteration_keys(
+    file: &str,
+    variables: &[String],
+    group: &[Span],
+    targets: &IncludeTargets,
+) -> Vec<Vec<String>> {
+    let mut best: Option<Span> = None;
+    let mut best_len = 0usize;
+    for span in group {
+        let len = targets
+            .get(&(file.to_string(), *span))
+            .map(|plan| plan.hits.len())
+            .unwrap_or(0);
+        if len > best_len {
+            best_len = len;
+            best = Some(*span);
+        }
+    }
+    let mut keys = Vec::new();
+    let mut push_span = |span: Span| {
+        let Some(plan) = targets.get(&(file.to_string(), span)) else {
+            return;
+        };
+        for hit in &plan.hits {
+            let key = hit_key(variables, &hit.bindings);
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
+    };
+    if let Some(span) = best {
+        push_span(span);
+    }
+    for span in group {
+        push_span(*span);
+    }
+    keys
+}
+
+fn one_shot_header(variables: &[String], bindings: &[(String, String)]) -> String {
+    let value_of = |name: &str| {
+        bindings
+            .iter()
+            .find(|(bound, _)| bound == name)
+            .map(|(_, value)| value.as_str())
+            .unwrap_or("0")
+    };
+    if variables.len() == 1 {
+        format!("@#for {} in [{}]\n", variables[0], value_of(&variables[0]))
+    } else if variables.is_empty() {
+        "@#for _i in [0]\n".to_string()
+    } else {
+        let names = variables.join(", ");
+        let values = variables
+            .iter()
+            .map(|name| value_of(name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("@#for ({names}) in [({values})]\n")
+    }
+}
+
+fn push_generated(
+    out: &mut String,
+    segments: &mut Vec<SpliceSegment>,
+    piece: &str,
+    file: &str,
+    origin: Span,
+    source: &str,
+) {
+    if piece.is_empty() {
+        return;
+    }
+    let line = if (origin.start as usize) <= source.len() {
+        1 + source[..origin.start as usize]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count() as u32
+    } else {
+        1
+    };
+    let start = out.len() as u32;
+    out.push_str(piece);
+    segments.push(SpliceSegment {
+        spliced: Span {
+            start,
+            end: out.len() as u32,
+        },
+        file: Some(file.to_string()),
+        origin,
+        line,
+    });
 }
 
 fn apply_replacements_mapped(
@@ -1370,9 +1906,17 @@ fn apply_replacements_mapped(
             gaps.push(gap.shift(offset));
         }
         out.push_str(&body);
-        if end < source.len() && source.as_bytes()[end] == b'\n' {
+        let consumed_newline = end > start && source.as_bytes()[end - 1] == b'\n';
+        let following_newline = end < source.len() && source.as_bytes()[end] == b'\n';
+        if following_newline {
             let synthetic = !body.is_empty() && !body.ends_with('\n') && !body.ends_with('\r');
             newline_marks.push((out.len() as u32, synthetic));
+        } else if consumed_newline && !body.ends_with('\n') && !body.ends_with('\r') {
+            // The directive span owns the line break. Put it back so the next
+            // written line stays on its own line, including an empty include.
+            let at = out.len() as u32;
+            out.push('\n');
+            newline_marks.push((at, !body.is_empty()));
         }
         last = end;
     }
@@ -1414,6 +1958,7 @@ fn push_root_piece(
     }
     let offset = out.len() as u32;
     let len = (to - from) as u32;
+    let line = 1 + source[..from].bytes().filter(|byte| *byte == b'\n').count() as u32;
     segments.push(SpliceSegment {
         spliced: Span {
             start: offset,
@@ -1421,6 +1966,7 @@ fn push_root_piece(
         },
         file: file.map(str::to_string),
         origin: Span::new(from, to),
+        line,
     });
     out.push_str(&source[from..to]);
 }
