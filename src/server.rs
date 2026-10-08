@@ -985,12 +985,33 @@ impl Backend {
         }
     }
 
-    fn complete(&self, pos: &TextDocumentPositionParams) -> Option<CompletionResponse> {
+    fn complete(
+        &self,
+        pos: &TextDocumentPositionParams,
+        context: Option<&CompletionContext>,
+    ) -> Option<CompletionResponse> {
         let mut inner = self.lock_inner();
         let text = inner.document(&pos.text_document.uri)?.text.clone();
         let normalized = crate::parser::normalize_newlines(&text);
         let index = LineIndex::new(&normalized);
         let byte = index.offset_utf16(&text, span_pos(pos.position));
+        if let Some(name) = macro_directive_name_at(&normalized, byte) {
+            let edit_start = name.start.min(byte);
+            return Some(CompletionResponse::Array(macro_directive_completions(
+                span_range(
+                    &index,
+                    &normalized,
+                    Span::new(edit_start as usize, name.end as usize),
+                ),
+                &normalized[edit_start as usize..name.start as usize],
+            )));
+        }
+        if context.is_some_and(|context| {
+            context.trigger_kind == CompletionTriggerKind::TRIGGER_CHARACTER
+                && context.trigger_character.as_deref() == Some("#")
+        }) {
+            return Some(CompletionResponse::Array(Vec::new()));
+        }
         if let Some(item) = metadata_completion_item(&mut inner, &pos.text_document.uri, byte) {
             return Some(CompletionResponse::Array(vec![item]));
         }
@@ -2676,7 +2697,7 @@ impl LanguageServer for Backend {
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         ordering::ready().await;
-        Ok(self.complete(&params.text_document_position))
+        Ok(self.complete(&params.text_document_position, params.context.as_ref()))
     }
 
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
@@ -2871,7 +2892,7 @@ pub fn initialize_result() -> InitializeResult {
             references_provider: Some(OneOf::Left(true)),
             document_highlight_provider: Some(OneOf::Left(true)),
             completion_provider: Some(CompletionOptions {
-                trigger_characters: Some(vec!["(".into(), ",".into()]),
+                trigger_characters: Some(vec!["(".into(), ",".into(), "#".into()]),
                 ..CompletionOptions::default()
             }),
             signature_help_provider: Some(SignatureHelpOptions {
@@ -3773,6 +3794,80 @@ fn metadata_completion_item(inner: &mut Inner, uri: &Url, byte: u32) -> Option<C
         })),
         ..CompletionItem::default()
     })
+}
+
+/// The macro scanner owns which written markers are directives. Completion
+/// reads only the name on that token's first line, without expanding the file.
+fn macro_directive_name_at(text: &str, byte: u32) -> Option<Span> {
+    crate::macro_expand::scan_macro_tokens(text)
+        .into_iter()
+        .filter(|token| token.kind == TokenKind::MacroDir)
+        .find_map(|token| {
+            let start = token.span.start as usize + 2;
+            let end = token.span.end as usize;
+            let bytes = text.as_bytes();
+            let mut name_start = start;
+            while name_start < end && matches!(bytes[name_start], b' ' | b'\t') {
+                name_start += 1;
+            }
+            let mut name_end = name_start;
+            if name_end < end && (bytes[name_end].is_ascii_alphabetic() || bytes[name_end] == b'_')
+            {
+                name_end += 1;
+                while name_end < end
+                    && (bytes[name_end].is_ascii_alphanumeric() || bytes[name_end] == b'_')
+                {
+                    name_end += 1;
+                }
+            }
+            (start <= byte as usize && byte as usize <= name_end)
+                .then(|| Span::new(name_start, name_end))
+        })
+}
+
+fn macro_directive_completions(range: Range, prefix: &str) -> Vec<CompletionItem> {
+    const DIRECTIVES: &[(&str, &str)] = &[
+        ("define", "Define a macro variable or function"),
+        ("include", "Insert another file"),
+        ("includepath", "Add a folder to the include search"),
+        ("if", "Keep the following text when the condition is true"),
+        ("ifdef", "Keep the following text when the name is defined"),
+        (
+            "ifndef",
+            "Keep the following text when the name is not defined",
+        ),
+        ("elseif", "Try another condition"),
+        ("else", "Take the remaining branch"),
+        ("endif", "End an if"),
+        ("for", "Repeat the following text for each value"),
+        ("endfor", "End a for"),
+        ("echo", "Show a macro message"),
+        ("error", "Stop expansion and show a message"),
+        ("echomacrovars", "Show macro variable values"),
+        (
+            "line",
+            "Mark a source line. Later checks keep the written file.",
+        ),
+    ];
+    DIRECTIVES
+        .iter()
+        .enumerate()
+        .map(|(order, (name, documentation))| CompletionItem {
+            label: (*name).into(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: Some("macro directive".into()),
+            documentation: Some(Documentation::String((*documentation).into())),
+            sort_text: Some(format!("{order:02}")),
+            filter_text: Some((*name).into()),
+            insert_text: Some((*name).into()),
+            insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                range,
+                new_text: format!("{prefix}{name}"),
+            })),
+            ..CompletionItem::default()
+        })
+        .collect()
 }
 
 fn default_completions(

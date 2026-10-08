@@ -68,6 +68,14 @@ Presentation settings use the displayed document. Analysis and include settings 
 
 Completion keeps the identifier as its label and insert text. A client supporting completion label details gets the long name beside the label; other clients get it in the item's detail. TeX stays literal text. Empty `model`, `steady_state_model`, `initval`, `endval`, and `shocks` skeletons use snippet placeholders only when supported; other clients receive plain empty skeletons.
 
+At a macro directive name after a line-start `@#`, completion returns the 15
+directive names. The label, filter text, and plain inserted text are the
+lowercase name, such as `define`; the edit replaces the name and retains
+`@#`. The macro scanner selects the site, including indented directives.
+Completion triggers are `(`, `,`, and `#`. A request triggered by `#` outside
+that site returns no items; a manual request keeps ordinary completion.
+Signature-help triggers remain `(`, `,`, and `=`.
+
 ## Written model information
 
 The initialize response advertises the following under `capabilities.experimental.dygnosis`:

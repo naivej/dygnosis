@@ -21,6 +21,12 @@ options. Accepting a name inserts its identifier. The long name is additional
 documentation. Command options have their own descriptions; the
 [option reference](reference.md) lists the recognized options.
 
+After `@#` at the start of a line, **Trigger Suggest** lists the macro
+directives and inserts the chosen name. Typing `#` in `@#` opens the same
+list. A prefix such as `@#def` selects `define`; the `@#` stays in place.
+Indentation is allowed. The list stays available when the file has a macro
+error and in an open `.inc` file.
+
 Empty `model`, `steady_state_model`, `initval`, `endval` and `shocks` skeletons
 use native snippet placeholders. Press Tab to move between placeholders.
 **Trigger Parameter Hints** shows the recognized function or command signature
