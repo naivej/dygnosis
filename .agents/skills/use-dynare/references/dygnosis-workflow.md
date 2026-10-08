@@ -32,12 +32,13 @@ conditions, determinacy, correct economics or a successful experiment. Those nee
 | Check the current model | `dynare_diagnose`. Run it before a change (baseline) and after each edit to a declaration, an equation, or a command. |
 | Check several saved models or a folder | `dynare_workspace_diagnose`. Report each failed root separately. |
 | Symbols, timing classes, blocks, counts | `dynare_model_info`: `endogenous`, `predetermined`, `forward_looking`, `static`, `mixed`, counts, block flags. |
+| Inspect `#` helper expressions or explicit model-local metadata | `dynare_model_info`: `model_locals.declarations` and `model_locals.definitions`. |
 | Find an equation and its source location; check the equation count | `dynare_equations`: rows with tags, `idents` (written `timing`, `dynare_timing`, timing class), `origin`, and `count_gap`. |
 | See text produced by `@#include` and macros | `dynare_expand`: `effective_text`, `complete`, navigation back to the written source. |
 | Find includes and companion files (steady-state file, helper files) | `dynare_related_files`, then read those files. A listed companion is not proof that its MATLAB code is correct. |
 | Understand a diagnostic | `dynare_explain`; `dynare_list_diagnostic_codes` to find a code. |
 | Check the options of a command | `dynare_list_options`, then the Dynare manual for meaning. An unknown command returns `known: false`. Do not invent options. |
-| Rename a symbol | `dynare_find_references` (comments are skipped), then `dynare_rename`. |
+| Find and rename identifier spellings | `dynare_find_references`, then `dynare_rename`. These tools match spelling across the supplied text; inspect same-name locals in separate models before applying the result. Comments and strings stay unchanged. |
 | Apply a known fix, or format | `dynare_auto_fix`, `dynare_format` (`formatIndent`: `"tab"` or 1–8). |
 | Review the structural effect of an edit | `dynare_compare_models` with supplied text and includes, or with explicit repository inputs. It is not a numerical equivalence test. |
 | Isolate a mechanism or make a small reproducer | `dynare_extract` by equation `names` or `tags` (all tags must match), optionally in one heterogeneity `dimension`. |
@@ -130,6 +131,23 @@ use Dynare timing after the `predetermined_variables` convention conversion. Per
 the written offset; `dynare_timing` is the converted offset. Use the returned class and counts for
 classification. Older engines omit `dynare_timing`; do not invent it.
 
+**Model-local variables.** `model_locals.declarations` lists explicit
+`model_local_variable` declarations and optional TeX labels.
+`model_locals.definitions` lists completed accepted `#` definitions, each with
+its `name`, `dimension`, parsed `text`, right-side `expression`, and `idents`.
+`dimension: null` is the aggregate model; a name selects that heterogeneity
+dimension. Several blocks of the same model share their definitions. Both
+arrays follow execution order, so macro copies can have the same written
+origin and different rows. A declaration alone gives no expression or value.
+Incomplete model info withholds this inventory; older engines can omit it.
+
+An identifier with `class: "model_local"` is a recognized local use. Its
+`timing` remains the written offset, including shifted helper uses; it has no
+endogenous timing class. Follow verified `origin` and `origin_frames` when
+editing a definition produced by macros. Read an absent origin as an
+unavailable source target. The inventory does not substitute helpers or
+evaluate them. `#` rows stay outside counted equations.
+
 **Equation numbers.** The `index` of a `dynare_equations` row starts at **zero**, and the `index` filter
 uses the same numbering. Prefer the `name` filter when tags are available. An equation number in
 Dygnosis output is not an equation number in Dynare's transformed model or in MATLAB output.
@@ -166,6 +184,10 @@ The editing tools return proposed text. They do not save files.
 
 An extracted fragment is not a runnable model. Before you present it as one, add what
 `omitted_context` names: parameter values, shocks, steady state, and the experiment.
+
+Extraction retains needed nested local definitions and explicit metadata from
+the selected model, including definitions in its earlier blocks. A definition
+with the same name in another heterogeneity dimension is a different dependency.
 
 ## Report
 

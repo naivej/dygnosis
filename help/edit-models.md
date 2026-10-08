@@ -49,6 +49,41 @@ the suggestion is withheld. At the end of a final declaration, you can accept
 the completion before typing `;`; the edit adds only the metadata, so type the
 semicolon yourself.
 
+### Model-local variables
+
+A model-local variable names an expression written as `#name = expression;`
+inside `model`. For example:
+
+```dynare
+var y;
+parameters p;
+p = 0.9;
+model_local_variable helper $H$;
+model;
+    #helper = p*y(-1);
+    y = helper(+1);
+end;
+```
+
+**Trigger Suggest** includes available model-local names in model expressions,
+including the right side of another `#` definition. Accepting a name inserts
+that identifier. Hover shows its role, optional TeX label, and known defining
+expression with a link to its written definition. An expression changed by
+macros is marked as expanded. These are source facts; Dygnosis does not
+evaluate the helper or replace nested helpers with their expressions.
+
+An earlier `#` definition makes its name available in later blocks of the same
+model. Aggregate blocks share one model; blocks for the same heterogeneity
+dimension share another. Different dimensions keep separate definitions. An
+earlier `model_local_variable` declaration can make a name available before its
+definition; a declaration alone supplies no expression.
+
+Local value suggestions stay outside the target being created after `#`,
+comments, strings, and other model contexts. Typing a model-local `#` does not
+open a value list. Earlier valid locals remain available while an unfinished
+definition is being edited. See [local navigation and rename](navigate-code.md#model-local-variables)
+for the edit limits.
+
 ## Fixes and refactors
 
 Place the cursor on a diagnostic and open **Quick Fix**. Apply only an action

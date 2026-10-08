@@ -82,7 +82,7 @@ The initialize response advertises the following under `capabilities.experimenta
 
 ```json
 {
-  "modelInfo": {"command": "dynare/modelInfo", "schema_version": 1},
+  "modelInfo": {"command": "dynare/modelInfo", "schema_version": 1, "model_locals": true},
   "modelInfoChanged": true,
   "configuration": {"schema_version": 1}
 }
@@ -133,6 +133,66 @@ To receive invalidations, set `initialize.capabilities.experimental.dygnosis.mod
 ```
 
 A missing root has `revision: null`. Re-request model information for affected roots after changes to includes, settings, overlays, or reported disk files. A client should forward watched-file events, cancel superseded requests, and discard old revisions and document versions. Standard semantic-token and inlay-hint refresh requests are sent only when the client advertises support; document-symbol refresh needs client handling.
+
+### Model-local information and editor bindings
+
+Complete `dynare_model_info` and LSP `dynare/modelInfo` responses add
+`model_locals`, with separate `declarations` and `definitions` arrays:
+
+| Array | Required fields | Optional source and metadata fields |
+|---|---|---|
+| `declarations` | `name` | `tex_name`, `origin`, `origin_frames`; MCP can also include `origin_uri`. |
+| `definitions` | `name`, `dimension`, `text`, `expression`, `idents` | `origin`, `origin_frames`; MCP can also include `origin_uri`. |
+
+Declarations are explicit top-level `model_local_variable` rows, including
+unused declarations. Definitions are completed accepted `#` rows. Both arrays
+follow parser execution order; repeated macro executions remain separate even
+when their written origins match. `dimension: null` selects the aggregate
+model; a dimension name selects its heterogeneous model. Several written
+blocks of the same model share that definition scope. A declaration alone has
+no expression. Complete input without locals returns two empty arrays;
+incomplete model information withholds the inventory. Older engines can omit
+the field. LSP advertises the addition with `modelInfo.model_locals: true`
+without changing `schema_version: 1`.
+
+`text` is the parsed `#` row and `expression` is its parsed right side.
+Definition `idents` use the equation identifier fields: `name`, `timing`,
+`dynare_timing`, `class`, and optional `timing_class`. Recognized local uses in
+definition `idents` and `dynare_equations` have `class: "model_local"` and no
+endogenous timing class. Their offsets retain the existing written timing
+contract, including shifted local uses. Local rows stay outside equation
+counts and indexes. Presentation settings do not remove MCP inventory data.
+
+An `origin` appears only for one verified written source segment. MCP `origin` uses
+one-based Unicode-scalar coordinates; `origin_uri` names the supplied file key
+when present, and `origin_frames` retains the existing macro frame format.
+LSP `origin` is a `Location` with `uri` and a zero-based UTF-16 `range`;
+its `origin_frames` use `kind`, `variable`, `value`, and `segments` containing
+written `Location` objects. LSP model-local facts share the enclosing response's
+root, revision, and document-version rules. An absent origin is not a target at
+line 1.
+
+Editor local completion is limited to model expressions and uses available
+declaration/definition facts in the selected model. It follows the macro
+directive-name branch, so a model-local `#` trigger still returns no value
+list. Local items use `VARIABLE`, `model-local variable` detail, and the name
+for label, filter, and inserted text. Hover can show the defining expression
+and a written definition link; macro-changed expressions are marked expanded.
+
+Local definition navigation targets the selected scope's `#` target.
+Declaration navigation prefers an explicit declaration. References honor
+`includeDeclaration` for both target forms; highlights mark them as writes and
+bound uses as reads. Rename proposes only verified declaration, definition,
+and bound-use edits from current inputs. Ambiguous owners, a declaration
+shared by different local bindings, uneditable macro text, or name collisions
+withhold the rename. Comments, strings, unrelated roots, and other local scopes
+stay unchanged.
+
+MCP `dynare_find_references` and `dynare_rename` match identifier spelling;
+they do not resolve these editor bindings. `dynare_extract` retains the selected
+model's required nested local definitions and explicit metadata, including
+definitions in earlier blocks. A different dimension's same-name definition
+is not that dependency. No MCP completion tool is added.
 
 ## Semantic token migration
 

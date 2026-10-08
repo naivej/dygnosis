@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Model-local variables have completion, expression hover, definition and declaration navigation, scoped references and highlights, and safe editor rename. Definitions in earlier blocks of the same model remain available; ambiguous source edits are withheld.
+- Model-local syntax follows `#name = expression;`. Explicit declarations permit forward uses, duplicate definitions are checked across blocks of the same model, and shifted local uses remain legal. An unfinished or refused row creates no valid definition.
+- `dynare_model_info` returns separate model-local declaration and definition lists. Equation identifiers recognize `model_local`; extraction keeps the selected model's local dependencies. MCP references and rename continue to match identifier spelling.
 - After a line-start `@#`, **Trigger Suggest** lists the macro directives and inserts the chosen name. Typing `#` in `@#` opens the same list; a prefix such as `@#def` selects `define`.
 - **Open changes** compares the invoking model with its previous revision, a selected revision, a branch or tag, or another `.mod` file. Before is the selected baseline; After is the invoking model. Historical includes come from the same fixed commit as their root. Split comparison tabs keep separate filters, and source actions open the exact side's written file. **Open root file text diff** shows the native editor diff.
 - `dynare_compare_models` also accepts a repository and explicit Git or saved Working inputs. It returns resolved commits and source policies with the comparison. Supplied-text calls keep their existing behavior. Incomplete or unavailable inputs return no authoritative change arrays.
