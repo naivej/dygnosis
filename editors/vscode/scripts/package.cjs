@@ -6,15 +6,14 @@ const vsce = require("@vscode/vsce");
 const { collectLicenses } = require("./licenses.cjs");
 const { sourceFileHashes } = require("./source-hash.cjs");
 const { assertNative, execute, extensionRoot, productRoot, binaryName, hostFacts, sha256, writeJson } = require("./common.cjs");
+const { checkVersion } = require("../../../scripts/version.cjs");
 
 async function main() {
   const { values } = parseArgs({ options: { target: { type: "string" }, tag: { type: "string" }, candidate: { type: "boolean" }, binary: { type: "string" } } });
   const target = values.target ?? (values.candidate ? `${process.platform}-${process.arch}` : undefined);
   const info = assertNative(target);
   const manifest = JSON.parse(await fs.readFile(path.join(extensionRoot, "package.json"), "utf8"));
-  const cargo = await fs.readFile(path.join(productRoot, "Cargo.toml"), "utf8");
-  const version = /^version\s*=\s*"([^"]+)"/m.exec(cargo)?.[1];
-  assert.equal(manifest.version, version, "Cargo and extension versions differ");
+  const version = await checkVersion();
   assert.equal(manifest.name, "dygnosis"); assert.equal(manifest.displayName, "Dygnosis");
   assert.equal(manifest.icon, "media/logo_s.png");
   assert.equal(manifest.license, "GPL-3.0-or-later");

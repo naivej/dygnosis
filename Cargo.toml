@@ -1,6 +1,7 @@
 [package]
 name = "dygnosis"
 description = "Dynare analysis core — LSP and MCP for .mod files"
+# Product version source. After editing, run: node scripts/version.cjs --sync
 version = "0.11.12"
 edition = "2021"
 license = "GPL-3.0-or-later"

@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { productRoot, extensionRoot, rpc } = require('./common.cjs');
+const { readVersion, checkVersion } = require('../../../scripts/version.cjs');
 const source = path.join(productRoot, 'help');
 
 async function engineFingerprint() {
@@ -27,8 +28,10 @@ async function generate(executable) {
   const session = rpc(executable, ['mcp'], false);
   try {
     const init = await session.request('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dygnosis-help-build', version: '1' } });
-    const manifest = require('../package.json');
-    assert.equal(init.serverInfo.version, manifest.version, 'Help must use the matching engine');
+    const manifest = JSON.parse(await fs.readFile(path.join(extensionRoot, 'package.json'), 'utf8'));
+    const version = await readVersion();
+    assert.equal(manifest.version, version, 'Synchronize the extension version before generating Help');
+    assert.equal(init.serverInfo.version, version, 'Help must use the matching engine');
     session.notify('notifications/initialized', {});
     const { tools } = await session.request('tools/list', {});
     async function call(name, args = {}) {
@@ -46,7 +49,8 @@ async function generate(executable) {
 }
 
 async function build() {
-  const manifest = require('../package.json');
+  await checkVersion();
+  const manifest = JSON.parse(await fs.readFile(path.join(extensionRoot, 'package.json'), 'utf8'));
   const registry = JSON.parse(await fs.readFile(path.join(source, 'topics.json'), 'utf8'));
   const reference = JSON.parse(await fs.readFile(path.join(source, 'reference.json'), 'utf8'));
   assert.equal(reference.version, manifest.version, 'Regenerate Help from the matching engine');

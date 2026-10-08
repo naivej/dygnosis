@@ -42,9 +42,9 @@
   ],
   "main": "./out/extension.js",
   "scripts": {
-    "compile": "tsc -p . && node scripts/help.cjs",
+    "compile": "npm run version:check && tsc -p . && node scripts/help.cjs",
     "watch": "tsc -w -p .",
-    "check": "tsc -p . --noEmit",
+    "check": "npm run version:check && tsc -p . --noEmit",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix --max-warnings 0",
     "test": "npm run compile && node --test tests/*.test.cjs",
@@ -53,7 +53,9 @@
     "package": "node scripts/package.cjs --candidate",
     "package:target": "node scripts/package.cjs",
     "verify:package": "node scripts/verify-package.cjs",
-    "help:generate": "node scripts/help.cjs --generate"
+    "help:generate": "node scripts/help.cjs --generate",
+    "version:sync": "node ../../scripts/version.cjs --sync",
+    "version:check": "node ../../scripts/version.cjs --check"
   },
   "contributes": {
     "languages": [

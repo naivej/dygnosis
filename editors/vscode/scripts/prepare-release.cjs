@@ -2,10 +2,13 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { execute, productRoot, writeJson } = require("./common.cjs");
+const { checkVersion } = require("../../../scripts/version.cjs");
 
 async function main() {
   const { RELEASE_TAG: tag, VERIFIED_RUN_ID: runId, GITHUB_REPOSITORY: repository, ARTIFACT_DIRECTORY: directory, RELEASE_GATES_FILE: gates } = process.env;
   assert.ok(/^v\d+\.\d+\.\d+$/.test(tag ?? ""), "Set a version tag");
+  const version = await checkVersion();
+  assert.equal(tag, `v${version}`, "The release tag must match Cargo.toml");
   assert.ok(/^\d+$/.test(runId ?? ""), "Set the successful verification workflow run ID");
   assert.equal(repository, "naivej/dygnosis");
   const commit = execute("git", ["rev-parse", `${tag}^{commit}`], { cwd: productRoot }).trim();
@@ -16,7 +19,7 @@ async function main() {
   assert.ok([".github/workflows/ci.yml", ".github/workflows/release.yml"].includes(run.path.split("@")[0]), "Artifacts must come from the compatibility workflow");
   execute(process.execPath, [path.join(__dirname, "collect-artifacts.cjs"), "--directory", directory, "--release", "--gates", gates], { stdio: "inherit" });
   const verified = JSON.parse(await fs.readFile(path.join(directory, "verified-artifacts.json"), "utf8"));
-  assert.equal(verified.commit, commit); assert.equal(verified.tag, tag); assert.equal(verified.publication_ready, true);
+  assert.equal(verified.commit, commit); assert.equal(verified.tag, tag); assert.equal(verified.version, version); assert.equal(verified.publication_ready, true);
   const changelog = await fs.readFile(path.join(productRoot, "CHANGELOG.md"), "utf8");
   const lines = changelog.split(/\r?\n/);
   const first = lines.indexOf(`## ${tag}`);

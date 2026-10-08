@@ -56,15 +56,18 @@ jobs:
           toolchain: "1.98.0"
           targets: ${{ matrix.rust }}
 
-      - name: Test the engine
-        run: cargo test
-
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           architecture: ${{ matrix.arch }}
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Check product version copies
+        run: node scripts/version.cjs --check
+
+      - name: Test the engine
+        run: cargo test --locked
 
       - name: Linux display dependencies
         if: runner.os == 'Linux'
