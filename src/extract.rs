@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use crate::check_e060::check_e063;
 use crate::check_writing::model_structure;
 use crate::expand::{expand_report, ExpandReport};
-use crate::expr::{ExprId, ExprKind};
+use crate::expr::{ExprId, ExprKind, IdentRef};
 use crate::intern::Name;
 use crate::model::{Decl, Equation, ExternalFunctionStmt, Model, TrendVar};
 use crate::parser::parse;
@@ -364,13 +364,6 @@ fn eq_at(model: &Model, place: EqRef) -> &Equation {
     }
 }
 
-fn equations_in(model: &Model, block: Option<usize>) -> &[Equation] {
-    match block {
-        None => &model.equations,
-        Some(block) => &model.heterogeneous_models[block].equations,
-    }
-}
-
 fn matches_selector(eq: &Equation, request: &ExtractRequest) -> bool {
     let name_ok = request.names.is_empty() || request.names.iter().any(|name| name == &eq.name);
     let tags_ok = request.tags.iter().all(|(key, value)| {
@@ -383,9 +376,10 @@ fn matches_selector(eq: &Equation, request: &ExtractRequest) -> bool {
 
 struct Closure {
     symbols: BTreeSet<String>,
-    /// Model-local names, each tied to the model block that defines them.
-    /// `None` is the aggregate model.
-    locals: BTreeSet<(Option<usize>, String)>,
+    /// Model-local names, each tied to the aggregate scope or a dimension.
+    locals: BTreeSet<(Option<String>, String)>,
+    /// The proven definitions required by bound local uses.
+    local_places: BTreeSet<EqRef>,
     externals: BTreeSet<String>,
 }
 
@@ -394,15 +388,17 @@ fn close(
     selected: &[EqRef],
     constraints: &[&crate::model::OccbinConstraint],
 ) -> Closure {
+    let facts = crate::model_locals::ModelLocals::collect(model);
     let mut closure = Closure {
         symbols: BTreeSet::new(),
         locals: BTreeSet::new(),
+        local_places: BTreeSet::new(),
         externals: BTreeSet::new(),
     };
     let mut pending: Vec<EqRef> = selected.to_vec();
     let mut seen = HashSet::new();
     while let Some(place) = pending.pop() {
-        absorb(model, place, &mut closure, &mut pending, &mut seen);
+        absorb(model, place, &facts, &mut closure, &mut pending, &mut seen);
     }
     for constraint in constraints {
         for expression in [
@@ -415,29 +411,18 @@ fn close(
         .flatten()
         {
             if let Some(id) = expression.expr {
-                push_expr_symbols(model, id, &mut closure);
+                push_expr_symbols(model, id, &facts, &mut closure);
             }
         }
     }
     loop {
         let locals_before = closure.locals.len();
-        grow_declaration_context(model, &mut closure);
-        for (block, name) in &closure.locals {
-            if let Some(index) = local_index_in(model, *block, name) {
-                let place = EqRef {
-                    block: *block,
-                    index,
-                };
-                if !seen.contains(&place) {
-                    pending.push(place);
-                }
-            }
-        }
+        grow_declaration_context(model, &facts, &mut closure);
         if pending.is_empty() && closure.locals.len() == locals_before {
             break;
         }
         while let Some(place) = pending.pop() {
-            absorb(model, place, &mut closure, &mut pending, &mut seen);
+            absorb(model, place, &facts, &mut closure, &mut pending, &mut seen);
         }
     }
     closure
@@ -446,6 +431,7 @@ fn close(
 fn absorb(
     model: &Model,
     place: EqRef,
+    facts: &crate::model_locals::ModelLocals,
     closure: &mut Closure,
     pending: &mut Vec<EqRef>,
     seen: &mut HashSet<EqRef>,
@@ -454,7 +440,7 @@ fn absorb(
         return;
     }
     let eq = eq_at(model, place);
-    let mut idents = Vec::new();
+    let mut idents: Vec<IdentRef> = Vec::new();
     let mut calls = Vec::new();
     if let Some(id) = eq.lhs_expr {
         walk(model, id, &mut idents, &mut calls);
@@ -462,18 +448,42 @@ fn absorb(
     if let Some(id) = eq.rhs_expr {
         walk(model, id, &mut idents, &mut calls);
     }
-    let defined = eq.is_local.then(|| local_name(model, eq)).flatten();
-    for name in idents {
-        let text = model.name(name).to_string();
-        if defined.as_deref() == Some(text.as_str()) {
+    let defined_span = eq
+        .is_local
+        .then(|| {
+            eq.lhs_expr.and_then(|id| match &model.exprs.get(id).kind {
+                ExprKind::Ident { ident_span, .. } => Some(*ident_span),
+                _ => None,
+            })
+        })
+        .flatten();
+    let written_index = written_equation_index(model, place);
+    for reference in idents {
+        let text = model.name(reference.name).to_string();
+        if defined_span == Some(reference.span) {
             continue;
         }
-        if let Some(local_idx) = local_index_in(model, place.block, &text) {
-            if closure.locals.insert((place.block, text)) {
-                pending.push(EqRef {
-                    block: place.block,
-                    index: local_idx,
-                });
+        let local_use = written_index.and_then(|written_index| {
+            facts.uses.iter().find(|usage| {
+                usage.equation_index == written_index
+                    && usage.name == reference.name
+                    && usage.span == reference.span
+            })
+        });
+        if let Some(local_use) = local_use {
+            closure.locals.insert((
+                local_use
+                    .dimension
+                    .map(|dimension| model.name(dimension).to_string()),
+                text,
+            ));
+            if let Some(definition) = local_use.definition {
+                if let Some(local_place) = local_place_for_definition(model, facts, definition) {
+                    closure.local_places.insert(local_place);
+                    if !seen.contains(&local_place) {
+                        pending.push(local_place);
+                    }
+                }
             }
         } else {
             closure.symbols.insert(text);
@@ -493,26 +503,22 @@ fn closure_has_local(closure: &Closure, name: &str) -> bool {
     closure.locals.iter().any(|(_, local)| local == name)
 }
 
-/// A `model_local_variable` declaration counts only in the block that uses it.
+/// A global model-local declaration is shared metadata for every model scope.
 fn decl_matches_local(model: &Model, closure: &Closure, decl: &Decl) -> bool {
     let name = model.name(decl.name);
-    closure.locals.iter().any(|(block, local)| {
-        local == name && local_scope_matches(model, *block, decl.heterogeneity.map(|(dim, _)| dim))
+    let declared_dimension = decl
+        .heterogeneity
+        .map(|(dimension, _)| model.name(dimension).to_string());
+    closure.locals.iter().any(|(local_dimension, local)| {
+        local == name && (declared_dimension.is_none() || *local_dimension == declared_dimension)
     })
 }
 
-fn local_scope_matches(model: &Model, block: Option<usize>, dimension: Option<Name>) -> bool {
-    match (block, dimension) {
-        (None, None) => true,
-        (Some(index), Some(dimension)) => model
-            .heterogeneous_models
-            .get(index)
-            .is_some_and(|het| model.name(het.dimension) == model.name(dimension)),
-        _ => false,
-    }
-}
-
-fn grow_declaration_context(model: &Model, closure: &mut Closure) {
+fn grow_declaration_context(
+    model: &Model,
+    facts: &crate::model_locals::ModelLocals,
+    closure: &mut Closure,
+) {
     loop {
         let before = closure.symbols.len() + closure.externals.len();
         for trend in &model.trend_vars {
@@ -520,7 +526,7 @@ fn grow_declaration_context(model: &Model, closure: &mut Closure) {
                 continue;
             }
             if let Some(id) = trend.growth {
-                push_expr_symbols(model, id, closure);
+                push_expr_symbols(model, id, facts, closure);
             }
         }
         for row in &model.nonstationary_vars {
@@ -528,7 +534,7 @@ fn grow_declaration_context(model: &Model, closure: &mut Closure) {
                 continue;
             }
             if let Some(id) = row.deflator {
-                push_expr_symbols(model, id, closure);
+                push_expr_symbols(model, id, facts, closure);
             }
         }
         let extra: Vec<String> = model
@@ -552,14 +558,28 @@ fn grow_declaration_context(model: &Model, closure: &mut Closure) {
     }
 }
 
-fn push_expr_symbols(model: &Model, id: ExprId, closure: &mut Closure) {
+fn push_expr_symbols(
+    model: &Model,
+    id: ExprId,
+    facts: &crate::model_locals::ModelLocals,
+    closure: &mut Closure,
+) {
     let mut idents = Vec::new();
     let mut calls = Vec::new();
     walk(model, id, &mut idents, &mut calls);
-    for name in idents {
-        let text = model.name(name).to_string();
-        if local_index_in(model, None, &text).is_some() {
+    for reference in idents {
+        let text = model.name(reference.name).to_string();
+        if let Some(binding) = facts
+            .available(None, usize::MAX)
+            .into_iter()
+            .find(|binding| model.name(binding.name) == text)
+        {
             closure.locals.insert((None, text));
+            if let Some(definition) = binding.definition {
+                if let Some(place) = local_place_for_definition(model, facts, definition) {
+                    closure.local_places.insert(place);
+                }
+            }
         } else {
             closure.symbols.insert(text);
         }
@@ -582,9 +602,19 @@ fn deriv_names(stmt: &ExternalFunctionStmt) -> Vec<Name> {
     names
 }
 
-fn walk(model: &Model, id: ExprId, idents: &mut Vec<Name>, calls: &mut Vec<Name>) {
+fn walk(model: &Model, id: ExprId, idents: &mut Vec<IdentRef>, calls: &mut Vec<Name>) {
     match &model.exprs.get(id).kind {
-        ExprKind::Ident { name, .. } => idents.push(*name),
+        ExprKind::Ident {
+            name,
+            timing,
+            ident_span,
+            timing_span,
+        } => idents.push(IdentRef {
+            name: *name,
+            span: *ident_span,
+            timing: *timing,
+            timing_span: *timing_span,
+        }),
         ExprKind::Number | ExprKind::String | ExprKind::Error | ExprKind::PathNamespace { .. } => {}
         ExprKind::Unary { arg, .. } => walk(model, *arg, idents, calls),
         ExprKind::Binary { lhs, rhs, .. } => {
@@ -603,18 +633,44 @@ fn walk(model: &Model, id: ExprId, idents: &mut Vec<Name>, calls: &mut Vec<Name>
     }
 }
 
-fn local_name(model: &Model, eq: &Equation) -> Option<String> {
-    let id = eq.lhs_expr?;
-    match &model.exprs.get(id).kind {
-        ExprKind::Ident { name, .. } => Some(model.name(*name).to_string()),
-        _ => None,
-    }
+fn written_equation_index(model: &Model, place: EqRef) -> Option<usize> {
+    let equation = eq_at(model, place);
+    let dimension = scope_key(model, place);
+    model.written_equations.iter().position(|row| {
+        row.equation.parse_order == equation.parse_order && row.dimension == dimension
+    })
 }
 
-fn local_index_in(model: &Model, block: Option<usize>, name: &str) -> Option<usize> {
-    equations_in(model, block)
-        .iter()
-        .position(|eq| eq.is_local && local_name(model, eq).as_deref() == Some(name))
+fn local_place_for_definition(
+    model: &Model,
+    facts: &crate::model_locals::ModelLocals,
+    definition: usize,
+) -> Option<EqRef> {
+    let fact = facts.definitions.get(definition)?;
+    let row = model.written_equations.get(fact.equation_index)?;
+    let parse_order = row.equation.parse_order;
+    match row.dimension {
+        None => model
+            .equations
+            .iter()
+            .position(|equation| equation.parse_order == parse_order)
+            .map(|index| EqRef { block: None, index }),
+        Some(dimension) => model
+            .heterogeneous_models
+            .iter()
+            .enumerate()
+            .filter(|(_, block)| block.dimension == dimension)
+            .find_map(|(block_index, block)| {
+                block
+                    .equations
+                    .iter()
+                    .position(|equation| equation.parse_order == parse_order)
+                    .map(|index| EqRef {
+                        block: Some(block_index),
+                        index,
+                    })
+            }),
+    }
 }
 
 fn is_external(model: &Model, name: &str) -> bool {
@@ -1094,14 +1150,7 @@ fn format_occbin_block(parts: &[String]) -> String {
 
 fn retained_places(model: &Model, selected: &[EqRef], closure: &Closure) -> Vec<EqRef> {
     let mut places = selected.to_vec();
-    for (block, name) in &closure.locals {
-        if let Some(index) = local_index_in(model, *block, name) {
-            places.push(EqRef {
-                block: *block,
-                index,
-            });
-        }
-    }
+    places.extend(closure.local_places.iter().copied());
     places.sort_by(|left, right| {
         eq_at(model, *left)
             .span

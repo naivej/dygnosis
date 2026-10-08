@@ -3,12 +3,15 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::equations::count_gap;
+use crate::equations::{identifier_class, IdentClass};
 use crate::intern::Name;
 use crate::model::Model;
+use crate::model_locals::ModelLocals;
 use crate::span::Span;
 use serde_json::{json, Value};
 
 use crate::timing::classify_aggregate_variable_timing;
+use crate::timing::TimingAnalysis;
 pub use crate::timing::{
     classify_variable_timing, structure_summary, StructureSummary, TimingClass, TimingInfo,
 };
@@ -181,6 +184,7 @@ pub fn model_info_json(model: &Model) -> Value {
         }
     }
     let summary = model.summary();
+    let model_locals = model_locals_json(model);
     let heterogeneous_timing = classify_variable_timing(model);
     let heterogeneous_dimensions: Vec<Value> = heterogeneous_dimension_names(model)
         .into_iter()
@@ -265,7 +269,76 @@ pub fn model_info_json(model: &Model) -> Value {
         "has_initval_block": summary.has_initval_block,
         "has_shocks_block": summary.has_shocks_block,
         "heterogeneity_dimensions": heterogeneous_dimensions,
+        "model_locals": model_locals,
     })
+}
+
+/// Parsed model-local declarations and definitions shared by MCP and LSP.
+/// Source origins are attached by the transport that owns the source map.
+pub(crate) fn model_locals_json(model: &Model) -> Value {
+    let facts = ModelLocals::collect(model);
+    let declarations: Vec<Value> = facts
+        .declarations
+        .iter()
+        .map(|declaration| {
+            let mut row = json!({ "name": model.name(declaration.name) });
+            if let Some(tex_name) = &declaration.tex_name {
+                row["tex_name"] = json!(tex_name);
+            }
+            row
+        })
+        .collect();
+    let timing = TimingAnalysis::new(model);
+    let definitions: Vec<Value> = facts
+        .definitions
+        .iter()
+        .map(|definition| {
+            let written = &model.written_equations[definition.equation_index];
+            let equation = &written.equation;
+            let expression_text = equation.rhs.trim();
+            let idents: Vec<Value> = model
+                .exprs
+                .walk_idents(definition.rhs_expr)
+                .map(|reference| {
+                    let is_local = facts.uses.iter().any(|usage| {
+                        usage.equation_index == definition.equation_index
+                            && usage.name == reference.name
+                            && usage.span == reference.span
+                    });
+                    let class = identifier_class(model, reference.name, is_local);
+                    let mut ident = json!({
+                        "name": model.name(reference.name),
+                        "timing": reference.timing,
+                        "dynare_timing": if definition.dimension.is_some() {
+                            reference.timing
+                        } else {
+                            timing.aggregate_dynare_offset(reference.name, reference.timing)
+                        },
+                        "class": class.as_str(),
+                    });
+                    if class == IdentClass::Endogenous {
+                        let timing_classes = if definition.dimension.is_some() {
+                            &timing.all
+                        } else {
+                            &timing.aggregate
+                        };
+                        if let Some(info) = timing_classes.get(model.name(reference.name)) {
+                            ident["timing_class"] = json!(info.class.label());
+                        }
+                    }
+                    ident
+                })
+                .collect();
+            json!({
+                "name": model.name(definition.name),
+                "dimension": definition.dimension.map(|dimension| model.name(dimension)),
+                "text": equation.text,
+                "expression": expression_text,
+                "idents": idents,
+            })
+        })
+        .collect();
+    json!({ "declarations": declarations, "definitions": definitions })
 }
 
 pub(crate) fn model_incomplete_status() -> Value {
