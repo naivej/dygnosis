@@ -3,7 +3,7 @@ Dygnosis provides language support for Dynare, acting as a second preprocessor t
 - Edit with live diagnostics, hover, completion, document or selection formatting, fixes, and commented shock templates.
 - Navigate with references and rename across known includes, plus outline, workspace symbols, folding, syntax colors, and links to related files.
 - Inspect model counts, equations, includes, and expanded source, with jumps back to the written equations.
-- Compare models and check unopened saved models in a project.
+- Compare a model with Git history or another `.mod` file; check unopened saved models in a project.
 
 Dygnosis works out of the box when installed from the VS Code Marketplace. Run **Dygnosis: Open Help** to learn more.
 

@@ -33,7 +33,7 @@ export function extendCapabilities(capabilities: ClientCapabilities): void {
   }
   const experimental: Record<string, unknown> = record(capabilities.experimental) ? capabilities.experimental : {};
   experimental.dygnosis = { modelInfo: { schema_version: 1 }, modelInfoChanged: true, configuration: { schema_version: 1 },
-    compareModels: { navigation_schema_version: 1 }, effectivePreview: { navigation_schema_version: 1, dependency_candidates: true },
+    compareModels: { navigation_schema_version: 1 }, compareModelSnapshots: { schema_version: 1, navigation_schema_version: 2 }, effectivePreview: { navigation_schema_version: 1, dependency_candidates: true },
     projectStatusChanged: true };
   capabilities.experimental = experimental;
 }
@@ -82,7 +82,7 @@ interface CachedRequest {
 export interface ModelSnapshot extends ModelInfo { client_instance: number }
 export interface NavigationDecision { isCurrent(): boolean }
 export type NavigationGuard = (loadedDocument: vscode.TextDocument) => boolean | NavigationDecision | Promise<boolean | NavigationDecision>;
-export interface InputInvalidation { root?: string; reason: "input" | "file"; uri?: string; inputRevision?: string }
+export interface InputInvalidation { root?: string; reason: "input" | "file" | "lifecycle"; uri?: string; inputRevision?: string; modelRevision?: string }
 
 /** Shared service for status, view, tint, lenses, diagnostics and previews. */
 export class DygnosisClient implements vscode.Disposable {
@@ -154,11 +154,11 @@ export class DygnosisClient implements vscode.Disposable {
       vscode.workspace.onDidChangeTextDocument(event => {
         if (event.contentChanges.length && isAnalysisDocument(event.document)) {
           this.pruneSourceLinks(event.document.uri, event.document.version);
-          this.invalidate();
+          this.invalidate(undefined, event.document.uri);
         }
       }),
       vscode.workspace.onDidCloseTextDocument(document => {
-        if (isAnalysisDocument(document)) { this.explicitOwnerDocuments.delete(document.uri.toString()); this.pruneSourceLinks(document.uri); this.invalidate(); }
+        if (isAnalysisDocument(document)) { this.explicitOwnerDocuments.delete(document.uri.toString()); this.pruneSourceLinks(document.uri); this.invalidate(undefined, document.uri); }
       }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => { this.selectedOwners.clear(); this.explicitOwnerDocuments.clear(); this.ownedDocuments.clear(); void this.sendSettings(); }),
       vscode.workspace.onDidChangeConfiguration(event => {
@@ -186,7 +186,15 @@ export class DygnosisClient implements vscode.Disposable {
     }
     return vscode.Disposable.from(...listeners);
   }
-  invalidate(root?: string, file?: vscode.Uri, inputRevision?: string): void {
+  invalidate(root?: string, file?: vscode.Uri, inputRevision?: string, modelRevision?: string): void {
+    this.invalidateInputs(file ? { root, reason: "file", uri: file.toString() } : { root, reason: "input", ...(inputRevision ? { inputRevision } : {}), ...(modelRevision ? { modelRevision } : {}) });
+  }
+  private invalidateLifecycle(): void {
+    ++this.instance;
+    this.invalidateInputs({ reason: "lifecycle" });
+  }
+  private invalidateInputs(event: InputInvalidation): void {
+    const root = event.root;
     ++this.epoch;
     // Every in-flight snapshot uses the global epoch. Release its fresh
     // callers immediately; a server ignoring cancellation must not hold a queue.
@@ -195,7 +203,7 @@ export class DygnosisClient implements vscode.Disposable {
       if (!root || key.startsWith(`${root}\n`)) { request.cancellation.cancel(); request.cancellation.dispose(); this.cache.delete(key); }
     }
     if (root) this.infos.delete(root); else this.infos.clear();
-    this.invalidated.fire(file ? { root, reason: "file", uri: file.toString() } : { root, reason: "input", ...(inputRevision ? { inputRevision } : {}) });
+    this.invalidated.fire(event);
     this.changed.fire();
     this.scheduleRootRefresh();
     this.scheduleSymbolRefresh();
@@ -250,9 +258,10 @@ export class DygnosisClient implements vscode.Disposable {
           record(experimental.dygnosis.modelInfo) && experimental.dygnosis.modelInfo.schema_version === 1;
         this.instanceSubscriptions.push(client.onNotification("dynare/modelInfoChanged", (value: unknown) => {
           if (client === this.client && record(value) && value.schema_version === 1 && typeof value.root_uri === "string")
-            this.invalidate(value.root_uri, undefined, typeof value.input_revision === "string" ? value.input_revision : undefined);
+            this.invalidate(value.root_uri, undefined, typeof value.input_revision === "string" ? value.input_revision : undefined,
+              typeof value.revision === "string" ? value.revision : undefined);
         }), client.onDidChangeState(event => {
-          if (client === this.client && event.newState === State.Stopped) { this.modelInfoSupported = false; this.invalidate(); }
+          if (client === this.client && event.newState === State.Stopped) { this.modelInfoSupported = false; this.invalidateLifecycle(); }
         }));
         this.refreshSymbols();
         this.invalidate();
@@ -264,7 +273,7 @@ export class DygnosisClient implements vscode.Disposable {
     if (this.closed) return;
     this.modelInfoSupported = false;
     this.symbolRegistration = false;
-    this.invalidate();
+    this.invalidateLifecycle();
     // start() replaces and disposes the prior client, including a pending start.
     const replacement = this.start();
     this.starting = replacement;
@@ -404,6 +413,14 @@ export class DygnosisClient implements vscode.Disposable {
     return [...this.infos.values()].filter(info => this.ownsDocument(info, document))
       .map(info => vscode.Uri.parse(info.root_uri));
   }
+  /** Written include paths with a current known owner, for resource menus. */
+  knownIncludedFiles(): string[] {
+    const files = [...this.infos.values()].flatMap(info => info.related_files
+      .filter(file => file.kind === "include" && file.resolved && file.path)
+      .map(file => vscode.Uri.file(file.path!)));
+    const open = vscode.workspace.textDocuments.filter(document => files.some(file => sameUri(file, document.uri)));
+    return [...new Set([...files.map(file => file.path), ...open.map(document => document.uri.path)])];
+  }
   /** Read proven chosen context without requests, discovery, or a picker. */
   chosenRootForDocument(document: vscode.TextDocument): vscode.Uri | undefined {
     if (this.closed || document.isClosed || !isAnalysisDocument(document)) return undefined;
@@ -415,18 +432,24 @@ export class DygnosisClient implements vscode.Disposable {
     }
     return isRootUri(document.uri) && !this.ownedDocuments.has(key) ? document.uri : undefined;
   }
-  async ownerChoices(document: vscode.TextDocument): Promise<vscode.Uri[]> {
+  async ownerChoices(document: vscode.TextDocument, token?: vscode.CancellationToken): Promise<vscode.Uri[]> {
+    if (token?.isCancellationRequested) return [];
     const roots = new Set(vscode.workspace.textDocuments.filter(doc => isRootUri(doc.uri) && !this.ownedDocuments.has(doc.uri.toString())).map(doc => doc.uri.toString()));
     for (const root of this.selectedOwners.values()) roots.add(root);
-    await Promise.all([...roots].map(root => this.modelInfo(vscode.Uri.parse(root))));
+    await Promise.all([...roots].map(root => {
+      const uri = vscode.Uri.parse(root);
+      return this.modelInfo(uri, uri, false, token);
+    }));
+    if (token?.isCancellationRequested) return [];
     return this.knownOwners(document.uri);
   }
-  async rootForDocument(document: vscode.TextDocument, prompt = false): Promise<vscode.Uri | undefined> {
-    if (!isAnalysisDocument(document)) return undefined;
+  async rootForDocument(document: vscode.TextDocument, prompt = false, token?: vscode.CancellationToken): Promise<vscode.Uri | undefined> {
+    if (!isAnalysisDocument(document) || token?.isCancellationRequested) return undefined;
     const key = document.uri.toString(), selected = this.selectedOwners.get(key);
     if (selected) {
       const root = vscode.Uri.parse(selected);
-      const info = await this.modelInfo(root);
+      const info = await this.modelInfo(root, root, false, token);
+      if (token?.isCancellationRequested) return undefined;
       if (this.selectedOwners.get(key) !== selected) return undefined;
       if (!info) return undefined;
       if (this.ownsDocument(info, document.uri)) return root;
@@ -436,11 +459,13 @@ export class DygnosisClient implements vscode.Disposable {
     if (isRootUri(document.uri) && !this.ownedDocuments.has(key)) return document.uri;
     // Discover owners only from available models, never analyze an include as a root.
     const selection = this.selectedOwners.get(key);
-    const owners = await this.ownerChoices(document);
+    const owners = await this.ownerChoices(document, token);
+    if (token?.isCancellationRequested) return undefined;
     if (this.selectedOwners.get(key) !== selection) return undefined;
     if (owners.length === 1) { this.rememberOwner(document.uri, owners[0], false); return owners[0]; }
     if (!prompt || owners.length === 0) return undefined;
-    const pick = await vscode.window.showQuickPick(owners.map(root => ({ label: vscode.workspace.asRelativePath(root), description: root.fsPath, root })), { placeHolder: "Choose the model that owns this include" });
+    const pick = await vscode.window.showQuickPick(owners.map(root => ({ label: vscode.workspace.asRelativePath(root), description: root.fsPath, root })), { placeHolder: "Choose the model that owns this include" }, token);
+    if (token?.isCancellationRequested) return undefined;
     if (this.selectedOwners.get(key) !== selection) return undefined;
     if (pick) this.selectOwner(document.uri, pick.root);
     return pick?.root;
@@ -523,7 +548,7 @@ export class DygnosisClient implements vscode.Disposable {
     ++this.startGeneration;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     if (this.symbolTimer) clearTimeout(this.symbolTimer);
-    this.invalidate();
+    this.invalidateLifecycle();
     this.shutdownPromise = this.lifecycle.shutdown().then(() => {
       for (const disposable of this.disposables) disposable.dispose();
       for (const subscription of this.instanceSubscriptions) subscription.dispose();

@@ -140,6 +140,7 @@ test("server invalidation keeps the diagnostic input token separate from the mod
   const events = [], listener = client.onDidInvalidate(event => events.push(event));
   host.managed[0].client.notify({ schema_version: 1, root_uri: "file:///project/root.mod", revision: "model-token", input_revision: "diagnostic-token" });
   assert.equal(events[0].inputRevision, "diagnostic-token");
+  assert.equal(events[0].modelRevision, "model-token");
   assert.equal(events[0].root, "file:///project/root.mod");
   listener.dispose(); await client.shutdown();
 });
@@ -213,6 +214,22 @@ test("a slow obsolete resolver cannot replace a newer restarted client", async (
   await client.restart(); const current = client.client;
   slow.resolve({ path: "old engine", override: true, version: "one" }); await first;
   assert.equal(client.client, current); assert.equal(host.managed.length, 1); await client.shutdown();
+});
+test("restart invalidates the old engine instance before the replacement resolver can finish", async () => {
+  reset(); const pending = deferred(); let resolutions = 0;
+  const client = service({ resolve: () => ++resolutions === 1 ? Promise.resolve({ path: "engine", override: true, version: "one" }) : pending.promise });
+  await client.ensureStarted(); const instance = client.currentInstance, events = [], listener = client.onDidInvalidate(event => events.push(event));
+  const restarted = client.restart(); await flush();
+  assert.ok(client.currentInstance > instance); assert.ok(events.some(event => event.reason === "lifecycle")); assert.equal(host.managed.length, 1, "replacement engine remains unresolved");
+  pending.resolve({ path: "replacement", override: true, version: "two" }); await restarted; listener.dispose(); await client.shutdown();
+});
+test("engine stop and explicit shutdown invalidate their instance immediately", async () => {
+  for (const operation of ["stop", "shutdown"]) {
+    reset(); const client = service(); await client.ensureStarted(); const instance = client.currentInstance, events = [], listener = client.onDidInvalidate(event => events.push(event));
+    if (operation === "stop") host.managed[0].client.state({ newState: languageClient.State.Stopped }); else await client.shutdown();
+    assert.ok(client.currentInstance > instance, operation); assert.ok(events.some(event => event.reason === "lifecycle"), operation);
+    listener.dispose(); if (operation === "stop") await client.shutdown();
+  }
 });
 test("native include links route through the retained owner before opening a mod fragment", async () => {
   reset(); const client = service(); await client.ensureStarted();
@@ -664,7 +681,8 @@ test("empty-content document metadata changes do not invalidate model inputs", a
   const source = { uri: Uri.parse("file:///project/root.mod"), languageId: "dynare", version: 1 };
   const events = []; const listener = client.onDidInvalidate(event => events.push(event));
   host.edit.fire({ document: source, contentChanges: [] }); assert.equal(events.length, 0);
-  host.edit.fire({ document: source, contentChanges: [{ text: "var y;" }] }); assert.equal(events[0].reason, "input");
+  host.edit.fire({ document: source, contentChanges: [{ text: "var y;" }] });
+  assert.equal(events[0].reason, "file"); assert.equal(events[0].uri, source.uri.toString());
   host.disk.fire(source.uri); assert.equal(events[1].reason, "file"); assert.equal(events[1].uri, source.uri.toString());
   listener.dispose(); await client.shutdown();
 });

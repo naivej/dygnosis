@@ -182,9 +182,9 @@
       },
       {
         "command": "dygnosis.diffWith",
-        "title": "Diff with…",
+        "title": "Open changes with .mod file…",
         "category": "Dygnosis",
-        "enablement": "dygnosis.modelContext",
+        "enablement": "dygnosis.changesContext",
         "icon": "$(diff)"
       },
       {
@@ -216,6 +216,12 @@
         "title": "Configure project exclusions",
         "category": "Dygnosis",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "dygnosis.openChanges",
+        "title": "Open changes",
+        "category": "Dygnosis",
+        "icon": "$(diff)"
       }
     ],
     "menus": {
@@ -236,8 +242,8 @@
           "group": "navigation@2"
         },
         {
-          "command": "dygnosis.diffWith",
-          "when": "dygnosis.modelContext && dygnosis.toolbarActions",
+          "command": "dygnosis.openChanges",
+          "when": "dygnosis.changesContext && dygnosis.toolbarActions",
           "group": "navigation@2"
         },
         {
@@ -263,8 +269,8 @@
           "group": "navigation@2"
         },
         {
-          "command": "dygnosis.diffWith",
-          "when": "dygnosis.modelContext && dygnosis.contextActions",
+          "command": "dygnosis.openChanges",
+          "when": "dygnosis.changesContext && dygnosis.contextActions",
           "group": "navigation@2"
         },
         {
@@ -303,8 +309,8 @@
           "when": "resourceScheme == dygnosis-effective && dygnosis.effectivePreview"
         },
         {
-          "command": "dygnosis.diffWith",
-          "when": "dygnosis.modelContext"
+          "command": "dygnosis.openChanges",
+          "when": "dygnosis.changesContext"
         }
       ],
       "view/title": [
@@ -352,6 +358,11 @@
           "command": "dygnosis.openHelp",
           "when": "view == dygnosis.project",
           "group": "navigation@99"
+        },
+        {
+          "command": "dygnosis.openChanges",
+          "when": "view == dygnosis.model && dygnosis.changesContext",
+          "group": "navigation@5"
         }
       ],
       "view/item/context": [
@@ -359,6 +370,13 @@
           "command": "dygnosis.configureProjectExclusions",
           "when": "view == dygnosis.project && viewItem == dygnosis.projectFolder",
           "group": "inline"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "dygnosis.openChanges",
+          "when": "scmProvider == git && (resourceExtname =~ /\\.(mod|dyn)$/ || resourcePath in dygnosis.knownIncludedPaths)",
+          "group": "navigation@2"
         }
       ]
     },
@@ -1321,7 +1339,7 @@
         }
       },
       {
-        "title": "Dygnosis: Diff",
+        "title": "Dygnosis: Changes",
         "properties": {
           "dynare.diff.layout": {
             "type": "string",
@@ -1332,7 +1350,7 @@
             ],
             "default": "auto",
             "scope": "resource",
-            "description": "Model Diff layout. Auto stacks Before and After in a narrow view."
+            "description": "Layout in Changes. Auto stacks Before and After in a narrow view. Defaults use the model that opened Changes."
           },
           "dynare.diff.defaultExpansion": {
             "type": "string",
@@ -1343,7 +1361,7 @@
             ],
             "default": "changes",
             "scope": "resource",
-            "description": "Initial section expansion in a new model Diff view."
+            "description": "Initial section expansion in a new Changes view; uses the model that opened it."
           },
           "dynare.diff.defaultChangeKinds": {
             "type": "array",
@@ -1364,7 +1382,7 @@
               "unpaired"
             ],
             "scope": "resource",
-            "description": "Change kinds initially shown in a new model Diff view. Empty hides all rows."
+            "description": "Change kinds initially shown in a new Changes view; uses the model that opened it. Empty hides all rows."
           },
           "dynare.diff.sections": {
             "type": "array",
@@ -1389,7 +1407,7 @@
               "shockAnalysisSetup"
             ],
             "scope": "resource",
-            "description": "Sections shown in model Diff. Empty hides all content. Changes update open comparisons; list order sets section order."
+            "description": "Sections shown in Changes. Empty hides all content. Setting changes update open comparisons; list order sets section order."
           }
         }
       },
@@ -1553,6 +1571,18 @@
             ]
           }
         ]
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "dygnosis.changes",
+        "displayName": "Dygnosis Changes",
+        "selector": [
+          {
+            "filenamePattern": "*.dygnosis-changes"
+          }
+        ],
+        "priority": "option"
       }
     ]
   },

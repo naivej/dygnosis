@@ -26,10 +26,10 @@ const string = (value: unknown): string => typeof value === "string" ? value : m
 const object = (value: unknown): Record<string, unknown> => record(value) ? value : malformed();
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : malformed();
 const nullableString = (value: unknown): string | null => value === null ? null : string(value);
-function target(value: unknown): DiffTarget | null {
+function target(value: unknown, snapshots = false): DiffTarget | null {
   if (value === null) return null;
   const row = object(value), locations = array(row.written_locations);
-  if (!locations.every(item => location(item) && /^(file|untitled):/.test(item.uri))) malformed();
+  if (!locations.every(item => location(item) && (snapshots ? /^(file|untitled|dygnosis-history):/ : /^(file|untitled):/).test(item.uri))) malformed();
   return { occurrence_id: string(row.occurrence_id), domain: string(row.domain), dimension: nullableString(row.dimension),
     written_locations: (locations as Location[]).map(item => ({ uri: item.uri, range: { start: { ...item.range.start }, end: { ...item.range.end } } })) };
 }
@@ -40,6 +40,9 @@ function envelope(value: unknown, root: string): DiffEnvelope {
 }
 /** Project legacy rows for display; their exact pointers carry the engine's pairing. */
 export function parseDiff(value: unknown, beforeRoot: string, afterRoot: string): DiffSnapshot {
+  return projectDiff(value, beforeRoot, afterRoot);
+}
+function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snapshots = false): DiffSnapshot {
   const result = object(value);
   if (typeof result.error === "string") throw new Error(result.error);
   if (result.status === "incomplete") return {
@@ -52,7 +55,7 @@ export function parseDiff(value: unknown, beforeRoot: string, afterRoot: string)
   for (const raw of array(nav.rows)) {
     const row = object(raw), id = string(row.id);
     if (navigation.has(id)) malformed();
-    navigation.set(id, { id, kind: string(row.kind), dimension: row.dimension === undefined ? undefined : nullableString(row.dimension), before: target(row.before), after: target(row.after) });
+    navigation.set(id, { id, kind: string(row.kind), dimension: row.dimension === undefined ? undefined : nullableString(row.dimension), before: target(row.before, snapshots), after: target(row.after, snapshots) });
   }
   const rows: DiffRow[] = [];
   const add = (id: string, section: DiffSection, group: string, kind: ChangeKind, label: string, old: string | null, next: string | null, dimension: string | null = null, sideDimensions?: { before: string | null | undefined; after: string | null | undefined }): void => {
@@ -137,6 +140,35 @@ export function parseDiff(value: unknown, beforeRoot: string, afterRoot: string)
   });
   const complete = before.complete && after.complete && !!before.revision && !!after.revision;
   return { before, after, rows: complete ? rows : [], complete };
+}
+
+/** Schema 2 keys are mapped only through the host's retained captured source registry. */
+export function parseSnapshotDiff(value: unknown, ids: Record<DiffSide, string>, source: (side: DiffSide, key: string) => string,
+  inputs: Record<DiffSide, { root_file: string; revision: string; commit?: string }>): DiffSnapshot {
+  const response = object(value), nav = object(response.navigation);
+  if (response.state !== "result" || nav.schema_version !== 2) malformed();
+  const envelope = (side: DiffSide) => {
+    const input = object(nav[side]);
+    if (input.input_id !== ids[side] || input.root_file !== inputs[side].root_file || input.revision !== inputs[side].revision || input.complete !== true) malformed();
+    return { root_uri: ids[side], revision: nullableString(input.revision), complete: input.complete };
+  };
+  const mapped = (side: DiffSide, value: unknown): unknown => {
+    if (value === null) return null;
+    const item = object(value);
+    const written_locations = array(item.written_locations).map(raw => {
+      const entry = object(raw);
+      if (entry.input_id !== ids[side] || typeof entry.file_key !== "string" || entry.commit !== inputs[side].commit) malformed();
+      const uri = source(side, entry.file_key);
+      if (!location({ uri, range: entry.range })) malformed();
+      return { uri, range: entry.range };
+    });
+    return { ...item, written_locations };
+  };
+  const rows = array(nav.rows).map(raw => {
+    const row = object(raw);
+    return { ...row, before: mapped("before", row.before), after: mapped("after", row.after) };
+  });
+  return projectDiff({ ...object(response.diff), navigation: { schema_version: 1, before: envelope("before"), after: envelope("after"), rows } }, ids.before, ids.after, true);
 }
 
 export function normalizeChoices(value: unknown, defaults: DiffPreferences): DiffChoices {

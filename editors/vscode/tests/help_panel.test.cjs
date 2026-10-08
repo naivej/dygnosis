@@ -80,7 +80,7 @@ test('active engine explanation is escaped and labelled beside the bundled editi
   const env = setup(true); env.open({ code: 'E999', markdown: '# Active\n\n<script>evil()</script>', engineVersion: '0.10.0' });
   const panel = env.host.panels[0]; await panel.receive({ type: 'ready' });
   const opened = panel.messages[1]; assert.equal(opened.destination, 'check:E999');
-  assert.match(opened.extra.edition, /Active engine 0.10.0; Help 0.11.7/); assert.doesNotMatch(opened.extra.html, /<script/);
+  assert.equal(opened.extra.edition, `Active engine 0.10.0; Help ${require('../package.json').version}`); assert.doesNotMatch(opened.extra.html, /<script/);
   env.registration.dispose();
 });
 

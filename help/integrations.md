@@ -297,7 +297,85 @@ Each row's `before` and `after` are either null or `{occurrence_id, domain, dime
 
 LSP locations are `{uri, range}` using zero-based UTF-16 positions. MCP locations are `{file, line, column, end_line, end_column}` with one-based Unicode-scalar columns and the caller's file key when available; `file` is null for the unnamed supplied root. The ranges are exclusive at their ends. Navigation does not change the legacy shock `location` coordinate convention.
 
-Both sides use live overlays and their own root settings. Compare observes disk dependencies even without a watched-file event. If files change while the engine is reading them, it returns `INPUT_CHANGED` and asks the client to refresh. A client must disable source actions once either revision is stale, then compare again before jumping. Older engines can still supply the original comparison without navigation.
+LSP `dynare/compareModels` uses live overlays and each root's settings. It observes disk dependencies even without a watched-file event. If files change while the engine is reading them, it returns `INPUT_CHANGED` and asks the client to refresh. A client must disable source actions once either revision is stale, then compare again before jumping. Supplied-text MCP comparison uses only caller-provided text and file maps. Older engines can still supply the original comparison without navigation.
+
+### Isolated comparison inputs
+
+LSP `dynare/compareModelSnapshots` is advertised as
+`experimental.dygnosis.compareModelSnapshots` with `schema_version: 1`,
+`navigation_schema_version: 2`, `needs_sources: true`, `max_manifest_files`,
+and `max_source_bytes`. It takes one object with `schema_version: 1`, `before`, and `after`.
+Each side has a distinct caller-supplied `input_id`.
+
+- Working: `{kind: "working", input_id, root_uri, expected_revision, search_paths?}`.
+  The expected revision is the current `dynare/modelInfo.revision` for that root and server instance.
+  Capture uses editor buffers and saved dependencies. Optional search paths are absolute host folders.
+- Git: `{kind: "git", input_id, repository_uri, commit, requested_ref?, root_file,
+  search_paths, manifest, sources}`. `commit` is a full resolved commit id; `root_file` and manifest
+  keys are exact repository-relative paths with `/` separators. The full manifest maps each path to
+  `{mode, object_id}`. `sources` maps loaded paths to `{kind: "text", text}` or
+  `{kind: "failure", code, message}`. It cannot contain a path absent from the manifest.
+
+The host acquires Git objects. The engine executes macros and selects include candidates from the
+manifest in normal lookup order. Inactive includes need no bodies. An in-tree absolute source path
+is resolved lexically within the selected tree. A reached outside candidate, symlink, or gitlink
+is unsupported; current disk cannot supply historical text.
+
+The response has `state`:
+
+- `needs_sources`: `requests` lists `{side, input_id, file_keys}`. Supply those exact bodies and
+  repeat the request with the same identities, commit, manifest, and Working expected revisions.
+- `failure`: `code`, `message`, optional `side` and `file_key`; no authoritative change arrays.
+- `result`: `diff` keeps the existing comparison fields. `inputs` has `schema_version: 1` and
+  resolved `before`/`after` facts. `sources` contains the exact captured text of each side's files.
+  `navigation.schema_version` is 2.
+
+Each input fact gives `input_id`, `kind`, `root_file`, opaque `revision`, `complete`, `search_paths`,
+`file_keys`, `dependency_candidates`, and `source_policy`. Git also gives `repository_uri`, `commit`,
+and `requested_ref`; Working gives `root_uri` and uses `source_policy: "editor_buffers_and_disk"`.
+Working dependency candidates include missing host file URIs. Watch those paths and revalidate the
+model revision before navigation. Git inputs remain fixed when a branch or HEAD moves.
+
+Schema-2 navigation keeps row JSON pointers, occurrence ids, and comparison pairing. Side facts
+use `input_id` and `root_file`. LSP written targets use `{input_id, file_key, commit?, range}` with
+zero-based UTF-16 ranges. Map the key through that input's captured text; do not treat it as a live
+disk path. Historical target `commit` identifies the selected tree. Compare only model revisions
+with model revisions; the separate notification `input_revision` is a diagnostic token.
+
+The extension uses a read-only custom editor with view type `dygnosis.changes`. Its versioned
+`dygnosis-changes:` resource stores selectors and the invoking anchor for reload. A shared document
+owns capture and cancellation; split views keep separate display choices. Historical written text
+uses read-only `dygnosis-history:` documents whose identities include repository, commit, and key.
+An open source tab retains its captured text after the comparison closes. Neither resource scheme
+is an ordinary analysis document.
+
+### MCP repository comparison
+
+`dynare_compare_models` accepts either its existing supplied-text fields or repository fields:
+
+```json
+{
+  "repository_path": "C:/models/project",
+  "before": { "kind": "git", "root_file": "main.mod", "ref": "HEAD" },
+  "after": { "kind": "working", "root_file": "main.mod" },
+  "search_paths": ["common"]
+}
+```
+
+`repository_path` must be absolute on the MCP server host. Both roots use exact repository-relative
+paths; a rename is explicit. Each Git selector requires a ref, resolved to a full commit before any
+body reads. Working reads saved files only. Relative search folders resolve against the repository;
+saved Working dependencies may lie outside it. Historical lookup retains the tree limits above.
+Git reads do not fetch, prompt for credentials, or change the index, refs, or working files.
+
+Successful repository calls retain the existing top-level diff arrays and add schema-1 `inputs`
+and schema-2 `navigation`. Source policies are `git_tree` and `saved_files`. Input facts also give
+`repository_path`, the requested root path, and resolved search folders where applicable. MCP
+written targets use `{input_id, file_key, commit?, line, column, end_line, end_column}` with one-based
+Unicode-scalar coordinates. Incomplete or failed calls retain the selected-input envelope, report
+`status` and an explanation, and omit authoritative diff arrays. Mixed or malformed modes return
+JSON-RPC invalid parameters (`-32602`). Supplied-text calls keep schema-1 navigation and never read
+repository files.
 
 ## MCP input schemas
 
@@ -305,8 +383,9 @@ Both sides use live overlays and their own root settings. Compare observes disk 
 includes, parsing, and macro expansion. Incomplete input returns
 `status: "incomplete"`, an explanatory `message`, `equations: []`, and
 `count_gap: null`, including filtered requests. `dynare_compare_models`
-returns only the incomplete status and message when either side is incomplete;
-it supplies no diff arrays, Markdown, or navigation claims. A missing include
+in supplied-text mode returns only the incomplete status and message when either side is incomplete;
+it supplies no diff arrays, Markdown, or navigation claims. Repository mode also returns its input
+envelope on incomplete or failed acquisition. A missing include
 uses model-expansion wording.
 
 For `dynare_diagnose`, `dynare_model_info`, `dynare_equations`,

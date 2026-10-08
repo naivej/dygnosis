@@ -1,9 +1,131 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { execFile } = require("node:child_process");
+const { promisify } = require("node:util");
+const { createHash } = require("node:crypto");
+const { Buffer } = require("node:buffer");
+const { clearTimeout } = require("node:timers");
 const vscode = require("vscode");
 const { probeNativeMcp } = require("../scripts/native-mcp-host.cjs");
 const { effectivePreviewArguments } = require("../out/preview");
+const { createGitSources } = require("../out/git_source_host");
+const { captureComparison } = require("../out/snapshot_compare");
+const { historicalUri } = require("../out/history_sources");
+const { resourceName, resourceQuery, changesViewType } = require("../out/changes_resource");
+
+async function historyArtifacts() {
+  const extensionRoot = path.resolve(__dirname, "..");
+  const compiled = [];
+  async function collect(directory) {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const filename = path.join(directory, entry.name);
+      if (entry.isDirectory()) await collect(filename);
+      else if (entry.name.endsWith(".js")) compiled.push(filename);
+    }
+  }
+  await collect(path.join(extensionRoot, "out"));
+  compiled.push(...["package.json", "media/diff_view.js", "media/diff_view.css"].map(filename => path.join(extensionRoot, filename)));
+  const extensionHash = createHash("sha256");
+  for (const filename of compiled.sort()) {
+    extensionHash.update(path.relative(extensionRoot, filename).split(path.sep).join("/"));
+    extensionHash.update("\0"); extensionHash.update(await fs.readFile(filename)); extensionHash.update("\0");
+  }
+  return { engine_sha256: createHash("sha256").update(await fs.readFile(process.env.DYGNOSIS_TEST_BINARY)).digest("hex"),
+    compiled_extension_sha256: extensionHash.digest("hex"), compiled_files: compiled.length };
+}
+
+async function hostDevtools(callback) {
+  const port = process.env.DYGNOSIS_HOST_CDP_PORT;
+  if (!port) return undefined;
+  const targets = await (await globalThis.fetch(`http://127.0.0.1:${port}/json/list`)).json();
+  const target = targets.find(item => item.type === "page" && item.url.includes("workbench"));
+  assert.ok(target?.webSocketDebuggerUrl, "The isolated Code host must expose its workbench CDP target");
+  const socket = new globalThis.WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => { socket.addEventListener("open", resolve, { once: true }); socket.addEventListener("error", reject, { once: true }); });
+  let next = 0;
+  const pending = new Map();
+  socket.addEventListener("message", event => {
+    const value = JSON.parse(event.data), entry = pending.get(value.id);
+    if (!entry) return;
+    pending.delete(value.id); clearTimeout(entry.timer);
+    if (value.error) entry.reject(new Error(JSON.stringify(value.error))); else entry.resolve(value.result);
+  });
+  const send = (method, params = {}) => new Promise((resolve, reject) => {
+    const id = ++next, timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timed out: ${method}`)); }, 10000);
+    pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params }));
+  });
+  try { return await callback(send); } finally { socket.close(); }
+}
+
+async function historyScreenshot(name, evidence) {
+  if (!process.env.DYGNOSIS_HOST_CDP_PORT) { evidence.history_screenshot = "CDP was not enabled for this host run"; return; }
+  const filename = path.join(path.dirname(process.env.DYGNOSIS_HOST_RESULT), `history-${vscode.version}-${name}.png`);
+  await hostDevtools(async send => {
+    const screenshot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+    await fs.writeFile(filename, Buffer.from(screenshot.data, "base64"));
+  });
+  (evidence.history_screenshots ??= []).push(filename);
+}
+
+async function historyThemeChecks(evidence) {
+  if (!process.env.DYGNOSIS_HOST_CDP_PORT || vscode.version !== "1.141.0") return;
+  const appearance = vscode.workspace.getConfiguration("workbench"), previous = appearance.get("colorTheme");
+  evidence.history_theme_checks = [];
+  try {
+    for (const [theme, bodyClass, name] of [["Default Light Modern", "vs", "changes-light"], ["Default High Contrast", "hc-black", "changes-high-contrast"]]) {
+      await appearance.update("colorTheme", theme, vscode.ConfigurationTarget.Workspace);
+      await waitFor(async () => hostDevtools(async send => {
+        const response = await send("Runtime.evaluate", { expression: `document.body.classList.contains(${JSON.stringify(bodyClass)}) || document.querySelector(".monaco-workbench")?.classList.contains(${JSON.stringify(bodyClass)})`, returnByValue: true });
+        return response.result.value;
+      }), `native workbench applies ${theme}`);
+      await new Promise(resolve => setTimeout(resolve, 800));
+      await historyScreenshot(name, evidence); evidence.history_theme_checks.push(theme);
+    }
+  } finally {
+    await appearance.update("colorTheme", previous, vscode.ConfigurationTarget.Workspace);
+    await new Promise(resolve => setTimeout(resolve, 800));
+  }
+}
+
+async function historyPaletteCheck(evidence, description) {
+  if (!process.env.DYGNOSIS_HOST_CDP_PORT) return;
+  await vscode.commands.executeCommand("workbench.action.quickOpen", ">Dygnosis: Open changes");
+  try {
+    await waitFor(async () => hostDevtools(async send => {
+      const response = await send("Runtime.evaluate", { expression: 'Array.from(document.querySelectorAll(".quick-input-list .monaco-list-row")).some(row => row.getClientRects().length > 0 && row.textContent.includes("Dygnosis: Open changes") && row.getAttribute("aria-disabled") !== "true" && !row.classList.contains("disabled"))', returnByValue: true });
+      return response.result.value;
+    }), description);
+    evidence.history_palette_enabled = true;
+  } finally { await vscode.commands.executeCommand("workbench.action.closeQuickOpen"); }
+}
+
+async function historyKeyboardCheck(evidence) {
+  if (!process.env.DYGNOSIS_HOST_CDP_PORT || vscode.version !== "1.141.0") return;
+  let context;
+  await hostDevtools(async send => {
+    const tree = await send("Page.getFrameTree"), frames = [];
+    const collect = node => { for (const child of node.childFrames ?? []) { frames.push(child.frame); collect(child); } };
+    collect(tree.frameTree);
+    for (const frame of frames.reverse()) {
+      try {
+        const world = await send("Page.createIsolatedWorld", { frameId: frame.id, worldName: "dygnosis-history-keyboard-evidence" });
+        const response = await send("Runtime.evaluate", { contextId: world.executionContextId, expression: 'Boolean(document.getElementById("changeComparison"))', returnByValue: true });
+        if (response.result.value) { context = world.executionContextId; break; }
+      } catch { /* Cross-process webview frames can require their own CDP target. */ }
+    }
+    if (!context) { evidence.history_keyboard = { checked: false, barrier: "The workbench CDP target did not expose the rendered webview control frame." }; return; }
+    await send("Runtime.evaluate", { contextId: context, expression: 'document.getElementById("changeComparison").focus()' });
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+    const response = await send("Runtime.evaluate", { contextId: context, expression: 'JSON.stringify({id:document.activeElement.id,outline:getComputedStyle(document.activeElement).outlineStyle,width:getComputedStyle(document.activeElement).outlineWidth})', returnByValue: true });
+    const focused = JSON.parse(response.result.value);
+    assert.equal(focused.id, "swap", "native Tab moves between the visible Changes controls");
+    assert.notEqual(focused.outline, "none"); assert.notEqual(focused.width, "0px");
+    evidence.history_keyboard = { checked: true, from: "Change comparison…", to: "Swap sides", focus_outline: focused };
+  });
+  if (context) await historyScreenshot("changes-keyboard", evidence);
+}
 
 async function waitFor(predicate, description) {
   for (let i = 0; i < 100; ++i) {
@@ -238,11 +360,207 @@ async function checkShockPathConstructors(service, workspaceRoot, evidence) {
   evidence.checks.push("slice 23 path E276/E277/E278/E405/E420 sentences and Unicode ranges in native Problems; unsaved quiet controls clear Errors");
 }
 
+async function checkGitHistory(service, workspaceRoot, evidence) {
+  const repositoryPath = path.join(workspaceRoot, "history-fixture"), rootPath = path.join(repositoryPath, "root.mod");
+  const bodyPath = path.join(repositoryPath, "body.data"), rootUri = vscode.Uri.file(rootPath);
+  await fs.mkdir(repositoryPath, { recursive: true });
+  const rootText = "var y;\nmodel;\n@#include \"body.data\"\nend;\n";
+  const bodyText = value => `/* 🧭 */ [name='output'] y=${value};\n`;
+  const sources = await createGitSources(), gitExtension = vscode.extensions.getExtension("vscode.git");
+  const api = gitExtension.exports.getAPI(1), runGit = promisify(execFile);
+  const git = async (...args) => (await runGit(api.git.path, ["-C", repositoryPath, ...args], { windowsHide: true })).stdout.trim();
+  await git("init", "-q");
+  await git("config", "user.email", "host-test@example.invalid");
+  await git("config", "user.name", "Dygnosis host test");
+  await git("config", "core.autocrlf", "false");
+  await fs.writeFile(rootPath, rootText); await fs.writeFile(bodyPath, bodyText(1));
+  await git("add", "."); await git("commit", "-qm", "Initial model and include");
+  const beforeCommit = await git("rev-parse", "HEAD");
+  await fs.writeFile(bodyPath, bodyText(2)); await git("add", "body.data"); await git("commit", "-qm", "Change only the include");
+  const afterCommit = await git("rev-parse", "HEAD");
+  await fs.writeFile(bodyPath, bodyText(3));
+  const repository = await sources.repositoryFor(rootUri), before = await sources.resolve(repository, beforeCommit), after = await sources.resolve(repository, afterCommit);
+  assert.equal(before.hash, beforeCommit); assert.equal(after.hash, afterCommit);
+  assert.equal((await sources.previous(repository)).revision.hash, afterCommit);
+  assert.equal((await sources.previous(repository, afterCommit)).revision.hash, beforeCommit);
+  const selector = commit => ({ kind: "git", repository_uri: repository.rootUri.toString(), commit, root_file: "root.mod", requested_ref: commit });
+  const fixedResource = { schema_version: 1, before: selector(beforeCommit), after: selector(afterCommit), anchor: selector(afterCommit), context_uri: rootUri.toString() };
+  const historical = {
+    retain(_holder, input, texts) { return new Map(Object.keys(texts).map(file_key => [file_key, historicalUri({ repository_uri: input.repository_uri, commit: input.commit, file_key })])); },
+    release() {},
+  };
+  const token = new vscode.CancellationTokenSource(), transport = [], execute = service.execute.bind(service);
+  service.execute = async (name, ...args) => {
+    const result = await execute(name, ...args);
+    if (name === "dynare/compareModelSnapshots") transport.push(result);
+    return result;
+  };
+  try {
+    const fixed = await captureComparison(service, async () => sources, historical, fixedResource, token.token);
+    const fixedWire = transport.findLast(result => result?.state === "result");
+    assert.ok(transport.some(result => result?.state === "needs_sources"), "Rust must request the active include body");
+    assert.deepEqual(Object.keys(fixed.texts.before).sort(), ["body.data", "root.mod"]);
+    assert.equal(fixed.texts.before["body.data"], bodyText(1)); assert.equal(fixed.texts.after["body.data"], bodyText(2));
+    assert.equal(fixed.snapshot.rows.length, 1); assert.equal(fixed.snapshot.rows[0].kind, "changed");
+    assert.equal(fixed.snapshot.rows[0].navigation.before.written_locations[0].range.start.character, 9);
+    assert.equal(fixedWire.inputs.before.commit, beforeCommit); assert.equal(fixedWire.inputs.after.commit, afterCommit);
+    evidence.checks.push("installed Git API resolves HEAD and historical first parent; Rust requests include bodies; fixed commits ignore current saved include bytes and map UTF-16 locations");
+
+    assert.equal(typeof api.toGitUri, "function", "The real Git API provides native source document URIs");
+    const nativeGitUri = api.toGitUri(rootUri, afterCommit), nativeGitDocument = await vscode.workspace.openTextDocument(nativeGitUri);
+    assert.equal(nativeGitDocument.getText(), rootText);
+    const provenance = await sources.provenance(nativeGitDocument);
+    assert.equal(provenance.commit.hash, afterCommit); assert.equal(provenance.file_key, "root.mod");
+    evidence.checks.push("built-in Git document URI, provider text and fixed-commit provenance work in the installed host");
+
+    const root = await vscode.workspace.openTextDocument(rootUri), body = await vscode.workspace.openTextDocument(bodyPath);
+    assert.equal(body.languageId, "plaintext", "the arbitrary-extension include starts outside native analysis");
+    await vscode.window.showTextDocument(root);
+    await currentSnapshot(service, root, () => service.modelInfo(root.uri), "history Working root snapshot");
+    const nativeGitBody = await vscode.workspace.openTextDocument(api.toGitUri(body.uri, afterCommit));
+    assert.equal(nativeGitBody.languageId, "plaintext", "a native Git document keeps the arbitrary include extension");
+    assert.ok(service.knownOwners(body.uri).some(owner => owner.toString() === rootUri.toString()));
+    await vscode.commands.executeCommand("workbench.action.joinAllGroups");
+    await vscode.window.showTextDocument(nativeGitBody, { preview: false });
+    if (process.env.DYGNOSIS_HOST_CDP_PORT) {
+      await waitFor(async () => hostDevtools(async send => {
+        const response = await send("Runtime.evaluate", { expression: 'Array.from(document.querySelectorAll(".editor-actions .action-label")).some(action => action.getClientRects().length > 0 && ((action.getAttribute("title") || "") + (action.getAttribute("aria-label") || "")).includes("Open changes") && action.getAttribute("aria-disabled") !== "true" && !action.classList.contains("disabled"))', returnByValue: true });
+        return response.result.value;
+      }), "native title offers Open changes on a known plaintext Git include");
+      await historyPaletteCheck(evidence, "native Command Palette offers Open changes on a known plaintext Git include");
+      evidence.history_git_plaintext_context = { title_enabled: true, palette_enabled: true };
+      evidence.checks.push("native title and Command Palette offer enabled Open changes for a known plaintext Git .data include");
+    }
+    const workingResource = { ...fixedResource, before: selector(afterCommit), after: { kind: "working", root_uri: rootUri.toString() }, anchor: { kind: "working", root_uri: rootUri.toString() } };
+    await captureComparison(service, async () => sources, historical, workingResource, token.token);
+    const savedWire = transport.findLast(result => result?.state === "result");
+    const serverId = "dygnosis.dygnosis/Dygnosis";
+    let mcpTool;
+    await waitFor(async () => {
+      await vscode.commands.executeCommand("workbench.mcp.startServer", serverId);
+      mcpTool = vscode.lm.tools.find(tool => tool.name.endsWith("_dynare_compare_models")); return !!mcpTool;
+    }, "native repository comparison MCP tool discovery");
+    const repositoryInput = { repository_path: repositoryPath, before: { kind: "git", root_file: "root.mod", ref: afterCommit }, after: { kind: "working", root_file: "root.mod" } };
+    const invoke = async input => {
+      const result = await vscode.lm.invokeTool(mcpTool.name, { input }, token.token);
+      return JSON.parse(result.content.filter(item => item instanceof vscode.LanguageModelTextPart).map(item => item.value).join("\n"));
+    };
+    const mcpSaved = await invoke(repositoryInput);
+    assert.deepEqual(mcpSaved.changed_equations, savedWire.diff.changed_equations);
+    assert.equal(mcpSaved.inputs.after.source_policy, "saved_files");
+    const mcpFixed = await invoke({ ...repositoryInput, before: { kind: "git", root_file: "root.mod", ref: beforeCommit }, after: { kind: "git", root_file: "root.mod", ref: afterCommit } });
+    assert.deepEqual(mcpFixed.changed_equations, fixedWire.diff.changed_equations);
+    const edit = new vscode.WorkspaceEdit(); edit.replace(body.uri, new vscode.Range(body.positionAt(0), body.positionAt(body.getText().length)), bodyText(4));
+    assert.equal(await vscode.workspace.applyEdit(edit), true); assert.equal(body.isDirty, true);
+    assert.equal(body.languageId, "plaintext", "the unsaved edit must precede the language change");
+    assert.ok(service.knownOwners(body.uri).some(owner => owner.toString() === rootUri.toString()), "the root snapshot proves the include owner");
+    const unrelated = await vscode.workspace.openTextDocument(path.join(workspaceRoot, "model.mod"));
+    await vscode.window.showTextDocument(unrelated);
+    await historyPaletteCheck(evidence, "native Command Palette offers Open changes with an unrelated editor active");
+    const selected = [], selectOwner = service.selectOwner.bind(service);
+    service.selectOwner = (document, owner) => {
+      if (document.toString() === body.uri.toString()) selected.push({ root: owner.toString(), language: vscode.workspace.textDocuments.find(open => open.uri.toString() === document.toString())?.languageId });
+      return selectOwner(document, owner);
+    };
+    const openingFromScm = vscode.commands.executeCommand("dygnosis.openChanges", { resourceUri: body.uri });
+    try {
+      await waitFor(() => selected.length && vscode.workspace.textDocuments.some(open => open.uri.toString() === body.uri.toString() && open.languageId === "dynare"), "explicit SCM include selects its proven owner before changing language");
+      assert.deepEqual(selected[0], { root: rootUri.toString(), language: "plaintext" });
+      assert.equal(vscode.window.activeTextEditor.document.uri.toString(), unrelated.uri.toString(), "the explicit SCM argument must not use the unrelated active editor");
+      await new Promise(resolve => setTimeout(resolve, 800));
+      await vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem"); await openingFromScm;
+    } finally { service.selectOwner = selectOwner; }
+    const adoptedBody = vscode.workspace.textDocuments.find(open => open.uri.toString() === body.uri.toString() && !open.isClosed);
+    assert.equal(adoptedBody.languageId, "dynare"); assert.equal(adoptedBody.getText(), bodyText(4)); assert.equal(adoptedBody.isDirty, true);
+    await waitFor(async () => (await service.rootForDocument(adoptedBody))?.toString() === rootUri.toString(), "proven include owner survives language-change cache invalidation");
+    let scmWire;
+    await waitFor(() => {
+      scmWire = transport.findLast(result => result?.state === "result");
+      return scmWire?.inputs.after.kind === "working" && scmWire.inputs.after.root_uri === rootUri.toString() && scmWire.diff.changed_equations[0]?.text_new?.includes("4");
+    }, "native SCM Open changes captures the unsaved arbitrary-extension include");
+    assert.deepEqual((await invoke(repositoryInput)).changed_equations, mcpSaved.changed_equations);
+    evidence.checks.push("explicit SCM URI on an unsaved plaintext .data include uses its proven owner with an unrelated editor active, selects owner before Dynare language change, retains context after cache invalidation, and keeps editor/MCP source policies distinct");
+    await currentSnapshot(service, root, () => service.modelInfo(root.uri), "history unsaved include snapshot");
+    const unsaved = await captureComparison(service, async () => sources, historical, workingResource, token.token);
+    assert.ok(unsaved.snapshot.rows[0].after.includes("4"));
+    assert.deepEqual((await invoke(repositoryInput)).changed_equations, mcpSaved.changed_equations, "independent MCP still reads saved include bytes");
+    await vscode.commands.executeCommand("workbench.mcp.stopServer", serverId);
+    evidence.checks.push("native VS Code MCP discovery and repository calls agree with editor snapshots for saved and fixed inputs; an unsaved include affects the editor while MCP retains saved bytes");
+
+    const comparisonUri = resource => vscode.Uri.from({ scheme: "dygnosis-changes", path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
+    const fixedUri = comparisonUri(fixedResource), tabs = uri => vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === changesViewType && tab.input.uri.toString() === uri.toString());
+    await vscode.commands.executeCommand("workbench.action.joinAllGroups");
+    if ((await vscode.commands.getCommands(true)).includes("workbench.action.closeAuxiliaryBar")) await vscode.commands.executeCommand("workbench.action.closeAuxiliaryBar");
+    await vscode.commands.executeCommand("vscode.openWith", fixedUri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
+    await waitFor(() => tabs(fixedUri).length === 1 && transport.findLast(result => result?.state === "result")?.inputs.after.commit === afterCommit, "read-only Changes custom editor resolves its real capture");
+    assert.equal(tabs(fixedUri)[0].isDirty, false);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    await historyScreenshot("changes", evidence);
+    await historyThemeChecks(evidence);
+    await historyKeyboardCheck(evidence);
+    await vscode.commands.executeCommand("vscode.openWith", fixedUri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
+    assert.equal(tabs(fixedUri).length, 1, "the same ordered comparison reuses its tab");
+    await vscode.commands.executeCommand("vscode.openWith", fixedUri, changesViewType, { viewColumn: vscode.ViewColumn.Two, preview: false });
+    await waitFor(() => tabs(fixedUri).length === 2, "comparison opens in two editor groups");
+    await vscode.window.tabGroups.close(tabs(fixedUri)[0]);
+    assert.equal(tabs(fixedUri).length, 1, "closing one split retains the other");
+    const swappedUri = comparisonUri({ ...fixedResource, before: fixedResource.after, after: fixedResource.before });
+    await vscode.commands.executeCommand("vscode.openWith", swappedUri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
+    await waitFor(() => tabs(swappedUri).length === 1, "swapped ordered comparison owns another resource");
+    evidence.checks.push("installed read-only custom editor: stable resource, same-pair reuse, separate ordered pair, two splits, close-one lifetime and no dirty state");
+
+    const oldUri = historicalUri({ repository_uri: repository.rootUri.toString(), commit: beforeCommit, file_key: "body.data" });
+    const newUri = historicalUri({ repository_uri: repository.rootUri.toString(), commit: afterCommit, file_key: "body.data" });
+    const oldSource = await vscode.languages.setTextDocumentLanguage(await vscode.workspace.openTextDocument(oldUri), "dynare");
+    const newSource = await vscode.languages.setTextDocumentLanguage(await vscode.workspace.openTextDocument(newUri), "dynare");
+    assert.equal(oldSource.getText(), bodyText(1)); assert.equal(newSource.getText(), bodyText(2));
+    assert.notEqual(oldSource.uri.toString(), newSource.uri.toString());
+    await vscode.window.showTextDocument(newSource, { preview: false });
+    await vscode.commands.executeCommand("default:type", { text: "EDIT_REFUSAL_TEST" });
+    assert.equal(newSource.getText(), bodyText(2)); assert.equal(newSource.isDirty, false);
+    await vscode.window.tabGroups.close([...tabs(fixedUri), ...tabs(swappedUri)]);
+    assert.equal((await vscode.workspace.openTextDocument(oldUri)).getText(), bodyText(1));
+    assert.equal((await vscode.workspace.openTextDocument(newUri)).getText(), bodyText(2));
+    const rootBeforeUri = historicalUri({ repository_uri: repository.rootUri.toString(), commit: beforeCommit, file_key: "root.mod" });
+    const rootAfterUri = historicalUri({ repository_uri: repository.rootUri.toString(), commit: afterCommit, file_key: "root.mod" });
+    await vscode.commands.executeCommand("vscode.diff", rootBeforeUri, rootAfterUri, "Include-only history: unchanged written root", { preview: false });
+    await waitFor(() => vscode.window.tabGroups.all.flatMap(group => group.tabs).some(tab => tab.input instanceof vscode.TabInputTextDiff && tab.input.original.toString() === rootBeforeUri.toString() && tab.input.modified.toString() === rootAfterUri.toString()), "native root text diff uses the fixed historical documents");
+    assert.equal((await vscode.workspace.openTextDocument(rootBeforeUri)).getText(), (await vscode.workspace.openTextDocument(rootAfterUri)).getText());
+    evidence.checks.push("two read-only historical versions at one path retain exact bytes after comparison closes; native root diff uses those identities and has no include-only root hunk");
+
+    await vscode.window.showTextDocument(newSource, { preview: false });
+    const opening = vscode.commands.executeCommand("dygnosis.openChanges");
+    await new Promise(resolve => setTimeout(resolve, 800));
+    if (process.env.DYGNOSIS_HOST_CDP_PORT) await hostDevtools(async send => {
+      const response = await send("Runtime.evaluate", { expression: 'JSON.stringify(Array.from(document.querySelectorAll(".quick-input-list .label-name")).filter(row => row.getClientRects().length > 0).map(row => row.textContent))', returnByValue: true });
+      assert.deepEqual(JSON.parse(response.result.value), ["With previous revision", "With revision…", "With branch or tag…", "With .mod file…"]);
+    });
+    await historyScreenshot("picker", evidence);
+    await vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem"); await opening;
+    let opened;
+    await waitFor(() => {
+      const active = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+      if (!(active instanceof vscode.TabInputCustom) || active.viewType !== changesViewType) return false;
+      opened = JSON.parse(active.uri.query);
+      return opened.before.commit === beforeCommit && opened.after.commit === afterCommit && opened.after.root_file === "root.mod";
+    }, "Open changes from retained historical include anchors its historical owner and first parent");
+    assert.equal(opened.anchor.commit, afterCommit);
+    evidence.checks.push("native Open changes on a retained historical include uses its model owner at that commit and historical first parent");
+    evidence.history = { beforeCommit, afterCommit, repository_root: repository.rootUri.toString(), git_api: 1, snapshot_schema: fixedWire.inputs.schema_version,
+      navigation_schema: fixedWire.navigation.schema_version, source_requests: transport.filter(value => value?.state === "needs_sources").length,
+      fixed_changes: fixed.snapshot.rows.length, native_mcp_agreement: true, historical_tabs_read_only: true };
+    await vscode.window.tabGroups.close(vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === changesViewType));
+  } finally {
+    service.execute = execute; token.cancel(); token.dispose(); sources.clear();
+  }
+}
+
 exports.run = async function run() {
   const resultFile = process.env.DYGNOSIS_HOST_RESULT;
   const evidence = { vscode: vscode.version, runId: process.env.DYGNOSIS_HOST_RUN_ID, checks: [] };
   try {
     assert.ok(process.env.DYGNOSIS_TEST_BINARY, "Set DYGNOSIS_TEST_BINARY to the matching built engine.");
+    evidence.artifacts_before = await historyArtifacts();
     const extension = vscode.extensions.getExtension("dygnosis.dygnosis");
     assert.ok(extension);
     const service = await extension.activate();
@@ -395,9 +713,12 @@ exports.run = async function run() {
     evidence.checks.push("native include link retains mod owner; unsaved include refreshes Outline/model revision");
     await checkNativeMetadata(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
     await checkMacroPreview(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
+    await checkGitHistory(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
     await service.restart(); assert.ok(service.client);
     await service.shutdown(); assert.equal(service.client, undefined);
     evidence.checks.push("restart/shutdown");
+    evidence.artifacts_after = await historyArtifacts();
+    assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "the engine and compiled extension must remain unchanged throughout the host gate");
     evidence.passed = true;
   } catch (error) { evidence.passed = false; evidence.error = String(error.stack || error); throw error; }
   finally { if (resultFile) await fs.writeFile(resultFile, JSON.stringify(evidence, null, 2)); }

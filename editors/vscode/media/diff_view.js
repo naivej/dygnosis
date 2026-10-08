@@ -102,6 +102,9 @@
     }
   }
   controls.refresh.addEventListener("click", () => api.postMessage({ type: "refresh" }));
+  for (const action of ["changeComparison", "swap", "rootTextDiff", "updateRevision", "choosePath", "details"]) {
+    document.getElementById(action)?.addEventListener("click", () => api.postMessage({ type: action }));
+  }
   document.getElementById("help").addEventListener("click", () => api.postMessage({ type: "help" }));
   controls.search.addEventListener("input", () => { choices.search = controls.search.value; update(); });
   controls.scope.addEventListener("change", () => { choices.scope = controls.scope.value; update(); });
@@ -117,6 +120,14 @@
     }
     controls.status.textContent = message.message; controls.status.className = message.status;
     controls.refresh.disabled = message.status === "loading";
+    const folders = document.getElementById("folders");
+    if (folders) folders.textContent = message.hasHistory ? `Extra include folders (current list): ${message.details?.inputs?.after?.search_paths?.join(", ") || "none"}.` : "";
+    const textDiff = document.getElementById("rootTextDiff");
+    if (textDiff) textDiff.disabled = message.status !== "ready";
+    const update = document.getElementById("updateRevision");
+    if (update) update.hidden = !message.hasHistory;
+    const choose = document.getElementById("choosePath");
+    if (choose) choose.hidden = message.status !== "failure";
     renderControls(); renderRows(); api.setState({ key: payload.key, choices });
   });
   api.postMessage({ type: "ready", key: saved?.key, choices: saved?.choices });

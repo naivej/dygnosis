@@ -39,7 +39,7 @@ conditions, determinacy, correct economics or a successful experiment. Those nee
 | Check the options of a command | `dynare_list_options`, then the Dynare manual for meaning. An unknown command returns `known: false`. Do not invent options. |
 | Rename a symbol | `dynare_find_references` (comments are skipped), then `dynare_rename`. |
 | Apply a known fix, or format | `dynare_auto_fix`, `dynare_format` (`formatIndent`: `"tab"` or 1–8). |
-| Review the structural effect of an edit | `dynare_compare_models` with the before and after text and the includes of each side. It is not a numerical equivalence test. |
+| Review the structural effect of an edit | `dynare_compare_models` with supplied text and includes, or with explicit repository inputs. It is not a numerical equivalence test. |
 | Isolate a mechanism or make a small reproducer | `dynare_extract` by equation `names` or `tags` (all tags must match), optionally in one heterogeneity `dimension`. |
 
 Call the tools that help the task. Do not call every tool on every task.
@@ -74,9 +74,30 @@ build a map, check that `dynare_expand` returns `root_file` equal to your key, o
 When one include belongs to several root files, choose the roots explicitly (Dygnosis W061 reports an
 ambiguous parent).
 
-**Two versions.** `dynare_compare_models` needs `file_content_a` and `file_content_b` in every call. For
-includes, give `active_file_a`/`files_a` and `active_file_b`/`files_b`, or one shared `files` map. Keep
-the inputs of the two sides separate.
+**Two versions.** `dynare_compare_models` has two modes. Do not combine them.
+
+- Supplied text: pass `file_content_a` and `file_content_b`. For includes, give
+  `active_file_a`/`files_a` and `active_file_b`/`files_b`, or one shared `files` map.
+- Repository: pass an absolute `repository_path` on the server host, and explicit `before` and
+  `after` inputs. Each input has `kind` (`git` or `working`) and a repository-relative `root_file`.
+  Every Git input also requires `ref`. Working reads saved files; it does not see editor buffers.
+
+For example, this compares HEAD with the saved model:
+
+```json
+{
+  "repository_path": "C:/models/project",
+  "before": { "kind": "git", "root_file": "main.mod", "ref": "HEAD" },
+  "after": { "kind": "working", "root_file": "main.mod" },
+  "search_paths": ["common"]
+}
+```
+
+Before is the baseline; After is the model under review. Git refs resolve once before source reads.
+Use the returned commit ids when reporting a result or repeating a fixed comparison. A renamed root
+needs its exact path on each side. Relative `search_paths` resolve against `repository_path`.
+Historical roots and executed includes use only their selected commit trees. Git never fetches missing
+objects. A required source outside that repository, a symlink, or a gitlink fails explicitly.
 
 ## Read the result
 
@@ -90,7 +111,7 @@ the inputs of the two sides separate.
 | `dynare_expand` | `complete: false` |
 | `dynare_related_files` | a row with `resolved: false` |
 | `dynare_extract` | `status: "unsupported_context"`, `fragment: null` |
-| `dynare_compare_models` | `{"status": "incomplete", …}` with no diff arrays or removed/added claims |
+| `dynare_compare_models` | `status: "incomplete"` or `status: "failed"` with no diff arrays or removed/added claims |
 | `dynare_workspace_diagnose` | a root with `status: "failed"` and a `failure` message |
 
 A partial result cannot support a claim that the model is clean. Fix the inputs, or report what was not
@@ -121,6 +142,12 @@ navigation when you need the loop copy that produced a row.
 to the file named in the row (`file`, `origin_uri`), or to the root when no file is named. After an
 edit, query again; do not reuse old locations. Edit the written source at the returned location, not
 the expanded text.
+
+Repository comparison adds `inputs` with `schema_version: 1`. Read each side's root, resolved commit,
+source policy, search paths, and completeness before making a change claim. Its navigation has
+`schema_version: 2`; each written target carries `input_id`, `file_key`, and the commit for a historical
+source. Read that file at that commit when following a historical target. Supplied-text calls retain
+navigation schema 1 and their original file keys.
 
 ## Apply edits
 

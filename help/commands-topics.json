@@ -20,5 +20,6 @@
   "dygnosis.projectStatus": "project-checks",
   "dygnosis.recheckProject": "project-checks",
   "dygnosis.cancelProject": "project-checks",
-  "dygnosis.configureProjectExclusions": "project-checks"
+  "dygnosis.configureProjectExclusions": "project-checks",
+  "dygnosis.openChanges": "structural-diff"
 }
