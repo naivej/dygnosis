@@ -543,6 +543,186 @@ fn registered_tools_include_format() {
             "tools/list must not contain {name}: {blob}"
         );
     }
+    let descriptions = tools
+        .iter()
+        .map(|tool| {
+            (
+                tool["name"].as_str().unwrap(),
+                tool["description"].as_str().unwrap(),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    assert!(descriptions["dynare_find_references"].contains("identifier spelling"));
+    assert!(descriptions["dynare_rename"].contains("identifier spelling"));
+}
+
+#[test]
+fn model_local_mcp_inventory_equations_and_extract() {
+    let source = "// Unicode heading: α😀\n\
+heterogeneity_dimension h;
+var y;
+var(heterogeneity=h) hy;
+parameters p;
+model_local_variable heading $α😀$; model_local_variable declared $D$;
+model;
+#declared = p;
+#nested = declared(+1) + 1;
+[name='euler']
+y = nested(-1);
+end;
+model;
+[name='later']
+y = nested;
+end;
+model(heterogeneity=h);
+hy = hy(-1);
+end;
+model(heterogeneity=h);
+#nested = 7;
+[name='hetero_later']
+hy = nested + declared;
+end;
+";
+
+    let info = dynare_model_info(source, None, None);
+    let declarations = info["model_locals"]["declarations"]
+        .as_array()
+        .expect("model-local declarations");
+    assert_eq!(declarations.len(), 2);
+    assert_eq!(declarations[0]["name"], "heading");
+    assert_eq!(declarations[0]["tex_name"], "α😀");
+    assert_eq!(declarations[1]["name"], "declared");
+    assert_eq!(declarations[1]["tex_name"], "D");
+    assert!(declarations[1]["origin"]["line"].as_u64().is_some());
+    let declaration_name = source.find("declared").unwrap() as u32;
+    let expected_position = LineIndex::new(source).position(source, declaration_name);
+    assert_eq!(
+        declarations[1]["origin"]["column"],
+        expected_position.character as u64 + 1
+    );
+
+    let definitions = info["model_locals"]["definitions"]
+        .as_array()
+        .expect("model-local definitions");
+    assert_eq!(definitions.len(), 3);
+    assert_eq!(definitions[0]["name"], "declared");
+    assert_eq!(definitions[0]["dimension"], Value::Null);
+    assert_eq!(definitions[1]["name"], "nested");
+    assert_eq!(definitions[1]["idents"][0]["name"], "declared");
+    assert_eq!(definitions[1]["idents"][0]["class"], "model_local");
+    assert!(definitions[1]["idents"][0].get("timing_class").is_none());
+    assert_eq!(definitions[2]["dimension"], "h");
+
+    let equations = dynare_equations(source, None, None, None, None);
+    let rows = equations["equations"].as_array().expect("equation rows");
+    let nested_use = rows
+        .iter()
+        .find(|row| {
+            row["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("y = nested(-1)"))
+        })
+        .expect("aggregate nested use");
+    let nested_ident = nested_use["idents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|ident| ident["name"] == "nested")
+        .expect("nested model-local identifier");
+    assert_eq!(nested_ident["class"], "model_local");
+    assert!(nested_ident.get("timing_class").is_none());
+
+    let extracted = dynare_extract(
+        source,
+        None,
+        None,
+        &["later".to_string()],
+        &HashMap::new(),
+        None,
+    )
+    .expect("extract model-local dependencies");
+    let fragment = extracted["fragment"].as_str().expect("extract fragment");
+    assert!(
+        fragment.contains("model_local_variable declared $D$;"),
+        "{fragment}"
+    );
+    assert!(
+        !fragment.contains("model_local_variable heading"),
+        "{fragment}"
+    );
+    assert!(fragment.contains("#declared = p;"), "{fragment}");
+    assert!(
+        fragment.contains("#nested = declared(+1) + 1;"),
+        "{fragment}"
+    );
+    assert!(
+        !fragment.contains("#nested = 7;"),
+        "cross-dimension definition leaked: {fragment}"
+    );
+    assert!(
+        !fragment.contains("model(heterogeneity=h)"),
+        "other scope leaked: {fragment}"
+    );
+
+    let heterogeneous = dynare_extract(
+        source,
+        None,
+        None,
+        &["hetero_later".to_string()],
+        &HashMap::new(),
+        Some("h"),
+    )
+    .expect("extract heterogeneous local dependencies");
+    let heterogeneous_fragment = heterogeneous["fragment"].as_str().unwrap();
+    assert!(
+        heterogeneous_fragment.contains("model_local_variable declared $D$;"),
+        "global explicit declaration should be shared with heterogeneous use: {heterogeneous_fragment}"
+    );
+    assert!(
+        heterogeneous_fragment.contains("#nested = 7;"),
+        "definition from the second block of dimension h was dropped: {heterogeneous_fragment}"
+    );
+    assert!(
+        !heterogeneous_fragment.contains("#nested = declared(+1) + 1;"),
+        "aggregate definition leaked into the heterogeneous scope: {heterogeneous_fragment}"
+    );
+
+    let incomplete = dynare_model_info(
+        "@#include \"missing.inc\"\nmodel; #z=1; y=z; end;\n",
+        None,
+        None,
+    );
+    assert_eq!(incomplete["status"], "incomplete");
+    assert!(incomplete.get("model_locals").is_none());
+
+    let macro_source = "\
+var y;
+@#define values = 1:2
+model;
+@#for i in values
+#local_@{i} = @{i};
+y = local_@{i};
+@#endfor
+end;
+";
+    let macro_info = dynare_model_info(macro_source, None, None);
+    let macro_definitions = macro_info["model_locals"]["definitions"]
+        .as_array()
+        .expect("expanded local definitions");
+    assert_eq!(macro_definitions.len(), 2);
+    assert_eq!(macro_definitions[0]["expression"], "1");
+    assert_eq!(macro_definitions[1]["expression"], "2");
+    assert!(!macro_definitions[0]["expression"]
+        .as_str()
+        .unwrap()
+        .contains("@{"));
+    assert_eq!(
+        macro_definitions[0]["origin"],
+        macro_definitions[1]["origin"]
+    );
+    assert!(macro_definitions[0]["origin_frames"]
+        .as_array()
+        .is_some_and(|frames| !frames.is_empty()));
 }
 
 fn assert_format_keys(body: &Value) {

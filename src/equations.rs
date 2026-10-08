@@ -48,6 +48,7 @@ pub enum IdentClass {
     Varexo,
     VarexoDet,
     Parameter,
+    ModelLocal,
     Undeclared,
 }
 
@@ -58,6 +59,7 @@ impl IdentClass {
             Self::Varexo => "varexo",
             Self::VarexoDet => "varexo_det",
             Self::Parameter => "parameter",
+            Self::ModelLocal => "model_local",
             Self::Undeclared => "undeclared",
         }
     }
@@ -75,18 +77,20 @@ pub struct CountGap {
 
 pub fn equations(model: &Model) -> Vec<EquationRow> {
     let timing = TimingAnalysis::new(model);
+    let locals = crate::model_locals::ModelLocals::collect(model);
     let mut rows = Vec::new();
     for eq in &model.equations {
         if !is_counted(eq) {
             continue;
         }
-        rows.push(equation_row(model, eq, rows.len(), &timing, None));
+        rows.push(equation_row(model, eq, rows.len(), &timing, None, &locals));
     }
     rows
 }
 
 pub(crate) fn heterogeneous_equations(model: &Model) -> Vec<HeterogeneousEquationBlockRows> {
     let timing = TimingAnalysis::new(model);
+    let locals = crate::model_locals::ModelLocals::collect(model);
     let mut next_index = HashMap::new();
     model
         .heterogeneous_models
@@ -103,6 +107,7 @@ pub(crate) fn heterogeneous_equations(model: &Model) -> Vec<HeterogeneousEquatio
                         *index,
                         &timing,
                         Some(block.dimension),
+                        &locals,
                     ));
                     *index += 1;
                 }
@@ -122,13 +127,19 @@ fn equation_row(
     index: usize,
     timing: &TimingAnalysis,
     heterogeneous_dimension: Option<crate::intern::Name>,
+    locals: &crate::model_locals::ModelLocals,
 ) -> EquationRow {
     let idents = model
         .ident_refs(eq)
         .into_iter()
         .map(|reference| {
             let name = model.name(reference.name).to_string();
-            let class = ident_class(model, reference.name);
+            let model_local = locals.uses.iter().any(|usage| {
+                usage.name == reference.name
+                    && usage.span == reference.span
+                    && usage.dimension == heterogeneous_dimension
+            });
+            let class = identifier_class(model, reference.name, model_local);
             let timing_class = if class == IdentClass::Endogenous {
                 let classes = if heterogeneous_dimension.is_some() {
                     &timing.all
@@ -244,7 +255,14 @@ fn collapsed_equation_count(model: &Model) -> usize {
     n
 }
 
-fn ident_class(model: &Model, name: crate::intern::Name) -> IdentClass {
+pub(crate) fn identifier_class(
+    model: &Model,
+    name: crate::intern::Name,
+    model_local: bool,
+) -> IdentClass {
+    if model_local {
+        return IdentClass::ModelLocal;
+    }
     match model
         .final_symbol_kind(name)
         .or_else(|| model.final_kind_or_written_if_excluded(name))

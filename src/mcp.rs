@@ -196,29 +196,100 @@ pub fn dynare_model_info(
     active_file: Option<&str>,
     files: Option<&HashMap<String, String>>,
 ) -> Value {
-    let (model, includes_complete) =
-        if let (Some(files), Some(active)) = (nonempty_map(files), active_file) {
-            let mut workspace = Workspace::new();
-            for (name, content) in files {
-                workspace.update_document(name, content);
-            }
-            workspace.update_document(active, file_content);
-            let complete = workspace.includes_complete(active);
-            let model = workspace
-                .get_effective_model(active)
-                .cloned()
-                .unwrap_or_else(|| parse(file_content));
-            (model, complete)
-        } else {
-            (
-                parse(file_content),
-                crate::macro_expand::required_includes_complete(file_content),
-            )
-        };
-    if let Some(status) = incomplete_model_status(&model, includes_complete) {
+    // Model info has always treated a supplied active path as an overlay, even
+    // when that path is not already present in `files`.
+    let unit = match (nonempty_map(files), active_file) {
+        (Some(files), Some(active)) => McpUnit::mapped(file_content, active, files),
+        _ => McpUnit::free(file_content),
+    };
+    if let Some(status) = incomplete_model_status(&unit.model, unit.includes_complete) {
         return status;
     }
-    model_info_json(&model)
+    let mut info = model_info_json(&unit.model);
+    attach_model_local_origins(&mut info, &unit);
+    info
+}
+
+fn attach_model_local_origins(info: &mut Value, unit: &McpUnit) {
+    let facts = crate::model_locals::ModelLocals::collect(&unit.model);
+    let Some(locals) = info.get_mut("model_locals") else {
+        return;
+    };
+    if let Some(rows) = locals.get_mut("declarations").and_then(Value::as_array_mut) {
+        for (row, declaration) in rows.iter_mut().zip(&facts.declarations) {
+            if let Some(source) = unit
+                .report
+                .model_map
+                .declarations
+                .get(declaration.declaration_index)
+            {
+                attach_local_source(row, source, unit);
+            }
+        }
+    }
+    if let Some(rows) = locals.get_mut("definitions").and_then(Value::as_array_mut) {
+        for (row, definition) in rows.iter_mut().zip(&facts.definitions) {
+            if let Some(source) = unit
+                .report
+                .model_map
+                .equations
+                .get(definition.equation_index)
+                .map(|occurrence| &occurrence.source)
+            {
+                attach_local_source(row, source, unit);
+            }
+        }
+    }
+}
+
+fn attach_local_source(
+    row: &mut Value,
+    source: &crate::model_map::SourceOccurrence,
+    unit: &McpUnit,
+) {
+    let [segment] = source.segments.as_slice() else {
+        return;
+    };
+    let Some(text) = unit.source_for(segment.file.as_deref()) else {
+        return;
+    };
+    if segment.span.is_empty() || !span_fits(text, segment.span) {
+        return;
+    }
+    row["origin"] = range_json(segment.span, text);
+    if let Some(file_key) = unit.map_uri(segment.file.as_deref()) {
+        row["origin_uri"] = json!(file_key);
+    }
+    if source.origin_frames.is_empty() {
+        return;
+    }
+    let mut frames = Vec::with_capacity(source.origin_frames.len());
+    for frame in &source.origin_frames {
+        let [segment] = frame.segments.as_slice() else {
+            return;
+        };
+        let Some(text) = unit.source_for(segment.file.as_deref()) else {
+            return;
+        };
+        if segment.span.is_empty() || !span_fits(text, segment.span) {
+            return;
+        }
+        let mut value = range_json(segment.span, text);
+        value["kind"] = json!(frame.kind);
+        if let Some(variable) = &frame.variable {
+            value["variable"] = json!(variable);
+        }
+        if let Some(expansion) = &frame.value {
+            value["value"] = json!(expansion);
+        }
+        if let Some(file_key) = unit.map_uri(segment.file.as_deref()) {
+            value["origin_uri"] = json!(file_key);
+        }
+        frames.push(value);
+    }
+    if publish_origin_frames_json(&frames) {
+        row["origin_frames"] = Value::Array(frames);
+    }
 }
 
 /// Counted aggregate and heterogeneous equations, with the aggregate count
@@ -2027,7 +2098,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_model_info",
         input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "Return aggregate and per-dimension names, counts, timing classes and block flags. Classes and timing counts use offsets after the predetermined-variable convention conversion, without other equation transformations or numerical results. Incomplete expansion withholds authoritative counts."
+        description = "Return aggregate and per-dimension names, counts, timing classes and block flags, plus model-local declarations and definitions with verified written origins when available. Classes and timing counts use offsets after the predetermined-variable convention conversion, without other equation transformations or numerical results. Incomplete expansion withholds authoritative counts and the local inventory."
     )]
     fn model_info_tool(
         &self,
@@ -2078,7 +2149,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_find_references",
         input_schema = mcp_input_schema::<FindReferencesParams>(),
-        description = "Find whole-word occurrences of a name, including declarations, and skip comments. Source lines and Unicode-scalar columns are one-based. A files map returns file keys; without a map, positions refer to file_content."
+        description = "Find whole-word occurrences of a name by identifier spelling, including declarations, and skip comments. This tool does not resolve model-local bindings. Source lines and Unicode-scalar columns are one-based. A files map returns file keys; without a map, positions refer to file_content."
     )]
     fn find_references_tool(
         &self,
@@ -2098,7 +2169,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_rename",
         input_schema = mcp_input_schema::<RenameParams>(),
-        description = "Rename a name. Skips comments. Without a files map, returns the rewritten text (or the original if the new name is not a legal identifier). With a map, returns only files that changed."
+        description = "Rename occurrences by identifier spelling. This tool does not resolve model-local bindings. Skips comments. Without a files map, returns the rewritten text (or the original if the new name is not a legal identifier). With a map, returns only files that changed."
     )]
     fn rename_tool(
         &self,
@@ -2167,7 +2238,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_equations",
         input_schema = mcp_input_schema::<EquationsParams>(),
-        description = "List aggregate and per-dimension written equations, identifiers and verified source locations. Identifier timing is the written offset; dynare_timing is the offset after the predetermined-variable convention conversion, not full Transform output. Use timing_class and model-info counts for classification. Older engines omit dynare_timing; do not infer it. Lines and Unicode-scalar columns are one-based. Count gap and index filter apply to aggregate equations; name searches both kinds. Equation numbers are before transformation. Incomplete required includes, parsing, or macro expansion return incomplete with no equations and a null count gap."
+        description = "List aggregate and per-dimension written equations, identifiers and verified source locations. Recognized model-local identifiers use class model_local and have no endogenous timing class. Identifier timing is the written offset; dynare_timing is the offset after the predetermined-variable convention conversion, not full Transform output. Use timing_class and model-info counts for classification. Older engines omit dynare_timing; do not infer it. Lines and Unicode-scalar columns are one-based. Count gap and index filter apply to aggregate equations; name searches both kinds. Equation numbers are before transformation. Incomplete required includes, parsing, or macro expansion return incomplete with no equations and a null count gap."
     )]
     fn equations_tool(
         &self,
