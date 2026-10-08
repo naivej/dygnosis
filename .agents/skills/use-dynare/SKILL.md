@@ -1,6 +1,6 @@
 ---
 name: use-dynare
-description: Dynare .mod files: write, review, replicate, edit, debug, and run experiments (stochastic simulation, higher-order perturbation, perfect foresight, estimation, method of moments, shock decomposition, forecasting, identification, optimal policy, OccBin, heterogeneity, Markov-switching), and produce publication figures. Use when the user works on a .mod or a DSGE, RBC, NK, or HANK model, or when the Dygnosis MCP tools are missing. Numerical runs go through the MATLAB Agentic Toolkit.
+description: "Dynare .mod files: write, review, replicate, edit, debug, and run experiments (stochastic simulation, higher-order perturbation, perfect foresight, estimation, method of moments, shock decomposition, forecasting, identification, optimal policy, OccBin, heterogeneity, Markov-switching), and produce publication figures. Use when the user works on a .mod or a DSGE, RBC, NK, or HANK model, or when the Dygnosis MCP tools are missing. Numerical runs go through the MATLAB Agentic Toolkit."
 ---
 # Dynare models with Dygnosis
 
