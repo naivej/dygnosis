@@ -11,6 +11,9 @@ mod project;
 #[path = "server_ordering.rs"]
 mod ordering;
 
+#[path = "server_locals.rs"]
+mod locals;
+
 #[cfg(test)]
 #[path = "server_ordering_tests.rs"]
 mod ordering_tests;
@@ -653,6 +656,9 @@ impl Backend {
 
     fn hover_at(&self, pos: &TextDocumentPositionParams) -> Option<Hover> {
         let mut inner = self.lock_inner();
+        if let Some(hover) = locals::hover(&mut inner, pos) {
+            return hover;
+        }
         if is_model_root(&pos.text_document.uri) {
             inner.project.active = Some(pos.text_document.uri.clone());
         }
@@ -854,6 +860,9 @@ impl Backend {
 
     fn definition_at(&self, pos: &TextDocumentPositionParams) -> Option<GotoDefinitionResponse> {
         let mut inner = self.lock_inner();
+        if let Some(target) = locals::definition(&mut inner, pos, false) {
+            return target;
+        }
         let uri = &pos.text_document.uri;
         let doc = inner.document(uri)?;
         let text = doc.text.clone();
@@ -957,6 +966,9 @@ impl Backend {
 
     fn ident_highlights(&self, pos: &TextDocumentPositionParams) -> Option<Vec<DocumentHighlight>> {
         let mut inner = self.lock_inner();
+        if let Some(highlights) = locals::highlights(&mut inner, pos) {
+            return highlights;
+        }
         let text = inner.document(&pos.text_document.uri)?.text.clone();
         let normalized = crate::parser::normalize_newlines(&text);
         let index = LineIndex::new(&normalized);
@@ -1057,6 +1069,12 @@ impl Backend {
         for group in groups {
             items.retain(|item| group.contains(item));
         }
+        items.extend(locals::completions(
+            &mut inner,
+            &pos.text_document.uri,
+            byte,
+            &preferences,
+        ));
         Some(CompletionResponse::Array(items))
     }
 
@@ -1069,7 +1087,14 @@ impl Backend {
     }
 
     fn prepare_rename_at(&self, pos: &TextDocumentPositionParams) -> Option<Range> {
-        let inner = self.lock_inner();
+        let mut inner = self.lock_inner();
+        if let Some(edit) = locals::rename(&mut inner, pos, None) {
+            edit?;
+            let text = &inner.document(&pos.text_document.uri)?.text;
+            let index = LineIndex::new(text);
+            let byte = index.offset_utf16(text, span_pos(pos.position));
+            return ident_at(text, byte).map(|(_, span)| span_range(&index, text, span));
+        }
         let doc = inner.document(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
         let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
@@ -1087,7 +1112,10 @@ impl Backend {
         if !is_legal_ident(new_name) {
             return None;
         }
-        let inner = self.lock_inner();
+        let mut inner = self.lock_inner();
+        if let Some(edit) = locals::rename(&mut inner, pos, Some(new_name)) {
+            return edit;
+        }
         let doc = inner.document(&pos.text_document.uri)?;
         let index = LineIndex::new(&doc.text);
         let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
@@ -1795,6 +1823,9 @@ impl Backend {
         )
         .with_known_uris(inner.docs.keys().chain(std::iter::once(&root)));
         let facts = view.facts_json();
+        if complete {
+            locals::info_origins(&view, &model, &report.model_map, &mut result);
+        }
         result
             .as_object_mut()
             .unwrap()
@@ -2667,6 +2698,14 @@ impl LanguageServer for Backend {
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
         ordering::ready().await;
+        {
+            let mut inner = self.lock_inner();
+            if let Some(target) =
+                locals::definition(&mut inner, &params.text_document_position_params, true)
+            {
+                return Ok(target);
+            }
+        }
         Ok(self
             .decl_location(&params.text_document_position_params)
             .map(GotoDefinitionResponse::Scalar))
@@ -2684,6 +2723,16 @@ impl LanguageServer for Backend {
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         ordering::ready().await;
+        {
+            let mut inner = self.lock_inner();
+            if let Some(locations) = locals::references(
+                &mut inner,
+                &params.text_document_position,
+                params.context.include_declaration,
+            ) {
+                return Ok(locations);
+            }
+        }
         Ok(self.ident_locations(&params.text_document_position))
     }
 
@@ -2944,7 +2993,7 @@ pub fn initialize_result() -> InitializeResult {
                 ..WorkspaceServerCapabilities::default()
             }),
             experimental: Some(json!({"dygnosis": {
-                "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true},
+                "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true, "model_locals": true},
                 "modelInfoChanged": true,
                 "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1},
                 "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES},

@@ -184,7 +184,7 @@ impl<'a> WrittenView<'a> {
             .collect()
     }
 
-    fn source_json(&self, source: &SourceOccurrence) -> Value {
+    pub(crate) fn source_json(&self, source: &SourceOccurrence) -> Value {
         let locations: Vec<_> = source
             .segments
             .iter()
