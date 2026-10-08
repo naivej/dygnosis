@@ -400,7 +400,11 @@ fn walk_nodes<'a>(model: &'a Model, id: ExprId, f: &mut impl FnMut(&'a crate::ex
         }
         ExprKind::SteadyState { arg } => walk_nodes(model, *arg, f),
         ExprKind::Expectation { arg, .. } => walk_nodes(model, *arg, f),
-        ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String | ExprKind::Error => {}
+        ExprKind::Ident { .. }
+        | ExprKind::Number
+        | ExprKind::String
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => {}
     }
 }
 

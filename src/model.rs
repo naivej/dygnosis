@@ -396,6 +396,7 @@ pub enum SymbolKind {
     LogTrendVar,
     ExternalFunction,
     ModFileLocal,
+    DatabaseVariable,
     ModelLocalVariable,
     Excluded,
 }
@@ -412,6 +413,7 @@ impl SymbolKind {
             Self::LogTrendVar => "log_trend_var",
             Self::ExternalFunction => "external_function",
             Self::ModFileLocal => "mod_file_local",
+            Self::DatabaseVariable => "database_variable",
             Self::ModelLocalVariable => "model_local_variable",
             Self::Excluded => "excluded",
         }
@@ -790,6 +792,8 @@ pub enum ShockKind {
 pub struct DateExpr {
     pub text: String,
     pub span: Span,
+    /// DATE and offset token spellings after macro expansion.
+    pub(crate) constructor_text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -807,13 +811,14 @@ pub struct PeriodRange {
     pub span: Span,
 }
 
-/// The written value of a shock or path instruction. Expressions are never
-/// evaluated by the parser; the optional tree supports later name checks.
+/// The written value and expression tree of a shock or path instruction.
 #[derive(Clone, Debug)]
 pub struct WrittenValue {
     pub text: String,
     pub span: Span,
     pub expr: Option<ExprId>,
+    /// The complete expression and required separator reached their action.
+    pub(crate) completed: bool,
     /// Names and qualified references in a `shock_paths` value. Empty on
     /// ordinary shock values. The raw text above remains authoritative.
     pub path_refs: Vec<PathReference>,
@@ -825,6 +830,9 @@ pub struct PathReference {
     pub namespace: Option<String>,
     pub name: Name,
     pub span: Span,
+    pub ident_span: Span,
+    pub lag_span: Option<Span>,
+    pub(crate) constructed_lag: Option<i32>,
     pub lag: Option<String>,
     /// Whether a parenthesized lag was written, including an empty `()`.
     pub lag_call: bool,
@@ -904,6 +912,7 @@ pub struct PathStanza {
     pub target: PathTarget,
     pub periods: Vec<PeriodRange>,
     pub values: Vec<WrittenValue>,
+    pub(crate) callback_completed: bool,
     pub span: Span,
 }
 
@@ -911,6 +920,7 @@ pub struct PathStanza {
 pub struct PathBlock {
     pub options: ShockOptions,
     pub stanzas: Vec<PathStanza>,
+    pub(crate) completed: bool,
     pub span: Span,
 }
 
@@ -1101,6 +1111,9 @@ pub struct Model {
     pub outside_expression_uses: Vec<(Name, Span, SymbolContext)>,
     /// The private official DataTree used by each completed expression allocation.
     pub(crate) constructor_scopes: HashMap<ExprId, crate::constructor::DataTreeScope>,
+    /// Facts collected from completed shock-path constructor roots. Written
+    /// references remain separate for comparison and source ownership.
+    pub(crate) path_value_facts: HashMap<ExprId, crate::constructor::PathValueFacts>,
     /// Constructor failure before the owning reader can flush deferred names.
     pub(crate) constructor_refused_statements: HashSet<usize>,
     /// Pound callbacks not reached because the written RHS was refused.
@@ -1393,6 +1406,8 @@ pub struct Model {
     pub namespace_qualified_exprs: HashSet<ExprId>,
     /// Interned-0 fold errors while building (span, code, 7.1 message).
     pub const_fold_errors: Vec<(Span, &'static str, String)>,
+    /// Completed shock_paths Parse actions, in parser execution order.
+    pub(crate) path_parse_errors: Vec<(Span, &'static str, String)>,
     /// `external_function(name=…)` identifiers (command body otherwise skipped).
     pub external_function_names: Vec<Name>,
     /// Auto-declared names from non-model expressions.

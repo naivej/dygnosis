@@ -130,6 +130,8 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         constructor_context: DataTreeScope::Dynamic,
         constructor_locals: HashMap::new(),
         in_constructor_target: false,
+        path_context: None,
+        path_call_refs: HashMap::new(),
         eq_token_ranges: Vec::new(),
         hetero_eq_token_ranges: Vec::new(),
         verbatim_ranges: Vec::new(),
@@ -977,6 +979,8 @@ struct Parser<'a> {
     constructor_locals: HashMap<(DataTreeScope, Name), NodeId>,
     /// A pound binding target stays in the written AST, but is not a DataTree read.
     in_constructor_target: bool,
+    path_context: Option<shock_parser::PathExpressionContext>,
+    path_call_refs: HashMap<ExprId, crate::model::PathReference>,
     eq_token_ranges: Vec<Range<usize>>,
     hetero_eq_token_ranges: Vec<Vec<Range<usize>>>,
     /// Token ranges of `verbatim; ? end;` bodies, whose text 7.1 passes through raw.
@@ -2751,7 +2755,10 @@ impl Parser<'_> {
                 self.model_expression_mentions(*lhs, name)
                     || self.model_expression_mentions(*rhs, name)
             }
-            ExprKind::Number | ExprKind::String | ExprKind::Error => false,
+            ExprKind::Number
+            | ExprKind::String
+            | ExprKind::Error
+            | ExprKind::PathNamespace { .. } => false,
         }
     }
 
@@ -8496,7 +8503,8 @@ impl Parser<'_> {
             | ExprKind::String
             | ExprKind::Error
             | ExprKind::SteadyState { .. }
-            | ExprKind::Expectation { .. } => None,
+            | ExprKind::Expectation { .. }
+            | ExprKind::PathNamespace { .. } => None,
         }
     }
 
@@ -10379,7 +10387,14 @@ impl Parser<'_> {
 
     fn parse_bp(&mut self, min_bp: u8) -> Option<ExprId> {
         let mut lhs = self.parse_prefix()?;
-        while let Some((l_bp, r_bp, op)) = self.infix_op() {
+        while !self
+            .path_context
+            .as_ref()
+            .is_some_and(|context| context.failed)
+        {
+            let Some((l_bp, r_bp, op)) = self.infix_op() else {
+                break;
+            };
             if l_bp < min_bp {
                 break;
             }
@@ -10501,6 +10516,9 @@ impl Parser<'_> {
     }
 
     fn parse_ident_expr(&mut self) -> ExprId {
+        if self.path_context.is_some() {
+            return self.parse_path_ident_expr();
+        }
         let tok = self.bump();
         let lexeme = self.lexeme(&tok).to_string();
         // Inside a block the word `end` is the closer, never a name. `+ end + 0`
@@ -10725,7 +10743,7 @@ impl Parser<'_> {
             _ => (1, 1),
         });
         let previous_argument_scope = self.in_model_call_args;
-        self.in_model_call_args |= self.model_function_context;
+        self.in_model_call_args |= self.model_function_context || self.path_context.is_some();
         if (self.in_steady_state_rhs || self.in_model_call_args) && self.at(TokenKind::RParen) {
             self.push_bison(
                 self.tokens[self.i].span,
@@ -10741,6 +10759,23 @@ impl Parser<'_> {
                     args.push(id);
                 } else {
                     self.refuse_model_argument_syntax();
+                }
+                if self
+                    .path_context
+                    .as_ref()
+                    .is_some_and(|context| context.failed)
+                {
+                    while !self.at(TokenKind::Eof)
+                        && !self.at(TokenKind::Semi)
+                        && !self.at(TokenKind::RParen)
+                    {
+                        if self.at(TokenKind::LParen) {
+                            self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                        } else {
+                            self.bump();
+                        }
+                    }
+                    break;
                 }
                 if self.at(TokenKind::Comma) {
                     if builtin_arity.is_some_and(|(_, maximum)| args.len() == maximum) {
@@ -10793,6 +10828,10 @@ impl Parser<'_> {
         if self.in_model_call_args
             && !self.at(TokenKind::RParen)
             && self.model.parse_issues.len() == parse_issues_before
+            && !self
+                .path_context
+                .as_ref()
+                .is_some_and(|context| context.failed)
         {
             let (span, unexpected) = self.ss_unexpected_token(self.i);
             self.push_bison(
@@ -10808,13 +10847,19 @@ impl Parser<'_> {
                 .map(|id| self.expr_span(*id).end)
                 .unwrap_or(kw.span.end)
         };
-        self.refuse_ss_variable_call(
-            callee,
-            Span {
-                start: kw.span.start,
-                end,
-            },
-        );
+        if self.path_context.is_none()
+            || args
+                .iter()
+                .all(|id| !self.refused_constructors.contains(id))
+        {
+            self.refuse_ss_variable_call(
+                callee,
+                Span {
+                    start: kw.span.start,
+                    end,
+                },
+            );
+        }
         if self.model.parse_issues.len() == parse_issues_before {
             self.refuse_model_call(
                 callee,
@@ -10846,6 +10891,11 @@ impl Parser<'_> {
             && !self.in_native_assignment
             && !self.is_expression_builtin(self.intern.get(callee))
             && !self.is_known_symbol(callee)
+            && (self.path_context.is_none()
+                || self.model.parse_issues.len() == parse_issues_before
+                    && args
+                        .iter()
+                        .all(|id| !self.refused_constructors.contains(id)))
         {
             self.push_external_function_name(callee);
             self.implicit_function_names.push(callee);
@@ -10876,6 +10926,24 @@ impl Parser<'_> {
                 end,
             },
         );
+        if self.path_context.is_some() {
+            self.path_call_refs.insert(
+                id,
+                crate::model::PathReference {
+                    symbol_type_context: self.model.symbol_context(),
+                    namespace: None,
+                    name: callee,
+                    span: kw.span,
+                    ident_span: kw.span,
+                    lag_span: None,
+                    constructed_lag: None,
+                    lag: None,
+                    lag_call: false,
+                    learnt_in: None,
+                    call: true,
+                },
+            );
+        }
         if let Some(role) = sum_role {
             self.model.sum_argument_roles.insert(id, role);
         }
@@ -10883,9 +10951,19 @@ impl Parser<'_> {
     }
 
     fn refuse_model_argument_syntax(&mut self) {
-        if self.in_model_call_args {
+        if self
+            .path_context
+            .as_ref()
+            .is_some_and(|context| context.failed)
+        {
+            return;
+        }
+        if self.in_model_call_args || self.path_context.is_some() {
             let (span, unexpected) = self.ss_unexpected_token(self.i);
             self.push_bison(span, format!("syntax error, unexpected {unexpected}"));
+            if let Some(context) = &mut self.path_context {
+                context.failed = true;
+            }
         }
     }
 
@@ -10942,7 +11020,7 @@ impl Parser<'_> {
     }
 
     fn refuse_ss_variable_call(&mut self, name: Name, span: Span) {
-        if self.in_steady_state_rhs
+        if (self.in_steady_state_rhs || self.path_context.is_some())
             && !is_dynare_expression_builtin(self.intern.get(name))
             && self.is_known_symbol(name)
             && self.model.final_symbol_kind(name) != Some("external_function")
@@ -11083,7 +11161,10 @@ impl Parser<'_> {
                 ));
             }
         }
-        if !self.model_function_context && !self.in_native_assignment && !self.in_constructor_target
+        if !self.model_function_context
+            && !self.in_native_assignment
+            && !self.in_constructor_target
+            && self.path_context.is_none()
         {
             if let ExprKind::Ident {
                 name, ident_span, ..
@@ -11159,6 +11240,11 @@ impl Parser<'_> {
         }
         self.construct_expr(id);
         self.note_const_fold_errors(id);
+        if self.refused_constructors.contains(&id) {
+            if let Some(context) = &mut self.path_context {
+                context.failed = true;
+            }
+        }
         id
     }
 
@@ -11172,7 +11258,9 @@ impl Parser<'_> {
         let expr = self.model.exprs.get(id);
         let name_refused = if let ExprKind::Ident { name, timing, .. } = expr.kind {
             let kind = self.model.final_symbol_kind(name);
-            if self.model_function_context {
+            if self.path_context.is_some() {
+                kind != Some("parameters")
+            } else if self.model_function_context {
                 matches!(
                     kind,
                     Some("external_function" | "mod_file_local" | "excluded")
@@ -11221,6 +11309,13 @@ impl Parser<'_> {
             ExprKind::Call { args, .. } => args
                 .iter()
                 .any(|arg| self.refused_constructors.contains(arg)),
+            ExprKind::PathNamespace { lag, .. } => {
+                lag.is_some_and(|arg| self.refused_constructors.contains(&arg))
+                    || self
+                        .path_context
+                        .as_ref()
+                        .is_some_and(|context| context.failed)
+            }
             ExprKind::Error => true,
             _ => false,
         };
@@ -11257,7 +11352,9 @@ impl Parser<'_> {
     }
 
     fn constructor_scope(&self) -> DataTreeScope {
-        if self.in_steady_state_rhs {
+        if self.path_context.is_some() {
+            DataTreeScope::ShockPaths
+        } else if self.in_steady_state_rhs {
             DataTreeScope::SteadyState
         } else if self.in_epilogue {
             DataTreeScope::Epilogue

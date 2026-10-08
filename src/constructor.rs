@@ -3,12 +3,13 @@
 
 use crate::expr::{BinOp, ExprId, ExprKind, UnOp};
 use crate::intern::Name;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) type NodeId = usize;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum DataTreeScope {
     General,
+    ShockPaths,
     Dynamic,
     SteadyState,
     Planner(usize),
@@ -27,6 +28,7 @@ pub(crate) struct ConstructorContext {
 pub(crate) enum Node {
     Number(String),
     Ident(Name, i32, DataTreeScope),
+    PathNamespace(PathNamespace),
     Neg(NodeId),
     Binary(u8, NodeId, NodeId),
     Builtin(&'static str, Vec<NodeId>),
@@ -36,9 +38,46 @@ pub(crate) enum Node {
     Opaque(ExprId),
 }
 
+/// Namespace identities use the constructed lag and the pin's namespace kind.
+/// Written aliases and lag expressions remain in the expression arena.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct PathNamespace {
+    kind: PathNamespaceKind,
+    symbol: Name,
+    lag: i32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum PathNamespaceKind {
+    Initval,
+    SelfValue,
+    Prev,
+    LearntIn(PathLearningPeriod),
+    Database(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum PathLearningPeriod {
+    Integer(i32),
+    Date(String),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PathValueFacts {
+    pub(crate) max_lag: i64,
+    pub(crate) self_variables: Vec<(Name, i32)>,
+}
+
+struct PathValueReach {
+    symbol_lags: Vec<(Name, i64)>,
+    has_unlagged_leaf: bool,
+    self_variables: Vec<(Name, i32)>,
+}
+
 pub(crate) struct ConstructorTree {
     nodes: Vec<Node>,
     values: Vec<Option<f64>>,
+    path_value_reach: HashMap<NodeId, PathValueReach>,
     intern: HashMap<(DataTreeScope, Node), NodeId>,
     scopes: HashMap<DataTreeScope, (NodeId, NodeId, NodeId)>,
     scope: DataTreeScope,
@@ -52,6 +91,7 @@ impl Default for ConstructorTree {
         let mut tree = Self {
             nodes: Vec::new(),
             values: Vec::new(),
+            path_value_reach: HashMap::new(),
             intern: HashMap::new(),
             scopes: HashMap::new(),
             scope: DataTreeScope::Dynamic,
@@ -118,6 +158,41 @@ impl ConstructorTree {
                 Node::Ident(*name, *timing, context.scope),
                 context.ident_value,
             ),
+            ExprKind::PathNamespace { reference, lag } => {
+                let lag = lag
+                    .map(|id| self.match_integer(children[&id]))
+                    .unwrap_or(Some(0));
+                let Some(lag) = lag else {
+                    return self.opaque(id);
+                };
+                let kind = match reference.namespace.as_deref() {
+                    Some("init" | "initval") => PathNamespaceKind::Initval,
+                    Some("self") => PathNamespaceKind::SelfValue,
+                    Some("prev") => PathNamespaceKind::Prev,
+                    Some("learnt_in") => {
+                        let period = match reference.learnt_in.as_ref() {
+                            Some(crate::model::PeriodPoint::Integer(period)) => {
+                                PathLearningPeriod::Integer(*period)
+                            }
+                            Some(crate::model::PeriodPoint::Date(date)) => {
+                                PathLearningPeriod::Date(path_learning_date(&date.constructor_text))
+                            }
+                            _ => return self.opaque(id),
+                        };
+                        PathNamespaceKind::LearntIn(period)
+                    }
+                    Some(database) => PathNamespaceKind::Database(database.into()),
+                    None => return self.opaque(id),
+                };
+                self.intern(
+                    Node::PathNamespace(PathNamespace {
+                        kind,
+                        symbol: reference.name,
+                        lag,
+                    }),
+                    None,
+                )
+            }
             ExprKind::Unary { op, arg } => match op {
                 UnOp::Pos => children[arg],
                 UnOp::Neg => self.neg(children[arg]),
@@ -153,6 +228,85 @@ impl ConstructorTree {
             .and_then(|(lhs, rhs)| (rhs == self.zero).then_some(lhs))
     }
 
+    /// NumConstNode uses stoi, which reads a decimal integer prefix. It thus
+    /// accepts written `1.0` and `1e2` as 1. Unary minus must wrap a number.
+    pub(crate) fn match_integer(&self, id: NodeId) -> Option<i32> {
+        match &self.nodes[id] {
+            Node::Number(text) => integer_prefix(text),
+            Node::Neg(arg) => match &self.nodes[*arg] {
+                Node::Number(text) => integer_prefix(text)?.checked_neg(),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Collect only surviving self leaves. Lag argument children have already
+    /// been consumed by namespace construction and are not collection edges.
+    /// Reach is memoized by constructed root; symbol roles are read afresh at
+    /// each stanza callback, since change_type does not change node identity.
+    pub(crate) fn path_value_facts(
+        &mut self,
+        root: NodeId,
+        lagged_symbol: impl Fn(Name) -> bool,
+    ) -> PathValueFacts {
+        if !self.path_value_reach.contains_key(&root) {
+            let reach = self.collect_path_value_reach(root);
+            self.path_value_reach.insert(root, reach);
+        }
+        let reach = &self.path_value_reach[&root];
+        let max_lag = reach
+            .symbol_lags
+            .iter()
+            .map(|(symbol, lag)| if lagged_symbol(*symbol) { *lag } else { 0 })
+            .chain(reach.has_unlagged_leaf.then_some(0))
+            .max()
+            .unwrap_or(0);
+        PathValueFacts {
+            max_lag,
+            self_variables: reach.self_variables.clone(),
+        }
+    }
+
+    fn collect_path_value_reach(&self, root: NodeId) -> PathValueReach {
+        let mut seen = HashSet::new();
+        let mut symbol_lags = HashMap::new();
+        let mut has_unlagged_leaf = false;
+        let mut self_variables = HashSet::new();
+        let mut pending = vec![root];
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            match &self.nodes[id] {
+                Node::PathNamespace(reference) => {
+                    let lag = -i64::from(reference.lag);
+                    symbol_lags
+                        .entry(reference.symbol)
+                        .and_modify(|maximum: &mut i64| *maximum = (*maximum).max(lag))
+                        .or_insert(lag);
+                    if reference.kind == PathNamespaceKind::SelfValue {
+                        self_variables.insert((reference.symbol, reference.lag));
+                    }
+                }
+                Node::Neg(arg) | Node::SteadyState(arg) | Node::Expectation(_, arg) => {
+                    pending.push(*arg);
+                }
+                Node::Binary(_, lhs, rhs) => pending.extend([*lhs, *rhs]),
+                Node::Builtin(_, args) | Node::Call(_, args) => {
+                    has_unlagged_leaf |= args.is_empty();
+                    pending.extend(args);
+                }
+                _ => has_unlagged_leaf = true,
+            }
+        }
+        PathValueReach {
+            symbol_lags: symbol_lags.into_iter().collect(),
+            has_unlagged_leaf,
+            self_variables: self_variables.into_iter().collect(),
+        }
+    }
+
     /// The pin uses its JSON expression display in constructor refusals.
     /// Emit with an explicit stack, so a long written expression needs no
     /// recursive walk and no cached full string for every intermediate node.
@@ -177,6 +331,32 @@ impl ConstructorTree {
                     output.push_str(name(*symbol));
                     if *timing != 0 {
                         output.push_str(&format!("({timing})"));
+                    }
+                }
+                Node::PathNamespace(reference) => {
+                    match &reference.kind {
+                        PathNamespaceKind::Initval => output.push_str("initval"),
+                        PathNamespaceKind::SelfValue => output.push_str("self"),
+                        PathNamespaceKind::Prev => output.push_str("prev"),
+                        PathNamespaceKind::LearntIn(period) => {
+                            output.push_str("learnt_in(");
+                            match period {
+                                PathLearningPeriod::Integer(period) => {
+                                    output.push_str(&period.to_string());
+                                }
+                                PathLearningPeriod::Date(date) => output.push_str(date),
+                            }
+                            output.push(')');
+                        }
+                        PathNamespaceKind::Database(database) => output.push_str(database),
+                    }
+                    output.push('.');
+                    output.push_str(name(reference.symbol));
+                    if matches!(
+                        reference.kind,
+                        PathNamespaceKind::SelfValue | PathNamespaceKind::Database(_)
+                    ) {
+                        output.push_str(&format!("({})", reference.lag));
                     }
                 }
                 Node::Neg(arg) => {
@@ -547,6 +727,31 @@ impl ConstructorTree {
             }
             _ => return None,
         })
+    }
+}
+
+fn integer_prefix(text: &str) -> Option<i32> {
+    let bytes = text.as_bytes();
+    let start = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
+    let end = start
+        + bytes[start..]
+            .iter()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count();
+    (end > start).then(|| text[..end].parse().ok()).flatten()
+}
+
+/// DynareBison's date_expr action wraps the written DATE and appends each
+/// offset token. Spaces and comments do not enter that generated identity.
+pub(crate) fn path_learning_date(text: &str) -> String {
+    let compact: String = crate::lexer::tokenize(text)
+        .iter()
+        .filter(|token| token.kind != crate::lexer::TokenKind::Eof)
+        .map(|token| token.text(text))
+        .collect();
+    match compact.split_once('+') {
+        Some((date, offsets)) => format!("dates('{date}')+{offsets}"),
+        None => format!("dates('{compact}')"),
     }
 }
 

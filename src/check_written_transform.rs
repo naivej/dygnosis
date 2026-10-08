@@ -219,7 +219,11 @@ fn contains_division(model: &Model, id: ExprId) -> bool {
         | ExprKind::SteadyState { arg }
         | ExprKind::Expectation { arg, .. } => contains_division(model, *arg),
         ExprKind::Call { args, .. } => args.iter().any(|arg| contains_division(model, *arg)),
-        ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String | ExprKind::Error => false,
+        ExprKind::Ident { .. }
+        | ExprKind::Number
+        | ExprKind::String
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => false,
     }
 }
 
@@ -274,7 +278,11 @@ fn bad_expectation(model: &Model, id: ExprId, equation_index: usize) -> Option<S
         ExprKind::Call { args, .. } => args
             .iter()
             .find_map(|arg| bad_expectation(model, *arg, equation_index)),
-        ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String | ExprKind::Error => None,
+        ExprKind::Ident { .. }
+        | ExprKind::Number
+        | ExprKind::String
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => None,
     }
 }
 
@@ -416,6 +424,7 @@ fn plain_expr(model: &Model, id: ExprId) -> bool {
         | ExprKind::Call { .. }
         | ExprKind::SteadyState { .. }
         | ExprKind::Expectation { .. }
-        | ExprKind::Error => false,
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => false,
     }
 }

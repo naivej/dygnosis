@@ -112,6 +112,7 @@ pub(crate) fn arithmetic_number(
         ExprKind::Call { .. }
         | ExprKind::String
         | ExprKind::Error
+        | ExprKind::PathNamespace { .. }
         | ExprKind::SteadyState { .. }
         | ExprKind::Expectation { .. } => None,
     };

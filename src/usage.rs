@@ -127,6 +127,11 @@ impl<'a> Usage<'a> {
             }
         }
         for (id, expr) in model.exprs.iter() {
+            // Path values have a separate persistent DataTree and never form
+            // model usage roots. Parse already owns their constructor facts.
+            if model.constructor_scopes.get(&id) == Some(&DataTreeScope::ShockPaths) {
+                continue;
+            }
             // Targets are written navigation nodes, not constructor reads.
             if binding_targets.contains(&id) {
                 continue;
@@ -264,7 +269,7 @@ impl<'a> Usage<'a> {
                 }
                 Node::Binary(_, lhs, rhs) => pending.extend([*lhs, *rhs]),
                 Node::Builtin(_, args) | Node::Call(_, args) => pending.extend(args),
-                Node::Number(_) | Node::Opaque(_) => {}
+                Node::Number(_) | Node::Opaque(_) | Node::PathNamespace(_) => {}
             }
         }
         names

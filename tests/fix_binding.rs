@@ -723,7 +723,10 @@ fn expr_has_error(model: &Model, id: ExprId) -> bool {
         ExprKind::SteadyState { arg } | ExprKind::Expectation { arg, .. } => {
             expr_has_error(model, *arg)
         }
-        ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String => false,
+        ExprKind::Ident { .. }
+        | ExprKind::Number
+        | ExprKind::String
+        | ExprKind::PathNamespace { .. } => false,
     }
 }
 

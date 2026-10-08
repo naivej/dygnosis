@@ -552,8 +552,8 @@ impl ContextRelevance {
                 self.heteroskedastic = true;
             }
         }
-        self.paths |= !model.shock_paths.is_empty();
-        for block in &model.shock_paths {
+        self.paths |= model.shock_paths.iter().any(|block| block.completed);
+        for block in model.shock_paths.iter().filter(|block| block.completed) {
             for stanza in &block.stanzas {
                 self.timed = true;
                 let path_name = path_target(model, &stanza.target).1;
@@ -847,7 +847,7 @@ fn shock_instructions(
     for block in &model.shock_blocks {
         blocks.push((block.span.start, ShockBlockRef::Shocks(block)));
     }
-    for block in &model.shock_paths {
+    for block in model.shock_paths.iter().filter(|block| block.completed) {
         blocks.push((block.span.start, ShockBlockRef::Path(block)));
     }
     for block in &model.controlled_paths {
@@ -1403,7 +1403,7 @@ fn append_context_instructions(
                 );
                 let mut references = Vec::new();
                 let mut referring_targets = HashSet::new();
-                for block in &model.shock_paths {
+                for block in model.shock_paths.iter().filter(|block| block.completed) {
                     for stanza in &block.stanzas {
                         for value in &stanza.values {
                             if value

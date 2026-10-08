@@ -605,7 +605,7 @@ fn collect_refs(
                 collect_refs(model, *arg, offset, origin, visiting, out);
             }
         }
-        ExprKind::Number | ExprKind::String | ExprKind::Error => {}
+        ExprKind::Number | ExprKind::String | ExprKind::Error | ExprKind::PathNamespace { .. } => {}
     }
 }
 
@@ -659,7 +659,7 @@ fn collect_operators(
                 collect_operators(model, *arg, origin, visiting, out);
             }
         }
-        ExprKind::Number | ExprKind::String | ExprKind::Error => {}
+        ExprKind::Number | ExprKind::String | ExprKind::Error | ExprKind::PathNamespace { .. } => {}
     }
 }
 

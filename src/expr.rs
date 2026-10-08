@@ -52,6 +52,12 @@ pub enum ExprKind {
         callee: Name,
         args: Vec<ExprId>,
     },
+    /// A written shock_paths namespace read. Its lag child is constructed
+    /// before the namespace action; it is not a model timing reference.
+    PathNamespace {
+        reference: Box<crate::model::PathReference>,
+        lag: Option<ExprId>,
+    },
     SteadyState {
         arg: ExprId,
     },
@@ -136,6 +142,7 @@ impl ExprArena {
                     self.collect_idents(*arg, out);
                 }
             }
+            ExprKind::PathNamespace { .. } => {}
             ExprKind::SteadyState { arg } | ExprKind::Expectation { arg, .. } => {
                 self.collect_idents(*arg, out);
             }

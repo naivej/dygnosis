@@ -416,7 +416,11 @@ fn walk_call_callees(model: &Model, id: ExprId, f: &mut impl FnMut(Name)) {
         ExprKind::SteadyState { arg } | ExprKind::Expectation { arg, .. } => {
             walk_call_callees(model, *arg, f);
         }
-        ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String | ExprKind::Error => {}
+        ExprKind::Ident { .. }
+        | ExprKind::Number
+        | ExprKind::String
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => {}
     }
 }
 
@@ -601,7 +605,11 @@ pub(crate) fn collect_steady_state_operands(
     out: &mut Vec<ExprId>,
 ) {
     match &arena.get(id).kind {
-        ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String | ExprKind::Error => {}
+        ExprKind::Ident { .. }
+        | ExprKind::Number
+        | ExprKind::String
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => {}
         ExprKind::Unary { arg, .. } => collect_steady_state_operands(arena, *arg, out),
         ExprKind::Binary { lhs, rhs, .. } => {
             collect_steady_state_operands(arena, *lhs, out);

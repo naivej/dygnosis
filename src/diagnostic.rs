@@ -248,8 +248,12 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     if !shock_parse_diags.is_empty() {
         return shock_parse_diags;
     }
-    let mut clashes = crate::check_clash::check_clash(model);
-    clashes.extend(crate::check_d_pac::check_transform(model));
+    let path_parse_incomplete = model.shock_paths.iter().any(|block| !block.completed);
+    let mut clashes = Vec::new();
+    if !path_parse_incomplete {
+        clashes.extend(crate::check_clash::check_clash(model));
+        clashes.extend(crate::check_d_pac::check_transform(model));
+    }
     let equation_parse = crate::check_e020::check_e020(model);
     let declaration_parse = crate::check_e030::check_e030(model);
     let occbin_diags = crate::check_occbin::check_occbin(model);
@@ -262,11 +266,14 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     // Mixed families contribute only the named parse refusals below. In
     // particular, a check-stage Error elsewhere must not suppress an earlier
     // PAC checkPass refusal.
-    let parse_refused = equation_parse
-        .iter()
-        .chain(&declaration_parse)
-        .chain(&surgery_parse)
-        .any(|diag| diag.severity == Severity::Error)
+    // The bare-name warrant has no diagnostic sentence, but its path read
+    // is unavailable. An incomplete path cannot supply an accepted Parse tree.
+    let parse_refused = path_parse_incomplete
+        || equation_parse
+            .iter()
+            .chain(&declaration_parse)
+            .chain(&surgery_parse)
+            .any(|diag| diag.severity == Severity::Error)
         || occbin_diags.iter().any(|diag| diag.code == "E182")
         || observed_diags
             .iter()
@@ -454,7 +461,7 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
                 .iter()
                 .any(|clash| clash.code == diag.code && clash.span == diag.span)
     });
-    if !has_earlier_error {
+    if !has_earlier_error && !path_parse_incomplete {
         let early = crate::check_written_transform::check_early(model);
         // Constant simplification and unused-endogenous checks precede all
         // current written clashes, including PAC target rewrites.

@@ -534,7 +534,11 @@ fn collect_calls(model: &Model, id: ExprId, out: &mut Vec<(String, Span)>) {
             collect_calls(model, *lhs, out);
             collect_calls(model, *rhs, out);
         }
-        ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String | ExprKind::Error => {}
+        ExprKind::Ident { .. }
+        | ExprKind::Number
+        | ExprKind::String
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => {}
     }
 }
 

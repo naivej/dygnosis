@@ -428,7 +428,11 @@ fn walk_sum_span(model: &Model, id: ExprId, found: &mut Option<Span>) {
                 walk_sum_span(model, *arg, found);
             }
         }
-        ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String | ExprKind::Error => {}
+        ExprKind::Ident { .. }
+        | ExprKind::Number
+        | ExprKind::String
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => {}
     }
 }
 
@@ -494,7 +498,11 @@ fn walk_aggregate_sum(model: &Model, id: ExprId, found: &mut Option<Diagnostic>)
                 walk_aggregate_sum(model, *arg, found);
             }
         }
-        ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String | ExprKind::Error => {}
+        ExprKind::Ident { .. }
+        | ExprKind::Number
+        | ExprKind::String
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => {}
     }
 }
 
@@ -851,14 +859,18 @@ fn collect_idents(model: &Model, id: ExprId, out: &mut Vec<(Name, i32, Span)>) {
                 collect_idents(model, *arg, out);
             }
         }
-        ExprKind::Number | ExprKind::String | ExprKind::Error => {}
+        ExprKind::Number | ExprKind::String | ExprKind::Error | ExprKind::PathNamespace { .. } => {}
     }
 }
 
 fn nonseparable(model: &Model, id: ExprId, dim: Name) -> Option<(Span, String)> {
     let expr = model.exprs.get(id);
     match &expr.kind {
-        ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String | ExprKind::Error => None,
+        ExprKind::Ident { .. }
+        | ExprKind::Number
+        | ExprKind::String
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => None,
         ExprKind::Unary { arg, .. }
         | ExprKind::SteadyState { arg }
         | ExprKind::Expectation { arg, .. } => {
@@ -968,7 +980,7 @@ fn max_timing(model: &Model, id: ExprId, dim: Name, endo: bool, lead: bool) -> i
             .map(|arg| max_timing(model, *arg, dim, endo, lead))
             .max()
             .unwrap_or(0),
-        ExprKind::Number | ExprKind::String | ExprKind::Error => 0,
+        ExprKind::Number | ExprKind::String | ExprKind::Error | ExprKind::PathNamespace { .. } => 0,
     }
 }
 
@@ -1016,7 +1028,7 @@ fn json_text(model: &Model, id: ExprId) -> String {
         ExprKind::Unary { arg, .. } => format!("-{}", json_text(model, *arg)),
         ExprKind::SteadyState { arg } => format!("STEADY_STATE({})", json_text(model, *arg)),
         ExprKind::Expectation { arg, .. } => json_text(model, *arg),
-        ExprKind::String | ExprKind::Error => String::new(),
+        ExprKind::String | ExprKind::Error | ExprKind::PathNamespace { .. } => String::new(),
     }
 }
 

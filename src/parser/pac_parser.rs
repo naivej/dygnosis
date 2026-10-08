@@ -354,7 +354,10 @@ impl Parser<'_> {
                 self.pac_expr_has_error(*lhs) || self.pac_expr_has_error(*rhs)
             }
             ExprKind::Call { args, .. } => args.iter().any(|arg| self.pac_expr_has_error(*arg)),
-            ExprKind::Ident { .. } | ExprKind::Number | ExprKind::String => false,
+            ExprKind::Ident { .. }
+            | ExprKind::Number
+            | ExprKind::String
+            | ExprKind::PathNamespace { .. } => false,
         }
     }
 

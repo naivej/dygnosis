@@ -206,6 +206,38 @@ async function checkParseFollowups(service, workspaceRoot, evidence) {
   evidence.checks.push("slice 22 empty steady-state, constructor refusal and phase, decimal quiet, verbatim bare end in native Problems");
 }
 
+async function checkShockPathConstructors(service, workspaceRoot, evidence) {
+  const head = "var y; varexo e u; parameters p q; model; y=e+u+p+q; end;\n";
+  const cases = [
+    ["E278", "(q+p)/0", "(q+p)/0.0", "Division by zero when forming (q+p)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0)."],
+    ["E276", "log(0)", "log(p)", "log(0) not defined!"],
+    ["E277", "log10(0)", "log10(p)", "log10(0) not defined!"],
+    ["E405", "self.e(-1)", "0*self.e(-1)", "shock_paths: a lag of 1 is not allowed at period 1"],
+    ["E420", "self.e", "0*self.e", "in the definition of 'e' in a 'shock_paths' block, the use of 'self.e' without a lag is not allowed, since it is a circular reference"],
+  ];
+  for (const [code, fire, quiet, sentence] of cases) {
+    const filename = path.join(workspaceRoot, `path-${code}.mod`);
+    const source = value => `${head}shock_paths; var e; periods 1; /*😀*/ values ${value}; end;\n`;
+    await writeObservedInput(service, filename, source(fire));
+    const document = await vscode.workspace.openTextDocument(filename);
+    await vscode.window.showTextDocument(document);
+    await currentSnapshot(service, document, () => service.modelInfo(document.uri), `${code} path snapshot`);
+    await waitFor(() => vscode.languages.getDiagnostics(document.uri).some(row => diagnosticCode(row) === code), `${code} path Problems`);
+    const rows = vscode.languages.getDiagnostics(document.uri).filter(row => diagnosticCode(row) === code);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].message, sentence);
+    assert.equal(rows[0].severity, vscode.DiagnosticSeverity.Error);
+    assert.equal(document.getText(rows[0].range), fire);
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), source(quiet));
+    assert.equal(await vscode.workspace.applyEdit(edit), true);
+    assert.equal(document.isDirty, true, "quiet control must use unsaved text");
+    await currentSnapshot(service, document, () => service.modelInfo(document.uri), `${code} quiet path snapshot`);
+    await waitFor(() => vscode.languages.getDiagnostics(document.uri).every(row => row.severity !== vscode.DiagnosticSeverity.Error), `${code} path clears on unsaved edit`);
+  }
+  evidence.checks.push("slice 23 path E276/E277/E278/E405/E420 sentences and Unicode ranges in native Problems; unsaved quiet controls clear Errors");
+}
+
 exports.run = async function run() {
   const resultFile = process.env.DYGNOSIS_HOST_RESULT;
   const evidence = { vscode: vscode.version, runId: process.env.DYGNOSIS_HOST_RUN_ID, checks: [] };
@@ -268,6 +300,7 @@ exports.run = async function run() {
     assert.ok(symbols.length > 0);
     evidence.checks.push("real engine counts/native symbols");
     await checkParseFollowups(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
+    await checkShockPathConstructors(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
     await vscode.window.showTextDocument(document);
     let equationLens;
     await waitFor(async () => {

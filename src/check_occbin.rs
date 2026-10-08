@@ -546,7 +546,7 @@ fn walk_occbin_expr_inner(
             walk_occbin_expr_inner(model, *lhs, locals, out);
             walk_occbin_expr_inner(model, *rhs, locals, out);
         }
-        ExprKind::Number | ExprKind::String | ExprKind::Error => {}
+        ExprKind::Number | ExprKind::String | ExprKind::Error | ExprKind::PathNamespace { .. } => {}
     }
 }
 

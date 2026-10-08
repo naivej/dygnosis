@@ -138,6 +138,24 @@ fn shock_paths_show_terminal_control_and_expression_changes() {
 }
 
 #[test]
+fn shock_paths_keep_discarded_written_references_and_value_spelling() {
+    let before = "var y; varexo e u; model; y=e+u; end; shock_paths; var e; periods 1; values 0*self.e; end;";
+    let after = "var y; varexo e u; model; y=e+u; end; shock_paths; var e; periods 1; values 0*self.u(-1.0); end;";
+    let parsed = parse(after);
+    let value = &parsed.shock_paths[0].stanzas[0].values[0];
+    assert_eq!(value.text, "0*self.u(-1.0)");
+    assert!(value.expr.is_some());
+    assert_eq!(value.path_refs.len(), 1);
+    assert_eq!(value.path_refs[0].namespace.as_deref(), Some("self"));
+    assert_eq!(parsed.name(value.path_refs[0].name), "u");
+    assert_eq!(value.path_refs[0].lag.as_deref(), Some("-1.0"));
+    let diff = compare(before, after);
+    let item = row(&diff, "shock_path", "e");
+    assert_eq!(item["before"]["values"][0], "0*self.e");
+    assert_eq!(item["after"]["values"][0], "0*self.u(-1.0)");
+}
+
+#[test]
 fn endval_and_companion_controlled_paths_change() {
     let before = "var y; varexo e u;\nendval(learnt_in=3); e = 1; y += 0.1; end;\nperfect_foresight_controlled_paths(learnt_in=3); exogenize y; periods 4:5; values 1.1; endogenize e; end;";
     let after = "var y; varexo e u;\nendval(learnt_in=4); e = 2; y *= 1.1; end;\nperfect_foresight_controlled_paths(learnt_in=4); exogenize y; periods 5:6; values 1.2; endogenize u; end;";
@@ -557,4 +575,36 @@ fn installed_dynare_accepts_compare_option_neighbours() {
             );
         }
     }
+}
+
+#[test]
+fn incomplete_shock_path_blocks_are_recovery_and_do_not_enter_setup_comparison() {
+    let before = "var y; varexo e; parameters p; model; y=e+p; end;";
+    for expression in ["1/0", "missing", "p,", "self.e(1)"] {
+        let after = format!("{before} shock_paths; var e; periods 1; values {expression}; end;");
+        let diff = compare(before, &after);
+        assert!(
+            !rows(&diff).iter().any(|row| row["form"] == "shock_path"),
+            "{expression}: {diff}"
+        );
+    }
+    for body in [
+        "var e; periods 1; values p;",
+        "var e; periods 1; values p; end",
+        "var e; periods 1; values p; nonsense; end;",
+        "var e; periods 1; values p; var e; values p; end;",
+    ] {
+        let after = format!("{before} shock_paths; {body}");
+        let diff = compare(before, &after);
+        assert!(
+            !rows(&diff).iter().any(|row| row["form"] == "shock_path"),
+            "{body}: {diff}"
+        );
+    }
+    let after = format!("{before} shock_paths; var e; periods 1; values 0*self.e; end;");
+    let diff = compare(before, &after);
+    assert_eq!(
+        row(&diff, "shock_path", "e")["after"]["values"][0],
+        "0*self.e"
+    );
 }

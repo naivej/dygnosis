@@ -5,10 +5,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::intern::Name;
-use crate::lag_fold::{fold_lag, LagFold};
 use crate::model::{
-    Model, PathBlock, PathReference, PathStanza, PathTarget, PeriodPoint, PeriodRange,
-    ShockBlockKind, ShockKind, ShockOperation,
+    Model, PathStanza, PathTarget, PeriodPoint, PeriodRange, ShockBlockKind, ShockKind,
+    ShockOperation,
 };
 use crate::span::Span;
 
@@ -75,6 +74,9 @@ fn endogenous(
 
 pub fn check_d_shocks(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
+    for (span, code, message) in &model.path_parse_errors {
+        error(&mut out, *span, code, message);
+    }
     for (name, span) in &model.option_twice {
         let shock_option = model
             .shock_paths
@@ -496,12 +498,16 @@ fn check_databases(model: &Model, out: &mut Vec<Diagnostic>) {
 }
 
 fn check_paths(model: &Model, out: &mut Vec<Diagnostic>) {
-    for (block, companion) in model
-        .shock_paths
-        .iter()
-        .map(|block| (block, false))
-        .chain(model.controlled_paths.iter().map(|block| (block, true)))
-    {
+    for block in &model.shock_paths {
+        if !block.completed {
+            continue;
+        }
+        for stanza in &block.stanzas {
+            check_path_self_variables(model, stanza, out);
+        }
+    }
+    // The companion block has its separate value grammar and callback checks.
+    for block in &model.controlled_paths {
         if let Some(PeriodPoint::Integer(n)) = block.options.learnt_in.as_ref() {
             if *n < 1 {
                 error(
@@ -566,323 +572,42 @@ fn check_paths(model: &Model, out: &mut Vec<Diagnostic>) {
             for range in &stanza.periods {
                 check_range(out, range);
             }
-            if !companion {
-                check_path_values(model, block, stanza, out);
-            }
         }
     }
 }
 
-fn check_path_values(
-    model: &Model,
-    block: &PathBlock,
-    stanza: &PathStanza,
-    out: &mut Vec<Diagnostic>,
-) {
-    let databases: HashSet<&str> = model
-        .databases
-        .iter()
-        .flat_map(|decl| decl.names.iter())
-        .filter(|(_, span)| span.start < block.span.start)
-        .map(|(name, _)| model.name(*name))
-        .collect();
-    for (index, value) in stanza.values.iter().enumerate() {
-        let mut max_lag = 0;
-        let mut bad_reference = false;
-        for reference in &value.path_refs {
-            let before = out.len();
-            check_path_reference(model, block, stanza, reference, &databases, out);
-            bad_reference |= out.len() != before;
-            if let Some(LagFold::Integer(lag)) = reference.lag.as_deref().map(fold_lag) {
-                max_lag = max_lag.max(-lag);
-            }
-        }
-        if !bad_reference {
-            if let (PathTarget::Exogenous { .. }, Some(period)) =
-                (&stanza.target, stanza.periods.get(index))
-            {
-                if let PeriodPoint::Integer(first) = &period.first {
-                    if *first <= max_lag {
-                        error(
-                            out,
-                            value.span,
-                            "E405",
-                            format!(
-                                "shock_paths: a lag of {max_lag} is not allowed at period {first}"
-                            ),
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn check_path_reference(
-    model: &Model,
-    block: &PathBlock,
-    stanza: &PathStanza,
-    reference: &PathReference,
-    databases: &HashSet<&str>,
-    out: &mut Vec<Diagnostic>,
-) {
-    let Some(namespace) = reference.namespace.as_deref() else {
-        if !reference.call
-            && known(
-                model,
-                reference.name,
-                reference.span,
-                reference.symbol_type_context,
-            )
-            && !has_kind(
-                model,
-                reference.name,
-                reference.symbol_type_context,
-                "parameters",
-            )
-        {
-            error(
-                out,
-                reference.span,
-                "E407",
-                "In the shock_paths block, parameters are the only symbols allowed without a namespace-qualifier",
-            );
-        }
-        // An undeclared bare name makes pinned 7.2 crash without an ERROR.
+fn check_path_self_variables(model: &Model, stanza: &PathStanza, out: &mut Vec<Diagnostic>) {
+    let PathTarget::Exogenous { name, .. } = stanza.target else {
         return;
     };
-    let name = model.name(reference.name);
-    let syntax = if namespace.eq_ignore_ascii_case("learnt_in") {
-        let period = reference
-            .learnt_in
-            .as_ref()
-            .map(period_text)
-            .unwrap_or_else(|| "?".to_string());
-        format!("learnt_in({period}).{name}")
-    } else {
-        format!("{namespace}.{name}")
-    };
-    let controlled = matches!(stanza.target, PathTarget::Controlled { .. });
-    if reference
-        .lag
-        .as_deref()
-        .is_some_and(|lag| lag.contains(','))
-        && (namespace.eq_ignore_ascii_case("self")
-            || namespace.eq_ignore_ascii_case("prev")
-            || databases.contains(namespace))
-    {
+    if !stanza.callback_completed {
+        return;
+    }
+    for value in &stanza.values {
+        let Some(facts) = value.expr.and_then(|id| model.path_value_facts.get(&id)) else {
+            continue;
+        };
+        if !facts.self_variables.contains(&(name, 0)) {
+            continue;
+        }
+        let span = value
+            .path_refs
+            .iter()
+            .find(|reference| {
+                reference.namespace.as_deref() == Some("self")
+                    && reference.name == name
+                    && reference.constructed_lag == Some(0)
+            })
+            .map(|reference| reference.span)
+            .unwrap_or(value.span);
+        let name = model.name(name);
         error(
             out,
-            reference.span,
-            "E410",
+            span,
+            "E420",
             format!(
-                "The parenthesis after {syntax} should only include a lag, since it references a variable inside a namespace"
+                "in the definition of '{name}' in a 'shock_paths' block, the use of 'self.{name}' without a lag is not allowed, since it is a circular reference"
             ),
         );
-        return;
-    }
-    match namespace.to_ascii_lowercase().as_str() {
-        "initval" | "init" => {
-            // `initval.x(...)` is routed to the function/lead-lag grammar,
-            // not to the bare `initval.x` namespace rule.
-            if reference.lag_call {
-                return;
-            }
-            if !known(
-                model,
-                reference.name,
-                reference.span,
-                reference.symbol_type_context,
-            ) {
-                error(
-                    out,
-                    reference.span,
-                    "E058",
-                    format!("Unknown symbol: {name}."),
-                );
-            } else if has_kind(
-                model,
-                reference.name,
-                reference.symbol_type_context,
-                "varexo_det",
-            ) {
-                error(
-                    out,
-                    reference.span,
-                    "E317",
-                    format!("{name} is an exogenous deterministic."),
-                );
-            } else if !has_kind(
-                model,
-                reference.name,
-                reference.symbol_type_context,
-                "varexo",
-            ) && !has_kind(model, reference.name, reference.symbol_type_context, "var")
-            {
-                error(
-                    out,
-                    reference.span,
-                    "E059",
-                    format!("{name} is neither endogenous or exogenous."),
-                );
-            }
-            return;
-        }
-        "self" | "prev" | "learnt_in" => {
-            if !exogenous(
-                model,
-                out,
-                reference.name,
-                (reference.span, reference.symbol_type_context),
-                false,
-            ) {
-                return;
-            }
-        }
-        _ => {
-            if !databases.contains(namespace) && reference.lag_call {
-                // An undeclared `A.x(…)` is parsed as an external function,
-                // even in a controlled stanza.
-                return;
-            }
-            if controlled {
-                forbidden_controlled(out, reference.span, &syntax);
-                return;
-            }
-            if !databases.contains(namespace) {
-                error(
-                    out,
-                    reference.span,
-                    "E415",
-                    format!(
-                        "Unknown database: {namespace}. You may want to declare it via the 'database' command."
-                    ),
-                );
-                return;
-            }
-        }
-    }
-    if namespace.eq_ignore_ascii_case("self") {
-        if controlled {
-            forbidden_controlled(out, reference.span, &syntax);
-            return;
-        }
-        if let Some(LagFold::Integer(lag)) = reference.lag.as_deref().map(fold_lag) {
-            if lag > 0 {
-                error(
-                    out,
-                    reference.span,
-                    "E408",
-                    format!("The syntax {syntax} cannot be used with a lead"),
-                );
-                return;
-            }
-        }
-    } else if namespace.eq_ignore_ascii_case("prev") {
-        if block.options.learnt_in.is_none()
-            || matches!(
-                block.options.learnt_in.as_ref(),
-                Some(PeriodPoint::Integer(1))
-            )
-        {
-            error(
-                out,
-                reference.span,
-                "E411",
-                format!(
-                    "The syntax {syntax} is not accepted in a 'shock_paths' block without the 'learnt_in' option or in a 'shock_paths(learnt_in=1)' block"
-                ),
-            );
-            return;
-        }
-        if controlled {
-            forbidden_controlled(out, reference.span, &syntax);
-            return;
-        }
-    } else if namespace.eq_ignore_ascii_case("learnt_in") {
-        if let Some(PeriodPoint::Integer(n)) = reference.learnt_in.as_ref() {
-            if *n < 1 {
-                error(
-                    out,
-                    reference.span,
-                    "E412",
-                    format!("The syntax {syntax} is not accepted"),
-                );
-                return;
-            }
-            let block_n = match block.options.learnt_in.as_ref() {
-                Some(PeriodPoint::Integer(value)) => *value,
-                None => 1,
-                _ => 0,
-            };
-            if block_n > 0 && block_n <= *n {
-                error(
-                    out,
-                    reference.span,
-                    "E413",
-                    format!(
-                        "The syntax {syntax} is not accepted in a 'shock_paths' block without the 'learnt_in' option or in a 'shock_paths(learnt_in={block_n})' block"
-                    ),
-                );
-                return;
-            }
-        }
-        if controlled {
-            forbidden_controlled(out, reference.span, &syntax);
-            return;
-        }
-    }
-    if let Some(lag) = reference.lag.as_deref() {
-        if fold_lag(lag) == LagFold::NonInteger {
-            error(
-                out,
-                reference.span,
-                "E409",
-                format!(
-                    "Symbol {syntax} is being treated as if it were a function (i.e., passed an argument that is not an integer)."
-                ),
-            );
-        }
-    }
-    if namespace.eq_ignore_ascii_case("self") {
-        let current = match &stanza.target {
-            PathTarget::Exogenous { name, .. } => *name,
-            PathTarget::Controlled { .. } => return,
-        };
-        let zero_lag = reference
-            .lag
-            .as_deref()
-            .map(fold_lag)
-            .unwrap_or(LagFold::Integer(0))
-            == LagFold::Integer(0);
-        if current == reference.name && zero_lag {
-            error(
-                out,
-                reference.span,
-                "E420",
-                format!(
-                    "in the definition of '{name}' in a 'shock_paths' block, the use of 'self.{name}' without a lag is not allowed, since it is a circular reference"
-                ),
-            );
-        }
-    }
-}
-
-fn forbidden_controlled(out: &mut Vec<Diagnostic>, span: Span, syntax: &str) {
-    error(
-        out,
-        span,
-        "E416",
-        format!(
-            "The syntax {syntax} is not accepted in an 'endogenize' stanza of a 'shock_paths' block"
-        ),
-    );
-}
-
-fn period_text(point: &PeriodPoint) -> String {
-    match point {
-        PeriodPoint::Integer(n) => n.to_string(),
-        PeriodPoint::Date(date) => date.text.clone(),
-        PeriodPoint::End => "end".to_string(),
     }
 }

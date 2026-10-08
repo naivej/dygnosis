@@ -376,3 +376,505 @@ fn pinned_72_accepts_new_forms_and_refuses_nearby_syntax() {
         );
     }
 }
+
+#[test]
+fn path_expression_reader_keeps_namespace_leaves_and_full_function_names() {
+    use dygnosis::expr::ExprKind;
+    let source =
+        file("database db; shock_paths; var e; periods 2; values 0*self.e(-1)+db.x+pkg.f(p); end;");
+    let model = parse(&source);
+    let value = &model.shock_paths[0].stanzas[0].values[0];
+    assert_eq!(value.text, "0*self.e(-1)+db.x+pkg.f(p)");
+    let refs = &value.path_refs;
+    assert!(refs
+        .iter()
+        .any(|reference| reference.namespace.as_deref() == Some("self")
+            && reference.lag.as_deref() == Some("-1")));
+    assert!(refs
+        .iter()
+        .any(|reference| reference.namespace.as_deref() == Some("db")
+            && model.name(reference.name) == "x"));
+    assert!(refs
+        .iter()
+        .any(|reference| reference.call && model.name(reference.name) == "pkg.f"));
+    assert!(
+        model.exprs.iter().any(|(_, expr)| matches!(&expr.kind,
+        ExprKind::PathNamespace { reference, .. } if reference.namespace.as_deref() == Some("db")))
+    );
+    assert!(!analyze(&model)
+        .iter()
+        .any(|diag| diag.severity == dygnosis::Severity::Error));
+}
+
+#[test]
+fn path_values_require_complete_comma_separated_expressions() {
+    for (expression, sentence) in [
+        ("", "syntax error, unexpected ';'"),
+        ("p,", "syntax error, unexpected ';'"),
+        (",p", "syntax error, unexpected COMMA"),
+        ("p,,p", "syntax error, unexpected COMMA"),
+        ("p+", "syntax error, unexpected ';'"),
+        ("(p", "syntax error, unexpected ';'"),
+        (
+            "p 1",
+            "syntax error, unexpected INT_NUMBER, expecting COMMA or ';'",
+        ),
+        (
+            "p .5",
+            "syntax error, unexpected FLOAT_NUMBER, expecting COMMA or ';'",
+        ),
+        ("exp()", "syntax error, unexpected ')'"),
+        ("exp(p,p)", "syntax error, unexpected COMMA"),
+        ("normcdf(p,p)", "syntax error, unexpected ')'"),
+        ("f(p,)", "syntax error, unexpected ')'"),
+        ("self.e()", "syntax error, unexpected ')'"),
+        ("learnt_in(1).e(-1,-1)", "syntax error, unexpected COMMA"),
+        ("'text'", "syntax error, unexpected QUOTED_STRING"),
+        ("steady_state(p)", "syntax error, unexpected STEADY_STATE"),
+        ("expectation(0)(p)", "syntax error, unexpected EXPECTATION"),
+        ("diff(p)", "syntax error, unexpected DIFF"),
+        ("sum(p)", "syntax error, unexpected SUM"),
+    ] {
+        let source = file(&format!(
+            "shock_paths(learnt_in=2); var e; periods 2; values {expression}; end;"
+        ));
+        let model = parse(&source);
+        let diags = analyze(&model);
+        assert!(
+            diags
+                .iter()
+                .any(|diag| diag.code == "E001" && diag.message == sentence),
+            "{expression}: {diags:?}"
+        );
+        assert!(
+            !diags
+                .iter()
+                .any(|diag| matches!(diag.code.as_str(), "E404" | "E405" | "E420")),
+            "{expression}: {diags:?}"
+        );
+        if let Some(binary) = find_preprocessor(None) {
+            let result = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Check,
+            );
+            let output = format!("{} {}", result.raw_stdout, result.raw_stderr);
+            assert!(
+                !result.success && output.contains(sentence),
+                "{expression}: {output}"
+            );
+        }
+    }
+}
+
+#[test]
+fn path_namespace_actions_capture_earlier_declarations_and_function_calls() {
+    for (body, code) in [
+        ("shock_paths; var e; periods 1; values Self.e; end;", "E415"),
+        ("shock_paths; var e; periods 1; values db.x; end; database db;", "E415"),
+        ("database db; shock_paths; var e; periods 1; values db.x; end; shock_paths; var e; periods 1; values x; end;", "E407"),
+        ("shock_paths; var e; periods 1; values f(p); end; shock_paths; var e; periods 1; values f; end;", "E407"),
+        ("shock_paths; var e; periods 1; values p(1); end;", "E001"),
+        ("shock_paths; var e; periods 1; values self.e(p); end;", "E409"),
+        ("shock_paths; var e; periods 1; values self.e(1); end;", "E408"),
+        ("shock_paths; var e; periods 1; values self.e(0,1); end;", "E410"),
+        ("shock_paths; exogenize y; periods 1; values 0*self.e; endogenize e; end;", "E416"),
+    ] {
+        let source = file(body);
+        let diags = analyze(&parse(&source));
+        assert!(diags.iter().any(|diag| diag.code == code), "{body}: {diags:?}");
+    }
+    for expression in [
+        "self.e(-1.0)",
+        "self.e(p/p-2)",
+        "missing.pkg.f(p)",
+        "initval.e(p)",
+    ] {
+        let source = file(&format!(
+            "shock_paths; var e; periods 2; values {expression}; end;"
+        ));
+        let diags = analyze(&parse(&source));
+        assert!(
+            !diags
+                .iter()
+                .any(|diag| diag.severity == dygnosis::Severity::Error),
+            "{expression}: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn path_refused_values_prevent_stanza_actions_and_retain_written_recovery() {
+    for target in ["e", "missing", "p"] {
+        let source = file(&format!(
+            "shock_paths; var {target}; periods 1,2; values 1/0; end;"
+        ));
+        let model = parse(&source);
+        let diags = analyze(&model);
+        assert!(
+            diags.iter().any(|diag| diag.code == "E278"),
+            "{source}: {diags:?}"
+        );
+        assert!(
+            !diags
+                .iter()
+                .any(|diag| matches!(diag.code.as_str(), "E404" | "E058" | "E387")),
+            "{source}: {diags:?}"
+        );
+        assert_eq!(model.shock_paths[0].stanzas[0].values[0].text, "1/0");
+    }
+    let source = file("shock_paths; var e; periods 1; values unknown/0; end;");
+    let model = parse(&source);
+    assert!(!analyze(&model)
+        .iter()
+        .any(|diag| matches!(diag.code.as_str(), "E278" | "E407" | "E058")));
+    assert!(!model
+        .mod_file_locals
+        .iter()
+        .any(|name| model.name(*name) == "unknown"));
+}
+
+#[test]
+fn bare_unavailable_path_read_withholds_check_claims_without_an_invented_error() {
+    let prefix = "var y z; varexo e; parameters p; model; y=e; z=e; end; steady_state_model; y=z; y=1; z=1; end;";
+    let source = format!("{prefix} shock_paths; var e; periods 1; values unknown/0; end;");
+    let model = parse(&source);
+    let diags = analyze(&model);
+    assert!(
+        !diags.iter().any(|diag| matches!(
+            diag.code.as_str(),
+            "E278" | "E407" | "E058" | "E130" | "E021" | "E251" | "W022" | "W042" | "W131"
+        )),
+        "{diags:?}"
+    );
+    let control = format!("{prefix} shock_paths; var e; periods 1; values p; end;");
+    let diags = analyze(&parse(&control));
+    assert!(diags.iter().any(|diag| diag.code == "W131"), "{diags:?}");
+    let transform_prefix = "var y; varexo e; parameters p; p=.5; model; y=e+p; end;";
+    for (tail, transform_code) in [("shocks; var e=1; end;", "E113"), ("", "E425")] {
+        let path = "shock_paths(learnt_in=2); var e; periods 2; values unknown/0; end;";
+        let source = format!("{transform_prefix} {path} {tail}");
+        let diags = analyze(&parse(&source));
+        assert!(
+            !diags.iter().any(|diag| diag.code == transform_code),
+            "an unavailable Parse read cannot reach Transform: {diags:?}"
+        );
+        let source = source.replace("unknown/0", "p");
+        let diags = analyze(&parse(&source));
+        assert!(
+            diags.iter().any(|diag| diag.code == transform_code),
+            "valid Parse keeps the Transform control: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn path_reach_names_roles_and_reader_exclusions_match_the_pin() {
+    let base =
+        "var y; varexo e u; varexo_det d; parameters p q; p=.5; q=.7; model; y=e+u+d+p+q; end;";
+    for (body, code, sentence) in [
+        ("shock_paths; var missing; periods 1; values 1; end;", "E058", "Unknown symbol: missing."),
+        ("shock_paths; var p; periods 1; values 1; end;", "E387", "p is not exogenous."),
+        ("shock_paths; var d; periods 1; values 1; end;", "E317", "d is an exogenous deterministic."),
+        ("shock_paths; exogenize p; periods 1; values 1; endogenize e; end;", "E317", "p is not endogenous."),
+        ("shock_paths; var e; periods 1; values init.missing; end;", "E058", "Unknown symbol: missing."),
+        ("shock_paths; var e; periods 1; values init.p; end;", "E059", "p is neither endogenous or exogenous."),
+        ("shock_paths; var e; periods 1; values init.d; end;", "E317", "d is an exogenous deterministic."),
+        ("shock_paths; var e; periods 1; values self.y; end;", "E387", "y is not exogenous."),
+        ("shock_paths; var e; periods 1; values self.d; end;", "E317", "d is an exogenous deterministic."),
+        ("shock_paths; var e; periods 1; values p(1/0); end;", "E278", "Division by zero when forming (1)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0)."),
+        ("shock_paths; var e; periods 1; values init.e+q; end;", "", ""),
+        ("p=self.e;", "E275", "Namespace-qualified symbol self.e not allowed in this context"),
+        ("trend_var(growth_factor=1.02) t; p=t;", "E310", "Variable t not allowed outside model declaration, because it is a trend variable."),
+        ("trend_var(growth_factor=1.02) t; shock_paths; var e; periods 1; values t; end;", "E407", "In the shock_paths block, parameters are the only symbols allowed without a namespace-qualifier"),
+    ] {
+        let source = format!("{base} {body}");
+        let diags = analyze(&parse(&source));
+        if code.is_empty() {
+            assert!(!diags.iter().any(|diag| diag.severity == dygnosis::Severity::Error), "{body}: {diags:?}");
+        } else {
+            assert!(diags.iter().any(|diag| diag.code == code && diag.message == sentence), "{body}: {diags:?}");
+        }
+        if let Some(binary) = find_preprocessor(None) {
+            let result = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Check);
+            let output = format!("{} {}", result.raw_stdout, result.raw_stderr);
+            if code.is_empty() { assert!(result.success, "{body}: {output}"); }
+            else { assert!(!result.success && output.contains(sentence.trim_end_matches('.')), "{body}: {output}"); }
+        }
+    }
+}
+
+#[test]
+fn path_body_syntax_requires_each_transition_and_a_closed_block() {
+    let probes = [
+        (
+            "nonsense; end;",
+            "syntax error, unexpected IDENTIFIER, expecting VAR or EXOGENIZE",
+        ),
+        ("var ; end;", "syntax error, unexpected ';'"),
+        (
+            "var e periods 1; values p; end;",
+            "syntax error, unexpected PERIODS, expecting ';'",
+        ),
+        (
+            "var e; values p; end;",
+            "syntax error, unexpected VALUES, expecting PERIODS",
+        ),
+        (
+            "var e; periods 1; p; end;",
+            "syntax error, unexpected IDENTIFIER, expecting VALUES",
+        ),
+        (
+            "exogenize e; periods 1; values p; var y; end;",
+            "syntax error, unexpected VAR, expecting ENDOGENIZE",
+        ),
+        (
+            "exogenize e; periods 1; values p; endogenize ; end;",
+            "syntax error, unexpected ';'",
+        ),
+        (
+            "exogenize e; periods 1; values p; endogenize y end;",
+            "syntax error, unexpected END, expecting ';'",
+        ),
+        (
+            "var e; periods 1; values p; nonsense; end;",
+            "syntax error, unexpected IDENTIFIER, expecting END",
+        ),
+        (
+            "var e; periods 1; values p; var e; values p; end;",
+            "syntax error, unexpected VALUES, expecting PERIODS",
+        ),
+    ];
+    for (body, sentence) in probes {
+        let source = file(&format!("shock_paths; {body}"));
+        let model = parse(&source);
+        let diags = analyze(&model);
+        assert!(
+            diags
+                .iter()
+                .any(|diag| diag.code == "E001" && diag.message == sentence),
+            "{body}: {diags:?}"
+        );
+        if body.starts_with("var e; periods 1; values p;") {
+            assert_eq!(model.shock_paths[0].stanzas[0].values[0].text, "p");
+        }
+        if let Some(binary) = find_preprocessor(None) {
+            let result = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Check,
+            );
+            let output = format!("{} {}", result.raw_stdout, result.raw_stderr);
+            assert!(
+                !result.success && output.contains(sentence),
+                "{body}: {output}"
+            );
+        }
+    }
+    for body in [
+        "var e; periods 1; values p; end;",
+        "exogenize e; periods 1; values p; endogenize y; end;",
+    ] {
+        let source = file(&format!("shock_paths; {body}"));
+        assert!(
+            !analyze(&parse(&source))
+                .iter()
+                .any(|diag| diag.code == "E001"),
+            "{body}"
+        );
+    }
+}
+
+#[test]
+fn path_symbol_actions_use_execution_order_when_macro_copies_share_written_spans() {
+    for source in [
+        file("shock_paths; var e; periods 1; values init.r; end; var r;"),
+        "var y; varexo e; parameters p; model; y=e; end; change_type(var) p; shock_paths; var e; periods 1; values p; end; change_type(parameters) p;".to_string(),
+        file("\n@#for k in 1:2\nshock_paths; var e; periods 1; values f(p); end;\nshock_paths; var e; periods 1; values f; end;\n@#endfor\n"),
+    ] {
+        let diags = analyze(&parse(&source));
+        let expected = if source.contains("init.r") { "E058" } else { "E407" };
+        assert!(diags.iter().any(|diag| diag.code == expected), "{source}: {diags:?}");
+    }
+    let source = "var y; varexo e; parameters p; model; y=e; end; change_type(var) p; change_type(parameters) p; shock_paths; var e; periods 1; values p; end;".to_string();
+    assert!(!analyze(&parse(&source))
+        .iter()
+        .any(|diag| matches!(diag.code.as_str(), "E407" | "E310")));
+}
+
+#[test]
+fn path_period_lists_match_exogenous_and_controlled_pinned_grammars() {
+    for (controlled, periods, values, sentence) in [
+        (
+            false,
+            "1 nonsense",
+            "1",
+            "syntax error, unexpected IDENTIFIER, expecting COMMA or ';'",
+        ),
+        (
+            false,
+            "2:1,",
+            "1",
+            "Can't have first period index greater than second index in range specification",
+        ),
+        (
+            false,
+            "2:1,1 nonsense",
+            "1",
+            "Can't have first period index greater than second index in range specification",
+        ),
+        (
+            false,
+            ":1",
+            "1",
+            "syntax error, unexpected ':', expecting END or DATE or INT_NUMBER",
+        ),
+        (
+            false,
+            "1::2",
+            "1",
+            "syntax error, unexpected ':', expecting END or INT_NUMBER",
+        ),
+        (
+            false,
+            "end:2",
+            "1",
+            "syntax error, unexpected ':', expecting COMMA or ';'",
+        ),
+        (
+            false,
+            "1,",
+            "1",
+            "syntax error, unexpected ';', expecting END or DATE or INT_NUMBER",
+        ),
+        (
+            false,
+            ",1",
+            "1",
+            "syntax error, unexpected COMMA, expecting END or DATE or INT_NUMBER",
+        ),
+        (
+            false,
+            "",
+            "1",
+            "syntax error, unexpected ';', expecting END or DATE or INT_NUMBER",
+        ),
+        (
+            false,
+            "1 2",
+            "1,2",
+            "syntax error, unexpected INT_NUMBER, expecting COMMA or ';'",
+        ),
+        (
+            false,
+            "1:2000Q1",
+            "1",
+            "syntax error, unexpected DATE, expecting END or INT_NUMBER",
+        ),
+        (
+            false,
+            "2000Q1:1",
+            "1",
+            "syntax error, unexpected INT_NUMBER, expecting END or DATE",
+        ),
+        (
+            false,
+            "1:",
+            "1",
+            "syntax error, unexpected ';', expecting END or INT_NUMBER",
+        ),
+        (
+            true,
+            "1 nonsense",
+            "1",
+            "syntax error, unexpected IDENTIFIER, expecting COMMA or DATE or INT_NUMBER or ';'",
+        ),
+        (
+            true,
+            "1,",
+            "1",
+            "syntax error, unexpected ';', expecting DATE or INT_NUMBER",
+        ),
+        (
+            true,
+            "",
+            "1",
+            "syntax error, unexpected ';', expecting DATE or INT_NUMBER",
+        ),
+        (
+            true,
+            "1:end",
+            "1",
+            "syntax error, unexpected END, expecting INT_NUMBER",
+        ),
+        (false, "1,2", "1,2", ""),
+        (true, "1 2", "1,2", ""),
+        (true, "1,2", "1,2", ""),
+        (false, "1 : 2", "1", ""),
+        (true, "1 /* range */ : 2", "1", ""),
+    ] {
+        let body = if controlled {
+            format!(
+                "shock_paths; exogenize y; periods {periods}; values {values}; endogenize e; end;"
+            )
+        } else {
+            format!("shock_paths; var e; periods {periods}; values {values}; end;")
+        };
+        let source = file(&body);
+        let diags = analyze(&parse(&source));
+        if sentence.is_empty() {
+            assert!(
+                !diags
+                    .iter()
+                    .any(|diag| diag.severity == dygnosis::Severity::Error),
+                "{body}: {diags:?}"
+            );
+        } else {
+            let code = if periods.starts_with("2:1") {
+                "E395"
+            } else {
+                "E001"
+            };
+            assert!(
+                diags
+                    .iter()
+                    .any(|diag| diag.code == code && diag.message == sentence),
+                "{body}: {diags:?}"
+            );
+            if code == "E395" {
+                assert!(
+                    !diags.iter().any(|diag| diag.code == "E001"),
+                    "{body}: {diags:?}"
+                );
+            }
+            assert!(
+                !diags
+                    .iter()
+                    .any(|diag| matches!(diag.code.as_str(), "E404" | "E406" | "E405" | "E420")),
+                "{body}: {diags:?}"
+            );
+        }
+        if let Some(binary) = find_preprocessor(None) {
+            let result = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Check,
+            );
+            let output = format!("{} {}", result.raw_stdout, result.raw_stderr);
+            if sentence.is_empty() {
+                assert!(result.success, "{body}: {output}");
+            } else {
+                assert!(
+                    !result.success && output.contains(sentence),
+                    "{body}: {output}"
+                );
+            }
+        }
+    }
+}

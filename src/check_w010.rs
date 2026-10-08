@@ -367,7 +367,11 @@ fn namespace_refused(model: &Model, id: ExprId) -> bool {
             namespace_refused(model, *lhs) || namespace_refused(model, *rhs)
         }
         ExprKind::Call { args, .. } => args.iter().any(|id| namespace_refused(model, *id)),
-        ExprKind::Number | ExprKind::String | ExprKind::Ident { .. } | ExprKind::Error => false,
+        ExprKind::Number
+        | ExprKind::String
+        | ExprKind::Ident { .. }
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => false,
     }
 }
 
@@ -554,6 +558,7 @@ fn eval_expr(model: &Model, id: ExprId, known: &HashMap<Name, f64>) -> Option<f6
         }
         ExprKind::String
         | ExprKind::Error
+        | ExprKind::PathNamespace { .. }
         | ExprKind::SteadyState { .. }
         | ExprKind::Expectation { .. } => None,
     }

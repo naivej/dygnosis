@@ -389,7 +389,8 @@ fn first_nonsmooth_on_type(
         | ExprKind::Ident { .. }
         | ExprKind::Number
         | ExprKind::String
-        | ExprKind::Error => None,
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => None,
     }
 }
 
@@ -443,7 +444,8 @@ fn first_special_call(model: &Model, id: ExprId, vars: &HashSet<Name>) -> Option
         | ExprKind::Ident { .. }
         | ExprKind::Number
         | ExprKind::String
-        | ExprKind::Error => None,
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => None,
     }
 }
 
@@ -500,7 +502,8 @@ fn first_operator(model: &Model, id: ExprId, vars: &HashSet<Name>) -> Option<(St
         | ExprKind::Ident { .. }
         | ExprKind::Number
         | ExprKind::String
-        | ExprKind::Error => None,
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => None,
     }
 }
 
@@ -520,7 +523,9 @@ fn has_variable(model: &Model, id: ExprId, vars: &HashSet<Name>) -> bool {
         ExprKind::Binary { lhs, rhs, .. } => {
             has_variable(model, *lhs, vars) || has_variable(model, *rhs, vars)
         }
-        ExprKind::Number | ExprKind::String | ExprKind::Error => false,
+        ExprKind::Number | ExprKind::String | ExprKind::Error | ExprKind::PathNamespace { .. } => {
+            false
+        }
     }
 }
 

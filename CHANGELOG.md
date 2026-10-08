@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `shock_paths` values are read as complete Dynare expressions. Constructor errors such as `log(0)`, `log10(0)`, and division by zero are reported in the value. Lag and circular-reference checks use references that remain after Dynare simplifies the value, so `0*self.e` does not report E420.
 - Empty `steady_state_model` blocks report Dynare's `syntax error, unexpected END` on `end`, unless an earlier Parse refusal occurred in the block. E278 follows Dynare's numeric spelling and constructor rules for written denominator identities, and reports the constructed numerator. A Parse refusal suppresses shared Check diagnostics such as E021, W022, and W042. `verbatim` text continues through Dynare's `end` terminator, so a bare `end` inside it does not hide later statements or W042.
 - `resid` accepts only `resid;` and `resid(non_zero);`. Unused parameter and exogenous checks follow Dynare's surviving model uses. Calibration, initial-value, and shock expressions no longer hide unused parameters; observed exogenous names and PAC growth or component-growth uses remain exempt from E021. Ramsey conditional steady-state instruments are excluded from W042, and a policy parse error stops later W042 warnings.
 - MATLAB text after a non-assignment native entry stays on that line and no longer creates Dynare declarations, blocks, or namespace errors. Invalid continuation dots, block characters, model-local statement heads, bare block `end`, and incomplete regular shock rows now report Dynare’s parse sentence.

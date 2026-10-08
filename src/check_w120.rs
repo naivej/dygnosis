@@ -310,6 +310,7 @@ fn eval_expr(model: &Model, id: ExprId, known: &HashMap<Name, f64>) -> Option<f6
         }
         ExprKind::String
         | ExprKind::Error
+        | ExprKind::PathNamespace { .. }
         | ExprKind::SteadyState { .. }
         | ExprKind::Expectation { .. } => None,
     }

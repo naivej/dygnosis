@@ -29,6 +29,10 @@ fn base(extra: &str) -> String {
     format!("var y;\nvarexo e u;\nmodel;\ny = e + u;\nend;\n{extra}\n")
 }
 
+fn path_base(extra: &str) -> String {
+    format!("var y;\nvarexo e u;\nparameters p; p=1;\nmodel;\ny = e + u + p;\nend;\n{extra}\n")
+}
+
 #[test]
 fn e111_cross_form_and_skew_duplicates() {
     let cross = fixture("e111_cov_corr.mod");
@@ -367,7 +371,7 @@ fn shock_path_and_endval_refusals_match_their_classes() {
         ),
     ];
     for (body, code) in cases {
-        let result = diagnostics(&base(body));
+        let result = diagnostics(&path_base(body));
         assert!(has(&result, code), "{code} on {body}: {result:?}");
     }
     for body in [
@@ -377,7 +381,7 @@ fn shock_path_and_endval_refusals_match_their_classes() {
         "shock_paths; exogenize y; periods 1; values missing.x(1); endogenize e; end;",
         "shock_paths; var e; periods 1; values self.u(p-p); end;",
     ] {
-        let result = diagnostics(&base(body));
+        let result = diagnostics(&path_base(body));
         assert!(
             !has(&result, "E415")
                 && !has(&result, "E409")
@@ -386,7 +390,7 @@ fn shock_path_and_endval_refusals_match_their_classes() {
             "{body}: {result:?}"
         );
     }
-    let declared_control = diagnostics(&base(
+    let declared_control = diagnostics(&path_base(
         "database db; shock_paths; exogenize y; periods 1; values db.x(1); endogenize e; end;",
     ));
     assert!(has(&declared_control, "E416"));
@@ -398,7 +402,7 @@ fn path_lag_folding_and_namespace_call_grammar() {
         "shock_paths; var e; periods 2; values self.e(0-0); end;",
         "shock_paths; var e; periods 2; values self.e(p-p); end;",
     ] {
-        assert!(has(&diagnostics(&base(body)), "E420"), "{body}");
+        assert!(has(&diagnostics(&path_base(body)), "E420"), "{body}");
     }
     for (body, code) in [
         (
@@ -426,7 +430,7 @@ fn path_lag_folding_and_namespace_call_grammar() {
             "E409",
         ),
     ] {
-        assert!(has(&diagnostics(&base(body)), code), "{body}");
+        assert!(has(&diagnostics(&path_base(body)), code), "{body}");
     }
     for body in [
         "shock_paths; var e; periods 1; values self.u(); end;",
@@ -437,7 +441,7 @@ fn path_lag_folding_and_namespace_call_grammar() {
         "shock_paths(learnt_in=2); var e; periods 1; values learnt_in(1).u(); end;",
         "shock_paths(learnt_in=2); exogenize y; periods 1; values learnt_in(1).u(1,2); endogenize e; end;",
     ] {
-        let result = diagnostics(&base(body));
+        let result = diagnostics(&path_base(body));
         assert!(has(&result, "E001"), "{body}: {result:?}");
         assert!(!has(&result, "E416"), "syntax must take precedence: {body}");
     }
@@ -446,7 +450,7 @@ fn path_lag_folding_and_namespace_call_grammar() {
         "shock_paths; var e; periods 2; values self.u(p-p); end;",
         "database db; shock_paths; var e; periods 1; values db.x(1-1); end;",
     ] {
-        let result = diagnostics(&base(body));
+        let result = diagnostics(&path_base(body));
         assert!(
             !has(&result, "E405") && !has(&result, "E408") && !has(&result, "E409"),
             "{body}: {result:?}"
@@ -474,12 +478,211 @@ fn parse_refusals_preempt_path_self_cycle() {
             "E058",
         ),
     ] {
-        let result = diagnostics(&base(body));
+        let result = diagnostics(&path_base(body));
         assert!(has(&result, first_code), "{body}: {result:?}");
         assert!(
             !has(&result, "E420"),
             "E420 leaked past {first_code}: {result:?}"
         );
+    }
+}
+
+#[test]
+fn shock_path_lag_and_circular_checks_collect_only_surviving_constructor_nodes() {
+    for term in [
+        "0*self.u(-1)",
+        "self.u(-1)-self.u(-1)",
+        "sin(0*self.u(-1))",
+        "fun(0*self.u(-1))",
+        "0*self.e",
+        "self.e-self.e",
+        "self.e/self.e",
+        "sin(0*self.e)",
+        "fun(0*self.e)",
+    ] {
+        let source = base(&format!(
+            "shock_paths; var e; periods 1; values {term}; end;"
+        ));
+        let result = diagnostics(&source);
+        assert!(
+            !has(&result, "E405") && !has(&result, "E420"),
+            "{term}: {result:?}"
+        );
+    }
+    for term in ["self.u(-1)", "sin(self.u(-1))", "fun(self.u(-1))"] {
+        let source = base(&format!(
+            "shock_paths; var e; periods 1; values {term}; end;"
+        ));
+        let result = diagnostics(&source);
+        let error = result.iter().find(|row| row.code == "E405").unwrap();
+        assert_eq!(
+            error.message,
+            "shock_paths: a lag of 1 is not allowed at period 1"
+        );
+        assert_eq!(
+            &source[error.span.start as usize..error.span.end as usize],
+            term
+        );
+    }
+    for term in ["self.e", "sin(self.e)", "fun(self.e)", "self.e(-1)+self.e"] {
+        let source = base(&format!(
+            "shock_paths; var e; periods 2; values {term}; end;"
+        ));
+        let result = diagnostics(&source);
+        let error = result.iter().find(|row| row.code == "E420").unwrap();
+        assert_eq!(
+            &source[error.span.start as usize..error.span.end as usize],
+            "self.e"
+        );
+    }
+    let controlled =
+        base("shock_paths; exogenize y; periods 1; values 0*self.e; endogenize e; end;");
+    assert!(has(&diagnostics(&controlled), "E416"));
+}
+
+#[test]
+fn shock_path_lags_use_constructed_constant_matching() {
+    for term in ["self.u(-1.0)", "self.u(p/p-2)", "self.u(-1e2)"] {
+        let source = base(&format!(
+            "shock_paths; var e; periods 2; values {term}; end;"
+        ))
+        .replace("model;", "parameters p; model;");
+        let result = diagnostics(&source);
+        assert!(
+            !has(&result, "E409") && !has(&result, "E405"),
+            "{term}: {result:?}"
+        );
+    }
+    let source = base("shock_paths; var e; periods 1; values self.u(-1.0); end;");
+    assert!(has(&diagnostics(&source), "E405"));
+}
+
+#[test]
+fn database_path_lags_follow_symbol_roles_at_each_stanza_callback() {
+    let prefix = "var y; varexo e; parameters p q; p=1; q=1; database db;";
+    for (term, fires) in [
+        ("db.p(-1)", false),
+        ("db.y(-1)", true),
+        ("db.e(-1)", true),
+        ("db.x(-1)", true),
+        ("0*db.x(-1)", false),
+    ] {
+        let source =
+            format!("{prefix}shock_paths; var e; periods 1; values {term}; end; model; y=e; end;");
+        let rows = diagnostics(&source);
+        assert_eq!(has(&rows, "E405"), fires, "{term}: {rows:?}");
+        if let Some(binary) = find_preprocessor(None) {
+            let result = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Check,
+            );
+            assert_eq!(result.success, !fires, "{term}: {result:?}");
+            if fires {
+                assert!(
+                    format!("{}{}", result.raw_stdout, result.raw_stderr)
+                        .contains("a lag of 1 is not allowed at period 1"),
+                    "{result:?}"
+                );
+            }
+        }
+    }
+    for (body, fires, model_body) in [
+        ("shock_paths; var e; periods 1; values db.p(-1); end; change_type(var) p; shock_paths; var e; periods 1; values db.p(-1); end;", true, "y=e; p=0;"),
+        ("shock_paths; var e; periods 1; values db.p(-1)+q; end; change_type(var) p; shock_paths; var e; periods 1; values db.p(-1)+q; end;", true, "y=e; p=0;"),
+        ("change_type(var) p; shock_paths; var e; periods 2; values db.p(-1); end; change_type(parameters) p; shock_paths; var e; periods 1; values db.p(-1); end;", false, "y=e;"),
+        ("change_type(var) p; shock_paths; var e; periods 2; values db.p(-1)+q; end; change_type(parameters) p; shock_paths; var e; periods 1; values db.p(-1)+q; end;", false, "y=e;"),
+        ("shock_paths; var e; periods 1; values db.p(-1); end; change_type(var) p;", false, "y=e; p=0;"),
+        ("shock_paths; var e; periods 1; values db.p(-1)-db.p(-1); end; change_type(var) p; shock_paths; var e; periods 1; values db.p(-1)-db.p(-1); end;", false, "y=e; p=0;"),
+    ] {
+        let source = format!("{prefix}{body}model; {model_body} end;");
+        let rows = diagnostics(&source);
+        assert_eq!(has(&rows, "E405"), fires, "{body}: {rows:?}");
+        if let Some(binary) = find_preprocessor(None) {
+            let result = run_preprocessor(&source, &binary, None, Duration::from_secs(30), JsonStage::Check);
+            assert_eq!(result.success, !fires, "{body}: {result:?}");
+        }
+    }
+}
+
+#[test]
+fn shock_path_builtin_and_declared_external_children_match_the_pinned_roots() {
+    for (term, code, needle) in [
+        (
+            "sin(self.u(-1))",
+            Some("E405"),
+            "a lag of 1 is not allowed at period 1",
+        ),
+        (
+            "fun(self.u(-1))",
+            Some("E405"),
+            "a lag of 1 is not allowed at period 1",
+        ),
+        (
+            "sin(self.e)",
+            Some("E420"),
+            "since it is a circular reference",
+        ),
+        (
+            "fun(self.e)",
+            Some("E420"),
+            "since it is a circular reference",
+        ),
+        ("sin(0*self.u(-1))", None, ""),
+        ("fun(0*self.u(-1))", None, ""),
+        ("sin(0*self.e)", None, ""),
+        ("fun(0*self.e)", None, ""),
+    ] {
+        // Non-model calls keep their accepted argument count even when an
+        // external_function declaration specifies the model-only count.
+        let source = format!(
+            "external_function(name=fun,nargs=2);{}",
+            base(&format!(
+                "shock_paths; var e; periods 1; values {term}; end;"
+            ))
+        );
+        let rows = diagnostics(&source);
+        assert!(!has(&rows, "E001"), "{term}: {rows:?}");
+        match code {
+            Some(code) => assert!(has(&rows, code), "{term}: {rows:?}"),
+            None => assert!(
+                !has(&rows, "E405") && !has(&rows, "E420"),
+                "{term}: {rows:?}"
+            ),
+        }
+        if let Some(binary) = find_preprocessor(None) {
+            let result = run_preprocessor(
+                &source,
+                &binary,
+                None,
+                Duration::from_secs(30),
+                JsonStage::Check,
+            );
+            assert_eq!(result.success, code.is_none(), "{term}: {result:?}");
+            if code.is_some() {
+                assert!(
+                    format!("{}{}", result.raw_stdout, result.raw_stderr).contains(needle),
+                    "{term}: {result:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn shock_path_refused_rhs_withholds_target_count_lag_and_later_check_callbacks() {
+    for body in [
+        "shock_paths; var missing; periods 1,2; values 1/0; end;",
+        "shock_paths; var e; periods 1,2; values 1/0; end;",
+        "shock_paths; exogenize missing; periods 1,2; values 1/0; endogenize e; end;",
+        "shock_paths; var e; periods 1,2; values 1/0,self.e; end;",
+        "shock_paths; var e; periods 1; values self.e; end; shock_paths; var u; periods 1; values 1/0; end;",
+    ] {
+        let result = diagnostics(&base(body));
+        assert!(has(&result, "E278"), "{body}: {result:?}");
+        assert!(result.iter().all(|row| !matches!(row.code.as_str(), "E058" | "E404" | "E405" | "E406" | "E420")), "{body}: {result:?}");
     }
 }
 

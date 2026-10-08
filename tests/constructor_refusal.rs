@@ -16,6 +16,205 @@ fn sentence(numerator: &str) -> String {
     format!("Division by zero when forming ({numerator})/(0); denominator simplified to 0 (possibly after substituting a variable set to 0).")
 }
 
+fn path_source(term: &str) -> String {
+    format!("var y; varexo e u; parameters p q; p=0; model; y=e+u+p+q; end; shock_paths; var e; periods 2; values {term}; end;")
+}
+
+#[test]
+fn shock_path_constructors_reach_refusals_before_the_stanza_callback() {
+    for (term, fraction, numerator) in [
+        ("(q+p)/0", "(q+p)/0", "q+p"),
+        ("1/0", "1/0", "1"),
+        ("0/0", "0/0", "0"),
+        ("1/(p-p)", "1/(p-p)", "1"),
+        ("1/(p/p-1)", "1/(p/p-1)", "1"),
+        ("1/(p^0-1)", "1/(p^0-1)", "1"),
+        ("0*(1/(p^0-1))", "1/(p^0-1)", "1"),
+        ("(p/p)/(p^0-1)", "(p/p)/(p^0-1)", "1"),
+        ("self.u(-1)/0", "self.u(-1)/0", "self.u(-1)"),
+        ("self.u/0", "self.u/0", "self.u(0)"),
+        ("init.y/0", "init.y/0", "initval.y"),
+    ] {
+        let source = path_source(term);
+        let expected = sentence(numerator);
+        official(&source, false, Some(&expected));
+        let model = parse(&source);
+        let rows = analyze(&model);
+        let errors: Vec<_> = rows.iter().filter(|row| row.code == "E278").collect();
+        assert_eq!(errors.len(), 1, "{term}: {rows:?}");
+        assert_eq!(errors[0].message, expected, "{term}");
+        assert_eq!(
+            &source[errors[0].span.start as usize..errors[0].span.end as usize],
+            fraction,
+            "{term}"
+        );
+        assert_eq!(model.shock_paths[0].stanzas[0].values[0].text, term);
+        withheld(&rows);
+    }
+    for (term, code, message) in [
+        ("log(0)", "E276", "log(0) not defined!"),
+        ("log10(0)", "E277", "log10(0) not defined!"),
+        ("self.u(1/0)", "E278", &sentence("1")),
+    ] {
+        let source = path_source(term);
+        official(&source, false, Some(message));
+        let rows = analyze(&parse(&source));
+        assert!(
+            rows.iter()
+                .any(|row| row.code == code && row.message == message),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .all(|row| !matches!(row.code.as_str(), "E404" | "E405" | "E408" | "E420")),
+            "{rows:?}"
+        );
+    }
+}
+
+#[test]
+fn shock_path_constructor_controls_preserve_literal_spelling_and_parameter_values() {
+    for term in ["1/0.0", "1/0e0", "1/(p^0.0-1)", "1/(p-p+1)", "1/p"] {
+        let source = path_source(term);
+        official(&source, true, None);
+        let model = parse(&source);
+        let rows = analyze(&model);
+        assert!(
+            rows.iter().all(|row| row.severity != Severity::Error),
+            "{term}: {rows:?}"
+        );
+        assert_eq!(model.shock_paths[0].stanzas[0].values[0].text, term);
+        assert!(model.shock_paths[0].stanzas[0].values[0].expr.is_some());
+    }
+}
+
+#[test]
+fn shock_path_namespace_identity_and_canonical_display_match_the_pin() {
+    for (prefix, term, numerator) in [
+        ("", "1/(self.u(-1)-self.u(-1.0))", "1"),
+        ("", "1/(init.u-initval.u)", "1"),
+        ("database db other;", "1/(db.x-db.x(0))", "1"),
+        ("database db;", "db.x/0", "db.x(0)"),
+        ("", "prev.u(-1)/0", "prev.u"),
+        ("", "learnt_in(1).u(-1)/0", "learnt_in(1).u"),
+        ("", "learnt_in(2024Q1).u/0", "learnt_in(dates('2024Q1')).u"),
+        (
+            "",
+            "learnt_in(2024Q1 + 1).u/0",
+            "learnt_in(dates('2024Q1')+1).u",
+        ),
+        ("", "1/(prev.u-prev.u)", "1"),
+        ("", "1/(learnt_in(1).u-learnt_in(1).u)", "1"),
+        ("", "1/(learnt_in(2024Q1).u-learnt_in(2024Q1).u)", "1"),
+        ("", "1/(learnt_in(2024Q1 + 1).u-learnt_in(2024Q1+1).u)", "1"),
+        (
+            "",
+            "1/(learnt_in(2024Q1+/*offset*/1).u-learnt_in(2024Q1+1).u)",
+            "1",
+        ),
+    ] {
+        let source = format!(
+            "{prefix}{}",
+            path_source(term).replace("shock_paths;", "shock_paths(learnt_in=3);")
+        );
+        let expected = sentence(numerator);
+        official(&source, false, Some(&expected));
+        let rows = analyze(&parse(&source));
+        assert!(
+            rows.iter()
+                .any(|row| row.code == "E278" && row.message == expected),
+            "{term}: {rows:?}"
+        );
+    }
+    for term in [
+        "1/(self.u(-1)-self.u)",
+        "1/(db.x-other.x)",
+        "1/(init.u-self.u)",
+        "1/(prev.u-prev.u(-1))",
+        "1/(learnt_in(1).u-learnt_in(2).u)",
+        "1/(learnt_in(2024Q1).u-learnt_in(2024Q2).u)",
+        "1/(learnt_in(1).u-learnt_in(2024Q1).u)",
+    ] {
+        let source = format!(
+            "database db other;{}",
+            path_source(term).replace("shock_paths;", "shock_paths(learnt_in=3);")
+        );
+        official(&source, true, None);
+        let rows = analyze(&parse(&source));
+        assert!(
+            rows.iter()
+                .all(|row| row.severity != Severity::Error || row.code == "E425"),
+            "{term}: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.code == "E425"),
+            "accepted Parse must retain its later Transform control: {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn path_constructor_scope_persists_across_stanzas_blocks_and_overwrite() {
+    let prefix = "var y; varexo e u; parameters p q; p=0; model; y=e+u+p+q; end;";
+    for (body, numerator) in [
+        ("shock_paths; var e; periods 2; values (q+p)/0; end;", "q+p"),
+        ("shock_paths; var u; periods 2; values p; var e; periods 2; values (q+p)/0; end;", "p+q"),
+        ("shock_paths; var u; periods 2; values p; end; shock_paths; var e; periods 2; values (q+p)/0; end;", "p+q"),
+        ("shock_paths; var u; periods 2; values p; end; shock_paths(overwrite); var e; periods 2; values (q+p)/0; end;", "p+q"),
+        ("shock_paths; exogenize y; periods 2; values (q+p)/0; endogenize e; end;", "q+p"),
+    ] {
+        let source = format!("{prefix}{body}");
+        let expected = sentence(numerator);
+        official(&source, false, Some(&expected));
+        let rows = analyze(&parse(&source));
+        let errors: Vec<_> = rows.iter().filter(|row| row.code == "E278").collect();
+        assert_eq!(errors.len(), 1, "{source}: {rows:?}");
+        assert_eq!(errors[0].message, expected);
+        assert_eq!(&source[errors[0].span.start as usize..errors[0].span.end as usize], "(q+p)/0");
+    }
+    let source =
+        format!("{prefix}shock_paths; exogenize y; periods 2; values init.y+p; endogenize e; end;");
+    official(&source, true, None);
+    assert!(analyze(&parse(&source))
+        .iter()
+        .all(|row| row.severity != Severity::Error));
+}
+
+#[test]
+fn path_namespace_date_display_uses_emitted_tokens_after_macro_substitution() {
+    let source = "@#define info = \"2024Q1 + 1\"\nvar y; varexo e u; model; y=e+u; end; shock_paths(learnt_in=3); var e; periods 2; values learnt_in(@{info}).u/0; end;";
+    let expected = sentence("learnt_in(dates('2024Q1')+1).u");
+    official(source, false, Some(&expected));
+    let rows = analyze(&parse(source));
+    assert!(
+        rows.iter()
+            .any(|row| row.code == "E278" && row.message == expected),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn path_parse_refusals_withhold_all_owned_check_results_anywhere_in_the_unit() {
+    for (source, code) in [
+        ("var y z; varexo e; parameters p; p=1; model; y=0*e; z=y; end; steady_state_model; y=1; end;", "E021"),
+        ("var y z; varexo e; parameters p; p=1; model; y=e+p; z=y; end; steady_state_model; y=z; z=1; end;", "E130"),
+        ("var y; varexo e; parameters p; p=1; model; y=e+p; end; planner_objective e;", "E251"),
+        ("var y z; varexo e; parameters p; p=1; model; y=0*e; z=y; end; steady_state_model; y=1; end;", "W022"),
+        ("var y z; varexo e; parameters p; p=1; model; y=0*e; z=y; end; steady_state_model; y=1; end;", "W042"),
+        ("var y; varexo e; parameters p; p=1; model; y=e+p; end; steady_state_model; y=0; y=1; end;", "W131"),
+    ] {
+        let control = analyze(&parse(source));
+        assert!(control.iter().any(|row| row.code == code), "{code}: {control:?}");
+        let refusal = "shock_paths; var e; periods 1; values 1/0; end;";
+        for refused in [format!("{source}{refusal}"), source.replacen("model;", &format!("{refusal}model;"), 1)] {
+            official(&refused, false, Some(&sentence("1")));
+            let rows = analyze(&parse(&refused));
+            assert!(rows.iter().any(|row| row.code == "E278"), "{code}: {rows:?}");
+            assert!(rows.iter().all(|row| !matches!(row.code.as_str(), "E420" | "E021" | "E130" | "E251" | "W022" | "W042" | "W131")), "{code}: {rows:?}");
+        }
+    }
+}
+
 fn official(source: &str, accepted: bool, message: Option<&str>) {
     let binary = PathBuf::from("C:/dynare/7.2/preprocessor/dynare-preprocessor.exe");
     if !binary.is_file() {

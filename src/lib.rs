@@ -53,7 +53,6 @@ pub(crate) mod extract;
 pub mod format;
 pub mod include_resolver;
 pub mod intern;
-mod lag_fold;
 pub mod lexer;
 pub mod macro_expand;
 mod macro_expr;

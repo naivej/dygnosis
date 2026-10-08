@@ -585,7 +585,7 @@ fn deriv_names(stmt: &ExternalFunctionStmt) -> Vec<Name> {
 fn walk(model: &Model, id: ExprId, idents: &mut Vec<Name>, calls: &mut Vec<Name>) {
     match &model.exprs.get(id).kind {
         ExprKind::Ident { name, .. } => idents.push(*name),
-        ExprKind::Number | ExprKind::String | ExprKind::Error => {}
+        ExprKind::Number | ExprKind::String | ExprKind::Error | ExprKind::PathNamespace { .. } => {}
         ExprKind::Unary { arg, .. } => walk(model, *arg, idents, calls),
         ExprKind::Binary { lhs, rhs, .. } => {
             walk(model, *lhs, idents, calls);

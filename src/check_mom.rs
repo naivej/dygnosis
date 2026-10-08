@@ -901,7 +901,7 @@ impl<'a> Ctx<'a> {
             }
             ExprKind::Call { callee, args } => self.fold_call(*callee, args),
             ExprKind::SteadyState { .. } | ExprKind::Expectation { .. } => Folded::Other,
-            ExprKind::String | ExprKind::Error => Folded::Other,
+            ExprKind::String | ExprKind::Error | ExprKind::PathNamespace { .. } => Folded::Other,
         }
     }
 

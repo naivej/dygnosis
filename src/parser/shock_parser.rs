@@ -9,6 +9,13 @@ use crate::model::{
     StochSimulRequest, SubsampleHead, SubsampleInstruction, SubsampleRange, WrittenValue,
 };
 
+pub(super) struct PathExpressionContext {
+    learnt_in: Option<PeriodPoint>,
+    controlled: bool,
+    databases: HashSet<String>,
+    pub(super) failed: bool,
+}
+
 impl Parser<'_> {
     pub(super) fn shock_block_kind(&mut self, opener_i: usize, body_i: usize) -> ShockBlockKind {
         let command = self.tokens[opener_i].text(self.src).to_string();
@@ -263,7 +270,7 @@ impl Parser<'_> {
                 .with_parse_order(self.token_origins[values_start].start),
             );
         }
-        let values = self.written_values(values_start, values_end, false, false);
+        let values = self.written_values(values_start, values_end);
         let end = if self.at(TokenKind::Semi) {
             self.bump().span.end
         } else {
@@ -302,16 +309,20 @@ impl Parser<'_> {
                 DateExpr {
                     text: self.src[start as usize..end as usize].to_string(),
                     span,
+                    constructor_text: self.tokens[at..i]
+                        .iter()
+                        .map(|token| token.text(self.src))
+                        .collect(),
                 },
                 i,
             ));
         }
         if self.tokens[i].kind == TokenKind::Minus {
-            if self
-                .tokens
-                .get(i + 1)
-                .is_none_or(|next| next.span.start != self.tokens[i].span.end)
-            {
+            if self.tokens.get(i + 1).is_none_or(|next| {
+                !self.tokens[i]
+                    .expanded_adjacent_next
+                    .unwrap_or(next.span.start == self.tokens[i].span.end)
+            }) {
                 return None;
             }
             i += 1;
@@ -320,13 +331,17 @@ impl Parser<'_> {
         let suffix = self.tokens.get(i + 1)?;
         if number.kind != TokenKind::Number
             || suffix.kind != TokenKind::Ident
-            || number.span.end != suffix.span.start
+            || !number
+                .expanded_adjacent_next
+                .unwrap_or(number.span.end == suffix.span.start)
         {
             return None;
         }
-        let base_end = suffix.span.end;
-        let base = &self.src[start as usize..base_end as usize];
-        if !crate::model::dynare_date(base) {
+        let base: String = self.tokens[at..i + 2]
+            .iter()
+            .map(|token| token.text(self.src))
+            .collect();
+        if !crate::model::dynare_date(&base) {
             return None;
         }
         i += 2;
@@ -344,6 +359,10 @@ impl Parser<'_> {
             DateExpr {
                 text: self.src[start as usize..end as usize].to_string(),
                 span,
+                constructor_text: self.tokens[at..i]
+                    .iter()
+                    .map(|token| token.text(self.src))
+                    .collect(),
             },
             i,
         ))
@@ -402,6 +421,9 @@ impl Parser<'_> {
     }
 
     fn read_periods_until_semi(&mut self, allow_end: bool) -> Vec<PeriodRange> {
+        if self.path_context.is_some() {
+            return self.read_path_periods(allow_end);
+        }
         let mut out = Vec::new();
         while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) {
             if self.at(TokenKind::Comma) {
@@ -457,7 +479,198 @@ impl Parser<'_> {
         out
     }
 
-    fn written_value(&mut self, from: usize, to: usize, path: bool) -> Option<WrittenValue> {
+    /// The exogenous path list requires commas. Controlled path lists use
+    /// period_list, which also permits adjacent ranges separated by whitespace.
+    fn read_path_periods(&mut self, allow_end: bool) -> Vec<PeriodRange> {
+        let mut out = Vec::new();
+        let first_expected = if allow_end {
+            "END or DATE or INT_NUMBER"
+        } else {
+            "DATE or INT_NUMBER"
+        };
+        loop {
+            let at = self.i;
+            if let Some(&span) = self.path_period_colons(at.saturating_sub(1), at).first() {
+                self.refuse_path_period_colon(span, first_expected);
+                break;
+            }
+            let Some((first, next)) = self.period_point_at(at, allow_end) else {
+                self.refuse_path_period_syntax(first_expected);
+                break;
+            };
+            self.i = next;
+            let mut last = None;
+            let colons = self.path_period_colons(self.i - 1, self.i);
+            if let Some(&span) = colons.first() {
+                let expected = match first {
+                    PeriodPoint::Integer(_) if allow_end => "END or INT_NUMBER",
+                    PeriodPoint::Integer(_) => "INT_NUMBER",
+                    PeriodPoint::Date(_) if allow_end => "END or DATE",
+                    PeriodPoint::Date(_) => "DATE",
+                    PeriodPoint::End => {
+                        self.refuse_path_period_colon(span, "COMMA or ';'");
+                        break;
+                    }
+                };
+                if let Some(&span) = colons.get(1) {
+                    self.refuse_path_period_colon(span, expected);
+                    break;
+                }
+                let point = self.period_point_at(self.i, allow_end);
+                let same_kind = point.as_ref().is_some_and(|(point, _)| {
+                    matches!(
+                        (&first, point),
+                        (PeriodPoint::Integer(_), PeriodPoint::Integer(_))
+                            | (PeriodPoint::Date(_), PeriodPoint::Date(_))
+                            | (_, PeriodPoint::End)
+                    )
+                });
+                if !same_kind {
+                    self.refuse_path_period_syntax(expected);
+                    break;
+                }
+                let (point, after) = point.unwrap();
+                last = Some(point);
+                self.i = after;
+                if let (PeriodPoint::Integer(first), Some(PeriodPoint::Integer(last))) =
+                    (&first, &last)
+                {
+                    if first > last {
+                        let span = Span {
+                            start: self.tokens[at].span.start,
+                            end: self.tokens[self.i - 1].span.end,
+                        };
+                        self.path_error(span, "E395", "Can't have first period index greater than second index in range specification");
+                        break;
+                    }
+                }
+                if let Some(&span) = self.path_period_colons(self.i - 1, self.i).first() {
+                    self.refuse_path_period_colon(
+                        span,
+                        if allow_end {
+                            "COMMA or ';'"
+                        } else {
+                            "COMMA or DATE or INT_NUMBER or ';'"
+                        },
+                    );
+                    break;
+                }
+            }
+            out.push(PeriodRange {
+                first,
+                last,
+                span: Span {
+                    start: self.tokens[at].span.start,
+                    end: self.tokens[self.i - 1].span.end,
+                },
+            });
+            if self.at(TokenKind::Semi) {
+                break;
+            }
+            if self.at(TokenKind::Comma) {
+                self.bump();
+                continue;
+            }
+            if !allow_end && self.period_point_at(self.i, false).is_some() {
+                continue;
+            }
+            self.refuse_path_period_syntax(if allow_end {
+                "COMMA or ';'"
+            } else {
+                "COMMA or DATE or INT_NUMBER or ';'"
+            });
+            break;
+        }
+        if self.path_context.as_ref().unwrap().failed {
+            while !self.at(TokenKind::Semi) && !self.at(TokenKind::Eof) && !self.at_ident_ci("end")
+            {
+                self.bump();
+            }
+        }
+        self.eat(TokenKind::Semi);
+        out
+    }
+
+    fn refuse_path_period_syntax(&mut self, expected: &str) {
+        if self.path_context.as_ref().unwrap().failed {
+            return;
+        }
+        let (span, unexpected) = if self.date_at(self.i).is_some() {
+            let end_i = if self.tokens[self.i].kind == TokenKind::Ident {
+                self.i
+            } else if self.tokens[self.i].kind == TokenKind::Minus {
+                self.i + 2
+            } else {
+                self.i + 1
+            };
+            (
+                Span {
+                    start: self.tokens[self.i].span.start,
+                    end: self.tokens[end_i].span.end,
+                },
+                "DATE".to_string(),
+            )
+        } else {
+            self.ss_unexpected_token(self.i)
+        };
+        self.push_bison(
+            span,
+            format!("syntax error, unexpected {unexpected}, expecting {expected}"),
+        );
+        self.path_context.as_mut().unwrap().failed = true;
+    }
+
+    fn refuse_path_period_colon(&mut self, span: Span, expected: &str) {
+        if self.path_context.as_ref().unwrap().failed {
+            return;
+        }
+        self.push_bison(
+            span,
+            format!("syntax error, unexpected ':', expecting {expected}"),
+        );
+        self.path_context.as_mut().unwrap().failed = true;
+    }
+
+    /// Colons are omitted by the byte lexer. Read the emitted gap so spaces,
+    /// comments, and macro-written range punctuation retain the pinned grammar.
+    fn path_period_colons(&self, left: usize, right: usize) -> Vec<Span> {
+        let (Some(left), Some(right)) = (self.tokens.get(left), self.tokens.get(right)) else {
+            return Vec::new();
+        };
+        let gap = match (&left.emitted, &right.emitted) {
+            (Some(a), Some(b)) if std::sync::Arc::ptr_eq(&a.source, &b.source) => a
+                .source
+                .text
+                .get(a.span.end as usize..b.span.start as usize),
+            _ => self
+                .src
+                .get(left.span.end as usize..right.span.start as usize),
+        };
+        let Some(gap) = gap else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let mut start = crate::native_line::initial_content_start(gap, 0);
+        while gap.as_bytes().get(start) == Some(&b':') && out.len() < 2 {
+            let span = if let Some(emitted) = &left.emitted {
+                let offset = emitted.span.end as usize + start;
+                Span {
+                    start: emitted.source.written_start(offset),
+                    end: emitted.source.written_end(offset + 1),
+                }
+            } else {
+                Span {
+                    start: left.span.end + start as u32,
+                    end: left.span.end + start as u32 + 1,
+                }
+            };
+            out.push(span);
+            start = crate::native_line::initial_content_start(gap, start + 1);
+        }
+        out
+    }
+
+    fn written_value(&mut self, from: usize, to: usize) -> Option<WrittenValue> {
         if from >= to {
             return None;
         }
@@ -468,35 +681,21 @@ impl Parser<'_> {
         let text = self.src[span.start as usize..span.end as usize]
             .trim()
             .to_string();
-        let path_refs = if path {
-            self.path_refs(from, to)
-        } else {
-            Vec::new()
-        };
-        let expr = if path {
-            None
-        } else {
-            let saved = self.i;
-            self.i = from;
-            let expr = self.parse_expr();
-            self.i = saved;
-            expr
-        };
+        let path_refs = Vec::new();
+        let saved = self.i;
+        self.i = from;
+        let expr = self.parse_expr();
+        self.i = saved;
         Some(WrittenValue {
             text,
             span,
             expr,
+            completed: expr.is_some(),
             path_refs,
         })
     }
 
-    fn written_values(
-        &mut self,
-        from: usize,
-        to: usize,
-        comma_required: bool,
-        path: bool,
-    ) -> Vec<WrittenValue> {
+    fn written_values(&mut self, from: usize, to: usize) -> Vec<WrittenValue> {
         let mut out = Vec::new();
         let mut i = from;
         while i < to {
@@ -505,18 +704,7 @@ impl Parser<'_> {
                 continue;
             }
             let start = i;
-            if comma_required {
-                let mut depth = 0_i32;
-                while i < to {
-                    match self.tokens[i].kind {
-                        TokenKind::LParen => depth += 1,
-                        TokenKind::RParen => depth -= 1,
-                        TokenKind::Comma if depth == 0 => break,
-                        _ => {}
-                    }
-                    i += 1;
-                }
-            } else if self.tokens[i].kind == TokenKind::LParen {
+            if self.tokens[i].kind == TokenKind::LParen {
                 i = skip_balanced_tokens(&self.tokens, i, TokenKind::LParen, TokenKind::RParen)
                     .min(to);
             } else {
@@ -525,111 +713,558 @@ impl Parser<'_> {
                 }
                 i = (i + 1).min(to);
             }
-            if let Some(value) = self.written_value(start, i, path) {
+            if let Some(value) = self.written_value(start, i) {
                 out.push(value);
             }
         }
         out
     }
 
-    fn path_refs(&mut self, from: usize, to: usize) -> Vec<PathReference> {
+    /// References come from the written tree, before constructor simplification.
+    fn path_refs_from_expr(&self, root: ExprId) -> Vec<PathReference> {
         let mut out = Vec::new();
-        let mut i = from;
-        while i < to {
-            let tok = &self.tokens[i];
-            if tok.kind != TokenKind::Ident {
-                i += 1;
-                continue;
-            }
-            let mut namespace = None;
-            let mut learnt_in = None;
-            let start = tok.span.start;
-            let mut name_i = i;
-            if tok.text(self.src).eq_ignore_ascii_case("learnt_in")
-                && self.tokens.get(i + 1).map(|t| t.kind) == Some(TokenKind::LParen)
-            {
-                let after =
-                    skip_balanced_tokens(&self.tokens, i + 1, TokenKind::LParen, TokenKind::RParen);
-                if self.tokens.get(after).map(|t| t.kind) == Some(TokenKind::Dot)
-                    && self.tokens.get(after + 1).map(|t| t.kind) == Some(TokenKind::Ident)
-                {
-                    learnt_in = self.period_point_at(i + 2, false).map(|(p, _)| p);
-                    namespace = Some("learnt_in".to_string());
-                    name_i = after + 1;
+        let mut pending = vec![root];
+        while let Some(id) = pending.pop() {
+            let expr = self.model.exprs.get(id);
+            match &expr.kind {
+                ExprKind::PathNamespace { reference, lag } => {
+                    out.push((**reference).clone());
+                    pending.extend(lag);
                 }
-            } else if self.tokens.get(i + 1).map(|t| t.kind) == Some(TokenKind::Dot)
-                && self.tokens.get(i + 2).map(|t| t.kind) == Some(TokenKind::Ident)
-            {
-                namespace = Some(tok.text(self.src).to_string());
-                name_i = i + 2;
-            }
-            let name_tok = self.tokens[name_i].clone();
-            let after_name = name_i + 1;
-            let mut lag = None;
-            let mut lag_call = false;
-            let mut next = after_name;
-            if self.tokens.get(after_name).map(|t| t.kind) == Some(TokenKind::LParen) {
-                lag_call = true;
-                let after = skip_balanced_tokens(
-                    &self.tokens,
-                    after_name,
-                    TokenKind::LParen,
-                    TokenKind::RParen,
-                )
-                .min(to);
-                if after > after_name + 1 {
-                    let lag_start = self.tokens[after_name + 1].span.start as usize;
-                    let lag_end = self.tokens[after - 2].span.end as usize;
-                    lag = Some(self.src[lag_start..lag_end].trim().to_string());
-                }
-                if after <= after_name + 2
-                    || self.tokens.get(after.saturating_sub(2)).map(|t| t.kind)
-                        == Some(TokenKind::Comma)
-                {
-                    self.model.shape_refuses.push(
-                        ShapeRefuse::official(
-                            self.tokens[after.saturating_sub(1)].span,
-                            "shock_paths",
-                            "syntax error, unexpected ')'",
-                        )
-                        .with_parse_order(self.token_origins[after.saturating_sub(1)].start),
-                    );
-                } else if namespace.as_deref() == Some("learnt_in") {
-                    if let Some(comma) = (after_name + 1..after.saturating_sub(1))
-                        .find(|&j| self.tokens[j].kind == TokenKind::Comma)
-                    {
-                        self.model.shape_refuses.push(
-                            ShapeRefuse::official(
-                                self.tokens[comma].span,
-                                "shock_paths",
-                                "syntax error, unexpected COMMA",
-                            )
-                            .with_parse_order(self.token_origins[comma].start),
-                        );
+                ExprKind::Ident {
+                    name, ident_span, ..
+                } => out.push(PathReference {
+                    symbol_type_context: self.model.symbol_context(),
+                    namespace: None,
+                    name: *name,
+                    span: *ident_span,
+                    ident_span: *ident_span,
+                    lag_span: None,
+                    constructed_lag: None,
+                    lag: None,
+                    lag_call: false,
+                    learnt_in: None,
+                    call: false,
+                }),
+                ExprKind::Call { args, .. } => {
+                    if let Some(reference) = self.path_call_refs.get(&id) {
+                        out.push(reference.clone());
                     }
+                    pending.extend(args.iter().rev());
                 }
-                next = after;
+                ExprKind::Unary { arg, .. }
+                | ExprKind::SteadyState { arg }
+                | ExprKind::Expectation { arg, .. } => pending.push(*arg),
+                ExprKind::Binary { lhs, rhs, .. } => {
+                    pending.push(*rhs);
+                    pending.push(*lhs);
+                }
+                _ => {}
             }
-            let call = namespace.is_none() && next > after_name;
-            let name = self.intern.intern(name_tok.text(self.src));
-            out.push(PathReference {
-                symbol_type_context: self.model.symbol_context(),
-                namespace,
-                name,
-                span: Span {
-                    start,
-                    end: name_tok.span.end,
-                },
-                lag,
-                lag_call,
-                learnt_in,
-                call,
-            });
-            // A bare function call may contain references we still need to
-            // inspect (`exp(p)`); a namespace call's contents are its lag.
-            i = if call { after_name } else { next };
         }
         out
+    }
+
+    fn path_error(&mut self, span: Span, code: &'static str, message: impl Into<String>) {
+        if self
+            .path_context
+            .as_ref()
+            .is_some_and(|context| context.failed)
+        {
+            return;
+        }
+        self.model
+            .path_parse_errors
+            .push((span, code, message.into()));
+        if let Some(context) = &mut self.path_context {
+            context.failed = true;
+        }
+    }
+
+    fn path_type_action(&mut self, name: Name, span: Span, required: &str) -> bool {
+        let kind = self.model.final_symbol_kind(name);
+        let text = self.intern.get(name).to_string();
+        let refusal = match (kind, required) {
+            (None, _) => Some(("E058", format!("Unknown symbol: {text}."))),
+            (Some("var"), "var" | "init") | (Some("varexo"), "varexo" | "init") => None,
+            (Some("varexo_det"), "varexo" | "init") => {
+                Some(("E317", format!("{text} is an exogenous deterministic.")))
+            }
+            (_, "var") => Some(("E317", format!("{text} is not endogenous."))),
+            (_, "init") => Some((
+                "E059",
+                format!("{text} is neither endogenous or exogenous."),
+            )),
+            _ => Some(("E387", format!("{text} is not exogenous."))),
+        };
+        if let Some((code, message)) = refusal {
+            self.path_error(span, code, message);
+            false
+        } else {
+            true
+        }
+    }
+
+    pub(super) fn parse_path_ident_expr(&mut self) -> ExprId {
+        let token_i = self.i;
+        let token = self.bump();
+        let mut written = token.text(self.src).to_string();
+        let mut name_token = token.clone();
+        let mut learnt_in = None;
+        if let Some(keyword) = self.ss_block_word_token(token_i) {
+            if !Self::ss_symbol_token(keyword)
+                && !is_dynare_expression_builtin(&written)
+                && !matches!(keyword, "LEARNT_IN" | "NAN_CONSTANT" | "INF_CONSTANT")
+            {
+                self.push_bison(token.span, format!("syntax error, unexpected {keyword}"));
+                return self.alloc_error(token.span);
+            }
+        }
+        if written.eq_ignore_ascii_case("learnt_in") && self.at(TokenKind::LParen) {
+            self.bump();
+            if let Some((point, next)) = self.period_point_at(self.i, false) {
+                learnt_in = Some(point);
+                self.i = next;
+            } else {
+                self.refuse_model_argument_syntax();
+                return self.alloc_error(token.span);
+            }
+            if !self.at(TokenKind::RParen) {
+                self.refuse_model_argument_syntax();
+                return self.alloc_error(token.span);
+            }
+            self.bump();
+            if !self.at(TokenKind::Dot) {
+                self.refuse_model_argument_syntax();
+                return self.alloc_error(token.span);
+            }
+            self.bump();
+            if !self.at(TokenKind::Ident) {
+                self.refuse_model_argument_syntax();
+                return self.alloc_error(token.span);
+            }
+            name_token = self.bump();
+            written = "learnt_in".into();
+        } else {
+            while self.at(TokenKind::Dot) {
+                self.bump();
+                if !self.at(TokenKind::Ident) {
+                    self.refuse_model_argument_syntax();
+                    return self.alloc_error(token.span);
+                }
+                name_token = self.bump();
+                written.push('.');
+                written.push_str(name_token.text(self.src));
+            }
+        }
+        let namespace = if learnt_in.is_some() {
+            Some("learnt_in".to_string())
+        } else {
+            written
+                .rsplit_once('.')
+                .map(|(prefix, _)| prefix.to_string())
+        };
+        let reference_span = Span {
+            start: token.span.start,
+            end: name_token.span.end,
+        };
+        let callee = self.intern.intern(&written);
+        let is_namespace_call = namespace.as_deref().is_some_and(|prefix| {
+            matches!(prefix, "self" | "prev" | "learnt_in")
+                || self
+                    .path_context
+                    .as_ref()
+                    .unwrap()
+                    .databases
+                    .contains(prefix)
+        });
+        if self.at(TokenKind::LParen) && !is_namespace_call {
+            return self.parse_call(
+                callee,
+                Token::with_lexeme(TokenKind::Ident, reference_span, written),
+            );
+        }
+        if namespace.is_none() {
+            if written.eq_ignore_ascii_case("nan") || written.eq_ignore_ascii_case("inf") {
+                return self.alloc(ExprKind::Number, token.span);
+            }
+            if is_dynare_expression_builtin(&written) {
+                let (span, unexpected) = self.ss_unexpected_token(self.i);
+                self.push_bison(
+                    span,
+                    format!("syntax error, unexpected {unexpected}, expecting '('"),
+                );
+                return self.alloc_error(token.span);
+            }
+            if let Some(keyword) = self.ss_block_word_token(token_i) {
+                if !Self::ss_symbol_token(keyword) {
+                    self.push_bison(token.span, format!("syntax error, unexpected {keyword}"));
+                    return self.alloc_error(token.span);
+                }
+            }
+            let name = self.intern.intern(&written);
+            let kind = self.model.final_symbol_kind(name);
+            if kind.is_some() && kind != Some("parameters") {
+                self.path_error(token.span, "E407", "In the shock_paths block, parameters are the only symbols allowed without a namespace-qualifier");
+            }
+            let id = self.alloc(
+                ExprKind::Ident {
+                    name,
+                    timing: 0,
+                    ident_span: token.span,
+                    timing_span: None,
+                },
+                token.span,
+            );
+            if kind != Some("parameters") {
+                // The pinned unknown bare read crashes without an ERROR.
+                // Preserve the written name, but make its construction unavailable.
+                self.refused_constructors.insert(id);
+                self.constructed.insert(id, self.constructors.opaque(id));
+                self.path_context.as_mut().unwrap().failed = true;
+            }
+            return id;
+        }
+        let namespace = namespace.unwrap();
+        let name = self.intern.intern(name_token.text(self.src));
+        let mut lag = None;
+        let mut lag_span = None;
+        let mut lag_text = None;
+        let lag_call = self.at(TokenKind::LParen);
+        let mut end = reference_span.end;
+        if lag_call {
+            let open = self.bump();
+            end = open.span.end;
+            let mut arguments = Vec::new();
+            loop {
+                if let Some(arg) = self.parse_expr() {
+                    arguments.push(arg);
+                } else {
+                    self.refuse_model_argument_syntax();
+                    break;
+                }
+                if self.path_context.as_ref().unwrap().failed {
+                    break;
+                }
+                if namespace == "learnt_in" && self.at(TokenKind::Comma) {
+                    self.refuse_model_argument_syntax();
+                    break;
+                }
+                if !self.at(TokenKind::Comma) {
+                    break;
+                }
+                self.bump();
+            }
+            if self.path_context.as_ref().unwrap().failed {
+                while !self.at(TokenKind::Eof)
+                    && !self.at(TokenKind::Semi)
+                    && !self.at(TokenKind::RParen)
+                {
+                    if self.at(TokenKind::LParen) {
+                        self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                    } else {
+                        self.bump();
+                    }
+                }
+            }
+            if !self.at(TokenKind::RParen) {
+                self.refuse_model_argument_syntax();
+            } else {
+                end = self.bump().span.end;
+            }
+            lag_span = Some(Span {
+                start: open.span.start,
+                end,
+            });
+            let inside_end = end.saturating_sub(1).max(open.span.end);
+            lag_text = self
+                .src
+                .get(open.span.end as usize..inside_end as usize)
+                .map(|text| text.trim().to_string());
+            lag = arguments.first().copied();
+            if arguments
+                .iter()
+                .any(|id| self.refused_constructors.contains(id))
+            {
+                self.path_context.as_mut().unwrap().failed = true;
+            } else if arguments.len() > 1 {
+                self.path_error(reference_span, "E410", format!("The parenthesis after {written} should only include a lag, since it references a variable inside a namespace"));
+            }
+        }
+        let mut reference = PathReference {
+            symbol_type_context: self.model.symbol_context(),
+            namespace: Some(namespace.clone()),
+            name,
+            span: reference_span,
+            ident_span: name_token.span,
+            lag_span,
+            constructed_lag: lag
+                .map(|id| self.constructors.match_integer(self.constructed[&id]))
+                .unwrap_or(Some(0)),
+            lag: lag_text,
+            lag_call,
+            learnt_in,
+            call: false,
+        };
+        if self
+            .model
+            .parse_issues
+            .last()
+            .is_some_and(|issue| reference_span.start <= issue.span.start && issue.span.end <= end)
+        {
+            self.path_context.as_mut().unwrap().failed = true;
+        }
+        if !self.path_context.as_ref().unwrap().failed {
+            self.path_namespace_action(&reference, lag);
+        }
+        let failed = self.path_context.as_ref().unwrap().failed;
+        if failed {
+            reference.constructed_lag = None;
+        }
+        let id = self.alloc(
+            ExprKind::PathNamespace {
+                reference: Box::new(reference),
+                lag,
+            },
+            Span {
+                start: token.span.start,
+                end,
+            },
+        );
+        if failed {
+            self.refused_constructors.insert(id);
+            self.constructed.insert(id, self.constructors.opaque(id));
+        }
+        id
+    }
+
+    fn path_namespace_action(&mut self, reference: &PathReference, lag: Option<ExprId>) {
+        let namespace = reference.namespace.as_deref().unwrap();
+        let text = self.intern.get(reference.name).to_string();
+        let syntax = if namespace == "learnt_in" {
+            let period = match reference.learnt_in.as_ref().unwrap() {
+                PeriodPoint::Integer(n) => n.to_string(),
+                PeriodPoint::Date(date) => {
+                    crate::constructor::path_learning_date(&date.constructor_text)
+                }
+                PeriodPoint::End => unreachable!(),
+            };
+            format!("learnt_in({period}).{text}")
+        } else {
+            format!("{namespace}.{text}")
+        };
+        if matches!(namespace, "init" | "initval") {
+            self.path_type_action(reference.name, reference.span, "init");
+            return;
+        }
+        if matches!(namespace, "self" | "prev" | "learnt_in")
+            && !self.path_type_action(reference.name, reference.span, "varexo")
+        {
+            return;
+        }
+        if namespace == "prev"
+            && matches!(
+                self.path_context.as_ref().unwrap().learnt_in,
+                None | Some(PeriodPoint::Integer(1))
+            )
+        {
+            self.path_error(reference.span, "E411", format!("The syntax {syntax} is not accepted in a 'shock_paths' block without the 'learnt_in' option or in a 'shock_paths(learnt_in=1)' block"));
+            return;
+        }
+        if namespace == "learnt_in" {
+            if let Some(PeriodPoint::Integer(n)) = reference.learnt_in.as_ref() {
+                if *n < 1 {
+                    self.path_error(
+                        reference.span,
+                        "E412",
+                        format!("The syntax {syntax} is not accepted"),
+                    );
+                    return;
+                }
+                let block_n = match self.path_context.as_ref().unwrap().learnt_in.as_ref() {
+                    Some(PeriodPoint::Integer(n)) => Some(*n),
+                    None => Some(1),
+                    _ => None,
+                };
+                if let Some(block_n) = block_n.filter(|block_n| block_n <= n) {
+                    self.path_error(reference.span, "E413", format!("The syntax {syntax} is not accepted in a 'shock_paths' block without the 'learnt_in' option or in a 'shock_paths(learnt_in={block_n})' block"));
+                    return;
+                }
+            }
+        }
+        if self.path_context.as_ref().unwrap().controlled {
+            self.path_error(reference.span, "E416", format!("The syntax {syntax} is not accepted in an 'endogenize' stanza of a 'shock_paths' block"));
+            return;
+        }
+        if !matches!(namespace, "self" | "prev" | "learnt_in") {
+            if self.model.final_symbol_kind(reference.name).is_none() {
+                self.record_symbol_declaration(
+                    reference.name,
+                    reference.ident_span,
+                    crate::model::SymbolKind::DatabaseVariable,
+                );
+            }
+            if !self
+                .path_context
+                .as_ref()
+                .unwrap()
+                .databases
+                .contains(namespace)
+            {
+                self.path_error(reference.span, "E415", format!("Unknown database: {namespace}. You may want to declare it via the 'database' command."));
+                return;
+            }
+        }
+        let integer = lag.map(|id| self.constructors.match_integer(self.constructed[&id]));
+        if integer == Some(None) {
+            self.path_error(reference.span, "E409", format!("Symbol {syntax} is being treated as if it were a function (i.e., passed an argument that is not an integer)."));
+            return;
+        }
+        if namespace == "self" && integer.flatten().is_some_and(|n| n > 0) {
+            self.path_error(
+                reference.span,
+                "E408",
+                format!("The syntax {syntax} cannot be used with a lead"),
+            );
+        }
+    }
+
+    fn read_path_values(&mut self, from: usize, to: usize) -> Vec<WrittenValue> {
+        let saved = self.i;
+        self.i = from;
+        let mut values = Vec::new();
+        loop {
+            let first = self.i;
+            let issues_before = self.model.parse_issues.len();
+            let expr = if !self.path_context.as_ref().unwrap().failed {
+                self.parse_expr()
+            } else {
+                None
+            };
+            let refused = expr.is_some_and(|id| self.refused_constructors.contains(&id));
+            if refused || self.model.parse_issues.len() != issues_before {
+                self.path_context.as_mut().unwrap().failed = true;
+            }
+            if !self.path_context.as_ref().unwrap().failed {
+                if expr.is_none() {
+                    self.refuse_model_argument_syntax();
+                } else if !self.at(TokenKind::Comma) && !self.at(TokenKind::Semi) {
+                    let (span, unexpected) = self.ss_unexpected_token(self.i);
+                    self.push_bison(
+                        span,
+                        format!("syntax error, unexpected {unexpected}, expecting COMMA or ';'"),
+                    );
+                }
+                if self.model.parse_issues.len() != issues_before {
+                    self.path_context.as_mut().unwrap().failed = true;
+                }
+            }
+            let completed = expr.is_some() && !self.path_context.as_ref().unwrap().failed;
+            if !completed {
+                // Keep the recovered text, but do not execute later read actions.
+                let mut depth = 0_i32;
+                while self.i < to {
+                    match self.tokens[self.i].kind {
+                        TokenKind::LParen => depth += 1,
+                        TokenKind::RParen => depth -= 1,
+                        TokenKind::Comma if depth <= 0 => break,
+                        _ => {}
+                    }
+                    self.i += 1;
+                }
+            }
+            if first < self.i {
+                let span = Span {
+                    start: self.tokens[first].span.start,
+                    end: self.tokens[self.i - 1].span.end,
+                };
+                let path_refs = expr
+                    .map(|id| self.path_refs_from_expr(id))
+                    .unwrap_or_default();
+                values.push(WrittenValue {
+                    text: self.src[span.start as usize..span.end as usize]
+                        .trim()
+                        .into(),
+                    span,
+                    expr,
+                    path_refs,
+                    completed,
+                });
+            }
+            if !self.at(TokenKind::Comma) {
+                break;
+            }
+            self.bump();
+            if self.i == to && !self.path_context.as_ref().unwrap().failed {
+                self.refuse_model_argument_syntax();
+                self.path_context.as_mut().unwrap().failed = true;
+                break;
+            }
+        }
+        self.i = saved;
+        values
+    }
+
+    fn path_stanza_action(&mut self, stanza: &PathStanza) -> bool {
+        match &stanza.target {
+            PathTarget::Exogenous { name, span } => {
+                if !self.path_type_action(*name, *span, "varexo") {
+                    return false;
+                }
+                if stanza.periods.len() != stanza.values.len() {
+                    self.path_error(stanza.span, "E404", format!("shock_paths: variable {}: number of periods is different from number of shock values", self.intern.get(*name)));
+                    return false;
+                }
+                self.record_path_value_facts(stanza);
+                for (period, value) in stanza.periods.iter().zip(&stanza.values) {
+                    let max_lag = self.model.path_value_facts[&value.expr.unwrap()].max_lag;
+                    if let PeriodPoint::Integer(first) = period.first {
+                        if i64::from(first) <= max_lag {
+                            self.path_error(value.span, "E405", format!("shock_paths: a lag of {max_lag} is not allowed at period {first}"));
+                            return false;
+                        }
+                    }
+                }
+            }
+            PathTarget::Controlled {
+                exogenize,
+                exogenize_span,
+                endogenize,
+                endogenize_span,
+            } => {
+                if !self.path_type_action(*exogenize, *exogenize_span, "var")
+                    || !self.path_type_action(*endogenize, *endogenize_span, "varexo")
+                {
+                    return false;
+                }
+                if stanza.periods.len() != stanza.values.len() {
+                    self.path_error(
+                        stanza.span,
+                        "E406",
+                        "The number of periods is different from the number of values",
+                    );
+                    return false;
+                }
+                self.record_path_value_facts(stanza);
+            }
+        }
+        true
+    }
+
+    fn record_path_value_facts(&mut self, stanza: &PathStanza) {
+        let context = self.model.symbol_context();
+        for value in &stanza.values {
+            let id = value.expr.unwrap();
+            let facts = self
+                .constructors
+                .path_value_facts(self.constructed[&id], |name| {
+                    matches!(
+                        self.model.symbol_kind_in_context(name, context),
+                        Some("var" | "varexo" | "varexo_det" | "epilogue" | "database_variable")
+                    )
+                });
+            self.model.path_value_facts.insert(id, facts);
+        }
     }
 
     /// `end` can be a period in an exogenous path stanza. Dynare's lexer
@@ -640,7 +1275,10 @@ impl Parser<'_> {
         let mut row_head = true;
         loop {
             if row_head
-                && self.discard_refused_block_row(allow_period_end && self.at_ident_ci("periods"))
+                && self.discard_refused_block_row(
+                    allow_period_end
+                        && (self.at_ident_ci("periods") || self.at_ident_ci("endogenize")),
+                )
             {
                 row_head = false;
                 continue;
@@ -666,6 +1304,8 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_path_block(&mut self, companion: bool) {
+        let parse_issues_before = self.model.parse_issues.len();
+        let shape_refuses_before = self.model.shape_refuses.len();
         let opener_i = self.i;
         let keyword = if companion {
             "perfect_foresight_controlled_paths"
@@ -707,6 +1347,11 @@ impl Parser<'_> {
             }
         }
         let body_end_i = self.consume_until_path_end(!companion);
+        let closed = self.word_at(body_end_i, "end")
+            && self
+                .tokens
+                .get(body_end_i + 1)
+                .is_some_and(|token| token.kind == TokenKind::Semi);
         self.record_missing_end_if_unclosed(
             keyword,
             Span {
@@ -718,6 +1363,35 @@ impl Parser<'_> {
         );
         let end = self.block_end_after_consume();
         let options = self.shock_options_at(opener_i, body_i);
+        let previous_path_context = self.path_context.take();
+        if !companion {
+            self.path_context =
+                Some(PathExpressionContext {
+                    learnt_in: options.learnt_in.clone(),
+                    controlled: false,
+                    databases: self
+                        .model
+                        .databases
+                        .iter()
+                        .flat_map(|decl| decl.names.iter())
+                        .map(|(name, _)| self.intern.get(*name).to_string())
+                        .collect(),
+                    failed: self.model.option_twice.iter().any(|(_, span)| {
+                        start_tok.span.start <= span.start && span.end <= opener_end
+                    }) || self.model.shape_refuses.iter().any(|issue| {
+                        start_tok.span.start <= issue.span.start && issue.span.end <= opener_end
+                    }),
+                });
+            if let Some(PeriodPoint::Integer(n)) = options.learnt_in.as_ref() {
+                if *n < 1 {
+                    self.path_error(
+                        options.learnt_in_span.unwrap_or(start_tok.span),
+                        "E421",
+                        format!("Value '{n}' is not allowed for 'learnt_in' option"),
+                    );
+                }
+            }
+        }
         let saved = self.i;
         self.i = body_i;
         let mut stanzas = Vec::new();
@@ -731,6 +1405,12 @@ impl Parser<'_> {
                     stanzas.push(row);
                 }
             } else {
+                let expected = if stanzas.is_empty() {
+                    "VAR or EXOGENIZE"
+                } else {
+                    "END"
+                };
+                self.refuse_path_stanza_syntax(companion, Some(expected));
                 self.bump();
             }
         }
@@ -746,9 +1426,18 @@ impl Parser<'_> {
                     .with_parse_order(self.token_origins[body_end_i].start),
             );
         }
+        let completed = companion
+            || closed
+                && self.model.parse_issues.len() == parse_issues_before
+                && self.model.shape_refuses.len() == shape_refuses_before
+                && !stanzas.is_empty()
+                && !self.path_context.as_ref().unwrap().failed
+                && stanzas.iter().all(|stanza| stanza.callback_completed);
+        self.path_context = previous_path_context;
         let block = PathBlock {
             options,
             stanzas,
+            completed,
             span: Span {
                 start: start_tok.span.start,
                 end,
@@ -761,6 +1450,19 @@ impl Parser<'_> {
         }
     }
 
+    fn refuse_path_stanza_syntax(&mut self, companion: bool, expected: Option<&str>) {
+        if companion || self.path_context.as_ref().unwrap().failed {
+            return;
+        }
+        let (span, unexpected) = self.ss_unexpected_token(self.i);
+        let mut message = format!("syntax error, unexpected {unexpected}");
+        if let Some(expected) = expected {
+            message.push_str(&format!(", expecting {expected}"));
+        }
+        self.push_bison(span, message);
+        self.path_context.as_mut().unwrap().failed = true;
+    }
+
     fn read_path_stanza(
         &mut self,
         end_i: usize,
@@ -770,20 +1472,28 @@ impl Parser<'_> {
         let start = self.bump().span.start;
         let target_tok = self.tokens.get(self.i)?.clone();
         if target_tok.kind != TokenKind::Ident {
+            self.refuse_path_stanza_syntax(companion, None);
             return None;
         }
         self.bump();
         let target_name = self.intern.intern(target_tok.text(self.src));
         if !self.at(TokenKind::Semi) {
+            self.refuse_path_stanza_syntax(companion, Some("';'"));
             return None;
         }
         self.bump();
         if !self.at_ident_ci("periods") {
+            self.refuse_path_stanza_syntax(companion, Some("PERIODS"));
             return None;
         }
         self.bump();
+        let issues_before = self.model.shape_refuses.len();
         let periods = self.read_periods_until_semi(!controlled);
+        if !companion && self.model.shape_refuses.len() != issues_before {
+            self.path_context.as_mut().unwrap().failed = true;
+        }
         if !self.at_ident_ci("values") {
+            self.refuse_path_stanza_syntax(companion, Some("VALUES"));
             return None;
         }
         self.bump();
@@ -792,60 +1502,30 @@ impl Parser<'_> {
             self.bump();
         }
         let value_end = self.i;
-        let values = self.written_values(value_start, value_end, !companion, !companion);
-        if !companion {
-            let mut depth = 0_i32;
-            for i in value_start..value_end {
-                let kind = self.tokens[i].kind;
-                if depth == 0 && i > value_start {
-                    let previous = self.tokens[i - 1].kind;
-                    let ends_expression = matches!(
-                        previous,
-                        TokenKind::Ident | TokenKind::Number | TokenKind::RParen
-                    );
-                    let starts_expression = matches!(
-                        kind,
-                        TokenKind::Ident | TokenKind::Number | TokenKind::LParen
-                    );
-                    let function_call = previous == TokenKind::Ident && kind == TokenKind::LParen;
-                    let message = if ends_expression && starts_expression && !function_call {
-                        Some(if kind == TokenKind::Number {
-                            "syntax error, unexpected INT_NUMBER, expecting COMMA or ';'"
-                        } else if kind == TokenKind::LParen {
-                            "syntax error, unexpected '(', expecting COMMA or ';'"
-                        } else {
-                            "syntax error, unexpected IDENTIFIER, expecting COMMA or ';'"
-                        })
-                    } else {
-                        None
-                    };
-                    if let Some(message) = message {
-                        self.model.shape_refuses.push(
-                            ShapeRefuse::official(self.tokens[i].span, "shock_paths", message)
-                                .with_parse_order(self.token_origins[i].start),
-                        );
-                        break;
-                    }
-                }
-                match kind {
-                    TokenKind::LParen => depth += 1,
-                    TokenKind::RParen => depth -= 1,
-                    _ => {}
-                }
-            }
-        }
+        let values = if companion {
+            self.written_values(value_start, value_end)
+        } else {
+            self.path_context.as_mut().unwrap().controlled = controlled;
+            self.read_path_values(value_start, value_end)
+        };
         self.eat(TokenKind::Semi);
         let target = if controlled {
             if !self.at_ident_ci("endogenize") {
+                self.refuse_path_stanza_syntax(companion, Some("ENDOGENIZE"));
                 return None;
             }
             self.bump();
             let endo_tok = self.tokens.get(self.i)?.clone();
             if endo_tok.kind != TokenKind::Ident {
+                self.refuse_path_stanza_syntax(companion, None);
                 return None;
             }
             self.bump();
             let endogenize = self.intern.intern(endo_tok.text(self.src));
+            if !self.at(TokenKind::Semi) && !companion {
+                self.refuse_path_stanza_syntax(companion, Some("';'"));
+                return None;
+            }
             self.eat(TokenKind::Semi);
             PathTarget::Controlled {
                 exogenize: target_name,
@@ -860,13 +1540,21 @@ impl Parser<'_> {
             }
         };
         let end = self.tokens[self.i.saturating_sub(1)].span.end;
-        Some(PathStanza {
+        let mut stanza = PathStanza {
             symbol_type_context: self.model.symbol_context(),
             target,
             periods,
             values,
+            callback_completed: companion,
             span: Span { start, end },
-        })
+        };
+        if !companion
+            && !self.path_context.as_ref().unwrap().failed
+            && stanza.values.iter().all(|value| value.completed)
+        {
+            stanza.callback_completed = self.path_stanza_action(&stanza);
+        }
+        Some(stanza)
     }
 
     pub(super) fn collect_endval_instruction(
@@ -912,7 +1600,7 @@ impl Parser<'_> {
                 self.bump();
             }
             let value_end = self.i;
-            let value = self.written_value(value_start, value_end, false);
+            let value = self.written_value(value_start, value_end);
             let row_end = if self.at(TokenKind::Semi) {
                 self.bump().span.end
             } else {

@@ -371,7 +371,10 @@ fn expr_has_dynamics(model: &Model, id: ExprId) -> bool {
             }
             ExprKind::Unary { arg, .. } => walk(model, *arg),
             ExprKind::Binary { lhs, rhs, .. } => walk(model, *lhs) || walk(model, *rhs),
-            ExprKind::Number | ExprKind::String | ExprKind::Error => false,
+            ExprKind::Number
+            | ExprKind::String
+            | ExprKind::Error
+            | ExprKind::PathNamespace { .. } => false,
         }
     }
     walk(model, id)
