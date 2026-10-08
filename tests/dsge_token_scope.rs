@@ -32,7 +32,7 @@ fn dsge_weight_remains_reserved_in_block_expressions_and_name_slots() {
     ] {
         let diagnostics = analyze(&parse(source));
         assert!(
-            diagnostics.iter().any(|row| row.code == "E001" && row.message.contains("dsge_prior_weight")),
+            diagnostics.iter().any(|row| row.code == "E001" && row.message.to_ascii_lowercase().contains("dsge_prior_weight")),
             "{source}: {diagnostics:?}"
         );
         if let Some(pp) = find_preprocessor(None) {

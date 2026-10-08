@@ -35,7 +35,7 @@ pub(crate) fn all_model_equations(model: &Model) -> Vec<&Equation> {
 /// `AddLocalVariable` is per tree, so a `#` name may be defined once in each.
 pub(crate) fn equation_trees(model: &Model) -> Vec<Vec<&Equation>> {
     let mut agg: Vec<&Equation> = model.equations.iter().collect();
-    agg.sort_by_key(|eq| (eq.span.start, eq.span.end));
+    agg.sort_by_key(|eq| eq.parse_order);
     let mut trees = vec![agg];
     let mut dimensions = HashMap::new();
     for block in &model.heterogeneous_models {
@@ -47,7 +47,7 @@ pub(crate) fn equation_trees(model: &Model) -> Vec<Vec<&Equation>> {
         trees[index].extend(&block.equations);
     }
     for tree in trees.iter_mut().skip(1) {
-        tree.sort_by_key(|eq| (eq.span.start, eq.span.end));
+        tree.sort_by_key(|eq| eq.parse_order);
     }
     trees
 }
@@ -59,7 +59,7 @@ fn local_names(model: &Model, eqs: &[&Equation]) -> HashSet<Name> {
 }
 
 /// Earliest `#` definition of each name, across every tree.
-fn earliest_local_defs(model: &Model, trees: &[Vec<&Equation>]) -> HashMap<Name, u32> {
+fn earliest_local_defs(model: &Model, trees: &[Vec<&Equation>]) -> HashMap<Name, usize> {
     let mut earliest = HashMap::new();
     for tree in trees {
         for eq in tree {
@@ -68,12 +68,12 @@ fn earliest_local_defs(model: &Model, trees: &[Vec<&Equation>]) -> HashMap<Name,
             };
             earliest
                 .entry(name)
-                .and_modify(|start: &mut u32| {
-                    if eq.span.start < *start {
-                        *start = eq.span.start;
+                .and_modify(|start: &mut usize| {
+                    if eq.parse_order < *start {
+                        *start = eq.parse_order;
                     }
                 })
-                .or_insert(eq.span.start);
+                .or_insert(eq.parse_order);
         }
     }
     earliest
@@ -144,7 +144,7 @@ fn check_e024(model: &Model) -> Vec<Diagnostic> {
 fn check_e025(model: &Model) -> Vec<Diagnostic> {
     let declared = declared_symbol_names(model);
     let mut eqs = all_model_equations(model);
-    eqs.sort_by_key(|eq| (eq.span.start, eq.span.end));
+    eqs.sort_by_key(|eq| eq.parse_order);
 
     let mut seen_shadowing = HashSet::new();
     let mut diagnostics = Vec::new();
@@ -162,7 +162,14 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
                     .is_some_and(|kind| kind != "model_local_variable")
             })
             .unwrap_or_else(|| declared.contains(&name));
-        if wrong_type && seen_shadowing.insert(name) {
+        let self_use = eq
+            .rhs_expr
+            .is_some_and(|rhs| model.exprs.walk_idents(rhs).any(|read| read.name == name))
+            && eq
+                .lhs_expr
+                .and_then(|target| model.model_local_target_contexts.get(&target))
+                .is_some_and(|&context| model.symbol_kind_in_context(name, context).is_none());
+        if (wrong_type || self_use) && seen_shadowing.insert(name) {
             diagnostics.push(shadowing_diag(model, name, span));
         }
     }
@@ -188,11 +195,15 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
                 };
                 if visible_locals.contains(&r.name)
                     || declared.contains(&r.name)
+                    || model
+                        .model_local_variables
+                        .iter()
+                        .any(|decl| decl.name == r.name && decl.parse_order <= eq.parse_order)
                     || seen_early.contains(&r.name)
                 {
                     continue;
                 }
-                if eq.span.start >= def_start {
+                if eq.parse_order >= def_start {
                     continue;
                 }
                 if earliest
@@ -328,7 +339,7 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
         )
         .chain(removed_equations().map(|eq| (eq, true)))
         .collect();
-    eqs.sort_by_key(|(eq, _)| (eq.span.start, eq.span.end));
+    eqs.sort_by_key(|(eq, _)| eq.parse_order);
 
     let mut seen = HashSet::new();
     let mut diagnostics = Vec::new();
@@ -354,7 +365,7 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
                 continue;
             }
             if visible.contains(&r.name)
-                || local_hides_unknown(model, eq, r.name, r.span.start, &pounds, &earliest)
+                || local_hides_unknown(model, eq, r.name, eq.parse_order, &pounds, &earliest)
             {
                 continue;
             }
@@ -525,7 +536,7 @@ fn visible_names(model: &Model, eq: &Equation) -> HashSet<Name> {
     };
     let mut visible = HashSet::new();
     for decl in visibility_decls(model) {
-        if nested_ok(decl) || decl.span.start <= eq.span.start {
+        if nested_ok(decl) || decl.parse_order <= eq.parse_order {
             visible.insert(decl.name);
         }
     }
@@ -550,6 +561,7 @@ fn visibility_decls(model: &Model) -> Vec<&Decl> {
     decls.extend(&model.exogenous);
     decls.extend(&model.deterministic_exogenous);
     decls.extend(&model.parameters);
+    decls.extend(&model.model_local_variables);
     decls.extend(&model.predetermined);
     decls
 }
@@ -587,9 +599,9 @@ fn local_hides_unknown(
     model: &Model,
     eq: &Equation,
     name: Name,
-    use_start: u32,
+    use_start: usize,
     pounds: &[HashSet<Name>],
-    earliest: &HashMap<Name, u32>,
+    earliest: &HashMap<Name, usize>,
 ) -> bool {
     let tree = equation_tree_index(model, eq);
     if pounds.get(tree).is_some_and(|pound| pound.contains(&name)) {
@@ -612,13 +624,13 @@ fn equation_tree_index(model: &Model, eq: &Equation) -> usize {
     0
 }
 
-fn local_def_starts(model: &Model, eqs: &[&Equation]) -> HashMap<Name, u32> {
+fn local_def_starts(model: &Model, eqs: &[&Equation]) -> HashMap<Name, usize> {
     let mut first = HashMap::new();
     for eq in eqs {
         let Some((name, _)) = model_local_name(model, eq) else {
             continue;
         };
-        first.entry(name).or_insert(eq.span.start);
+        first.entry(name).or_insert(eq.parse_order);
     }
     first
 }

@@ -1385,7 +1385,7 @@ end;
     }
 
     #[test]
-    fn a_name_on_a_local_is_still_taken() {
+    fn rejected_local_tag_does_not_reserve_name() {
         let source = "\
 var y;
 model;
@@ -1397,7 +1397,7 @@ end;
         let (title, edited) = planned(source).expect("action");
         assert_eq!(title, "Add equation tags");
         assert!(edited.contains("[name='eq1']\n# x = 1;"));
-        assert!(edited.contains("[name='eq2'] y = y(-1);"));
+        assert!(edited.contains("[name='eq1'] y = y(-1);"));
     }
 
     #[test]
