@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.7",
+  "version": "0.11.9",
   "publisher": "dygnosis",
   "private": true,
   "license": "GPL-3.0-or-later",

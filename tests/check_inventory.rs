@@ -48,7 +48,7 @@ fn check_inventory() {
         assert!(
             matches!(
                 row.kind.as_str(),
-                "fire" | "quiet" | "archive" | "harness" | "documented-only"
+                "fire" | "quiet" | "archive" | "harness"
             ),
             "{}: bad kind {}",
             row.id,

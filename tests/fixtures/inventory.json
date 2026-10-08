@@ -3921,18 +3921,6 @@
       "notes": "model; without linear"
     },
     {
-      "id": "e999_documented_only",
-      "codes": [
-        "E999"
-      ],
-      "kind": "documented-only",
-      "package": "other",
-      "fixture": "",
-      "source": "explain.rs::known_codes_is_exactly_the_163_rust_keys",
-      "cluster": "",
-      "notes": "in known_codes / explain; nothing emits it yet"
-    },
-    {
       "id": "other_parse_summary",
       "codes": [],
       "kind": "harness",

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## v0.11.9
+
+- **E999** (Additional errors truncated) is removed from Explain and Help. The checker reports every diagnostic, so this truncation note has no current result. The code remains unused.
 - `shock_paths` values are read as complete Dynare expressions. Constructor errors such as `log(0)`, `log10(0)`, and division by zero are reported in the value. Lag and circular-reference checks use references that remain after Dynare simplifies the value, so `0*self.e` does not report E420.
 - Empty `steady_state_model` blocks report Dynare's `syntax error, unexpected END` on `end`, unless an earlier Parse refusal occurred in the block. E278 follows Dynare's numeric spelling and constructor rules for written denominator identities, and reports the constructed numerator. A Parse refusal suppresses shared Check diagnostics such as E021, W022, and W042. `verbatim` text continues through Dynare's `end` terminator, so a bare `end` inside it does not hide later statements or W042.
 - `resid` accepts only `resid;` and `resid(non_zero);`. Unused parameter and exogenous checks follow Dynare's surviving model uses. Calibration, initial-value, and shock expressions no longer hide unused parameters; observed exogenous names and PAC growth or component-growth uses remain exempt from E021. Ramsey conditional steady-state instruments are excluded from W042, and a policy parse error stops later W042 warnings.
@@ -24,6 +27,9 @@
 - A macro directive inside a `var`, `varexo`, `parameters`, or similar declaration list is no longer reported as an invalid name. Discarded-branch names stay quiet; an active illegal name such as `bad-name` still refuses.
 - `@#if` can test whether a value is in an array or tuple, for example `("8" in possible_signals)`.
 - **W070** (Parameter outside its conventional range) is no longer reported. A parameter name such as `beta` or `rho` can mean whatever the model uses.
+
+## v0.11.8
+
 - **Trigger Suggest** completes the lowest unused positive `eqN` equation tag
   and adds a symbol's own `long_name`. **Add equation tags** and **Add long
   names** fill missing metadata counted by I208 and I209, including in included

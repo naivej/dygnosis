@@ -43,7 +43,7 @@ pub struct ExplainEntry {
     pub kind: ExplainKind,
 }
 
-// 382 keys: 344 shared + 34 added + 4 skipped.
+// 381 keys: 344 shared + 33 added + 4 skipped.
 static ENTRIES: &[(&str, ExplainEntry)] = &[
     ("E001", ExplainEntry {
         title: "Parse error",
@@ -149,11 +149,6 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
         title: "Invalid steady_state operand",
         body: "The `steady_state(...)` operator must not contain exogenous shocks. Dynare refuses: `Exogenous variables are not allowed in the context of the STEADY_STATE() operator.`\n\n**Fix**\n\nRemove the exogenous variable from `steady_state(...)`, replace it with the intended endogenous or parameter expression, or rewrite the equation so the shock enters outside the operator.",
         kind: ExplainKind::Shared,
-    }),
-    ("E999", ExplainEntry {
-        title: "Additional errors truncated",
-        body: "Dygnosis 0.11.7 does not emit this code. This explanation remains available for older results.",
-        kind: ExplainKind::Added,
     }),
     ("I050", ExplainEntry {
         title: "No initval or steady_state_model block",

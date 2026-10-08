@@ -44,13 +44,13 @@ Folders follow the diagnostic code. File names start with the same code (`w010_u
 
 ## Inventory
 
-[`inventory.json`](inventory.json) is the list of triggers. One row per trigger, not one row per code letter. Every **emit** and **added** `known_codes()` key has a row (`E999` is `documented-only`). Skipped keys have none; E193 now emits on a bounded direct PAC target equation. Out / vacated codes (`E040`, `W040`, `W041`, `I041`, `W071`, `I070`, `I071`, `W080`, `W081`, `DYNR`, `E060`) have none.
+[`inventory.json`](inventory.json) is the list of triggers. One row per trigger, not one row per code letter. Every **emit** and **added** `known_codes()` key has a row. Skipped keys have none; E193 now emits on a bounded direct PAC target equation. Out / vacated codes (`E040`, `W040`, `W041`, `I041`, `W071`, `I070`, `I071`, `W080`, `W081`, `DYNR`, `E060`, `E999`) have none.
 
 | Field | Meaning |
 |-------|---------|
 | `id` | Stable trigger id |
 | `codes` | Codes for this trigger (`[]` only for harness rows that are not a diagnostic) |
-| `kind` | `fire` / `quiet` / `archive` / `harness` / `documented-only` |
+| `kind` | `fire` / `quiet` / `archive` / `harness` |
 | `package` | Family folder, or `other` for transports that stay on archives |
 | `fixture` | Path from repo root. Required for `fire` / `quiet` / `archive`. A directory is allowed for include graphs. |
 | `source` | Test (`file.rs::fn_name`) |

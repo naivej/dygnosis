@@ -1,6 +1,6 @@
 {
-  "version": "0.11.7",
-  "fingerprint": "9b8f9bf5f6e67da0d7b501778b1393314de795d8d45a172a4937a515e74ebec6",
+  "version": "0.11.9",
+  "fingerprint": "2bf5c2f2410afdba92613e0c601d8d65631b312f39debeafb54066d0df01126f",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -2552,12 +2552,6 @@
       "kind": "shared",
       "title": "Incorrect steady_state_model target type",
       "markdown": "### E481: Incorrect steady_state_model target type\n\nA ``steady_state_model`` output name has an incompatible type. Scalar and multiple-output assignments allow an ordinary endogenous, a parameter, or a temporary mod-file local. An unknown output name becomes a temporary after parsing the right-hand side. A function registered by that right-hand side is already known when its output names are checked. Dynare refuses: `e has incorrect type`.\n\nThis check uses the symbol type at that assignment, after the right-hand side and before the output is registered. A later ``change_type`` does not change that earlier decision. Heterogeneous variables and parameters are incompatible targets until a prior successful type change makes them ordinary.\n\n**Warrant**\n\nThe message keeps Dynare's sentence. The editor range points at the incompatible written output name instead of the parser's range for the assignment.\n\n**Fix**\n\nAssign an ordinary endogenous, parameter, or temporary name. Use a different output name from the function being called.\n"
-    },
-    {
-      "code": "E999",
-      "kind": "added",
-      "title": "Additional errors truncated",
-      "markdown": "### E999: Additional errors truncated\n\nDygnosis 0.11.7 does not emit this code. This explanation remains available for older results.\n"
     },
     {
       "code": "I050",
