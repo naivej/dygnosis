@@ -17,6 +17,8 @@ use crate::workspace::Workspace;
 pub(crate) enum Coordinates {
     Mcp,
     Lsp,
+    SnapshotMcp,
+    SnapshotLsp,
 }
 
 #[derive(Clone)]
@@ -39,6 +41,8 @@ pub(crate) struct ComparisonInput {
     parameters: BTreeMap<String, Target>,
     symbols: BTreeMap<String, Target>,
     shocks: HashMap<usize, Target>,
+    snapshot_id: Option<String>,
+    snapshot_commit: Option<String>,
 }
 
 impl ComparisonInput {
@@ -50,7 +54,11 @@ impl ComparisonInput {
         model: &Model,
         shocks: impl Iterator<Item = Option<&'a ShockSetting>>,
     ) -> Self {
-        let root_key = normalize_uri(root);
+        let root_key = if workspace.snapshot_lookup.is_some() {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
         let report = workspace.expand_report(root).cloned();
         let complete = report
             .as_ref()
@@ -67,6 +75,8 @@ impl ComparisonInput {
             parameters: BTreeMap::new(),
             symbols: BTreeMap::new(),
             shocks: HashMap::new(),
+            snapshot_id: None,
+            snapshot_commit: None,
         };
         let Some(report) = report.filter(|_| complete) else {
             return input;
@@ -184,6 +194,16 @@ impl ComparisonInput {
         input
     }
 
+    pub(crate) fn with_snapshot_identity(mut self, input_id: &str, commit: Option<&str>) -> Self {
+        self.snapshot_id = Some(input_id.to_owned());
+        self.snapshot_commit = commit.map(str::to_owned);
+        // All new source actions use the same normalized text as parsing.
+        for text in self.sources.values_mut() {
+            *text = normalize_newlines(text);
+        }
+        self
+    }
+
     pub(crate) fn with_file_names<'a>(mut self, files: impl Iterator<Item = &'a String>) -> Self {
         for file in files {
             self.file_names.insert(normalize_uri(file), file.clone());
@@ -201,6 +221,28 @@ impl ComparisonInput {
         let normalized = normalize_newlines(text);
         let index = LineIndex::new(&normalized);
         match coordinates {
+            Coordinates::SnapshotMcp => {
+                let start = index.position(&normalized, segment.span.start);
+                let end = index.position(&normalized, segment.span.end);
+                let mut location = json!({"input_id":self.snapshot_id, "file_key":key,
+                    "line":start.line + 1, "column":start.character + 1,
+                    "end_line":end.line + 1, "end_column":end.character + 1});
+                if let Some(commit) = &self.snapshot_commit {
+                    location["commit"] = json!(commit);
+                }
+                Some(location)
+            }
+            Coordinates::SnapshotLsp => {
+                let start = index.position_utf16(&normalized, segment.span.start);
+                let end = index.position_utf16(&normalized, segment.span.end);
+                let mut location = json!({"input_id":self.snapshot_id, "file_key":key,
+                    "range":{"start":{"line":start.line,"character":start.character},
+                    "end":{"line":end.line,"character":end.character}}});
+                if let Some(commit) = &self.snapshot_commit {
+                    location["commit"] = json!(commit);
+                }
+                Some(location)
+            }
             Coordinates::Mcp => {
                 let start = index.position(text, segment.span.start);
                 let end = index.position(text, segment.span.end);
@@ -249,6 +291,9 @@ impl ComparisonInput {
     }
 
     fn envelope(&self) -> Value {
+        if let Some(input_id) = &self.snapshot_id {
+            return json!({"input_id":input_id,"root_file":self.root_key,"revision":self.revision,"complete":self.complete});
+        }
         json!({"root_uri": self.root_uri, "revision": self.revision, "complete": self.complete})
     }
 }
@@ -323,7 +368,7 @@ pub(crate) fn navigation_json(
             change.before.as_ref().and_then(|setting| before.shocks.get(&setting.occurrence_id)),
             change.after.as_ref().and_then(|setting| after.shocks.get(&setting.occurrence_id)));
     }
-    json!({"schema_version": 1, "before": before.envelope(), "after": after.envelope(), "rows": builder.rows})
+    json!({"schema_version": if matches!(builder.coordinates, Coordinates::SnapshotLsp | Coordinates::SnapshotMcp) { 2 } else { 1 }, "before": before.envelope(), "after": after.envelope(), "rows": builder.rows})
 }
 
 struct Rows<'a> {

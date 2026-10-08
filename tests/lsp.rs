@@ -2276,9 +2276,10 @@ fn initialize_capabilities_wave_c() {
         .expect("executeCommand")
         .commands
         .clone();
-    assert_eq!(commands.len(), 7, "commands: {commands:?}");
+    assert_eq!(commands.len(), 8, "commands: {commands:?}");
     assert!(commands.contains(&"dynare/explainDiagnostic".into()));
     assert!(commands.contains(&"dynare/compareModels".into()));
+    assert!(commands.contains(&"dynare/compareModelSnapshots".into()));
     assert!(commands.contains(&"dynare/showEffectiveModel".into()));
     assert!(commands.contains(&"dynare/modelInfo".into()));
     assert!(commands.contains(&"dynare/projectStatus".into()));

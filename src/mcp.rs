@@ -32,6 +32,7 @@ use crate::model_diff::{compare_models_with_sources, CompareSource};
 use crate::model_info::{heterogeneous_dimension_names, model_info_json, related_files_json};
 use crate::parser::{normalize_newlines, parse};
 use crate::refs::{is_legal_ident, occurrences, rename_in_text};
+use crate::repository_compare::{compare_repository, RepositoryComparison, RepositorySelector};
 use crate::span::{LineIndex, Span};
 use crate::workspace::Workspace;
 use crate::workspace_diagnose::{
@@ -1697,27 +1698,180 @@ struct WorkspaceDiagnoseParams {
     paths: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, JsonSchema)]
 struct CompareModelsParams {
-    /// Complete Before model text, overlaid on active_file_a when a map is supplied.
-    file_content_a: String,
-    /// Complete After model text, overlaid on active_file_b when a map is supplied.
-    file_content_b: String,
+    /// Supplied-text mode: complete Before model text, overlaid on active_file_a when a map is supplied. Required with file_content_b; omit every repository-mode argument.
+    file_content_a: Option<String>,
+    /// Supplied-text mode: complete After model text, overlaid on active_file_b when a map is supplied. Required with file_content_a; omit every repository-mode argument.
+    file_content_b: Option<String>,
     /// Before root key in files_a or the shared files map.
-    #[serde(default)]
     active_file_a: Option<String>,
     /// After root key in files_b or the shared files map.
-    #[serde(default)]
     active_file_b: Option<String>,
     /// Before include text map. A nonempty map overrides the shared files map for this side.
-    #[serde(default)]
     files_a: Option<HashMap<String, String>>,
     /// After include text map. A nonempty map overrides the shared files map for this side.
-    #[serde(default)]
     files_b: Option<HashMap<String, String>>,
     /// Shared supplied include map for either side whose files_a or files_b is absent or empty.
-    #[serde(default)]
     files: Option<HashMap<String, String>>,
+    /// Repository mode: absolute repository root directory on the MCP server host. Required with before and after; omit all supplied-text and include-map arguments.
+    repository_path: Option<String>,
+    /// Explicit Before selector: Git reads this local commit tree; Working reads saved server-host files. Each root_file is repository-relative .mod or .dyn.
+    before: Option<RepositorySelector>,
+    /// Explicit After selector. There is no implicit HEAD, current editor, or unsaved-buffer input.
+    after: Option<RepositorySelector>,
+    /// Repository mode: extra include folders on this server host, used by both sides. Relative paths resolve against repository_path. Omit for no additional folders. Written @#includepath still applies. No editor settings are inferred; historical dependencies must remain inside the repository tree.
+    search_paths: Option<Vec<String>>,
+}
+
+const COMPARE_TEXT_KEYS: &[&str] = &[
+    "file_content_a",
+    "file_content_b",
+    "active_file_a",
+    "active_file_b",
+    "files_a",
+    "files_b",
+    "files",
+];
+const COMPARE_REPOSITORY_KEYS: &[&str] = &["repository_path", "before", "after", "search_paths"];
+
+impl<'de> Deserialize<'de> for CompareModelsParams {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| serde::de::Error::custom("Comparison arguments must be an object"))?;
+        // Presence, including null or empty values, determines the family. Thus
+        // an invalid mixed call cannot silently become supplied-text mode.
+        if COMPARE_TEXT_KEYS
+            .iter()
+            .any(|key| object.contains_key(*key))
+            && COMPARE_REPOSITORY_KEYS
+                .iter()
+                .any(|key| object.contains_key(*key))
+        {
+            return Err(serde::de::Error::custom(
+                "Choose supplied-text mode or repository mode; do not combine their arguments",
+            ));
+        }
+        fn field<T: serde::de::DeserializeOwned, E: serde::de::Error>(
+            value: &Value,
+            key: &str,
+        ) -> Result<Option<T>, E> {
+            serde_json::from_value(value.get(key).cloned().unwrap_or(Value::Null))
+                .map_err(E::custom)
+        }
+        let params = Self {
+            file_content_a: field(&value, "file_content_a")?,
+            file_content_b: field(&value, "file_content_b")?,
+            active_file_a: field(&value, "active_file_a")?,
+            active_file_b: field(&value, "active_file_b")?,
+            files_a: field(&value, "files_a")?,
+            files_b: field(&value, "files_b")?,
+            files: field(&value, "files")?,
+            repository_path: field(&value, "repository_path")?,
+            before: field(&value, "before")?,
+            after: field(&value, "after")?,
+            search_paths: field(&value, "search_paths")?,
+        };
+        params.validate().map_err(serde::de::Error::custom)?;
+        Ok(params)
+    }
+}
+
+impl CompareModelsParams {
+    fn validate(&self) -> Result<(), String> {
+        let repository_mode = self.repository_path.is_some()
+            || self.before.is_some()
+            || self.after.is_some()
+            || self.search_paths.is_some();
+        let supplied_mode = self.file_content_a.is_some()
+            || self.file_content_b.is_some()
+            || self.active_file_a.is_some()
+            || self.active_file_b.is_some()
+            || self.files_a.is_some()
+            || self.files_b.is_some()
+            || self.files.is_some();
+        if repository_mode && supplied_mode {
+            return Err(
+                "Choose supplied-text mode or repository mode; do not combine their arguments"
+                    .into(),
+            );
+        }
+        if repository_mode {
+            let path = self
+                .repository_path
+                .as_deref()
+                .filter(|path| !path.is_empty() && !path.contains('\0'))
+                .ok_or("Repository mode requires a nonempty repository_path on this server host")?;
+            if !Path::new(path).is_absolute() {
+                return Err("repository_path must be absolute on this server host".into());
+            }
+            self.before
+                .as_ref()
+                .ok_or("Repository mode requires both before and after selectors")?
+                .validate()?;
+            self.after
+                .as_ref()
+                .ok_or("Repository mode requires both before and after selectors")?
+                .validate()?;
+            if self
+                .search_paths
+                .iter()
+                .flatten()
+                .any(|path| path.contains('\0'))
+            {
+                return Err("search_paths must not contain NUL characters".into());
+            }
+        } else if self.file_content_a.is_none() || self.file_content_b.is_none() {
+            return Err(
+                "Supplied-text mode requires both file_content_a and file_content_b".into(),
+            );
+        }
+        Ok(())
+    }
+
+    fn compare(self, cancelled: &(dyn Fn() -> bool + Sync)) -> Value {
+        if let Some(repository_path) = self.repository_path {
+            compare_repository(
+                RepositoryComparison {
+                    repository_path,
+                    before: self.before.expect("validated Before selector"),
+                    after: self.after.expect("validated After selector"),
+                    search_paths: self.search_paths.unwrap_or_default(),
+                },
+                cancelled,
+            )
+        } else {
+            dynare_compare_models(
+                self.file_content_a
+                    .as_deref()
+                    .expect("validated Before text"),
+                self.file_content_b
+                    .as_deref()
+                    .expect("validated After text"),
+                self.active_file_a.as_deref(),
+                self.active_file_b.as_deref(),
+                self.files_a.as_ref(),
+                self.files_b.as_ref(),
+                self.files.as_ref(),
+            )
+        }
+    }
+}
+
+fn compare_models_input_schema() -> std::sync::Arc<serde_json::Map<String, Value>> {
+    let mut schema = mcp_input_schema::<CompareModelsParams>().as_ref().clone();
+    let absent = |keys: &[&str]| json!({"not": {"anyOf": keys.iter().map(|key| json!({"required": [key]})).collect::<Vec<_>>()}});
+    let mut text = absent(COMPARE_REPOSITORY_KEYS);
+    text["required"] = json!(["file_content_a", "file_content_b"]);
+    text["properties"] =
+        json!({"file_content_a": {"type": "string"}, "file_content_b": {"type": "string"}});
+    let mut repository = absent(COMPARE_TEXT_KEYS);
+    repository["required"] = json!(["repository_path", "before", "after"]);
+    repository["properties"] = json!({"repository_path": {"type": "string", "minLength": 1}, "before": {"type": "object"}, "after": {"type": "object"}});
+    schema.insert("oneOf".into(), json!([text, repository]));
+    std::sync::Arc::new(schema)
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1892,22 +2046,33 @@ impl DygnosisMcp {
 
     #[tool(
         name = "dynare_compare_models",
-        input_schema = mcp_input_schema::<CompareModelsParams>(),
-        description = "Compare two supplied models by symbol kinds and metadata, proven parameter values, aggregate and per-dimension equations, and written shock setup. Each side keeps its own supplied includes. Incomplete input on either side returns incomplete without diff claims. Returns structural changes and verified one-based source ranges, not numerical equivalence."
+        input_schema = compare_models_input_schema(),
+        description = "Compare Before to After by symbol kinds and metadata, proven parameter values, aggregate and per-dimension equations, and written shock setup. Choose exactly one mode: supplied text uses both file_content_a/file_content_b and each side's own include maps, including explicitly supplied unsaved text; repository mode uses absolute repository_path on this server host, explicit before/after Git or Working selectors, and optional search_paths. Git refs resolve once to full local commits before source reads; no fetch or checkout occurs. Working means saved files on this server host, including saved active includes and untracked files, never editor buffers. Omitted search_paths means no additional configured include folders; both sides still use written @#includepath. Repository results identify resolved commits, snapshot revisions, source policies, include folders, and exact historical source targets. Incomplete or failed input returns no authoritative change arrays; changed saved input returns INPUT_CHANGED. Source lines and Unicode-scalar columns are one-based. These are structural changes, not numerical equivalence."
     )]
-    fn compare_models_tool(
+    async fn compare_models_tool(
         &self,
-        Parameters(params): Parameters<CompareModelsParams>,
-    ) -> CallToolResult {
-        tool_json(dynare_compare_models(
-            &params.file_content_a,
-            &params.file_content_b,
-            params.active_file_a.as_deref(),
-            params.active_file_b.as_deref(),
-            params.files_a.as_ref(),
-            params.files_b.as_ref(),
-            params.files.as_ref(),
-        ))
+        Parameters(arguments): Parameters<Value>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        // The SDK reports extractor deserialization errors as tool-result
+        // errors. Decode here so invalid mode/selector combinations retain
+        // this tool's JSON-RPC invalid-parameters contract.
+        let params: CompareModelsParams = serde_json::from_value(arguments)
+            .map_err(|error| rmcp::ErrorData::invalid_params(error.to_string(), None))?;
+        params
+            .validate()
+            .map_err(|message| rmcp::ErrorData::invalid_params(message, None))?;
+        let cancellation = context.ct;
+        let value =
+            tokio::task::spawn_blocking(move || params.compare(&|| cancellation.is_cancelled()))
+                .await
+                .map_err(|error| {
+                    rmcp::ErrorData::internal_error(
+                        format!("Comparison worker failed: {error}"),
+                        None,
+                    )
+                })?;
+        Ok(tool_json(value))
     }
 
     #[tool(
@@ -2126,6 +2291,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compare_modes_are_exclusive_and_require_explicit_inputs() {
+        let repository_path = std::env::temp_dir()
+            .join("models")
+            .to_string_lossy()
+            .into_owned();
+        let repository = json!({"repository_path":repository_path, "before":{"kind":"git", "root_file":"main.mod", "ref":"HEAD"}, "after":{"kind":"working", "root_file":"main.mod"}});
+        assert!(serde_json::from_value::<CompareModelsParams>(repository.clone()).is_ok());
+        let mut sibling_folder = repository.clone();
+        sibling_folder["search_paths"] = json!(["../common"]);
+        assert!(serde_json::from_value::<CompareModelsParams>(sibling_folder).is_ok());
+        for field in COMPARE_TEXT_KEYS {
+            let mut mixed = repository.clone();
+            mixed[*field] = Value::Null;
+            assert!(serde_json::from_value::<CompareModelsParams>(mixed)
+                .unwrap_err()
+                .to_string()
+                .contains("do not combine"));
+        }
+        for invalid in [
+            json!({}),
+            json!({"file_content_a":"var y;"}),
+            json!({"repository_path":repository_path, "before":{"kind":"working", "root_file":"main.mod"}}),
+            json!({"repository_path":"relative", "before":{"kind":"working", "root_file":"main.mod"}, "after":{"kind":"working", "root_file":"main.mod"}}),
+            json!({"repository_path":repository_path, "before":{"kind":"working", "root_file":"../main.mod"}, "after":{"kind":"working", "root_file":"main.mod"}}),
+            json!({"repository_path":repository_path, "before":{"kind":"git", "root_file":"main.mod"}, "after":{"kind":"working", "root_file":"main.mod"}}),
+            json!({"repository_path":repository_path, "before":{"kind":"working", "root_file":"main.mod", "ref":"HEAD"}, "after":{"kind":"working", "root_file":"main.mod"}}),
+            json!({"repository_path":repository_path, "before":{"kind":"working", "root_file":"main.mod"}, "after":{"kind":"working", "root_file":"main.mod"}, "search_paths":["common\u{0}folder"]}),
+        ] {
+            assert!(
+                serde_json::from_value::<CompareModelsParams>(invalid.clone()).is_err(),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn supplied_text_compare_preserves_established_results() {
+        let old = "var y;\nmodel;\n[name='eq'] y=1;\nend;\n";
+        let new = "var y;\nmodel;\n[name='eq'] y=2;\nend;\n";
+        let params = serde_json::from_value::<CompareModelsParams>(
+            json!({"file_content_a":old, "file_content_b":new, "files_a":null, "files_b":{}}),
+        )
+        .unwrap();
+        assert_eq!(
+            params.compare(&|| false),
+            dynare_compare_models(old, new, None, None, None, None, None)
+        );
+        let schema = compare_models_input_schema();
+        assert_eq!(
+            schema["oneOf"][0]["required"],
+            json!(["file_content_a", "file_content_b"])
+        );
+        assert_eq!(
+            schema["oneOf"][1]["required"],
+            json!(["repository_path", "before", "after"])
+        );
+    }
+
+    #[test]
     fn equation_index_schema_starts_at_zero() {
         let schema = mcp_input_schema::<EquationsParams>();
         assert!(schema["properties"]["index"]["description"]
@@ -2180,7 +2404,15 @@ mod tests {
             "dynare_related_files",
             "dynare_expand",
         ]);
-        assert_same::<CompareModelsParams>(&["dynare_compare_models"]);
+        assert_eq!(
+            DygnosisMcp::tool_router()
+                .list_all()
+                .iter()
+                .find(|tool| tool.name == "dynare_compare_models")
+                .unwrap()
+                .input_schema,
+            compare_models_input_schema()
+        );
         assert_same::<FindReferencesParams>(&["dynare_find_references"]);
         assert_same::<RenameParams>(&["dynare_rename"]);
         assert_same::<FileContentParams>(&["dynare_auto_fix"]);

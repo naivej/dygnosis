@@ -72,6 +72,160 @@ impl Drop for McpWire {
 }
 
 #[test]
+fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_stdio() {
+    let directory = std::env::temp_dir().join(format!(
+        "dygnosis stdio history {} {}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(directory.clone());
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&directory)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    };
+    git(&["init", "--quiet"]);
+    git(&["config", "user.name", "Dygnosis MCP test"]);
+    git(&["config", "user.email", "test@example.invalid"]);
+    git(&["config", "core.autocrlf", "false"]);
+    let root = "var y;\nmodel;\n@#include \"eq.inc\"\nend;\n";
+    std::fs::write(directory.join("main.mod"), root).unwrap();
+    std::fs::write(directory.join("eq.inc"), "[name='eq'] y=1;\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "Before"]);
+    let before = git(&["rev-parse", "HEAD"]);
+    std::fs::write(directory.join("eq.inc"), "[name='eq'] y=2;\n").unwrap();
+    git(&["commit", "--quiet", "-am", "After"]);
+    let after = git(&["rev-parse", "HEAD"]);
+    std::fs::write(directory.join("eq.inc"), "[name='eq'] y=3;\n").unwrap();
+    let mut wire = McpWire::new();
+    let listed = wire.request("tools/list", json!({}));
+    let tool = listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "dynare_compare_models")
+        .unwrap();
+    let description = tool["description"].as_str().unwrap();
+    for phrase in [
+        "Before to After",
+        "server host",
+        "saved files",
+        "no fetch",
+        "INPUT_CHANGED",
+    ] {
+        assert!(
+            description.contains(phrase),
+            "Missing discovery policy {phrase}: {tool}"
+        );
+    }
+    assert_eq!(tool["inputSchema"]["oneOf"].as_array().unwrap().len(), 2);
+    let decode = |reply: Value| {
+        assert!(reply.get("error").is_none(), "{reply}");
+        serde_json::from_str::<Value>(reply["result"]["content"][0]["text"].as_str().unwrap())
+            .unwrap()
+    };
+    let mut arguments = json!({"repository_path":directory.to_str().unwrap(),
+        "before":{"kind":"git", "root_file":"main.mod", "ref":before},
+        "after":{"kind":"git", "root_file":"main.mod", "ref":after}});
+    let historical = decode(wire.call("dynare_compare_models", arguments.clone()));
+    assert_eq!(historical["state"], "result", "{historical}");
+    assert_eq!(historical["inputs"]["before"]["commit"], before);
+    assert_eq!(historical["inputs"]["after"]["commit"], after);
+    assert_eq!(historical["changed_equations"].as_array().unwrap().len(), 1);
+    assert!(!historical.to_string().contains("y = 3"));
+    arguments["before"]["ref"] = json!("HEAD");
+    arguments["after"] = json!({"kind":"working", "root_file":"main.mod"});
+    let saved = decode(wire.call("dynare_compare_models", arguments.clone()));
+    assert_eq!(saved["state"], "result", "{saved}");
+    assert_eq!(saved["inputs"]["after"]["source_policy"], "saved_files");
+    assert_eq!(saved["inputs"]["after"]["search_paths"], json!([]));
+    assert!(saved.to_string().contains("y = 3"));
+    let mut mixed = arguments.clone();
+    mixed["files"] = json!({});
+    let invalid = wire.call("dynare_compare_models", mixed);
+    assert_eq!(invalid["error"]["code"], -32602, "{invalid}");
+    let mut missing = arguments.clone();
+    missing["before"]["root_file"] = json!("absent.mod");
+    let failure = decode(wire.call("dynare_compare_models", missing));
+    assert_eq!(failure["code"], "ROOT_NOT_FOUND");
+    assert_eq!(failure["side"], "before");
+    assert!(failure.get("changed_equations").is_none());
+    let text = decode(wire.call("dynare_compare_models", json!({"file_content_a":"var y; model; y=1; end;", "file_content_b":"var y; model; y=2; end;"})));
+    assert!(text.get("changed_equations").is_some());
+    assert!(text.get("inputs").is_none());
+    // Exercise relative sibling folders through the published JSON arguments,
+    // not only through the repository adapter's internal entry point.
+    let project = directory.join("project");
+    let common = directory.join("common");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::create_dir(&common).unwrap();
+    std::fs::write(project.join("main.mod"), root).unwrap();
+    std::fs::write(common.join("eq.inc"), "[name='eq'] y=4;\n").unwrap();
+    for command_args in [
+        vec!["init", "--quiet"],
+        vec!["config", "user.name", "Dygnosis MCP test"],
+        vec!["config", "user.email", "test@example.invalid"],
+        vec!["add", "main.mod"],
+        vec!["commit", "--quiet", "-m", "External include"],
+    ] {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(command_args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let mut sibling_arguments = json!({"repository_path":project.to_str().unwrap(),
+        "before":{"kind":"working", "root_file":"main.mod"},
+        "after":{"kind":"working", "root_file":"main.mod"}, "search_paths":["../common"]});
+    let sibling_saved = decode(wire.call("dynare_compare_models", sibling_arguments.clone()));
+    assert_eq!(sibling_saved["state"], "result", "{sibling_saved}");
+    assert_eq!(
+        sibling_saved["inputs"]["before"]["search_paths"],
+        json!(["../common"])
+    );
+    sibling_arguments["before"] = json!({"kind":"git", "root_file":"main.mod", "ref":"HEAD"});
+    let sibling_history = decode(wire.call("dynare_compare_models", sibling_arguments));
+    assert_eq!(
+        sibling_history["code"], "UNSUPPORTED_SOURCE",
+        "{sibling_history}"
+    );
+    assert_eq!(sibling_history["side"], "before");
+    assert!(sibling_history.get("changed_equations").is_none());
+    // Protocol cancellation must leave the server able to handle the next call.
+    wire.next_id += 1;
+    let cancelled_id = wire.next_id;
+    wire.send(json!({"jsonrpc":"2.0", "id":cancelled_id, "method":"tools/call", "params":{"name":"dynare_compare_models", "arguments":arguments}}));
+    wire.send(json!({"jsonrpc":"2.0", "method":"notifications/cancelled", "params":{"requestId":cancelled_id, "reason":"test capture cancellation"}}));
+    assert!(wire.request("ping", json!({})).get("result").is_some());
+}
+
+#[test]
 fn constructor_refusals_use_unsaved_include_text_and_clear_on_decimal_denominators() {
     let mut wire = McpWire::new();
     let root = "var y; varexo e; parameters p; p=1; model;\n@#include \"body.inc\"\nend;";

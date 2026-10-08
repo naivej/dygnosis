@@ -1668,6 +1668,7 @@ impl Backend {
         let result = match command {
             "dynare/explainDiagnostic" => explain_command(arguments),
             "dynare/compareModels" => self.compare_command(arguments),
+            "dynare/compareModelSnapshots" => self.compare_snapshot_command(arguments),
             "dynare/showEffectiveModel" => self.show_effective_model_command(arguments),
             "dynare/modelInfo" => self.model_info_command(arguments),
             _ => json!({"error": format!("unknown command {command}"), "code": "UNKNOWN_COMMAND"}),
@@ -1886,6 +1887,161 @@ impl Backend {
             &after,
             crate::compare_navigation::Coordinates::Lsp,
         );
+        result
+    }
+
+    fn capture_snapshot_input(
+        &self,
+        input: &crate::compare_snapshots::SnapshotInput,
+    ) -> crate::compare_snapshots::SnapshotCapture {
+        use crate::compare_snapshots::{
+            capture_git_snapshot, capture_working_snapshot, SnapshotCapture, SnapshotFailure,
+            SnapshotInput,
+        };
+        match input {
+            SnapshotInput::Git(input) => capture_git_snapshot(input),
+            SnapshotInput::Working {
+                input_id,
+                root_uri,
+                expected_revision,
+                search_paths,
+            } => {
+                let Some(uri) = Url::parse(root_uri).ok().filter(|uri| {
+                    is_model_root(uri) && matches!(uri.scheme(), "file" | "untitled")
+                }) else {
+                    return SnapshotCapture::Failure(SnapshotFailure::new(
+                        "INVALID_ARGUMENTS",
+                        "Working snapshot needs a file or untitled model root",
+                        Some(root_uri.clone()),
+                    ));
+                };
+                if input_id.is_empty() || expected_revision.is_empty() {
+                    return SnapshotCapture::Failure(SnapshotFailure::new(
+                        "INVALID_ARGUMENTS",
+                        "Working snapshot needs an input ID and expected revision",
+                        None,
+                    ));
+                }
+                let workspace = {
+                    let mut inner = self.lock_inner();
+                    let Some(current) = inner.root_revision(&uri) else {
+                        return SnapshotCapture::Failure(SnapshotFailure::new(
+                            "ROOT_NOT_FOUND",
+                            "Working model root is unavailable",
+                            Some(root_uri.clone()),
+                        ));
+                    };
+                    if &current != expected_revision {
+                        return SnapshotCapture::Failure(SnapshotFailure::new(
+                            "INPUT_CHANGED",
+                            "Working model changed before capture; refresh the comparison",
+                            Some(root_uri.clone()),
+                        ));
+                    }
+                    match search_paths {
+                        Some(paths) => inner.workspace.snapshot_for_root(
+                            root_uri,
+                            paths.iter().map(std::path::PathBuf::from).collect(),
+                        ),
+                        None => inner.workspace.snapshot_with_root_settings(root_uri),
+                    }
+                };
+                let mut capture = capture_working_snapshot(
+                    workspace,
+                    root_uri,
+                    input_id,
+                    "editor_buffers_and_disk",
+                );
+                if let SnapshotCapture::Ready(input) = &mut capture {
+                    input.inputs["expected_revision"] = json!(expected_revision);
+                }
+                capture
+            }
+        }
+    }
+
+    fn compare_snapshot_command(&self, arguments: &[Value]) -> Value {
+        use crate::compare_snapshots::{
+            compare_captured_snapshots, SnapshotCapture, SnapshotCompareRequest,
+            SnapshotCoordinates, SnapshotFailure, SnapshotInput, SNAPSHOT_SCHEMA_VERSION,
+        };
+        let request = arguments
+            .first()
+            .cloned()
+            .and_then(|value| serde_json::from_value::<SnapshotCompareRequest>(value).ok());
+        let Some(request) =
+            request.filter(|request| request.schema_version == SNAPSHOT_SCHEMA_VERSION)
+        else {
+            return SnapshotFailure::new(
+                "INVALID_ARGUMENTS",
+                "compareModelSnapshots requires snapshot schema 1 with Before and After inputs",
+                None,
+            )
+            .response("before");
+        };
+        let old = self.capture_snapshot_input(&request.before);
+        let new = self.capture_snapshot_input(&request.after);
+        let mut needs = Vec::new();
+        for (side, input, captured) in [
+            ("before", &request.before, &old),
+            ("after", &request.after, &new),
+        ] {
+            match captured {
+                SnapshotCapture::Failure(failure) => return failure.response(side),
+                SnapshotCapture::NeedsSources(keys) => {
+                    let SnapshotInput::Git(input) = input else {
+                        unreachable!("only historical sources are deferred")
+                    };
+                    needs.push(json!({"side":side,"input_id":input.input_id,"file_keys":keys}));
+                }
+                _ => {}
+            }
+        }
+        // A Working side remains pinned while the host acquires historical
+        // sources. Check it after every round, including needs_sources rounds.
+        for (side, input) in [("before", &request.before), ("after", &request.after)] {
+            if let SnapshotInput::Working {
+                root_uri,
+                expected_revision,
+                ..
+            } = input
+            {
+                let uri = Url::parse(root_uri).expect("validated Working root");
+                if self.lock_inner().root_revision(&uri).as_ref() != Some(expected_revision) {
+                    return SnapshotFailure::new(
+                        "INPUT_CHANGED",
+                        "Working model changed during capture; refresh the comparison",
+                        Some(root_uri.clone()),
+                    )
+                    .response(side);
+                }
+            }
+        }
+        if !needs.is_empty() {
+            return json!({"state":"needs_sources","requests":needs});
+        }
+        let (SnapshotCapture::Ready(old), SnapshotCapture::Ready(new)) = (old, new) else {
+            unreachable!("finished captures")
+        };
+        let result = compare_captured_snapshots(*old, *new, SnapshotCoordinates::Lsp);
+        for (side, input) in [("before", &request.before), ("after", &request.after)] {
+            if let SnapshotInput::Working {
+                root_uri,
+                expected_revision,
+                ..
+            } = input
+            {
+                let uri = Url::parse(root_uri).expect("validated Working root");
+                if self.lock_inner().root_revision(&uri).as_ref() != Some(expected_revision) {
+                    return SnapshotFailure::new(
+                        "INPUT_CHANGED",
+                        "Working model changed during comparison; refresh the comparison",
+                        Some(root_uri.clone()),
+                    )
+                    .response(side);
+                }
+            }
+        }
         result
     }
 
@@ -2748,6 +2904,7 @@ pub fn initialize_result() -> InitializeResult {
                 commands: vec![
                     "dynare/explainDiagnostic".into(),
                     "dynare/compareModels".into(),
+                    "dynare/compareModelSnapshots".into(),
                     "dynare/showEffectiveModel".into(),
                     "dynare/modelInfo".into(),
                     "dynare/projectStatus".into(),
@@ -2769,6 +2926,7 @@ pub fn initialize_result() -> InitializeResult {
                 "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true},
                 "modelInfoChanged": true,
                 "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1},
+                "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES},
                 "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
                 ,"projectDiagnostics": {"schema_version":project::SCHEMA_VERSION,"status_command":"dynare/projectStatus","recheck_command":"dynare/recheckProject","cancel_command":"dynare/cancelProject","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/projectStatusChanged","typing_pause_ms":250}

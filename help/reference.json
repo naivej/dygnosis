@@ -1,6 +1,6 @@
 {
   "version": "0.11.9",
-  "fingerprint": "2bf5c2f2410afdba92613e0c601d8d65631b312f39debeafb54066d0df01126f",
+  "fingerprint": "3366525198e3876017a63b5186ba1fa03c04af520ba4dcbcc32590ca96390ff1",
   "tools": [
     {
       "name": "dynare_auto_fix",
@@ -21,12 +21,156 @@
     },
     {
       "name": "dynare_compare_models",
-      "description": "Compare two supplied models by symbol kinds and metadata, proven parameter values, aggregate and per-dimension equations, and written shock setup. Each side keeps its own supplied includes. Incomplete input on either side returns incomplete without diff claims. Returns structural changes and verified one-based source ranges, not numerical equivalence.",
+      "description": "Compare Before to After by symbol kinds and metadata, proven parameter values, aggregate and per-dimension equations, and written shock setup. Choose exactly one mode: supplied text uses both file_content_a/file_content_b and each side's own include maps, including explicitly supplied unsaved text; repository mode uses absolute repository_path on this server host, explicit before/after Git or Working selectors, and optional search_paths. Git refs resolve once to full local commits before source reads; no fetch or checkout occurs. Working means saved files on this server host, including saved active includes and untracked files, never editor buffers. Omitted search_paths means no additional configured include folders; both sides still use written @#includepath. Repository results identify resolved commits, snapshot revisions, source policies, include folders, and exact historical source targets. Incomplete or failed input returns no authoritative change arrays; changed saved input returns INPUT_CHANGED. Source lines and Unicode-scalar columns are one-based. These are structural changes, not numerical equivalence.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "RepositorySelector": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "git",
+                    "type": "string"
+                  },
+                  "ref": {
+                    "description": "Locally available commit, branch, tag, or revision expression. Resolved once before reading any model text. No automatic fetch.",
+                    "type": "string"
+                  },
+                  "root_file": {
+                    "description": "Repository-relative .mod or .dyn root at this revision.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "root_file",
+                  "ref"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "working",
+                    "type": "string"
+                  },
+                  "root_file": {
+                    "description": "Repository-relative .mod or .dyn root. Reads saved files on this server host, including saved active includes and untracked files.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "root_file"
+                ],
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "oneOf": [
+          {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "repository_path"
+                  ]
+                },
+                {
+                  "required": [
+                    "before"
+                  ]
+                },
+                {
+                  "required": [
+                    "after"
+                  ]
+                },
+                {
+                  "required": [
+                    "search_paths"
+                  ]
+                }
+              ]
+            },
+            "properties": {
+              "file_content_a": {
+                "type": "string"
+              },
+              "file_content_b": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file_content_a",
+              "file_content_b"
+            ]
+          },
+          {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "file_content_a"
+                  ]
+                },
+                {
+                  "required": [
+                    "file_content_b"
+                  ]
+                },
+                {
+                  "required": [
+                    "active_file_a"
+                  ]
+                },
+                {
+                  "required": [
+                    "active_file_b"
+                  ]
+                },
+                {
+                  "required": [
+                    "files_a"
+                  ]
+                },
+                {
+                  "required": [
+                    "files_b"
+                  ]
+                },
+                {
+                  "required": [
+                    "files"
+                  ]
+                }
+              ]
+            },
+            "properties": {
+              "after": {
+                "type": "object"
+              },
+              "before": {
+                "type": "object"
+              },
+              "repository_path": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository_path",
+              "before",
+              "after"
+            ]
+          }
+        ],
         "properties": {
           "active_file_a": {
-            "default": null,
             "description": "Before root key in files_a or the shared files map.",
             "type": [
               "string",
@@ -34,26 +178,52 @@
             ]
           },
           "active_file_b": {
-            "default": null,
             "description": "After root key in files_b or the shared files map.",
             "type": [
               "string",
               "null"
             ]
           },
+          "after": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/RepositorySelector"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit After selector. There is no implicit HEAD, current editor, or unsaved-buffer input."
+          },
+          "before": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/RepositorySelector"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit Before selector: Git reads this local commit tree; Working reads saved server-host files. Each root_file is repository-relative .mod or .dyn."
+          },
           "file_content_a": {
-            "description": "Complete Before model text, overlaid on active_file_a when a map is supplied.",
-            "type": "string"
+            "description": "Supplied-text mode: complete Before model text, overlaid on active_file_a when a map is supplied. Required with file_content_b; omit every repository-mode argument.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "file_content_b": {
-            "description": "Complete After model text, overlaid on active_file_b when a map is supplied.",
-            "type": "string"
+            "description": "Supplied-text mode: complete After model text, overlaid on active_file_b when a map is supplied. Required with file_content_a; omit every repository-mode argument.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "files": {
             "additionalProperties": {
               "type": "string"
             },
-            "default": null,
             "description": "Shared supplied include map for either side whose files_a or files_b is absent or empty.",
             "type": [
               "object",
@@ -64,7 +234,6 @@
             "additionalProperties": {
               "type": "string"
             },
-            "default": null,
             "description": "Before include text map. A nonempty map overrides the shared files map for this side.",
             "type": [
               "object",
@@ -75,18 +244,30 @@
             "additionalProperties": {
               "type": "string"
             },
-            "default": null,
             "description": "After include text map. A nonempty map overrides the shared files map for this side.",
             "type": [
               "object",
               "null"
             ]
+          },
+          "repository_path": {
+            "description": "Repository mode: absolute repository root directory on the MCP server host. Required with before and after; omit all supplied-text and include-map arguments.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "search_paths": {
+            "description": "Repository mode: extra include folders on this server host, used by both sides. Relative paths resolve against repository_path. Omit for no additional folders. Written @#includepath still applies. No editor settings are inferred; historical dependencies must remain inside the repository tree.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
-        "required": [
-          "file_content_a",
-          "file_content_b"
-        ],
         "type": "object"
       }
     },

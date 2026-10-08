@@ -204,6 +204,7 @@ pub struct Workspace {
     companions: HashMap<String, Vec<CompanionRecord>>,
     /// When set, document text and `@#include` targets come only from overlays.
     overlay_only: bool,
+    pub(crate) snapshot_lookup: Option<crate::compare_snapshots::SnapshotLookup>,
 }
 
 impl Workspace {
@@ -295,6 +296,73 @@ impl Workspace {
             ws.insert_overlay(name, content.clone());
         }
         ws
+    }
+
+    /// Fixed tree lookup. Neither include candidates nor text use disk fallback.
+    pub(crate) fn snapshot_documents(input: &crate::compare_snapshots::GitSnapshotInput) -> Self {
+        let mut workspace = Self {
+            overlay_only: true,
+            search_paths: input.search_paths.iter().map(PathBuf::from).collect(),
+            snapshot_lookup: Some(crate::compare_snapshots::SnapshotLookup {
+                repository_path: tower_lsp::lsp_types::Url::parse(&input.repository_uri)
+                    .ok()
+                    .map(|uri| {
+                        if uri.scheme() == "file" {
+                            uri_to_path(&input.repository_uri)
+                                .to_string_lossy()
+                                .replace('\\', "/")
+                        } else {
+                            uri_to_path(&format!("file://{}", uri.path()))
+                                .to_string_lossy()
+                                .replace('\\', "/")
+                        }
+                    })
+                    .unwrap_or_else(|| input.repository_uri.replace('\\', "/")),
+                manifest: input.manifest.clone(),
+                facts: input.sources.clone(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for (key, fact) in &input.sources {
+            if let crate::compare_snapshots::SourceFact::Text { text } = fact {
+                workspace.insert_overlay(key, crate::parser::normalize_newlines(text));
+            }
+        }
+        workspace
+    }
+
+    pub(crate) fn snapshot_sources(&self, root: &str) -> BTreeMap<String, String> {
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        std::iter::once(key.clone())
+            .chain(self.records.get(&key).into_iter().flat_map(|records| {
+                records
+                    .resolved
+                    .iter()
+                    .map(|record| self.include_key(&record.path))
+            }))
+            .filter_map(|key| {
+                self.docs
+                    .get(&key)
+                    .map(|doc| (key, crate::parser::normalize_newlines(&doc.source)))
+            })
+            .collect()
+    }
+
+    pub(crate) fn snapshot_search_paths(&self, root: &str) -> Vec<String> {
+        let key = if self.overlay_only {
+            root.to_owned()
+        } else {
+            normalize_uri(root)
+        };
+        self.root_paths(&key)
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect()
     }
 
     fn overlay_generation(&self, key: &str, source: &str) -> u64 {
@@ -1029,6 +1097,9 @@ impl Workspace {
             return Ok(Some(doc.source.clone()));
         }
         if self.overlay_only {
+            if let Some(lookup) = &mut self.snapshot_lookup {
+                lookup.request(key);
+            }
             return Ok(None);
         }
         let path = PathBuf::from(key);
@@ -1071,6 +1142,12 @@ impl Workspace {
         filename: &str,
         active_search: &[PathBuf],
     ) -> Option<PathBuf> {
+        if self.snapshot_lookup.is_some() {
+            let paths = self.configured_search(root_key, active_search);
+            return self
+                .snapshot_include_key(including_key, filename, &paths)
+                .map(PathBuf::from);
+        }
         if self.virtual_roots.contains(root_key) {
             return None;
         }
@@ -1097,6 +1174,38 @@ impl Workspace {
         } else {
             path_key(path)
         }
+    }
+
+    fn snapshot_include_key(
+        &mut self,
+        including_key: &str,
+        filename: &str,
+        paths: &[PathBuf],
+    ) -> Option<String> {
+        use crate::compare_snapshots::tree_parent;
+        if filename.is_empty() {
+            return None;
+        }
+        let lookup = self.snapshot_lookup.as_mut().expect("snapshot lookup");
+        let mut candidates = vec![lookup.path(tree_parent(including_key), filename)];
+        candidates.extend(
+            paths
+                .iter()
+                .map(|path| lookup.path(&path.to_string_lossy(), filename)),
+        );
+        for candidate in candidates {
+            let Some(candidate) = candidate else {
+                lookup.refuse(
+                    filename,
+                    "Historical include leaves the selected repository",
+                );
+                return None;
+            };
+            if lookup.contains(&candidate) {
+                return Some(candidate);
+            }
+        }
+        None
     }
 
     /// Resolve separator aliases to one supplied key. Ambiguous aliases do
@@ -1267,6 +1376,22 @@ impl Workspace {
                 return None;
             }
             if let crate::macro_expand::MacroFileDirective::IncludePath(path) = event.directive {
+                if let Some(lookup) = &mut self.snapshot_lookup {
+                    let Some(directory) =
+                        lookup.path(crate::compare_snapshots::tree_parent(root_key), path)
+                    else {
+                        lookup.refuse(
+                            path,
+                            "Historical include folder leaves the selected repository",
+                        );
+                        return None;
+                    };
+                    if path.is_empty() || !lookup.directory_exists(&directory) {
+                        return None;
+                    }
+                    active_search = append_unique(&active_search, &[PathBuf::from(directory)]);
+                    return Some(crate::macro_expand::MacroFileLoad::Path);
+                }
                 let added = if self.overlay_only {
                     PathBuf::from(overlay_includepath_key(root_key, path))
                 } else {
