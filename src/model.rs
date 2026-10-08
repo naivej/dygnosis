@@ -440,6 +440,8 @@ pub struct SymbolContext(usize);
 /// at that read. Later declarations and repeated macro spans cannot change it.
 #[derive(Clone, Copy, Debug)]
 pub struct ModelExpressionUse {
+    /// Identifier token position in expanded parser execution order.
+    pub parse_order: usize,
     /// Effective statement execution owning this read; macro spans can repeat.
     pub(crate) statement_id: usize,
     pub name: Name,
@@ -1120,6 +1122,8 @@ pub struct Model {
     pub(crate) unattempted_model_local_targets: HashSet<ExprId>,
     /// Symbol history after the RHS, before a pound callback checks its target.
     pub(crate) model_local_target_contexts: HashMap<ExprId, SymbolContext>,
+    /// Completed pound callbacks accepted by the target type and model scope.
+    pub(crate) valid_model_local_targets: HashSet<ExprId>,
     pub model_expression_uses: Vec<ModelExpressionUse>,
     pub initval: Vec<Assignment>,
     pub endval: Vec<Assignment>,

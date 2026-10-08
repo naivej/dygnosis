@@ -1180,7 +1180,7 @@ impl Parser<'_> {
                 self.record_decl_roles(&decls, EstimatedNameRole::Parameter);
                 self.model.parameters.extend(decls);
             } else if self.at_ident_ci("model_local_variable") {
-                let decls = self.parse_declaration("model_local_variable");
+                let decls = self.parse_model_local_declaration();
                 self.record_decl_roles(&decls, EstimatedNameRole::Other);
                 self.model.model_local_variables.extend(decls);
             } else if self.at_ident_ci("predetermined_variables") {
@@ -1606,6 +1606,106 @@ impl Parser<'_> {
                 EstimatedNameRole::Unknown
             }
         })
+    }
+
+    fn at_local_symbol(&self, block: bool) -> bool {
+        if !self.at(TokenKind::Ident) {
+            return false;
+        }
+        let keyword = if block {
+            self.ss_block_word_token(self.i).map(str::to_string)
+        } else {
+            statement_keywords::keyword_token(self.lexeme(&self.tokens[self.i]))
+        };
+        keyword.is_none_or(|token| Self::ss_symbol_token(&token))
+    }
+
+    fn refuse_local_symbol(&mut self, block: bool) {
+        let token = if block {
+            self.ss_block_word_token(self.i).map(str::to_string)
+        } else {
+            statement_keywords::keyword_token(self.lexeme(&self.tokens[self.i]))
+        };
+        if let Some(token) = token {
+            self.push_bison(
+                self.tokens[self.i].span,
+                format!("syntax error, unexpected {token}"),
+            );
+        } else {
+            self.hetero_bison_refuse(self.i, None);
+        }
+    }
+
+    /// The pin permits names and optional TeX labels, without partitions or options.
+    /// The declaration callback runs only after the whole list and `;` complete.
+    fn parse_model_local_declaration(&mut self) -> Vec<Decl> {
+        self.bump();
+        let mut names = Vec::new();
+        loop {
+            if !self.at_local_symbol(false) {
+                self.refuse_local_symbol(false);
+                self.skip_to_stmt_end();
+                self.eat(TokenKind::Semi);
+                return Vec::new();
+            }
+            let token = self.i;
+            let tok = self.bump();
+            let name = self.intern.intern(tok.text(self.src));
+            let tex_name = if self.at(TokenKind::Latex) {
+                let tex = self.bump();
+                let Some(value) = closed_tex_name(self.lexeme(&tex)) else {
+                    self.push_bison(tex.span, "syntax error, unclosed TeX name".to_string());
+                    self.skip_to_stmt_end();
+                    self.eat(TokenKind::Semi);
+                    return Vec::new();
+                };
+                Some(value)
+            } else {
+                None
+            };
+            names.push((name, tok.span, token, tex_name));
+            if self.at(TokenKind::Semi) {
+                self.bump();
+                break;
+            }
+            if self.at(TokenKind::Comma) {
+                self.bump();
+            } else if !self.at_local_symbol(false) {
+                self.hetero_bison_refuse(self.i, None);
+                self.skip_to_stmt_end();
+                self.eat(TokenKind::Semi);
+                return Vec::new();
+            }
+        }
+        let mut declarations = Vec::new();
+        for (name, span, token, tex_name) in names {
+            self.record_symbol_declaration(
+                name,
+                span,
+                crate::model::SymbolKind::ModelLocalVariable,
+            );
+            self.retain_last_symbol_occurrence(token);
+            let declaration = Decl {
+                parse_order: token + 1,
+                symbol_type_context: self.model.symbol_context(),
+                name,
+                span,
+                long_name: None,
+                tex_name,
+                log_transform: false,
+                heterogeneity: None,
+            };
+            self.model
+                .written_declarations
+                .push(crate::model::WrittenDeclaration {
+                    statement_id: self.model.statements.len(),
+                    written_kind: "model_local_variable".to_string(),
+                    token_range: token..token + 1,
+                    declaration: declaration.clone(),
+                });
+            declarations.push(declaration);
+        }
+        declarations
     }
 
     fn parse_declaration(&mut self, keyword: &str) -> Vec<Decl> {
@@ -2371,7 +2471,7 @@ impl Parser<'_> {
                 if let ExprKind::Ident { name, .. } = self.model.exprs.get(lhs).kind {
                     // A local's value is available only after its RHS is read.
                     // The first definition owns it; a later duplicate is refused.
-                    if self.model.final_symbol_kind(name) == Some("model_local_variable")
+                    if self.model.valid_model_local_targets.contains(&lhs)
                         && !self.refused_constructors.contains(&rhs)
                     {
                         self.constructor_locals
@@ -2427,6 +2527,23 @@ impl Parser<'_> {
                 }) || equation
                     .rhs_expr
                     .is_some_and(|expr| self.model_expression_mentions(expr, name));
+                if equation.is_local {
+                    let accepted_type = match self.model.final_symbol_kind(name) {
+                        Some("model_local_variable") => true,
+                        None => !earlier_use,
+                        _ => false,
+                    };
+                    if !accepted_type
+                        || self
+                            .constructor_locals
+                            .contains_key(&(self.constructor_context, name))
+                    {
+                        return;
+                    }
+                    self.model
+                        .valid_model_local_targets
+                        .insert(equation.lhs_expr.unwrap());
+                }
                 if equation.is_local && self.model.final_symbol_kind(name).is_none() && !earlier_use
                 {
                     // The pinned pound action declares an unknown name after
@@ -3104,126 +3221,11 @@ impl Parser<'_> {
     }
 
     fn ss_block_word_token(&self, index: usize) -> Option<&'static str> {
-        // Complete literal-word rules in the pinned lexer's DYNARE_BLOCK state.
-        // Token naming is independent of the Bison symbol production below.
-        const WORDS: &[(&str, &str)] = &[
-            ("end", "END"),
-            ("relative_irf", "RELATIVE_IRF"),
-            ("from_initval_to_endval", "FROM_INITVAL_TO_ENDVAL"),
-            ("model_name", "MODEL_NAME"),
-            ("name", "NAME"),
-            ("diff", "DIFF"),
-            ("use_calibration", "USE_CALIBRATION"),
-            ("growth", "GROWTH"),
-            ("var", "VAR"),
-            ("varexo", "VAREXO"),
-            ("stderr", "STDERR"),
-            ("values", "VALUES"),
-            ("corr", "CORR"),
-            ("skew", "SKEW"),
-            ("periods", "PERIODS"),
-            ("scales", "SCALES"),
-            ("add", "ADD"),
-            ("multiply", "MULTIPLY"),
-            ("cutoff", "CUTOFF"),
-            ("mfs", "MFS"),
-            ("static_mfs", "STATIC_MFS"),
-            ("balanced_growth_test_tol", "BALANCED_GROWTH_TEST_TOL"),
-            ("heterogeneity", "HETEROGENEITY"),
-            ("gamma_pdf", "GAMMA_PDF"),
-            ("beta_pdf", "BETA_PDF"),
-            ("normal_pdf", "NORMAL_PDF"),
-            ("inv_gamma_pdf", "INV_GAMMA_PDF"),
-            ("inv_gamma1_pdf", "INV_GAMMA1_PDF"),
-            ("inv_gamma2_pdf", "INV_GAMMA2_PDF"),
-            ("uniform_pdf", "UNIFORM_PDF"),
-            ("weibull_pdf", "WEIBULL_PDF"),
-            ("dsge_prior_weight", "DSGE_PRIOR_WEIGHT"),
-            ("surprise", "SURPRISE"),
-            ("bind", "BIND"),
-            ("relax", "RELAX"),
-            ("error_bind", "ERROR_BIND"),
-            ("error_relax", "ERROR_RELAX"),
-            ("relative_to_initval", "RELATIVE_TO_INITVAL"),
-            ("restriction", "RESTRICTION"),
-            ("component", "COMPONENT"),
-            ("target", "TARGET"),
-            ("auxname", "AUXNAME"),
-            (
-                "auxname_target_nonstationary",
-                "AUXNAME_TARGET_NONSTATIONARY",
-            ),
-            ("kind", "KIND"),
-            ("ll", "LL"),
-            ("dl", "DL"),
-            ("dd", "DD"),
-            ("weights", "WEIGHTS"),
-            ("exogenize", "EXOGENIZE"),
-            ("endogenize", "ENDOGENIZE"),
-            ("stderr_multiples", "STDERR_MULTIPLES"),
-            ("diagonal_only", "DIAGONAL_ONLY"),
-            ("equation", "EQUATION"),
-            ("exclusion", "EXCLUSION"),
-            ("lag", "LAG"),
-            ("coeff", "COEFF"),
-            ("overwrite", "OVERWRITE"),
-            ("learnt_in", "LEARNT_IN"),
-            ("upper_cholesky", "UPPER_CHOLESKY"),
-            ("lower_cholesky", "LOWER_CHOLESKY"),
-            ("use_dll", "USE_DLL"),
-            ("block", "BLOCK"),
-            ("bytecode", "BYTECODE"),
-            ("all_values_required", "ALL_VALUES_REQUIRED"),
-            ("no_static", "NO_STATIC"),
-            ("differentiate_forward_vars", "DIFFERENTIATE_FORWARD_VARS"),
-            ("parallel_local_files", "PARALLEL_LOCAL_FILES"),
-            ("linear", "LINEAR"),
-            ("exp", "EXP"),
-            ("log", "LOG"),
-            ("log10", "LOG10"),
-            ("ln", "LN"),
-            ("sin", "SIN"),
-            ("cos", "COS"),
-            ("tan", "TAN"),
-            ("asin", "ASIN"),
-            ("acos", "ACOS"),
-            ("atan", "ATAN"),
-            ("sinh", "SINH"),
-            ("cosh", "COSH"),
-            ("tanh", "TANH"),
-            ("asinh", "ASINH"),
-            ("acosh", "ACOSH"),
-            ("atanh", "ATANH"),
-            ("sqrt", "SQRT"),
-            ("cbrt", "CBRT"),
-            ("max", "MAX"),
-            ("min", "MIN"),
-            ("abs", "ABS"),
-            ("sign", "SIGN"),
-            ("normcdf", "NORMCDF"),
-            ("normpdf", "NORMPDF"),
-            ("erf", "ERF"),
-            ("erfc", "ERFC"),
-            ("steady_state", "STEADY_STATE"),
-            ("expectation", "EXPECTATION"),
-            ("var_expectation", "VAR_EXPECTATION"),
-            ("pac_expectation", "PAC_EXPECTATION"),
-            ("pac_target_nonstationary", "PAC_TARGET_NONSTATIONARY"),
-            ("sum", "SUM"),
-            ("varobs", "VAROBS"),
-            ("varexobs", "VAREXOBS"),
-            ("nan", "NAN_CONSTANT"),
-            ("inf", "INF_CONSTANT"),
-            ("constants", "CONSTANTS"),
-        ];
         let token = self.tokens.get(index)?;
         if token.kind != TokenKind::Ident {
             return None;
         }
-        WORDS
-            .iter()
-            .find(|(word, _)| self.lexeme(token).eq_ignore_ascii_case(word))
-            .map(|(_, token)| *token)
+        model_block_keyword_token(self.lexeme(token))
     }
 
     fn ss_symbol_token(token: &str) -> bool {
@@ -9529,6 +9531,10 @@ impl Parser<'_> {
             return None;
         }
 
+        if self.at(TokenKind::Hash) {
+            return self.parse_model_local_definition();
+        }
+
         let stmt_i = self.i;
         let stmt_start = self.current_start();
         let mut static_tag = false;
@@ -9544,10 +9550,16 @@ impl Parser<'_> {
             tag_twice.extend(tag.twice);
             tag_map.extend(tag.map);
         }
-        let is_local = self.at(TokenKind::Hash);
-        if is_local {
-            self.bump();
+        if self.at(TokenKind::Hash) {
+            self.push_bison(
+                self.tokens[self.i].span,
+                "syntax error, unexpected '#'".to_string(),
+            );
+            self.skip_to_stmt_end();
+            self.eat(TokenKind::Semi);
+            return None;
         }
+        let is_local = false;
 
         let previous_target = self.in_constructor_target;
         self.in_constructor_target |= is_local;
@@ -9620,6 +9632,72 @@ impl Parser<'_> {
             });
         }
         Some((eq, stmt_i..stmt_end_i))
+    }
+
+    /// Exact `# symbol = model_expression ;` production. A refused row creates
+    /// no equation, local definition, or target write. Recovery stops at `end`.
+    fn parse_model_local_definition(&mut self) -> Option<(Equation, Range<usize>)> {
+        let from = self.i;
+        let start = self.bump().span.start;
+        if !self.at_local_symbol(true) {
+            self.refuse_local_symbol(true);
+            self.skip_to_stmt_end();
+            self.eat(TokenKind::Semi);
+            return None;
+        }
+        let target = self.bump();
+        let name = self.intern.intern(target.text(self.src));
+        if !self.at(TokenKind::Eq) {
+            self.hetero_bison_refuse(self.i, Some("EQUAL"));
+            self.skip_to_stmt_end();
+            self.eat(TokenKind::Semi);
+            return None;
+        }
+        self.bump();
+        if self.at(TokenKind::Semi) || self.at(TokenKind::Eof) || self.at_block_stop() {
+            self.hetero_bison_refuse(self.i, None);
+            self.eat(TokenKind::Semi);
+            return None;
+        }
+        let previous_target = self.in_constructor_target;
+        self.in_constructor_target = true;
+        let lhs = self.alloc(
+            ExprKind::Ident {
+                name,
+                timing: 0,
+                ident_span: target.span,
+                timing_span: None,
+            },
+            target.span,
+        );
+        self.in_constructor_target = previous_target;
+        let issues_before = self.model.parse_issues.len();
+        let previous_args = self.in_model_call_args;
+        self.in_model_call_args = true;
+        let rhs = self.parse_expr();
+        self.in_model_call_args = previous_args;
+        if self.model.parse_issues.len() > issues_before {
+            self.skip_to_stmt_end();
+            self.eat(TokenKind::Semi);
+            return None;
+        }
+        if rhs.is_none() || !self.at(TokenKind::Semi) {
+            self.hetero_bison_refuse(self.i, None);
+            self.skip_to_stmt_end();
+            self.eat(TokenKind::Semi);
+            return None;
+        }
+        let to = self.i;
+        let end = self.current_start();
+        self.bump();
+        let raw = join_lexemes(self.src, &self.tokens[from..to]);
+        let mut equation = equation_from_statement(&raw, Span { start, end }, from)?;
+        equation.is_local = true;
+        equation.model_local = true;
+        equation.active_tokens = from..to;
+        equation.lhs_expr = Some(lhs);
+        equation.rhs_expr = rhs;
+        Some((equation, from..to))
     }
 
     fn parse_expr_side(&mut self, stop: ExprStop) -> (Option<ExprId>, bool) {
@@ -11194,6 +11272,12 @@ impl Parser<'_> {
                 self.model
                     .model_expression_uses
                     .push(crate::model::ModelExpressionUse {
+                        parse_order: self.tokens[..self.i]
+                            .iter()
+                            .rposition(|token| {
+                                token.kind == TokenKind::Ident && token.span == *ident_span
+                            })
+                            .unwrap_or(self.i),
                         statement_id: self.model.statements.len(),
                         name: *name,
                         span: *ident_span,
@@ -12994,6 +13078,133 @@ struct PeriodAtom {
     span: Span,
     /// `2000Q1` is two of our tokens and one of theirs.
     tokens: usize,
+}
+
+/// A rename name must be a symbol both at a declaration and at a pound target.
+pub(crate) fn is_model_local_name(name: &str) -> bool {
+    crate::refs::is_legal_ident(name)
+        && model_block_keyword_token(name).is_none_or(Parser::ss_symbol_token)
+        && statement_keywords::keyword_token(name)
+            .is_none_or(|token| Parser::ss_symbol_token(&token))
+}
+
+fn model_block_keyword_token(word: &str) -> Option<&'static str> {
+    // Complete literal-word rules in the pinned lexer's DYNARE_BLOCK state.
+    // Token naming is independent of the Bison symbol production below.
+    const WORDS: &[(&str, &str)] = &[
+        ("end", "END"),
+        ("relative_irf", "RELATIVE_IRF"),
+        ("from_initval_to_endval", "FROM_INITVAL_TO_ENDVAL"),
+        ("model_name", "MODEL_NAME"),
+        ("name", "NAME"),
+        ("diff", "DIFF"),
+        ("use_calibration", "USE_CALIBRATION"),
+        ("growth", "GROWTH"),
+        ("var", "VAR"),
+        ("varexo", "VAREXO"),
+        ("stderr", "STDERR"),
+        ("values", "VALUES"),
+        ("corr", "CORR"),
+        ("skew", "SKEW"),
+        ("periods", "PERIODS"),
+        ("scales", "SCALES"),
+        ("add", "ADD"),
+        ("multiply", "MULTIPLY"),
+        ("cutoff", "CUTOFF"),
+        ("mfs", "MFS"),
+        ("static_mfs", "STATIC_MFS"),
+        ("balanced_growth_test_tol", "BALANCED_GROWTH_TEST_TOL"),
+        ("heterogeneity", "HETEROGENEITY"),
+        ("gamma_pdf", "GAMMA_PDF"),
+        ("beta_pdf", "BETA_PDF"),
+        ("normal_pdf", "NORMAL_PDF"),
+        ("inv_gamma_pdf", "INV_GAMMA_PDF"),
+        ("inv_gamma1_pdf", "INV_GAMMA1_PDF"),
+        ("inv_gamma2_pdf", "INV_GAMMA2_PDF"),
+        ("uniform_pdf", "UNIFORM_PDF"),
+        ("weibull_pdf", "WEIBULL_PDF"),
+        ("dsge_prior_weight", "DSGE_PRIOR_WEIGHT"),
+        ("surprise", "SURPRISE"),
+        ("bind", "BIND"),
+        ("relax", "RELAX"),
+        ("error_bind", "ERROR_BIND"),
+        ("error_relax", "ERROR_RELAX"),
+        ("relative_to_initval", "RELATIVE_TO_INITVAL"),
+        ("restriction", "RESTRICTION"),
+        ("component", "COMPONENT"),
+        ("target", "TARGET"),
+        ("auxname", "AUXNAME"),
+        (
+            "auxname_target_nonstationary",
+            "AUXNAME_TARGET_NONSTATIONARY",
+        ),
+        ("kind", "KIND"),
+        ("ll", "LL"),
+        ("dl", "DL"),
+        ("dd", "DD"),
+        ("weights", "WEIGHTS"),
+        ("exogenize", "EXOGENIZE"),
+        ("endogenize", "ENDOGENIZE"),
+        ("stderr_multiples", "STDERR_MULTIPLES"),
+        ("diagonal_only", "DIAGONAL_ONLY"),
+        ("equation", "EQUATION"),
+        ("exclusion", "EXCLUSION"),
+        ("lag", "LAG"),
+        ("coeff", "COEFF"),
+        ("overwrite", "OVERWRITE"),
+        ("learnt_in", "LEARNT_IN"),
+        ("upper_cholesky", "UPPER_CHOLESKY"),
+        ("lower_cholesky", "LOWER_CHOLESKY"),
+        ("use_dll", "USE_DLL"),
+        ("block", "BLOCK"),
+        ("bytecode", "BYTECODE"),
+        ("all_values_required", "ALL_VALUES_REQUIRED"),
+        ("no_static", "NO_STATIC"),
+        ("differentiate_forward_vars", "DIFFERENTIATE_FORWARD_VARS"),
+        ("parallel_local_files", "PARALLEL_LOCAL_FILES"),
+        ("linear", "LINEAR"),
+        ("exp", "EXP"),
+        ("log", "LOG"),
+        ("log10", "LOG10"),
+        ("ln", "LN"),
+        ("sin", "SIN"),
+        ("cos", "COS"),
+        ("tan", "TAN"),
+        ("asin", "ASIN"),
+        ("acos", "ACOS"),
+        ("atan", "ATAN"),
+        ("sinh", "SINH"),
+        ("cosh", "COSH"),
+        ("tanh", "TANH"),
+        ("asinh", "ASINH"),
+        ("acosh", "ACOSH"),
+        ("atanh", "ATANH"),
+        ("sqrt", "SQRT"),
+        ("cbrt", "CBRT"),
+        ("max", "MAX"),
+        ("min", "MIN"),
+        ("abs", "ABS"),
+        ("sign", "SIGN"),
+        ("normcdf", "NORMCDF"),
+        ("normpdf", "NORMPDF"),
+        ("erf", "ERF"),
+        ("erfc", "ERFC"),
+        ("steady_state", "STEADY_STATE"),
+        ("expectation", "EXPECTATION"),
+        ("var_expectation", "VAR_EXPECTATION"),
+        ("pac_expectation", "PAC_EXPECTATION"),
+        ("pac_target_nonstationary", "PAC_TARGET_NONSTATIONARY"),
+        ("sum", "SUM"),
+        ("varobs", "VAROBS"),
+        ("varexobs", "VAREXOBS"),
+        ("nan", "NAN_CONSTANT"),
+        ("inf", "INF_CONSTANT"),
+        ("constants", "CONSTANTS"),
+    ];
+    WORDS
+        .iter()
+        .find(|(known, _)| word.eq_ignore_ascii_case(known))
+        .map(|(_, token)| *token)
 }
 
 /// A `<DYNARE_BLOCK>` keyword, so bison names the token rather than IDENTIFIER.
