@@ -98,6 +98,22 @@ fn usage_parse_constructor_cancellations_match_pinned_dynare() {
 }
 
 #[test]
+fn usage_accepts_expression_children_whose_macro_spans_run_backwards() {
+    let source = "var y; varexo e; model;\n@#for i in 1:2\n@#if i==2\ne;\n@#else\ny=e+\n@#endif\n@#endfor\nend;\n";
+    official(source, true, None);
+    let model = parse(source);
+    assert_eq!(model.equations.len(), 1);
+    assert_eq!(model.equations[0].rhs, "e+e");
+    let rows = analyze(&model);
+    assert!(
+        rows.iter().all(|row| row.severity != Severity::Error),
+        "{rows:?}"
+    );
+    assert!(check_w021(&model).is_empty());
+    assert!(check_w022(&model).is_empty());
+}
+
+#[test]
 fn usage_keeps_written_identities_that_dynare_does_not_remove() {
     for term in [
         "(p-1)+1",

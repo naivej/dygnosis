@@ -6,7 +6,7 @@ use crate::macro_expand::{
     expand_macros_with_source_layout_and_evaluations, MacroReplay, SourceFragment, SourceLayoutGap,
 };
 use crate::model::Model;
-use crate::parser::join_lexemes_recorded;
+use crate::parser::{join_lexemes_recorded, parse_expanded};
 use crate::span::Span;
 
 #[derive(Debug)]
@@ -49,13 +49,19 @@ pub(crate) fn source_with_evaluations(
         line_segments,
         evaluations,
     );
-    let copy = join_lexemes_recorded(&model.source, &tokens, |_, _| {});
+    let (copy_model, _) = parse_expanded(&model.source, tokens);
+    let tokens = &copy_model.expanded_tokens;
+    let copy = join_lexemes_recorded(&model.source, tokens, |_, _| {});
     if copy != *original {
         return None;
     }
-    let proven = token_stream_agrees(&layout.text, &model.source, &tokens);
+    // The display also needs raw-block recovery. A plain lexer comparison
+    // would hide valid statements after a comment-shaped verbatim terminator.
+    let (proof_model, _) = parse_expanded(&layout.text, tokenize(&layout.text));
+    let proof = &proof_model.expanded_tokens;
+    let proven = token_stream_agrees(&layout.text, &model.source, tokens, proof);
     let ranges = if proven {
-        map_navigation(report, &layout.text, &model.source, &tokens).unwrap_or_default()
+        map_navigation(report, &model.source, tokens, proof).unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -68,8 +74,7 @@ pub(crate) fn source_with_evaluations(
     })
 }
 
-fn token_stream_agrees(display: &str, src: &str, expanded: &[Token]) -> bool {
-    let proof = tokenize(display);
+fn token_stream_agrees(display: &str, src: &str, expanded: &[Token], proof: &[Token]) -> bool {
     let mut proof = proof.iter().filter(|token| token.kind != TokenKind::Eof);
     for token in expanded.iter().filter(|token| token.kind != TokenKind::Eof) {
         let Some(got) = proof.next() else {
@@ -84,11 +89,10 @@ fn token_stream_agrees(display: &str, src: &str, expanded: &[Token]) -> bool {
 
 fn map_navigation(
     report: &ExpandReport,
-    display: &str,
     src: &str,
     expanded: &[Token],
+    proof: &[Token],
 ) -> Option<Vec<Span>> {
-    let proof = tokenize(display);
     let proof: Vec<_> = proof
         .iter()
         .filter(|token| token.kind != TokenKind::Eof)

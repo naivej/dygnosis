@@ -101,6 +101,9 @@ pub fn tokenize(src: &str) -> Vec<Token> {
         pos: 0,
         in_comment: false,
         comment_bol: false,
+        comment_checkpoints: None,
+        #[cfg(test)]
+        comment_steps: 0,
     };
     let mut tokens = Vec::new();
     loop {
@@ -114,11 +117,64 @@ pub fn tokenize(src: &str) -> Vec<Token> {
     tokens
 }
 
+/// Resume the source lexer at a raw-region boundary. The caller can stop once
+/// the new stream agrees with its retained tokens, without scanning the tail.
+pub(crate) fn tokenize_from<'a>(
+    src: &'a str,
+    start: usize,
+    comment_checkpoints: Option<&'a [usize]>,
+) -> impl Iterator<Item = Token> + 'a {
+    let mut lexer = Lexer {
+        src,
+        pos: start,
+        in_comment: false,
+        comment_bol: false,
+        comment_checkpoints,
+        #[cfg(test)]
+        comment_steps: 0,
+    };
+    let mut finished = false;
+    std::iter::from_fn(move || {
+        if finished {
+            return None;
+        }
+        let token = lexer.next_token();
+        finished = token.kind == TokenKind::Eof;
+        Some(token)
+    })
+}
+
+/// Source positions that can end a comment or emit a macro token from one.
+/// Resumed lexers share this index so an unclosed comment tail is not rescanned.
+pub(crate) fn comment_checkpoints(src: &str) -> Vec<usize> {
+    let bytes = src.as_bytes();
+    let mut checkpoints = Vec::new();
+    let mut line_head = true;
+    for (index, byte) in bytes.iter().enumerate() {
+        let tail = &bytes[index..];
+        if tail.starts_with(b"*/")
+            || tail.starts_with(b"@{")
+            || line_head && tail.starts_with(b"@#")
+        {
+            checkpoints.push(index);
+        }
+        if *byte == b'\n' {
+            line_head = true;
+        } else if !matches!(byte, b' ' | b'\t' | b'\r') {
+            line_head = false;
+        }
+    }
+    checkpoints
+}
+
 struct Lexer<'a> {
     src: &'a str,
     pos: usize,
     in_comment: bool,
     comment_bol: bool,
+    comment_checkpoints: Option<&'a [usize]>,
+    #[cfg(test)]
+    comment_steps: usize,
 }
 
 impl Lexer<'_> {
@@ -283,6 +339,15 @@ impl Lexer<'_> {
 
     fn next_comment_token(&mut self) -> Option<Token> {
         loop {
+            #[cfg(test)]
+            {
+                self.comment_steps += 1;
+            }
+            if let Some(checkpoints) = self.comment_checkpoints {
+                let next = checkpoints.partition_point(|&position| position < self.pos);
+                self.pos = checkpoints.get(next).copied().unwrap_or(self.src.len());
+                self.comment_bol = self.starts("@#");
+            }
             if self.pos >= self.src.len() {
                 self.in_comment = false;
                 return None;
@@ -479,6 +544,51 @@ impl Lexer<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indexed_comment_recovery_matches_the_ordinary_lexer() {
+        for source in [
+            "verbatim;\n/*end;\nparameters p;\n",
+            "/* text */ var y; /*\n  @#echo 1\n@{name}\n*/model;y=1;end;",
+            "/* @#not_a_directive\n\t@#define z=1\n '*/' \"raw\" */ next",
+        ] {
+            let checkpoints = comment_checkpoints(source);
+            for start in 0..source.len() {
+                let ordinary: Vec<_> = tokenize_from(source, start, None)
+                    .map(|token| (token.kind, token.span, token.comment_context))
+                    .collect();
+                let indexed: Vec<_> = tokenize_from(source, start, Some(&checkpoints))
+                    .map(|token| (token.kind, token.span, token.comment_context))
+                    .collect();
+                assert_eq!(indexed, ordinary, "{source:?} from {start}");
+            }
+        }
+    }
+
+    #[test]
+    fn repeated_raw_recovery_visits_a_bounded_number_of_comment_checkpoints() {
+        let body = "verbatim;\n/* end;\n";
+        let count = 3000;
+        let source = body.repeat(count);
+        let checkpoints = comment_checkpoints(&source);
+        let mut steps = 0;
+        for index in 0..count {
+            let mut lexer = Lexer {
+                src: &source,
+                pos: index * body.len(),
+                in_comment: false,
+                comment_bol: false,
+                comment_checkpoints: Some(&checkpoints),
+                comment_steps: 0,
+            };
+            while lexer.next_token().kind != TokenKind::Eof {}
+            steps += lexer.comment_steps;
+        }
+        assert!(
+            steps <= count,
+            "{steps} comment visits for {count} resumptions"
+        );
+    }
 
     fn kinds(src: &str) -> Vec<TokenKind> {
         tokenize(src).into_iter().map(|t| t.kind).collect()

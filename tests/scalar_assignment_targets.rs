@@ -333,9 +333,9 @@ fn refused_unmatched_target_keeps_its_block_end_and_later_statements() {
                 .any(|row| row.message.contains("Missing 'end;'")),
             "{source}: {diagnostics:?}"
         );
-        assert_eq!(
-            model.ss_block.unwrap().end as usize,
-            source.rfind("end;").unwrap() + "end;".len()
+        assert!(
+            model.ss_block.is_none(),
+            "a refused block is not successful"
         );
         assert_eq!(model.param_assignments.len(), 1, "{source}");
         assert_eq!(model.name(model.param_assignments[0].name), "q");

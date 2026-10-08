@@ -3,6 +3,7 @@
 use std::collections::{hash_map::Entry, BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 
+use crate::constructor::{ConstructorContext, ConstructorTree, DataTreeScope, NodeId};
 use crate::expr::{BinOp, ExprId, ExprKind, UnOp};
 use crate::intern::{Interner, Name};
 use crate::lexer::{tokenize, Token, TokenKind};
@@ -32,124 +33,6 @@ mod pac_parser;
 mod resid_parser;
 mod shock_parser;
 mod statement_keywords;
-
-#[derive(Clone, Debug)]
-enum FoldKey {
-    Number(u64),
-    Ident(Name, i32),
-    Neg(Box<FoldKey>),
-    Binary(BinOp, Box<FoldKey>, Box<FoldKey>),
-    Call(Name, Vec<FoldKey>),
-    SteadyState(Box<FoldKey>),
-    Expectation(i32, Box<FoldKey>),
-    Other(ExprId),
-}
-
-impl PartialEq for FoldKey {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Number(a), Self::Number(b)) => a == b,
-            (Self::Ident(a, at), Self::Ident(b, bt)) => a == b && at == bt,
-            (Self::Neg(a), Self::Neg(b)) | (Self::SteadyState(a), Self::SteadyState(b)) => a == b,
-            (Self::Binary(aop, al, ar), Self::Binary(bop, bl, br)) => {
-                aop == bop
-                    && ((al == bl && ar == br)
-                        || (matches!(aop, BinOp::Add | BinOp::Mul) && al == br && ar == bl))
-            }
-            (Self::Call(an, aa), Self::Call(bn, ba)) => an == bn && aa == ba,
-            (Self::Expectation(as_, a), Self::Expectation(bs, b)) => as_ == bs && a == b,
-            (Self::Other(a), Self::Other(b)) => a == b,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for FoldKey {}
-
-impl FoldKey {
-    fn number(value: f64) -> Self {
-        Self::Number(if value == 0.0 { 0 } else { value.to_bits() })
-    }
-
-    fn is_zero(&self) -> bool {
-        matches!(self, Self::Number(0))
-    }
-
-    fn is_one(&self) -> bool {
-        *self == Self::number(1.0)
-    }
-
-    fn neg(value: Self) -> Self {
-        match value {
-            Self::Number(bits) => Self::number(-f64::from_bits(bits)),
-            Self::Neg(inner) => *inner,
-            other => Self::Neg(Box::new(other)),
-        }
-    }
-
-    fn add(left: Self, right: Self) -> Self {
-        if left.is_zero() {
-            return right;
-        }
-        if right.is_zero() {
-            return left;
-        }
-        if let Self::Neg(inner) = &right {
-            return Self::sub(left, (**inner).clone());
-        }
-        if let Self::Neg(inner) = &left {
-            return Self::sub(right, (**inner).clone());
-        }
-        if let Self::Binary(BinOp::Sub, x, y) = &left {
-            if **y == right {
-                return (**x).clone();
-            }
-        }
-        if let Self::Binary(BinOp::Sub, x, y) = &right {
-            if **y == left {
-                return (**x).clone();
-            }
-        }
-        Self::Binary(BinOp::Add, Box::new(left), Box::new(right))
-    }
-
-    fn sub(left: Self, right: Self) -> Self {
-        if right.is_zero() {
-            return left;
-        }
-        if left.is_zero() {
-            return Self::neg(right);
-        }
-        if left == right {
-            return Self::number(0.0);
-        }
-        if let Self::Neg(inner) = &right {
-            return Self::add(left, (**inner).clone());
-        }
-        if let Self::Binary(BinOp::Add, x, y) = &left {
-            if **x == right {
-                return (**y).clone();
-            }
-            if **y == right {
-                return (**x).clone();
-            }
-        }
-        Self::Binary(BinOp::Sub, Box::new(left), Box::new(right))
-    }
-
-    fn mul(left: Self, right: Self) -> Self {
-        if left.is_zero() || right.is_zero() {
-            return Self::number(0.0);
-        }
-        if left.is_one() {
-            return right;
-        }
-        if right.is_one() {
-            return left;
-        }
-        Self::Binary(BinOp::Mul, Box::new(left), Box::new(right))
-    }
-}
 
 pub fn parse(text: &str) -> Model {
     parse_with_lines(text, &[])
@@ -240,9 +123,17 @@ pub(crate) fn parse_expanded(src: &str, tokens: Vec<Token>) -> (Model, EquationT
         model: Model::default(),
         symbol_roles: HashMap::new(),
         generated_policy_discount: None,
+        constructors: ConstructorTree::default(),
+        constructed: HashMap::new(),
+        constructor_spans: HashMap::new(),
+        refused_constructors: HashSet::new(),
+        constructor_context: DataTreeScope::Dynamic,
+        constructor_locals: HashMap::new(),
+        in_constructor_target: false,
         eq_token_ranges: Vec::new(),
         hetero_eq_token_ranges: Vec::new(),
         verbatim_ranges: Vec::new(),
+        raw_comment_checkpoints: None,
         native_ranges: Vec::new(),
         initial_source_cursor: 0,
         completed_block_separator: None,
@@ -1076,10 +967,22 @@ struct Parser<'a> {
     symbol_roles: HashMap<Name, EstimatedNameRole>,
     /// A policy-created parameter is known to later expressions, without a written declaration.
     generated_policy_discount: Option<Name>,
+    /// Incremental Parse evidence, separate from Check's final collection tree.
+    constructors: ConstructorTree,
+    constructed: HashMap<ExprId, NodeId>,
+    /// Completed written grouping for refusal ranges; the public AST stays intact.
+    constructor_spans: HashMap<ExprId, Span>,
+    refused_constructors: HashSet<ExprId>,
+    constructor_context: DataTreeScope,
+    constructor_locals: HashMap<(DataTreeScope, Name), NodeId>,
+    /// A pound binding target stays in the written AST, but is not a DataTree read.
+    in_constructor_target: bool,
     eq_token_ranges: Vec<Range<usize>>,
     hetero_eq_token_ranges: Vec<Vec<Range<usize>>>,
     /// Token ranges of `verbatim; ? end;` bodies, whose text 7.1 passes through raw.
     verbatim_ranges: Vec<Range<usize>>,
+    /// Standalone display proof has no emitted-source cache.
+    raw_comment_checkpoints: Option<Vec<usize>>,
     /// Token ranges already read as native text, independently of written spans.
     native_ranges: Vec<Range<usize>>,
     /// End of consumed emitted text, including trivia omitted by the lexer.
@@ -1624,17 +1527,31 @@ impl Parser<'_> {
             .as_ref()
             .and_then(|key| key.split_once('.').map(|(_, subtype)| subtype.to_string()))
             .or(subtype);
-        let complete = self.tokens[self.i - 1].kind == TokenKind::Semi
-            && (!block
-                || self
-                    .completed_block_separator
-                    .is_some_and(|(end, after)| from <= end && end < after && after == self.i));
+        let complete = name == "verbatim"
+            || self.tokens[self.i - 1].kind == TokenKind::Semi
+                && (!block
+                    || self
+                        .completed_block_separator
+                        .is_some_and(|(end, after)| from <= end && end < after && after == self.i));
         let id = self.model.statements.len();
         let native = assignment.is_some_and(|index| match index {
             crate::model::AssignmentIndex::Parameter(i) => self.model.param_assignments[i].native,
             crate::model::AssignmentIndex::Helper(i) => self.model.helper_assignments[i].native,
         });
         let span = match assignment {
+            _ if name == "verbatim" => {
+                let head = &self.tokens[from];
+                Span {
+                    start: head.span.start,
+                    end: head
+                        .emitted
+                        .as_ref()
+                        .map_or(self.initial_source_cursor as u32, |token| {
+                            token.source.written_end(self.initial_source_cursor)
+                        })
+                        .max(head.span.start),
+                }
+            }
             Some(crate::model::AssignmentIndex::Helper(i))
                 if native && self.model.helper_assignments[i].expr.is_none() =>
             {
@@ -2092,6 +2009,8 @@ impl Parser<'_> {
             end: opener_end,
         };
         let body_i = self.i;
+        let previous_context = self.constructor_context;
+        self.constructor_context = DataTreeScope::Heterogeneous(dimension);
         self.in_equation_body = true;
         let mut equations = Vec::new();
         let mut ranges = Vec::new();
@@ -2103,6 +2022,7 @@ impl Parser<'_> {
             }
         }
         self.in_equation_body = false;
+        self.constructor_context = previous_context;
         if equations.is_empty() && self.at_block_end() {
             self.hetero_bison_refuse(self.i, None);
         }
@@ -2426,7 +2346,36 @@ impl Parser<'_> {
         dimension: Option<Name>,
     ) {
         if equation.is_local {
-            self.record_lhs_write(equation, range);
+            if let Some(target) = equation.lhs_expr {
+                self.model
+                    .model_local_target_contexts
+                    .insert(target, self.model.symbol_context());
+            }
+            let rhs_completed = equation.rhs_expr.is_some_and(|rhs| {
+                !matches!(self.model.exprs.get(rhs).kind, ExprKind::Error)
+                    && !self.refused_constructors.contains(&rhs)
+            });
+            if !rhs_completed {
+                if let Some(target) = equation.lhs_expr {
+                    self.model.unattempted_model_local_targets.insert(target);
+                }
+            }
+            if rhs_completed {
+                self.record_lhs_write(equation, range);
+            }
+            if let (Some(lhs), Some(rhs)) = (equation.lhs_expr, equation.rhs_expr) {
+                if let ExprKind::Ident { name, .. } = self.model.exprs.get(lhs).kind {
+                    // A local's value is available only after its RHS is read.
+                    // The first definition owns it; a later duplicate is refused.
+                    if self.model.final_symbol_kind(name) == Some("model_local_variable")
+                        && !self.refused_constructors.contains(&rhs)
+                    {
+                        self.constructor_locals
+                            .entry((self.constructor_context, name))
+                            .or_insert(self.constructed[&rhs]);
+                    }
+                }
+            }
         }
         self.model
             .written_equations
@@ -2810,6 +2759,13 @@ impl Parser<'_> {
         let opener_span = self.bump_plain_opener();
         let start = opener_span.start;
         let body_i = self.i;
+        let issues_before = self.model.parse_issues.len();
+        let shapes_before = self.model.shape_refuses.len();
+        let folds_before = self.model.const_fold_errors.len();
+        let namespaces_before = self.model.namespace_qualified.len();
+        let rhs_uses_before = self.model.steady_state_rhs_uses.len();
+        let mut completed_assignment = false;
+        let mut refused_assignment = false;
         // Same body as `model`: an opener spelling is an identifier here.
         self.in_equation_body = true;
         while !self.at(TokenKind::Eof) && !self.at_block_stop() {
@@ -2839,15 +2795,49 @@ impl Parser<'_> {
                 continue;
             }
             if let Some(eq) = self.parse_ss_equation() {
+                let valid_rhs = eq
+                    .rhs_expr
+                    .is_some_and(|id| !matches!(self.model.exprs.get(id).kind, ExprKind::Error));
+                let valid_targets = eq
+                    .steady_state_targets
+                    .iter()
+                    .all(|target| self.model.steady_state_target_is_valid(target));
+                completed_assignment |= valid_rhs && valid_targets;
+                refused_assignment |= !valid_rhs || !valid_targets;
                 self.model.steady_state_equations.push(eq);
             }
         }
         self.in_equation_body = false;
+        let body_refused = refused_assignment
+            || self.model.parse_issues.len() != issues_before
+            || self.model.shape_refuses.len() != shapes_before
+            || self.model.const_fold_errors.len() != folds_before
+            || self.model.namespace_qualified.len() != namespaces_before
+            || self.model.steady_state_rhs_uses[rhs_uses_before..]
+                .iter()
+                .any(|&(name, _, context)| {
+                    !self.model.outside_expression_symbol_is_valid(name, context)
+                });
+        let empty_refusal = self.at_block_end() && !completed_assignment && !body_refused;
+        if empty_refusal {
+            self.push_bison(
+                self.tokens[self.i].span,
+                "syntax error, unexpected END".to_string(),
+            );
+        }
         if self.at_block_end() {
             self.record_missing_final("steady_state_model", body_i, self.i);
         }
         let end = self.finish_block_named("steady_state_model", opener_span, body_i);
-        self.model.ss_block = Some(Span { start, end });
+        let span = Span { start, end };
+        if body_refused || empty_refusal || self.model.parse_issues.len() != issues_before {
+            // Retain completed rows for editor recovery, but do not replace a
+            // previously accepted block with this refused block. Its text is
+            // claimed so generic source scans cannot invent another statement.
+            self.model.ms_unparsed_spans.push(span);
+        } else {
+            self.model.ss_block = Some(span);
+        }
     }
 
     /// 7.2's `steady_state_equation` takes `symbol EQUAL`, rather than a
@@ -2955,6 +2945,10 @@ impl Parser<'_> {
 
     fn parse_ss_equation(&mut self) -> Option<Equation> {
         if self.at(TokenKind::Semi) {
+            self.push_bison(
+                self.tokens[self.i].span,
+                "syntax error, unexpected ';'".to_string(),
+            );
             self.bump();
             return None;
         }
@@ -3014,24 +3008,39 @@ impl Parser<'_> {
         self.in_steady_state_rhs = true;
         let (rhs, clean) = self.parse_expr_side(ExprStop::Semi);
         self.in_steady_state_rhs = false;
+        if rhs.is_none() {
+            let (span, unexpected) = self.ss_unexpected_token(rhs_start);
+            self.push_bison(span, format!("syntax error, unexpected {unexpected}"));
+        }
         let end = self.i;
         let span = Span {
             start: self.tokens[start].span.start,
             end: self.current_start(),
         };
+        let completed = self.at(TokenKind::Semi);
         self.eat(TokenKind::Semi);
         let rhs_expr = Some(if clean {
             rhs.unwrap_or_else(|| self.alloc_error(span))
         } else {
             self.alloc_error(span)
         });
-        let valid_rhs =
-            rhs_expr.is_some_and(|id| !matches!(self.model.exprs.get(id).kind, ExprKind::Error));
+        let valid_rhs = completed
+            && rhs_expr.is_some_and(|id| {
+                !matches!(self.model.exprs.get(id).kind, ExprKind::Error)
+                    && !self.refused_constructors.contains(&id)
+            });
         let mut outputs = Vec::new();
+        let mut target_actions_valid = valid_rhs;
         for &(name, token) in &targets {
             let target_span = self.tokens[token].span;
             let context = self.model.symbol_context();
-            if valid_rhs && !self.is_known_symbol(name) {
+            let target = crate::model::SteadyStateTarget {
+                name,
+                span: target_span,
+                symbol_type_context: context,
+                action_attempted: target_actions_valid,
+            };
+            if target_actions_valid && !self.is_known_symbol(name) {
                 self.model.mod_file_locals.push(name);
                 self.record_symbol_declaration(
                     name,
@@ -3040,21 +3049,22 @@ impl Parser<'_> {
                 );
                 self.retain_last_symbol_occurrence(token);
             }
-            if valid_rhs {
+            target_actions_valid &= self.model.steady_state_target_is_valid(&target);
+            outputs.push(target);
+        }
+        if target_actions_valid {
+            for &(name, token) in &targets {
                 self.record_write(name, token);
             }
-            outputs.push(crate::model::SteadyStateTarget {
-                name,
-                span: target_span,
-                symbol_type_context: context,
-            });
         }
         let lhs_expr = if bracketed {
             None
         } else {
             let (name, token) = targets[0];
             let span = self.tokens[token].span;
-            Some(self.alloc(
+            // This written target is a binding, not an ordinary expression
+            // read. Keep navigation without adding it to a constructor tree.
+            Some(self.model.exprs.alloc(
                 ExprKind::Ident {
                     name,
                     timing: 0,
@@ -9016,17 +9026,107 @@ impl Parser<'_> {
 
     fn skip_block(&mut self) {
         let opener = self.lexeme(&self.tokens[self.i]).to_ascii_lowercase();
-        let start = self.i;
+        if opener == "verbatim" {
+            self.skip_verbatim_block();
+            return;
+        }
         self.bump();
         if self.at(TokenKind::LParen) {
             self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
         }
         self.eat(TokenKind::Semi);
-        self.consume_block_end(opener != "verbatim");
-        if opener == "verbatim" {
-            // Raw text: 7.1 passes it through, so its quotes are none of the grammar's business.
-            self.verbatim_ranges.push(start..self.i);
+        self.consume_block_end(true);
+    }
+
+    /// VERBATIM_BLOCK reads emitted bytes, not Dynare tokens. A bare END and
+    /// Dynare-looking text remain raw until `end[[:space:]]*;` or accepted EOF.
+    fn skip_verbatim_block(&mut self) {
+        let from = self.i;
+        let head = self.tokens[from].clone();
+        let emitted = head.emitted.clone();
+        let source = emitted
+            .as_ref()
+            .map_or(self.src, |t| t.source.text.as_str());
+        self.bump();
+        self.eat(TokenKind::Semi);
+        let body = &self.tokens[self.i - 1];
+        let start = body.emitted.as_ref().map_or(body.span.end, |t| t.span.end) as usize;
+        let end = crate::native_line::verbatim_region_end(source, start);
+        while !self.at(TokenKind::Eof)
+            && (self.tokens[self.i]
+                .emitted
+                .as_ref()
+                .map_or(self.tokens[self.i].span.start, |t| t.span.start) as usize)
+                < end
+        {
+            self.i += 1;
         }
+        if let Some(last) = self.i.checked_sub(1).and_then(|i| self.tokens.get_mut(i)) {
+            let span = last.emitted.as_ref().map_or(last.span, |t| t.span);
+            if span.end as usize > end {
+                last.lexeme = Some(source[span.start as usize..end].to_string());
+                if let Some(token) = &mut last.emitted {
+                    token.span.end = end as u32;
+                    last.span.end = token.source.written_end(end).max(last.span.start);
+                } else {
+                    last.span.end = end as u32;
+                }
+            }
+        }
+        // Quotes and comments in the raw body can hide the terminator from the
+        // ordinary lexer. Resume at that byte and stop at the first agreement.
+        if end < source.len() {
+            if emitted.is_none() && self.raw_comment_checkpoints.is_none() {
+                self.raw_comment_checkpoints = Some(crate::lexer::comment_checkpoints(source));
+            }
+            let at = self.i;
+            let mut after = at;
+            let mut replacement = Vec::new();
+            let checkpoints = emitted
+                .as_ref()
+                .map(|token| token.source.comment_checkpoints.as_slice())
+                .or(self.raw_comment_checkpoints.as_deref());
+            for mut token in crate::lexer::tokenize_from(source, end, checkpoints) {
+                while after < self.tokens.len() {
+                    let old = &self.tokens[after];
+                    let span = old.emitted.as_ref().map_or(old.span, |t| t.span);
+                    if span.start >= token.span.start || old.kind == TokenKind::Eof {
+                        break;
+                    }
+                    after += 1;
+                }
+                if let Some(old) = self.tokens.get(after) {
+                    let span = old.emitted.as_ref().map_or(old.span, |t| t.span);
+                    if old.kind == token.kind && span == token.span {
+                        break;
+                    }
+                }
+                if token.kind == TokenKind::Eof {
+                    break;
+                }
+                let span = token.span;
+                token.lexeme = Some(source[span.start as usize..span.end as usize].to_string());
+                if let Some(origin) = &emitted {
+                    token.emitted = Some(crate::native_line::EmittedToken {
+                        source: origin.source.clone(),
+                        span,
+                    });
+                    let start = origin.source.written_start(span.start as usize);
+                    token.span = Span {
+                        start,
+                        end: origin.source.written_end(span.end as usize).max(start),
+                    };
+                }
+                replacement.push(token);
+            }
+            let origin = self.token_origins[at.saturating_sub(1)].start
+                ..self.token_origins[after.min(self.token_origins.len() - 1)].end;
+            let origins = (0..replacement.len()).map(|_| origin.clone());
+            self.tokens.splice(at..after, replacement);
+            self.token_origins.splice(at..after, origins);
+        }
+        self.verbatim_ranges.push(from..self.i);
+        self.initial_source_cursor = end;
     }
 
     /// Dynare `NATIVE` is an unknown name, a mod-file local, or an external
@@ -9441,7 +9541,10 @@ impl Parser<'_> {
             self.bump();
         }
 
+        let previous_target = self.in_constructor_target;
+        self.in_constructor_target |= is_local;
         let (lhs_expr, lhs_ok) = self.parse_expr_side(ExprStop::EqOrSemi);
+        self.in_constructor_target = previous_target;
         let saw_eq = self.at(TokenKind::Eq);
         let (rhs_expr, rhs_ok) = if saw_eq {
             self.bump();
@@ -9829,6 +9932,17 @@ impl Parser<'_> {
             })
     }
 
+    fn in_verbatim_range(&self, token: usize) -> bool {
+        // Recovery and later string splices occur at or after the current
+        // cursor. Completed raw ranges therefore keep increasing endpoints.
+        let next = self
+            .verbatim_ranges
+            .partition_point(|range| range.end <= token);
+        self.verbatim_ranges
+            .get(next)
+            .is_some_and(|range| range.contains(&token))
+    }
+
     /// 7.1's lexer accepts only single-quoted strings, so a double-quoted one is lexer
     /// junk wherever the grammar reads a string. `verbatim` bodies pass raw text through.
     fn record_double_quoted_strings(&mut self) {
@@ -9837,7 +9951,7 @@ impl Parser<'_> {
             if tok.kind != TokenKind::String || !self.lexeme(tok).starts_with('"') {
                 continue;
             }
-            if self.verbatim_ranges.iter().any(|range| range.contains(&i)) {
+            if self.in_verbatim_range(i) {
                 continue;
             }
             if self.native_ranges.iter().any(|range| range.contains(&i)) {
@@ -9995,7 +10109,7 @@ impl Parser<'_> {
         }
         let blocks = complete_block_ranges(&self.tokens, self.src);
         for (i, tok) in self.tokens.iter().enumerate() {
-            if self.in_native_line_assignment(i) {
+            if self.in_native_line_assignment(i) || self.in_verbatim_range(i) {
                 continue;
             }
             if tok.kind != TokenKind::Ident {
@@ -10311,7 +10425,7 @@ impl Parser<'_> {
             return Some(self.alloc(ExprKind::Unary { op, arg }, span));
         }
         if self.at(TokenKind::LParen) {
-            self.bump();
+            let open = self.bump();
             let parse_issues_before = self.model.parse_issues.len();
             let inner = self.parse_bp(0);
             if (inner.is_none() || !self.at(TokenKind::RParen))
@@ -10319,7 +10433,22 @@ impl Parser<'_> {
             {
                 self.refuse_model_argument_syntax();
             }
-            self.eat(TokenKind::RParen);
+            let end = if self.at(TokenKind::RParen) {
+                self.bump().span.end
+            } else {
+                inner
+                    .map(|id| self.constructor_span(id).end)
+                    .unwrap_or(open.span.end)
+            };
+            if let Some(id) = inner {
+                self.constructor_spans.insert(
+                    id,
+                    Span {
+                        start: open.span.start,
+                        end,
+                    },
+                );
+            }
             return inner;
         }
         if self.at(TokenKind::Number) {
@@ -10583,6 +10712,18 @@ impl Parser<'_> {
         let parse_issues_before = self.model.parse_issues.len();
         self.eat(TokenKind::LParen);
         let mut args = Vec::new();
+        let builtin = (!self.in_native_assignment)
+            .then(|| self.intern.get(callee))
+            .filter(|name| {
+                is_dynare_expression_builtin(name)
+                    || self.model_function_context
+                        && matches!(name.to_ascii_lowercase().as_str(), "diff" | "sum")
+            });
+        let builtin_arity = builtin.map(|name| match name.to_ascii_lowercase().as_str() {
+            "max" | "min" => (2, 2),
+            "normcdf" | "normpdf" => (1, 3),
+            _ => (1, 1),
+        });
         let previous_argument_scope = self.in_model_call_args;
         self.in_model_call_args |= self.model_function_context;
         if (self.in_steady_state_rhs || self.in_model_call_args) && self.at(TokenKind::RParen) {
@@ -10602,11 +10743,52 @@ impl Parser<'_> {
                     self.refuse_model_argument_syntax();
                 }
                 if self.at(TokenKind::Comma) {
+                    if builtin_arity.is_some_and(|(_, maximum)| args.len() == maximum) {
+                        if self.model.parse_issues.len() == parse_issues_before
+                            && args
+                                .iter()
+                                .all(|id| !self.refused_constructors.contains(id))
+                        {
+                            self.push_bison(
+                                self.tokens[self.i].span,
+                                "syntax error, unexpected COMMA".into(),
+                            );
+                        }
+                        // The grammar refuses this separator before reading
+                        // another argument. Recover without constructing it.
+                        self.bump();
+                        while !self.at(TokenKind::Eof)
+                            && !self.at(TokenKind::Semi)
+                            && !self.at_block_stop()
+                            && !self.at(TokenKind::RParen)
+                        {
+                            if self.at(TokenKind::LParen) {
+                                self.skip_balanced(TokenKind::LParen, TokenKind::RParen);
+                            } else {
+                                self.bump();
+                            }
+                        }
+                        break;
+                    }
                     self.bump();
                     continue;
                 }
                 break;
             }
+        }
+        if self.at(TokenKind::RParen)
+            && self.model.parse_issues.len() == parse_issues_before
+            && args
+                .iter()
+                .all(|id| !self.refused_constructors.contains(id))
+            && builtin_arity.is_some_and(|(minimum, maximum)| {
+                args.len() < minimum || minimum != maximum && args.len() == 2
+            })
+        {
+            self.push_bison(
+                self.tokens[self.i].span,
+                "syntax error, unexpected ')'".into(),
+            );
         }
         if self.in_model_call_args
             && !self.at(TokenKind::RParen)
@@ -10889,7 +11071,7 @@ impl Parser<'_> {
     }
 
     fn alloc(&mut self, kind: ExprKind, span: Span) -> ExprId {
-        if self.in_steady_state_rhs {
+        if self.in_steady_state_rhs && !self.in_constructor_target {
             if let ExprKind::Ident {
                 name, ident_span, ..
             } = &kind
@@ -10901,11 +11083,17 @@ impl Parser<'_> {
                 ));
             }
         }
-        if !self.model_function_context && !self.in_native_assignment {
+        if !self.model_function_context && !self.in_native_assignment && !self.in_constructor_target
+        {
             if let ExprKind::Ident {
                 name, ident_span, ..
             } = &kind
             {
+                self.model.outside_expression_uses.push((
+                    *name,
+                    *ident_span,
+                    self.model.symbol_context(),
+                ));
                 if matches!(
                     self.model.final_symbol_kind(*name),
                     Some("trend_var" | "log_trend_var")
@@ -10914,7 +11102,7 @@ impl Parser<'_> {
                 }
             }
         }
-        if self.model_function_context {
+        if self.model_function_context && !self.in_constructor_target {
             if let ExprKind::Ident {
                 name,
                 ident_span,
@@ -10925,6 +11113,7 @@ impl Parser<'_> {
                 self.model
                     .model_expression_uses
                     .push(crate::model::ModelExpressionUse {
+                        statement_id: self.model.statements.len(),
                         name: *name,
                         span: *ident_span,
                         full_span: span,
@@ -10965,6 +11154,10 @@ impl Parser<'_> {
         };
         let interned = interned.filter(|v| v.is_finite());
         let id = self.model.exprs.alloc_interned(kind, span, interned);
+        if self.in_constructor_target {
+            return id;
+        }
+        self.construct_expr(id);
         self.note_const_fold_errors(id);
         id
     }
@@ -10973,111 +11166,153 @@ impl Parser<'_> {
         self.model.exprs.get(id).interned
     }
 
-    fn interned_display(&self, id: ExprId) -> String {
-        match self.interned_value(id) {
-            Some(0.0) => "0".to_string(),
-            Some(1.0) => "1".to_string(),
-            Some(v) if v.fract() == 0.0 && v.abs() < 1e15 => format!("{}", v as i64),
-            Some(v) => format!("{v}"),
-            None => {
-                let span = self.expr_span(id);
-                self.src
-                    .get(span.start as usize..span.end as usize)
-                    .unwrap_or("?")
-                    .to_string()
+    fn construct_expr(&mut self, id: ExprId) {
+        let scope = self.constructor_scope();
+        self.model.constructor_scopes.insert(id, scope);
+        let expr = self.model.exprs.get(id);
+        let name_refused = if let ExprKind::Ident { name, timing, .. } = expr.kind {
+            let kind = self.model.final_symbol_kind(name);
+            if self.model_function_context {
+                matches!(
+                    kind,
+                    Some("external_function" | "mod_file_local" | "excluded")
+                ) || kind == Some("epilogue") && !self.in_epilogue
+                    || kind == Some("varexo_det") && timing != 0
+                    || self.model_expression_command == "planner_objective"
+                        && (timing != 0
+                            || kind == Some("model_local_variable")
+                            || self
+                                .model
+                                .heterogeneous_in_context(name, self.model.symbol_context()))
+            } else {
+                !self.in_native_assignment
+                    && !self
+                        .model
+                        .outside_expression_symbol_is_valid(name, self.model.symbol_context())
             }
-        }
+        } else {
+            false
+        };
+        let written_span = match &expr.kind {
+            ExprKind::Binary { lhs, rhs, .. } => Span {
+                start: self.constructor_span(*lhs).start,
+                end: self.constructor_span(*rhs).end,
+            },
+            ExprKind::Unary { arg, .. } => Span {
+                start: expr.span.start,
+                end: self.constructor_span(*arg).end,
+            },
+            _ => expr.span,
+        };
+        self.constructor_spans.insert(id, written_span);
+        let call_refused = matches!(expr.kind, ExprKind::Call { .. })
+            && (self.model.parse_issues.last().is_some_and(|issue| {
+                written_span.start <= issue.span.start && issue.span.end <= written_span.end
+            }) || self.model.shape_refuses.last().is_some_and(|issue| {
+                written_span.start <= issue.span.start && issue.span.end <= written_span.end
+            }));
+        let refused_child = match &expr.kind {
+            ExprKind::Unary { arg, .. }
+            | ExprKind::SteadyState { arg }
+            | ExprKind::Expectation { arg, .. } => self.refused_constructors.contains(arg),
+            ExprKind::Binary { lhs, rhs, .. } => {
+                self.refused_constructors.contains(lhs) || self.refused_constructors.contains(rhs)
+            }
+            ExprKind::Call { args, .. } => args
+                .iter()
+                .any(|arg| self.refused_constructors.contains(arg)),
+            ExprKind::Error => true,
+            _ => false,
+        };
+        let node = if refused_child || name_refused || call_refused {
+            self.refused_constructors.insert(id);
+            self.constructors.opaque(id)
+        } else {
+            // Tokens retain emitted literal spelling, including interpolation.
+            let literal = matches!(expr.kind, ExprKind::Number).then(|| {
+                let text = self.tokens[self.i.saturating_sub(1)].text(self.src);
+                (text, text.parse().ok())
+            });
+            let ident_value = if let ExprKind::Ident { name, .. } = expr.kind {
+                self.model_function_context
+                    .then(|| {
+                        self.constructor_locals
+                            .get(&(scope, name))
+                            .and_then(|node| self.constructors.value(*node))
+                    })
+                    .flatten()
+            } else {
+                None
+            };
+            self.constructors.construct(
+                id,
+                &expr.kind,
+                &self.constructed,
+                literal,
+                ConstructorContext { scope, ident_value },
+                |name| self.intern.get(name).to_string(),
+            )
+        };
+        self.constructed.insert(id, node);
     }
 
-    /// The small simplifications `DataTree::AddPlus/AddMinus/AddTimes` make while
-    /// building an expression. This is deliberately local: assigned parameter
-    /// values and broader algebraic identities are not available at parse.
-    fn folded_key(&self, id: ExprId) -> FoldKey {
-        if let Some(value) = self.interned_value(id) {
-            return FoldKey::number(value);
-        }
-        match &self.model.exprs.get(id).kind {
-            ExprKind::Ident { name, timing, .. } => FoldKey::Ident(*name, *timing),
-            ExprKind::Unary { op, arg } => {
-                let inner = self.folded_key(*arg);
-                match op {
-                    UnOp::Pos => inner,
-                    UnOp::Neg => FoldKey::neg(inner),
-                }
-            }
-            ExprKind::Binary { op, lhs, rhs } => {
-                let left = self.folded_key(*lhs);
-                let right = self.folded_key(*rhs);
-                match op {
-                    BinOp::Add => FoldKey::add(left, right),
-                    BinOp::Sub => FoldKey::sub(left, right),
-                    BinOp::Mul => FoldKey::mul(left, right),
-                    _ => FoldKey::Binary(*op, Box::new(left), Box::new(right)),
-                }
-            }
-            ExprKind::Call { callee, args } => FoldKey::Call(
-                *callee,
-                args.iter().map(|arg| self.folded_key(*arg)).collect(),
-            ),
-            ExprKind::SteadyState { arg } => FoldKey::SteadyState(Box::new(self.folded_key(*arg))),
-            ExprKind::Expectation { shift, arg } => {
-                FoldKey::Expectation(*shift, Box::new(self.folded_key(*arg)))
-            }
-            _ => FoldKey::Other(id),
+    fn constructor_scope(&self) -> DataTreeScope {
+        if self.in_steady_state_rhs {
+            DataTreeScope::SteadyState
+        } else if self.in_epilogue {
+            DataTreeScope::Epilogue
+        } else if self.model_expression_command == "planner_objective" {
+            DataTreeScope::Planner(self.model.planner_objective_spans.len())
+        } else if self.model_expression_command == "occbin_constraints" {
+            DataTreeScope::Occbin(self.model.occbin_constraints_blocks.len())
+        } else if self.model_function_context {
+            self.constructor_context
+        } else {
+            DataTreeScope::General
         }
     }
 
     fn note_const_fold_errors(&mut self, id: ExprId) {
-        let span = self.expr_span(id);
-        let log_zero = match &self.model.exprs.get(id).kind {
-            ExprKind::Call { callee, args } if args.len() == 1 => {
-                let arg = args[0];
-                let name = self.intern.get(*callee).to_string();
-                Some((name, arg))
-            }
-            _ => None,
-        };
-        if let Some((name, arg)) = log_zero {
-            if self.interned_value(arg) == Some(0.0) {
-                if name.eq_ignore_ascii_case("log") || name.eq_ignore_ascii_case("ln") {
-                    self.model.const_fold_errors.push((
-                        span,
-                        "E276",
-                        "log(0) not defined!".to_string(),
-                    ));
+        if self.in_native_assignment || self.refused_constructors.contains(&id) {
+            return;
+        }
+        let span = self.constructor_span(id);
+        // Keep the existing logarithm diagnostic scope. Extending E276/E277
+        // to all constructor identities is outside this repair.
+        if let ExprKind::Call { callee, args } = &self.model.exprs.get(id).kind {
+            if args.len() == 1 && self.interned_value(args[0]) == Some(0.0) {
+                let name = self.intern.get(*callee);
+                let code = if name.eq_ignore_ascii_case("log") || name.eq_ignore_ascii_case("ln") {
+                    Some(("E276", "log(0) not defined!"))
                 } else if name.eq_ignore_ascii_case("log10") {
-                    self.model.const_fold_errors.push((
-                        span,
-                        "E277",
-                        "log10(0) not defined!".to_string(),
-                    ));
+                    Some(("E277", "log10(0) not defined!"))
+                } else {
+                    None
+                };
+                if let Some((code, message)) = code {
+                    self.model
+                        .const_fold_errors
+                        .push((span, code, message.into()));
+                    self.model
+                        .constructor_refused_statements
+                        .insert(self.model.statements.len());
+                    self.refused_constructors.insert(id);
                 }
             }
             return;
         }
-        let div_zero = match &self.model.exprs.get(id).kind {
-            ExprKind::Binary {
-                op: BinOp::Div,
-                lhs,
-                rhs,
-            } => Some((*lhs, *rhs)),
-            _ => None,
-        };
-        if let Some((lhs, rhs)) = div_zero {
-            if self.folded_key(rhs).is_zero() {
-                let num = if self.folded_key(lhs).is_zero() {
-                    "0".to_string()
-                } else {
-                    self.interned_display(lhs)
-                };
-                self.model.const_fold_errors.push((
-                    span,
-                    "E278",
-                    format!(
-                        "Division by zero when forming ({num})/(0); denominator simplified to 0 (possibly after substituting a variable set to 0)."
-                    ),
-                ));
-            }
+        let node = self.constructed[&id];
+        if let Some(numerator) = self.constructors.division_numerator(node) {
+            let numerator = self
+                .constructors
+                .display(numerator, |name| self.intern.get(name));
+            self.model.const_fold_errors.push((span, "E278", format!(
+                "Division by zero when forming ({numerator})/(0); denominator simplified to 0 (possibly after substituting a variable set to 0)."
+            )));
+            self.model
+                .constructor_refused_statements
+                .insert(self.model.statements.len());
+            self.refused_constructors.insert(id);
         }
     }
 
@@ -11087,6 +11322,13 @@ impl Parser<'_> {
 
     fn expr_span(&self, id: ExprId) -> Span {
         self.model.exprs.get(id).span
+    }
+
+    fn constructor_span(&self, id: ExprId) -> Span {
+        self.constructor_spans
+            .get(&id)
+            .copied()
+            .unwrap_or_else(|| self.expr_span(id))
     }
 
     fn peek_tok(&self, ahead: usize) -> Option<&Token> {

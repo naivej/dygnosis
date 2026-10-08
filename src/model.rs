@@ -173,6 +173,8 @@ pub struct SteadyStateTarget {
     pub span: Span,
     /// Type table after the RHS and before registering this output name.
     pub symbol_type_context: SymbolContext,
+    /// The RHS and delimiter completed before this output's driver action.
+    pub(crate) action_attempted: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -436,6 +438,8 @@ pub struct SymbolContext(usize);
 /// at that read. Later declarations and repeated macro spans cannot change it.
 #[derive(Clone, Copy, Debug)]
 pub struct ModelExpressionUse {
+    /// Effective statement execution owning this read; macro spans can repeat.
+    pub(crate) statement_id: usize,
     pub name: Name,
     pub span: Span,
     pub full_span: Span,
@@ -1093,6 +1097,16 @@ pub struct Model {
     /// Bare RHS uses with their Parse-time symbol history. Macro copies may
     /// share written spans, and later type changes must not alter these roles.
     pub steady_state_rhs_uses: Vec<(Name, Span, SymbolContext)>,
+    /// Ordinary expression uses in effective Parse order, excluding native text.
+    pub outside_expression_uses: Vec<(Name, Span, SymbolContext)>,
+    /// The private official DataTree used by each completed expression allocation.
+    pub(crate) constructor_scopes: HashMap<ExprId, crate::constructor::DataTreeScope>,
+    /// Constructor failure before the owning reader can flush deferred names.
+    pub(crate) constructor_refused_statements: HashSet<usize>,
+    /// Pound callbacks not reached because the written RHS was refused.
+    pub(crate) unattempted_model_local_targets: HashSet<ExprId>,
+    /// Symbol history after the RHS, before a pound callback checks its target.
+    pub(crate) model_local_target_contexts: HashMap<ExprId, SymbolContext>,
     pub model_expression_uses: Vec<ModelExpressionUse>,
     pub initval: Vec<Assignment>,
     pub endval: Vec<Assignment>,
@@ -2113,6 +2127,40 @@ pub enum ShocksSemiFamily {
 }
 
 impl Model {
+    pub(crate) fn model_local_action_attempted(&self, equation: &Equation) -> bool {
+        !equation
+            .lhs_expr
+            .is_some_and(|target| self.unattempted_model_local_targets.contains(&target))
+    }
+
+    /// Roles that ParsingDriver allows in an ordinary expression outside model.
+    pub(crate) fn outside_expression_symbol_is_valid(
+        &self,
+        name: Name,
+        context: SymbolContext,
+    ) -> bool {
+        !self.heterogeneous_in_context(name, context)
+            && !matches!(
+                self.symbol_kind_in_context(name, context),
+                Some(
+                    "model_local_variable"
+                        | "external_function"
+                        | "epilogue"
+                        | "trend_var"
+                        | "log_trend_var"
+                        | "excluded"
+                )
+            )
+    }
+
+    /// ParsingDriver validates steady-state outputs after reading their RHS.
+    pub(crate) fn steady_state_target_is_valid(&self, target: &SteadyStateTarget) -> bool {
+        matches!(
+            self.symbol_kind_in_context(target.name, target.symbol_type_context),
+            None | Some("var" | "parameters" | "mod_file_local")
+        ) && !self.heterogeneous_in_context(target.name, target.symbol_type_context)
+    }
+
     /// A rejected model row makes uses and counts from that body incomplete.
     pub(crate) fn model_rows_rejected(&self) -> bool {
         self.parse_issues.iter().any(|issue| {

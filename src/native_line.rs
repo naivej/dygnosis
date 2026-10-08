@@ -12,6 +12,8 @@ use crate::span::Span;
 pub(crate) struct EmittedSource {
     pub text: String,
     pub origins: Vec<EmittedOrigin>,
+    /// Ordinary-lexer comment checkpoints, built once before raw recovery.
+    pub comment_checkpoints: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -19,9 +21,33 @@ pub(crate) struct EmittedOrigin {
     pub emitted: Span,
     pub written: Span,
     pub copied: bool,
+    pub frames: Vec<usize>,
 }
 
 impl EmittedSource {
+    /// Macro context shared by every contributing byte of a parser token.
+    /// Written spans can repeat, so recovery uses emitted spans here.
+    pub fn common_frames(&self, span: Span) -> Vec<usize> {
+        let first = self
+            .origins
+            .partition_point(|origin| origin.emitted.end <= span.start);
+        let mut overlapping = self.origins[first..]
+            .iter()
+            .take_while(|origin| origin.emitted.start < span.end);
+        let Some(first) = overlapping.next() else {
+            return Vec::new();
+        };
+        let mut frames = first.frames.clone();
+        for origin in overlapping {
+            let shared = frames
+                .iter()
+                .zip(&origin.frames)
+                .take_while(|(a, b)| a == b)
+                .count();
+            frames.truncate(shared);
+        }
+        frames
+    }
     /// Map the first byte, including source characters omitted by tokenization.
     pub fn written_start(&self, start: usize) -> u32 {
         let next = self
@@ -80,6 +106,24 @@ pub(crate) fn verbatim_opener(src: &str, start: usize) -> bool {
             .as_bytes()
             .get(skip_flex_space(src.as_bytes(), start + 8))
             == Some(&b';')
+}
+
+/// First byte after the pinned `end[[:space:]]*;` raw-block terminator.
+/// The rule is case-insensitive and has no word, quote, or comment boundary.
+/// EOF accepts the remaining verbatim text without a terminator.
+pub(crate) fn verbatim_region_end(src: &str, start: usize) -> usize {
+    let bytes = src.as_bytes();
+    let mut i = start.min(bytes.len());
+    while i + 3 <= bytes.len() {
+        if bytes[i..i + 3].eq_ignore_ascii_case(b"end") {
+            let separator = skip_flex_space(bytes, i + 3);
+            if bytes.get(separator) == Some(&b';') {
+                return separator + 1;
+            }
+        }
+        i += 1;
+    }
+    bytes.len()
 }
 
 #[derive(Clone)]

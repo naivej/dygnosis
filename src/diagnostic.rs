@@ -274,14 +274,38 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
         || block_diags.iter().any(|diag| {
             matches!(
                 diag.code.as_str(),
-                "E020" | "E182" | "E271" | "E280" | "E281" | "E294"
+                "E020"
+                    | "E182"
+                    | "E252"
+                    | "E253"
+                    | "E271"
+                    | "E275"
+                    | "E276"
+                    | "E277"
+                    | "E278"
+                    | "E279"
+                    | "E280"
+                    | "E281"
+                    | "E282"
+                    | "E294"
+                    | "E310"
+                    | "E426"
             )
         })
         || steady_state_diags.iter().any(|diag| diag.code == "E481")
         || open_diags.iter().any(|diag| {
             matches!(
                 diag.code.as_str(),
-                "E058" | "E059" | "E288" | "E289" | "E290" | "E291" | "E292" | "E293" | "E294"
+                "E058"
+                    | "E059"
+                    | "E288"
+                    | "E289"
+                    | "E290"
+                    | "E291"
+                    | "E292"
+                    | "E293"
+                    | "E294"
+                    | "E310"
             )
         });
     let mut out = Vec::new();
@@ -316,11 +340,30 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
         }
     }
     out.extend(shock_diags);
-    out.extend(open_diags);
+    // Ordinary assignments already own captured epilogue-role refusals.
+    // The command reader can see the same use. Keep maximum multiplicity
+    // across these readers, including repeated macro copies at one span.
+    let mut epilogue_roles = std::collections::HashMap::new();
+    for row in out.iter().filter(|row| row.code == "E294") {
+        *epilogue_roles
+            .entry((row.span, row.message.clone()))
+            .or_insert(0usize) += 1;
+    }
+    for row in open_diags {
+        if row.code == "E294" {
+            if let Some(existing) = epilogue_roles.get_mut(&(row.span, row.message.clone())) {
+                if *existing > 0 {
+                    *existing -= 1;
+                    continue;
+                }
+            }
+        }
+        out.push(row);
+    }
     // E271 is already emitted for each repeated option by check_shape. The
     // dotted parse walk uses the first duplicate only to stop a later head
     // type refusal from pre-empting that statement.
-    out.extend(ms_diags.into_iter().filter(|d| d.code != "E271"));
+    out.extend(ms_diags.into_iter().filter(|row| row.code != "E271"));
     out.extend(surgery_parse);
     // The moment row-scope pass reads the same captured model-expression
     // uses as the generic role/timing passes. Keep one diagnostic per refusal.
@@ -355,7 +398,12 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
     // Dynare finishes parsing the whole file before checkPass, so any of them
     // stops E420 regardless of its written position.
     if parse_refused {
-        out.retain(|d| d.code != "E420");
+        out.retain(|d| {
+            !matches!(
+                d.code.as_str(),
+                "E420" | "E021" | "E251" | "E130" | "W022" | "W042" | "W131"
+            )
+        });
     }
     // A refusal in an earlier statement also stops a later shock_paths
     // checkPass from reporting the circular self reference.

@@ -152,7 +152,7 @@ fn macro_mixed_policy_uses_execution_order_when_written_spans_run_backwards() {
 }
 
 #[test]
-fn bracketed_targets_and_empty_blocks_keep_the_existing_coverage_rules() {
+fn bracketed_targets_accept_and_empty_blocks_refuse_before_check() {
     for body in ["[y,z]=foo(1);", ""] {
         let source = format!(
             "{MODEL}{OBJECTIVE}ramsey_model(instruments=(r));steady_state_model;{body}end;"
@@ -163,7 +163,17 @@ fn bracketed_targets_and_empty_blocks_keep_the_existing_coverage_rules() {
             &[],
             body.is_empty().then_some("syntax error, unexpected END"),
         );
-        assert!(missing(&analyze(&parse(&source))).is_empty());
+        let model = parse(&source);
+        let diagnostics = analyze(&model);
+        assert!(missing(&diagnostics).is_empty());
+        if body.is_empty() {
+            assert!(model.ss_block.is_none());
+            assert!(diagnostics.iter().any(|row| {
+                row.code == "E001" && row.message == "syntax error, unexpected END"
+            }));
+        } else {
+            assert!(model.ss_block.is_some());
+        }
     }
 }
 

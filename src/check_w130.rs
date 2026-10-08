@@ -77,10 +77,10 @@ fn check_ss_target_types(model: &Model) -> Vec<Diagnostic> {
             continue;
         }
         for target in &eq.steady_state_targets {
-            let kind = model.symbol_kind_in_context(target.name, target.symbol_type_context);
-            if matches!(kind, None | Some("var" | "parameters" | "mod_file_local"))
-                && !model.heterogeneous_in_context(target.name, target.symbol_type_context)
-            {
+            if !target.action_attempted {
+                continue;
+            }
+            if model.steady_state_target_is_valid(target) {
                 continue;
             }
             diagnostics.push(Diagnostic::new(

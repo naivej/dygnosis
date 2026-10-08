@@ -175,6 +175,37 @@ async function checkMacroPreview(service, workspaceRoot, evidence) {
   await waitFor(() => vscode.languages.getDiagnostics(document.uri).some(diagnostic => diagnosticCode(diagnostic) === "E063"), "failing macro Problems");
   evidence.checks.push("range, Cartesian and comprehension names, expression includes, exact preview text, macro ranges, written jump, edit/Refresh, debug order and fatal status");
 }
+async function checkParseFollowups(service, workspaceRoot, evidence) {
+  const cases = [
+    ["empty-steady-state", "var y; model; y=0; end;\nsteady_state_model; end;\n", "E001",
+      "syntax error, unexpected END"],
+    ["constructor-denominator", "var y; varexo e unused; parameters p; model; y=e+0/(p^0-1); end;\n", "E278",
+      "Division by zero when forming (0)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0)."],
+    ["decimal-denominator", "var y; varexo e; model; y=e+1/0.0; end;\n", null, null],
+    ["verbatim-bare-end", "var y; varexo e; model; y=e; end;\nverbatim;\nend\nend;\nshocks; var e=1; end;\n", null, null],
+  ];
+  for (const [name, source, code, sentence] of cases) {
+    const filename = path.join(workspaceRoot, `${name}.mod`);
+    await writeObservedInput(service, filename, source);
+    const document = await vscode.workspace.openTextDocument(filename);
+    await vscode.window.showTextDocument(document);
+    await currentSnapshot(service, document, () => service.modelInfo(document.uri), `${name} snapshot`);
+    if (code) {
+      await waitFor(() => vscode.languages.getDiagnostics(document.uri).some(row => diagnosticCode(row) === code), `${name} Problems`);
+      const rows = vscode.languages.getDiagnostics(document.uri);
+      const refusal = rows.find(row => diagnosticCode(row) === code);
+      assert.equal(refusal.message, sentence);
+      assert.equal(refusal.severity, vscode.DiagnosticSeverity.Error);
+      assert.ok(rows.every(row => !["E021", "W022", "W042"].includes(diagnosticCode(row))), `${name} must stop shared Check reports`);
+    } else {
+      const info = await service.modelInfo(document.uri);
+      assert.equal(info.n_equations, 1);
+      assert.ok(vscode.languages.getDiagnostics(document.uri).every(row => row.severity !== vscode.DiagnosticSeverity.Error), `${name} must remain accepted`);
+    }
+  }
+  evidence.checks.push("slice 22 empty steady-state, constructor refusal and phase, decimal quiet, verbatim bare end in native Problems");
+}
+
 exports.run = async function run() {
   const resultFile = process.env.DYGNOSIS_HOST_RESULT;
   const evidence = { vscode: vscode.version, runId: process.env.DYGNOSIS_HOST_RUN_ID, checks: [] };
@@ -236,6 +267,8 @@ exports.run = async function run() {
     const symbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri);
     assert.ok(symbols.length > 0);
     evidence.checks.push("real engine counts/native symbols");
+    await checkParseFollowups(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
+    await vscode.window.showTextDocument(document);
     let equationLens;
     await waitFor(async () => {
       const lenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", document.uri);

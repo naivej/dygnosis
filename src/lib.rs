@@ -38,6 +38,7 @@ mod check_written_transform;
 mod command_skip;
 pub mod companion;
 mod compare_navigation;
+mod constructor;
 mod diag_shape;
 pub mod diagnostic;
 mod diagnostic_anchors;

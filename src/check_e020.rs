@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::diagnostic::{Diagnostic, Severity};
+use crate::expr::IdentRef;
 use crate::intern::Name;
 use crate::model::{Decl, Equation, Model};
 use crate::span::Span;
@@ -30,16 +31,23 @@ pub(crate) fn all_model_equations(model: &Model) -> Vec<&Equation> {
     eqs
 }
 
-/// One data tree per list: the aggregate model, then each heterogeneous block.
+/// One data tree per list: the aggregate model, then each distinct dimension.
 /// `AddLocalVariable` is per tree, so a `#` name may be defined once in each.
 pub(crate) fn equation_trees(model: &Model) -> Vec<Vec<&Equation>> {
     let mut agg: Vec<&Equation> = model.equations.iter().collect();
     agg.sort_by_key(|eq| (eq.span.start, eq.span.end));
     let mut trees = vec![agg];
+    let mut dimensions = HashMap::new();
     for block in &model.heterogeneous_models {
-        let mut eqs: Vec<&Equation> = block.equations.iter().collect();
-        eqs.sort_by_key(|eq| (eq.span.start, eq.span.end));
-        trees.push(eqs);
+        let next = trees.len();
+        let index = *dimensions.entry(block.dimension).or_insert_with(|| {
+            trees.push(Vec::new());
+            next
+        });
+        trees[index].extend(&block.equations);
+    }
+    for tree in trees.iter_mut().skip(1) {
+        tree.sort_by_key(|eq| (eq.span.start, eq.span.end));
     }
     trees
 }
@@ -145,7 +153,16 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
         let Some((name, span)) = model_local_name(model, eq) else {
             continue;
         };
-        if declared.contains(&name) && seen_shadowing.insert(name) {
+        let wrong_type = eq
+            .lhs_expr
+            .and_then(|target| model.model_local_target_contexts.get(&target))
+            .map(|&context| {
+                model
+                    .symbol_kind_in_context(name, context)
+                    .is_some_and(|kind| kind != "model_local_variable")
+            })
+            .unwrap_or_else(|| declared.contains(&name));
+        if wrong_type && seen_shadowing.insert(name) {
             diagnostics.push(shadowing_diag(model, name, span));
         }
     }
@@ -162,7 +179,7 @@ fn check_e025(model: &Model) -> Vec<Diagnostic> {
         let mut seen_early = HashSet::new();
         for eq in tree {
             let local = model_local_name(model, eq).map(|(n, _)| n);
-            for r in model.ident_refs(eq) {
+            for r in expression_reads(model, eq) {
                 if local == Some(r.name) {
                     continue;
                 }
@@ -238,6 +255,20 @@ fn shadowing_diag(model: &Model, name: Name, span: Span) -> Diagnostic {
 }
 
 fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
+    let refused_roots: HashSet<_> = model
+        .written_equations
+        .iter()
+        .filter(|row| {
+            model
+                .constructor_refused_statements
+                .contains(&row.statement_id)
+        })
+        .flat_map(|row| {
+            [row.equation.lhs_expr, row.equation.rhs_expr]
+                .into_iter()
+                .flatten()
+        })
+        .collect();
     let local_declared = all_declared_name_strings(model);
     // Equations a surgery statement removed still refuse an undeclared name: 7.1 resolves
     // symbols while it parses the model block, before the removal statement runs.
@@ -302,8 +333,18 @@ fn check_undeclared_equations(model: &Model) -> Vec<Diagnostic> {
     let mut seen = HashSet::new();
     let mut diagnostics = Vec::new();
     for (eq, removed) in eqs {
+        // Unknown model names are reported when this reader completes. An
+        // eager constructor refusal prevents that flush, including earlier rows
+        // in this same execution; another completed reader keeps its own names.
+        if [eq.lhs_expr, eq.rhs_expr]
+            .into_iter()
+            .flatten()
+            .any(|id| refused_roots.contains(&id))
+        {
+            continue;
+        }
         let visible = visible_names(model, eq);
-        for r in model.ident_refs(eq) {
+        for r in expression_reads(model, eq) {
             let ref_name = model.name(r.name);
             if is_skipped_ref(ref_name) {
                 continue;
@@ -356,6 +397,18 @@ struct UndeclaredNames<'a> {
     endo: &'a HashSet<String>,
     params: &'a HashSet<String>,
     exo_underscore: bool,
+}
+
+/// Pound targets are binding names. Their written references stay available
+/// to editor tools, while language reads come only from that definition's RHS.
+fn expression_reads(model: &Model, eq: &Equation) -> Vec<IdentRef> {
+    if eq.is_local {
+        eq.rhs_expr
+            .map(|rhs| model.exprs.walk_idents(rhs).collect())
+            .unwrap_or_default()
+    } else {
+        model.ident_refs(eq)
+    }
 }
 
 fn undeclared_diag(
@@ -548,12 +601,15 @@ fn local_hides_unknown(
 }
 
 fn equation_tree_index(model: &Model, eq: &Equation) -> usize {
-    model
-        .heterogeneous_models
-        .iter()
-        .position(|block| block.equations.iter().any(|other| std::ptr::eq(other, eq)))
-        .map(|index| index + 1)
-        .unwrap_or(0)
+    let mut dimensions = HashMap::new();
+    for block in &model.heterogeneous_models {
+        let next = dimensions.len() + 1;
+        let index = *dimensions.entry(block.dimension).or_insert(next);
+        if block.equations.iter().any(|other| std::ptr::eq(other, eq)) {
+            return index;
+        }
+    }
+    0
 }
 
 fn local_def_starts(model: &Model, eqs: &[&Equation]) -> HashMap<Name, u32> {
@@ -568,6 +624,9 @@ fn local_def_starts(model: &Model, eqs: &[&Equation]) -> HashMap<Name, u32> {
 }
 
 fn model_local_name(model: &Model, eq: &Equation) -> Option<(Name, Span)> {
+    if !model.model_local_action_attempted(eq) {
+        return None;
+    }
     if !eq.text.trim().starts_with('#') {
         return None;
     }

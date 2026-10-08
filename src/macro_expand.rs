@@ -1483,7 +1483,14 @@ fn realize_model_tokens(
         if text.is_empty() {
             continue;
         }
-        budget.spend_work(text.len().saturating_add(trace.frames.len()).max(1))?;
+        // Reserve a frame copy per emitted byte before ordinary comments or
+        // strings can hide tokens that the parser later recovers.
+        budget.spend_work(
+            text.len()
+                .saturating_add(trace.frames.len())
+                .saturating_add(text.len().saturating_mul(trace.frames.len()))
+                .max(1),
+        )?;
         let start = emitted.len();
         emitted.push_str(text);
         contribs.push(EmitContrib {
@@ -1499,7 +1506,7 @@ fn realize_model_tokens(
     budget.spend_work(
         contribs
             .len()
-            .saturating_add(emitted.len())
+            .saturating_add(emitted.len().saturating_mul(2))
             .saturating_add(1),
     )?;
     let lexed = crate::lexer::tokenize(&emitted);
@@ -1608,18 +1615,21 @@ fn realize_model_tokens(
     }
     out.push(Token::new(TokenKind::Eof, Span::new(src.len(), src.len())));
     out_traces.push(TokenTrace { frames: Vec::new() });
+    let comment_checkpoints = crate::lexer::comment_checkpoints(&emitted);
     let origins = contribs
-        .iter()
+        .into_iter()
         .map(|contrib| crate::native_line::EmittedOrigin {
             emitted: Span::new(contrib.emit_start, contrib.emit_end),
             written: contrib.span,
             copied: emitted.get(contrib.emit_start..contrib.emit_end)
                 == src.get(contrib.span.start as usize..contrib.span.end as usize),
+            frames: contrib.frames,
         })
         .collect();
     let emitted = std::sync::Arc::new(crate::native_line::EmittedSource {
         text: emitted,
         origins,
+        comment_checkpoints,
     });
     for (token, lexed) in out.iter_mut().zip(&lexed) {
         token.emitted = Some(crate::native_line::EmittedToken {

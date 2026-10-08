@@ -1362,6 +1362,120 @@ async fn source_navigation_maps_declarations_macros_includes_and_identifiers() {
 }
 
 #[tokio::test]
+async fn verbatim_rescan_keeps_exact_source_preview_and_following_include_navigation() {
+    let root = Url::parse("file:///C:/dygnosis-preview/verbatim-rescan.mod").unwrap();
+    let include = Url::parse("file:///C:/dygnosis-preview/verbatim-rescan.inc").unwrap();
+    let root_text = "var y;\n@#include \"verbatim-rescan.inc\"\n";
+    // The ordinary lexer would treat the rest as an unclosed comment. The
+    // pinned raw terminator resumes Dynare at the following declaration.
+    let child_text = "verbatim;\n/*end;\nparameters p; p=1;\nmodel; y=p; end;\n";
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(backend, &include, child_text, 1).await;
+    open(backend, &root, root_text, 1).await;
+    let source_view = source_preview(backend, &root).await;
+    assert_eq!(source_view["complete"], true, "{source_view}");
+    let text = source_view["effective_text"].as_str().unwrap();
+    assert_eq!(text, format!("var y;\n{child_text}"));
+    assert_eq!(
+        source_view["navigation"].as_array().unwrap().len(),
+        1,
+        "{source_view}"
+    );
+    let regions = source_view["source_navigation"].as_array().unwrap();
+    for written in ["parameters p;", "y=p;"] {
+        assert!(
+            regions.iter().any(|region| {
+                region["written_location"]["uri"] == include.as_str()
+                    && json_slice(text, &region["effective_range"], true).contains(written)
+                    && json_slice(child_text, &region["written_location"]["range"], true)
+                        .contains(written)
+            }),
+            "missing written navigation for {written}: {source_view}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn verbatim_rescan_preserves_each_include_loop_copy_and_written_equation() {
+    let root = Url::parse("file:///C:/dygnosis-preview/verbatim-loop.mod").unwrap();
+    let include = Url::parse("file:///C:/dygnosis-preview/verbatim-loop.inc").unwrap();
+    let root_text = "var y;\n@#for j in 1:2\n@#include \"verbatim-loop.inc\"\n@#endfor\n";
+    let child_text = "verbatim;\n/*end;\nmodel;y=@{j};end;\n";
+    let (service, _socket) = new_service();
+    let backend = service.inner();
+    open(backend, &include, child_text, 1).await;
+    open(backend, &root, root_text, 1).await;
+    let files = HashMap::from([
+        (
+            "C:/dygnosis-preview/verbatim-loop.mod".to_string(),
+            root_text.to_string(),
+        ),
+        (
+            "C:/dygnosis-preview/verbatim-loop.inc".to_string(),
+            child_text.to_string(),
+        ),
+    ]);
+    let mcp = dynare_expand(
+        root_text,
+        Some("C:/dygnosis-preview/verbatim-loop.mod"),
+        Some(&files),
+    );
+    assert_eq!(mcp["complete"], true, "{mcp}");
+    for (view, lsp) in [
+        (mcp, false),
+        (preview(backend, &root).await, true),
+        (source_preview(backend, &root).await, true),
+    ] {
+        assert_eq!(view["complete"], true, "{view}");
+        let text = view["effective_text"].as_str().unwrap();
+        let rows = view["navigation"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "{view}");
+        for (row, value) in rows.iter().zip(["1", "2"]) {
+            let equation = json_slice(text, &row["effective_range"], lsp);
+            assert_eq!(equation.replace(' ', ""), format!("y={value}"));
+            let target = &row["written_locations"][0];
+            let owner = if lsp { "uri" } else { "file" };
+            assert!(
+                target[owner]
+                    .as_str()
+                    .unwrap()
+                    .ends_with("verbatim-loop.inc"),
+                "{row}"
+            );
+            let range = &target["range"];
+            assert_eq!(json_slice(child_text, range, lsp), "y=@{j}");
+            let frame = row["macro_frames"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|frame| frame["kind"] == "for")
+                .unwrap();
+            assert_eq!(frame["variable"], "j");
+            assert_eq!(frame["value"], value);
+        }
+        if lsp && view.get("source_navigation").is_some() {
+            assert_eq!(
+                text,
+                "var y;\nverbatim;\n/*end;\nmodel;y=1;end;\nverbatim;\n/*end;\nmodel;y=2;end;\n"
+            );
+            let regions = view["source_navigation"].as_array().unwrap();
+            let substitutions: Vec<_> = regions
+                .iter()
+                .filter(|row| row["kind"] == "substitution")
+                .collect();
+            assert_eq!(substitutions.len(), 2, "{view}");
+            for row in substitutions {
+                assert_eq!(
+                    json_slice(child_text, &row["written_location"]["range"], true),
+                    "@{j}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn source_navigation_nested_name_and_incomplete_are_empty() {
     let root = Url::parse("file:///C:/dygnosis-preview/source-nav-nested.mod").unwrap();
     let (service, _socket) = new_service();

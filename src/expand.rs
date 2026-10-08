@@ -144,7 +144,9 @@ pub(crate) fn compact_emitted_prefix(prefix: &str) -> String {
             emitted: Span::new(0, prefix.len()),
             written: Span::new(0, prefix.len()),
             copied: true,
+            frames: Vec::new(),
         }],
+        comment_checkpoints: Vec::new(),
     });
     let mut tokens = tokenize(prefix);
     for token in &mut tokens {
@@ -192,7 +194,7 @@ pub(crate) fn expand_report_from_spliced(
     let (model, ranges) = parse_expanded(&source, tokens.clone());
     let map_complete = !incomplete && crate::model_map::parser_complete(&model);
     let parsed_tokens = &model.expanded_tokens;
-    let parsed_traces = project_token_traces(&ranges, &traces);
+    let parsed_traces = project_token_traces(parsed_tokens, &ranges, &traces);
     let render_tokens = if map_complete {
         parsed_tokens.as_slice()
     } else {
@@ -213,7 +215,7 @@ pub(crate) fn expand_report_from_spliced(
     );
     // Compare with an independently proven active-include projection. Matching
     // lexemes alone is insufficient: kinds and order must agree too. It uses
-    // the same expander, without another parser or any diagnostic changes.
+    // the same expander and parser; each projection is parsed once.
     let verified = if let Some(NavigationSource::Mapped { text, segments }) = written_navigation {
         let text = normalize_newlines(text);
         let navigation_lines: Vec<(Span, u32)> = segments
@@ -235,26 +237,44 @@ pub(crate) fn expand_report_from_spliced(
             && actual.iter().zip(&tokens).all(|(actual, legacy)| {
                 actual.kind == legacy.kind && actual.text(&text) == legacy.text(&source)
             });
-        matches.then_some((actual, actual_traces, actual_arena, segments.as_slice()))
+        if matches {
+            // Raw terminators and Dynare strings can split or join ordinary
+            // lexer tokens. Compare completed parser streams, then use the
+            // independently parsed projection's exact written positions.
+            let (actual_model, actual_ranges) = parse_expanded(&text, actual);
+            let parsed_matches = actual_model.expanded_tokens.len() == parsed_tokens.len()
+                && actual_model.expanded_tokens.iter().zip(parsed_tokens).all(
+                    |(actual, legacy)| {
+                        actual.kind == legacy.kind && actual.text(&text) == legacy.text(&source)
+                    },
+                );
+            let actual_traces = project_token_traces(
+                &actual_model.expanded_tokens,
+                &actual_ranges,
+                &actual_traces,
+            );
+            parsed_matches.then_some((
+                actual_model.expanded_tokens,
+                actual_traces,
+                actual_arena,
+                segments.as_slice(),
+            ))
+        } else {
+            None
+        }
     } else {
         None
     };
-    let projected_navigation = verified.as_ref().and_then(|(actual, traces, _, _)| {
-        project_token_positions(parsed_tokens, &ranges, &tokens, actual)
-            .map(|tokens| (tokens, project_token_traces(&ranges, traces)))
-    });
     let navigation_complete = map_complete
         && if written_navigation.is_some() {
-            projected_navigation.is_some()
+            verified.is_some()
         } else {
             macro_navigation_complete
         };
     let (navigation_tokens, navigation_traces, navigation_arena, navigation_map) = verified
         .as_ref()
-        .and_then(|(_, _, arena, map)| {
-            projected_navigation.as_ref().map(|(tokens, traces)| {
-                (tokens.as_slice(), traces.as_slice(), arena.as_slice(), *map)
-            })
+        .map(|(tokens, traces, arena, map)| {
+            (tokens.as_slice(), traces.as_slice(), arena.as_slice(), *map)
         })
         .unwrap_or((parsed_tokens.as_slice(), &parsed_traces, &arena, map));
     let navigation = if navigation_complete {
@@ -438,13 +458,20 @@ pub(crate) fn expand_report_from_spliced(
 /// A joined token has only the macro context shared by all its source tokens.
 /// This cannot turn a string crossing a loop boundary into one loop occurrence.
 fn project_token_traces(
+    tokens: &[Token],
     ranges: &crate::parser::EquationTokenRanges,
     traces: &[TokenTrace],
 ) -> Vec<TokenTrace> {
     ranges
         .original_tokens
         .iter()
-        .map(|range| {
+        .zip(tokens)
+        .map(|(range, token)| {
+            if let Some(emitted) = &token.emitted {
+                return TokenTrace {
+                    frames: emitted.source.common_frames(emitted.span),
+                };
+            }
             let mut frames = traces[range.start].frames.clone();
             for trace in &traces[range.start + 1..range.end] {
                 let shared = frames
@@ -455,39 +482,6 @@ fn project_token_traces(
                 frames.truncate(shared);
             }
             TokenTrace { frames }
-        })
-        .collect()
-}
-
-/// Reproject split and joined tokens onto the independently verified include
-/// stream. Each endpoint uses its own original token, including split suffixes.
-fn project_token_positions(
-    parsed: &[Token],
-    ranges: &crate::parser::EquationTokenRanges,
-    original: &[Token],
-    verified: &[Token],
-) -> Option<Vec<Token>> {
-    let source_end = verified
-        .iter()
-        .map(|token| token.span.end)
-        .max()
-        .unwrap_or(0) as i64;
-    parsed
-        .iter()
-        .zip(&ranges.original_tokens)
-        .map(|(token, range)| {
-            let first = range.start;
-            let last = range.end - 1;
-            let start = verified[first].span.start as i64 + token.span.start as i64
-                - original[first].span.start as i64;
-            let end = verified[last].span.end as i64 + token.span.end as i64
-                - original[last].span.end as i64;
-            if start < 0 || end < start || end > source_end {
-                return None;
-            }
-            let mut projected = token.clone();
-            projected.span = Span::new(start as usize, end as usize);
-            Some(projected)
         })
         .collect()
 }

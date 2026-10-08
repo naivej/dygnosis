@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::diagnostic::{Diagnostic, RelatedDiagnostic, Severity};
 use crate::expr::{ExprId, ExprKind};
 use crate::intern::Name;
-use crate::model::{Equation, Model, SymbolContext};
+use crate::model::{Model, SymbolContext};
 use crate::span::Span;
 
 pub fn check_d_block(model: &Model) -> Vec<Diagnostic> {
@@ -22,6 +22,31 @@ pub fn check_d_block(model: &Model) -> Vec<Diagnostic> {
     out.extend(check_outside_assignment_roles(model));
     out.extend(check_model_expression_roles(model));
     out.extend(check_ss_rhs_roles(model));
+    let mut existing = HashMap::new();
+    for row in &out {
+        *existing
+            .entry((row.span, row.code.clone(), row.message.clone()))
+            .or_insert(0usize) += 1;
+    }
+    let mut captured = HashMap::new();
+    for &(name, span, context) in &model.outside_expression_uses {
+        if let Some(row) = outside_expression_role_refusal(model, name, span, context) {
+            // Retain executed-copy counts where legacy role readers collapse
+            // equal written spans. Other open/removed/heterogeneous readers
+            // keep their existing ownership.
+            if !matches!(row.code.as_str(), "E279" | "E282" | "E294") {
+                continue;
+            }
+            let key = (row.span, row.code.clone(), row.message.clone());
+            let count = captured.entry(key.clone()).or_insert(0usize);
+            *count += 1;
+            // Overlapping readers describe the same executions. Retain the
+            // larger count; equal written spans can be independent macro copies.
+            if *count > existing.get(&key).copied().unwrap_or(0) {
+                out.push(row);
+            }
+        }
+    }
     out
 }
 
@@ -57,36 +82,42 @@ fn check_histval_lag_dup(model: &Model) -> Vec<Diagnostic> {
 }
 
 fn check_planner_lead_local(model: &Model) -> Vec<Diagnostic> {
-    let Some(id) = model.planner_objective_expr else {
+    if model.planner_objective_expr.is_none() {
         return Vec::new();
-    };
+    }
     let span = model
         .planner_objective_span
         .unwrap_or(Span { start: 0, end: 1 });
-    let locals: HashSet<Name> = model
-        .equations
-        .iter()
-        .filter(|eq| eq.is_local)
-        .filter_map(|eq| lhs_ident(model, eq))
-        .collect();
     let mut out = Vec::new();
-    let mut saw_lead = false;
-    for r in model.exprs.walk_idents(id) {
-        if !saw_lead && r.timing != 0 {
+    for r in model
+        .model_expression_uses
+        .iter()
+        .filter(|use_| use_.command == "planner_objective")
+    {
+        let kind = model.symbol_kind_in_context(r.name, r.context);
+        if matches!(
+            kind,
+            Some("external_function" | "mod_file_local" | "excluded")
+        ) || kind == Some("varexo_det") && r.timing != 0
+        {
+            continue;
+        }
+        if r.timing != 0 {
             out.push(err(
                 span,
                 "E252",
                 "Leads and lags on variables are forbidden in 'planner_objective'.",
             ));
-            saw_lead = true;
+            break;
         }
-        if locals.contains(&r.name) {
+        if kind == Some("model_local_variable") {
             let name = model.name(r.name);
             out.push(err(
                 span,
                 "E253",
                 format!("Model local variable {name} cannot be used in 'planner_objective'."),
             ));
+            break;
         }
     }
     out
@@ -279,7 +310,8 @@ fn check_model_expression_roles(model: &Model) -> Vec<Diagnostic> {
             Some("mod_file_local") => Some(("E281", crate::model::mod_file_local_in_model_message(name))),
             Some("epilogue") if usage.command != "epilogue" => Some(("E294", format!("Symbol '{name}' cannot be used outside the epilogue block."))),
             None if usage.command == "occbin_constraints" => Some(("E182", format!("Exogenous variable {name} cannot be used in 'occbin_constraints'."))),
-            None if matches!(usage.command, "model_replace" | "planner_objective" | "trend_var" | "log_trend_var" | "var") => Some(("E020", format!("Undeclared identifier '{name}' in equation. Fix: add '{name}' to a var, varexo, or parameters declaration."))),
+            None if matches!(usage.command, "model_replace" | "planner_objective" | "trend_var" | "log_trend_var" | "var")
+                && !model.constructor_refused_statements.contains(&usage.statement_id) => Some(("E020", format!("Undeclared identifier '{name}' in equation. Fix: add '{name}' to a var, varexo, or parameters declaration."))),
             _ => None,
         };
         if let Some((code, message)) = refusal {
@@ -309,6 +341,9 @@ pub(crate) fn outside_expression_role_refusal(
     span: Span,
     context: SymbolContext,
 ) -> Option<Diagnostic> {
+    if model.outside_expression_symbol_is_valid(name, context) {
+        return None;
+    }
     let spelling = model.name(name);
     let (code, message) = if model.heterogeneous_in_context(name, context) {
         ("E463", format!("Symbol '{spelling}' cannot be used outside model declaration, because it is heterogeneous."))
@@ -323,14 +358,6 @@ pub(crate) fn outside_expression_role_refusal(
     }
     };
     Some(err(span, code, message))
-}
-
-fn lhs_ident(model: &Model, eq: &Equation) -> Option<Name> {
-    let id = eq.lhs_expr?;
-    match &model.exprs.get(id).kind {
-        ExprKind::Ident { name, .. } => Some(*name),
-        _ => None,
-    }
 }
 
 fn expr_has_dynamics(model: &Model, id: ExprId) -> bool {

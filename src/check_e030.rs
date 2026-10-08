@@ -71,7 +71,7 @@ fn check_model_local_dups(model: &Model) -> Vec<Diagnostic> {
     for tree in crate::check_e020::equation_trees(model) {
         let mut seen = HashMap::new();
         for eq in tree {
-            if !eq.model_local {
+            if !eq.model_local || !model.model_local_action_attempted(eq) {
                 continue;
             }
             let Some(id) = eq.lhs_expr else {

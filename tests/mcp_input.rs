@@ -71,12 +71,106 @@ impl Drop for McpWire {
     }
 }
 
+#[test]
+fn constructor_refusals_use_unsaved_include_text_and_clear_on_decimal_denominators() {
+    let mut wire = McpWire::new();
+    let root = "var y; varexo e; parameters p; p=1; model;\n@#include \"body.inc\"\nend;";
+    let mut args = json!({"active_file": "main.mod", "file_content": root,
+        "files": {"main.mod": "", "body.inc": "y=e+0*(1/(p^0-1));"}});
+    let decode = |reply: Value| -> Vec<Value> {
+        assert!(reply.get("error").is_none(), "{reply}");
+        serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+    };
+    let rows = decode(wire.call("dynare_diagnose", args.clone()));
+    let errors: Vec<_> = rows.iter().filter(|row| row["code"] == "E278").collect();
+    assert_eq!(errors.len(), 1, "{rows:?}");
+    assert_eq!(errors[0]["file"], "body.inc");
+    assert_eq!(errors[0]["severity"], "ERROR");
+    assert_eq!(errors[0]["message"], "Division by zero when forming (1)/(0); denominator simplified to 0 (possibly after substituting a variable set to 0).");
+    assert_eq!(errors[0]["line"], 1);
+    assert_eq!(errors[0]["column"], 8);
+    assert_eq!(errors[0]["end_column"], 17);
+    assert!(
+        rows.iter()
+            .all(|row| !matches!(row["code"].as_str(), Some("E021" | "W022" | "W042"))),
+        "{rows:?}"
+    );
+    args["files"]["body.inc"] = json!("y=e+1/0.0;");
+    let rows = decode(wire.call("dynare_diagnose", args));
+    assert!(rows.iter().all(|row| row["code"] != "E278"), "{rows:?}");
+    assert!(rows.iter().any(|row| row["code"] == "W022"), "{rows:?}");
+}
+
 fn arguments(name: &str) -> Value {
     match name {
         "dynare_find_references" => json!({"symbol": "y"}),
         "dynare_rename" => json!({"old_name": "y", "new_name": "output"}),
         _ => json!({}),
     }
+}
+
+#[test]
+fn empty_steady_state_and_verbatim_boundaries_keep_unsaved_owners_on_the_wire() {
+    let mut wire = McpWire::new();
+    let root = "var y; varexo e; model; y=e; end;\n@#include \"body.inc\"\n";
+    let mut args = json!({"active_file": "main.mod", "file_content": root,
+        "files": {"main.mod": "old disk contents", "body.inc": "steady_state_model; end;"}});
+    let decode = |reply: Value| -> Vec<Value> {
+        assert!(reply.get("error").is_none(), "{reply}");
+        serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+    };
+    let rows = decode(wire.call("dynare_diagnose", args.clone()));
+    let errors: Vec<_> = rows.iter().filter(|row| row["code"] == "E001").collect();
+    assert_eq!(errors.len(), 1, "{rows:?}");
+    assert_eq!(errors[0]["file"], "body.inc");
+    assert_eq!(errors[0]["message"], "syntax error, unexpected END");
+    assert_eq!(errors[0]["severity"], "ERROR");
+    assert_eq!(
+        (
+            errors[0]["line"].as_u64(),
+            errors[0]["column"].as_u64(),
+            errors[0]["end_column"].as_u64()
+        ),
+        (Some(1), Some(21), Some(24))
+    );
+    args["files"]["body.inc"] = json!("steady_state_model; y=0; end;");
+    let rows = decode(wire.call("dynare_diagnose", args.clone()));
+    assert!(
+        rows.iter().all(|row| row["severity"] != "ERROR"),
+        "{rows:?}"
+    );
+
+    args["files"]["body.inc"] =
+        json!("verbatim;\nparameters phantom;\nmodel;\ny={1};\nend\nend;\n");
+    args["file_content"] = json!(format!("{root}shocks; var e=1; end;"));
+    let rows = decode(wire.call("dynare_diagnose", args.clone()));
+    assert!(
+        rows.iter().all(|row| row["severity"] != "ERROR"),
+        "{rows:?}"
+    );
+    let reply = wire.call("dynare_model_info", args.clone());
+    assert!(reply.get("error").is_none(), "{reply}");
+    let info: Value =
+        serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        info["n_parameters"], 0,
+        "raw text must not declare phantom: {info}"
+    );
+    assert_eq!(
+        info["n_equations"], 1,
+        "raw text must not create an equation: {info}"
+    );
+    args["file_content"] = json!(format!("{root}shocks; var e; end;"));
+    let rows = decode(wire.call("dynare_diagnose", args));
+    let error = rows.iter().find(|row| row["code"] == "E001").unwrap();
+    assert_eq!(
+        error["message"],
+        "syntax error, unexpected END, expecting PERIODS"
+    );
+    assert!(
+        error["file"].is_null(),
+        "the real refused row belongs to root: {error}"
+    );
 }
 
 #[test]
