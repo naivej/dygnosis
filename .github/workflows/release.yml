@@ -1,5 +1,5 @@
 # Cross-platform compatibility for a version tag, then a GitHub Release of the
-# tested engine binaries and VSIX files. Marketplace publication stays local.
+# tested engine binaries and VSIX files. Marketplace publication is marketplace.yml.
 #
 # Usage:
 #   git tag v0.12.0

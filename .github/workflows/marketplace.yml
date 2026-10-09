@@ -1,0 +1,86 @@
+# Publish the six VSIX files already attached to one GitHub Release.
+# The Release exists only after the six-target Release workflow passes.
+# Sign-in uses the marketplace environment's Microsoft Entra identity.
+#
+# Usage: Actions → Marketplace → Run workflow
+# Leave the tag empty to publish the latest release, or enter vX.Y.Z.
+
+name: Marketplace
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Product tag, for example v0.11.13. Empty publishes the latest release.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: marketplace-${{ inputs.release_tag || 'latest' }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    environment: marketplace
+    defaults:
+      run:
+        working-directory: editors/vscode
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Download the six VSIX files from the GitHub Release
+        id: packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$RELEASE_TAG" ]]; then
+            RELEASE_TAG="$(gh release view --json tagName --jq .tagName)"
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a vMAJOR.MINOR.PATCH tag, or an empty tag for the latest release." >&2
+            exit 1
+          fi
+          destination="$RUNNER_TEMP/marketplace"
+          mkdir -p "$destination"
+          gh release download "$RELEASE_TAG" --dir "$destination" --pattern 'dygnosis-*.vsix' --pattern 'SHA256SUMS'
+          for target in win32-x64 win32-arm64 darwin-x64 darwin-arm64 linux-x64 linux-arm64; do
+            count="$(find "$destination" -maxdepth 1 -type f -name "dygnosis-*-${target}.vsix" | wc -l)"
+            if [[ "$count" -ne 1 ]]; then
+              echo "Expected one VSIX for ${target}, found ${count}." >&2
+              exit 1
+            fi
+          done
+          (
+            cd "$destination"
+            grep '\.vsix$' SHA256SUMS | sha256sum -c -
+          )
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "package_dir=$destination" >> "$GITHUB_OUTPUT"
+      - name: Sign in to Microsoft Entra
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Publish the six VSIX files
+        env:
+          PACKAGE_DIR: ${{ steps.packages.outputs.package_dir }}
+        run: |
+          set -euo pipefail
+          mapfile -t packages < <(find "$PACKAGE_DIR" -maxdepth 1 -type f -name 'dygnosis-*.vsix' | sort)
+          test "${#packages[@]}" -eq 6
+          npx --no-install vsce publish --packagePath "${packages[@]}" --skip-duplicate --azure-credential
