@@ -14,7 +14,7 @@ export interface DiffPreferences {
   expansion: "changes" | "all" | "none";
   sections: DiffSection[]; changeKinds: ChangeKind[];
 }
-export interface PresentationState { layout: DiffPreferences["layout"]; expansion: DiffPreferences["expansion"]; sections: DiffSection[]; changeKinds: ChangeKind[]; search: string; scope: string; expanded: Record<string, boolean>; selected: string | null; sourceSelected: string | null; tab: "model" | "source" | "coverage"; capture: string }
+export interface PresentationState { layout: DiffPreferences["layout"]; expansion: DiffPreferences["expansion"]; sections: DiffSection[]; changeKinds: ChangeKind[]; customSections: DiffSection[]; customChangeKinds: ChangeKind[]; search: string; scope: string; expanded: Record<string, boolean>; selected: string | null; sourceSelected: string | null; tab: "model" | "source" | "coverage"; capture: string }
 export interface DiffChoices extends PresentationState { presentation: "focusedReview" | "changeList"; presentations: Partial<Record<"focusedReview" | "changeList", PresentationState>> }
 export interface DiffTarget {
   occurrence_id: string; domain: string; dimension: string | null; written_locations: Location[];
@@ -161,7 +161,12 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
   for (const [index, row] of details.semantic.rows.entries()) {
     const source = navigation.get(row.pointer), legacy = rowMap.get(row.pointer);
     if (!legacy && row.pointer !== `/semantic/rows/${index}`) malformed();
-    if (!source || legacy && (legacy.kind !== row.change || section(row) !== legacy.section && row.family !== "shocks") || !legacy && (source.kind !== "semantic" || source.family !== row.family || source.name !== row.name)) malformed();
+    // Duplicate-name equations retain legacy add/remove pointers. Their typed
+    // detail refines those same one-sided occurrences to Unpaired.
+    const unpairedEquation = legacy && row.family === "equations" && row.change === "unpaired" &&
+      (legacy.kind === "added" || legacy.kind === "removed") &&
+      (legacy.before === null) === (row.before === null) && (legacy.after === null) === (row.after === null);
+    if (!source || legacy && (legacy.kind !== row.change && !unpairedEquation || section(row) !== legacy.section && row.family !== "shocks") || !legacy && (source.kind !== "semantic" || source.family !== row.family || source.name !== row.name)) malformed();
     for (const side of ["before", "after"] as const) {
       if (!row[side] && source[side] || row[side] && source[side] && (source[side].domain !== (row[side].scope.dimension === null ? "aggregate" : "heterogeneous") || source[side].dimension !== row[side].scope.dimension)) malformed();
       for (const location of source[side]?.written_locations ?? []) {
@@ -227,6 +232,8 @@ export function normalizeChoices(value: unknown, defaults: DiffPreferences): Dif
     layout: ["auto", "sideBySide", "stacked"].includes(String(row.layout)) ? row.layout as DiffPreferences["layout"] : defaults.layout,
     expansion: ["changes", "all", "none"].includes(String(row.expansion)) ? row.expansion as DiffPreferences["expansion"] : defaults.expansion,
     sections: list(row.sections, allDiffSections, defaults.sections), changeKinds: list(row.changeKinds, changeKinds, defaults.changeKinds),
+    customSections: list(row.customSections, allDiffSections, list(row.sections, allDiffSections, defaults.sections)),
+    customChangeKinds: list(row.customChangeKinds, changeKinds, list(row.changeKinds, changeKinds, defaults.changeKinds)),
     search: typeof row.search === "string" ? row.search.slice(0, 10000) : "", scope: typeof row.scope === "string" ? row.scope.slice(0, 1000) : "all",
     expanded: record(row.expanded) ? Object.fromEntries(Object.entries(row.expanded).filter(([key, value]) => key.length <= 1000 && typeof value === "boolean")) as Record<string, boolean> : {},
     selected: typeof row.selected === "string" ? row.selected.slice(0, 1000) : null, sourceSelected: typeof row.sourceSelected === "string" ? row.sourceSelected.slice(0, 1000) : null,

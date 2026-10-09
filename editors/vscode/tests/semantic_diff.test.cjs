@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { parseSemantic, semanticCapability, semanticFamilies } = require("../out/semantic_view");
-const { parseDiff, normalizeChoices, allDiffSections, changeKinds } = require("../out/diff_view");
+const { parseDiff, parseSnapshotDiff, normalizeChoices, allDiffSections, changeKinds } = require("../out/diff_view");
 const { createHost, captured, deferred, flush, load, working, comparison, anchorUri, baselineUri } = require("./helpers/changes_host.cjs");
 const roots = { before: "file:///before/main.mod", after: "file:///after/main.mod" };
 const scope = { domain: "global", dimension: null, block: null };
@@ -37,6 +37,55 @@ function response() {
   result.sources = registry; return result;
 }
 const defaults = { presentation: "focusedReview", layout: "auto", expansion: "changes", sections: [...allDiffSections], changeKinds: [...changeKinds] };
+
+// The real Working/Working LSP producer keeps duplicate-name occurrences in
+// legacy add/remove arrays and refines their semantic owners to Unpaired.
+function unpairedEquations(dimension = null) {
+  const r = response(), prefix = dimension === null ? "" : "/heterogeneous_equations/0";
+  const owner = dimension === null ? r : { dimension, added: [], removed: [], changed: [], unmatched_same_name: [] };
+  if (dimension !== null) r.heterogeneous_equations.push(owner);
+  const suffix = dimension === null ? "_equations" : "", equationScope = { domain: dimension === null ? "aggregate" : "heterogeneous", dimension, block: null };
+  r.semantic.rows = []; r.semantic.references = []; r.navigation.rows = [];
+  for (const [kind, activeSide, text, index] of [["removed", "before", "k = y", 0], ["removed", "before", "x = 1", 1], ["added", "after", "k = y+1", 0], ["added", "after", "z = 2", 1]]) {
+    const equation = { domain: equationScope.domain, dimension, index: index + 1, name: "Ambiguous", tags: { name: "Ambiguous" }, text };
+    owner[kind + suffix].push(equation);
+    const pointer = `${prefix}/${kind}${suffix}/${index}`, target = { occurrence_id: activeSide + ":" + index, domain: equationScope.domain, dimension, written_locations: [{ uri: roots[activeSide], range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } } }] };
+    const own = { name: "Ambiguous", scope: equationScope, occurrence: 48 + index, equation_index: index + 1, context: { kind: "block", name: "model", execution_order: 4, scope: equationScope, pointer: null } };
+    r.semantic.rows.push({ pointer, family: "equations", change: "unpaired", name: "Ambiguous", count_unit: "accepted_occurrence", facets: ["expression"], before: activeSide === "before" ? own : null, after: activeSide === "after" ? own : null,
+      fields: [{ name: "expression", label: "Expression", before: activeSide === "before" ? value(text) : { state: "absent", value: null }, after: activeSide === "after" ? value(text) : { state: "absent", value: null }, changed: true, comparison_availability: "complete", numeric_difference: null }],
+      expressions: [{ field: "expression", before: activeSide === "before" ? { text, runs: [{ text, role: "unchanged" }] } : null, after: activeSide === "after" ? { text, runs: [{ text, role: "unchanged" }] } : null, highlight_basis: "unpaired_text_only", availability: "complete", reason: null }],
+      timing: [], references: [], limits: [{ code: "equation_correspondence_unpaired", reason: "Text-only highlights do not establish equation, reference or timing correspondence.", owner: "semantic_equations", omitted: null }] });
+    r.navigation.rows.push({ id: pointer, kind: "equation", before: activeSide === "before" ? target : null, after: activeSide === "after" ? target : null });
+    r.navigation.rows.push({ id: `${prefix}/unmatched_same_name/0/${kind}/${index}`, kind: "equation", before: activeSide === "before" ? target : null, after: activeSide === "after" ? target : null });
+  }
+  owner.unmatched_same_name.push({ name: "Ambiguous", dimension, removed: owner["removed" + suffix], added: owner["added" + suffix] });
+  return r;
+}
+
+test("real producer Unpaired equation refinements keep legacy owners and separate side appearances", () => {
+  for (const dimension of [null, "households"]) {
+    const r = unpairedEquations(dimension), expected = dimension === null ? "aggregateEquations" : "heterogeneousEquations";
+    const parsed = parseDiff(r, roots.before, roots.after, true);
+    assert.equal(parsed.rows.length, 8); assert.ok(parsed.rows.every(row => row.kind === "unpaired" && row.section === expected));
+    assert.equal(parsed.rows.filter(row => row.semantic).length, 4);
+    for (const row of parsed.rows) assert.notEqual(row.before === null, row.after === null);
+    const snapshot = structuredClone(r), ids = { before: "before", after: "after" }, inputs = { before: { root_file: roots.before, revision: "old" }, after: { root_file: roots.after, revision: "new" } };
+    for (const side of ["before", "after"]) {
+      snapshot.navigation[side] = { input_id: ids[side], ...inputs[side], complete: true };
+      snapshot.source_changes.files[0][side].input_id = ids[side];
+      for (const row of snapshot.navigation.rows) if (row[side]) row[side] = { ...row[side], written_locations: row[side].written_locations.map(location => ({ input_id: ids[side], file_key: location.uri, range: location.range })) };
+    }
+    const projected = parseSnapshotDiff({ state: "result", diff: snapshot, navigation: { ...snapshot.navigation, schema_version: 2 }, sources: registry }, ids, (side, key) => key, inputs, true);
+    assert.deepEqual(projected.rows.map(row => [row.id, row.kind]), parsed.rows.map(row => [row.id, row.kind]));
+  }
+});
+
+test("Unpaired refinement cannot replace another family or reverse an equation owner side", () => {
+  for (const mutate of [r => r.semantic.rows[0].family = "symbols", r => { r.semantic.rows[0].after = r.semantic.rows[0].before; r.semantic.rows[0].before = null; }, r => r.semantic.rows[0].change = "added"]) {
+    const r = unpairedEquations(); mutate(r);
+    assert.throws(() => parseDiff(r, roots.before, roots.after, true), /unsupported comparison/);
+  }
+});
 
 test("v1 retains typed values, exact runs, field limits and source registry identities", () => {
   const parsed = parseSemantic(fixture(), { before: null, after: null }, registry, true);
@@ -184,11 +233,11 @@ class Element {
 }
 const descendants = element => [element, ...element.children.flatMap(descendants)];
 function webview() {
-  const elements = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "counts", "results", "refresh", "presentation", "modelTab", "sourceTab", "coverageTab", "help", "rootTextDiff"].map(id => [id, new Element(id)]));
+  const elements = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "counts", "results", "refresh", "presentation", "modelTab", "sourceTab", "coverageTab", "help", "rootTextDiff", "moreActions", "filterTools", "kindFilter", "sectionFilter", "scopeFilter", "choosePath"].map(id => [id, new Element(id)]));
   const events = {}, posted = [], states = [], snapshot = parseDiff(response(), roots.before, roots.after, true);
   const sandbox = { document: { getElementById: id => elements[id], createElement: tag => new Element(tag) }, window: { addEventListener: (name, callback) => events[name] = callback }, acquireVsCodeApi: () => ({ getState: () => undefined, setState: value => states.push(structuredClone(value)), postMessage: value => posted.push(value) }) };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../media/diff_view.js"), "utf8"), sandbox);
-  const render = (extra = {}) => events.message({ data: { ...snapshot, type: "render", key: "view", capture: "capture1", token: 3, before: roots.before, after: roots.after, status: "ready", message: "Current comparison", choices: normalizeChoices({}, defaults), defaults, ...extra } });
+  const render = (extra = {}) => events.message({ data: { ...snapshot, type: "render", key: "view", capture: "capture1", token: 3, status: "ready", message: "Current comparison", choices: normalizeChoices({}, defaults), defaults, ...extra, before: typeof extra.before === "string" ? extra.before : roots.before, after: typeof extra.after === "string" ? extra.after : roots.after } });
   return { elements, posted, states, render };
 }
 test("both presentations safely render typed fields and preserve independent filters/layout/focus", () => {
@@ -203,13 +252,94 @@ test("both presentations safely render typed fields and preserve independent fil
   assert.equal(env.elements.search.value, "rho"); assert.equal(env.elements.layout.value, "stacked");
   assert.equal(env.states.at(-1).choices.presentations.changeList.search, "0.9");
 });
+test("accepted composition has compact selects, disclosed actions, input cards and four plain marks", () => {
+  const { vscode } = createHost(), { diffHtml } = load("diff", vscode);
+  const html = diffHtml({ cspSource: "vscode-webview:", asWebviewUri: uri => uri }, vscode.Uri.file("/extension/media"));
+  assert.doesNotMatch(html, /fieldset|type="checkbox"|editor-tab/);
+  assert.match(html, /<select id="kinds"/); assert.match(html, /<select id="sections"/);
+  assert.match(html, /<details id="moreActions"[\s\S]*<summary>More actions<\/summary>[\s\S]*id="rootTextDiff"[\s\S]*id="help"/);
+  assert.ok(html.indexOf('id="presentation"') < html.indexOf('id="tabs"'));
+  assert.ok(html.indexOf('id="tabs"') < html.indexOf('id="filterTools"'));
+  assert.match(html, /aria-label="Change colors"/);
+  const env = webview(); env.render({ before: "C:/models/root.mod · Working", after: "tree/root.mod @ main · aaaaaaa" });
+  assert.equal(env.elements.models.children[0].className, "input-side");
+  assert.equal(env.elements.models.children[0].title, "C:/models/root.mod · Working");
+  assert.doesNotMatch(env.elements.models.textContent, /C:\/models/); assert.match(env.elements.models.textContent, /root.mod/);
+  assert.equal(descendants(env.elements.results).some(element => element.className === "badge"), false);
+  const css = fs.readFileSync(path.join(__dirname, "../media/diff_view.css"), "utf8");
+  assert.match(css, /grid-template-columns: 245px minmax\(0, 1fr\)/);
+  assert.match(css, /^body \{\s+--line:/); assert.doesNotMatch(css, /:root/);
+  assert.match(css, /--change: var\(--vscode-dynare-diff\\\.changedForeground, var\(--vscode-dynare-diff-changedForeground, var\(--vscode-focusBorder\)\)\)/);
+  assert.match(css, /\.change-mark\.changed\s*\{\s*color: var\(--change\)/);
+});
+test("compact filters preserve saved multi-selections through switching, reload, refresh and split views", () => {
+  const env = webview(), other = webview(), initial = normalizeChoices({ sections: ["priors", "commands"], changeKinds: ["changed", "unpaired"] }, defaults);
+  env.render({ choices: initial }); other.render();
+  assert.equal(env.elements.sections.value, "saved"); assert.equal(env.elements.kinds.value, "saved");
+  assert.match(env.elements.sections.textContent, /Saved selection \(2\)/);
+  env.elements.kinds.value = "removed"; env.elements.kinds.fire("change"); assert.match(env.elements.results.textContent, /No rows match/);
+  env.elements.kinds.value = "saved"; env.elements.kinds.fire("change"); assert.match(env.elements.results.textContent, /Prior mean/);
+  env.elements.sections.value = "commands"; env.elements.sections.fire("change");
+  env.elements.sections.value = "saved"; env.elements.sections.fire("change");
+  env.elements.presentation.value = "changeList"; env.elements.presentation.fire("change");
+  env.elements.sections.value = "symbols"; env.elements.sections.fire("change");
+  env.elements.presentation.value = "focusedReview"; env.elements.presentation.fire("change");
+  assert.equal(env.elements.sections.value, "saved");
+  const restored = normalizeChoices(env.states.at(-1).choices, defaults); env.render({ choices: restored, capture: "capture2" });
+  assert.deepEqual(env.states.at(-1).choices.sections, ["priors", "commands"]);
+  assert.deepEqual(env.states.at(-1).choices.customChangeKinds, ["changed", "unpaired"]);
+  assert.equal(env.states.at(-1).choices.presentations.changeList.sections[0], "symbols");
+  assert.equal(other.elements.sections.value, "all"); assert.equal(other.elements.kinds.value, "all");
+});
+test("collapsed Change list summaries retain facets and scope in text and accessible names", () => {
+  for (const dimension of [null, "households"]) {
+    const env = webview(), snapshot = parseDiff(unpairedEquations(dimension), roots.before, roots.after, true);
+    env.render({ ...snapshot, choices: normalizeChoices({ presentation: "changeList", expansion: "none" }, defaults) });
+    const rows = descendants(env.elements.results).filter(element => element.className === "row-summary unpaired");
+    assert.equal(rows.length, 8);
+    const expectedScope = dimension === null ? "Aggregate" : "Dimension: households";
+    for (const row of rows) {
+      assert.equal(row.open, false);
+      const summary = row.children[0], owner = snapshot.rows.find(item => item.id === row.attributes["data-row-id"]);
+      const subtitle = summary.children.find(element => element.className === "row-subtitle");
+      assert.equal(subtitle.textContent, (owner.semantic ? "Expression" : owner.group) + " · " + expectedScope);
+      assert.equal(summary.attributes["aria-label"], "Unpaired " + owner.label + ", " + expectedScope);
+    }
+  }
+});
+test("empty filters have a clear route to All and irrelevant controls hide by tab", () => {
+  const env = webview(); env.render({ choices: normalizeChoices({ sections: [], changeKinds: [] }, defaults) });
+  assert.match(env.elements.sections.textContent, /No sections selected/); assert.match(env.elements.kinds.textContent, /No kinds selected/);
+  env.elements.sections.value = "all"; env.elements.sections.fire("change"); env.elements.kinds.value = "all"; env.elements.kinds.fire("change");
+  assert.match(env.elements.results.textContent, /Prior mean/);
+  env.elements.sourceTab.fire("click"); assert.equal(env.elements.scopeFilter.hidden, true); assert.equal(env.elements.sectionFilter.hidden, true); assert.equal(env.elements.filterTools.hidden, false);
+  env.elements.coverageTab.fire("click"); assert.equal(env.elements.filterTools.hidden, true);
+  env.render(); assert.doesNotMatch(env.elements.sections.textContent, /Saved selection/); assert.doesNotMatch(env.elements.kinds.textContent, /Saved selection/);
+});
+test("More actions forwards capture tokens and paths stay in the relevant failure state", () => {
+  const env = webview(); env.render(); env.elements.moreActions.open = true;
+  env.elements.rootTextDiff.fire("click"); assert.equal(env.elements.moreActions.open, false);
+  assert.equal(env.posted.at(-1).type, "rootTextDiff"); assert.equal(env.posted.at(-1).token, 3);
+  const summary = new Element("summary"); env.elements.moreActions.querySelector = () => summary;
+  env.elements.moreActions.open = true; env.elements.moreActions.fire("keydown", { key: "Escape" }); assert.equal(env.elements.moreActions.open, false); assert.equal(summary.focused, true);
+  assert.equal(env.elements.choosePath.hidden, true); env.render({ status: "failure", message: "Before model path is absent" }); assert.equal(env.elements.choosePath.hidden, false);
+  env.render({ status: "failure", message: "Unsupported comparison detail" }); assert.equal(env.elements.choosePath.hidden, true);
+});
+test("long retained values disclose full facts without covering readable expressions", () => {
+  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), field = snapshot.rows[0].semantic.fields[0];
+  field.before = { state: "present", value: { kind: "list", value: Array.from({ length: 8 }, () => ({ kind: "record", value: { name: { kind: "text", value: "retained_expression_node_with_a_long_name" } } })) } };
+  env.render(snapshot);
+  const detail = descendants(env.elements.results).find(element => element.className === "field-value"); assert.ok(detail); assert.notEqual(detail.open, true);
+  assert.match(detail.textContent, /8 retained items · show values/); assert.match(detail.textContent, /retained_expression_node/);
+  assert.match(env.elements.results.textContent, /0.9/);
+});
 test("source/coverage tabs keep separate counts, hunks, limits and keyboard navigation", () => {
   const env = webview(); env.render(); env.elements.sourceTab.fire("click");
   assert.match(env.elements.counts.textContent, /1 of 1 captured files shown · 1 source hunks/);
   assert.match(env.elements.results.textContent, /\/\/ old/); assert.match(env.elements.results.textContent, /Captured file text diff/);
-  assert.ok(descendants(env.elements.results).some(element => element.className === "badge" && element.textContent.includes("Changed")));
+  assert.ok(descendants(env.elements.results).some(element => element.className === "change-mark changed" && element.textContent === "~"));
   env.elements.presentation.value = "changeList"; env.elements.presentation.fire("change"); env.elements.sourceTab.fire("click");
-  assert.ok(descendants(env.elements.results).some(element => element.tag === "details" && element.className === "changed"));
+  assert.ok(descendants(env.elements.results).some(element => element.tag === "details" && element.className === "row-summary changed"));
   env.elements.sourceTab.fire("keydown", { key: "ArrowRight", preventDefault() {} });
   assert.equal(env.elements.coverageTab.focused, true); assert.match(env.elements.results.textContent, /Effective inherited prior/);
   assert.match(env.elements.results.textContent, /not captured/);
@@ -239,6 +369,7 @@ test("field limits do not color budget-unavailable values and color roles have t
   assert.equal(descendants(env.elements.results).some(e => e.className === "token added" || e.className === "token removed"), false);
   const css = fs.readFileSync(path.join(__dirname, "../media/diff_view.css"), "utf8");
   assert.match(css, /diffEditor-removedTextBackground/); assert.match(css, /text-decoration: underline/); assert.doesNotMatch(css, /line-through/);
+  assert.doesNotMatch(css.match(/\.change-mark\.removed\s*\{([^}]+)\}/)[1], /background/);
   const properties = require("../package.json").contributes.configuration.find(group => group.title === "Dygnosis: Changes").properties;
   assert.equal(properties["dynare.diff.presentation"].default, "focusedReview");
   assert.deepEqual(properties["dynare.diff.layout"].enum, ["auto", "sideBySide", "stacked"]);

@@ -442,7 +442,8 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
               const restored = normalizeChoices(message.choices, defaults);
               if (view.sectionsChanged) {
                 restored.sections = view.choices.sections;
-                for (const state of Object.values(restored.presentations)) state.sections = [...view.choices.sections];
+                restored.customSections = [...view.choices.sections];
+                for (const state of Object.values(restored.presentations)) { state.sections = [...view.choices.sections]; state.customSections = [...view.choices.sections]; }
               }
               view.choices = restored; view.sectionsChanged = false;
             }
@@ -497,7 +498,8 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
       if (event.affectsConfiguration("dynare.diff.sections", context)) {
         for (const view of doc.views) {
           view.choices.sections = diffPreferences(context, service.log).sections;
-          for (const state of Object.values(view.choices.presentations)) state.sections = [...view.choices.sections];
+          view.choices.customSections = [...view.choices.sections];
+          for (const state of Object.values(view.choices.presentations)) { state.sections = [...view.choices.sections]; state.customSections = [...view.choices.sections]; }
           view.sectionsChanged = true;
         }
         send(doc);

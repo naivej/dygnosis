@@ -281,7 +281,11 @@ test("reopening a saved custom document captures again, retains selectors and re
 
 test("a fresh host restores saved empty sections and hidden settings changes take precedence over older webview state", async t => {
   const resource = comparison(historical(commits.old), historical()), first = createHost(); first.host.install();
-  await first.host.openSaved(resource); const savedChoices = { ...first.host.last().choices, search: "saved across reload", sections: [] };
+  await first.host.openSaved(resource); const initial = first.host.last().choices;
+  const savedChoices = { ...initial, search: "saved across reload", sections: [], customSections: ["priors", "commands"], presentations: {
+    focusedReview: { ...initial, sections: ["symbols"], customSections: ["symbols", "parameters"] },
+    changeList: { ...initial, sections: ["commands"], customSections: ["priors", "commands"] },
+  } };
   first.host.message({ type: "choices", key: first.host.last().key, choices: savedChoices }); first.host.registration.dispose();
   const { host } = setup(t); await host.openSaved(JSON.parse(resourceQuery(resource)));
   assert.notDeepEqual(host.last().choices.sections, [], "fresh host begins with configured defaults");
@@ -289,6 +293,14 @@ test("a fresh host restores saved empty sections and hidden settings changes tak
   host.settings.set(anchorUri.toString(), { "diff.sections": ["aggregateEquations"] });
   host.configChanged.fire({ affectsConfiguration: key => key === "dynare.diff.sections" });
   host.message({ type: "ready", key: host.last().key, choices: savedChoices }); assert.deepEqual(host.last().choices.sections, ["aggregateEquations"]);
+  assert.deepEqual(host.last().choices.customSections, ["aggregateEquations"]);
+  for (const state of Object.values(host.last().choices.presentations)) {
+    assert.deepEqual(state.sections, ["aggregateEquations"]); assert.deepEqual(state.customSections, ["aggregateEquations"]);
+  }
+  host.settings.set(anchorUri.toString(), { "diff.sections": [] });
+  host.configChanged.fire({ affectsConfiguration: key => key === "dynare.diff.sections" });
+  assert.deepEqual(host.last().choices.customSections, []);
+  for (const state of Object.values(host.last().choices.presentations)) { assert.deepEqual(state.sections, []); assert.deepEqual(state.customSections, []); }
 });
 
 test("Open changes from a custom tab uses its recorded anchor while activeTextEditor points elsewhere", async t => {

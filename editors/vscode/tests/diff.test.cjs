@@ -140,7 +140,7 @@ test("webview text/kind/scope filters, counts, layout and expansion preserve sta
   env.elements.expansion.value = "none"; env.elements.expansion.fire("change"); assert.equal(env.elements.results.children[0].open, false);
   env.elements.search.value = ""; env.elements.search.fire("input"); env.elements.scope.value = "households"; env.elements.scope.fire("change"); assert.match(env.elements.counts.textContent, /1 of 11 model rows shown/);
   assert.equal(env.states.at(-1).choices.scope, "households");
-  const changed = descendants(env.elements.kinds).filter(element => element.tag === "input")[2]; changed.checked = false; changed.fire("change"); assert.match(env.elements.results.textContent, /No rows match/);
+  env.elements.kinds.value = "removed"; env.elements.kinds.fire("change"); assert.match(env.elements.results.textContent, /No rows match/);
 });
 test("webview scope filters and side labels retain unmapped heterogeneous shock rows", () => {
   const result = fixture(), nav = result.navigation.rows.find(row => row.id === "/shock_setup_changes/0");
