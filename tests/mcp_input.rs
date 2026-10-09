@@ -152,6 +152,14 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     assert_eq!(historical["inputs"]["before"]["commit"], before);
     assert_eq!(historical["inputs"]["after"]["commit"], after);
     assert_eq!(historical["changed_equations"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        historical["sources"]["before"]["eq.inc"],
+        "[name='eq'] y=1;\n"
+    );
+    assert_eq!(
+        historical["sources"]["after"]["eq.inc"],
+        "[name='eq'] y=2;\n"
+    );
     assert!(!historical.to_string().contains("y = 3"));
     arguments["before"]["ref"] = json!("HEAD");
     arguments["after"] = json!({"kind":"working", "root_file":"main.mod"});
@@ -160,6 +168,9 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     assert_eq!(saved["inputs"]["after"]["source_policy"], "saved_files");
     assert_eq!(saved["inputs"]["after"]["search_paths"], json!([]));
     assert!(saved.to_string().contains("y = 3"));
+    let changed_source = &saved["source_changes"]["files"][0];
+    let key = changed_source["after"]["file_key"].as_str().unwrap();
+    assert_eq!(saved["sources"]["after"][key], "[name='eq'] y=3;\n");
     let mut mixed = arguments.clone();
     mixed["files"] = json!({});
     let invalid = wire.call("dynare_compare_models", mixed);
@@ -173,6 +184,41 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     let text = decode(wire.call("dynare_compare_models", json!({"file_content_a":"var y; model; y=1; end;", "file_content_b":"var y; model; y=2; end;"})));
     assert!(text.get("changed_equations").is_some());
     assert!(text.get("inputs").is_none());
+    let supplied_root = "@#include \"body\"\n@#include \"empty\"\n";
+    let supplied_old = "parameters p; estimated_params; p,normal_pdf,.5,.1; end;";
+    let supplied_new = supplied_old.replace("normal_pdf,.5", "normal_pdf,.6");
+    let supplied = decode(wire.call("dynare_compare_models", json!({"file_content_a":supplied_root,"file_content_b":supplied_root,
+        "active_file_a":"root.mod","active_file_b":"root.mod",
+        "files_a":{"root.mod":supplied_root,"body":supplied_old,"empty":"","unused":"not executed"},
+        "files_b":{"root.mod":supplied_root,"body":supplied_new,"empty":"","unused":"not executed"}})));
+    assert_eq!(supplied["sources"]["before"]["empty"], "");
+    assert!(supplied["sources"]["before"].get("unused").is_none());
+    assert_eq!(
+        supplied["source_changes"]["files"][0]["correspondence"],
+        "proven_file_identity"
+    );
+    let prior = supplied["semantic"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["family"] == "priors")
+        .unwrap();
+    let target = supplied["navigation"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == prior["pointer"])
+        .unwrap();
+    assert_eq!(target["before"]["written_locations"][0]["file"], "body");
+    for result in [&historical, &saved, &supplied] {
+        assert_eq!(result["source_changes"]["schema_version"], 1);
+        assert_eq!(result["source_changes"]["availability"], "complete");
+        assert!(result["coverage"]["limits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|limit| limit["code"] == "sources_not_captured"));
+    }
     // Exercise relative sibling folders through the published JSON arguments,
     // not only through the repository adapter's internal entry point.
     let project = directory.join("project");

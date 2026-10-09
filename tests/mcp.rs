@@ -1812,7 +1812,7 @@ fn dynare_compare_models_indexed_equations_and_markdown() {
         assert!(row.get("text_old").is_some(), "{row}");
         assert!(row.get("text_new").is_some(), "{row}");
     }
-    let blob = diff.to_string();
+    let blob = json!({"added":diff["added_equations"],"removed":diff["removed_equations"],"changed":diff["changed_equations"],"markdown":diff["markdown"]}).to_string();
     assert!(
         !blob.contains("c = betta*c(+1)") && !blob.contains("c=betta*c(+1)"),
         "common Euler must be absent: {blob}"
@@ -1821,6 +1821,7 @@ fn dynare_compare_models_indexed_equations_and_markdown() {
         serde_json::from_str(&expected_mcp("dynare_compare_models.a_vs_b.json")).unwrap();
     let mut legacy = diff.clone();
     legacy.as_object_mut().unwrap().remove("navigation");
+    legacy.as_object_mut().unwrap().remove("sources");
     for key in ["semantic", "source_changes", "coverage"] {
         assert_eq!(diff[key]["schema_version"], 1, "{key} advertised payload");
         assert_eq!(diff["comparison_versions"][key], 1, "{key} version");

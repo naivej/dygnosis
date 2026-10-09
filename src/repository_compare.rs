@@ -673,6 +673,7 @@ fn compare_repository_inner(
         output["state"] = json!("result");
         output["inputs"] = result["inputs"].clone();
         output["navigation"] = result["navigation"].clone();
+        output["sources"] = result["sources"].clone();
         output
     } else {
         result

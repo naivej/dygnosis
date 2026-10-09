@@ -1,7 +1,7 @@
 //! Additive navigation for the existing structural comparison. Pairing is owned
 //! by model_diff; every navigation id is a JSON pointer into that unchanged diff.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 use serde_json::{json, Value};
 use tower_lsp::lsp_types::Url;
@@ -10,7 +10,10 @@ use crate::include_resolver::{is_virtual_uri, normalize_uri};
 use crate::model::{AssignmentIndex, Model};
 use crate::model_diff::{EquationChange, IndexedEquation, ModelDiff, ShockSetting};
 use crate::model_map::{SourceOccurrence, WrittenSegment};
-use crate::parser::normalize_newlines;
+use crate::semantic_diff::{
+    CaptureBoundary, CapturedSourceInput, OccurrenceProvenance, Side, SourceFilePair,
+    SourceIdentityProof,
+};
 use crate::span::LineIndex;
 use crate::workspace::Workspace;
 
@@ -35,12 +38,17 @@ pub(crate) struct ComparisonInput {
     root_key: String,
     revision: Option<String>,
     complete: bool,
-    sources: HashMap<String, String>,
+    sources: BTreeMap<String, String>,
+    line_indexes: BTreeMap<String, LineIndex>,
     file_names: HashMap<String, String>,
     equations: BTreeMap<(Option<String>, usize), Target>,
     parameters: BTreeMap<String, Target>,
     symbols: BTreeMap<String, Target>,
     shocks: HashMap<usize, Target>,
+    statements: BTreeMap<usize, Target>,
+    written_equations: BTreeMap<usize, (usize, usize, Target)>,
+    declarations: BTreeMap<usize, (usize, Target)>,
+    statement_ranges: BTreeMap<usize, std::ops::Range<usize>>,
     snapshot_id: Option<String>,
     snapshot_commit: Option<String>,
 }
@@ -54,7 +62,7 @@ impl ComparisonInput {
         model: &Model,
         shocks: impl Iterator<Item = Option<&'a ShockSetting>>,
     ) -> Self {
-        let root_key = if workspace.snapshot_lookup.is_some() {
+        let root_key = if workspace.is_overlay_only() {
             root.to_owned()
         } else {
             normalize_uri(root)
@@ -64,23 +72,88 @@ impl ComparisonInput {
             .as_ref()
             .is_some_and(|report| report.complete && report.model_map.complete)
             && workspace.includes_complete(root);
+        // snapshot_sources normalizes each captured file once. Navigation can
+        // render many references to that file without cloning or rescanning it.
+        let sources = workspace.snapshot_sources(root);
+        let line_indexes = sources
+            .iter()
+            .map(|(key, text)| (key.clone(), LineIndex::new(text)))
+            .collect();
         let mut input = Self {
             root_uri: root_uri.map(str::to_owned),
             root_key,
             revision,
             complete,
-            sources: HashMap::new(),
+            sources,
+            line_indexes,
             file_names: HashMap::new(),
             equations: BTreeMap::new(),
             parameters: BTreeMap::new(),
             symbols: BTreeMap::new(),
             shocks: HashMap::new(),
+            statements: BTreeMap::new(),
+            written_equations: BTreeMap::new(),
+            declarations: BTreeMap::new(),
+            statement_ranges: model
+                .statements
+                .iter()
+                .map(|statement| (statement.id, statement.token_range.clone()))
+                .collect(),
             snapshot_id: None,
             snapshot_commit: None,
         };
         let Some(report) = report.filter(|_| complete) else {
             return input;
         };
+        for (id, source) in report.model_map.statements.iter().enumerate() {
+            if let Some(statement) = model
+                .statements
+                .get(id)
+                .filter(|statement| statement.id == id)
+            {
+                input.statements.insert(
+                    id,
+                    target(format!("s{id}"), source, statement.dimension.clone()),
+                );
+            }
+        }
+        for (id, row) in report.model_map.equations.iter().enumerate() {
+            let Some(written) = model
+                .written_equations
+                .get(id)
+                .filter(|written| written.statement_id == row.statement_id)
+            else {
+                continue;
+            };
+            input.written_equations.insert(
+                id,
+                (
+                    row.statement_id,
+                    written.equation.parse_order,
+                    target(format!("e{}", row.id), &row.source, row.dimension.clone()),
+                ),
+            );
+        }
+        for (written, source) in model
+            .written_declarations
+            .iter()
+            .zip(&report.model_map.declarations)
+        {
+            input.declarations.insert(
+                written.declaration.parse_order,
+                (
+                    written.statement_id,
+                    target(
+                        format!("d{}", written.declaration.parse_order),
+                        source,
+                        written
+                            .declaration
+                            .heterogeneity
+                            .map(|(name, _)| model.name(name).to_owned()),
+                    ),
+                ),
+            );
+        }
         for row in &report.model_map.equations {
             if let Some(number) = row.number {
                 input.equations.insert(
@@ -171,42 +244,74 @@ impl ComparisonInput {
                 );
             }
         }
-        let files: BTreeSet<_> = input
-            .equations
-            .values()
-            .chain(input.parameters.values())
-            .chain(input.symbols.values())
-            .chain(input.shocks.values())
-            .flat_map(|target| target.segments.iter())
-            .map(|segment| {
-                segment
-                    .file
-                    .as_deref()
-                    .unwrap_or(&input.root_key)
-                    .to_owned()
+        input
+    }
+
+    pub(crate) fn source_input(&self, boundary: CaptureBoundary) -> CapturedSourceInput<'_> {
+        CapturedSourceInput {
+            input_id: self.snapshot_id.as_deref(),
+            root_key: &self.root_key,
+            sources: &self.sources,
+            boundary,
+        }
+    }
+
+    pub(crate) fn sources(&self) -> &BTreeMap<String, String> {
+        &self.sources
+    }
+
+    /// Both current captures retain the same written-file identity as their key.
+    /// No filename, suffix or text match supplies an include pair.
+    pub(crate) fn same_file_pairs<'a>(&'a self, after: &'a Self) -> Vec<SourceFilePair<'a>> {
+        self.sources
+            .keys()
+            .filter(|key| {
+                *key != &self.root_key
+                    && *key != &after.root_key
+                    && after.sources.contains_key(*key)
             })
-            .collect();
-        for file in files {
-            if let Some(text) = workspace.source_for_normalized_key(&file) {
-                input.sources.insert(file, text.to_owned());
+            .map(|key| SourceFilePair {
+                before_key: key,
+                after_key: key,
+                proof: SourceIdentityProof::SameWrittenFileIdentity,
+            })
+            .collect()
+    }
+
+    fn proven_target(&self, proof: Option<&OccurrenceProvenance>) -> Option<&Target> {
+        let proof = proof?;
+        let parent = proof.statement_id?;
+        let range = self.statement_ranges.get(&parent)?;
+        if proof
+            .parse_order
+            .is_some_and(|order| !range.contains(&order))
+        {
+            return None;
+        }
+        if let Some(id) = proof.equation_id {
+            let (owner, order, target) = self.written_equations.get(&id)?;
+            return (*owner == parent && proof.parse_order.is_none_or(|given| given == *order))
+                .then_some(target);
+        }
+        if let Some(order) = proof.parse_order {
+            if let Some((owner, declaration)) = self.declarations.get(&order) {
+                return (*owner == parent).then_some(declaration);
             }
         }
-        input
+        self.statements.get(&parent)
     }
 
     pub(crate) fn with_snapshot_identity(mut self, input_id: &str, commit: Option<&str>) -> Self {
         self.snapshot_id = Some(input_id.to_owned());
         self.snapshot_commit = commit.map(str::to_owned);
-        // All new source actions use the same normalized text as parsing.
-        for text in self.sources.values_mut() {
-            *text = normalize_newlines(text);
-        }
         self
     }
 
     pub(crate) fn with_file_names<'a>(mut self, files: impl Iterator<Item = &'a String>) -> Self {
         for file in files {
-            self.file_names.insert(normalize_uri(file), file.clone());
+            if self.sources.contains_key(file) {
+                self.file_names.insert(file.clone(), file.clone());
+            }
         }
         self
     }
@@ -218,12 +323,11 @@ impl ComparisonInput {
         if segment.span.is_empty() {
             return None;
         }
-        let normalized = normalize_newlines(text);
-        let index = LineIndex::new(&normalized);
+        let index = self.line_indexes.get(key)?;
         match coordinates {
             Coordinates::SnapshotMcp => {
-                let start = index.position(&normalized, segment.span.start);
-                let end = index.position(&normalized, segment.span.end);
+                let start = index.position(text, segment.span.start);
+                let end = index.position(text, segment.span.end);
                 let mut location = json!({"input_id":self.snapshot_id, "file_key":key,
                     "line":start.line + 1, "column":start.character + 1,
                     "end_line":end.line + 1, "end_column":end.character + 1});
@@ -233,8 +337,8 @@ impl ComparisonInput {
                 Some(location)
             }
             Coordinates::SnapshotLsp => {
-                let start = index.position_utf16(&normalized, segment.span.start);
-                let end = index.position_utf16(&normalized, segment.span.end);
+                let start = index.position_utf16(text, segment.span.start);
+                let end = index.position_utf16(text, segment.span.end);
                 let mut location = json!({"input_id":self.snapshot_id, "file_key":key,
                     "range":{"start":{"line":start.line,"character":start.character},
                     "end":{"line":end.line,"character":end.character}}});
@@ -368,6 +472,36 @@ pub(crate) fn navigation_json(
             change.before.as_ref().and_then(|setting| before.shocks.get(&setting.occurrence_id)),
             change.after.as_ref().and_then(|setting| after.shocks.get(&setting.occurrence_id)));
     }
+    // Legacy pointers already have their original navigation shape. Independently
+    // owned semantic/context rows resolve only private accepted occurrence proof.
+    let mut ids: std::collections::BTreeSet<_> = builder
+        .rows
+        .iter()
+        .filter_map(|row| row["id"].as_str().map(str::to_owned))
+        .collect();
+    for row in &diff.semantic.rows {
+        if !ids.insert(row.pointer.clone()) {
+            continue;
+        }
+        builder.push(
+            json!({"id":row.pointer,"kind":"semantic","family":row.family,"name":row.name}),
+            before.proven_target(
+                row.before
+                    .as_ref()
+                    .and_then(|side| side.provenance.as_ref()),
+            ),
+            after.proven_target(row.after.as_ref().and_then(|side| side.provenance.as_ref())),
+        );
+    }
+    for reference in &diff.semantic.references {
+        if !ids.insert(reference.pointer.clone()) {
+            continue;
+        }
+        let proof = reference.provenance.as_ref();
+        builder.push(json!({"id":reference.pointer,"kind":"reference","name":reference.symbol,"equation_pointer":reference.equation_pointer}),
+            (reference.side == Side::Before).then(|| before.proven_target(proof)).flatten(),
+            (reference.side == Side::After).then(|| after.proven_target(proof)).flatten());
+    }
     json!({"schema_version": if matches!(builder.coordinates, Coordinates::SnapshotLsp | Coordinates::SnapshotMcp) { 2 } else { 1 }, "before": before.envelope(), "after": after.envelope(), "rows": builder.rows})
 }
 
@@ -440,5 +574,118 @@ impl Rows<'_> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::semantic_diff::{ChangeKind, ComparisonScope, RowSide, SemanticFamily, SemanticRow};
+
+    #[test]
+    fn semantic_targets_require_consistent_private_occurrence_proof() {
+        let source = "parameters p; p=1; var y z; model; y=p; z=y; end;";
+        let mut workspace = Workspace::new();
+        workspace.update_document("proof:root", source);
+        let model = workspace.get_effective_model("proof:root").unwrap().clone();
+        let input = ComparisonInput::capture(
+            &mut workspace,
+            "proof:root",
+            None,
+            None,
+            &model,
+            std::iter::empty::<Option<&ShockSetting>>(),
+        );
+        let written = &model.written_equations[0];
+        let proof = OccurrenceProvenance {
+            span: written.equation.span,
+            parse_order: Some(written.equation.parse_order),
+            equation_id: Some(0),
+            statement_id: Some(written.statement_id),
+        };
+        let mut diff = crate::model_diff::compare_models(&model, &model);
+        for (name, retained) in [
+            ("valid", Some(proof.clone())),
+            (
+                "invalid_equation",
+                Some(OccurrenceProvenance {
+                    equation_id: Some(999),
+                    ..proof.clone()
+                }),
+            ),
+            (
+                "wrong_parent",
+                Some(OccurrenceProvenance {
+                    statement_id: Some(0),
+                    ..proof.clone()
+                }),
+            ),
+            (
+                "wrong_order",
+                Some(OccurrenceProvenance {
+                    parse_order: Some(usize::MAX),
+                    ..proof.clone()
+                }),
+            ),
+            (
+                "wrong_equation_order_same_parent",
+                Some(OccurrenceProvenance {
+                    parse_order: Some(model.written_equations[1].equation.parse_order),
+                    ..proof.clone()
+                }),
+            ),
+            ("display_only", None),
+        ] {
+            let mut side = RowSide::named(name, ComparisonScope::aggregate());
+            side.equation_index = Some(0);
+            side.occurrence = Some(written.equation.parse_order);
+            side.provenance = retained;
+            let mut row = SemanticRow::new(SemanticFamily::Equations, ChangeKind::Added, name);
+            row.after = Some(side);
+            diff.semantic.push_row(row);
+        }
+        let navigation = navigation_json(&diff, &input, &input, Coordinates::Mcp);
+        let rows: Vec<_> = navigation["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["kind"] == "semantic")
+            .collect();
+        assert_eq!(rows.len(), 6);
+        assert!(rows[0]["after"].is_object());
+        assert!(rows[1..].iter().all(|row| row["after"].is_null()));
+    }
+
+    #[test]
+    fn written_declaration_target_keeps_dimension_before_retyping() {
+        let source =
+            "heterogeneity_dimension d; var(heterogeneity=d) y; change_type(parameters) y;";
+        let mut workspace = Workspace::new();
+        workspace.update_document("proof:root", source);
+        let model = workspace.get_effective_model("proof:root").unwrap().clone();
+        let written = model
+            .written_declarations
+            .iter()
+            .find(|written| model.name(written.declaration.name) == "y")
+            .unwrap();
+        assert!(model.final_heterogeneity(&written.declaration).is_none());
+        let input = ComparisonInput::capture(
+            &mut workspace,
+            "proof:root",
+            None,
+            None,
+            &model,
+            std::iter::empty::<Option<&ShockSetting>>(),
+        );
+        let target = input
+            .proven_target(Some(&OccurrenceProvenance {
+                span: written.declaration.span,
+                parse_order: Some(written.declaration.parse_order),
+                equation_id: None,
+                statement_id: Some(written.statement_id),
+            }))
+            .unwrap();
+        assert_eq!(target.dimension.as_deref(), Some("d"));
+        assert_eq!(input.symbols["y"].dimension, None);
     }
 }

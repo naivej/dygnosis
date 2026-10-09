@@ -65,6 +65,18 @@ fn snapshot_capability_is_additive_and_advertises_bounded_source_negotiation() {
         .commands
         .contains(&"dynare/compareModelSnapshots".to_owned()));
     let extensions = capabilities.experimental.unwrap();
+    for command in ["compareModels", "compareModelSnapshots"] {
+        for field in [
+            "semantic_schema_version",
+            "source_changes_schema_version",
+            "coverage_schema_version",
+        ] {
+            assert_eq!(
+                extensions["dygnosis"][command][field], 1,
+                "{command}.{field}"
+            );
+        }
+    }
     assert_eq!(
         extensions["dygnosis"]["compareModels"]["navigation_schema_version"],
         1

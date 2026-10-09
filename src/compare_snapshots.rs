@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use crate::compare_navigation::{navigation_json, ComparisonInput, Coordinates};
 use crate::model::Model;
 use crate::model_diff::{compare_models_with_sources, CompareSource};
+use crate::semantic_diff::{CaptureBoundary, SourceFilePair, SourceIdentityProof};
 use crate::workspace::Workspace;
 
 pub const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
@@ -453,6 +454,113 @@ pub enum SnapshotCoordinates {
     Mcp,
 }
 
+/// Captured identities alone establish these aliases. Historical paths must
+/// never be canonicalized through the current host's filesystem.
+fn source_pairs<'a>(
+    before: &'a CapturedSnapshot,
+    after: &'a CapturedSnapshot,
+) -> Vec<SourceFilePair<'a>> {
+    let old_root = before.inputs["root_file"].as_str().unwrap_or(&before.root);
+    let new_root = after.inputs["root_file"].as_str().unwrap_or(&after.root);
+    let includes = |snapshot: &'a CapturedSnapshot, root: &str| {
+        snapshot
+            .sources
+            .keys()
+            .filter(move |key| key.as_str() != root)
+            .collect::<Vec<_>>()
+    };
+    let old = includes(before, old_root);
+    let new = includes(after, new_root);
+    if before.historical == after.historical {
+        if before.historical && before.inputs["repository_uri"] != after.inputs["repository_uri"] {
+            return Vec::new();
+        }
+        let new: BTreeSet<_> = new.into_iter().collect();
+        return old
+            .into_iter()
+            .filter(|key| new.contains(key))
+            .map(|key| SourceFilePair {
+                before_key: key,
+                after_key: key,
+                proof: if before.historical {
+                    SourceIdentityProof::SameRepositoryKey
+                } else {
+                    SourceIdentityProof::SameWrittenFileIdentity
+                },
+            })
+            .collect();
+    }
+    let aliases = |snapshot: &'a CapturedSnapshot, keys: Vec<&'a String>| {
+        let mut aliases: BTreeMap<String, Vec<&'a String>> = BTreeMap::new();
+        for key in keys {
+            let path = if let Some(lookup) = &snapshot.workspace.snapshot_lookup {
+                format!("{}/{}", lookup.repository_path.trim_end_matches('/'), key)
+            } else {
+                key.clone()
+            };
+            if let Some(alias) = lexical_captured_path(&path) {
+                aliases.entry(alias).or_default().push(key);
+            }
+        }
+        aliases
+    };
+    // Roots participate in alias uniqueness, although root correspondence is
+    // selected explicitly and must never be emitted as an include pair.
+    let old = aliases(before, before.sources.keys().collect());
+    let new = aliases(after, after.sources.keys().collect());
+    old.iter()
+        .filter_map(|(alias, keys)| {
+            let candidates = new.get(alias)?;
+            (keys.len() == 1
+                && candidates.len() == 1
+                && keys[0] != old_root
+                && candidates[0] != new_root)
+                .then_some(SourceFilePair {
+                    before_key: keys[0],
+                    after_key: candidates[0],
+                    proof: SourceIdentityProof::SameWrittenFileIdentity,
+                })
+        })
+        .collect()
+}
+
+fn lexical_captured_path(path: &str) -> Option<String> {
+    if crate::include_resolver::is_virtual_uri(path) || path.contains('\0') {
+        return None;
+    }
+    let path = crate::include_resolver::uri_to_path(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    let drive = path.as_bytes().get(1) == Some(&b':');
+    if !drive && !path.starts_with('/') {
+        return None;
+    }
+    let mut parts = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." if parts.len() > usize::from(drive) => {
+                parts.pop();
+            }
+            ".." => return None,
+            value => parts.push(value),
+        }
+    }
+    let prefix = if path.starts_with("//") {
+        "//"
+    } else if path.starts_with('/') {
+        "/"
+    } else {
+        ""
+    };
+    let identity = format!("{prefix}{}", parts.join("/"));
+    Some(if cfg!(windows) {
+        identity.to_lowercase()
+    } else {
+        identity
+    })
+}
+
 pub fn compare_captured_snapshots(
     mut before: CapturedSnapshot,
     mut after: CapturedSnapshot,
@@ -466,7 +574,7 @@ pub fn compare_captured_snapshots(
         )
         .response("before");
     }
-    let diff = compare_models_with_sources(
+    let mut diff = compare_models_with_sources(
         &before.model,
         &after.model,
         before
@@ -506,6 +614,15 @@ pub fn compare_captured_snapshots(
             .map(|change| change.after.as_ref()),
     )
     .with_snapshot_identity(&after.input_id, after.inputs["commit"].as_str());
+    let include_pairs = source_pairs(&before, &after);
+    let boundary = CaptureBoundary::RootAndExecutedIncludes;
+    let _ = crate::semantic_diff::populate_captured_sources(
+        &mut diff,
+        old.source_input(boundary),
+        new.source_input(boundary),
+        &include_pairs,
+    );
+    crate::semantic_diff::enforce_output_budget(&mut diff);
     for (side, input) in [("before", &before), ("after", &after)] {
         if !input.historical && !input.workspace.input_snapshot_is_current(&input.root) {
             return input_changed().response(side);
@@ -514,4 +631,78 @@ pub fn compare_captured_snapshots(
     json!({"state":"result", "inputs":{"schema_version":SNAPSHOT_SCHEMA_VERSION, "before":before.inputs, "after":after.inputs},
         "diff":diff.to_json(), "navigation":navigation_json(&diff, &old, &new, match coordinates { SnapshotCoordinates::Lsp => Coordinates::SnapshotLsp, SnapshotCoordinates::Mcp => Coordinates::SnapshotMcp }),
         "sources":{"before":before.sources, "after":after.sources}})
+}
+
+#[cfg(test)]
+mod source_identity_tests {
+    use super::*;
+
+    fn captured(historical: bool, repository: &str, root: &str, keys: &[&str]) -> CapturedSnapshot {
+        let mut workspace = Workspace::new();
+        if historical {
+            workspace.snapshot_lookup = Some(SnapshotLookup {
+                repository_path: repository.into(),
+                ..Default::default()
+            });
+        }
+        CapturedSnapshot {
+            workspace,
+            root: root.into(),
+            model: crate::parse(""),
+            input_id: if historical { "old" } else { "new" }.into(),
+            revision: String::new(),
+            inputs: json!({"root_file":root,"repository_uri":repository}),
+            sources: keys
+                .iter()
+                .chain(std::iter::once(&root))
+                .map(|key| ((*key).into(), String::new()))
+                .collect(),
+            historical,
+        }
+    }
+
+    #[test]
+    fn alias_proof_is_unique_and_uses_lexical_paths_only() {
+        let old = captured(true, "/repo", "root.mod", &["shared/a", "shared/./a"]);
+        let new = captured(false, "", "/repo/root.mod", &["/repo/shared/a"]);
+        assert!(
+            source_pairs(&old, &new).is_empty(),
+            "two captured aliases cannot select one occurrence"
+        );
+        let old = captured(true, "/repo", "root.mod", &["shared/a"]);
+        let new = captured(
+            false,
+            "",
+            "/repo/root.mod",
+            &["/repo/shared/a", "/repo/shared/./a"],
+        );
+        assert!(
+            source_pairs(&old, &new).is_empty(),
+            "one alias cannot select among two captured occurrences"
+        );
+        let new = captured(
+            false,
+            "",
+            "/repo/root.mod",
+            &["/repo/shared/../shared/a", "/other/shared/a"],
+        );
+        let pairs = source_pairs(&old, &new);
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].after_key, "/repo/shared/../shared/a");
+        assert_eq!(
+            lexical_captured_path("/repo/../repo/shared/a"),
+            lexical_captured_path("/repo/shared/a")
+        );
+        assert!(lexical_captured_path("/../repo/shared/a").is_none());
+        assert!(lexical_captured_path("shared/a").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn root_alias_collision_prevents_include_correspondence() {
+        let old = captured(true, "C:/repo", "Root.mod", &["root.mod"]);
+        let new = captured(false, "", "C:/repo/other.mod", &["C:/repo/root.mod"]);
+        assert!(source_pairs(&old, &new).is_empty());
+        assert!(source_pairs(&new, &old).is_empty());
+    }
 }

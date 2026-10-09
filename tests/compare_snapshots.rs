@@ -457,3 +457,93 @@ fn absolute_paths_inside_repository_use_the_selected_tree_and_outside_paths_refu
         matches!(capture_git_snapshot(&snapshot), SnapshotCapture::Failure(failure) if failure.code == "UNSUPPORTED_SOURCE")
     );
 }
+
+#[test]
+fn git_source_pairing_requires_the_exact_repository_and_keeps_empty_includes() {
+    let root = "@#include \"empty\"\n@#include \"body\"\n";
+    let before = input(
+        "before",
+        "root.mod",
+        &[("root.mod", root), ("empty", ""), ("body", "% old\n")],
+    );
+    let mut after = input(
+        "after",
+        "root.mod",
+        &[("root.mod", root), ("empty", ""), ("body", "% new\n")],
+    );
+    let paired =
+        compare_captured_snapshots(ready(&before), ready(&after), SnapshotCoordinates::Lsp);
+    assert_eq!(paired["sources"]["before"]["empty"], "");
+    assert_eq!(
+        paired["diff"]["source_changes"]["files"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        paired["diff"]["source_changes"]["files"][0]["correspondence"],
+        "proven_file_identity"
+    );
+    assert_eq!(
+        paired["diff"]["source_changes"]["files"][0]["before"]["input_id"],
+        "before"
+    );
+    after.repository_uri = "file:///different-snapshot-repository".to_owned();
+    let unpaired =
+        compare_captured_snapshots(ready(&before), ready(&after), SnapshotCoordinates::Lsp);
+    let files = unpaired["diff"]["source_changes"]["files"]
+        .as_array()
+        .unwrap();
+    assert_eq!(files.len(), 4, "{unpaired}");
+    assert!(files
+        .iter()
+        .all(|file| file["correspondence"] == "unpaired"));
+}
+
+#[test]
+fn git_working_source_aliases_pair_repository_relative_includes_lexically() {
+    let directory = std::env::temp_dir().join(format!("dygnosis-aliases-{}", std::process::id()));
+    std::fs::create_dir_all(directory.join("shared")).unwrap();
+    let root = "@#include \"shared/./part\"\n@#include \"shared/empty\"\n";
+    std::fs::write(directory.join("root.mod"), root).unwrap();
+    std::fs::write(directory.join("shared/part"), "% new\n").unwrap();
+    std::fs::write(directory.join("shared/empty"), "").unwrap();
+    let mut before = input(
+        "before",
+        "root.mod",
+        &[
+            ("root.mod", root),
+            ("shared/part", "% old\n"),
+            ("shared/empty", ""),
+        ],
+    );
+    before.repository_uri = tower_lsp::lsp_types::Url::from_file_path(&directory)
+        .unwrap()
+        .to_string();
+    let working = match capture_working_snapshot(
+        Workspace::new(),
+        directory.join("root.mod").to_str().unwrap(),
+        "after",
+        "saved_files",
+    ) {
+        SnapshotCapture::Ready(captured) => *captured,
+        _ => panic!("working capture"),
+    };
+    let result = compare_captured_snapshots(ready(&before), working, SnapshotCoordinates::Mcp);
+    std::fs::remove_dir_all(directory).unwrap();
+    let files = result["diff"]["source_changes"]["files"]
+        .as_array()
+        .unwrap();
+    assert_eq!(files.len(), 1, "{result}");
+    assert_eq!(files[0]["correspondence"], "proven_file_identity");
+    assert_eq!(files[0]["before"]["file_key"], "shared/part");
+    assert!(files[0]["after"]["file_key"]
+        .as_str()
+        .unwrap()
+        .ends_with(if cfg!(windows) {
+            "shared\\part"
+        } else {
+            "shared/part"
+        }));
+}

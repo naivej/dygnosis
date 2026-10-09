@@ -22,6 +22,15 @@ fn assert_pointers(diff: &Value) {
     }
 }
 
+fn without_capture(mut diff: Value) -> Value {
+    // Captured Source and its boundary are transport facts; parsed models alone
+    // retain the same legacy arrays and semantic model facts.
+    for key in ["navigation", "sources", "source_changes", "coverage"] {
+        diff.as_object_mut().unwrap().remove(key);
+    }
+    diff
+}
+
 #[test]
 fn direct_assignments_and_metadata_have_exact_legacy_rows() {
     let before = "parameters p;\np=1;\np=2;\nvar y(long_name='Before');\nmodel; y=p+y(-1); end;";
@@ -53,20 +62,22 @@ fn direct_assignments_and_metadata_have_exact_legacy_rows() {
     );
     diff.as_object_mut().unwrap().remove("navigation");
     assert_eq!(
-        diff,
-        compare_models_with_sources(
-            &parse(before),
-            &parse(after),
-            Some(CompareSource {
-                text: before,
-                origin_uri: Some("before.mod")
-            }),
-            Some(CompareSource {
-                text: after,
-                origin_uri: Some("after.mod")
-            })
+        without_capture(diff),
+        without_capture(
+            compare_models_with_sources(
+                &parse(before),
+                &parse(after),
+                Some(CompareSource {
+                    text: before,
+                    origin_uri: Some("before.mod")
+                }),
+                Some(CompareSource {
+                    text: after,
+                    origin_uri: Some("after.mod")
+                })
+            )
+            .to_json()
         )
-        .to_json()
     );
 }
 
@@ -165,20 +176,22 @@ fn macro_copies_keep_occurrence_and_pairing_identity() {
     let mut legacy = diff.clone();
     legacy.as_object_mut().unwrap().remove("navigation");
     assert_eq!(
-        legacy,
-        compare_models_with_sources(
-            &parse(before),
-            &parse(&after),
-            Some(CompareSource {
-                text: before,
-                origin_uri: None
-            }),
-            Some(CompareSource {
-                text: &after,
-                origin_uri: None
-            })
+        without_capture(legacy),
+        without_capture(
+            compare_models_with_sources(
+                &parse(before),
+                &parse(&after),
+                Some(CompareSource {
+                    text: before,
+                    origin_uri: None
+                }),
+                Some(CompareSource {
+                    text: &after,
+                    origin_uri: None
+                })
+            )
+            .to_json()
         )
-        .to_json()
     );
 }
 
@@ -368,6 +381,180 @@ fn scalar_columns_do_not_count_utf16_units() {
         row(&diff, "/changed_equations/0")["before"]["written_locations"][0]["column"],
         column
     );
+}
+
+#[test]
+fn supplied_source_registry_keeps_empty_executed_files_and_excludes_unused_files() {
+    let root = "@#include \"empty\"\n@#include \"body\"\n@#if 0\n@#include \"inactive\"\n@#endif\n";
+    let files = |comment: &str| {
+        HashMap::from([
+            ("root.mod".to_owned(), root.to_owned()),
+            ("empty".to_owned(), String::new()),
+            (
+                "body".to_owned(),
+                format!("% {comment}\rvar y; model; y=1; end;"),
+            ),
+            ("inactive".to_owned(), "unexecuted".to_owned()),
+        ])
+    };
+    let diff = dynare_compare_models(
+        root,
+        root,
+        Some("root.mod"),
+        Some("root.mod"),
+        Some(&files("old")),
+        Some(&files("new")),
+        None,
+    );
+    assert_eq!(diff["source_changes"]["availability"], "complete", "{diff}");
+    assert_eq!(
+        diff["coverage"]["source_boundary"],
+        "supplied_roots_and_executed_includes"
+    );
+    assert!(diff["semantic"]["rows"].as_array().unwrap().is_empty());
+    for side in ["before", "after"] {
+        let texts = diff["sources"][side].as_object().unwrap();
+        assert_eq!(texts.len(), 3);
+        assert!(texts.values().any(|text| text == ""));
+        assert!(!texts.values().any(|text| text == "unexecuted"));
+        assert!(texts
+            .values()
+            .any(|text| text.as_str().unwrap().contains("\nvar y;")));
+    }
+    let file = &diff["source_changes"]["files"][0];
+    assert_eq!(file["correspondence"], "proven_file_identity");
+    assert_eq!(file["before"]["input_id"], Value::Null);
+    assert_eq!(file["before"]["exact_text_available"], true);
+    assert!(!file["hunks"].as_array().unwrap().is_empty());
+    assert_pointers(&diff);
+}
+
+#[test]
+fn prior_macro_rows_and_unchanged_equation_references_have_verified_targets() {
+    let before = "parameters p_1 p_2; p_1=.5; p_2=.6; var y;\nmodel; y=p_1*y(-1); end;\n@#for i in [1,2]\nestimated_params; p_@{i},normal_pdf,.5,.1; end;\n@#endfor\n";
+    let after = before
+        .replace("p_1=.5", "p_1=.7")
+        .replace("normal_pdf,.5", "normal_pdf,.8");
+    let diff = dynare_compare_models(before, &after, None, None, None, None, None);
+    assert_pointers(&diff);
+    let priors: Vec<_> = diff["navigation"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["family"] == "priors")
+        .collect();
+    let old: Vec<_> = priors
+        .iter()
+        .filter(|row| row["before"].is_object())
+        .collect();
+    assert_eq!(old.len(), 2, "{diff}");
+    assert_ne!(
+        old[0]["before"]["occurrence_id"],
+        old[1]["before"]["occurrence_id"]
+    );
+    assert_eq!(
+        old[0]["before"]["written_locations"],
+        old[1]["before"]["written_locations"]
+    );
+    assert!(diff["changed_equations"].as_array().unwrap().is_empty());
+    let references = diff["semantic"]["references"].as_array().unwrap();
+    assert!(!references.is_empty());
+    for reference in references {
+        let target = row(&diff, reference["pointer"].as_str().unwrap());
+        let side = reference["side"].as_str().unwrap();
+        assert_eq!(target[side]["written_locations"][0]["line"], 2);
+        assert!(target[if side == "before" { "after" } else { "before" }].is_null());
+    }
+}
+
+#[test]
+fn supplied_compare_cannot_capture_a_present_host_include() {
+    let files = TempFiles::new();
+    let host = files.write("host.inc", "parameters host; host=1;");
+    let before = format!(
+        "@#include \"{}\"\nvar y; model; y=1; end;",
+        host.to_file_path()
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/")
+    );
+    let map = HashMap::from([("root.mod".to_owned(), before.clone())]);
+    let result = dynare_compare_models(
+        &before,
+        &before,
+        Some("root.mod"),
+        Some("root.mod"),
+        Some(&map),
+        Some(&map),
+        None,
+    );
+    assert_eq!(result["status"], "incomplete", "{result}");
+    for field in [
+        "semantic",
+        "source_changes",
+        "sources",
+        "navigation",
+        "changed_parameter_values",
+    ] {
+        assert!(result.get(field).is_none(), "{field}: {result}");
+    }
+}
+
+#[test]
+fn transport_source_alignment_limit_preserves_exact_captured_text() {
+    let before = (0..1001)
+        .map(|line| format!("% old {line}\n"))
+        .collect::<String>();
+    let after = before.replace("old", "new");
+    let result = dynare_compare_models(&before, &after, None, None, None, None, None);
+    let file = &result["source_changes"]["files"][0];
+    assert_eq!(result["source_changes"]["availability"], "partial");
+    assert_eq!(file["availability"], "limit_exceeded");
+    assert_eq!(file["before"]["exact_text_available"], true);
+    assert_eq!(file["after"]["exact_text_available"], true);
+    assert!(file["hunks"].as_array().unwrap().is_empty());
+    assert_eq!(
+        result["sources"]["before"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap(),
+        &before
+    );
+    assert_eq!(
+        result["sources"]["after"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap(),
+        &after
+    );
+}
+
+#[test]
+fn heterogeneous_statement_context_targets_keep_the_proven_dimension() {
+    let before =
+        "heterogeneity_dimension d; heterogeneity_dimension h; var(heterogeneity=d) x; model(heterogeneity=d); x=0; end;";
+    let after = before.replace("heterogeneity=d", "heterogeneity=h");
+    let result = dynare_compare_models(before, &after, None, None, None, None, None);
+    let contexts: Vec<_> = result["semantic"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["family"] == "commands" && row["name"] == "model")
+        .collect();
+    assert!(!contexts.is_empty());
+    for context in contexts {
+        let target = row(&result, context["pointer"].as_str().unwrap());
+        for (side, dimension) in [("before", "d"), ("after", "h")] {
+            if context[side].is_object() {
+                assert_eq!(target[side]["domain"], "heterogeneous");
+                assert_eq!(target[side]["dimension"], dimension);
+            }
+        }
+    }
 }
 
 use dygnosis::server::{new_service, Backend};

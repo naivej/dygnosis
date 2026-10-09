@@ -524,7 +524,11 @@ impl Workspace {
     /// Observe disk changes without replacing editor overlays. Missing search
     /// candidates are inputs too: creating one can change an include's owner.
     pub fn input_revision(&mut self, uri: &str) -> Option<String> {
-        let key = normalize_uri(uri);
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
         if let Some(previous) = self.input_snapshots.get(&key).cloned() {
             let changed: Vec<_> = previous
                 .iter()
@@ -558,10 +562,14 @@ impl Workspace {
                     }),
                 )
                 .collect();
+        let resolved_keys: Vec<_> = resolved_inputs
+            .iter()
+            .map(|path| self.include_key(path))
+            .collect();
         self.dependency_candidates
             .entry(key.clone())
             .or_default()
-            .extend(resolved_inputs.iter().map(|path| path_key(path)));
+            .extend(resolved_keys);
         if !self.overlay_only && !self.virtual_roots.contains(&key) {
             // These checks read directory existence and a loader file outside
             // include/companion resolution. They are revision inputs too.
@@ -682,12 +690,13 @@ impl Workspace {
                     .then_some(doc.input_generation),
             }
         } else {
-            let metadata = (!is_virtual_uri(key))
+            let metadata = (!self.overlay_only && !is_virtual_uri(key))
                 .then(|| std::fs::metadata(key).ok())
                 .flatten();
             InputFile {
                 overlay: false,
-                bytes: if is_virtual_uri(key)
+                bytes: if self.overlay_only
+                    || is_virtual_uri(key)
                     || metadata
                         .as_ref()
                         .is_some_and(|value| value.len() > crate::macro_expr::MACRO_WORK_CAP as u64)
@@ -712,7 +721,12 @@ impl Workspace {
     /// Validate a result against the exact files observed by input_revision.
     /// Also catch a disk write between loading a parsed source and hashing it.
     pub(crate) fn input_snapshot_is_current(&self, uri: &str) -> bool {
-        let Some(snapshot) = self.input_snapshots.get(&normalize_uri(uri)) else {
+        let key = if self.overlay_only {
+            uri.to_owned()
+        } else {
+            normalize_uri(uri)
+        };
+        let Some(snapshot) = self.input_snapshots.get(&key) else {
             return false;
         };
         snapshot.iter().all(|(key, state)| {
@@ -2788,5 +2802,40 @@ mod project_snapshot_tests {
         let absolute = folder.canonicalize().unwrap();
         assert!(absolute.starts_with(std::env::temp_dir().canonicalize().unwrap()));
         std::fs::remove_dir_all(absolute).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod supplied_compare_revision_tests {
+    use super::*;
+
+    #[test]
+    fn supplied_revisions_preserve_exact_keys_and_detect_changed_include_text() {
+        let root = "map/./root.mod";
+        let child = "map/./body";
+        let mut workspace = Workspace::overlay_documents(&BTreeMap::from([
+            (root.into(), "@#include \"body\"\n".into()),
+            (child.into(), "var y; model; y=1; end;".into()),
+        ]));
+        let before = workspace.input_revision(root).unwrap();
+        assert!(workspace.input_snapshot_is_current(root));
+        assert!(workspace.input_snapshots.contains_key(root));
+        assert!(workspace.snapshot_sources(root).contains_key(child));
+        workspace.insert_overlay(child, "var y; model; y=2; end;".into());
+        assert!(!workspace.input_snapshot_is_current(root));
+        assert_ne!(workspace.input_revision(root).unwrap(), before);
+        assert!(workspace.input_snapshot_is_current(root));
+    }
+
+    #[test]
+    fn missing_supplied_input_has_no_host_disk_state() {
+        let path =
+            std::env::temp_dir().join(format!("dygnosis-map-state-{}.inc", std::process::id()));
+        std::fs::write(&path, "host source").unwrap();
+        let workspace = Workspace::overlay_documents(&BTreeMap::new());
+        let state = workspace.input_file(path.to_str().unwrap());
+        std::fs::remove_file(path).unwrap();
+        assert!(!state.exists && !state.directory);
+        assert!(state.bytes.is_none() && state.identity.is_none() && state.length.is_none());
     }
 }

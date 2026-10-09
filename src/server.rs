@@ -1889,7 +1889,7 @@ impl Backend {
         }) {
             return status;
         }
-        let diff = compare_models_with_sources(
+        let mut diff = compare_models_with_sources(
             &model_a,
             &model_b,
             inner
@@ -1927,6 +1927,15 @@ impl Backend {
                 .iter()
                 .map(|change| change.after.as_ref()),
         );
+        let include_pairs = before.same_file_pairs(&after);
+        let boundary = crate::semantic_diff::CaptureBoundary::RootAndExecutedIncludes;
+        let _ = crate::semantic_diff::populate_captured_sources(
+            &mut diff,
+            before.source_input(boundary),
+            after.source_input(boundary),
+            &include_pairs,
+        );
+        crate::semantic_diff::enforce_output_budget(&mut diff);
         if !inner.workspace.input_snapshot_is_current(&uri_a)
             || !inner.workspace.input_snapshot_is_current(&uri_b)
         {
@@ -1939,6 +1948,7 @@ impl Backend {
             &after,
             crate::compare_navigation::Coordinates::Lsp,
         );
+        result["sources"] = json!({"before":before.sources(),"after":after.sources()});
         result
     }
 
@@ -2995,8 +3005,8 @@ pub fn initialize_result() -> InitializeResult {
             experimental: Some(json!({"dygnosis": {
                 "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true, "model_locals": true},
                 "modelInfoChanged": true,
-                "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1},
-                "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES},
+                "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
+                "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
                 "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true},
                 "configuration": {"schema_version": CONFIGURATION_SCHEMA_VERSION}
                 ,"projectDiagnostics": {"schema_version":project::SCHEMA_VERSION,"status_command":"dynare/projectStatus","recheck_command":"dynare/recheckProject","cancel_command":"dynare/cancelProject","active_model_notification":"dynare/activeModelChanged","status_notification":"dynare/projectStatusChanged","typing_pause_ms":250}

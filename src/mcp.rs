@@ -768,7 +768,7 @@ fn range_json(span: Span, text: &str) -> Value {
     })
 }
 
-/// Structural `compare_models` JSON. No solver / steady-state keys.
+/// Shared structural and semantic comparison JSON, without solver results.
 pub fn dynare_compare_models(
     file_content_a: &str,
     file_content_b: &str,
@@ -793,7 +793,7 @@ pub fn dynare_compare_models(
     {
         return status;
     }
-    let diff = compare_models_with_sources(
+    let mut diff = compare_models_with_sources(
         &model_a,
         &model_b,
         Some(CompareSource {
@@ -835,6 +835,16 @@ pub fn dynare_compare_models(
             .into_iter()
             .flat_map(|map| map.keys()),
     );
+    let include_pairs = before.same_file_pairs(&after);
+    let boundary = crate::semantic_diff::CaptureBoundary::SuppliedRootAndExecutedIncludes;
+    // Invalid retained maps leave explicit unavailable Source coverage.
+    let _ = crate::semantic_diff::populate_captured_sources(
+        &mut diff,
+        before.source_input(boundary),
+        after.source_input(boundary),
+        &include_pairs,
+    );
+    crate::semantic_diff::enforce_output_budget(&mut diff);
     if !workspace_a.input_snapshot_is_current(&root_a)
         || !workspace_b.input_snapshot_is_current(&root_b)
     {
@@ -847,6 +857,7 @@ pub fn dynare_compare_models(
         &after,
         crate::compare_navigation::Coordinates::Mcp,
     );
+    result["sources"] = json!({"before":before.sources(),"after":after.sources()});
     result
 }
 
@@ -890,11 +901,12 @@ fn mcp_compare_input(
         }
     };
     let files = owned.as_ref().unwrap_or(files);
-    let mut ws = Workspace::new();
-    for (name, content) in files {
-        ws.update_document(name, content);
-    }
-    ws.update_document(&active, file_content);
+    let mut captured: std::collections::BTreeMap<_, _> = files
+        .iter()
+        .map(|(key, text)| (key.clone(), text.clone()))
+        .collect();
+    captured.insert(active.clone(), file_content.to_owned());
+    let mut ws = Workspace::overlay_documents(&captured);
     let revision = ws.input_revision(&active);
     let model = ws
         .get_effective_model(&active)
@@ -2118,7 +2130,7 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_compare_models",
         input_schema = compare_models_input_schema(),
-        description = "Compare Before to After by symbol kinds and metadata, proven parameter values, aggregate and per-dimension equations, and written shock setup. Choose exactly one mode: supplied text uses both file_content_a/file_content_b and each side's own include maps, including explicitly supplied unsaved text; repository mode uses absolute repository_path on this server host, explicit before/after Git or Working selectors, and optional search_paths. Git refs resolve once to full local commits before source reads; no fetch or checkout occurs. Working means saved files on this server host, including saved active includes and untracked files, never editor buffers. Omitted search_paths means no additional configured include folders; both sides still use written @#includepath. Repository results identify resolved commits, snapshot revisions, source policies, include folders, and exact historical source targets. Incomplete or failed input returns no authoritative change arrays; changed saved input returns INPUT_CHANGED. Source lines and Unicode-scalar columns are one-based. These are structural changes, not numerical equivalence."
+        description = "Compare Before to After model facts: symbols, parameters, equations and timing, shock setup, model locals, state assignments, priors, accepted commands, and other retained family settings. Results keep structural arrays and Markdown and add versioned semantic fields, expression tokens, direct equation references, captured Source changes, coverage and field limits. Each fact has one owning model row; references and Source hunks have separate counts. Read coverage even when model rows are empty. Choose exactly one mode: supplied text uses both file_content_a/file_content_b and each side's own include maps, including supplied unsaved text; only caller text can be read. Repository mode uses absolute repository_path on this server host, explicit before/after Git or Working selectors, and optional search_paths. Git refs resolve once to full local commits; no fetch or checkout occurs. Working reads saved server-host files, including active includes and untracked files. Omitted search_paths means no extra configured folders; written @#includepath still applies. Source captures roots and executed includes; unexecuted children, external functions and data contents are outside capture. Missing facts, ambiguous matches and work/output limits are explicit; retained exact file text remains available when hunks are limited. Use returned row/reference targets, never token offsets or hunk lines, for source navigation. Incomplete or failed inputs return no authoritative change arrays; changed saved input returns INPUT_CHANGED. Source lines and Unicode-scalar columns are one-based. No algebraic equivalence, solved state, posterior or simulation result is inferred."
     )]
     async fn compare_models_tool(
         &self,
