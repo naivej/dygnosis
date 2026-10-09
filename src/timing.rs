@@ -117,6 +117,12 @@ impl TimingAnalysis {
         }
     }
 
+    /// Effective convention after accepted type changes, using the same mark
+    /// selection as every converted aggregate identifier offset.
+    pub(crate) fn is_predetermined(&self, name: Name) -> bool {
+        self.marked.contains(&name)
+    }
+
     fn record_aggregate(
         &self,
         model: &Model,

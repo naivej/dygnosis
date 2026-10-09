@@ -94,6 +94,7 @@ pub enum ChangeFacet {
     LogTransform,
     PredeterminedConvention,
     Timing,
+    Complementarity,
     ShockSetup,
     Target,
     Role,
@@ -380,6 +381,8 @@ pub struct EquationReference {
     pub label: String,
     pub scope: ComparisonScope,
     pub occurrence: usize,
+    /// One side's accepted written use, including convention-only conversion.
+    pub timing: TimingSide,
     #[serde(skip)]
     pub provenance: Option<OccurrenceProvenance>,
 }

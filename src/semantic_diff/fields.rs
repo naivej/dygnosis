@@ -6,6 +6,7 @@ use crate::model_diff::{
     parameter_value_changed, ModelDiff, ShockSetting,
 };
 use crate::model_info::assigned_number;
+use crate::timing::TimingAnalysis;
 
 use super::schema::*;
 
@@ -174,7 +175,11 @@ fn symbol_side(model: &Model, decl: &Decl) -> RowSide {
     side
 }
 
-fn symbol_values(model: &Model, decl: Option<&&Decl>) -> BTreeMap<&'static str, FieldState> {
+fn symbol_values(
+    model: &Model,
+    decl: Option<&&Decl>,
+    timing: &TimingAnalysis,
+) -> BTreeMap<&'static str, FieldState> {
     let Some(decl) = decl else {
         return BTreeMap::new();
     };
@@ -194,25 +199,22 @@ fn symbol_values(model: &Model, decl: Option<&&Decl>) -> BTreeMap<&'static str, 
         ("log_transform", FieldState::boolean(decl.log_transform)),
         (
             "predetermined",
-            FieldState::boolean(
-                model
-                    .predetermined
-                    .iter()
-                    .any(|entry| entry.name == decl.name),
-            ),
+            FieldState::boolean(timing.is_predetermined(decl.name)),
         ),
     ])
 }
 
 fn symbols(before: &Model, after: &Model, diff: &mut ModelDiff) {
+    let old_timing = TimingAnalysis::new(before);
+    let new_timing = TimingAnalysis::new(after);
     let old = final_symbol_declarations(before);
     let new = final_symbol_declarations(after);
     let names: BTreeSet<_> = old.keys().chain(new.keys()).collect();
     for name in names {
         let old_decl = old.get(name);
         let new_decl = new.get(name);
-        let old_fields = symbol_values(before, old_decl);
-        let new_fields = symbol_values(after, new_decl);
+        let old_fields = symbol_values(before, old_decl, &old_timing);
+        let new_fields = symbol_values(after, new_decl, &new_timing);
         if old_fields == new_fields {
             continue;
         }

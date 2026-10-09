@@ -413,7 +413,7 @@ pub fn compare_models_with_budgets(
         source_changes: SourceChanges::default(),
         coverage: ComparisonCoverage::default(),
     };
-    crate::semantic_diff::populate_foundation(model_a, model_b, &mut diff);
+    crate::semantic_diff::populate(model_a, model_b, &mut diff);
     crate::semantic_diff::enforce_output_budget(&mut diff);
     diff
 }

@@ -203,6 +203,11 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
             (old_pointer, reference.pointer.clone())
         })
         .collect();
+    for reference in &mut diff.semantic.references {
+        if let Some(pointer) = retained.get(&reference.equation_pointer) {
+            reference.equation_pointer = pointer.clone();
+        }
+    }
     for row in &mut diff.semantic.rows {
         let old_count = row.references.len();
         row.references = row

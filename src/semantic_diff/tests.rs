@@ -305,6 +305,13 @@ fn reference(index: usize, side: Side) -> EquationReference {
         label: "Output".into(),
         scope: ComparisonScope::aggregate(),
         occurrence: index,
+        timing: TimingSide {
+            name: "p".into(),
+            class: "parameter".into(),
+            written_offset: 0,
+            converted_offset: 0,
+            occurrence: index,
+        },
         provenance: None,
     }
 }
