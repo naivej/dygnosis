@@ -367,6 +367,74 @@ LSP locations are `{uri, range}` using zero-based UTF-16 positions. MCP location
 
 LSP `dynare/compareModels` uses live overlays and each root's settings. It observes disk dependencies even without a watched-file event. If files change while the engine is reading them, it returns `INPUT_CHANGED` and asks the client to refresh. A client must disable source actions once either revision is stale, then compare again before jumping. Supplied-text MCP comparison uses only caller-provided text and file maps. Older engines can still supply the original comparison without navigation.
 
+### Semantic comparison, Source and Coverage
+
+Both LSP comparison capabilities add `semantic_schema_version: 1`,
+`source_changes_schema_version: 1` and `coverage_schema_version: 1`.
+`compareModels` retains navigation schema 1 and has no outer `schema_version`;
+`compareModelSnapshots` retains outer schema 1 and navigation schema 2. An
+engine without the additive fields supports the existing structural fallback.
+Partial advertisements or unsupported versions must fail visibly.
+
+The shared diff adds `comparison_versions: {semantic: 1, source_changes: 1,
+coverage: 1}`, `semantic`, `source_changes` and `coverage`. Current-file LSP,
+supplied-text MCP and repository MCP place them beside the legacy arrays.
+Snapshot LSP places them inside `diff`. Each successful transport returns
+`sources: {before: {file_key: text}, after: {file_key: text}}`; snapshot LSP
+places that registry in its result envelope. Empty text is a captured file.
+Keys are opaque identities in their input namespace. Current-file LSP uses
+native workspace keys; a client maps these to its registered file URIs.
+Snapshot and supplied-map keys must not be reinterpreted as live disk paths.
+
+Each additive object has `schema_version: 1`, `availability` and `limits`.
+Availability is `complete`, `partial`, `not_available` or `limit_exceeded`.
+A limit has `code`, `reason`, `owner` and nullable positive `omitted` count.
+Read field and coverage limits even when there are no changed rows.
+
+| Object | Fields and meaning |
+|---|---|
+| `semantic` | `budgets`, `rows`, `references`; typed retained model facts. |
+| Semantic row | `pointer`, `family`, `change`, `name`, `count_unit`, `facets`, nullable `before`/`after`, `fields`, `expressions`, `timing`, `references`, `limits`. |
+| Row side | `name`, `scope`, nullable `occurrence` and `equation_index`, nullable accepted statement `context`. Scope has `domain`, nullable `dimension` and `block`. Context adds accepted kind/name, execution order, scope and nullable supporting pointer. These display fields are not navigation proof. |
+| Field change | `name`, `label`, side states, `changed`, `comparison_availability`, nullable finite `numeric_difference`. States are `absent`, `empty`, `unknown` or `present`; typed values are text, number, integer, boolean, ordered list or named record. Absent/unknown have null values; empty is explicit empty text. |
+| Expression | `field`, nullable sides with exact `text` and `runs`, `highlight_basis`, `availability`, nullable `reason`. Runs have text and `unchanged`/`added`/`removed` role and reconstruct that side's text exactly. Basis is `paired_expression`, `unpaired_text_only` or `none`; unavailable alignment keeps plain text, basis none and a reason. |
+| Timing | Nullable sides with `name`, `class`, `written_offset`, `converted_offset`, `occurrence`. Written timing and predetermined-variable conversion are distinct. |
+| Reference | `pointer`, `symbol`, `side`, `equation_pointer`, `equation_index`, `label`, `scope`, `occurrence`, `timing`. It describes a direct counted-equation use, including unchanged text; it adds no model row. |
+| `source_changes` | `files`; each has `pointer`, `change`, `correspondence`, nullable sides, `availability`, `hunks`, nullable `omitted_hunks`, `limits`. A side has nullable `input_id`, exact `file_key` and `exact_text_available`. Current/supplied inputs use null IDs; snapshots use selected IDs. |
+| Source hunk | One-based `before_start`/`after_start`, `before_lines`/`after_lines`, and ordered text/role `lines`. Lines are text-diff display positions, not source targets. |
+| `coverage` | `source_boundary`, `families`; each family has availability, compared `fields` and exact limits. External functions, data contents and unexecuted children are outside captured roots and executed includes. Supplied mode compares only supplied text. |
+
+Families are `symbols`, `parameters`, `equations`, `shocks`, `steady_state`,
+`priors`, `commands`, `observables`, `data`, `occbin`, `policy`,
+`semi_structural`, `moments`, `ms_sbvar`, `heterogeneity`, `external_functions`,
+`trends`, `operations` and `macro_context`. `change` is `added`, `removed`,
+`changed` or `unpaired`. `count_unit` is `final_fact`, `accepted_occurrence`
+or `operation`; written history and final settings can differ. Each fact has
+one owner. Supporting statement context and references do not count again.
+Source file and hunk counts remain separate from model row appearances.
+
+Existing owners retain their exact legacy pointers. New rows use
+`/semantic/rows/N`; references use `/semantic/references/N`; files use
+`/source_changes/files/N`, with N their index in that array. Semantic navigation
+entries have `kind: "semantic"`, `family` and `name`. Reference entries have
+`kind: "reference"`, `name`, `equation_pointer` and a target only on the stated
+side. An equation pointer names an actual retained equation owner or the
+reference itself for unchanged equation context. Validate pointer ownership,
+schema versions, side/input identity, field states, token reconstruction and
+captured registry membership before display or actions. Private parser receipts
+are not serialized. Missing proof yields a null target; display offsets and
+hunk lines cannot create one.
+
+`semantic.budgets` reports comparison-wide token alignment cells (250,000),
+source alignment cells (1,000,000), references per side (2,000), source hunks
+(2,000) and optional serialized detail bytes (8,388,608). Limits retain exact
+expression or complete captured-file text when available and report omissions;
+legacy arrays survive optional-detail limits. References cannot outlive an
+omitted semantic equation row. Retained-tree materialization also has bounded
+work and field-specific limits. Unknown evaluation, unavailable retention and
+budget-unavailable comparison are distinct. No algebraic, solved-state,
+posterior or simulation claim follows from these facts.
+
 ### Isolated comparison inputs
 
 LSP `dynare/compareModelSnapshots` is advertised as
@@ -414,6 +482,8 @@ The extension uses a read-only custom editor with view type `dygnosis.changes`. 
 `dygnosis-changes:` resource stores selectors and the invoking anchor for reload. A shared document
 owns capture and cancellation; split views keep separate display choices. Historical written text
 uses read-only `dygnosis-history:` documents whose identities include repository, commit, and key.
+Working captured Source text uses read-only `dygnosis-captured:` documents with
+one capture identity; an absent side of a captured-file diff is explicit empty text.
 An open source tab retains its captured text after the comparison closes. Neither resource scheme
 is an ordinary analysis document.
 

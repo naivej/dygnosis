@@ -7,6 +7,23 @@
       "capturedAt": "2026-10-05T01:58:01.708Z",
       "status": "ok",
       "detail": {}
+    },
+    {
+      "name": "semantic-diff",
+      "original": "help/assets/semantic-diff.png",
+      "vscode": "1.141.0",
+      "capturedAt": "2026-10-09T06:39:08.220Z",
+      "status": "ok",
+      "detail": {
+        "capture": "Unaltered native VS Code workbench screenshot",
+        "runId": "06cb78c3-6936-48f7-8f5e-26e709e78c2a",
+        "scope": "all",
+        "required_visual": true,
+        "product_commit": "9ed5a91bd1dfc9738608070cd0ecffcd3ce14b3f",
+        "engine_sha256": "aa8ee3afb5de4c77684efc522a052f740e938ba1c59e0462b2e7b20e798f4c33",
+        "compiled_extension_sha256": "c7a655372b05f7f985df352cb9ee7ce4586de015867dd387120591164bef66b6",
+        "screenshot_sha256": "1a76b72e6b47af429e9fc4964a1a1026d02b1891bab9effab3374c00a0d9cf09"
+      }
     }
   ],
   "failures": [],
@@ -19,7 +36,6 @@
     "diagnostics",
     "navigate-code",
     "effective-model",
-    "structural-diff",
     "project-checks",
     "agents-mcp",
     "troubleshoot"

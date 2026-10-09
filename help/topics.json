@@ -7,7 +7,7 @@
   {"id":"appearance","title":"Read names, hints and colors","keywords":["semantic tokens","tint","theme","long_name","TeX","inlay"]},
   {"id":"project-checks","title":"Check a project","keywords":["coverage","background","saved","exclude","cancel","Recheck"]},
   {"id":"effective-model","title":"Trace the effective model","keywords":["expand","macro","origins","written source","refresh"]},
-  {"id":"structural-diff","title":"Compare models","keywords":["Diff","Before","After","layout","pairing","filter"]},
+  {"id":"structural-diff","title":"Compare models","keywords":["Diff","semantic","Before","After","presentation","layout","pairing","filter","priors","Source changes","Coverage","timing","references"]},
   {"id":"agents","title":"Connect an agent","keywords":["MCP","tools",".mcp.json","managed binary","approval"]},
   {"id":"reference","title":"Commands, checks and options","keywords":["keyboard","shortcut","index","reference"]},
   {"id":"integrations","title":"LSP and MCP contracts","keywords":["schema","coordinates","UTF-16","revision","supplied text","file map"]},

@@ -1,8 +1,23 @@
 # Changelog
 
+## v0.11.14
+
+- **Open changes** compares retained model facts across parser families, with
+  Model changes, Source changes and Coverage tabs. Focused review is the default
+  presentation; Change list is available. Details show named field and
+  expression-token changes, written and convention-adjusted timing, and direct
+  written references. Coverage explains available fields and comparison limits.
+  Compact dropdown filters keep the review visible; More actions holds the
+  additional comparison tools.
+- Source changes shows normalized captured text for selected roots and executed
+  includes, including edits already represented by model rows. Captured text is
+  read-only. Model-row counts and captured-file/hunk counts are separate.
+  Out-of-date inputs keep rows visible but disable source actions until Refresh.
+  The comparison does not infer solver results or capture unexecuted child
+  files, external MATLAB functions or data-file contents.
+
 ## v0.11.13
 
-- Marketplace packages use the **Coconut Water** publisher (`CoconutWater.dygnosis`).
 - Block backgrounds stay visible while you type and while a new model result is pending. Tint refreshes after a 200 ms typing pause, without clearing first. Current results remove deleted or unfinished blocks; turning tint off still clears it immediately. Language checks continue to use unsaved edits.
 
 ## v0.11.12
