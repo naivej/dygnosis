@@ -19,7 +19,7 @@ its own declarations, equations and timing lists.
 ![Dynare model view, model counts and equation CodeLens](assets/model-overview.png)
 
 1. **Dynare model** lists aggregate counts, timing classes, dimensions and related files for the selected model.
-2. **Jump to equation** (or **Jump to N equations**) and **Show effective model** CodeLens actions appear above mapped model openers.
+2. **Jump to equation** (or **Jump to N equations**) and **Expand macros** CodeLens actions appear above mapped model openers.
 3. The status bar shows endogenous, exogenous and equation counts for the active `.mod` or `.dyn` file.
 
 Use the view's native title menu to hide or move it. Use
@@ -132,11 +132,11 @@ Repeated macro executions at one written opener share one lens. **Jump to equati
 Two optional actions are available:
 
 - **Find references** appears at declaration lines. A line declaring several names opens a symbol picker, then native Find All References. Results use the existing language-server name-occurrence search and may include declarations. The lens requests references when clicked and shows no usage count.
-- **Show effective model** appears at the first safe model opener. It opens the chosen root's read-only effective preview beside the editor.
+- **Expand macros** appears at the first safe model opener. It opens the chosen root's read-only macro expansion preview beside the editor.
 
 Use the native controls for [equation browsing](settings:dynare.codeLens.modelEquations),
 [declaration references](settings:dynare.codeLens.declarationReferences) and
-[effective preview](settings:dynare.codeLens.effectiveModel) to choose the actions.
+[macro expansion preview](settings:dynare.codeLens.effectiveModel) to choose the actions.
 
 All three settings apply to the displayed file and support workspace/folder overrides. Changes apply immediately. Use **Reset Setting** to restore a default. Native `editor.codeLens` controls overall visibility; it also stops this surface's model requests when off. To hide lenses in Dynare files only, put this in User or Workspace settings:
 
@@ -146,6 +146,6 @@ All three settings apply to the displayed file and support workspace/folder over
 }
 ```
 
-Native commands remain available through the Command Palette and editor menus when lenses are hidden: **Dygnosis: Go to equation N**, **Dygnosis: Jump to named equation**, **Dygnosis: Show effective model**, and **Find All References**. Configure their shortcuts in VS Code's Keyboard Shortcuts editor.
+Native commands remain available through the Command Palette and editor menus when lenses are hidden: **Dygnosis: Go to equation N**, **Dygnosis: Jump to named equation**, **Dygnosis: Expand macros**, and **Find All References**. Configure their shortcuts in VS Code's Keyboard Shortcuts editor.
 
 Lenses refresh with edits, include changes, owner choices, and server restarts. A click made from older model data stops and asks you to use the refreshed action. Only verified written locations open; equation text and numbering are never used to guess a source location.

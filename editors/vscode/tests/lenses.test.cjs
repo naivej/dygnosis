@@ -381,14 +381,14 @@ test("a verified unopened include still opens when loading refreshes presentatio
 test("effective lens needs a safe opener but does not need an authoritative equation count", async () => {
   const env = setup(); env.configure("dynare.codeLens.effectiveModel", true);
   env.service.info = () => facts(env.doc, { statements: [statement("s1", { equation_count: null })], equations: [equation("e1", { location: null })] });
-  assert.deepEqual((await env.provide()).map(row => row.command.title), ["Show effective model"]); env.registration.dispose();
+  assert.deepEqual((await env.provide()).map(row => row.command.title), ["Expand macros"]); env.registration.dispose();
 });
 test("optional effective lens uses only the first safe opener and passes the explicit validated context", async () => {
   const env = setup(); env.configure("dynare.codeLens.effectiveModel", true);
   env.service.info = () => facts(env.doc, { statements: [statement(), statement("s2", { lens_anchor: location(undefined, 20), equation_count: 0 })] });
   const preview = registerEffectivePreview(env.service); const lenses = await env.provide();
-  assert.equal(lenses.filter(row => row.command.title === "Show effective model").length, 1);
-  await env.run(lenses.find(row => row.command.title === "Show effective model"));
+  assert.equal(lenses.filter(row => row.command.title === "Expand macros").length, 1);
+  await env.run(lenses.find(row => row.command.title === "Expand macros"));
   assert.deepEqual(env.service.engineRequests, [{ command: "dynare/showEffectiveModel", args: [env.doc.uri.toString()] }]);
   assert.equal(env.host.shown[0].doc.uri.scheme, "dygnosis-effective"); assert.deepEqual(env.host.languages, ["dynare"]);
   assert.equal(env.host.shown[0].options.viewColumn, 2); preview.dispose(); env.registration.dispose();
@@ -396,7 +396,7 @@ test("optional effective lens uses only the first safe opener and passes the exp
 test("effective preview expected context refuses owner/version/revision/instance and disposal races", async () => {
   for (const change of ["owner", "version", "revision", "instance", "setting", "dispose", "loading", "focus"]) {
     const env = setup(); env.configure("dynare.codeLens.effectiveModel", true); const preview = registerEffectivePreview(env.service);
-    const lens = (await env.provide()).find(row => row.command.title === "Show effective model");
+    const lens = (await env.provide()).find(row => row.command.title === "Expand macros");
     const reply = deferred(); env.service.executeResult = () => reply.promise; const pending = env.run(lens); await flush();
     assert.equal(env.service.engineRequests.length, 1);
     if (change === "owner") env.service.root = uri("file:///other.mod");

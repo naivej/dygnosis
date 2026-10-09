@@ -115,7 +115,7 @@
       },
       {
         "command": "dygnosis.showEffectiveModel",
-        "title": "Show effective model",
+        "title": "Expand macros",
         "category": "Dygnosis",
         "enablement": "dygnosis.modelContext",
         "icon": "$(open-preview)"
@@ -177,14 +177,14 @@
       },
       {
         "command": "dygnosis.refreshEffectiveModel",
-        "title": "Refresh effective model",
+        "title": "Refresh macro expansion",
         "category": "Dygnosis",
         "icon": "$(refresh)",
         "enablement": "dygnosis.effectivePreview"
       },
       {
         "command": "dygnosis.diffWith",
-        "title": "Open changes with .mod file…",
+        "title": "Show mod changes with .mod file…",
         "category": "Dygnosis",
         "enablement": "dygnosis.changesContext",
         "icon": "$(diff)"
@@ -221,7 +221,7 @@
       },
       {
         "command": "dygnosis.openChanges",
-        "title": "Open changes",
+        "title": "Show mod changes",
         "category": "Dygnosis",
         "icon": "$(diff)"
       }
@@ -565,13 +565,13 @@
             "type": "boolean",
             "default": false,
             "scope": "resource",
-            "description": "Offer Show effective model at the first safely mapped model opener. Also respects editor.codeLens."
+            "description": "Offer Expand macros at the first safely mapped model opener. Also respects editor.codeLens."
           },
           "dynare.effectiveModel.macroTint": {
             "type": "boolean",
             "default": true,
             "scope": "resource",
-            "description": "Shade macro-expanded text in the effective-model preview with a faint background. Resolved against the preview's chosen root."
+            "description": "Shade macro-expanded text in the macro expansion preview with a faint background. Resolved against the preview's chosen root."
           }
         }
       },
@@ -1343,20 +1343,6 @@
       {
         "title": "Dygnosis: Changes",
         "properties": {
-          "dynare.diff.presentation": {
-            "type": "string",
-            "enum": [
-              "focusedReview",
-              "changeList"
-            ],
-            "enumItemLabels": [
-              "Focused review",
-              "Change list"
-            ],
-            "default": "focusedReview",
-            "scope": "resource",
-            "description": "Initial presentation in a new Changes view. Focused review shows a compact list beside selected detail. Change list shows expandable summaries. Each presentation keeps its own filters, selection and detail layout."
-          },
           "dynare.diff.layout": {
             "type": "string",
             "enum": [
@@ -1366,7 +1352,7 @@
             ],
             "default": "auto",
             "scope": "resource",
-            "description": "Layout in Changes. Auto stacks Before and After in a narrow view. Defaults use the model that opened Changes."
+            "description": "Layout of Before and After expression panels. Auto stacks them in a narrow view. Field tables keep their Before and After columns. Defaults use the model that opened Changes."
           },
           "dynare.diff.defaultExpansion": {
             "type": "string",

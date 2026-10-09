@@ -32,7 +32,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .input-side small, .input-context { color: var(--secondary); font-size: 12px; }
 .input-side code { line-height: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .input-context { overflow-wrap: anywhere; }
-.presentation-choice, .tools label, .more-actions-panel label { display: flex; align-items: center; gap: 5px; color: var(--secondary); min-width: 0; }
+.tools label, .more-actions-panel label { display: flex; align-items: center; gap: 5px; color: var(--secondary); min-width: 0; }
 .comparison-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; margin-left: auto; }
 .more-actions { position: relative; }
 .more-actions > summary { cursor: pointer; padding: 3px 7px; border: 1px solid transparent; }
@@ -41,10 +41,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .more-actions-panel label { padding: 5px 7px; justify-content: space-between; }
 #folders { color: var(--secondary); padding: 5px 7px; font-size: 12px; }
 #folders:empty { display: none; }
-#tabs { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding: 0 10px; gap: 4px; }
-#tabs button { border-radius: 0; border-bottom: 2px solid transparent; padding: 8px 6px; color: var(--secondary); display: flex; align-items: center; gap: 7px; }
-#tabs [aria-selected=true] { color: var(--vscode-foreground); border-bottom-color: var(--vscode-focusBorder); }
-.count { font-size: 11px; min-width: 19px; text-align: center; background: var(--chrome); border-radius: 9px; padding: 0 5px; color: var(--secondary); }
 .tools { padding: 9px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; min-width: 0; }
 .tools .search { flex: 1 1 170px; min-width: 0; }
 .search input { width: 100%; min-width: 0; }
@@ -91,7 +87,7 @@ th { font-weight: 400; font-size: 12px; color: var(--secondary); }
 .field-value pre { max-height: 320px; overflow: auto; }
 .token.added { background: var(--vscode-diffEditor-insertedTextBackground, var(--vscode-diffEditor-insertedLineBackground)); text-decoration: underline; text-underline-offset: 3px; }
 .token.removed { background: var(--vscode-diffEditor-removedTextBackground, var(--vscode-diffEditor-removedLineBackground)); text-decoration: none; }
-.field-cue, .line-cue { font-family: var(--vscode-editor-font-family); }
+.field-cue { font-family: var(--vscode-editor-font-family); }
 .sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 15px; }
 .side { min-width: 0; border: 1px solid var(--line); }
 .side-title { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 5px 9px; background: var(--chrome); font-size: 12px; color: var(--secondary); }
@@ -108,25 +104,6 @@ th { font-weight: 400; font-size: 12px; color: var(--secondary); }
 .reference button:disabled { color: var(--vscode-disabledForeground); }
 .actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 17px; }
 .actions button { border: 1px solid var(--input-border); background: var(--vscode-input-background); }
-.list-group, .results > .row-summary { margin: 4px 14px 12px; }
-.list-group > .group-heading { padding-left: 0; margin-top: 9px; }
-.row-summary { border-bottom: 1px solid var(--line); }
-.row-summary > summary { padding: 9px 3px; overflow-wrap: anywhere; cursor: pointer; }
-.row-summary > summary .change-mark { margin-right: 8px; }
-.row-summary > summary .row-title, .row-summary > summary .row-subtitle { display: inline; }
-.row-summary > summary .row-subtitle { margin-left: 10px; }
-.row-summary[open] > summary { font-weight: 500; }
-.row-summary .detail { padding: 10px 9px 20px; }
-.source-hunk { min-width: 380px; }
-.source-hunk td { white-space: pre; }
-.source-hunk .gutter { width: 4em; background: var(--vscode-editorGutter-background); }
-.coverage { padding: 20px 18px; }
-.coverage h2 { margin-bottom: 8px; }
-.coverage > p { margin-bottom: 15px; color: var(--secondary); }
-.coverage table { table-layout: fixed; min-width: 480px; }
-.coverage th:first-child { width: 23%; }
-.coverage th:nth-child(2) { width: 19%; }
-.coverage td p { margin: 0; }
 .limits { padding-left: 20px; margin: 6px 0; color: var(--secondary); font-size: 12px; overflow-wrap: anywhere; }
 .empty { padding: 24px 18px; color: var(--secondary); }
 .footer { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; border-top: 1px solid var(--line); padding: 7px 14px; color: var(--secondary); margin-top: auto; }
@@ -142,18 +119,19 @@ th { font-weight: 400; font-size: 12px; color: var(--secondary); }
   .more-actions { position: static; }
   .more-actions-panel { right: 14px; top: 100%; }
   .comparison-inputs { width: 100%; }
-  .presentation-choice { flex-wrap: wrap; }
   .input-side { flex: 1 1 115px; }
-  #tabs { gap: 0; padding: 0 6px; }
-  #tabs button { font-size: 12px; padding: 8px 5px; gap: 4px; }
   .tools label { flex: 1 1 115px; justify-content: space-between; }
   .tools .search { flex-basis: 100%; }
   .tools select { max-width: 175px; width: 100%; }
-  .detail, .coverage { padding-left: 12px; padding-right: 12px; }
-  .row-summary > summary .row-subtitle { display: block; margin: 3px 0 0 20px; }
+  .detail { padding-left: 12px; padding-right: 12px; }
   .footer .boundary { margin-left: 0; }
 }
 @media (pointer: coarse) { button, summary, input, select { min-height: 44px; } input, select { font-size: 16px; } }
 body.vscode-high-contrast .token.added, body.vscode-high-contrast-light .token.added { outline: 1px solid var(--vscode-contrastBorder, currentColor); }
 body.vscode-high-contrast .token.removed, body.vscode-high-contrast-light .token.removed { outline: 1px dashed var(--vscode-contrastBorder, currentColor); }
 @media (forced-colors: active) { .side, .token.added { border: 1px solid CanvasText; } .token.removed { border: 1px dashed CanvasText; } .list-row.selected { outline: 2px solid Highlight; } }
+
+.comparison-limits { border-bottom: 1px solid var(--line); color: var(--secondary); font-size: 12px; }
+.comparison-limits > summary { padding: 6px 14px; cursor: pointer; }
+#limitsBody { padding: 0 14px 10px; overflow-wrap: anywhere; }
+#limitsBody p { margin: 5px 0; }

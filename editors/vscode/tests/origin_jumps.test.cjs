@@ -464,7 +464,7 @@ test("chosen target disappearing after picker disables the stale snapshot", asyn
   env.host.pick = items => { env.service.value.navigation[0].written_locations = [items[1].target]; return items[0]; };
   await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 0);
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
-  assert.match(env.host.messages[0], /Refresh effective model/);
+  assert.match(env.host.messages[0], /Refresh macro expansion/);
   env.registration.dispose(); env.previews.dispose();
 });
 

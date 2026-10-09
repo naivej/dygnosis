@@ -2,19 +2,21 @@
 
 ## v0.11.14
 
-- **Open changes** compares retained model facts across parser families, with
-  Model changes, Source changes and Coverage tabs. Focused review is the default
-  presentation; Change list is available. Details show named field and
-  expression-token changes, written and convention-adjusted timing, and direct
-  written references. Coverage explains available fields and comparison limits.
-  Compact dropdown filters keep the review visible; More actions holds the
-  additional comparison tools.
-- Source changes shows normalized captured text for selected roots and executed
-  includes, including edits already represented by model rows. Captured text is
-  read-only. Model-row counts and captured-file/hunk counts are separate.
-  Out-of-date inputs keep rows visible but disable source actions until Refresh.
-  The comparison does not infer solver results or capture unexecuted child
-  files, external MATLAB functions or data-file contents.
+- **Show mod changes** compares retained model facts across parser families in
+  a pinned tab in the active editor group. A grouped list shows the selected
+  change's named fields, expression tokens, written and convention-adjusted
+  timing, and direct written references. Compact filters keep the review visible.
+- **Comparison limits** is a collapsed note that marks partial comparisons and
+  explains unavailable facts and the captured source boundary. **Captured file
+  text diff…** opens VS Code's native diff for a changed captured root or include,
+  including unsaved text. Out-of-date inputs disable source and text-diff actions
+  until Refresh. The comparison does not infer solver results or capture
+  unexecuted child files, external MATLAB functions or data-file contents.
+- **Expression layout** affects Before and After expression panels; field tables
+  keep their Before and After columns. Change list and its Presentation setting
+  are removed. Saved filters and layout still restore in the single model view.
+- **Expand macros** and **Refresh macro expansion** replace the effective-model
+  command labels. The preview remains read-only and expands macros and includes.
 
 ## v0.11.13
 

@@ -1,6 +1,6 @@
-# Trace an effective model
+# Trace macro expansion
 
-Show effective model opens include and macro expansion in a read-only editor. The preview shows the model before Dynare transforms equations. Edit the written files, then use Refresh effective model to update the preview.
+Expand macros opens include and macro expansion in a read-only editor. The preview shows the model before Dynare transforms equations. Edit the written files, then use Refresh macro expansion to update the preview.
 
 With the bundled engine or an engine that supports source layout, the preview keeps the written spaces and line breaks. Macro substitution and includes expand in place. Strings, native text, and matrix contents stay as written. An older engine that only advertises readable layout keeps the indented preview, which does not preserve written spacing. Engines without either layout keep the compact preview.
 
@@ -8,10 +8,10 @@ Macro interpolation also expands inside quoted values, `//` comments, and `%` co
 
 Macro expressions follow Dynare's evaluation order, including changes a comprehension makes to macro variables. Syntax is checked in every branch of each file that is read before that file runs. A child cannot close a macro block in its parent.
 
-![Written source beside the read-only effective preview](assets/effective-model.png)
+![Written source beside the read-only macro expansion preview](assets/effective-model.png)
 
 1. The written `.mod` file stays editable in the primary editor column.
-2. The **effective model** preview shows expanded include and macro text read-only beside it.
+2. The **macro expansion** preview shows expanded include and macro text read-only beside it.
 3. Native preview commands refresh the text and jump back to verified written locations.
 
 Macro-expanded text has a faint background: loop and branch bodies, included text, substitutions, and a complete macro-built name such as `beta_1`. Unchanged root text stays unshaded. Nested macros use that same background. [Macro tint](settings:dynare.effectiveModel.macroTint) turns the background off. An older engine does not shade the preview. Incomplete expansion has no background.
@@ -23,7 +23,7 @@ The commands appear in the Command Palette while a preview is active. [Editor ac
 | Action | Windows/Linux | macOS |
 |---|---|---|
 | Go to written source | Ctrl+Alt+G | Cmd+Alt+G |
-| Refresh effective model | Ctrl+Alt+R | Cmd+Alt+R |
+| Refresh macro expansion | Ctrl+Alt+R | Cmd+Alt+R |
 
 [Keyboard Shortcuts](action:shortcuts) can change these bindings. Pickers use VS Code's native keyboard controls and theme.
 

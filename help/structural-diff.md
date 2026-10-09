@@ -1,6 +1,6 @@
 # Semantic model Diff
 
-Open a model and run **Dygnosis: Open changes**. The open model is **After**.
+Open a model and run **Dygnosis: Show mod changes**. The open model is **After**.
 Choose its **Before** version:
 
 1. **With previous revision** uses HEAD for a Working model, or the first parent
@@ -11,7 +11,7 @@ Choose its **Before** version:
    remote-tracking branch, or tag.
 4. **With .mod file…** selects another current `.mod` or `.dyn` model.
 
-![Focused review in VS Code with a changed local definition, field detail and direct equation references](assets/semantic-diff.png)
+![Model changes in VS Code with a changed local definition, field detail and direct equation references](assets/semantic-diff.png)
 
 **Working** means current saved files plus open unsaved text. A historical model
 uses its root and active includes from the selected commit. The four choices
@@ -21,12 +21,13 @@ checked at that same commit. The Source Control action uses its selected
 Working model, including when invoked from the staged list.
 
 Git choices remain visible when unavailable and explain the reason. File
-comparison stays available. **Open changes with .mod file…** is the direct
+comparison stays available. **Show mod changes with .mod file…** is the direct
 file-comparison command for existing bindings. Cancelling a picker keeps the
 current comparison.
 
-The top bar keeps Before, After and Presentation together. Use **More actions**
-for Root file text diff, Update revision, Details, Help and Expansion. Details
+The comparison opens as a pinned tab in the active editor group. The top bar
+keeps Before and After together. Use **More actions** for Root file text diff,
+Captured file text diff, Update revision, Details, Help and Expansion. Details
 shows the full captured input paths and include settings.
 
 The Changes tab names both inputs. **Change comparison…** chooses another
@@ -51,15 +52,11 @@ The Changes view opens on **Model changes**. It compares retained model facts
 across supported parser families, including symbols, parameters, equations,
 priors, commands and other accepted settings. One changed fact has one model
 row. Supporting statement context and equation references do not add more model
-changes. Model counts describe displayed row appearances; Source counts name
-captured files and text hunks separately.
+changes. Model counts describe displayed row appearances.
 
-**Focused review** is the default presentation. It shows a compact list beside
-the selected detail. **Change list** shows expandable summaries. The
-Presentation switch stays beside Before and After on Model changes, Source
-changes and Coverage. Both presentations use the same comparison. Each keeps
-its own filters, selection, detail layout and expansion state when you switch.
-Each split keeps its own state while sharing the captured comparison.
+A compact grouped list shows the model changes beside the selected detail.
+Each split keeps its own filters, selection, expression layout and expansion
+state while sharing the captured comparison.
 
 Details show named Before and After fields, with absent, empty and unknown values
 kept distinct. Equation expressions highlight changed identifiers, timing
@@ -74,9 +71,11 @@ solve the model or report simulation, estimation or steady-state results.
 
 Find changes, Kind, Section and Scope filter model rows. Kind and Section offer
 All or one choice; a saved group of choices remains available as a saved
-selection. **Detail** supports Auto, Side by side and Stacked. When no model row
-is available, check Coverage and
-Source changes before concluding that the written files are unchanged.
+selection. **Expression layout** supports Auto, Side by side and Stacked for
+Before and After expression panels. It appears when the selected row has
+expression detail; field tables keep their Before and After columns. When no
+model row is available, review Comparison limits and the native text diff
+before concluding that the written files are unchanged.
 
 **Open source** opens the row's verified written source on that side. Direct
 reference actions open the referenced equation. Several contributing files
@@ -84,36 +83,29 @@ offer a source picker; an absent or unverified target has a disabled action
 and a reason. Historical sources are read-only and retain their commit and
 captured text after the Changes tab closes.
 
-## Source changes and coverage
+## Text diff and comparison limits
 
-**Source changes** compares normalized text from the selected roots and their
-captured executed includes. It keeps comments, formatting, macro text and edits
-that also have semantic rows. Roots pair because you selected them. Includes
-pair only when their captured identity is proven; an uncertain file stays
-separate. The view does not guess renames from filenames or similar text.
+**Captured file text diff…** in More actions opens a native picker of changed
+captured files, then VS Code's text diff for that file. It uses retained Before
+and After text, including unsaved text and executed includes. Added or removed
+files compare with an empty side. Uncertain file correspondence stays separate;
+the picker does not guess renames. The action stays available when hunk alignment
+reaches its limit and complete captured text is retained.
 
-Select a captured file to see its hunks and line numbers. **Open Before captured
-text** and **Open After captured text** show read-only text retained by the
-comparison. **Captured file text diff** opens the two retained sides in VS Code.
-If alignment reaches its limit, the view reports omitted hunks and keeps this
-text-diff action when the captured text is complete. Hunk positions are not
-source-navigation targets. **Root file text diff** remains available for the
-written roots. It opens VS Code's text diff for the selected roots; an
-include-only edit may have no root-file hunk.
+**Root file text diff** opens the native text diff for the selected roots. An
+include-only edit may have no root-file hunk. Captured text is read-only;
+ordinary Open source actions navigate to verified written files.
 
-**Coverage** lists compared families, available fields, limits and the source
-boundary. Coverage is field-specific: a limit on one field does not hide other
-facts the parser retained. If an occurrence cannot be matched safely, the view
-keeps the useful side facts and states the limit. When a comparison budget
-prevents a field comparison, that field stays plain and is not presented as a
-change; other available fields still compare.
+**Comparison limits** is a collapsed note below the inputs. Its summary marks
+partial comparisons. Open it to see unavailable facts, comparison limits and
+the captured source boundary. Relevant limits also appear in row detail. A
+limit on one field does not hide other available facts. A field whose comparison
+is unavailable stays plain and is not presented as a change.
 
-Only captured roots and executed includes are in the Source comparison.
+Only captured roots and executed includes are in the text comparison.
 Unexecuted child files, external MATLAB functions and data-file contents are
-not captured. In supplied-text mode, only the supplied roots and include text
-are available. An empty semantic result does not mean that all source text is
-unchanged. When source capture is incomplete, Coverage states the boundary and
-does not claim a complete source comparison.
+not captured. Supplied-text inputs contain only the supplied roots and include
+text. Empty model rows do not establish that all source text is unchanged.
 
 ## Refresh and settings
 
@@ -125,9 +117,8 @@ capture. Unrelated edits do not invalidate it. Two fixed historical inputs
 remain current across Working edits. An engine restart requires a new capture.
 An incomplete or failed refresh clears authoritative comparison rows.
 
-[Presentation](settings:dynare.diff.presentation) defaults to Focused review;
-choose Change list to make that the initial view for new comparisons.
-[Diff layout](settings:dynare.diff.layout) keeps Auto, Side by side and Stacked.
+[Expression layout](settings:dynare.diff.layout) keeps Auto, Side by side and
+Stacked.
 Changing `dynare.diff.sections` updates open comparisons. Other defaults apply
 when opening a comparison. Display choices survive Refresh and window reload;
 restored inputs are captured again before source actions become available.

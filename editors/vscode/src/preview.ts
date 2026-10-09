@@ -84,7 +84,7 @@ export function registerEffectivePreview(service: DygnosisClient): EffectivePrev
       if (!await validRoot()) return;
       const result = await service.execute("dynare/showEffectiveModel", effectivePreviewArguments(service, root, true));
       if (!await validRoot()) return;
-      if (!record(result) || typeof result.effective_text !== "string") throw new Error("This engine cannot show the effective model. Update dynare.serverPath or use the bundled binary.");
+      if (!record(result) || typeof result.effective_text !== "string") throw new Error("This engine cannot show macro expansion. Update dynare.serverPath or use the bundled binary.");
       appendMacroMessages(service.output, result);
       const uri = vscode.Uri.from({ scheme: "dygnosis-effective", path: `/${++sequence}/${root.path.split("/").at(-1) ?? "model.mod"}` });
       const rendered = previewText(result)!;

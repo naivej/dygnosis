@@ -154,7 +154,7 @@ export function registerLenses(service: DygnosisClient): vscode.Disposable {
           add("declarationReferences", group.anchor, group.declarations.map(row => row.id), "Find references", "dygnosis.findLensReferences");
         if (preferences.effectiveModel && safeAnchor(info.first_model_anchor, document)) {
           const first = mappedModelGroups(info, document).find(group => sameWrittenLocation(group.anchor, info.first_model_anchor!));
-          if (first) add("effectiveModel", first.anchor, first.statements.map(row => row.id), "Show effective model", "dygnosis.showLensEffectiveModel");
+          if (first) add("effectiveModel", first.anchor, first.statements.map(row => row.id), "Expand macros", "dygnosis.showLensEffectiveModel");
         }
         return current() ? result : [];
       } catch (error) { if (current()) service.log(String(error)); return []; }

@@ -4,24 +4,16 @@
   const api = acquireVsCodeApi(), saved = api.getState();
   const names = { symbols: "Symbols", parameters: "Parameters", aggregateEquations: "Aggregate equations", heterogeneousEquations: "Equations by dimension", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "Steady state", priors: "Priors", commands: "Commands", observables: "Observables", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Moments and IRFs", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
   const kinds = ["added", "removed", "changed", "unpaired"], marks = { added: "+", removed: "−", changed: "~", unpaired: "?" };
-  const controls = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "counts", "results", "refresh", "presentation", "modelTab", "sourceTab", "coverageTab"].map(id => [id, document.getElementById(id)]));
+  const controls = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "counts", "results", "refresh", "comparisonLimits", "limitsSummary", "limitsBody", "layoutFilter"].map(id => [id, document.getElementById(id)]));
   let payload, choices, references = new Map();
   const node = (tag, text, className) => { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; };
   const titleCase = text => text.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase());
   const scopeLabel = value => value === "aggregate" ? "Aggregate" : value === "global" ? "Global" : "Dimension: " + value;
   // These are display labels only. Source actions retain the host's exact keys.
   const basename = value => value.replaceAll("\\", "/").split("/").at(-1) || value;
-  const fileContext = value => value.replaceAll("\\", "/").split("/").slice(-2).join("/");
   const post = (type, args = {}) => api.postMessage({ type, token: payload.token, ...args });
   const remember = () => { api.setState({ key: payload.key, choices }); api.postMessage({ type: "choices", key: payload.key, choices }); };
   function update() { renderRows(); remember(); }
-  function localState() { return Object.fromEntries(Object.entries(choices).filter(([key]) => !["presentations", "presentation"].includes(key))); }
-  function switchPresentation(value) {
-    choices.presentations[choices.presentation] = localState();
-    const next = choices.presentations[value], defaults = payload.defaults ?? choices;
-    choices = { ...(next ?? { ...defaults, search: "", scope: "all", expanded: {}, selected: null, sourceSelected: null, capture: "", tab: choices.tab }), presentation: value, presentations: choices.presentations };
-    renderControls(); update(); controls.presentation?.focus();
-  }
   function filterChoice(container, entries, property, savedProperty, label) {
     const selected = choices[property], all = entries.map(([value]) => value);
     const mode = selected.length === all.length && all.every(value => selected.includes(value)) ? "all" : selected.length === 1 ? selected[0] : "saved";
@@ -37,7 +29,6 @@
   }
   function renderControls() {
     controls.search.value = choices.search; controls.layout.value = choices.layout; controls.expansion.value = choices.expansion;
-    if (controls.presentation) controls.presentation.value = choices.presentation;
     const scopes = [...new Set(payload.rows.flatMap(row => row.scopes))].sort(); controls.scope.replaceChildren();
     for (const value of ["all", ...scopes]) { const option = node("option", value === "all" ? "All scopes" : scopeLabel(value)); option.value = value; controls.scope.append(option); }
     if (choices.scope !== "all" && !scopes.includes(choices.scope)) { const option = node("option", scopeLabel(choices.scope) + " (no rows)"); option.value = choices.scope; controls.scope.append(option); }
@@ -120,7 +111,7 @@
       const location = node("p", [...new Set(locations)].join(" · "), "location");
       location.title = ["before", "after"].flatMap(side => (row.navigation[side]?.written_locations ?? []).map(location => titleCase(side) + ": " + location.uri)).join("\n"); article.append(location);
     }
-    if (!row.semantic && payload.semantic) article.append(node("p", "Typed detail is unavailable for this row. Structural detail remains; review Coverage for limits.", "source-note"));
+    if (!row.semantic && payload.semantic) article.append(node("p", "Typed detail is unavailable for this row. Structural detail remains; review Comparison limits.", "source-note"));
     if (row.semantic) {
       const detail = row.semantic;
       const changed = detail.fields.filter(field => field.changed && field.comparison_availability === "complete");
@@ -176,115 +167,53 @@
     controls.counts.textContent = shown.length + " of " + available.length + " model rows shown · " + breakdown;
     if (!shown.some(row => row.id === choices.selected)) choices.selected = shown[0]?.id ?? null;
     if (!shown.length) {
-      const text = !choices.sections.length ? "All sections are hidden. Choose a section to show its rows." : ["failure", "incomplete", "loading"].includes(payload.status) ? "" : payload.rows.length ? "No rows match these filters." : payload.sourceChanges?.files.length ? "No model changes. Captured text differs; open Source changes." : payload.coverage?.availability !== "complete" && payload.semantic ? "No model rows. Review Coverage for comparison limits and the captured source boundary." : payload.status === "ready" ? "No structural changes. Written text can still differ." : "Refresh to compare current inputs.";
+      const text = !choices.sections.length ? "All sections are hidden. Choose a section to show its rows." : ["failure", "incomplete", "loading"].includes(payload.status) ? "" : payload.rows.length ? "No rows match these filters." : payload.sourceChanges?.files.length ? "No model changes. Captured text differs; use Captured file text diff in More actions." : payload.coverage?.availability !== "complete" && payload.semantic ? "No model rows. Review Comparison limits before concluding that the model is unchanged." : payload.status === "ready" ? "No structural changes. Written text can still differ." : "Refresh to compare current inputs.";
       if (text) controls.results.append(node("p", text, "empty")); return;
     }
     const groups = new Map();
     for (const row of shown) { const key = row.section + ":" + row.group; if (!groups.has(key)) groups.set(key, { label: row.group, rows: [] }); groups.get(key).rows.push(row); }
-    if (choices.presentation === "focusedReview") {
-      const grid = node("div", undefined, "focused"), list = node("nav", undefined, "change-tree"); list.setAttribute("aria-label", "Model changes");
-      for (const [key, group] of groups) {
-        const section = node("details", undefined, "tree-group"), heading = node("summary", undefined, "group-heading"); section.open = choices.expanded[key] ?? choices.expansion !== "none";
-        heading.append(node("span", group.label), node("span", String(group.rows.length), "group-count")); heading.title = group.rows.length + " model row appearances"; section.append(heading);
-        section.addEventListener("toggle", () => { choices.expanded[key] = section.open; remember(); });
-        for (const row of group.rows) {
-          const button = node("button", undefined, "list-row " + row.kind + (row.id === choices.selected ? " selected" : "")); button.type = "button"; button.setAttribute("aria-pressed", String(row.id === choices.selected));
-          button.setAttribute("aria-label", titleCase(row.kind) + " " + row.label + ", " + row.scopes.map(scopeLabel).join(" · "));
-          const label = node("span"); label.append(node("span", row.label, "row-title"), node("span", (row.semantic?.facets.map(titleCase).join(" · ") || row.group) + " · " + row.scopes.map(scopeLabel).join(" · "), "row-subtitle"));
-          button.append(node("span", marks[row.kind], "change-mark " + row.kind), label);
-          button.setAttribute("data-row-id", row.id);
-          button.addEventListener("click", () => { choices.selected = row.id; update(); focusRow("data-row-id", row.id); }); section.append(button);
-        }
-        list.append(section);
+    const grid = node("div", undefined, "focused"), list = node("nav", undefined, "change-tree"); list.setAttribute("aria-label", "Model changes");
+    for (const [key, group] of groups) {
+      const section = node("details", undefined, "tree-group"), heading = node("summary", undefined, "group-heading"); section.open = choices.expanded[key] ?? choices.expansion !== "none";
+      heading.append(node("span", group.label), node("span", String(group.rows.length), "group-count")); heading.title = group.rows.length + " model row appearances"; section.append(heading);
+      section.addEventListener("toggle", () => { choices.expanded[key] = section.open; remember(); });
+      for (const row of group.rows) {
+        const button = node("button", undefined, "list-row " + row.kind + (row.id === choices.selected ? " selected" : "")); button.type = "button"; button.setAttribute("aria-pressed", String(row.id === choices.selected));
+        button.setAttribute("aria-label", titleCase(row.kind) + " " + row.label + ", " + row.scopes.map(scopeLabel).join(" · "));
+        const label = node("span"); label.append(node("span", row.label, "row-title"), node("span", (row.semantic?.facets.map(titleCase).join(" · ") || row.group) + " · " + row.scopes.map(scopeLabel).join(" · "), "row-subtitle"));
+        button.append(node("span", marks[row.kind], "change-mark " + row.kind), label);
+        button.setAttribute("data-row-id", row.id);
+        button.addEventListener("click", () => { choices.selected = row.id; update(); focusRow("data-row-id", row.id); }); section.append(button);
       }
-      const detail = node("section", undefined, "selected-detail"); detail.setAttribute("aria-label", "Selected change"); detail.append(rowDetail(shown.find(row => row.id === choices.selected))); grid.append(list, detail); controls.results.append(grid);
-    } else {
-      for (const [key, group] of groups) {
-        const section = node("details", undefined, "list-group"), heading = node("summary", undefined, "group-heading"); section.open = choices.expanded[key] ?? choices.expansion !== "none";
-        heading.append(node("span", group.label), node("span", String(group.rows.length), "group-count")); heading.title = group.rows.length + " model row appearances"; section.append(heading);
-        section.addEventListener("toggle", () => { choices.expanded[key] = section.open; remember(); });
-        for (const row of group.rows) {
-          const detail = node("details", undefined, "row-summary " + row.kind); detail.open = choices.expanded[row.id] ?? choices.expansion !== "none";
-          detail.setAttribute("data-row-id", row.id);
-          const summary = node("summary"); summary.append(node("span", marks[row.kind], "change-mark " + row.kind), node("span", row.label, "row-title"), node("span", (row.semantic?.facets.map(titleCase).join(" · ") || row.group) + " · " + row.scopes.map(scopeLabel).join(" · "), "row-subtitle")); summary.setAttribute("aria-label", titleCase(row.kind) + " " + row.label + ", " + row.scopes.map(scopeLabel).join(" · ")); detail.append(summary, rowDetail(row));
-          detail.addEventListener("toggle", () => { choices.expanded[row.id] = detail.open; choices.selected = row.id; remember(); }); section.append(detail);
-        }
-        controls.results.append(section);
-      }
+      list.append(section);
     }
+    const detail = node("section", undefined, "selected-detail"); detail.setAttribute("aria-label", "Selected change"); detail.append(rowDetail(shown.find(row => row.id === choices.selected))); grid.append(list, detail); controls.results.append(grid);
   }
-  function capturedAction(file, side) {
-    const own = file[side], reason = payload.status !== "ready" ? "Refresh to enable source actions." : !own?.exact_text_available ? "Complete captured text is unavailable on this side." : "";
-    return action("Open " + titleCase(side) + " captured text", "openCapturedSource", { pointer: file.pointer, side }, reason);
-  }
-  function sourceDetail(file) {
-    const detail = node("article", undefined, "detail change selected-detail " + file.change), heading = node("div", undefined, "detail-heading"), key = file.after?.file_key ?? file.before?.file_key;
-    heading.append(node("span", marks[file.change], "change-mark " + file.change), node("h2", basename(key)), node("span", titleCase(file.change) + " · captured source", "facet"));
-    const location = node("p", ["before", "after"].filter(side => file[side]).map(side => titleCase(side) + ": " + fileContext(file[side].file_key)).join(" · "), "location"); location.title = [file.before?.file_key, file.after?.file_key].filter(Boolean).join("\n");
-    detail.append(heading, location, node("p", "Captured source text. Model rows can also describe edits in these hunks.", "summary-line"));
-    const buttons = node("div", undefined, "actions"); buttons.append(capturedAction(file, "before"), capturedAction(file, "after"), action("Captured file text diff", "capturedTextDiff", { pointer: file.pointer }, payload.status !== "ready" ? "Refresh to enable source actions." : [file.before, file.after].filter(Boolean).some(side => !side.exact_text_available) ? "Complete captured text is unavailable." : ""));
-    if (file.correspondence === "unpaired") detail.append(node("p", "Unpaired captured file. File correspondence is not proven.", "source-note"));
-    for (const hunk of file.hunks) {
-      const table = node("table", undefined, "source-hunk"), head = node("tr"); head.append(node("th", "Before line"), node("th", "After line"), node("th", "Captured text")); table.append(head);
-      let before = hunk.before_start, after = hunk.after_start;
-      for (const line of hunk.lines) {
-        const tr = node("tr", undefined, line.role), old = line.role === "added" ? "" : String(before++), next = line.role === "removed" ? "" : String(after++);
-        tr.append(node("td", old, "gutter"), node("td", next, "gutter")); const text = node("td"); text.append(node("span", line.role === "added" ? "+ " : line.role === "removed" ? "− " : "  ", "line-cue"), node("code", line.text, "token " + line.role)); tr.append(text); table.append(tr);
-      }
-      const scroll = node("div", undefined, "table-scroll"); scroll.append(table); detail.append(scroll);
-    }
-    if (file.omitted_hunks) detail.append(node("p", file.omitted_hunks + " source hunks omitted. Use Captured file text diff for complete retained text.")); limits(detail, file.limits); detail.append(buttons); return detail;
-  }
-  function sourceRows() {
-    const all = payload.sourceChanges?.files ?? [], query = choices.search.trim().toLocaleLowerCase(), shown = all.filter(file => choices.changeKinds.includes(file.change) && (!query || [file.before?.file_key, file.after?.file_key, ...file.hunks.flatMap(h => h.lines.map(l => l.text))].join("\n").toLocaleLowerCase().includes(query)));
-    controls.counts.textContent = shown.length + " of " + all.length + " captured files shown · " + shown.reduce((sum, f) => sum + f.hunks.length, 0) + " source hunks";
-    if (!shown.some(file => file.pointer === choices.sourceSelected)) choices.sourceSelected = shown[0]?.pointer ?? null;
-    if (!shown.length) controls.results.append(node("p", all.length ? "No captured files match these filters." : payload.sourceChanges ? "No captured file changes. Review Coverage for the captured source boundary." : "Captured Source detail is unavailable with this engine. Use Root file text diff.", "empty"));
-    else if (choices.presentation === "focusedReview") {
-      const grid = node("div", undefined, "focused"), list = node("nav", undefined, "change-tree"); list.setAttribute("aria-label", "Captured file changes");
-      const heading = node("div", undefined, "group-heading"); heading.append(node("span", "Captured files"), node("span", String(shown.length))); list.append(heading);
-      for (const file of shown) {
-        const key = file.after?.file_key ?? file.before?.file_key, button = node("button", undefined, "list-row " + file.change + (choices.sourceSelected === file.pointer ? " selected" : "")), label = node("span");
-        label.append(node("span", basename(key), "row-title"), node("span", fileContext(key) + " · " + (file.correspondence === "unpaired" ? "Unpaired" : file.hunks.length + " hunks"), "row-subtitle"));
-        button.append(node("span", marks[file.change], "change-mark " + file.change), label); button.title = key; button.setAttribute("aria-label", titleCase(file.change) + " captured file " + fileContext(key));
-        button.setAttribute("data-source-pointer", file.pointer); button.setAttribute("aria-pressed", String(choices.sourceSelected === file.pointer)); button.addEventListener("click", () => { choices.sourceSelected = file.pointer; update(); focusRow("data-source-pointer", file.pointer); }); list.append(button);
-      }
-      grid.append(list, sourceDetail(shown.find(f => f.pointer === choices.sourceSelected))); controls.results.append(grid);
-    } else for (const file of shown) {
-      const detail = node("details", undefined, "row-summary " + file.change), key = file.after?.file_key ?? file.before?.file_key, summary = node("summary"); detail.open = choices.expanded[file.pointer] ?? choices.expansion !== "none";
-      summary.append(node("span", marks[file.change], "change-mark " + file.change), node("span", basename(key), "row-title"), node("span", fileContext(key), "row-subtitle")); summary.title = key; summary.setAttribute("aria-label", titleCase(file.change) + " captured file " + fileContext(key)); detail.append(summary, sourceDetail(file)); detail.addEventListener("toggle", () => { choices.expanded[file.pointer] = detail.open; remember(); }); controls.results.append(detail);
-    }
-    limits(controls.results, payload.sourceChanges?.limits);
-  }
-  function coverageRows() {
-    controls.counts.textContent = "Comparison coverage and source boundary";
-    const coverage = payload.coverage;
-    if (!coverage) { controls.results.append(node("p", payload.semanticMessage ?? "Coverage detail is unavailable with this engine.")); return; }
-    const boundary = coverage.source_boundary === "parsed_models_only" ? "Only parsed models were supplied. Source capture is unavailable." : coverage.source_boundary.startsWith("supplied_") ? "Only supplied roots and executed include text are compared. Other source files were not supplied." : "Captured roots and executed includes are compared.";
-    const panel = node("section", undefined, "coverage");
-    panel.append(node("h2", "Coverage: " + titleCase(coverage.availability)), node("p", "Source boundary: " + titleCase(coverage.source_boundary)), node("p", boundary + " Unexecuted child files, external MATLAB functions and data file contents are not captured."));
-    limits(panel, coverage.limits); limits(panel, payload.semantic?.limits);
-    const table = node("table"), head = node("tr"); for (const text of ["Family", "Availability", "Compared fields and limits"]) head.append(node("th", text)); table.append(head);
-    for (const family of coverage.families) {
-      const row = node("tr"), fields = node("td"); row.append(node("th", titleCase(family.family)), node("td", titleCase(family.availability))); fields.append(node("p", family.fields.map(titleCase).join(", ") || "None")); limits(fields, family.limits); row.append(fields); table.append(row);
-    }
-    const scroll = node("div", undefined, "table-scroll"); scroll.append(table); panel.append(scroll); controls.results.append(panel);
+  function comparisonLimits() {
+    if (!controls.comparisonLimits) return;
+    const coverage = payload.coverage, source = payload.sourceChanges;
+    controls.comparisonLimits.hidden = payload.status === "loading";
+    controls.limitsSummary.textContent = "Comparison limits" + (payload.status === "ready" && [coverage, source, payload.semantic].some(value => value && value.availability !== "complete") ? " · Partial" : "");
+    const body = controls.limitsBody; body.replaceChildren();
+    const boundary = !coverage || coverage.source_boundary === "parsed_models_only" ? "Captured source text is unavailable." : coverage.source_boundary.startsWith("supplied_") ? "Only supplied roots and executed include text are compared." : "Captured roots and executed includes are compared.";
+    body.append(node("p", boundary + " Unexecuted child files, external MATLAB functions and data-file contents are not captured."));
+    if (payload.semanticMessage) body.append(node("p", payload.semanticMessage));
+    const entries = [...(coverage?.limits ?? []), ...(payload.semantic?.limits ?? []), ...(source?.limits ?? []), ...(coverage?.families ?? []).flatMap(family => family.limits), ...(source?.files ?? []).flatMap(file => (file.limits ?? []).map(limit => ({ ...limit, reason: (file.after?.file_key ?? file.before?.file_key) + ": " + limit.reason })))];
+    const unique = new Map(entries.map(limit => [limit.reason + ":" + limit.omitted, limit]));
+    limits(body, [...unique.values()]);
+    for (const family of coverage?.families ?? []) if (family.availability !== "complete" && !family.limits.length) body.append(node("p", titleCase(family.family) + " comparison: " + titleCase(family.availability) + "."));
   }
   function renderRows() {
     if (!payload || !choices) return;
     controls.results.className = "results layout-" + choices.layout; controls.results.replaceChildren();
-    if (choices.capture !== payload.capture && payload.status === "ready") { choices.capture = payload.capture ?? ""; choices.selected = null; choices.sourceSelected = null; }
-    for (const tab of ["model", "source", "coverage"]) { const control = controls[tab + "Tab"]; if (control) { control.setAttribute("aria-selected", String(choices.tab === tab)); control.tabIndex = choices.tab === tab ? 0 : -1; } }
-    controls.scope.disabled = choices.tab !== "model"; controls.sections.disabled = choices.tab !== "model"; controls.search.disabled = choices.tab === "coverage";
-    const tools = document.getElementById("filterTools"); if (tools) tools.hidden = choices.tab === "coverage";
-    for (const name of ["sectionFilter", "scopeFilter"]) { const filter = document.getElementById(name); if (filter) filter.hidden = choices.tab !== "model"; }
-    controls.results.setAttribute("aria-labelledby", choices.tab + "Tab");
-    if (choices.tab === "source") sourceRows(); else if (choices.tab === "coverage") coverageRows(); else modelRows();
-    if (payload.semanticMessage) controls.results.append(node("p", payload.semanticMessage, "source-note"));
+    if (choices.capture !== payload.capture && payload.status === "ready") { choices.capture = payload.capture ?? ""; choices.selected = null; }
+    modelRows(); comparisonLimits();
+    const selected = payload.rows.find(row => row.id === choices.selected);
+    if (controls.layoutFilter) controls.layoutFilter.hidden = !selected || !!selected.semantic && !selected.semantic.expressions.length;
   }
   function focusRow(attribute, identity) { const entries = document.querySelectorAll?.("[" + attribute + "]") ?? []; [...entries].find(element => element.getAttribute(attribute) === identity)?.focus(); }
   controls.refresh.addEventListener("click", () => post("refresh"));
-  for (const name of ["changeComparison", "swap", "rootTextDiff", "updateRevision", "choosePath", "details", "help"]) document.getElementById(name)?.addEventListener("click", () => { post(name); const more = document.getElementById("moreActions"); if (more) more.open = false; });
+  for (const name of ["changeComparison", "swap", "rootTextDiff", "capturedTextDiff", "updateRevision", "choosePath", "details", "help"]) document.getElementById(name)?.addEventListener("click", () => { post(name); const more = document.getElementById("moreActions"); if (more) more.open = false; });
   document.getElementById("moreActions")?.addEventListener("keydown", event => { if (event.key === "Escape") { const more = document.getElementById("moreActions"); more.open = false; more.querySelector("summary")?.focus(); } });
   controls.search.addEventListener("input", () => { choices.search = controls.search.value; update(); });
   for (const [control, property, savedProperty, entries] of [[controls.kinds, "changeKinds", "customChangeKinds", kinds], [controls.sections, "sections", "customSections", Object.keys(names)]]) control.addEventListener("change", () => {
@@ -292,16 +221,10 @@
     renderControls(); update();
   });
   for (const name of ["scope", "layout", "expansion"]) controls[name].addEventListener("change", () => { choices[name] = controls[name].value; if (name === "expansion") choices.expanded = {}; update(); });
-  controls.presentation?.addEventListener("change", () => switchPresentation(controls.presentation.value));
-  const tabs = ["model", "source", "coverage"];
-  tabs.forEach((tab, index) => {
-    const button = controls[tab + "Tab"]; if (!button) return;
-    button.addEventListener("click", () => { choices.tab = tab; update(); });
-    button.addEventListener("keydown", event => { const next = event.key === "ArrowRight" ? (index + 1) % 3 : event.key === "ArrowLeft" ? (index + 2) % 3 : event.key === "Home" ? 0 : event.key === "End" ? 2 : -1; if (next >= 0) { event.preventDefault(); choices.tab = tabs[next]; update(); controls[tabs[next] + "Tab"].focus(); } });
-  });
+  controls.comparisonLimits?.addEventListener("toggle", () => { if (payload && choices) { choices.limitsOpen = controls.comparisonLimits.open; remember(); } });
   window.addEventListener("message", event => {
     const message = event.data; if (!message || message.type !== "render" || !Array.isArray(message.rows)) return;
-    payload = message; references = new Map((message.references ?? []).map(reference => [reference.pointer, reference])); choices = message.choices; choices.presentations ??= {}; choices.tab ??= "model";
+    payload = message; references = new Map((message.references ?? []).map(reference => [reference.pointer, reference])); choices = message.choices; if (controls.comparisonLimits) controls.comparisonLimits.open = choices.limitsOpen;
     controls.models.replaceChildren();
     for (const [label, input] of [["Before", message.before], ["After", message.after]]) {
       const model = node("div", undefined, "input-side"), parts = input.split(" · "); model.title = input;
@@ -312,9 +235,9 @@
     const folders = document.getElementById("folders"); if (folders) folders.textContent = message.hasHistory ? "Extra include folders use the current settings. Historical sources use only their selected commits." : "";
     for (const name of ["swap", "changeComparison", "updateRevision"]) { const button = document.getElementById(name); if (button) button.disabled = name === "updateRevision" ? !message.hasHistory : false; }
     const path = document.getElementById("choosePath"); if (path) path.hidden = message.status !== "failure" || !/model|root|path|file|source/i.test(message.message);
-    for (const [name, count] of [["modelCount", message.rows.length], ["sourceCount", message.sourceChanges?.files.length ?? 0]]) { const badge = document.getElementById(name); if (badge) badge.textContent = String(count); }
-    const boundary = document.getElementById("sourceBoundary"); if (boundary) boundary.textContent = !message.coverage ? "Review Coverage for the captured source boundary" : message.coverage.source_boundary === "parsed_models_only" ? "Parsed models only · Source unavailable" : message.coverage.source_boundary.startsWith("supplied_") ? "Supplied root + executed includes" : "Captured root + executed includes";
+    const boundary = document.getElementById("sourceBoundary"); if (boundary) boundary.textContent = !message.coverage ? "Captured source boundary unavailable" : message.coverage.source_boundary === "parsed_models_only" ? "Parsed models only · Source unavailable" : message.coverage.source_boundary.startsWith("supplied_") ? "Supplied root + executed includes" : "Captured root + executed includes";
     const root = document.getElementById("rootTextDiff"); if (root) root.disabled = message.status !== "ready";
+    const captured = document.getElementById("capturedTextDiff"); if (captured) captured.disabled = message.status !== "ready" || !message.sourceChanges?.files.length;
     renderControls(); renderRows(); remember();
   });
   api.postMessage({ type: "ready", key: saved?.key, choices: saved?.choices });

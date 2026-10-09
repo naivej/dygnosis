@@ -88,7 +88,10 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
   const checks = [];
   await nativeChanges(async ({ send, evaluate, refreshContext }) => {
     const regainChanges = () => waitFor(async () => {
-      try { await refreshContext(); delete evidence.semantic_context_discovery; return true; }
+      try {
+        await refreshContext(); delete evidence.semantic_context_discovery;
+        return await evaluate('document.getElementById("status").className === "ready" && Boolean(document.querySelector("button.list-row"))');
+      }
       catch (error) {
         if (error.code !== "NATIVE_FRAME_PENDING") throw error;
         evidence.semantic_context_discovery = error.discovery; return false;
@@ -107,10 +110,11 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     })()`);
     const click = selector => evaluate(`(() => {
       const control = document.querySelector(${JSON.stringify(selector)});
-      if (!control || !control.getClientRects().length) throw new Error("Missing visible native control");
+      if (!control || !control.getClientRects().length || control.disabled) throw new Error("Missing enabled visible native control: " + ${JSON.stringify(selector)});
       control.click();
     })()`);
-    assert.equal(await evaluate('document.getElementById("presentation").value'), "focusedReview");
+    assert.equal(await evaluate('Boolean(document.getElementById("presentation") || document.querySelector("[role=tablist]"))'), false);
+    assert.equal(await evaluate('document.getElementById("comparisonLimits").open'), false);
     const header = await evaluate('({cards:[...document.querySelectorAll("#models .input-side")].map(card=>({label:card.querySelector("small").textContent,name:card.querySelector("code").textContent,title:card.title})),kinds:document.getElementById("kinds").tagName,sections:document.getElementById("sections").tagName,checkboxes:document.querySelectorAll("input[type=checkbox],fieldset").length,legend:[...document.querySelectorAll("footer .change-mark")].map(mark=>mark.parentElement.textContent.trim())})');
     assert.deepEqual(header.cards.map(card => [card.label, card.name]), [["Before", "root.mod"], ["After", "root.mod"]]);
     assert.ok(header.cards[0].title.includes(decodeURIComponent(new URL(roots.before.toString()).pathname)));
@@ -130,27 +134,10 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     await select("#sections", "saved");
     assert.equal(await evaluate('document.getElementById("sections").value'), "saved");
     await select("#sections", "all");
-    assert.equal(await evaluate('document.getElementById("modelCount").textContent'), "15", "the rich accepted producer fixture retains all model rows");
-    assert.equal(await evaluate('document.getElementById("sourceCount").textContent'), "3");
+    assert.match(await evaluate('document.getElementById("counts").textContent'), /15 of 15 model rows shown/);
     evidence.semantic_compact_controls = header;
     evidence.semantic_saved_filters = true;
-    for (const presentation of ["focusedReview", "changeList"]) {
-      await select("#presentation", presentation);
-      assert.equal(await evaluate('document.activeElement.id'), "presentation", "switching presentation keeps keyboard focus visible");
-      for (const tab of ["modelTab", "sourceTab", "coverageTab"]) {
-        await click(`#${tab}`);
-        assert.equal(await evaluate(`document.getElementById(${JSON.stringify(tab)}).getAttribute("aria-selected")`), "true");
-        assert.equal(await evaluate('Boolean(document.getElementById("presentation").getClientRects().length)'), true);
-        assert.equal(await evaluate('Boolean(document.getElementById("results").textContent.trim())'), true);
-        const filters = await evaluate('({toolbar:document.getElementById("filterTools").hidden,scope:document.getElementById("scopeFilter").hidden,section:document.getElementById("sectionFilter").hidden,tabsBottom:document.getElementById("tabs").getBoundingClientRect().bottom,toolsTop:document.getElementById("filterTools").getBoundingClientRect().top})');
-        assert.equal(filters.toolbar, tab === "coverageTab");
-        assert.equal(filters.scope, tab !== "modelTab"); assert.equal(filters.section, tab !== "modelTab");
-        if (tab !== "coverageTab") assert.ok(filters.toolsTop >= filters.tabsBottom, "tabs precede the compact filters");
-        checks.push(`${presentation}/${tab}`);
-      }
-    }
-    await select("#presentation", "focusedReview");
-    await click("#modelTab");
+    checks.push("single model view");
     assert.equal(await evaluate('Boolean(document.querySelector("nav.change-tree button[data-row-id]"))'), true);
     assert.equal(await evaluate('Boolean(document.querySelector("section.selected-detail"))'), true);
     await evaluate('document.querySelector("nav.change-tree .tree-group > summary").focus()');
@@ -158,24 +145,26 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     assert.equal(await evaluate('document.querySelector("nav.change-tree .tree-group").open'), false, "native keyboard collapses a counted group");
     await key("Enter", "Enter", 13);
     assert.equal(await evaluate('document.querySelector("nav.change-tree .tree-group").open'), true);
-    await select("#layout", "stacked");
-    await select("#presentation", "changeList");
+    await evaluate('(() => { const row=Array.from(document.querySelectorAll("button.list-row")).find(element => element.textContent.includes("forecast")); if (!row) throw new Error("Missing expression row"); row.click(); })()');
+    assert.equal(await evaluate('document.getElementById("layoutFilter").hidden'), false);
     await select("#layout", "sideBySide");
-    await select("#presentation", "focusedReview");
-    assert.equal(await evaluate('document.getElementById("layout").value'), "stacked", "presentations retain their own detail layout");
-    await evaluate('document.getElementById("presentation").focus()');
-    await key("Tab", "Tab", 9);
-    assert.notEqual(await evaluate('document.activeElement.id'), "presentation", "native Tab moves to another visible control");
+    const sideBySide = await evaluate('(() => {const before=document.querySelector(".side.before").getBoundingClientRect(),after=document.querySelector(".side.after").getBoundingClientRect();return {bx:before.x,by:before.y,ax:after.x,ay:after.y};})()');
+    assert.equal(sideBySide.by, sideBySide.ay); assert.ok(sideBySide.ax > sideBySide.bx);
+    await select("#layout", "stacked");
+    const stacked = await evaluate('(() => {const before=document.querySelector(".side.before").getBoundingClientRect(),after=document.querySelector(".side.after").getBoundingClientRect();return {bx:before.x,by:before.y,ax:after.x,ay:after.y};})()');
+    assert.equal(stacked.bx, stacked.ax); assert.ok(stacked.ay > stacked.by);
+    await evaluate('document.querySelector("#comparisonLimits > summary").focus()');
+    await key("Enter", "Enter", 13);
+    assert.equal(await evaluate('document.getElementById("comparisonLimits").open'), true);
+    assert.match(await evaluate('document.getElementById("limitsBody").textContent'), /not captured/);
+    await key("Enter", "Enter", 13);
+    assert.equal(await evaluate('document.getElementById("comparisonLimits").open'), false);
+    await evaluate('document.getElementById("search").focus()'); await key("Tab", "Tab", 9);
     const focus = await evaluate('({style:getComputedStyle(document.activeElement).outlineStyle,width:getComputedStyle(document.activeElement).outlineWidth})');
     assert.notEqual(focus.style, "none"); assert.notEqual(focus.width, "0px");
-    await evaluate('document.getElementById("modelTab").focus()');
-    await key("ArrowRight", "ArrowRight", 39);
-    assert.equal(await evaluate('document.getElementById("sourceTab").getAttribute("aria-selected")'), "true", "native arrow key changes the selected tab");
-    await click("#sourceTab");
-    assert.equal(await evaluate('Boolean(document.querySelector("[data-source-pointer]"))'), true);
-    assert.equal(await evaluate('Boolean(document.querySelector("table.source-hunk .gutter"))'), true);
-    assert.ok(await evaluate('document.querySelectorAll("table.source-hunk .token.removed").length') > 0, "the deletion style check uses actual retained source lines");
-    assert.equal(await evaluate('Array.from(document.querySelectorAll("table.source-hunk .token.removed")).every(node => !getComputedStyle(node).textDecorationLine.includes("line-through"))'), true);
+    assert.ok(await evaluate('document.querySelectorAll(".selected-detail .token.removed").length') > 0);
+    assert.equal(await evaluate('Array.from(document.querySelectorAll(".token.removed")).every(node => !getComputedStyle(node).textDecorationLine.includes("line-through"))'), true);
+    evidence.semantic_expression_layout = { sideBySide, stacked };
     assert.equal(await evaluate('document.getElementById("moreActions").open'), false);
     assert.equal(await evaluate('document.getElementById("rootTextDiff").disabled'), false, "ready root action is available inside the closed overflow");
     await evaluate('document.querySelector("#moreActions > summary").focus()');
@@ -210,16 +199,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
       ]) {
         await appearance.update("colorTheme", theme, vscode.ConfigurationTarget.Workspace);
         await waitFor(() => evaluate(`document.body.classList.contains(${JSON.stringify(bodyClass)})`), `rendered native ${theme}`);
-        for (const presentation of ["focusedReview", "changeList"]) {
-          await select("#presentation", presentation);
-          for (const tab of ["modelTab", "sourceTab", "coverageTab"]) {
-            await click(`#${tab}`);
-            const control = await evaluate('({top:document.getElementById("presentation").getBoundingClientRect().top,tabs:document.getElementById("modelTab").getBoundingClientRect().top,labels:Array.from(document.querySelectorAll("button,input,select")).every(element => element.getAttribute("aria-label") || element.labels?.length || element.textContent.trim())})');
-            assert.ok(control.top < control.tabs, "Presentation stays in the top comparison controls");
-            assert.equal(control.labels, true, "native controls have accessible names");
-          }
-        }
-        await click("#sourceTab");
+        assert.equal(await evaluate('Array.from(document.querySelectorAll("button,input,select")).every(element => element.getAttribute("aria-label") || element.labels?.length || element.textContent.trim())'), true);
         assert.equal(await evaluate('Array.from(document.querySelectorAll(".token.removed")).every(node => !getComputedStyle(node).textDecorationLine.includes("line-through"))'), true);
         themes.push(theme);
         evidence.semantic_themes = [...themes];
@@ -237,42 +217,29 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
       }, "native customized comparison color");
       evidence.semantic_custom_configuration = { ...vscode.workspace.getConfiguration("workbench").get("colorCustomizations") };
       assert.equal(evidence.semantic_custom_configuration["dynare.diff.changedForeground"], "#2266aa");
-      const fills = await evaluate('({added:[...document.querySelectorAll("table.source-hunk .token.added")].map(token=>getComputedStyle(token).backgroundColor),removed:[...document.querySelectorAll("table.source-hunk .token.removed")].map(token=>getComputedStyle(token).backgroundColor)})');
-      assert.ok(fills.added.length > 0 && fills.removed.length > 0, "native diff fill checks use actual added and removed source tokens");
+      const fills = await evaluate('({added:[...document.querySelectorAll(".selected-detail .token.added")].map(token=>getComputedStyle(token).backgroundColor),removed:[...document.querySelectorAll(".selected-detail .token.removed")].map(token=>getComputedStyle(token).backgroundColor)})');
+      assert.ok(fills.added.length > 0 && fills.removed.length > 0, "native diff fill checks use actual added and removed expression tokens");
       assert.ok(fills.added.every(color => color.startsWith("rgba(34, 136, 68,")));
       assert.ok(fills.removed.every(color => color.startsWith("rgba(170, 51, 68,")));
       evidence.semantic_native_diff_fills = fills;
-      await click("#modelTab");
       const changedColor = await evaluate('getComputedStyle(document.querySelector("footer .change-mark.changed")).color');
       assert.equal(changedColor, "rgb(34, 102, 170)", "Changed glyph uses the customized native semantic color");
       evidence.semantic_changed_color = changedColor;
       await appearance.update("activityBar.location", "hidden", vscode.ConfigurationTarget.Workspace);
       await send("Emulation.setDeviceMetricsOverride", { width: 320, height: 1000, deviceScaleFactor: 1, mobile: false });
       await waitFor(() => evaluate('window.innerWidth <= 320 && window.innerWidth > 250'), "real native narrow webview viewport");
-      for (const presentation of ["focusedReview", "changeList"]) {
-        await select("#presentation", presentation);
-        for (const tab of ["modelTab", "sourceTab", "coverageTab"]) {
-          await click(`#${tab}`);
-          assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), true, "narrow controls keep overflow inside their detail tables");
-        }
-      }
+      assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), true, "narrow controls keep overflow inside their detail tables");
+      await click("#comparisonLimits > summary");
+      assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), true, "limits remain readable at a narrow width");
+      await click("#comparisonLimits > summary");
       evidence.semantic_narrow = await evaluate('({width:window.innerWidth,height:window.innerHeight})');
       const viewports = [];
       for (const width of [1024, 1600]) {
         await send("Emulation.setDeviceMetricsOverride", { width, height: 1000, deviceScaleFactor: 1, mobile: false });
         await waitFor(() => evaluate(`window.innerWidth > ${width - 100} && window.innerWidth <= ${width}`), `native ${width}-pixel viewport`);
-        for (const presentation of ["focusedReview", "changeList"]) {
-          await select("#presentation", presentation);
-          for (const tab of ["modelTab", "sourceTab", "coverageTab"]) {
-            await click(`#${tab}`);
-            assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), true);
-            if (presentation === "focusedReview" && tab !== "coverageTab") {
-              const treeWidth = await evaluate('document.querySelector("nav.change-tree").getBoundingClientRect().width');
-              assert.ok(Math.abs(treeWidth - 245) < 0.6, "wide focused review keeps its compact 245-pixel tree");
-            }
-          }
-        }
-        await select("#presentation", "focusedReview"); await click("#modelTab");
+        assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'), true);
+        const treeWidth = await evaluate('document.querySelector("nav.change-tree").getBoundingClientRect().width');
+        assert.ok(Math.abs(treeWidth - 245) < 0.6, "wide model review keeps its compact tree");
         viewports.push(await evaluate('({width:window.innerWidth,height:window.innerHeight,tree:document.querySelector("nav.change-tree").getBoundingClientRect().width})'));
       }
       evidence.semantic_viewports = viewports;
@@ -285,8 +252,6 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
       await appearance.update("colorTheme", previousTheme, vscode.ConfigurationTarget.Workspace);
     }
     const filename = path.join(path.dirname(process.env.DYGNOSIS_HOST_RESULT), `semantic-${vscode.version}.png`);
-    await select("#presentation", "focusedReview");
-    await click("#modelTab");
     await select("#layout", "auto");
     await evaluate('(() => { const row=Array.from(document.querySelectorAll("button.list-row")).find(element => element.textContent.includes("forecast")); if (!row) throw new Error("Missing native local definition"); row.click(); })()');
     assert.equal(await evaluate('Boolean(document.querySelector(".selected-detail .reference"))'), true, "local detail retains direct counted-equation references");
@@ -297,18 +262,30 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     evidence.semantic_diff = { checks, screenshot: filename, required_visual: true };
     const referencedFile = path.join(path.dirname(roots.after.fsPath), "body.mod");
     await click('.selected-detail .reference button[aria-label^="Open After reference:"]');
-    await waitFor(() => vscode.window.activeTextEditor?.document.uri.fsPath === referencedFile, "native direct reference opens the captured include target");
+    await waitFor(() => vscode.window.activeTextEditor?.document.uri.fsPath === referencedFile && vscode.window.activeTextEditor.selection.start.line === 2, "native direct reference opens the captured include target and selects the counted equation");
     assert.equal(vscode.window.activeTextEditor.selection.start.line, 2, "the accepted direct reference maps to the counted Output equation");
     await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
     await regainChanges();
-    await click("#sourceTab");
-    await evaluate('(() => { const row=Array.from(document.querySelectorAll("button[data-source-pointer]")).find(element => element.textContent.includes("semantic-after") && element.textContent.includes("body.mod")); if (!row) throw new Error("Missing After captured include"); row.click(); })()');
-    await click('.selected-detail button[aria-label="Open After captured text"]');
-    await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === "dygnosis-captured", "native captured include opens read-only retained text");
-    assert.equal(vscode.window.activeTextEditor.document.getText(), await fs.readFile(referencedFile, "utf8"));
+    await waitFor(() => evaluate('document.getElementById("status").className === "ready" && !document.getElementById("capturedTextDiff").disabled'), "rendered captured-text action is ready");
+    await click("#moreActions > summary"); await click("#capturedTextDiff");
+    assert.equal(await evaluate('document.getElementById("moreActions").open'), false, "the captured-text action was dispatched");
+    let picker;
+    await waitFor(async () => nativeWorkbench(async send => {
+      const state = await send("Runtime.evaluate", { expression: 'Array.from(document.querySelectorAll(".quick-input-list .monaco-list-row")).map(row=>row.textContent)', returnByValue: true });
+      picker = state.result?.value ?? [];
+      return picker.some(label => label.includes("semantic-after") && label.includes("body.mod"));
+    }), "native captured-file picker");
+    const choice = picker.findIndex(label => label.includes("semantic-after") && label.includes("body.mod"));
+    for (let index = 0; index < choice; index++) await vscode.commands.executeCommand("workbench.action.quickOpenSelectNext");
+    await vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem");
+    await waitFor(() => vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputTextDiff, "native captured include text diff");
+    const capturedDiffTab = vscode.window.tabGroups.activeTabGroup.activeTab, capturedDiff = capturedDiffTab.input;
+    assert.equal(capturedDiff.modified.scheme, "dygnosis-captured");
+    assert.equal((await vscode.workspace.openTextDocument(capturedDiff.modified)).getText(), await fs.readFile(referencedFile, "utf8"));
+    assert.equal((await vscode.workspace.openTextDocument(capturedDiff.original)).getText(), "", "an unpaired added include has an empty Before side");
+    await vscode.window.tabGroups.close(capturedDiffTab);
     await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
     await regainChanges();
-    await click("#modelTab");
     const rootDocument = await vscode.workspace.openTextDocument(roots.after);
     const edit = new vscode.WorkspaceEdit();
     edit.insert(roots.after, rootDocument.positionAt(rootDocument.getText().length), "// Native refresh control\n");
@@ -318,16 +295,23 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     assert.equal(await evaluate('document.getElementById("moreActions").open'), false, "stale root action is disabled while overflow remains closed");
     assert.ok(await evaluate('document.querySelectorAll(".selected-detail .reference button").length') > 0, "the stale reference check has real accepted references");
     assert.equal(await evaluate('Array.from(document.querySelectorAll(".selected-detail button")).filter(button => /Open .*source|Open .*reference/.test(button.getAttribute("aria-label"))).every(button => button.disabled)'), true);
-    await click("#sourceTab");
-    assert.equal(await evaluate('Array.from(document.querySelectorAll(".selected-detail button")).every(button => button.disabled)'), true, "stale capture disables every captured Source action");
+    assert.equal(await evaluate('document.getElementById("capturedTextDiff").disabled'), true);
     await click("#refresh");
     await waitFor(() => evaluate('document.getElementById("status").classList.contains("ready")'), "native refreshed comparison");
-    await click("#modelTab");
     assert.equal(await evaluate('Boolean(document.querySelector("button.list-row[aria-pressed=true]"))'), true);
     assert.equal(await evaluate('document.querySelector("button.list-row[aria-pressed=true]").textContent.includes("forecast")'), false, "Refresh does not reuse selection without cross-capture proof");
     evidence.semantic_stale_refresh = true;
+    await vscode.window.showTextDocument(rootDocument, { viewColumn: vscode.ViewColumn.Active, preview: false });
+    await vscode.commands.executeCommand("dygnosis.showEffectiveModel");
+    await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === "dygnosis-effective", "Expand macros opens the read-only include expansion");
+    const expansionScreenshot = path.join(path.dirname(process.env.DYGNOSIS_HOST_RESULT), `macro-expansion-${vscode.version}.png`);
+    await nativeWorkbench(async workbenchSend => {
+      const picture = await workbenchSend("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+      await fs.writeFile(expansionScreenshot, Buffer.from(picture.data, "base64"));
+    });
+    evidence.macro_expansion_screenshot = expansionScreenshot;
   }).catch(async error => { await captureFailure(evidence); throw error; });
-  evidence.checks.push("native compact semantic Model/Source/Coverage, saved select filters, both presentations, per-presentation layout, native keyboard focus and More actions, 245px tree, custom Changed color, root text diff, captured include and stale Refresh actions");
+  evidence.checks.push("native single model view, saved filters, expression layouts, comparison limits, keyboard focus and More actions, themes, root/captured text diff and stale Refresh actions");
 }
 
 module.exports = { checkSemanticDiff };

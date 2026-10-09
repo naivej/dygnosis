@@ -105,7 +105,7 @@ function createHost() {
     host.panels.push(panel); return panel;
   };
   const token = () => new CancellationTokenSource().token;
-  const vscode = { Disposable, EventEmitter: Emitter, CancellationTokenSource, Uri, Range, RelativePattern, TabInputCustom, QuickPickItemKind: { Separator: -1 }, ProgressLocation: { Window: 10 }, ViewColumn: { Beside: 2 },
+  const vscode = { Disposable, EventEmitter: Emitter, CancellationTokenSource, Uri, Range, RelativePattern, TabInputCustom, QuickPickItemKind: { Separator: -1 }, ProgressLocation: { Window: 10 }, ViewColumn: { Active: -1, Beside: 2 },
     commands: {
       registerCommand(id, callback) { host.commands.set(id, callback); return new Disposable(() => host.commands.delete(id)); },
       async executeCommand(id, ...args) {

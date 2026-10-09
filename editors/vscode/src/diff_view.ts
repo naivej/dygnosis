@@ -9,13 +9,11 @@ export type DiffSection = typeof allDiffSections[number];
 export type ChangeKind = typeof changeKinds[number];
 export type DiffSide = "before" | "after";
 export interface DiffPreferences {
-  presentation?: "focusedReview" | "changeList";
   layout: "auto" | "sideBySide" | "stacked";
   expansion: "changes" | "all" | "none";
   sections: DiffSection[]; changeKinds: ChangeKind[];
 }
-export interface PresentationState { layout: DiffPreferences["layout"]; expansion: DiffPreferences["expansion"]; sections: DiffSection[]; changeKinds: ChangeKind[]; customSections: DiffSection[]; customChangeKinds: ChangeKind[]; search: string; scope: string; expanded: Record<string, boolean>; selected: string | null; sourceSelected: string | null; tab: "model" | "source" | "coverage"; capture: string }
-export interface DiffChoices extends PresentationState { presentation: "focusedReview" | "changeList"; presentations: Partial<Record<"focusedReview" | "changeList", PresentationState>> }
+export interface DiffChoices { layout: DiffPreferences["layout"]; expansion: DiffPreferences["expansion"]; sections: DiffSection[]; changeKinds: ChangeKind[]; customSections: DiffSection[]; customChangeKinds: ChangeKind[]; search: string; scope: string; expanded: Record<string, boolean>; selected: string | null; capture: string; limitsOpen: boolean }
 export interface DiffTarget {
   occurrence_id: string; domain: string; dimension: string | null; written_locations: Location[];
 }
@@ -228,7 +226,8 @@ export function parseSnapshotDiff(value: unknown, ids: Record<DiffSide, string>,
 export function normalizeChoices(value: unknown, defaults: DiffPreferences): DiffChoices {
   const row = record(value) ? value : {};
   const list = <T extends string>(value: unknown, allowed: readonly T[], fallback: T[]): T[] => Array.isArray(value) ? [...new Set(value.filter((item): item is T => typeof item === "string" && allowed.includes(item as T)))] : [...fallback];
-  const normalizeState = (row: Record<string, unknown>): PresentationState => ({
+  // Old presentation/tab state is ignored; its current filters and layout survive.
+  return {
     layout: ["auto", "sideBySide", "stacked"].includes(String(row.layout)) ? row.layout as DiffPreferences["layout"] : defaults.layout,
     expansion: ["changes", "all", "none"].includes(String(row.expansion)) ? row.expansion as DiffPreferences["expansion"] : defaults.expansion,
     sections: list(row.sections, allDiffSections, defaults.sections), changeKinds: list(row.changeKinds, changeKinds, defaults.changeKinds),
@@ -236,12 +235,9 @@ export function normalizeChoices(value: unknown, defaults: DiffPreferences): Dif
     customChangeKinds: list(row.customChangeKinds, changeKinds, list(row.changeKinds, changeKinds, defaults.changeKinds)),
     search: typeof row.search === "string" ? row.search.slice(0, 10000) : "", scope: typeof row.scope === "string" ? row.scope.slice(0, 1000) : "all",
     expanded: record(row.expanded) ? Object.fromEntries(Object.entries(row.expanded).filter(([key, value]) => key.length <= 1000 && typeof value === "boolean")) as Record<string, boolean> : {},
-    selected: typeof row.selected === "string" ? row.selected.slice(0, 1000) : null, sourceSelected: typeof row.sourceSelected === "string" ? row.sourceSelected.slice(0, 1000) : null,
-    capture: typeof row.capture === "string" ? row.capture.slice(0, 1000) : "", tab: ["model", "source", "coverage"].includes(String(row.tab)) ? row.tab as PresentationState["tab"] : "model",
-  });
-  const presentations: DiffChoices["presentations"] = {};
-  if (record(row.presentations)) for (const key of ["focusedReview", "changeList"] as const) { const state = row.presentations[key]; if (record(state)) presentations[key] = normalizeState(state); }
-  return { ...normalizeState(row), presentation: row.presentation === "focusedReview" || row.presentation === "changeList" ? row.presentation : defaults.presentation ?? "focusedReview", presentations };
+    selected: typeof row.selected === "string" ? row.selected.slice(0, 1000) : null,
+    capture: typeof row.capture === "string" ? row.capture.slice(0, 1000) : "", limitsOpen: row.limitsOpen === true,
+  };
 }
 
 export function sameTarget(left: DiffTarget | null, right: DiffTarget | null): boolean {

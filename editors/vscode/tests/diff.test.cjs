@@ -121,23 +121,22 @@ function webview() {
     acquireVsCodeApi: () => ({ getState: () => undefined, setState: value => states.push(value), postMessage: message => posted.push(message) }) };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../media/diff_view.js"), "utf8"), sandbox);
   const render = (extra = {}) => events.message({ data: { type: "render", key: "view", token: 4, before, after, rows: parseDiff(fixture(), before, after).rows,
-    status: "ready", message: "Current comparison", choices: normalizeChoices({ presentation: "changeList" }, defaults), ...extra } });
+    status: "ready", message: "Current comparison", choices: normalizeChoices({}, defaults), ...extra } });
   return { elements, posted, states, render };
 }
 test("webview uses text nodes, labels source sides and disables missing/stale locations", () => {
   const env = webview(); const rows = parseDiff(fixture(), before, after).rows; rows[0].label = "<img src=x onerror=bad()>";
   env.render({ rows }); assert.match(env.elements.results.textContent, /<img src=x onerror=bad\(\)>/);
   assert.equal(descendants(env.elements.results).some(element => element.tag === "img"), false);
-  const buttons = descendants(env.elements.results).filter(element => element.tag === "button");
-  assert.equal(buttons.length, 22); assert.equal(buttons[0].disabled, true); assert.equal(buttons[1].disabled, false);
+  const buttons = descendants(env.elements.results).filter(element => element.tag === "button" && element.attributes["aria-label"]?.startsWith("Open")); assert.equal(buttons[0].disabled, true); assert.equal(buttons[1].disabled, false);
   buttons[1].fire("click"); assert.equal(env.posted.at(-1).side, "after"); assert.equal(env.posted.at(-1).rowId, "/added_endogenous/0");
-  env.render({ status: "stale", message: "Out of date" }); assert.ok(descendants(env.elements.results).filter(element => element.tag === "button").every(button => button.disabled));
+  env.render({ status: "stale", message: "Out of date" }); assert.ok(descendants(env.elements.results).filter(element => element.tag === "button" && element.attributes["aria-label"]?.startsWith("Open")).every(button => button.disabled));
 });
 test("webview text/kind/scope filters, counts, layout and expansion preserve state", () => {
   const env = webview(); env.render(); assert.match(env.elements.counts.textContent, /11 of 11 model rows shown/);
   env.elements.search.value = "goods"; env.elements.search.fire("input"); assert.match(env.elements.counts.textContent, /1 of 11 model rows shown/);
   env.elements.layout.value = "stacked"; env.elements.layout.fire("change"); assert.equal(env.elements.results.className, "results layout-stacked");
-  env.elements.expansion.value = "none"; env.elements.expansion.fire("change"); assert.equal(env.elements.results.children[0].open, false);
+  env.elements.expansion.value = "none"; env.elements.expansion.fire("change"); assert.equal(env.elements.results.children[0].children[0].children[0].open, false);
   env.elements.search.value = ""; env.elements.search.fire("input"); env.elements.scope.value = "households"; env.elements.scope.fire("change"); assert.match(env.elements.counts.textContent, /1 of 11 model rows shown/);
   assert.equal(env.states.at(-1).choices.scope, "households");
   env.elements.kinds.value = "removed"; env.elements.kinds.fire("change"); assert.match(env.elements.results.textContent, /No rows match/);

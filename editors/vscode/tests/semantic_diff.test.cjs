@@ -172,17 +172,17 @@ test("empty captured files are valid registry entries and opaque keys are not re
   const source = { before: { [key]: "" }, after: registry.after };
   assert.equal(parseSemantic(r, { before: null, after: null }, source).sourceChanges.files[0].before.file_key, key);
 });
-test("Presentation defaults, resource overrides, invalid values and reset preserve detail layout", () => {
+test("expression layout keeps resource overrides and ignores the retired Presentation setting", () => {
   const { host, vscode } = createHost(), { diffPreferences } = load("diff", vscode);
-  assert.equal(diffPreferences(anchorUri, () => {}).presentation, "focusedReview");
   host.settings.set(anchorUri.toString(), { "diff.presentation": "changeList", "diff.layout": "stacked" });
-  assert.equal(diffPreferences(anchorUri, () => {}).presentation, "changeList");
-  assert.equal(diffPreferences(baselineUri, () => {}).presentation, "focusedReview");
-  const messages = []; host.settings.set(anchorUri.toString(), { "diff.presentation": "bad" });
-  assert.equal(diffPreferences(anchorUri, message => messages.push(message)).presentation, "focusedReview");
-  assert.match(messages[0], /diff.presentation/);
+  assert.equal(diffPreferences(anchorUri, () => {}).layout, "stacked");
+  assert.equal(diffPreferences(baselineUri, () => {}).layout, "auto");
+  const restored = normalizeChoices({ presentation: "changeList", tab: "coverage", presentations: { focusedReview: { search: "older" } }, search: "retained", layout: "stacked", limitsOpen: true }, defaults);
+  assert.equal(restored.search, "retained"); assert.equal(restored.layout, "stacked"); assert.equal(restored.limitsOpen, true);
+  assert.equal(Object.hasOwn(restored, "presentation"), false); assert.equal(Object.hasOwn(restored, "tab"), false);
   host.settings.delete(anchorUri.toString()); assert.equal(diffPreferences(anchorUri, () => {}).layout, "auto");
 });
+
 test("current LSP native source keys remain exact while URI navigation uses the registered mapping", async t => {
   const { host, service, vscode, git, token } = createHost(), { HistoricalSources } = load("history_sources", vscode), history = new HistoricalSources(async () => "unused"); t.after(() => history.dispose());
   service.client.initializeResult.capabilities.experimental = { dygnosis: { compareModels: { schema_version: 1, navigation_schema_version: 1, semantic_schema_version: 1, source_changes_schema_version: 1, coverage_schema_version: 1 } } };
@@ -233,31 +233,30 @@ class Element {
 }
 const descendants = element => [element, ...element.children.flatMap(descendants)];
 function webview() {
-  const elements = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "counts", "results", "refresh", "presentation", "modelTab", "sourceTab", "coverageTab", "help", "rootTextDiff", "moreActions", "filterTools", "kindFilter", "sectionFilter", "scopeFilter", "choosePath"].map(id => [id, new Element(id)]));
+  const elements = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "counts", "results", "refresh", "comparisonLimits", "limitsSummary", "limitsBody", "layoutFilter", "help", "rootTextDiff", "capturedTextDiff", "moreActions", "filterTools", "kindFilter", "sectionFilter", "scopeFilter", "choosePath"].map(id => [id, new Element(id)]));
   const events = {}, posted = [], states = [], snapshot = parseDiff(response(), roots.before, roots.after, true);
   const sandbox = { document: { getElementById: id => elements[id], createElement: tag => new Element(tag) }, window: { addEventListener: (name, callback) => events[name] = callback }, acquireVsCodeApi: () => ({ getState: () => undefined, setState: value => states.push(structuredClone(value)), postMessage: value => posted.push(value) }) };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../media/diff_view.js"), "utf8"), sandbox);
   const render = (extra = {}) => events.message({ data: { ...snapshot, type: "render", key: "view", capture: "capture1", token: 3, status: "ready", message: "Current comparison", choices: normalizeChoices({}, defaults), defaults, ...extra, before: typeof extra.before === "string" ? extra.before : roots.before, after: typeof extra.after === "string" ? extra.after : roots.after } });
   return { elements, posted, states, render };
 }
-test("both presentations safely render typed fields and preserve independent filters/layout/focus", () => {
+test("focused detail preserves filters, expression layout and the limits disclosure through reload", () => {
   const env = webview(); env.render();
   assert.match(env.elements.results.textContent, /Prior mean/); assert.match(env.elements.results.textContent, /0.8/);
   env.elements.search.value = "rho"; env.elements.search.fire("input");
   env.elements.layout.value = "stacked"; env.elements.layout.fire("change");
-  env.elements.presentation.value = "changeList"; env.elements.presentation.fire("change");
-  assert.equal(env.elements.presentation.focused, true); assert.equal(env.elements.search.value, "");
-  env.elements.search.value = "0.9"; env.elements.search.fire("input");
-  env.elements.presentation.value = "focusedReview"; env.elements.presentation.fire("change");
+  env.elements.comparisonLimits.open = true; env.elements.comparisonLimits.fire("toggle");
+  env.render({ choices: normalizeChoices(env.states.at(-1).choices, defaults) });
   assert.equal(env.elements.search.value, "rho"); assert.equal(env.elements.layout.value, "stacked");
-  assert.equal(env.states.at(-1).choices.presentations.changeList.search, "0.9");
+  assert.equal(env.elements.comparisonLimits.open, true);
 });
+
 test("input cards keep the full model path in the title and a short name in the text", () => {
   const env = webview(); env.render({ before: "C:/models/root.mod · Working", after: "tree/root.mod @ main · aaaaaaa" });
   assert.equal(env.elements.models.children[0].title, "C:/models/root.mod · Working");
   assert.doesNotMatch(env.elements.models.textContent, /C:\/models/); assert.match(env.elements.models.textContent, /root.mod/);
 });
-test("compact filters preserve saved multi-selections through switching, reload, refresh and split views", () => {
+test("compact filters preserve saved multi-selections through reload, refresh and split views", () => {
   const env = webview(), other = webview(), initial = normalizeChoices({ sections: ["priors", "commands"], changeKinds: ["changed", "unpaired"] }, defaults);
   env.render({ choices: initial }); other.render();
   assert.equal(env.elements.sections.value, "saved"); assert.equal(env.elements.kinds.value, "saved");
@@ -266,39 +265,34 @@ test("compact filters preserve saved multi-selections through switching, reload,
   env.elements.kinds.value = "saved"; env.elements.kinds.fire("change"); assert.match(env.elements.results.textContent, /Prior mean/);
   env.elements.sections.value = "commands"; env.elements.sections.fire("change");
   env.elements.sections.value = "saved"; env.elements.sections.fire("change");
-  env.elements.presentation.value = "changeList"; env.elements.presentation.fire("change");
-  env.elements.sections.value = "symbols"; env.elements.sections.fire("change");
-  env.elements.presentation.value = "focusedReview"; env.elements.presentation.fire("change");
   assert.equal(env.elements.sections.value, "saved");
   const restored = normalizeChoices(env.states.at(-1).choices, defaults); env.render({ choices: restored, capture: "capture2" });
   assert.deepEqual(env.states.at(-1).choices.sections, ["priors", "commands"]);
   assert.deepEqual(env.states.at(-1).choices.customChangeKinds, ["changed", "unpaired"]);
-  assert.equal(env.states.at(-1).choices.presentations.changeList.sections[0], "symbols");
   assert.equal(other.elements.sections.value, "all"); assert.equal(other.elements.kinds.value, "all");
 });
-test("collapsed Change list summaries retain facets and scope in text and accessible names", () => {
+test("grouped model rows retain facets, scopes and accessible names", () => {
   for (const dimension of [null, "households"]) {
     const env = webview(), snapshot = parseDiff(unpairedEquations(dimension), roots.before, roots.after, true);
-    env.render({ ...snapshot, choices: normalizeChoices({ presentation: "changeList", expansion: "none" }, defaults) });
-    const rows = descendants(env.elements.results).filter(element => element.className === "row-summary unpaired");
-    assert.equal(rows.length, 8);
+    env.render({ ...snapshot, choices: normalizeChoices({ expansion: "none" }, defaults) });
+    const rows = descendants(env.elements.results).filter(element => element.attributes["data-row-id"]);
+    assert.deepEqual(rows.map(row => row.attributes["data-row-id"]), snapshot.rows.map(row => row.id));
     const expectedScope = dimension === null ? "Aggregate" : "Dimension: households";
     for (const row of rows) {
-      assert.equal(row.open, false);
-      const summary = row.children[0], owner = snapshot.rows.find(item => item.id === row.attributes["data-row-id"]);
-      const subtitle = summary.children.find(element => element.className === "row-subtitle");
-      assert.equal(subtitle.textContent, (owner.semantic ? "Expression" : owner.group) + " · " + expectedScope);
-      assert.equal(summary.attributes["aria-label"], "Unpaired " + owner.label + ", " + expectedScope);
+      const owner = snapshot.rows.find(item => item.id === row.attributes["data-row-id"]);
+      assert.match(row.textContent, new RegExp(expectedScope));
+      assert.equal(row.attributes["aria-label"], "Unpaired " + owner.label + ", " + expectedScope);
     }
   }
 });
-test("empty filters have a clear route to All and irrelevant controls hide by tab", () => {
+
+test("empty filters have a route to All and expression layout hides without expression detail", () => {
   const env = webview(); env.render({ choices: normalizeChoices({ sections: [], changeKinds: [] }, defaults) });
   assert.match(env.elements.sections.textContent, /No sections selected/); assert.match(env.elements.kinds.textContent, /No kinds selected/);
   env.elements.sections.value = "all"; env.elements.sections.fire("change"); env.elements.kinds.value = "all"; env.elements.kinds.fire("change");
   assert.match(env.elements.results.textContent, /Prior mean/);
-  env.elements.sourceTab.fire("click"); assert.equal(env.elements.scopeFilter.hidden, true); assert.equal(env.elements.sectionFilter.hidden, true); assert.equal(env.elements.filterTools.hidden, false);
-  env.elements.coverageTab.fire("click"); assert.equal(env.elements.filterTools.hidden, true);
+  const snapshot = parseDiff(response(), roots.before, roots.after, true); snapshot.rows[0].semantic.expressions = [];
+  env.render(snapshot); assert.equal(env.elements.layoutFilter.hidden, true);
   env.render(); assert.doesNotMatch(env.elements.sections.textContent, /Saved selection/); assert.doesNotMatch(env.elements.kinds.textContent, /Saved selection/);
 });
 test("More actions forwards capture tokens and paths stay in the relevant failure state", () => {
@@ -318,17 +312,23 @@ test("long retained values disclose full facts without covering readable express
   assert.match(detail.textContent, /8 retained items · show values/); assert.match(detail.textContent, /retained_expression_node/);
   assert.match(env.elements.results.textContent, /0.9/);
 });
-test("source/coverage tabs keep separate counts, hunks, limits and keyboard navigation", () => {
-  const env = webview(); env.render(); env.elements.sourceTab.fire("click");
-  assert.match(env.elements.counts.textContent, /1 of 1 captured files shown · 1 source hunks/);
-  assert.match(env.elements.results.textContent, /\/\/ old/); assert.match(env.elements.results.textContent, /Captured file text diff/);
-  assert.ok(descendants(env.elements.results).some(element => element.className === "change-mark changed" && element.textContent === "~"));
-  env.elements.presentation.value = "changeList"; env.elements.presentation.fire("change"); env.elements.sourceTab.fire("click");
-  assert.ok(descendants(env.elements.results).some(element => element.tag === "details" && element.className === "row-summary changed"));
-  env.elements.sourceTab.fire("keydown", { key: "ArrowRight", preventDefault() {} });
-  assert.equal(env.elements.coverageTab.focused, true); assert.match(env.elements.results.textContent, /Effective inherited prior/);
-  assert.match(env.elements.results.textContent, /not captured/);
+test("limits stay visible with no model rows and duplicate family warnings appear once", () => {
+  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
+  env.render({ ...snapshot, rows: [] });
+  assert.equal(env.elements.comparisonLimits.open, false);
+  assert.match(env.elements.limitsSummary.textContent, /Partial/);
+  assert.match(env.elements.limitsBody.textContent, /not captured/);
+  assert.match(env.elements.limitsBody.textContent, /Effective inherited prior/);
+  assert.match(env.elements.results.textContent, /Captured file text diff/);
+  snapshot.coverage.limits = [...snapshot.coverage.families[0].limits]; env.render(snapshot);
+  assert.equal(env.elements.limitsBody.textContent.match(/Effective inherited prior/g).length, 1);
+  snapshot.sourceChanges.files[0].limits = [{ code: "source_alignment_limit", reason: "Source alignment budget exceeded.", omitted: null }]; env.render(snapshot);
+  assert.match(env.elements.limitsBody.textContent, /main.mod: Source alignment budget exceeded/);
+  env.elements.capturedTextDiff.fire("click");
+  assert.equal(env.posted.at(-1).type, "capturedTextDiff"); assert.equal(env.posted.at(-1).token, 3);
+  env.render({ status: "stale" }); assert.equal(env.elements.capturedTextDiff.disabled, true);
 });
+
 test("filtered selections clear, new captures cannot reuse pointers, stale actions remain disabled", () => {
   const env = webview(); env.render(); env.elements.search.value = "nothing"; env.elements.search.fire("input");
   assert.equal(env.states.at(-1).choices.selected, null); assert.match(env.elements.results.textContent, /No rows match/);
@@ -339,7 +339,7 @@ test("filtered selections clear, new captures cannot reuse pointers, stale actio
   env.elements.layout.fire("change"); assert.equal(env.states.at(-1).choices.capture, "capture2");
   assert.equal(env.states.at(-1).choices.selected, "/semantic/rows/0");
 });
-test("source-only changes lead to Source, text cannot inject DOM or source actions", () => {
+test("source-only changes lead to native text diff, text cannot inject DOM or source actions", () => {
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
   env.render({ rows: [] }); assert.match(env.elements.results.textContent, /Captured text differs/);
   snapshot.rows[0].label = "<img src=x onerror=bad()>"; snapshot.rows[0].semantic.fields[0].after.value.value = "command:bad";
@@ -353,43 +353,67 @@ test("field limits do not mark budget-unavailable values as added or removed", (
   env.render(snapshot); assert.match(env.elements.results.textContent, /Comparison unavailable/);
   assert.equal(descendants(env.elements.results).some(e => e.className === "token added" || e.className === "token removed"), false);
 });
-test("semantic reference and captured-file actions use host IDs, exact read-only text and stale guards", async t => {
-  const { host, service } = createHost(); host.install(); t.after(() => host.registration.dispose());
+test("reference and captured-file picker actions use exact retained text and stale guards", async t => {
+  const { host, service, vscode } = createHost(); host.install(); t.after(() => host.registration.dispose());
   host.capture = (resource, cancel, history) => {
     const result = captured(resource, history, host, service.currentInstance), row = result.snapshot.rows[0];
     result.snapshot.references = [{ pointer: "/semantic/references/0", side: "after", navigation: { ...row.navigation, id: "/semantic/references/0" } }];
     const before = result.inputs.before.root_file, after = result.inputs.after.root_file;
-    result.snapshot.sourceChanges = { files: [{ pointer: "/source_changes/files/0", before: { input_id: "before", file_key: before, exact_text_available: true }, after: { input_id: "after", file_key: after, exact_text_available: true } }] };
+    result.snapshot.sourceChanges = { files: [{ pointer: "/source_changes/files/0", change: "changed", correspondence: "selected_roots", before: { input_id: "before", file_key: before, exact_text_available: true }, after: { input_id: "after", file_key: after, exact_text_available: true } }] };
     return result;
   };
   await host.open();
   host.message({ type: "openReference", token: host.last().token, pointer: "/semantic/references/0", side: "after" }); await flush();
   assert.equal(host.shown.length, 1);
-  host.message({ type: "openCapturedSource", token: host.last().token, pointer: "/source_changes/files/0", side: "after" }); await flush();
-  const source = host.shown.at(-1).document;
-  assert.equal(source.uri.scheme, "dygnosis-captured"); assert.equal(source.getText(), host.panels[0].document.result.texts.after[host.panels[0].document.result.inputs.after.root_file]);
-  host.message({ type: "capturedTextDiff", token: host.last().token, pointer: "/source_changes/files/0" }); await flush();
-  const diff = host.calls.findLast(call => call.id === "vscode.diff"); assert.ok(diff); assert.equal(diff.args[0].scheme, "dygnosis-history"); assert.equal(diff.args[1].scheme, "dygnosis-captured");
+  host.message({ type: "capturedTextDiff", token: host.last().token }); await flush();
+  const diff = host.calls.findLast(call => call.id === "vscode.diff"); assert.ok(diff);
+  assert.equal(diff.args[0].scheme, "dygnosis-history"); assert.equal(diff.args[1].scheme, "dygnosis-captured");
+  assert.equal((await vscode.workspace.openTextDocument(diff.args[1])).getText(), host.panels[0].document.result.texts.after[host.panels[0].document.result.inputs.after.root_file]);
+  assert.match(host.picks.at(-1).options.placeHolder, /captured file/);
   const count = host.calls.filter(call => call.id === "vscode.diff").length;
-  host.changed.fire({ reason: "lifecycle" }); host.message({ type: "capturedTextDiff", token: host.last().token, pointer: "/source_changes/files/0" }); await flush();
+  host.changed.fire({ reason: "lifecycle" }); host.message({ type: "capturedTextDiff", token: host.last().token }); await flush();
   assert.equal(host.calls.filter(call => call.id === "vscode.diff").length, count);
 });
-test("captured Source refuses stale actions after a delayed language change", async t => {
+
+test("a captured-file picker cannot open an old capture after refresh or engine restart", async t => {
   for (const invalidation of ["lifecycle", "refresh"]) {
-    const { host, service, vscode } = createHost(); host.install(); t.after(() => host.registration.dispose());
+    const { host, service } = createHost(); host.install(); t.after(() => host.registration.dispose());
     host.capture = (resource, cancel, history) => {
       const result = captured(resource, history, host, service.currentInstance);
-      result.snapshot.sourceChanges = { files: [{ pointer: "/source_changes/files/0", after: { input_id: "after", file_key: result.inputs.after.root_file, exact_text_available: true } }] };
+      result.snapshot.sourceChanges = { files: [{ pointer: "/source_changes/files/0", change: "added", correspondence: "unpaired", after: { input_id: "after", file_key: result.inputs.after.root_file, exact_text_available: true } }] };
       return result;
     };
-    await host.open();
-    const pending = deferred(); let started = false;
-    vscode.languages.setTextDocumentLanguage = async document => { started = true; await pending.promise; return document; };
-    host.message({ type: "openCapturedSource", token: host.last().token, pointer: "/source_changes/files/0", side: "after" }); await flush();
-    assert.equal(started, true);
-    if (invalidation === "refresh") host.message({ type: "refresh" });
-    else host.changed.fire({ reason: "lifecycle" });
-    await flush(); pending.resolve(); await flush();
-    assert.equal(host.shown.length, 0, invalidation);
+    await host.open(); const pending = deferred(); let selected;
+    host.pick = items => { selected = items[0]; return pending.promise; };
+    host.message({ type: "capturedTextDiff", token: host.last().token }); await flush(); assert.ok(selected);
+    if (invalidation === "refresh") host.message({ type: "refresh" }); else host.changed.fire({ reason: "lifecycle" });
+    await flush(); pending.resolve(selected); await flush();
+    assert.equal(host.calls.some(call => call.id === "vscode.diff"), false, invalidation);
   }
+});
+
+test("captured-file revalidation marks changed Working inputs stale before showing a picker", async t => {
+  const { host, service } = createHost(); host.install(); t.after(() => host.registration.dispose());
+  host.capture = (resource, cancel, history) => {
+    const result = captured(resource, history, host, service.currentInstance);
+    result.snapshot.sourceChanges = { files: [{ pointer: "/source_changes/files/0", change: "added", after: { file_key: result.inputs.after.root_file, exact_text_available: true } }] };
+    return result;
+  };
+  await host.open(); const picks = host.picks.length; host.validate = () => undefined;
+  host.message({ type: "capturedTextDiff", token: host.last().token }); await flush();
+  assert.equal(host.last().status, "stale"); assert.equal(host.picks.length, picks);
+  assert.equal(host.calls.some(call => call.id === "vscode.diff"), false);
+});
+
+test("unavailable captured text has a picker reason and cannot open a partial text diff", async t => {
+  const { host, service } = createHost(); host.install(); t.after(() => host.registration.dispose());
+  host.capture = (resource, cancel, history) => {
+    const result = captured(resource, history, host, service.currentInstance);
+    result.snapshot.sourceChanges = { files: [{ pointer: "/source_changes/files/0", change: "added", after: { file_key: result.inputs.after.root_file, exact_text_available: false } }] };
+    return result;
+  };
+  await host.open(); host.message({ type: "capturedTextDiff", token: host.last().token }); await flush();
+  assert.match(host.picks.at(-1).items[0].description, /unavailable.*complete captured text/i);
+  assert.match(host.logs.at(-1), /Complete captured text is unavailable/);
+  assert.equal(host.calls.some(call => call.id === "vscode.diff"), false);
 });

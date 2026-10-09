@@ -16,7 +16,8 @@ function activateHost(env) {
 }
 
 test("Open changes offers exactly four choices in order and retains the Working anchor", async t => {
-  const { host } = setup(t); await host.open();
+  const { host, vscode } = setup(t); await host.open();
+  assert.deepEqual(host.calls.find(call => call.id === "vscode.openWith").args[2], { viewColumn: vscode.ViewColumn.Active, preview: false });
   assert.deepEqual(host.picks[0].items.map(item => item.label), fourChoices);
   assert.equal(host.picks[0].items[0].description, "Last committed model · ccccccc");
   assert.deepEqual(host.captures[0].resource.before, historical(commits.head, "main.mod", "HEAD"));
@@ -294,13 +295,10 @@ test("a fresh host restores saved empty sections and hidden settings changes tak
   host.configChanged.fire({ affectsConfiguration: key => key === "dynare.diff.sections" });
   host.message({ type: "ready", key: host.last().key, choices: savedChoices }); assert.deepEqual(host.last().choices.sections, ["aggregateEquations"]);
   assert.deepEqual(host.last().choices.customSections, ["aggregateEquations"]);
-  for (const state of Object.values(host.last().choices.presentations)) {
-    assert.deepEqual(state.sections, ["aggregateEquations"]); assert.deepEqual(state.customSections, ["aggregateEquations"]);
-  }
   host.settings.set(anchorUri.toString(), { "diff.sections": [] });
   host.configChanged.fire({ affectsConfiguration: key => key === "dynare.diff.sections" });
   assert.deepEqual(host.last().choices.customSections, []);
-  for (const state of Object.values(host.last().choices.presentations)) { assert.deepEqual(state.sections, []); assert.deepEqual(state.customSections, []); }
+  assert.equal(Object.hasOwn(host.last().choices, "presentations"), false);
 });
 
 test("Open changes from a custom tab uses its recorded anchor while activeTextEditor points elsewhere", async t => {

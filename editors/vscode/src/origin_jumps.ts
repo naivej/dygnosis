@@ -322,7 +322,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     cancel(state); state.cancellation = new vscode.CancellationTokenSource();
     return { operation: state.operation, epoch: state.epoch, token: state.cancellation.token };
   };
-  const unavailable = (): void => { void vscode.window.showInformationMessage("This preview has changed or its source is unavailable. Refresh effective model and choose the row again."); };
+  const unavailable = (): void => { void vscode.window.showInformationMessage("This preview has changed or its source is unavailable. Refresh macro expansion and choose the row again."); };
   const refresh = async (): Promise<void> => {
     const state = activeState();
     if (!state || disposed) return;
