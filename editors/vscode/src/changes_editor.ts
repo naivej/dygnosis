@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
+import { randomBytes } from "node:crypto";
 import { DygnosisClient } from "./client";
 import { diffHtml, diffPreferences } from "./diff";
 import { ComparisonResource, changesScheme, changesViewType, GitSelector, historyScheme, inputLabel, ModelSelector, resourceData, resourceName, resourceQuery } from "./changes_resource";
@@ -10,6 +11,8 @@ import { decodeGitDocument, normalizeGitText } from "./git_provenance";
 import { HistoricalSources, historicalSource } from "./history_sources";
 import { captureComparison, CapturedComparison, ComparisonFailure } from "./snapshot_compare";
 import { record } from "./protocol";
+import { CapturedTextSources } from "./captured_text";
+import { SourceFile } from "./semantic_view";
 
 interface EditorView { panel: vscode.WebviewPanel; choices: DiffChoices; subscriptions: vscode.Disposable[]; sectionsChanged?: boolean }
 interface InputSelection { token: vscode.CancellationToken; signal: AbortSignal; dispose(): void }
@@ -23,6 +26,7 @@ class ChangesDocument implements vscode.CustomDocument {
   readonly closed = new vscode.EventEmitter<void>();
   readonly onDidDispose = this.closed.event;
   generation = 0; instance = 0; disposed = false;
+  captureId = "";
   status: ViewStatus = "loading"; message = "Loading comparison…";
   result?: CapturedComparison; capture?: vscode.CancellationTokenSource; loading?: Promise<void>;
   failureSide?: DiffSide;
@@ -50,6 +54,7 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
     return { token: source.token, signal: abort.signal, dispose: () => { for (const item of subscriptions) item.dispose(); } };
   };
   const assets = vscode.Uri.file(path.resolve(__dirname, "../media"));
+  const capturedText = new CapturedTextSources();
   const git = (): Promise<GitSources> => gitSources ??= createGitSources().catch(error => { gitSources = undefined; throw error; });
   const history = new HistoricalSources(async (source, token) => {
     const abort = new AbortController(), subscription = token.onCancellationRequested(() => abort.abort());
@@ -68,9 +73,11 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
     for (const view of doc.views) void view.panel.webview.postMessage({ type: "render", key: doc.uri.toString(), token: doc.generation,
       before: inputLabel(doc.resource.before), after: inputLabel(doc.resource.after), status: doc.status, message: doc.message,
       rows: doc.result?.snapshot.rows ?? [], choices: view.choices, hasHistory: doc.resource.before.kind === "git" || doc.resource.after.kind === "git",
+      capture: doc.captureId, defaults: diffPreferences(vscode.Uri.parse(doc.resource.context_uri), service.log), semantic: doc.result?.snapshot.semantic,
+      sourceChanges: doc.result?.snapshot.sourceChanges, coverage: doc.result?.snapshot.coverage, references: doc.result?.snapshot.references, semanticMessage: doc.result?.snapshot.semanticMessage,
       details: doc.result ? { inputs: doc.result.inputs, sourcePolicy: "Current extra include folders; each historical side uses its own written directives." } : undefined });
   };
-  const release = (doc: ChangesDocument): void => { if (doc.result) history.release(doc.result.holder); doc.result = undefined; };
+  const release = (doc: ChangesDocument): void => { if (doc.result) { history.release(doc.result.holder); capturedText.release(doc.result.holder); } doc.result = undefined; };
   const stale = (doc: ChangesDocument, message = "Out of date. Refresh to compare current inputs and enable source actions."): void => {
     if (doc.disposed || doc.status === "stale") return;
     ++doc.generation; doc.capture?.cancel(); doc.status = "stale"; doc.message = message; send(doc);
@@ -105,7 +112,8 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
       });
       if (!current(doc, generation, result.instance) || token.token.isCancellationRequested) { history.release(result.holder); return; }
       doc.instance = result.instance; doc.result = result; doc.status = "ready";
-      doc.message = result.snapshot.rows.length ? "Current comparison" : "No structural changes. Written text can still differ.";
+      doc.captureId = randomBytes(16).toString("hex");
+      doc.message = result.snapshot.rows.length ? "Current comparison" : result.snapshot.sourceChanges?.files.length ? "No model changes. Captured text differs; open Source changes." : result.snapshot.semantic ? "No model rows. Review Source changes and Coverage." : "No structural changes. Written text can still differ.";
       watchInputs(doc); send(doc);
     } catch (error) {
       if (!current(doc, generation, service.currentInstance)) return;
@@ -322,7 +330,7 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
     } catch (error) { if (!disposed && request === opening && !token.isCancellationRequested) await service.failure(String(error)); }
     finally { selection.dispose(); }
   };
-  const validateWorking = async (doc: ChangesDocument, row?: DiffRow): Promise<boolean> => {
+  const validateWorking = async (doc: ChangesDocument, row?: Pick<DiffRow, "id" | "navigation">): Promise<boolean> => {
     const generation = doc.generation, result = doc.result, instance = doc.instance;
     if (!result || doc.status !== "ready" || !current(doc, generation, instance)) return false;
     const verified = await Promise.all(result.working.map(input => service.revalidate(input.root, input.expected, instance)));
@@ -334,7 +342,7 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
     }
     return current(doc, generation, instance);
   };
-  const openSource = async (doc: ChangesDocument, row: DiffRow, side: DiffSide): Promise<void> => {
+  const openSource = async (doc: ChangesDocument, row: Pick<DiffRow, "id" | "navigation">, side: DiffSide): Promise<void> => {
     const generation = doc.generation, instance = doc.instance, result = doc.result, target = row.navigation[side];
     if (!result || !target?.written_locations.length) return;
     const refuse = (): void => { if (current(doc, generation, instance)) stale(doc); };
@@ -348,12 +356,36 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
       let written = await vscode.workspace.openTextDocument(source);
       if (source.scheme === historyScheme) written = await vscode.languages.setTextDocumentLanguage(written, "dynare");
       if (!await validateWorking(doc, row) || !current(doc, generation, instance)) { refuse(); return; }
-      const key = [...result.sourceUris[side]].find(([, uri]) => uri.toString() === selected.uri)?.[0];
+      const key = [...result.sourceUris[side]].find(([, uri]) => uri.toString() === source.toString())?.[0];
       if (!key || !result.legacy && normalizeGitText(written.getText()) !== normalizeGitText(result.texts[side][key])) { refuse(); return; }
       const input = doc.resource[side]; if (input.kind === "working") service.selectOwner(written.uri, modelUri(input));
       const range = new vscode.Range(selected.range.start.line, selected.range.start.character, selected.range.end.line, selected.range.end.character);
       await vscode.window.showTextDocument(written, { selection: range });
     } catch (error) { service.log(String(error)); refuse(); }
+  };
+  const openCaptured = async (doc: ChangesDocument, file: SourceFile, side?: DiffSide): Promise<void> => {
+    const generation = doc.generation, instance = doc.instance, result = doc.result;
+    if (!result || doc.status !== "ready") return;
+    try {
+      if (!await validateWorking(doc) || !current(doc, generation, instance)) { if (current(doc, generation, instance)) stale(doc); return; }
+      const uri = (which: DiffSide): vscode.Uri | undefined => {
+        const own = file[which];
+        if (own && (!own.exact_text_available || !Object.hasOwn(result.texts[which], own.file_key))) return undefined;
+        const input = doc.resource[which], label = `${which} ${own?.file_key ?? "absent"}${input.kind === "git" ? ` ${input.commit.slice(0, 7)}` : " captured"}`;
+        if (input.kind === "git" && own) return result.sourceUris[which].get(own.file_key);
+        return capturedText.retain(result.holder, `${file.pointer}:${which}`, label, own ? result.texts[which][own.file_key] : "");
+      };
+      if (side) {
+        if (!file[side]) return;
+        const source = uri(side); if (!source) return;
+        const document = await vscode.languages.setTextDocumentLanguage(await vscode.workspace.openTextDocument(source), "dynare");
+        if (!await validateWorking(doc) || !current(doc, generation, instance)) { if (current(doc, generation, instance)) stale(doc); return; }
+        await vscode.window.showTextDocument(document);
+      } else {
+        const before = uri("before"), after = uri("after");
+        if (before && after && await validateWorking(doc) && current(doc, generation, instance)) await vscode.commands.executeCommand("vscode.diff", before, after, `Captured file text: ${file.before?.file_key ?? "absent"} → ${file.after?.file_key ?? "absent"}`);
+      }
+    } catch (error) { service.log(String(error)); if (current(doc, generation, instance)) stale(doc); }
   };
   const updateRevision = async (doc: ChangesDocument, view: EditorView): Promise<void> => {
     const selection = beginSelection(doc, view), { token, signal } = selection;
@@ -408,7 +440,10 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
           if (message.type === "ready") {
             if (message.key === key) {
               const restored = normalizeChoices(message.choices, defaults);
-              if (view.sectionsChanged) restored.sections = view.choices.sections;
+              if (view.sectionsChanged) {
+                restored.sections = view.choices.sections;
+                for (const state of Object.values(restored.presentations)) state.sections = [...view.choices.sections];
+              }
               view.choices = restored; view.sectionsChanged = false;
             }
             send(doc);
@@ -421,7 +456,7 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
           else if (message.type === "updateRevision") void updateRevision(doc, view).catch(error => service.failure(String(error)));
           else if (message.type === "choosePath") void choosePath(doc, view).catch(error => service.failure(String(error)));
           else if (message.type === "details" && doc.result) void vscode.window.showInformationMessage(`Extra include folders (current list): ${doc.result.inputs.after.search_paths.join(", ") || "none"}. Historical sources come only from their selected commit trees. Working sources include open unsaved text.`);
-          else if (message.type === "rootTextDiff" && doc.status === "ready") {
+          else if (message.type === "rootTextDiff" && message.token === doc.generation && doc.status === "ready") {
             const generation = doc.generation;
             void validateWorking(doc).then(valid => {
               if (!valid) { if (doc.generation === generation) stale(doc); return; }
@@ -430,6 +465,12 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
             }).catch(error => service.failure(String(error)));
           } else if (message.type === "openSource" && message.token === doc.generation && doc.status === "ready" && typeof message.rowId === "string" && (message.side === "before" || message.side === "after")) {
             const row = doc.result?.snapshot.rows.find(row => row.id === message.rowId); if (row) void openSource(doc, row, message.side);
+          } else if (message.type === "openReference" && message.token === doc.generation && doc.status === "ready" && typeof message.pointer === "string" && (message.side === "before" || message.side === "after")) {
+            const reference = doc.result?.snapshot.references?.find(reference => reference.pointer === message.pointer && reference.side === message.side);
+            if (reference) void openSource(doc, { id: reference.pointer, navigation: reference.navigation }, reference.side);
+          } else if ((message.type === "openCapturedSource" || message.type === "capturedTextDiff") && message.token === doc.generation && doc.status === "ready" && typeof message.pointer === "string") {
+            const file = doc.result?.snapshot.sourceChanges?.files.find(file => file.pointer === message.pointer);
+            if (file && (message.type === "capturedTextDiff" || message.side === "before" || message.side === "after")) void openCaptured(doc, file, message.type === "capturedTextDiff" ? undefined : message.side as DiffSide);
           }
         }), panel.onDidChangeViewState(() => { if (panel.visible) send(doc); }));
       panel.webview.html = diffHtml(panel.webview, assets); send(doc);
@@ -454,12 +495,16 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
       if (event.affectsConfiguration("dynare.serverPath")) stale(doc, "The engine selection changed. Refresh this comparison.");
       else if (event.affectsConfiguration("dynare.searchPaths", context) || (["before", "after"] as const).some(side => doc.resource[side].kind === "working" && event.affectsConfiguration("dynare.searchPaths", modelUri(doc.resource[side])))) stale(doc);
       if (event.affectsConfiguration("dynare.diff.sections", context)) {
-        for (const view of doc.views) { view.choices.sections = diffPreferences(context, service.log).sections; view.sectionsChanged = true; }
+        for (const view of doc.views) {
+          view.choices.sections = diffPreferences(context, service.log).sections;
+          for (const state of Object.values(view.choices.presentations)) state.sections = [...view.choices.sections];
+          view.sectionsChanged = true;
+        }
         send(doc);
       }
     }
   });
-  return vscode.Disposable.from(history, invalidated, settings,
+  return vscode.Disposable.from(history, capturedText, invalidated, settings,
     vscode.window.registerCustomEditorProvider(changesViewType, provider, { supportsMultipleEditorsPerDocument: true, webviewOptions: { retainContextWhenHidden: false } }),
     vscode.commands.registerCommand("dygnosis.openChanges", (argument?: unknown) => start(argument)),
     vscode.commands.registerCommand("dygnosis.diffWith", (argument?: unknown) => start(argument, true)),

@@ -384,7 +384,9 @@ test("source actions use retained side identity, exact bytes and UTF-16 ranges; 
   assert.equal(host.revalidations.length, 0);
   for (const message of [{ rowId: "missing" }, { side: "outside" }, { token: initial.token - 1 }]) host.source("before", host.panels[0], message);
   await flush(); assert.equal(host.shown.length, 2);
-  host.message({ type: "rootTextDiff" }); await flush(); const call = host.calls.find(call => call.id === "vscode.diff");
+  host.message({ type: "rootTextDiff", token: initial.token - 1 }); await flush();
+  assert.equal(host.calls.some(call => call.id === "vscode.diff"), false);
+  host.message({ type: "rootTextDiff", token: host.last().token }); await flush(); const call = host.calls.find(call => call.id === "vscode.diff");
   assert.equal(call.args[0].scheme, historyScheme); assert.equal(call.args[1].scheme, historyScheme); assert.match(call.args[2], /aaaaaaa.*bbbbbbb/);
 });
 

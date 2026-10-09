@@ -64,6 +64,7 @@
   "dynare.blockTint.heterogeneousModels": "appearance",
   "dynare.diagnosticActions.ignore": "diagnostics",
   "dynare.diagnosticActions.explain": "diagnostics",
+  "dynare.diff.presentation": "structural-diff",
   "dynare.diff.layout": "structural-diff",
   "dynare.diff.defaultExpansion": "structural-diff",
   "dynare.diff.defaultChangeKinds": "structural-diff",

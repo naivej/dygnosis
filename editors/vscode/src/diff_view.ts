@@ -1,26 +1,33 @@
 import { Location, location, record } from "./protocol";
+import { Coverage, parseSemantic, Reference, Semantic, SemanticRow, SourceChanges, SourceRegistry } from "./semantic_view";
 
 export const diffSections = ["symbols", "parameters", "aggregateEquations", "heterogeneousEquations", "shockSetup", "shockAnalysisSetup"] as const;
 export const changeKinds = ["added", "removed", "changed", "unpaired"] as const;
-export type DiffSection = typeof diffSections[number];
+export const familySections = ["steadyState", "priors", "commands", "observables", "data", "occbin", "policy", "semiStructural", "moments", "msSbvar", "heterogeneity", "externalFunctions", "trends", "operations", "macroContext"] as const;
+export const allDiffSections = [...diffSections, ...familySections] as const;
+export type DiffSection = typeof allDiffSections[number];
 export type ChangeKind = typeof changeKinds[number];
 export type DiffSide = "before" | "after";
 export interface DiffPreferences {
+  presentation?: "focusedReview" | "changeList";
   layout: "auto" | "sideBySide" | "stacked";
   expansion: "changes" | "all" | "none";
   sections: DiffSection[]; changeKinds: ChangeKind[];
 }
-export interface DiffChoices extends DiffPreferences { search: string; scope: string; expanded: Record<string, boolean> }
+export interface PresentationState { layout: DiffPreferences["layout"]; expansion: DiffPreferences["expansion"]; sections: DiffSection[]; changeKinds: ChangeKind[]; search: string; scope: string; expanded: Record<string, boolean>; selected: string | null; sourceSelected: string | null; tab: "model" | "source" | "coverage"; capture: string }
+export interface DiffChoices extends PresentationState { presentation: "focusedReview" | "changeList"; presentations: Partial<Record<"focusedReview" | "changeList", PresentationState>> }
 export interface DiffTarget {
   occurrence_id: string; domain: string; dimension: string | null; written_locations: Location[];
 }
-export interface DiffNavigationRow { id: string; kind: string; dimension?: string | null; before: DiffTarget | null; after: DiffTarget | null }
+export interface DiffNavigationRow { id: string; kind: string; dimension?: string | null; family?: string; name?: string; equation_pointer?: string; before: DiffTarget | null; after: DiffTarget | null }
 export interface DiffEnvelope { root_uri: string; revision: string | null; complete: boolean }
 export interface DiffRow {
   id: string; section: DiffSection; group: string; kind: ChangeKind; label: string;
   before: string | null; after: string | null; scopes: string[]; sideScopes: { before: string | null; after: string | null }; navigation: DiffNavigationRow;
+  semantic?: SemanticRow;
 }
-export interface DiffSnapshot { before: DiffEnvelope; after: DiffEnvelope; rows: DiffRow[]; complete: boolean }
+export interface DiffReference extends Reference { navigation: DiffNavigationRow }
+export interface DiffSnapshot { before: DiffEnvelope; after: DiffEnvelope; rows: DiffRow[]; complete: boolean; semantic?: Semantic; sourceChanges?: SourceChanges; coverage?: Coverage; references?: DiffReference[]; semanticMessage?: string }
 function malformed(): never { throw new Error("This engine returned an unsupported comparison. Update dynare.serverPath or use the bundled binary."); }
 const string = (value: unknown): string => typeof value === "string" ? value : malformed();
 const object = (value: unknown): Record<string, unknown> => record(value) ? value : malformed();
@@ -39,10 +46,10 @@ function envelope(value: unknown, root: string): DiffEnvelope {
   return { root_uri: root, revision: nullableString(row.revision), complete: row.complete };
 }
 /** Project legacy rows for display; their exact pointers carry the engine's pairing. */
-export function parseDiff(value: unknown, beforeRoot: string, afterRoot: string): DiffSnapshot {
-  return projectDiff(value, beforeRoot, afterRoot);
+export function parseDiff(value: unknown, beforeRoot: string, afterRoot: string, expectedSemantic?: boolean, registeredSource?: (side: DiffSide, uri: string) => boolean): DiffSnapshot {
+  return projectDiff(value, beforeRoot, afterRoot, false, { before: null, after: null }, expectedSemantic, registeredSource);
 }
-function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snapshots = false): DiffSnapshot {
+function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snapshots = false, ids: Record<DiffSide, string | null> = { before: null, after: null }, expectedSemantic?: boolean, registeredSource?: (side: DiffSide, uri: string) => boolean): DiffSnapshot {
   const result = object(value);
   if (typeof result.error === "string") throw new Error(result.error);
   if (result.status === "incomplete") return {
@@ -55,7 +62,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
   for (const raw of array(nav.rows)) {
     const row = object(raw), id = string(row.id);
     if (navigation.has(id)) malformed();
-    navigation.set(id, { id, kind: string(row.kind), dimension: row.dimension === undefined ? undefined : nullableString(row.dimension), before: target(row.before, snapshots), after: target(row.after, snapshots) });
+    navigation.set(id, { id, kind: string(row.kind), dimension: row.dimension === undefined ? undefined : nullableString(row.dimension), family: row.family === undefined ? undefined : string(row.family), name: row.name === undefined ? undefined : string(row.name), equation_pointer: row.equation_pointer === undefined ? undefined : string(row.equation_pointer), before: target(row.before, snapshots), after: target(row.after, snapshots) });
   }
   const rows: DiffRow[] = [];
   const add = (id: string, section: DiffSection, group: string, kind: ChangeKind, label: string, old: string | null, next: string | null, dimension: string | null = null, sideDimensions?: { before: string | null | undefined; after: string | null | undefined }): void => {
@@ -139,12 +146,54 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     add(`/shock_setup_changes/${index}`, section, section === "shockSetup" ? "Shock setup" : "Shock analysis setup", kind as ChangeKind, `${string(row.target)} · ${string(row.form)} · ${string(row.role)}`, side(row.before), side(row.after), null, { before: dimension(row.before), after: dimension(row.after) });
   });
   const complete = before.complete && after.complete && !!before.revision && !!after.revision;
-  return { before, after, rows: complete ? rows : [], complete };
+  const registry: SourceRegistry = { before: {}, after: {} };
+  if (result.sources !== undefined) {
+    const sources = object(result.sources);
+    for (const side of ["before", "after"] as const) registry[side] = Object.fromEntries(Object.entries(object(sources[side])).map(([key, value]) => [key, string(value)]));
+  }
+  const details = parseSemantic(result, ids, registry, expectedSemantic);
+  if (!details) return { before, after, rows: complete ? rows : [], complete, semanticMessage: "Semantic detail is unavailable with this engine. Showing structural changes; use Root file text diff for written edits." };
+  const rowMap = new Map(rows.map(row => [row.id, row]));
+  const section = (row: SemanticRow): DiffSection => {
+    const mapped: Record<string, DiffSection> = { symbols: "symbols", parameters: "parameters", shocks: "shockSetup", steady_state: "steadyState", priors: "priors", commands: "commands", observables: "observables", data: "data", occbin: "occbin", policy: "policy", semi_structural: "semiStructural", moments: "moments", ms_sbvar: "msSbvar", heterogeneity: "heterogeneity", external_functions: "externalFunctions", trends: "trends", operations: "operations", macro_context: "macroContext" };
+    return row.family === "equations" ? row.before?.scope.dimension || row.after?.scope.dimension ? "heterogeneousEquations" : "aggregateEquations" : mapped[row.family];
+  };
+  for (const [index, row] of details.semantic.rows.entries()) {
+    const source = navigation.get(row.pointer), legacy = rowMap.get(row.pointer);
+    if (!legacy && row.pointer !== `/semantic/rows/${index}`) malformed();
+    if (!source || legacy && (legacy.kind !== row.change || section(row) !== legacy.section && row.family !== "shocks") || !legacy && (source.kind !== "semantic" || source.family !== row.family || source.name !== row.name)) malformed();
+    for (const side of ["before", "after"] as const) {
+      if (!row[side] && source[side] || row[side] && source[side] && (source[side].domain !== (row[side].scope.dimension === null ? "aggregate" : "heterogeneous") || source[side].dimension !== row[side].scope.dimension)) malformed();
+      for (const location of source[side]?.written_locations ?? []) {
+        if (!snapshots && !(registeredSource ? registeredSource(side, location.uri) : Object.hasOwn(registry[side], location.uri))) malformed();
+      }
+    }
+    const sideScopes = { before: row.before?.scope.dimension ?? (row.before ? row.before.scope.domain : null), after: row.after?.scope.dimension ?? (row.after ? row.after.scope.domain : null) };
+    const projected: DiffRow = { id: row.pointer, section: legacy?.section ?? section(row), group: row.family === "parameters" ? "Parameters" : legacy?.group ?? semanticGroup(section(row)), kind: row.change, label: row.name, before: row.before?.name ?? null, after: row.after?.name ?? null, scopes: [...new Set(Object.values(sideScopes).filter((s): s is string => s !== null))], sideScopes, navigation: source, semantic: row };
+    if (legacy) Object.assign(legacy, projected); else rows.push(projected);
+  }
+  const equationOwners = new Map(rows.filter(row => row.section === "aggregateEquations" || row.section === "heterogeneousEquations").map(row => [row.id, row]));
+  const references = details.semantic.references.map(ref => {
+    const source = navigation.get(ref.pointer);
+    if (!source || source.kind !== "reference" || source.name !== ref.symbol || source.equation_pointer !== ref.equation_pointer || source[ref.side === "before" ? "after" : "before"] !== null || source[ref.side] && (source[ref.side]!.domain !== (ref.scope.dimension === null ? "aggregate" : "heterogeneous") || source[ref.side]!.dimension !== ref.scope.dimension)) malformed();
+    const equationTarget = navigation.get(ref.equation_pointer);
+    const equationOwner = equationOwners.get(ref.equation_pointer);
+    if (ref.equation_pointer !== ref.pointer && (!equationOwner || equationOwner[ref.side] === null)) malformed();
+    if (ref.equation_pointer !== ref.pointer && !(equationTarget?.kind === "equation" || equationTarget?.kind === "semantic" && equationTarget.family === "equations")) malformed();
+    for (const location of source[ref.side]?.written_locations ?? []) if (!snapshots && !(registeredSource ? registeredSource(ref.side, location.uri) : Object.hasOwn(registry[ref.side], location.uri))) malformed();
+    return { ...ref, navigation: source };
+  });
+  return { before, after, rows: complete ? rows : [], complete, ...details, references: complete ? references : [] };
+}
+
+export function semanticGroup(section: DiffSection): string {
+  const labels: Record<DiffSection, string> = { symbols: "Symbols", parameters: "Parameters", aggregateEquations: "Aggregate equations", heterogeneousEquations: "Equations by dimension", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "Steady state", priors: "Priors", commands: "Commands", observables: "Observables", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Moments and IRFs", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
+  return labels[section];
 }
 
 /** Schema 2 keys are mapped only through the host's retained captured source registry. */
 export function parseSnapshotDiff(value: unknown, ids: Record<DiffSide, string>, source: (side: DiffSide, key: string) => string,
-  inputs: Record<DiffSide, { root_file: string; revision: string; commit?: string }>): DiffSnapshot {
+  inputs: Record<DiffSide, { root_file: string; revision: string; commit?: string }>, expectedSemantic?: boolean): DiffSnapshot {
   const response = object(value), nav = object(response.navigation);
   if (response.state !== "result" || nav.schema_version !== 2) malformed();
   const envelope = (side: DiffSide) => {
@@ -168,19 +217,24 @@ export function parseSnapshotDiff(value: unknown, ids: Record<DiffSide, string>,
     const row = object(raw);
     return { ...row, before: mapped("before", row.before), after: mapped("after", row.after) };
   });
-  return projectDiff({ ...object(response.diff), navigation: { schema_version: 1, before: envelope("before"), after: envelope("after"), rows } }, ids.before, ids.after, true);
+  return projectDiff({ ...object(response.diff), sources: response.sources, navigation: { schema_version: 1, before: envelope("before"), after: envelope("after"), rows } }, ids.before, ids.after, true, ids, expectedSemantic);
 }
 
 export function normalizeChoices(value: unknown, defaults: DiffPreferences): DiffChoices {
   const row = record(value) ? value : {};
   const list = <T extends string>(value: unknown, allowed: readonly T[], fallback: T[]): T[] => Array.isArray(value) ? [...new Set(value.filter((item): item is T => typeof item === "string" && allowed.includes(item as T)))] : [...fallback];
-  return {
+  const normalizeState = (row: Record<string, unknown>): PresentationState => ({
     layout: ["auto", "sideBySide", "stacked"].includes(String(row.layout)) ? row.layout as DiffPreferences["layout"] : defaults.layout,
     expansion: ["changes", "all", "none"].includes(String(row.expansion)) ? row.expansion as DiffPreferences["expansion"] : defaults.expansion,
-    sections: list(row.sections, diffSections, defaults.sections), changeKinds: list(row.changeKinds, changeKinds, defaults.changeKinds),
+    sections: list(row.sections, allDiffSections, defaults.sections), changeKinds: list(row.changeKinds, changeKinds, defaults.changeKinds),
     search: typeof row.search === "string" ? row.search.slice(0, 10000) : "", scope: typeof row.scope === "string" ? row.scope.slice(0, 1000) : "all",
     expanded: record(row.expanded) ? Object.fromEntries(Object.entries(row.expanded).filter(([key, value]) => key.length <= 1000 && typeof value === "boolean")) as Record<string, boolean> : {},
-  };
+    selected: typeof row.selected === "string" ? row.selected.slice(0, 1000) : null, sourceSelected: typeof row.sourceSelected === "string" ? row.sourceSelected.slice(0, 1000) : null,
+    capture: typeof row.capture === "string" ? row.capture.slice(0, 1000) : "", tab: ["model", "source", "coverage"].includes(String(row.tab)) ? row.tab as PresentationState["tab"] : "model",
+  });
+  const presentations: DiffChoices["presentations"] = {};
+  if (record(row.presentations)) for (const key of ["focusedReview", "changeList"] as const) { const state = row.presentations[key]; if (record(state)) presentations[key] = normalizeState(state); }
+  return { ...normalizeState(row), presentation: row.presentation === "focusedReview" || row.presentation === "changeList" ? row.presentation : defaults.presentation ?? "focusedReview", presentations };
 }
 
 export function sameTarget(left: DiffTarget | null, right: DiffTarget | null): boolean {

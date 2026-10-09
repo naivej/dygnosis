@@ -176,12 +176,12 @@ test("shared backgrounds use four theme defaults, transparent high contrast, and
     assert.deepEqual(Object.keys(type.options).sort(), ["backgroundColor", "isWholeLine", "rangeBehavior"]);
     assert.ok(type.options.backgroundColor instanceof ThemeColor);
   }
-  for (const color of colorContributions.colors) {
+  for (const color of colorContributions.colors.filter(color => color.id.endsWith("Background"))) {
     assert.deepEqual(Object.keys(color.defaults).sort(), ["dark", "highContrast", "highContrastLight", "light"]);
     assert.equal(color.defaults.highContrast, "#00000000"); assert.equal(color.defaults.highContrastLight, "#00000000");
     assert.match(color.defaults.dark, /^#[0-9A-F]{8}$/); assert.match(color.defaults.light, /^#[0-9A-F]{8}$/);
   }
-  const [model, subtle] = colorContributions.colors;
+  const [model, subtle] = colorContributions.colors.filter(color => color.id.startsWith("dynare.blockTint."));
   for (const theme of ["dark", "light"]) assert.ok(parseInt(model.defaults[theme].slice(-2), 16) > parseInt(subtle.defaults[theme].slice(-2), 16));
   assert.equal(env.ranges("model").length, 1); env.registration.dispose();
 });

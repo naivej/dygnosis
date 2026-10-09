@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.13",
+  "version": "0.11.14",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -1343,6 +1343,20 @@
       {
         "title": "Dygnosis: Changes",
         "properties": {
+          "dynare.diff.presentation": {
+            "type": "string",
+            "enum": [
+              "focusedReview",
+              "changeList"
+            ],
+            "enumItemLabels": [
+              "Focused review",
+              "Change list"
+            ],
+            "default": "focusedReview",
+            "scope": "resource",
+            "description": "Initial presentation in a new Changes view. Focused review shows a compact list beside selected detail. Change list shows expandable summaries. Each presentation keeps its own filters, selection and detail layout."
+          },
           "dynare.diff.layout": {
             "type": "string",
             "enum": [
@@ -1397,7 +1411,22 @@
                 "aggregateEquations",
                 "heterogeneousEquations",
                 "shockSetup",
-                "shockAnalysisSetup"
+                "shockAnalysisSetup",
+                "steadyState",
+                "priors",
+                "commands",
+                "observables",
+                "data",
+                "occbin",
+                "policy",
+                "semiStructural",
+                "moments",
+                "msSbvar",
+                "heterogeneity",
+                "externalFunctions",
+                "trends",
+                "operations",
+                "macroContext"
               ]
             },
             "default": [
@@ -1406,7 +1435,22 @@
               "aggregateEquations",
               "heterogeneousEquations",
               "shockSetup",
-              "shockAnalysisSetup"
+              "shockAnalysisSetup",
+              "steadyState",
+              "priors",
+              "commands",
+              "observables",
+              "data",
+              "occbin",
+              "policy",
+              "semiStructural",
+              "moments",
+              "msSbvar",
+              "heterogeneity",
+              "externalFunctions",
+              "trends",
+              "operations",
+              "macroContext"
             ],
             "scope": "resource",
             "description": "Sections shown in Changes. Empty hides all content. Setting changes update open comparisons; list order sets section order."
@@ -1486,6 +1530,16 @@
       }
     ],
     "colors": [
+      {
+        "id": "dynare.diff.changedForeground",
+        "description": "Blue cue for a paired changed model row in Changes. Before and After fields keep removal and addition cues.",
+        "defaults": {
+          "dark": "#3794FF",
+          "light": "#005FB8",
+          "highContrast": "#79B8FF",
+          "highContrastLight": "#005FB8"
+        }
+      },
       {
         "id": "dynare.blockTint.modelBackground",
         "description": "Whole-line background for Model-strength Dynare block tinting. Supports transparency.",
