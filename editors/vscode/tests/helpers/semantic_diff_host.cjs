@@ -235,7 +235,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
         evidence.semantic_custom_colors = color;
         return color.glyph === "rgb(34, 102, 170)";
       }, "native customized comparison color");
-      evidence.semantic_custom_configuration = { ...appearance.get("colorCustomizations") };
+      evidence.semantic_custom_configuration = { ...vscode.workspace.getConfiguration("workbench").get("colorCustomizations") };
       assert.equal(evidence.semantic_custom_configuration["dynare.diff.changedForeground"], "#2266aa");
       const fills = await evaluate('({added:[...document.querySelectorAll("table.source-hunk .token.added")].map(token=>getComputedStyle(token).backgroundColor),removed:[...document.querySelectorAll("table.source-hunk .token.removed")].map(token=>getComputedStyle(token).backgroundColor)})');
       assert.ok(fills.added.length > 0 && fills.removed.length > 0, "native diff fill checks use actual added and removed source tokens");
