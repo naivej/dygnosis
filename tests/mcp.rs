@@ -1821,6 +1821,15 @@ fn dynare_compare_models_indexed_equations_and_markdown() {
         serde_json::from_str(&expected_mcp("dynare_compare_models.a_vs_b.json")).unwrap();
     let mut legacy = diff.clone();
     legacy.as_object_mut().unwrap().remove("navigation");
+    for key in ["semantic", "source_changes", "coverage"] {
+        assert_eq!(diff[key]["schema_version"], 1, "{key} advertised payload");
+        assert_eq!(diff["comparison_versions"][key], 1, "{key} version");
+        legacy.as_object_mut().unwrap().remove(key);
+    }
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("comparison_versions");
     assert_eq!(legacy, expected);
 }
 

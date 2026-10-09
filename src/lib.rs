@@ -72,6 +72,7 @@ mod preview_navigation;
 mod preview_source;
 pub mod refs;
 mod repository_compare;
+pub mod semantic_diff;
 pub mod server;
 mod server_model_map;
 mod server_names;

@@ -13,6 +13,9 @@ use crate::model::{
 };
 use crate::model_info::assigned_number;
 use crate::parser::normalize_newlines;
+use crate::semantic_diff::{
+    ComparisonBudgets, ComparisonCoverage, ComparisonVersions, SemanticDiff, SourceChanges,
+};
 use crate::span::{LineIndex, Span};
 
 const VALUE_TOL: f64 = 1e-12;
@@ -218,6 +221,10 @@ pub struct ModelDiff {
     /// A dimension with no counted-equation diff still appears; its four lists are empty.
     pub heterogeneous_equations: Vec<HeterogeneousEquationDiff>,
     pub shock_setup_changes: Vec<ShockSetupChange>,
+    pub comparison_versions: ComparisonVersions,
+    pub semantic: SemanticDiff,
+    pub source_changes: SourceChanges,
+    pub coverage: ComparisonCoverage,
 }
 
 impl ModelDiff {
@@ -348,6 +355,24 @@ pub fn compare_models_with_sources(
     source_a: Option<CompareSource<'_>>,
     source_b: Option<CompareSource<'_>>,
 ) -> ModelDiff {
+    compare_models_with_budgets(
+        model_a,
+        model_b,
+        source_a,
+        source_b,
+        ComparisonBudgets::default(),
+    )
+}
+
+/// Shared comparison with explicit optional-detail limits. Legacy arrays keep
+/// their existing meanings even when a detail limit is reached.
+pub fn compare_models_with_budgets(
+    model_a: &Model,
+    model_b: &Model,
+    source_a: Option<CompareSource<'_>>,
+    source_b: Option<CompareSource<'_>>,
+    budgets: ComparisonBudgets,
+) -> ModelDiff {
     let end_a = names(model_a, &model_a.final_decls(&["var"]));
     let end_b = names(model_b, &model_b.final_decls(&["var"]));
     let exo_a = names(model_a, &model_a.final_decls(&["varexo", "varexo_det"]));
@@ -365,7 +390,7 @@ pub fn compare_models_with_sources(
         None,
     );
 
-    ModelDiff {
+    let mut diff = ModelDiff {
         added_endogenous: sorted_diff(&end_b, &end_a),
         removed_endogenous: sorted_diff(&end_a, &end_b),
         common_endogenous: sorted_intersect(&end_a, &end_b),
@@ -383,7 +408,14 @@ pub fn compare_models_with_sources(
         unmatched_same_name,
         heterogeneous_equations: diff_heterogeneous_equations(model_a, model_b),
         shock_setup_changes: diff_shock_setup(model_a, model_b, source_a, source_b),
-    }
+        comparison_versions: ComparisonVersions::default(),
+        semantic: SemanticDiff::new(budgets),
+        source_changes: SourceChanges::default(),
+        coverage: ComparisonCoverage::default(),
+    };
+    crate::semantic_diff::populate_foundation(model_a, model_b, &mut diff);
+    crate::semantic_diff::enforce_output_budget(&mut diff);
+    diff
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2044,19 +2076,30 @@ fn symbols_changed(before: &Model, after: &Model) -> Vec<SymbolChange> {
 }
 
 fn symbol_index(model: &Model) -> BTreeMap<String, SymbolSide> {
+    final_symbol_declarations(model)
+        .into_iter()
+        .map(|(name, decl)| {
+            let kind = model
+                .final_kind_or_written_if_excluded(decl.name)
+                .expect("final declaration has a type");
+            (
+                name,
+                SymbolSide {
+                    kind: symbol_kind(model, kind, decl),
+                    long_name: decl.long_name.clone(),
+                    tex_name: decl.tex_name.clone(),
+                },
+            )
+        })
+        .collect()
+}
+
+pub(crate) fn final_symbol_declarations(model: &Model) -> BTreeMap<String, &Decl> {
     let mut decls = model.final_decls(&["var", "varexo", "varexo_det", "parameters"]);
     decls.sort_by_key(|decl| (decl.span.start, decl.span.end));
     let mut out = BTreeMap::new();
     for decl in decls {
-        let kind = model
-            .final_kind_or_written_if_excluded(decl.name)
-            .expect("final declaration has a type");
-        out.entry(model.name(decl.name).to_string())
-            .or_insert_with(|| SymbolSide {
-                kind: symbol_kind(model, kind, decl),
-                long_name: decl.long_name.clone(),
-                tex_name: decl.tex_name.clone(),
-            });
+        out.entry(model.name(decl.name).to_string()).or_insert(decl);
     }
     out
 }
@@ -2114,19 +2157,27 @@ fn sorted_intersect(a: &HashSet<String>, b: &HashSet<String>) -> Vec<String> {
     v
 }
 
-fn last_assignment<'a>(model: &'a Model, name: &str) -> Option<&'a Assignment> {
+pub(crate) fn last_assignment<'a>(model: &'a Model, name: &str) -> Option<&'a Assignment> {
     model
         .param_assignments
         .iter()
         .rfind(|a| model.name(a.name) == name)
 }
 
-fn normalize_expr(raw: &str) -> String {
+pub(crate) fn normalize_expr(raw: &str) -> String {
     collapse_ws(raw).trim_end_matches(';').trim().to_string()
 }
 
 fn collapse_ws(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+pub(crate) fn parameter_value_changed(before: Option<f64>, after: Option<f64>) -> bool {
+    match (before, after) {
+        (Some(before), Some(after)) => (before - after).abs() > VALUE_TOL,
+        (None, None) => false,
+        _ => true,
+    }
 }
 
 fn changed_params(a: &Model, b: &Model, common: &HashSet<String>) -> Vec<ParameterChange> {
@@ -2142,11 +2193,7 @@ fn changed_params(a: &Model, b: &Model, common: &HashSet<String>) -> Vec<Paramet
             .unwrap_or_default();
         let old_value = assigned_number(a, name);
         let new_value = assigned_number(b, name);
-        let num_changed = match (old_value, new_value) {
-            (Some(x), Some(y)) => (x - y).abs() > VALUE_TOL,
-            (None, None) => false,
-            _ => true,
-        };
+        let num_changed = parameter_value_changed(old_value, new_value);
         let expr_changed = normalize_expr(&old_raw) != normalize_expr(&new_raw);
         if num_changed || expr_changed {
             out.push(ParameterChange {
@@ -2161,7 +2208,7 @@ fn changed_params(a: &Model, b: &Model, common: &HashSet<String>) -> Vec<Paramet
     out
 }
 
-fn normalize_equation(text: &str) -> String {
+pub(crate) fn normalize_equation(text: &str) -> String {
     let mut s = String::new();
     for line in text.lines() {
         let cut = line.find("//").map(|i| &line[..i]).unwrap_or(line);
