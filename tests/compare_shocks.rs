@@ -496,9 +496,8 @@ fn identical_setup_produces_no_changes_or_solver_claims() {
     let text = "varexo e; shocks; var e; stderr 0.1; end;";
     let diff = compare(text, text);
     assert!(rows(&diff).is_empty());
-    let blob = diff.to_string();
-    assert!(!blob.contains("steady_state"));
-    assert!(!blob.contains("computed"));
+    assert!(diff["semantic"]["rows"].as_array().unwrap().is_empty());
+    assert!(!diff.to_string().contains("computed"));
 }
 
 #[test]

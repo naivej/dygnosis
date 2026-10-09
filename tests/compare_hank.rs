@@ -371,7 +371,10 @@ fn unchanged_heterogeneous_row_is_absent() {
     let text = "heterogeneity_dimension d;\nvarexo(heterogeneity=d) e u;\nshocks(heterogeneity=d);\nvar e; stderr 0.1;\nvar e, u = 0.2;\nend;\n";
     let diff = compare(text, text);
     assert!(rows(&diff).is_empty(), "{diff}");
-    assert!(!diff.to_string().contains("steady"));
+    assert!(
+        diff["semantic"]["rows"].as_array().unwrap().is_empty(),
+        "{diff}"
+    );
 }
 
 #[test]

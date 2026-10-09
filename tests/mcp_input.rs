@@ -129,7 +129,7 @@ fn repository_compare_is_discoverable_and_runs_real_git_and_saved_inputs_over_st
     for phrase in [
         "Before to After",
         "server host",
-        "saved files",
+        "saved server-host files",
         "no fetch",
         "INPUT_CHANGED",
     ] {
