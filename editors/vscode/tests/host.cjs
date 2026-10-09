@@ -5,7 +5,6 @@ const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const { createHash } = require("node:crypto");
 const { Buffer } = require("node:buffer");
-const { clearTimeout } = require("node:timers");
 const vscode = require("vscode");
 const { probeNativeMcp } = require("../scripts/native-mcp-host.cjs");
 const { effectivePreviewArguments } = require("../out/preview");
@@ -13,6 +12,8 @@ const { createGitSources } = require("../out/git_source_host");
 const { captureComparison } = require("../out/snapshot_compare");
 const { historicalUri } = require("../out/history_sources");
 const { resourceName, resourceQuery, changesViewType } = require("../out/changes_resource");
+const { nativeWorkbench } = require("./helpers/native_webview.cjs");
+const { checkSemanticDiff } = require("./helpers/semantic_diff_host.cjs");
 
 async function historyArtifacts() {
   const extensionRoot = path.resolve(__dirname, "..");
@@ -38,24 +39,7 @@ async function historyArtifacts() {
 async function hostDevtools(callback) {
   const port = process.env.DYGNOSIS_HOST_CDP_PORT;
   if (!port) return undefined;
-  const targets = await (await globalThis.fetch(`http://127.0.0.1:${port}/json/list`)).json();
-  const target = targets.find(item => item.type === "page" && item.url.includes("workbench"));
-  assert.ok(target?.webSocketDebuggerUrl, "The isolated Code host must expose its workbench CDP target");
-  const socket = new globalThis.WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => { socket.addEventListener("open", resolve, { once: true }); socket.addEventListener("error", reject, { once: true }); });
-  let next = 0;
-  const pending = new Map();
-  socket.addEventListener("message", event => {
-    const value = JSON.parse(event.data), entry = pending.get(value.id);
-    if (!entry) return;
-    pending.delete(value.id); clearTimeout(entry.timer);
-    if (value.error) entry.reject(new Error(JSON.stringify(value.error))); else entry.resolve(value.result);
-  });
-  const send = (method, params = {}) => new Promise((resolve, reject) => {
-    const id = ++next, timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timed out: ${method}`)); }, 10000);
-    pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params }));
-  });
-  try { return await callback(send); } finally { socket.close(); }
+  return nativeWorkbench(callback);
 }
 
 async function historyScreenshot(name, evidence) {
@@ -482,7 +466,8 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
     evidence.checks.push("explicit SCM URI on an unsaved plaintext .data include uses its proven owner with an unrelated editor active, selects owner before Dynare language change, retains context after cache invalidation, and keeps editor/MCP source policies distinct");
     await currentSnapshot(service, root, () => service.modelInfo(root.uri), "history unsaved include snapshot");
     const unsaved = await captureComparison(service, async () => sources, historical, workingResource, token.token);
-    assert.ok(unsaved.snapshot.rows[0].after.includes("4"));
+    const changedEquation = unsaved.snapshot.rows.find(row => row.id === "/changed_equations/0");
+    assert.ok(changedEquation?.semantic.expressions.some(expression => expression.field === "expression" && expression.after?.text.includes("4")));
     assert.deepEqual((await invoke(repositoryInput)).changed_equations, mcpSaved.changed_equations, "independent MCP still reads saved include bytes");
     await vscode.commands.executeCommand("workbench.mcp.stopServer", serverId);
     evidence.checks.push("native VS Code MCP discovery and repository calls agree with editor snapshots for saved and fixed inputs; an unsaved include affects the editor while MCP retains saved bytes");
@@ -557,13 +542,24 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
 
 exports.run = async function run() {
   const resultFile = process.env.DYGNOSIS_HOST_RESULT;
-  const evidence = { vscode: vscode.version, runId: process.env.DYGNOSIS_HOST_RUN_ID, checks: [] };
+  const scope = process.env.DYGNOSIS_HOST_SCOPE ?? "all";
+  const evidence = { vscode: vscode.version, runId: process.env.DYGNOSIS_HOST_RUN_ID, scope, checks: [] };
   try {
     assert.ok(process.env.DYGNOSIS_TEST_BINARY, "Set DYGNOSIS_TEST_BINARY to the matching built engine.");
     evidence.artifacts_before = await historyArtifacts();
     const extension = vscode.extensions.getExtension("CoconutWater.dygnosis");
     assert.ok(extension);
     const service = await extension.activate();
+    assert.ok(["all", "semantic"].includes(scope), "Native host scope must be all or semantic");
+    if (scope === "semantic") {
+      assert.equal(process.env.DYGNOSIS_HOST_REQUIRED_VISUAL, "1", "Semantic-only runs require actual native visual checks");
+      await checkSemanticDiff(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, waitFor);
+      await service.shutdown();
+      evidence.artifacts_after = await historyArtifacts();
+      assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "the engine and compiled extension must remain unchanged throughout the host gate");
+      evidence.passed = true;
+      return;
+    }
     const projectFeature = extension.packageJSON.contributes.configuration.some(group => Object.hasOwn(group.properties, "dynare.projectDiagnostics"));
     if (projectFeature) {
       await waitFor(() => service.client && service.supportsModelInfo, "folder-only project LSP startup");
@@ -716,6 +712,7 @@ exports.run = async function run() {
     await checkNativeMetadata(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
     await checkMacroPreview(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
     await checkGitHistory(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
+    await checkSemanticDiff(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, waitFor);
     await service.restart(); assert.ok(service.client);
     await service.shutdown(); assert.equal(service.client, undefined);
     evidence.checks.push("restart/shutdown");
