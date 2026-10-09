@@ -27,7 +27,7 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
   context.subscriptions.push(client, registerDiagnosticActions(client), registerProjectStatus(client), registerLenses(client), registerStatus(client), registerModelView(client), registerColors(client), registerMcp(context, client.log), previews, registerOriginJumps(client, previews), registerChanges(client),
     vscode.commands.registerCommand("dygnosis.restartServer", () => client.restart()),
     vscode.commands.registerCommand("dygnosis.showOutput", () => client.output.show()),
-    vscode.commands.registerCommand("dygnosis.openSettings", () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:dygnosis.dygnosis")),
+    vscode.commands.registerCommand("dygnosis.openSettings", () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:CoconutWater.dygnosis")),
     vscode.commands.registerCommand("dygnosis.editSettingsJson", () => vscode.commands.executeCommand("workbench.action.openSettingsJson")),
     vscode.commands.registerCommand("dygnosis.treatAsRoot", () => {
       const document = vscode.window.activeTextEditor?.document;

@@ -7,7 +7,7 @@ Dygnosis provides language support for Dynare, acting as a second preprocessor t
 - Inspect model counts, equations, includes, and expanded source, with jumps back to the written equations.
 - Compare a model with Git history or another `.mod` file; check unopened saved models in a project.
 
-Dygnosis works out of the box when installed from the VS Code Marketplace. Run **Dygnosis: Open Help** to learn more.
+Dygnosis works out of the box when installed from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis). Run **Dygnosis: Open Help** to learn more.
 
 For MCP without VS Code, download the native Rust binary from [GitHub Releases](https://github.com/naivej/dygnosis/releases) and follow [MCP setup](help/get-started.md#mcp-without-vs-code).
 

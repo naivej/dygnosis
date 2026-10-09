@@ -57,7 +57,7 @@ exports.run = async function run() {
     evidence.mcp = await probeMcp(binary, source.version);
     evidence.checks.push("installed bundled MCP initialize/tools/list/tool call before opening a model");
     await checkpoint("native VS Code MCP discovery and model-info invocation");
-    evidence.native_vscode_mcp = await probeNativeMcp(vscode, `${source.publisher}.dygnosis`);
+    evidence.native_vscode_mcp = await probeNativeMcp(vscode, extension.id);
     if (!projectDiagnostics) assert.equal(service.client, undefined, "Native MCP must work before the first LSP launch");
     evidence.checks.push("native VS Code MCP discovery and actual invocation of all fifteen tools before opening a model");
     await checkpoint("bundled LSP counts, symbols and Problems diagnostics");

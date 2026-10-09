@@ -5,7 +5,7 @@ const expectedTools = ["auto_fix", "compare_models", "diagnose", "equations", "e
 
 /** Exercise the real workbench provider and language-model tool routing. */
 async function probeNativeMcp(vscode, extensionId) {
-  const serverId = `${extensionId}/Dygnosis`;
+  const serverId = `${extensionId.toLowerCase()}/Dygnosis`;
   const cancellation = new vscode.CancellationTokenSource();
   try {
     assert.ok((await vscode.commands.getCommands(true)).includes("workbench.mcp.startServer"));

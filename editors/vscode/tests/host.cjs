@@ -434,7 +434,7 @@ async function checkGitHistory(service, workspaceRoot, evidence) {
     const workingResource = { ...fixedResource, before: selector(afterCommit), after: { kind: "working", root_uri: rootUri.toString() }, anchor: { kind: "working", root_uri: rootUri.toString() } };
     await captureComparison(service, async () => sources, historical, workingResource, token.token);
     const savedWire = transport.findLast(result => result?.state === "result");
-    const serverId = "dygnosis.dygnosis/Dygnosis";
+    const serverId = `${vscode.extensions.getExtension("CoconutWater.dygnosis").id.toLowerCase()}/Dygnosis`;
     let mcpTool;
     await waitFor(async () => {
       await vscode.commands.executeCommand("workbench.mcp.startServer", serverId);
@@ -561,7 +561,7 @@ exports.run = async function run() {
   try {
     assert.ok(process.env.DYGNOSIS_TEST_BINARY, "Set DYGNOSIS_TEST_BINARY to the matching built engine.");
     evidence.artifacts_before = await historyArtifacts();
-    const extension = vscode.extensions.getExtension("dygnosis.dygnosis");
+    const extension = vscode.extensions.getExtension("CoconutWater.dygnosis");
     assert.ok(extension);
     const service = await extension.activate();
     const projectFeature = extension.packageJSON.contributes.configuration.some(group => Object.hasOwn(group.properties, "dynare.projectDiagnostics"));

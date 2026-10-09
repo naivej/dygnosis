@@ -50,7 +50,7 @@ async function main() {
   const cliArgs = [cli, "--user-data-dir", profile, "--extensions-dir", extensions];
   execute(executable, [...cliArgs, "--install-extension", vsix, "--force"], { env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } });
   const installed = execute(executable, [...cliArgs, "--list-extensions", "--show-versions"], { env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } });
-  assert.ok(installed.split(/\r?\n/).includes(`${source.publisher}.dygnosis@${source.version}`), "VSIX installation did not report the matching version");
+  assert.ok(installed.split(/\r?\n/).some(line => line.toLowerCase() === `${source.publisher}.dygnosis@${source.version}`.toLowerCase()), "VSIX installation did not report the matching version");
   await writeJson(path.join(harness, "package.json"), { name: "dygnosis-package-harness", publisher: "test", version: "1.0.0", engines: { vscode: "^1.102.0" } });
   await fs.mkdir(path.join(profile, "User"), { recursive: true });
   await writeJson(path.join(profile, "User", "settings.json"), { "extensions.autoUpdate": false, "extensions.autoCheckUpdates": false, "telemetry.telemetryLevel": "off" });

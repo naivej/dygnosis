@@ -1,7 +1,7 @@
 # Get started
 
 Install **Dygnosis** from the
-[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=dygnosis.dygnosis).
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis).
 For a candidate build, use **Install from VSIX…** as described below. The
 extension includes its Rust engine. Analysis needs no separate Rust,
 Python, MATLAB, Octave or Dynare installation. VS Code updates the extension

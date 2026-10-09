@@ -539,7 +539,7 @@ export class DygnosisClient implements vscode.Disposable {
     const action = await vscode.window.showErrorMessage(message, "Show Output", "Use bundled binary", "Open Settings", "Open Help");
     if (action === "Show Output") this.output.show();
     else if (action === "Use bundled binary") await vscode.workspace.getConfiguration("dynare").update("serverPath", "", vscode.ConfigurationTarget.Global);
-    else if (action === "Open Settings") await vscode.commands.executeCommand("workbench.action.openSettings", "@ext:dygnosis.dygnosis dynare.serverPath");
+    else if (action === "Open Settings") await vscode.commands.executeCommand("workbench.action.openSettings", "@ext:CoconutWater.dygnosis dynare.serverPath");
     else if (action === "Open Help") await vscode.commands.executeCommand("dygnosis.openHelp", "troubleshoot");
   }
   shutdown(): Promise<void> {

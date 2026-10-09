@@ -84,7 +84,7 @@ async function directory(t) {
 function bundle(version, contents = `engine ${version}`, target = `${process.platform}-${process.arch}`) {
   const bytes = Buffer.from(contents), commit = "a".repeat(40);
   const rust = { "win32-x64": "x86_64-pc-windows-msvc", "win32-arm64": "aarch64-pc-windows-msvc", "darwin-x64": "x86_64-apple-darwin", "darwin-arm64": "aarch64-apple-darwin", "linux-x64": "x86_64-unknown-linux-gnu", "linux-arm64": "aarch64-unknown-linux-gnu" };
-  return { bytes, provenance: { schema_version: 1, name: "dygnosis", publisher: "dygnosis", version, target, rust_target: rust[target], commit, source: `https://github.com/naivej/dygnosis/tree/${commit}`, source_archive: `https://github.com/naivej/dygnosis/archive/${commit}.tar.gz`, binary_sha256: createHash("sha256").update(bytes).digest("hex"), release: false, tag: null, dirty: true, test_provenance: { retained: true } } };
+  return { bytes, provenance: { schema_version: 1, name: "dygnosis", publisher: "CoconutWater", version, target, rust_target: rust[target], commit, source: `https://github.com/naivej/dygnosis/tree/${commit}`, source_archive: `https://github.com/naivej/dygnosis/archive/${commit}.tar.gz`, binary_sha256: createHash("sha256").update(bytes).digest("hex"), release: false, tag: null, dirty: true, test_provenance: { retained: true } } };
 }
 const fixtureVersion = async file => `dygnosis ${(await fs.readFile(file, "utf8")).split(" ")[1]}`;
 const options = { version: fixtureVersion, lockAttempts: 50, lockDelayMs: 5 };
@@ -208,7 +208,7 @@ test("package verification rejects mismatched extension metadata before launchin
   await fs.writeFile(path.join(folder, "SOURCE.json"), JSON.stringify(source.provenance));
   const context = { extensionPath: folder, extension: { packageJSON: { name: "dygnosis", publisher: "different", version: "0.11.2" } } };
   await assert.rejects(verifyPackagedBundle(context), /provenance/);
-  context.extension.packageJSON.publisher = "dygnosis"; context.extension.packageJSON.version = "0.11.1";
+  context.extension.packageJSON.publisher = "CoconutWater"; context.extension.packageJSON.version = "0.11.1";
   await assert.rejects(verifyPackagedBundle(context), /version or native target/);
 });
 

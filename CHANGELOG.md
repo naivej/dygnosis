@@ -2,6 +2,7 @@
 
 ## v0.11.13
 
+- Marketplace packages use the **Coconut Water** publisher (`CoconutWater.dygnosis`).
 - Block backgrounds stay visible while you type and while a new model result is pending. Tint refreshes after a 200 ms typing pause, without clearing first. Current results remove deleted or unfinished blocks; turning tint off still clears it immediately. Language checks continue to use unsaved edits.
 
 ## v0.11.12

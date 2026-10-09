@@ -39,7 +39,7 @@ Module._load = load;
 function setup(shown = false) {
   host = { commands: new Map(), executed: [], external: [], panels: [], invitations: 0 };
   const state = new Map(shown ? [['helpInvitationShown', true]] : []);
-  const context = { extensionUri: uri(path.resolve(__dirname, '..')), extension: { id: 'dygnosis.dygnosis' },
+  const context = { extensionUri: uri(path.resolve(__dirname, '..')), extension: { id: 'CoconutWater.dygnosis' },
     globalState: { get: key => state.get(key), update: (key, value) => { state.set(key, value); return Promise.resolve(); } } };
   const registration = registerHelp(context);
   return { registration, state, open: argument => host.commands.get('dygnosis.openHelp')(argument), host };
@@ -69,7 +69,7 @@ test('messages dispatch only known native actions and topic permalinks', async (
   await panel.receive({ type: 'link', target: 'settings:dynare.searchPaths' });
   assert.deepEqual(env.host.executed.pop(), ['workbench.action.openSettings', '@id:dynare.searchPaths']);
   await panel.receive({ type: 'permalink', destination: 'diagnostics' });
-  assert.equal(env.host.clipboard, 'vscode://dygnosis.dygnosis/help?topic=diagnostics');
+  assert.equal(env.host.clipboard, 'vscode://CoconutWater.dygnosis/help?topic=diagnostics');
   env.host.links.handleUri({ path: '/help', query: 'topic=check%3AE020' });
   assert.deepEqual(env.host.executed.pop(), ['dygnosis.openHelp', 'check:E020']);
   env.host.links.handleUri({ path: '/run', query: 'topic=diagnostics' }); assert.deepEqual(env.host.executed, []);

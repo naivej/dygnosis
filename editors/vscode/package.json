@@ -4,7 +4,7 @@
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
   "version": "0.11.13",
-  "publisher": "dygnosis",
+  "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
   "repository": {

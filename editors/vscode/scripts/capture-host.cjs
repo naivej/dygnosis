@@ -110,7 +110,7 @@ exports.run = async function run() {
     }
   };
 
-  const extension = vscode.extensions.getExtension("dygnosis.dygnosis");
+  const extension = vscode.extensions.getExtension("CoconutWater.dygnosis");
   assert.ok(extension, "Dygnosis extension missing");
   const service = await extension.activate();
   await settle(800);
