@@ -109,6 +109,20 @@ pub struct WrittenWrite {
     pub token_range: Range<usize>,
 }
 
+/// Direct existing-reader proof for one selected setting, never a span match.
+#[derive(Clone, Debug)]
+pub(crate) struct SettingReceipt {
+    pub tokens: Range<usize>,
+    pub option_list: Option<Range<usize>>,
+}
+
+/// A private receipt recorded at an existing named producer's push site.
+#[derive(Clone, Debug)]
+pub(crate) struct RetainedFactReceipt {
+    pub parse_order: usize,
+    pub claims: Vec<Range<usize>>,
+}
+
 /// One name of a `heterogeneity_dimension` statement, file order (one record
 /// per name, each carrying the whole statement's span).
 #[derive(Clone, Debug)]
@@ -224,6 +238,8 @@ pub enum SemiStructuralKind {
 
 #[derive(Clone, Debug)]
 pub struct SemiStructuralCommand {
+    pub(crate) parse_order: usize,
+    pub(crate) active_tokens: Range<usize>,
     pub symbol_type_context: SymbolContext,
     pub kind: SemiStructuralKind,
     pub span: Span,
@@ -289,6 +305,8 @@ pub struct NamedModelOperator {
 
 #[derive(Clone, Debug)]
 pub struct PacTargetInfoBlock {
+    pub(crate) parse_order: usize,
+    pub(crate) active_tokens: Range<usize>,
     pub name: Name,
     pub name_span: Span,
     pub span: Span,
@@ -320,6 +338,8 @@ pub enum PacTargetComponentRow {
 
 #[derive(Clone, Debug)]
 pub struct DeterministicTrendsBlock {
+    pub(crate) parse_order: usize,
+    pub(crate) active_tokens: Range<usize>,
     pub span: Span,
     pub rows: Vec<DeterministicTrendRow>,
 }
@@ -335,6 +355,9 @@ pub struct DeterministicTrendRow {
 /// One `model_remove` / `model_replace` statement and what it matched.
 #[derive(Clone, Debug)]
 pub struct EquationSurgery {
+    /// Direct accepted opener receipt; source spans do not identify execution.
+    pub(crate) parse_order: usize,
+    pub(crate) opener_tokens: std::ops::Range<usize>,
     /// Keyword span of the statement.
     pub span: Span,
     /// `true` for a `model_replace` block.
@@ -481,10 +504,14 @@ pub struct OccbinExpr {
     pub text: String,
     pub span: Span,
     pub expr: Option<ExprId>,
+    /// Existing clause reader's expanded keyword/value/delimiter range.
+    pub(crate) active_tokens: Range<usize>,
 }
 
 #[derive(Clone, Debug)]
 pub struct OccbinConstraint {
+    pub(crate) parse_order: usize,
+    pub(crate) name_tokens: Range<usize>,
     pub name: String,
     pub name_span: Span,
     pub bind: Option<OccbinExpr>,
@@ -547,8 +574,11 @@ pub enum PolicyCommand {
 }
 
 /// One `ramsey_model` / `ramsey_policy` / … statement, file order.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct PolicyCommandStatement {
+    pub(crate) parse_order: usize,
+    pub(crate) option_tokens: Option<Range<usize>>,
+    pub(crate) owned_option_words: Vec<Range<usize>>,
     pub command: PolicyCommand,
     /// Command identifier through the statement `;`.
     pub span: Span,
@@ -563,6 +593,7 @@ pub struct PolicyCommandStatement {
 /// An instrument occurrence with the type it had when its command was parsed.
 #[derive(Clone, Copy, Debug)]
 pub struct PolicyInstrumentUse {
+    pub(crate) parse_order: usize,
     pub name: Name,
     pub span: Span,
     pub command_span: Span,
@@ -618,6 +649,7 @@ pub struct NonstationaryVar {
 /// One `optim_weights` row: `symbol expr;` or `symbol, symbol expr;`.
 #[derive(Clone, Debug)]
 pub struct OptimWeight {
+    pub(crate) active_tokens: Range<usize>,
     pub first: Name,
     pub first_span: Span,
     pub second: Option<Name>,
@@ -633,6 +665,7 @@ pub struct OptimWeight {
 /// One `ramsey_constraints` entry (one expression through `;`).
 #[derive(Clone, Debug)]
 pub struct RamseyConstraint {
+    pub(crate) active_tokens: Range<usize>,
     pub expr: Option<ExprId>,
     pub span: Span,
 }
@@ -758,7 +791,52 @@ pub struct EstimatedParam {
     pub mean_expr: Option<ExprId>,
     pub std_expr: Option<ExprId>,
     pub prior_beta: bool,
+    /// Display retention is separate from the compact diagnostic inputs above.
+    pub retained: EstimatedParamRetention,
     pub span: Span,
+}
+
+/// Original accepted positions in one estimated-parameter row. Empty slots have
+/// equal token endpoints; absent slots are None. Existing expression IDs are
+/// attached only when the original reader consumed exactly that written slot.
+#[derive(Clone, Copy, Debug)]
+pub struct EstimatedParamRetention {
+    pub statement_id: usize,
+    pub parse_order: usize,
+    pub token_start: usize,
+    pub token_end: usize,
+    pub distribution: Option<Name>,
+    /// Initial value, optimizer lower/upper, prior mean/std, prior support 3/4,
+    /// and proposal scale, in that order. These are written settings, not defaults.
+    pub slots: [Option<EstimatedParamSlot>; 8],
+    /// The existing reader's retained token shape has an audited positional form.
+    pub positions_complete: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct EstimatedParamSlot {
+    pub token_start: usize,
+    pub token_end: usize,
+    pub expr: Option<ExprId>,
+    pub known_value: Option<f64>,
+}
+
+/// Opener facts for each accepted estimated-parameter block, including empty
+/// use_calibration blocks. The parent statement owns completion and token proof.
+#[derive(Clone, Copy, Debug)]
+pub struct EstimatedParamBlock {
+    pub statement_id: usize,
+    pub kind: EstimatedParamBlockKind,
+    pub overwrite: bool,
+    pub use_calibration: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EstimatedParamBlockKind {
+    Parameters,
+    Initialization,
+    Bounds,
+    Removal,
 }
 
 /// One `var` / `corr` / `stderr` / `skew` statement inside a `shocks` block.
@@ -1008,6 +1086,10 @@ pub struct DateOption {
 
 #[derive(Clone, Debug)]
 pub struct StochSimulRequest {
+    pub(crate) parse_order: usize,
+    pub(crate) option_tokens: Option<Range<usize>>,
+    pub(crate) irf_tokens: Option<Range<usize>>,
+    pub(crate) irf_shocks_tokens: Option<Range<usize>>,
     pub span: Span,
     /// Explicit `irf=INTEGER`, including zero. `None` means no explicit value.
     pub irf: Option<(i32, Span)>,
@@ -1019,6 +1101,9 @@ pub struct StochSimulRequest {
 /// `estimation`. Names retain their written spans and command order.
 #[derive(Clone, Debug)]
 pub struct IrfShocksOption {
+    pub(crate) parse_order: usize,
+    pub(crate) active_tokens: Range<usize>,
+    pub(crate) option_tokens: Range<usize>,
     pub symbol_type_context: SymbolContext,
     pub command: String,
     pub span: Span,
@@ -1051,6 +1136,8 @@ pub struct AssignmentSyntax {
 #[derive(Clone, Debug, Default)]
 pub struct Model {
     pub source: String,
+    pub(crate) setting_receipts: HashMap<&'static str, SettingReceipt>,
+    pub(crate) fact_receipts: HashMap<&'static str, Vec<RetainedFactReceipt>>,
     /// Tokens after macro expansion. Equation and assignment `active_tokens`
     /// index this vector. Empty when the model was not produced by the parser.
     pub expanded_tokens: Vec<crate::lexer::Token>,
@@ -1079,6 +1166,9 @@ pub struct Model {
     pub sum_argument_roles: HashMap<ExprId, bool>,
     pub semi_structural_commands: Vec<SemiStructuralCommand>,
     pub named_model_operators: Vec<NamedModelOperator>,
+    /// Direct receipt from the named-operator reader to its existing leaf call.
+    /// Arena IDs are internal lookup keys, never comparison values.
+    pub(crate) named_model_operator_exprs: HashMap<ExprId, usize>,
     pub pac_target_info: Vec<PacTargetInfoBlock>,
     pub deterministic_trends: Vec<DeterministicTrendsBlock>,
     /// A repeated leading name within one independent `deterministic_trends` block.
@@ -1164,6 +1254,7 @@ pub struct Model {
     /// First `varobs …;` statement.
     pub varobs_span: Option<Span>,
     pub estimated_params: Vec<EstimatedParam>,
+    pub estimated_param_blocks: Vec<EstimatedParamBlock>,
     /// Flat-vector index where each `estimated_params` block begins.
     pub estimated_params_block_starts: Vec<usize>,
     pub estimated_params_span: Option<Span>,
@@ -1390,6 +1481,8 @@ pub struct Model {
     pub osr_params_statement_count: u32,
     /// First `planner_objective` expression (first-wins).
     pub planner_objective_expr: Option<ExprId>,
+    /// The RHS range captured when the existing first-wins reader stores it.
+    pub(crate) planner_objective_tokens: Option<Range<usize>>,
     pub varexobs: Vec<ObservedVar>,
     pub varexobs_span: Option<Span>,
     pub varexobs_statement_count: u32,
@@ -1543,11 +1636,18 @@ pub struct HistvalEntry {
     pub lag: i32,
     pub span: Span,
     pub expr: Option<ExprId>,
+    /// Exact consumed execution, including its delimiter. Written spans can
+    /// repeat in macros; this retained range supplies the owning statement.
+    pub(crate) active_tokens: Range<usize>,
+    /// The existing reader completed the pinned target/lag/equal/RHS/delimiter
+    /// shape. Comparison does not promote recovered rows to assignments.
+    pub(crate) accepted_assignment: bool,
 }
 
 /// One `NAME, lower, upper;` in `osr_params_bounds`.
 #[derive(Clone, Debug)]
 pub struct OsrBound {
+    pub(crate) active_tokens: Range<usize>,
     pub name: Name,
     pub span: Span,
     pub lower: Option<ExprId>,
@@ -1568,6 +1668,8 @@ pub struct CommandSymbol {
     pub command: String,
     pub name: Name,
     pub span: Span,
+    /// Expanded token index captured by the existing trailing-list reader.
+    pub(crate) parse_order: usize,
     /// Statement this name was listed on. Duplicate detection is per statement:
     /// Dynare calls `removeDuplicates` on one statement's list, so the same name
     /// on two `stoch_simul` statements is not a duplicate.
@@ -1745,6 +1847,7 @@ pub enum DottedHead {
 /// One option row of a parsed family statement.
 #[derive(Clone, Debug)]
 pub struct FamilyOption {
+    pub(crate) active_tokens: Range<usize>,
     /// Producer positions in the original expanded token stream. Several
     /// emitted tokens can share one interpolation's written span.
     pub(crate) parse_order: usize,
@@ -1883,6 +1986,7 @@ pub struct MomStatement {
 /// One `matched_moments` row: a model expression through `;`.
 #[derive(Clone, Debug)]
 pub struct MatchedMoment {
+    pub(crate) active_tokens: Range<usize>,
     /// `join_lexemes` of the expression.
     pub text: String,
     pub span: Span,
@@ -1897,6 +2001,8 @@ pub struct MatchedMoment {
 /// One `matched_irfs` block.
 #[derive(Clone, Debug)]
 pub struct MatchedIrfsBlock {
+    pub(crate) parse_order: usize,
+    pub(crate) opener_tokens: std::ops::Range<usize>,
     /// Opener through `end;`.
     pub span: Span,
     /// The block wrote `(overwrite)`.
@@ -1907,6 +2013,8 @@ pub struct MatchedIrfsBlock {
 /// One `matched_irfs_weights` block.
 #[derive(Clone, Debug)]
 pub struct MatchedIrfsWeightsBlock {
+    pub(crate) parse_order: usize,
+    pub(crate) opener_tokens: Range<usize>,
     /// Opener through `end;`.
     pub span: Span,
     /// The block wrote `(overwrite)`.
@@ -1917,6 +2025,11 @@ pub struct MatchedIrfsWeightsBlock {
 /// One `var ENDO; varexo EXO; periods …; values …; weights …;` row.
 #[derive(Clone, Debug)]
 pub struct MatchedIrfsRow {
+    /// Direct accepted item ranges preserve order through macro expansion.
+    pub(crate) period_tokens: Vec<IrfPeriodTokens>,
+    pub(crate) value_tokens: Vec<std::ops::Range<usize>>,
+    pub(crate) weight_tokens: Vec<std::ops::Range<usize>>,
+    pub(crate) represented_tokens: Vec<std::ops::Range<usize>>,
     pub endogenous: Name,
     pub endogenous_span: Span,
     pub exogenous: Name,
@@ -1934,9 +2047,16 @@ pub struct MatchedIrfsRow {
     pub span: Span,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct IrfPeriodTokens {
+    pub first: std::ops::Range<usize>,
+    pub last: Option<std::ops::Range<usize>>,
+}
+
 /// One `name(periods), exo, name(periods), exo, expression;` row.
 #[derive(Clone, Debug)]
 pub struct MatchedIrfsWeight {
+    pub(crate) active_tokens: Range<usize>,
     pub left_endo: Name,
     pub left_endo_span: Span,
     /// `1` or `1:2`, as written.
@@ -1960,6 +2080,8 @@ pub struct MatchedIrfsWeight {
 /// One `moment_calibration;` … `end;` block.
 #[derive(Clone, Debug)]
 pub struct MomentCalibrationBlock {
+    pub(crate) parse_order: usize,
+    pub(crate) opener_tokens: Range<usize>,
     pub span: Span,
     pub rows: Vec<MomentCalibrationRow>,
 }
@@ -1967,6 +2089,7 @@ pub struct MomentCalibrationBlock {
 /// One `name, name(lags), range;` row.
 #[derive(Clone, Debug)]
 pub struct MomentCalibrationRow {
+    pub(crate) active_tokens: Range<usize>,
     pub first: Name,
     pub first_span: Span,
     pub second: Name,
@@ -1981,6 +2104,8 @@ pub struct MomentCalibrationRow {
 /// One `irf_calibration;` … `end;` block.
 #[derive(Clone, Debug)]
 pub struct IrfCalibrationBlock {
+    pub(crate) parse_order: usize,
+    pub(crate) opener_tokens: Range<usize>,
     pub span: Span,
     /// The block wrote `(relative_irf)`.
     pub relative_irf: bool,
@@ -1990,6 +2115,7 @@ pub struct IrfCalibrationBlock {
 /// One `name(periods), exo, range;` row.
 #[derive(Clone, Debug)]
 pub struct IrfCalibrationRow {
+    pub(crate) active_tokens: Range<usize>,
     pub endogenous: Name,
     pub endogenous_span: Span,
     /// `None` when there is no `(…)`; 7.1 defaults this to `1`.

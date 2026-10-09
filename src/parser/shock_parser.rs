@@ -1633,10 +1633,13 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_database_statement(&mut self) {
+        let parse_order = self.i;
+        let mut owned = std::iter::once(self.i..self.i + 1).collect::<Vec<_>>();
         let start = self.bump().span.start;
         let mut names = Vec::new();
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
             if self.at(TokenKind::Ident) {
+                owned.push(self.i..self.i + 1);
                 let tok = self.bump();
                 let name = self.intern.intern(tok.text(self.src));
                 names.push((name, tok.span));
@@ -1653,9 +1656,12 @@ impl Parser<'_> {
             names,
             span: Span { start, end },
         });
+        self.retain_fact_receipt("database", parse_order, owned);
     }
 
     pub(super) fn parse_set_time_statement(&mut self) {
+        let parse_order = self.i;
+        let mut value_tokens = None;
         let start = self.bump().span.start;
         if self.at(TokenKind::LParen) {
             let first = self.i + 1;
@@ -1682,6 +1688,7 @@ impl Parser<'_> {
         }
         let value = if self.at(TokenKind::LParen) {
             self.date_at(self.i + 1).map(|(date, next)| {
+                value_tokens = Some(self.i + 1..next);
                 if let Some(refuse) = self.date_suffix_refusal_at(
                     next,
                     "set_time",
@@ -1707,6 +1714,9 @@ impl Parser<'_> {
                 value,
                 span: Span { start, end },
             });
+            let mut owned = std::iter::once(parse_order..parse_order + 1).collect::<Vec<_>>();
+            owned.extend(value_tokens);
+            self.retain_fact_receipt("set_time", parse_order, owned);
         }
     }
 
@@ -1740,6 +1750,7 @@ impl Parser<'_> {
                         },
                         value,
                     });
+                    self.retain_fact_receipt("date_option", i, std::iter::once(i..next).collect());
                     i = next;
                     continue;
                 }
@@ -1750,10 +1761,15 @@ impl Parser<'_> {
 
     pub(super) fn collect_stoch_simul_request(
         &mut self,
+        parse_order: usize,
         span: Span,
         option_range: Option<(usize, usize)>,
     ) {
         let mut request = StochSimulRequest {
+            parse_order,
+            option_tokens: option_range.map(|(open, close)| open..close),
+            irf_tokens: None,
+            irf_shocks_tokens: None,
             span,
             irf: None,
             irf_shocks: None,
@@ -1775,6 +1791,7 @@ impl Parser<'_> {
                     {
                         if let Ok(number) = tok.text(self.src).parse::<i32>() {
                             request.irf = Some((number, tok.span));
+                            request.irf_tokens = Some(i..i + 3);
                         }
                     }
                 } else if option == "irf_shocks"
@@ -1796,6 +1813,7 @@ impl Parser<'_> {
                         }
                     }
                     request.irf_shocks = Some(names);
+                    request.irf_shocks_tokens = Some(i..after);
                     i = after;
                     continue;
                 }
@@ -1878,6 +1896,9 @@ impl Parser<'_> {
                 }
             }
             self.model.irf_shocks_options.push(IrfShocksOption {
+                parse_order: i,
+                active_tokens: i..after,
+                option_tokens: open..close,
                 symbol_type_context: self.model.symbol_context(),
                 command: command.to_ascii_lowercase(),
                 span: option_span,
@@ -1951,19 +1972,22 @@ impl Parser<'_> {
         let Some((head, mut i)) = self.subsample_head_at(from) else {
             return;
         };
+        let mut owned = std::iter::once(from..i).collect::<Vec<_>>();
         let span = Span {
             start: self.tokens[from].span.start,
             end: self.tokens[to.saturating_sub(1)].span.end,
         };
         if self.tokens.get(i).map(|t| t.kind) == Some(TokenKind::Eq) {
             i += 1;
-            if let Some((source, _)) = self.subsample_head_at(i) {
+            if let Some((source, after_source)) = self.subsample_head_at(i) {
                 self.model.subsamples.push(SubsampleInstruction::Copy {
                     symbol_type_context: self.model.symbol_context(),
                     target: head,
                     source,
                     span,
                 });
+                owned.push(i - 1..after_source);
+                self.retain_fact_receipt("subsamples", from, owned);
             }
             return;
         }
@@ -2065,6 +2089,7 @@ impl Parser<'_> {
                 first,
                 last,
             });
+            owned.push(i..after_last);
             i = after_last;
         }
         self.model.subsamples.push(SubsampleInstruction::Declare {
@@ -2073,6 +2098,7 @@ impl Parser<'_> {
             span,
             symbol_type_context: self.model.symbol_context(),
         });
+        self.retain_fact_receipt("subsamples", from, owned);
     }
 
     fn shock_opener_refuse(&mut self, at: usize, command: &str, expected: &str) -> bool {

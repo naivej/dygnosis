@@ -134,6 +134,10 @@ pub struct ShockSetting {
     pub(crate) source_span: Option<Span>,
     #[serde(skip)]
     pub(crate) occurrence_id: usize,
+    /// Exact accepted assignment token range for shared semantic ownership.
+    /// Instruction-list position and written span cannot replace this proof.
+    #[serde(skip)]
+    pub(crate) assignment_tokens: Option<std::ops::Range<usize>>,
     pub block: String,
     /// Heterogeneity dimension for a `shocks(heterogeneity=…)` row. Absent on ordinary shocks.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -830,6 +834,7 @@ fn base_shock_setting(
     ShockSetting {
         source_span: Some(span),
         occurrence_id: 0,
+        assignment_tokens: None,
         block: block.into(),
         heterogeneity: None,
         domain: None,
@@ -1571,7 +1576,7 @@ fn append_baseline_context(
         if *baseline == "initval" {
             for assignment in &model.initval {
                 if model.name(assignment.name) == target {
-                    out.push(context_instruction(
+                    let mut instruction = context_instruction(
                         model,
                         source,
                         ContextSpec {
@@ -1584,7 +1589,10 @@ fn append_baseline_context(
                             values: Some(vec![written_assignment_value(model, assignment)]),
                             span: assignment.span,
                         },
-                    ));
+                    );
+                    instruction.setting.assignment_tokens = (!assignment.active_tokens.is_empty())
+                        .then(|| assignment.active_tokens.clone());
+                    out.push(instruction);
                 }
             }
         } else {

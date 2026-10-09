@@ -134,7 +134,22 @@ fn metadata_absence_empty_and_duplicate_selection_follow_legacy() {
         &parse("var y (long_name='First'); var y (long_name='Edited');"),
     );
     assert!(diff.symbols_changed.is_empty());
-    assert!(diff.semantic.rows.is_empty());
+    assert!(!diff
+        .semantic
+        .rows
+        .iter()
+        .any(|row| row.pointer.starts_with("/symbols_changed/")));
+    let written = row(&diff, SemanticFamily::Symbols, "y");
+    assert_eq!(
+        field(written, "long_name").before,
+        FieldState::text("Later")
+    );
+    assert_eq!(
+        field(written, "long_name").after,
+        FieldState::text("Edited")
+    );
+    assert!(field(written, "long_name").changed);
+    assert_eq!(diff.semantic.rows.len(), 1);
 }
 
 #[test]
@@ -313,6 +328,81 @@ fn reference(index: usize, side: Side) -> EquationReference {
             occurrence: index,
         },
         provenance: None,
+    }
+}
+
+#[test]
+fn output_limits_never_keep_references_to_omitted_semantic_equations() {
+    let mut candidate = compare_models(&parse("parameters p; p=1;"), &parse("parameters p; p=2;"));
+    let mut equation = SemanticRow::new(SemanticFamily::Equations, ChangeKind::Changed, "Output");
+    equation.before = Some(RowSide::named("Output", ComparisonScope::aggregate()));
+    equation.after = equation.before.clone();
+    equation.fields.push(FieldChange::new(
+        "condition",
+        "Complementarity condition",
+        FieldState::text(&"x".repeat(80)),
+        FieldState::text(&"y".repeat(80)),
+    ));
+    let equation_pointer = candidate.semantic.push_row(equation);
+    candidate.semantic.references = vec![reference(0, Side::Before), reference(1, Side::After)];
+    for retained in &mut candidate.semantic.references {
+        retained.equation_pointer = equation_pointer.clone();
+    }
+    candidate.semantic.rows[0].references = candidate
+        .semantic
+        .references
+        .iter()
+        .map(|reference| reference.pointer.clone())
+        .collect();
+    let full_bytes = candidate
+        .semantic
+        .rows
+        .iter()
+        .map(|row| serde_json::to_vec(row).unwrap().len())
+        .chain(
+            candidate
+                .semantic
+                .references
+                .iter()
+                .map(|reference| serde_json::to_vec(reference).unwrap().len()),
+        )
+        .sum::<usize>();
+    for limit in (0..=full_bytes).step_by(17) {
+        let mut diff = candidate.clone();
+        diff.semantic.budgets.serialized_output_bytes = limit;
+        enforce_output_budget(&mut diff);
+        let bytes = diff
+            .semantic
+            .rows
+            .iter()
+            .map(|row| serde_json::to_vec(row).unwrap().len())
+            .chain(
+                diff.semantic
+                    .references
+                    .iter()
+                    .map(|reference| serde_json::to_vec(reference).unwrap().len()),
+            )
+            .sum::<usize>();
+        assert!(bytes <= limit, "detail exceeded byte cap {limit}");
+        for reference in &diff.semantic.references {
+            assert!(
+                diff.semantic
+                    .rows
+                    .iter()
+                    .any(|row| row.pointer == reference.equation_pointer),
+                "dangling equation reference at byte cap {limit}"
+            );
+        }
+        for row in &diff.semantic.rows {
+            assert!(
+                row.references.iter().all(|pointer| diff
+                    .semantic
+                    .references
+                    .iter()
+                    .any(|reference| reference.pointer == *pointer)),
+                "dangling row reference at byte cap {limit}"
+            );
+        }
     }
 }
 

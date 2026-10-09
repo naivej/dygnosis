@@ -68,11 +68,6 @@ pub(super) fn populate(before: &Model, after: &Model, diff: &mut ModelDiff) {
             ],
         ),
     ];
-    diff.coverage.limits.push(ComparisonLimit::new(
-        "retained_families_pending",
-        "Other retained families require their named-field comparison producers.",
-        "semantic_surfaces_priors_families",
-    ));
 }
 
 fn coverage(family: SemanticFamily, fields: &[&str]) -> FamilyCoverage {
@@ -146,6 +141,15 @@ fn parameter_side(model: &Model, name: &str) -> RowSide {
         span: assignment.span,
         parse_order: Some(assignment.active_tokens.start),
         equation_id: None,
+        statement_id: model
+            .statements
+            .iter()
+            .find(|statement| {
+                !assignment.active_tokens.is_empty()
+                    && statement.token_range.start <= assignment.active_tokens.start
+                    && assignment.active_tokens.end <= statement.token_range.end
+            })
+            .map(|statement| statement.id),
     });
     side
 }
@@ -171,6 +175,14 @@ fn symbol_side(model: &Model, decl: &Decl) -> RowSide {
         span: decl.span,
         parse_order: Some(decl.parse_order),
         equation_id: None,
+        statement_id: model
+            .written_declarations
+            .iter()
+            .find(|written| {
+                written.declaration.parse_order == decl.parse_order
+                    && written.declaration.name == decl.name
+            })
+            .map(|written| written.statement_id),
     });
     side
 }
@@ -581,8 +593,9 @@ fn shock_side(name: &str, setting: &ShockSetting) -> RowSide {
     side.occurrence = Some(setting.occurrence_id);
     side.provenance = setting.source_span.map(|span| OccurrenceProvenance {
         span,
-        parse_order: Some(setting.occurrence_id),
+        parse_order: setting.assignment_tokens.as_ref().map(|range| range.start),
         equation_id: None,
+        statement_id: None,
     });
     side
 }

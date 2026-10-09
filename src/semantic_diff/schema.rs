@@ -197,6 +197,9 @@ pub struct OccurrenceProvenance {
     pub span: Span,
     pub parse_order: Option<usize>,
     pub equation_id: Option<usize>,
+    /// Exact owning accepted parser statement in this captured model. Display
+    /// execution order and written spans do not establish this link.
+    pub statement_id: Option<usize>,
 }
 
 impl RowSide {
@@ -289,6 +292,9 @@ pub struct FieldChange {
     pub before: FieldState,
     pub after: FieldState,
     pub changed: bool,
+    /// Optional comparison work can be unavailable even when one side retains
+    /// a value. Such a field does not claim a model change.
+    pub comparison_availability: Availability,
     pub numeric_difference: Option<f64>,
 }
 
@@ -301,6 +307,7 @@ impl FieldChange {
             before,
             after,
             changed,
+            comparison_availability: Availability::Complete,
             numeric_difference: None,
         }
     }

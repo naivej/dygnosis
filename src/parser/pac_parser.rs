@@ -40,6 +40,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_semi_structural_command(&mut self, kind: SemiStructuralKind) {
+        let start_i = self.i;
         let start = self.bump().span.start;
         let mut options = Vec::new();
         if !self.at(TokenKind::LParen) {
@@ -98,6 +99,8 @@ impl Parser<'_> {
         self.model
             .semi_structural_commands
             .push(SemiStructuralCommand {
+                parse_order: start_i,
+                active_tokens: start_i..self.i,
                 symbol_type_context: self.model.symbol_context(),
                 kind,
                 span: Span { start, end },
@@ -406,7 +409,8 @@ impl Parser<'_> {
             start: keyword.span.start,
             end,
         };
-        if let Some((name, name_span)) = name {
+        let retained_index = name.map(|(name, name_span)| {
+            let index = self.model.named_model_operators.len();
             self.model.named_model_operators.push(NamedModelOperator {
                 kind,
                 name,
@@ -414,19 +418,25 @@ impl Parser<'_> {
                 name_span,
                 span,
             });
-        }
+            index
+        });
         // The name identifies a model, not a variable reference. Keep the tree
         // leaf call so ordinary symbol walks do not treat it as an undeclared var.
-        self.alloc(
+        let id = self.alloc(
             ExprKind::Call {
                 callee,
                 args: Vec::new(),
             },
             span,
-        )
+        );
+        if let Some(index) = retained_index {
+            self.model.named_model_operator_exprs.insert(id, index);
+        }
+        id
     }
 
     pub(super) fn parse_pac_target_info_block(&mut self) {
+        let start_i = self.i;
         let start = self.bump().span.start;
         if !self.at(TokenKind::LParen) {
             self.pac_syntax("'('");
@@ -524,6 +534,8 @@ impl Parser<'_> {
         self.i = saved;
         if let Some((name, name_span)) = name {
             self.model.pac_target_info.push(PacTargetInfoBlock {
+                parse_order: start_i,
+                active_tokens: start_i..self.i,
                 name,
                 name_span,
                 span: Span { start, end },
@@ -533,6 +545,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_deterministic_trends_block(&mut self) {
+        let start_i = self.i;
         let start = self.bump().span.start;
         if !self.at(TokenKind::Semi) {
             self.pac_syntax("';'");
@@ -597,6 +610,8 @@ impl Parser<'_> {
         self.model
             .deterministic_trends
             .push(DeterministicTrendsBlock {
+                parse_order: start_i,
+                active_tokens: start_i..self.i,
                 span: Span {
                     start: opener.start,
                     end,

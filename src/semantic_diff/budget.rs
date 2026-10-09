@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::model_diff::ModelDiff;
 
@@ -192,6 +192,56 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
             "semantic_diff",
         ));
     }
+    repair_reference_links(diff);
+    // Link/limit repair changes row JSON sizes. Enforce the byte cap after it.
+    let mut final_bytes = detail_bytes(diff);
+    let mut additional_rows = 0;
+    while final_bytes > limit && !diff.semantic.rows.is_empty() {
+        let row = diff.semantic.rows.pop().expect("nonempty");
+        final_bytes = final_bytes.saturating_sub(json_bytes(&row));
+        additional_rows += 1;
+    }
+    add_limit(&mut diff.semantic.limits, "serialized_output_limit", "Semantic rows were omitted by the serialized detail limit; legacy structural rows remain available.", additional_rows, "semantic_diff");
+    if additional_rows > 0 {
+        diff.semantic.availability = Availability::Partial;
+        diff.coverage.availability = Availability::Partial;
+        // References to a condition-only equation cannot outlive its optional
+        // semantic row. Removing each reference frees more bytes than its
+        // row-link omission notice requires.
+        repair_reference_links(diff);
+    }
+    if diff
+        .source_changes
+        .files
+        .iter()
+        .any(|file| file.availability != Availability::Complete)
+        && !diff.source_changes.files.is_empty()
+    {
+        diff.source_changes.availability = Availability::Partial;
+        diff.coverage.availability = Availability::Partial;
+    }
+}
+
+fn repair_reference_links(diff: &mut ModelDiff) {
+    let retained_rows: HashSet<_> = diff
+        .semantic
+        .rows
+        .iter()
+        .map(|row| row.pointer.as_str())
+        .collect();
+    let old_count = diff.semantic.references.len();
+    diff.semantic.references.retain(|reference| {
+        !reference.equation_pointer.starts_with("/semantic/rows/")
+            || retained_rows.contains(reference.equation_pointer.as_str())
+    });
+    let omitted = old_count - diff.semantic.references.len();
+    if omitted > 0 {
+        diff.semantic.availability = Availability::Partial;
+        diff.coverage.availability = Availability::Partial;
+        for limits in [&mut diff.semantic.limits, &mut diff.coverage.limits] {
+            add_limit(limits, "reference_target_output_limit", "References to omitted semantic equation rows were omitted; remaining reference targets are retained.", omitted, "semantic_equations");
+        }
+    }
     let retained: HashMap<_, _> = diff
         .semantic
         .references
@@ -222,29 +272,6 @@ pub fn enforce_output_budget(diff: &mut ModelDiff) {
             old_count - row.references.len(),
             "semantic_equations",
         );
-    }
-    // Link/limit repair changes row JSON sizes. Enforce the byte cap after it.
-    let mut final_bytes = detail_bytes(diff);
-    let mut additional_rows = 0;
-    while final_bytes > limit && !diff.semantic.rows.is_empty() {
-        let row = diff.semantic.rows.pop().expect("nonempty");
-        final_bytes = final_bytes.saturating_sub(json_bytes(&row));
-        additional_rows += 1;
-    }
-    add_limit(&mut diff.semantic.limits, "serialized_output_limit", "Semantic rows were omitted by the serialized detail limit; legacy structural rows remain available.", additional_rows, "semantic_diff");
-    if additional_rows > 0 {
-        diff.semantic.availability = Availability::Partial;
-        diff.coverage.availability = Availability::Partial;
-    }
-    if diff
-        .source_changes
-        .files
-        .iter()
-        .any(|file| file.availability != Availability::Complete)
-        && !diff.source_changes.files.is_empty()
-    {
-        diff.source_changes.availability = Availability::Partial;
-        diff.coverage.availability = Availability::Partial;
     }
 }
 

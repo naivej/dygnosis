@@ -128,6 +128,7 @@ struct CapturedEquation<'a> {
     dimension: Option<crate::intern::Name>,
     dimension_name: Option<String>,
     written_id: Option<usize>,
+    statement_id: Option<usize>,
 }
 
 type EquationKey = (Option<String>, usize);
@@ -176,6 +177,7 @@ fn captured<'a>(
         dimension,
         dimension_name: dimension.map(|dimension| model.name(dimension).into()),
         written_id,
+        statement_id: written_id.map(|index| model.written_equations[index].statement_id),
     }
 }
 
@@ -184,6 +186,7 @@ fn provenance(equation: &CapturedEquation<'_>) -> OccurrenceProvenance {
         span: equation.equation.span,
         parse_order: Some(equation.equation.parse_order),
         equation_id: equation.written_id,
+        statement_id: equation.statement_id,
     }
 }
 
@@ -1285,5 +1288,212 @@ fn populate_references(
         diff.coverage.limits.push(limit);
         diff.semantic.availability = Availability::Partial;
         diff.coverage.availability = Availability::Partial;
+    }
+}
+
+/// Local rows use ModelLocals' exact accepted binding links. These are direct
+/// written counted uses, not uses reached through expanding the local's RHS.
+struct LocalReferenceIndex {
+    definition_ids: HashMap<usize, usize>,
+    declaration_ids: HashMap<usize, usize>,
+    by_definition: HashMap<usize, Vec<(EquationKey, usize, usize)>>,
+    by_declaration: HashMap<usize, Vec<(EquationKey, usize, usize)>>,
+}
+
+impl LocalReferenceIndex {
+    fn new(catalog: &Catalog<'_>, locals: &ModelLocals) -> Self {
+        let mut index = Self {
+            definition_ids: locals
+                .definitions
+                .iter()
+                .enumerate()
+                .map(|(id, definition)| (definition.equation_index, id))
+                .collect(),
+            declaration_ids: locals
+                .declarations
+                .iter()
+                .enumerate()
+                .map(|(id, declaration)| (declaration.parse_order, id))
+                .collect(),
+            by_definition: HashMap::new(),
+            by_declaration: HashMap::new(),
+        };
+        let counted: HashMap<_, _> = catalog
+            .iter()
+            .filter_map(|(key, equation)| equation.written_id.map(|id| (id, key)))
+            .collect();
+        let mut occurrences = HashMap::new();
+        for (usage_id, usage) in locals.uses.iter().enumerate() {
+            let Some(key) = counted.get(&usage.equation_index) else {
+                continue;
+            };
+            let occurrence = occurrences.entry(usage.equation_index).or_insert(0);
+            let entry = ((*key).clone(), *occurrence, usage_id);
+            *occurrence += 1;
+            if let Some(id) = usage.definition {
+                index
+                    .by_definition
+                    .entry(id)
+                    .or_default()
+                    .push(entry.clone());
+            }
+            if let Some(id) = usage.declaration {
+                index.by_declaration.entry(id).or_default().push(entry);
+            }
+        }
+        for entries in index
+            .by_definition
+            .values_mut()
+            .chain(index.by_declaration.values_mut())
+        {
+            entries.sort_by(|a, b| (&a.0, a.1).cmp(&(&b.0, b.1)));
+        }
+        index
+    }
+}
+
+pub(crate) fn populate_local_references(before: &Model, after: &Model, diff: &mut ModelDiff) {
+    let old = catalog(before);
+    let new = catalog(after);
+    let old_locals = ModelLocals::collect(before);
+    let new_locals = ModelLocals::collect(after);
+    let old_index = LocalReferenceIndex::new(&old, &old_locals);
+    let new_index = LocalReferenceIndex::new(&new, &new_locals);
+    let old_pointers = equation_pointers(diff, Side::Before);
+    let new_pointers = equation_pointers(diff, Side::After);
+    let mut counts = [0_usize; 2];
+    for reference in &diff.semantic.references {
+        counts[usize::from(reference.side == Side::After)] += 1;
+    }
+    let mut emitted: HashMap<(usize, EquationKey, usize), Option<String>> = HashMap::new();
+    let mut omitted = 0;
+    for row_index in 0..diff.semantic.rows.len() {
+        let role = diff.semantic.rows[row_index]
+            .fields
+            .iter()
+            .find(|field| field.name == "role");
+        let is_local=role.is_some_and(|field|[&field.before,&field.after].into_iter().any(|value|matches!(value.value.as_ref(),Some(FieldValue::Text(role)) if role=="model_local_definition" || role=="model_local_declaration")));
+        if !is_local {
+            continue;
+        }
+        for (side, model, catalog, locals, index, pointers, count_index) in [
+            (
+                Side::Before,
+                before,
+                &old,
+                &old_locals,
+                &old_index,
+                &old_pointers,
+                0,
+            ),
+            (
+                Side::After,
+                after,
+                &new,
+                &new_locals,
+                &new_index,
+                &new_pointers,
+                1,
+            ),
+        ] {
+            let row_side = match side {
+                Side::Before => &diff.semantic.rows[row_index].before,
+                Side::After => &diff.semantic.rows[row_index].after,
+            };
+            let Some(proof) = row_side.as_ref().and_then(|side| side.provenance.as_ref()) else {
+                continue;
+            };
+            let definition = proof
+                .equation_id
+                .and_then(|id| index.definition_ids.get(&id).copied());
+            let declaration = if definition.is_none() {
+                proof
+                    .parse_order
+                    .and_then(|order| index.declaration_ids.get(&order).copied())
+            } else {
+                None
+            };
+            let mut row_omitted = 0;
+            let uses = definition
+                .and_then(|id| index.by_definition.get(&id))
+                .or_else(|| declaration.and_then(|id| index.by_declaration.get(&id)));
+            for (key, occurrence, usage_id) in uses.into_iter().flatten() {
+                let equation = &catalog[key];
+                let usage = &locals.uses[*usage_id];
+                let occurrence = *occurrence;
+                let identity = (count_index, key.clone(), occurrence);
+                if let Some(pointer) = emitted.get(&identity) {
+                    if let Some(pointer) = pointer {
+                        diff.semantic.rows[row_index]
+                            .references
+                            .push(pointer.clone());
+                    } else {
+                        row_omitted += 1;
+                    }
+                    continue;
+                }
+                if counts[count_index] >= diff.semantic.budgets.references_per_side {
+                    row_omitted += 1;
+                    omitted += 1;
+                    emitted.insert(identity, None);
+                    continue;
+                }
+                counts[count_index] += 1;
+                let pointer = format!("/semantic/references/{}", diff.semantic.references.len());
+                let timing = TimingSide {
+                    name: model.name(usage.name).into(),
+                    class: "model_local".into(),
+                    written_offset: usage.timing,
+                    converted_offset: usage.timing,
+                    occurrence,
+                };
+                diff.semantic.references.push(EquationReference {
+                    pointer: pointer.clone(),
+                    symbol: timing.name.clone(),
+                    side,
+                    equation_pointer: pointers
+                        .get(key)
+                        .cloned()
+                        .unwrap_or_else(|| pointer.clone()),
+                    equation_index: equation.row.index,
+                    label: equation_label(equation),
+                    scope: ComparisonScope {
+                        domain: if equation.dimension.is_some() {
+                            "heterogeneous"
+                        } else {
+                            "aggregate"
+                        }
+                        .into(),
+                        dimension: key.0.clone(),
+                        block: None,
+                    },
+                    occurrence,
+                    timing,
+                    provenance: Some(provenance(equation)),
+                });
+                diff.semantic.rows[row_index]
+                    .references
+                    .push(pointer.clone());
+                emitted.insert(identity, Some(pointer));
+            }
+            if row_omitted > 0 {
+                let mut limit = ComparisonLimit::new(
+                    "references_partial",
+                    "Direct local references were omitted by the comparison-wide reference limit.",
+                    "semantic_surfaces",
+                );
+                limit.omitted = Some(row_omitted);
+                diff.semantic.rows[row_index].limits.push(limit);
+            }
+        }
+    }
+    if omitted > 0 {
+        let mut limit = ComparisonLimit::new(
+            "reference_limit",
+            "Direct local references were omitted; the reference list is partial.",
+            "semantic_surfaces",
+        );
+        limit.omitted = Some(omitted);
+        super::occurrences::record_limit(diff, SemanticFamily::Equations, limit);
     }
 }
