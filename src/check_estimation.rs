@@ -130,10 +130,11 @@ pub fn check_estimation(model: &Model) -> Vec<Diagnostic> {
             }
         }
     }
-    if model.prior_function_has_parens && !model.prior_function_has_function {
-        if let Some(span) = model.prior_function_span.or(model.posterior_function_span) {
-            push(&mut out, span, "E234", E234_MSG);
-        }
+    if model.prior_function_has_parens
+        && !model.prior_function_has_function
+        && let Some(span) = model.prior_function_span.or(model.posterior_function_span)
+    {
+        push(&mut out, span, "E234", E234_MSG);
     }
     out
 }

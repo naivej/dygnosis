@@ -223,15 +223,14 @@ fn check_irf_shocks_options(model: &Model, out: &mut Vec<Diagnostic>) {
 fn check_range(out: &mut Vec<Diagnostic>, range: &PeriodRange) {
     if let (PeriodPoint::Integer(first), Some(PeriodPoint::Integer(last))) =
         (&range.first, &range.last)
+        && first > last
     {
-        if first > last {
-            error(
-                out,
-                range.span,
-                "E395",
-                "Can't have first period index greater than second index in range specification",
-            );
-        }
+        error(
+            out,
+            range.span,
+            "E395",
+            "Can't have first period index greater than second index in range specification",
+        );
     }
 }
 
@@ -243,20 +242,20 @@ fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
         let mut seen = HashMap::new();
         let mut seen_hetero = HashMap::new();
         let learnt = block.options.learnt_in.as_ref();
-        if let Some(PeriodPoint::Integer(n)) = learnt {
-            if *n < 1 {
-                let command = if block.kind == ShockBlockKind::Multiplicative {
-                    "mshocks"
-                } else {
-                    "shocks"
-                };
-                error(
-                    out,
-                    block.options.learnt_in_span.unwrap_or(block.span),
-                    "E400",
-                    format!("{command}: value '{n}' is not allowed for 'learnt_in' option"),
-                );
-            }
+        if let Some(PeriodPoint::Integer(n)) = learnt
+            && *n < 1
+        {
+            let command = if block.kind == ShockBlockKind::Multiplicative {
+                "mshocks"
+            } else {
+                "shocks"
+            };
+            error(
+                out,
+                block.options.learnt_in_span.unwrap_or(block.span),
+                "E400",
+                format!("{command}: value '{n}' is not allowed for 'learnt_in' option"),
+            );
         }
         for row in &block.scheduled {
             let allow_det = block.kind != ShockBlockKind::Heteroskedastic
@@ -347,17 +346,19 @@ fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
                     "shocks(surprise): dates are not allowed in the 'periods' keyword",
                 );
             }
-            if let Some(PeriodPoint::Integer(n)) = learnt {
-                if *n > 1 {
-                    for range in &row.periods {
-                        if let PeriodPoint::Integer(first) = &range.first {
-                            if first < n {
-                                let command = if block.kind == ShockBlockKind::Multiplicative {
-                                    "mshocks"
-                                } else {
-                                    "shocks"
-                                };
-                                error(
+            if let Some(PeriodPoint::Integer(n)) = learnt
+                && *n > 1
+            {
+                for range in &row.periods {
+                    if let PeriodPoint::Integer(first) = &range.first
+                        && first < n
+                    {
+                        let command = if block.kind == ShockBlockKind::Multiplicative {
+                            "mshocks"
+                        } else {
+                            "shocks"
+                        };
+                        error(
                                     out,
                                     range.span,
                                     "E401",
@@ -366,9 +367,7 @@ fn check_scheduled(model: &Model, out: &mut Vec<Diagnostic>) {
                                         model.name(row.name)
                                     ),
                                 );
-                                break;
-                            }
-                        }
+                        break;
                     }
                 }
             }
@@ -429,15 +428,15 @@ fn operation_word(operation: ShockOperation) -> &'static str {
 fn check_endval(model: &Model, out: &mut Vec<Diagnostic>) {
     for block in &model.endval_instructions {
         let learnt = block.learnt_in.as_ref();
-        if let Some(PeriodPoint::Integer(n)) = learnt {
-            if *n < 1 {
-                error(
-                    out,
-                    block.learnt_in_span.unwrap_or(block.span),
-                    "E418",
-                    format!("endval: value '{n}' is not allowed for 'learnt_in' option"),
-                );
-            }
+        if let Some(PeriodPoint::Integer(n)) = learnt
+            && *n < 1
+        {
+            error(
+                out,
+                block.learnt_in_span.unwrap_or(block.span),
+                "E418",
+                format!("endval: value '{n}' is not allowed for 'learnt_in' option"),
+            );
         }
         let nondefault = matches!(learnt, Some(PeriodPoint::Date(_)))
             || matches!(learnt, Some(PeriodPoint::Integer(n)) if *n > 1);
@@ -508,15 +507,15 @@ fn check_paths(model: &Model, out: &mut Vec<Diagnostic>) {
     }
     // The companion block has its separate value grammar and callback checks.
     for block in &model.controlled_paths {
-        if let Some(PeriodPoint::Integer(n)) = block.options.learnt_in.as_ref() {
-            if *n < 1 {
-                error(
-                    out,
-                    block.options.learnt_in_span.unwrap_or(block.span),
-                    "E421",
-                    format!("Value '{n}' is not allowed for 'learnt_in' option"),
-                );
-            }
+        if let Some(PeriodPoint::Integer(n)) = block.options.learnt_in.as_ref()
+            && *n < 1
+        {
+            error(
+                out,
+                block.options.learnt_in_span.unwrap_or(block.span),
+                "E421",
+                format!("Value '{n}' is not allowed for 'learnt_in' option"),
+            );
         }
         for stanza in &block.stanzas {
             match &stanza.target {

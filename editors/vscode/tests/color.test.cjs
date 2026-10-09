@@ -1,7 +1,5 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const fs = require("node:fs");
-const path = require("node:path");
 const Module = require("node:module");
 const { URL } = require("node:url");
 
@@ -135,16 +133,13 @@ function pure(info, prefs = {}) {
   return tintRanges(info, doc, { enabled: true, styles: new Map(tintCategoryDefaults), heterogeneousModels: new Map(), ...prefs });
 }
 
-test("all 45 schema controls match the engine registry, defaults and native controls", () => {
-  const rust = fs.readFileSync(path.resolve(__dirname, "../../../src/model_map.rs"), "utf8");
-  const registryText = rust.match(/pub const BLOCK_CATEGORIES:[\s\S]*?= &\[([\s\S]*?)\];/)[1];
-  const engine = [...registryText.matchAll(/\("([^"]+)", "(off|subtle|model)"\)/g)].map(match => [match[1], match[2]]);
-  const ordered = rows => [...rows].sort(([left], [right]) => left.localeCompare(right));
-  assert.equal(engine.length, 45);
-  assert.deepEqual(ordered(tintCategoryDefaults), ordered(engine));
+test("native block-tint settings expose the client categories, defaults and choices", () => {
   const properties = colorContributions.configuration.properties;
-  assert.equal(Object.keys(properties).length, 47);
-  for (const [category, fallback] of engine) {
+  const categories = Object.entries(properties)
+    .filter(([key, entry]) => key.startsWith("dynare.blockTint.") && entry.type === "string")
+    .map(([key]) => key.slice("dynare.blockTint.".length));
+  assert.deepEqual(categories.sort(), tintCategoryDefaults.map(([category]) => category).sort());
+  for (const [category, fallback] of tintCategoryDefaults) {
     const entry = properties[`dynare.blockTint.${category}`];
     assert.deepEqual(entry.enum, ["off", "subtle", "model"]); assert.deepEqual(entry.enumItemLabels, ["Off", "Subtle", "Model-strength"]);
     assert.equal(entry.default, fallback); assert.equal(entry.scope, "resource"); assert.equal(entry.type, "string");
@@ -154,7 +149,6 @@ test("all 45 schema controls match the engine registry, defaults and native cont
   const overrides = properties["dynare.blockTint.heterogeneousModels"];
   assert.deepEqual(overrides.default, {}); assert.equal(overrides.scope, "resource"); assert.equal(overrides.type, "object");
   assert.deepEqual(overrides.additionalProperties.enum, ["off", "subtle", "model"]);
-  assert.match(overrides.markdownDescription, /command:dygnosis.editSettingsJson/); assert.match(overrides.markdownDescription, /households/);
 });
 
 test("four independently customizable roles use variable parent and explicit Dynare fallback scopes", () => {

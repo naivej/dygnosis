@@ -182,13 +182,12 @@ fn description(
         "**Model-local variable** {}",
         crate::server_names::code(view.model.name(binding.name))
     );
-    if preferences.name_details.tex {
-        if let Some(tex) = binding
+    if preferences.name_details.tex
+        && let Some(tex) = binding
             .declaration
             .and_then(|id| view.facts.declarations[id].tex_name.as_ref())
-        {
-            text.push_str(&format!("\n\nTeX: {}", crate::server_names::code(tex)));
-        }
+    {
+        text.push_str(&format!("\n\nTeX: {}", crate::server_names::code(tex)));
     }
     if let Some(expression) = expression(view, binding) {
         let definition = &view.facts.definitions[binding.definition.unwrap()];
@@ -286,10 +285,10 @@ pub(super) fn definition(
                     .definition
                     .map(|id| view.facts.definitions[id].target_span)
             };
-            if let Some(target) = span.and_then(|span| location(inner, &view, span)) {
-                if !targets.contains(&target) {
-                    targets.push(target);
-                }
+            if let Some(target) = span.and_then(|span| location(inner, &view, span))
+                && !targets.contains(&target)
+            {
+                targets.push(target);
             }
         }
     }
@@ -342,10 +341,10 @@ pub(super) fn references(
             continue;
         }
         for (span, _) in sites(view, bindings[0], include_declaration) {
-            if let Some(target) = location(inner, view, span) {
-                if !result.contains(&target) {
-                    result.push(target);
-                }
+            if let Some(target) = location(inner, view, span)
+                && !result.contains(&target)
+            {
+                result.push(target);
             }
         }
     }

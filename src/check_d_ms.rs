@@ -272,10 +272,11 @@ fn check_parse_phase(model: &Model, out: &mut Vec<Diagnostic>, before: Option<us
         .filter(|row| row.parse_order.is_none())
     {
         if let Some(execution) = &refuse.parse_execution {
-            if let Some(boundary) = before {
-                if execution.start < boundary && boundary < execution.end {
-                    before = Some(execution.start);
-                }
+            if let Some(boundary) = before
+                && execution.start < boundary
+                && boundary < execution.end
+            {
+                before = Some(execution.start);
             }
         } else {
             if before.is_some() {
@@ -672,16 +673,16 @@ fn check_dotted_head_and_subsample(
         push(out, *span, "E271", format!("option {name} declared twice"));
         return true;
     }
-    if let DottedHead::Param { first, .. } = stmt.head {
-        if !model.parameter_in_context(first, stmt.symbol_type_context) {
-            push(
-                out,
-                stmt.span,
-                "E378",
-                format!("{} is not a parameter", model.name(first)),
-            );
-            return true;
-        }
+    if let DottedHead::Param { first, .. } = stmt.head
+        && !model.parameter_in_context(first, stmt.symbol_type_context)
+    {
+        push(
+            out,
+            stmt.span,
+            "E378",
+            format!("{} is not a parameter", model.name(first)),
+        );
+        return true;
     }
     if let DottedHead::Vec { names } = &stmt.head {
         for (name, span) in names {
@@ -2048,19 +2049,19 @@ fn check_prior_body(model: &Model, stmt: &DottedStatement, out: &mut Vec<Diagnos
     if !prior_body_spellable(&model.source, &stmt.options, joint) {
         return false;
     }
-    if let DottedHead::Vec { names } = &stmt.head {
-        if names.len() < 2 {
-            out.push(
-                Diagnostic::new(
-                    stmt.span,
-                    Severity::Error,
-                    "E377",
-                    "you must pass at least two parameters to the joint prior statement",
-                )
-                .with_display_keyword(stmt.keyword_span, "prior"),
-            );
-            return true;
-        }
+    if let DottedHead::Vec { names } = &stmt.head
+        && names.len() < 2
+    {
+        out.push(
+            Diagnostic::new(
+                stmt.span,
+                Severity::Error,
+                "E377",
+                "you must pass at least two parameters to the joint prior statement",
+            )
+            .with_display_keyword(stmt.keyword_span, "prior"),
+        );
+        return true;
     }
     if prior_shape_refusal(stmt, joint, out) {
         return true;

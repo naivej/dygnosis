@@ -8,7 +8,6 @@
 //! character for character (see `honesty.rs` for the run against the installed
 //! preprocessor). The walk's own table is locked here, shape by shape.
 
-use dygnosis::explain::known_codes;
 use dygnosis::{analyze, parse, Diagnostic};
 
 fn fixture(rel: &str) -> String {
@@ -1121,17 +1120,4 @@ fn legal_syntax_neighbours_stay_quiet() {
             .collect();
         assert!(errors.is_empty(), "{body}: {errors:?}");
     }
-}
-
-/// The registry grew by the eleven new codes. S061 is dropped.
-#[test]
-fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 381);
-    for code in [
-        "E382", "E383", "E384", "E385", "E386", "E387", "E388", "E389", "E390", "E391", "E392",
-    ] {
-        assert!(known_codes().contains(&code), "{code} missing");
-    }
-    assert!(!known_codes().contains(&"S032"), "S032 was dropped");
-    assert!(!known_codes().contains(&"S061"), "S061 was dropped");
 }

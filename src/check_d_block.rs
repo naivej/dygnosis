@@ -286,10 +286,9 @@ fn check_outside_assignment_roles(model: &Model) -> Vec<Diagnostic> {
                     usage.name,
                     usage.span,
                     a.symbol_type_context,
-                ) {
-                    if seen.insert((usage.name, diagnostic.code.clone())) {
-                        out.push(diagnostic);
-                    }
+                ) && seen.insert((usage.name, diagnostic.code.clone()))
+                {
+                    out.push(diagnostic);
                 }
             }
         }
@@ -314,10 +313,10 @@ fn check_model_expression_roles(model: &Model) -> Vec<Diagnostic> {
                 && !model.constructor_refused_statements.contains(&usage.statement_id) => Some(("E020", format!("Undeclared identifier '{name}' in equation. Fix: add '{name}' to a var, varexo, or parameters declaration."))),
             _ => None,
         };
-        if let Some((code, message)) = refusal {
-            if seen.insert((usage.name, usage.span, code)) {
-                out.push(err(usage.span, code, message));
-            }
+        if let Some((code, message)) = refusal
+            && seen.insert((usage.name, usage.span, code))
+        {
+            out.push(err(usage.span, code, message));
         }
     }
     out

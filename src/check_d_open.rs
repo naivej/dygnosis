@@ -808,18 +808,18 @@ fn check_optim_weights(model: &Model) -> Vec<Diagnostic> {
                 format!("optim_weights: {} declared twice", model.name(row.first)),
             ));
         }
-        if let Some(second) = row.second {
-            if !pairs.insert((row.first, second)) {
-                out.push(err(
-                    row.span,
-                    "E316",
-                    format!(
-                        "optim_weights: pair of variables ({}, {}) declared twice",
-                        model.name(row.first),
-                        model.name(second)
-                    ),
-                ));
-            }
+        if let Some(second) = row.second
+            && !pairs.insert((row.first, second))
+        {
+            out.push(err(
+                row.span,
+                "E316",
+                format!(
+                    "optim_weights: pair of variables ({}, {}) declared twice",
+                    model.name(row.first),
+                    model.name(second)
+                ),
+            ));
         }
         for (name, span, kind) in [(row.first, row.first_span, row.first_kind)]
             .into_iter()
@@ -1056,27 +1056,26 @@ fn check_external_functions(model: &Model) -> Vec<Diagnostic> {
             continue;
         }
         let options = effective_options(stmt, own);
-        if options.first == DerivId::Top {
-            if let DerivId::Named(id) = options.second {
-                if id != own {
-                    out.push(err(
+        if options.first == DerivId::Top
+            && let DerivId::Named(id) = options.second
+            && id != own
+        {
+            out.push(err(
                         stmt.span,
                         "E328",
                         "If the first derivative is provided by the top-level function, the second derivative cannot be provided by any other external function.",
                     ));
-                }
-            }
         }
         // `deriv_id` maps a derivative name equal to `own` to `Top`, so both
         // options are `Named` only when neither is the top-level function.
-        if let (DerivId::Named(first), DerivId::Named(second)) = (options.first, options.second) {
-            if first == second {
-                out.push(err(
+        if let (DerivId::Named(first), DerivId::Named(second)) = (options.first, options.second)
+            && first == second
+        {
+            out.push(err(
                     stmt.span,
                     "E334",
                     "If the Jacobian and Hessian are provided by the same function, that function must be the top-level function.",
                 ));
-            }
         }
         if let Some(previous) = table.get(&own) {
             if options.nargs != previous.nargs {

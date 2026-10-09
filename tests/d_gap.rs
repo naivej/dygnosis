@@ -9,7 +9,6 @@
 //! `estimated_params` may name it, a block expression may not — that use is a parse
 //! refuse (**E001**), the same family as `var sin;`.
 
-use dygnosis::explain::known_codes;
 use dygnosis::{analyze, check_file, parse, Diagnostic};
 
 const GATE_MSG: &str = "Invalid use of 'dsge_prior_weight' in a Dynare block: reserved preprocessor symbol. Choose a different name.";
@@ -190,9 +189,4 @@ fn epilogue_duplicate_keeps_its_own_error() {
         find(&diags, "E287").message,
         "in the 'epilogue' block, variable 'foo' is declared twice"
     );
-}
-
-#[test]
-fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 381);
 }

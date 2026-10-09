@@ -8,7 +8,6 @@
 //! shape is `E322`'s (probed 7.1 prints the missing-name Error there, not the
 //! Jacobian sentence).
 
-use dygnosis::explain::known_codes;
 use dygnosis::{analyze, check_file, parse, Diagnostic};
 
 fn fixture(rel: &str) -> String {
@@ -111,9 +110,4 @@ fn var_collision_fires_both_errors() {
         "Symbol bar declared twice with different types!"
     );
     assert_eq!(find(&diags, "E334").message, E334_MSG);
-}
-
-#[test]
-fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 381);
 }

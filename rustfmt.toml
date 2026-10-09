@@ -1,0 +1,2 @@
+# Keep existing formatting during the Rust 2024 language migration.
+style_edition = "2021"

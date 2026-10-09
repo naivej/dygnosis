@@ -134,11 +134,11 @@ fn merge_shaded_ranges(mut ranges: Vec<Span>) -> Vec<Span> {
     ranges.sort_by_key(|span| (span.start, span.end));
     let mut out: Vec<Span> = Vec::new();
     for span in ranges {
-        if let Some(prev) = out.last_mut() {
-            if span.start <= prev.end {
-                prev.end = prev.end.max(span.end);
-                continue;
-            }
+        if let Some(prev) = out.last_mut()
+            && span.start <= prev.end
+        {
+            prev.end = prev.end.max(span.end);
+            continue;
         }
         out.push(span);
     }
@@ -359,18 +359,16 @@ fn subtract_spans(span: Span, covers: &[(Span, Span)]) -> Vec<Span> {
 fn coalesce_copies(regions: Vec<Region>, file_cuts: &[u32]) -> Vec<Region> {
     let mut out: Vec<Region> = Vec::new();
     for region in regions {
-        if region.kind == RegionKind::Copy {
-            if let Some(prev) = out.last_mut() {
-                if prev.kind == RegionKind::Copy
-                    && prev.display.end == region.display.start
-                    && prev.written.end == region.written.start
-                    && !file_cuts.contains(&region.written.start)
-                {
-                    prev.display.end = region.display.end;
-                    prev.written.end = region.written.end;
-                    continue;
-                }
-            }
+        if region.kind == RegionKind::Copy
+            && let Some(prev) = out.last_mut()
+            && prev.kind == RegionKind::Copy
+            && prev.display.end == region.display.start
+            && prev.written.end == region.written.start
+            && !file_cuts.contains(&region.written.start)
+        {
+            prev.display.end = region.display.end;
+            prev.written.end = region.written.end;
+            continue;
         }
         out.push(region);
     }

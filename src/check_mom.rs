@@ -1045,15 +1045,15 @@ impl<'a> Ctx<'a> {
         if let Folded::UMinus(inner) = first {
             return self.minus(second, *inner);
         }
-        if let Folded::Minus(left, right) = &first {
-            if **right == second {
-                return (**left).clone();
-            }
+        if let Folded::Minus(left, right) = &first
+            && **right == second
+        {
+            return (**left).clone();
         }
-        if let Folded::Minus(left, right) = &second {
-            if **right == first {
-                return (**left).clone();
-            }
+        if let Folded::Minus(left, right) = &second
+            && **right == first
+        {
+            return (**left).clone();
         }
         self.eval(&first, &second, BinOp::Add)
             .unwrap_or(Folded::Plus(Box::new(first), Box::new(second)))
@@ -1102,15 +1102,15 @@ impl<'a> Ctx<'a> {
         if second.is_minus_one() {
             return uminus(first);
         }
-        if let Folded::Divide(left, right) = &first {
-            if **right == second {
-                return (**left).clone();
-            }
+        if let Folded::Divide(left, right) = &first
+            && **right == second
+        {
+            return (**left).clone();
         }
-        if let Folded::Divide(left, right) = &second {
-            if **right == first {
-                return (**left).clone();
-            }
+        if let Folded::Divide(left, right) = &second
+            && **right == first
+        {
+            return (**left).clone();
         }
         self.eval(&first, &second, BinOp::Mul)
             .unwrap_or(Folded::Times(Box::new(first), Box::new(second)))
@@ -1131,10 +1131,10 @@ impl<'a> Ctx<'a> {
         if first == second {
             return self.one();
         }
-        if let Folded::Divide(left, right) = &second {
-            if left.is_one() {
-                return self.times(first, (**right).clone());
-            }
+        if let Folded::Divide(left, right) = &second
+            && left.is_one()
+        {
+            return self.times(first, (**right).clone());
         }
         if let Folded::Times(left, right) = &first {
             if **right == second {

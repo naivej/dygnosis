@@ -135,33 +135,31 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
                 }
                 // ParsingDriver calls SymbolTable::getID directly here. An
                 // unknown variable aborts the pin without a diagnostic line.
-                if let Some((name, _)) = variable {
-                    if model
+                if let Some((name, _)) = variable
+                    && model
                         .symbol_kind_in_context(name, command.symbol_type_context)
                         .is_none()
-                    {
-                        continue;
-                    }
+                {
+                    continue;
                 }
-                if let Some(discount) = expression_option(command, "discount") {
-                    if !valid_var_discount(model, discount) {
-                        out.push(error(
-                            discount.span,
-                            "E442",
-                            "The discount factor must be a constant expression or a parameter",
-                        ));
-                    }
+                if let Some(discount) = expression_option(command, "discount")
+                    && !valid_var_discount(model, discount)
+                {
+                    out.push(error(
+                        discount.span,
+                        "E442",
+                        "The discount factor must be a constant expression or a parameter",
+                    ));
                 }
-                if let Some(row) = option(command, "time_shift") {
-                    if let SemiStructuralValue::Integer { text, span } = &row.value {
-                        if text.parse::<i32>().is_ok_and(|shift| shift > 0) {
-                            out.push(error(
-                                *span,
-                                "E443",
-                                "The 'time_shift' option must be a non-positive integer",
-                            ));
-                        }
-                    }
+                if let Some(row) = option(command, "time_shift")
+                    && let SemiStructuralValue::Integer { text, span } = &row.value
+                    && text.parse::<i32>().is_ok_and(|shift| shift > 0)
+                {
+                    out.push(error(
+                        *span,
+                        "E443",
+                        "The 'time_shift' option must be a non-positive integer",
+                    ));
                 }
                 for name in ["model_name", "auxiliary_model_name", "horizon"] {
                     if option(command, name).is_none() {
@@ -196,23 +194,23 @@ pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
                 }
             }
         }
-        if let Some((name, span)) = symbol_option(command, "model_name") {
-            if !model_names.insert((command.kind, name)) {
-                let article = match command.kind {
-                    SemiStructuralKind::VarModel => "VAR model",
-                    SemiStructuralKind::TrendComponentModel => "trend component model",
-                    SemiStructuralKind::VarExpectationModel => "var_expectation_model",
-                    SemiStructuralKind::PacModel => "PAC model",
-                };
-                out.push(error(
-                    span,
-                    "E440",
-                    format!(
-                        "a {article} already exists with the name {}",
-                        model.name(name)
-                    ),
-                ));
-            }
+        if let Some((name, span)) = symbol_option(command, "model_name")
+            && !model_names.insert((command.kind, name))
+        {
+            let article = match command.kind {
+                SemiStructuralKind::VarModel => "VAR model",
+                SemiStructuralKind::TrendComponentModel => "trend component model",
+                SemiStructuralKind::VarExpectationModel => "var_expectation_model",
+                SemiStructuralKind::PacModel => "PAC model",
+            };
+            out.push(error(
+                span,
+                "E440",
+                format!(
+                    "a {article} already exists with the name {}",
+                    model.name(name)
+                ),
+            ));
         }
     }
     for block in &model.deterministic_trends {
@@ -450,10 +448,10 @@ fn unused_implicit_exogenous(model: &Model) -> Vec<(Name, Span)> {
     let used_in_model = usage.model_names();
     let mut expressions = Vec::new();
     for command in &model.semi_structural_commands {
-        if command.kind == SemiStructuralKind::VarExpectationModel {
-            if let Some(expression) = expression_option(command, "expression") {
-                expressions.push(expression);
-            }
+        if command.kind == SemiStructuralKind::VarExpectationModel
+            && let Some(expression) = expression_option(command, "expression")
+        {
+            expressions.push(expression);
         }
     }
     for block in &model.pac_target_info {
@@ -627,11 +625,11 @@ fn collect_operators(
         ExprKind::Ident {
             name, ident_span, ..
         } => {
-            if let Some(rhs) = local_rhs(model, *name, ident_span.start) {
-                if visiting.insert(*name) {
-                    collect_operators(model, rhs, origin.or(Some(*ident_span)), visiting, out);
-                    visiting.remove(name);
-                }
+            if let Some(rhs) = local_rhs(model, *name, ident_span.start)
+                && visiting.insert(*name)
+            {
+                collect_operators(model, rhs, origin.or(Some(*ident_span)), visiting, out);
+                visiting.remove(name);
             }
         }
         ExprKind::Unary { arg, .. }
@@ -700,11 +698,10 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
         if matches!(
             command.kind,
             SemiStructuralKind::VarModel | SemiStructuralKind::TrendComponentModel
-        ) {
-            if let Some(tags) = tags_option(command, "eqtags") {
-                for (tag, span) in tags {
-                    selected_tags.entry(tag.as_str()).or_insert(*span);
-                }
+        ) && let Some(tags) = tags_option(command, "eqtags")
+        {
+            for (tag, span) in tags {
+                selected_tags.entry(tag.as_str()).or_insert(*span);
             }
         }
     }
@@ -868,15 +865,15 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
     pac_commands.sort_by(|a, b| model.name(a.1).cmp(model.name(b.1)));
     let mut generated_vars = HashSet::new();
     for (command, name, name_span) in pac_commands {
-        if let Some(growth) = expression_option(command, "growth") {
-            if let Some(span) = written_nonlinear_growth(model, growth) {
-                out.push(error(
-                    span,
-                    "E448",
-                    "PAC growth must be a linear combination of variables",
-                ));
-                return out;
-            }
+        if let Some(growth) = expression_option(command, "growth")
+            && let Some(span) = written_nonlinear_growth(model, growth)
+        {
+            out.push(error(
+                span,
+                "E448",
+                "PAC growth must be a linear combination of variables",
+            ));
+            return out;
         }
         let target_rows = model
             .pac_target_info
@@ -890,9 +887,9 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
                 _ => None,
             })
             .next_back()
+            && written_target_product_without_lhs(model, target)
         {
-            if written_target_product_without_lhs(model, target) {
-                out.push(error(
+            out.push(error(
                     target.span,
                     "E458",
                     format!(
@@ -900,8 +897,7 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
                         model.name(name)
                     ),
                 ));
-                return out;
-            }
+            return out;
         }
         if let Some((target_name, span)) = target_rows
             .clone()
@@ -910,27 +906,27 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
                 _ => None,
             })
             .next_back()
-        {
-            if let Some(diag) = generated_pac_variable_clash(
+            && let Some(diag) = generated_pac_variable_clash(
                 model,
                 model.name(target_name),
                 span,
                 &mut generated_vars,
                 true,
-            ) {
-                out.push(diag);
-                return out;
-            }
+            )
+        {
+            out.push(diag);
+            return out;
         }
-        if let Some((auxiliary, span)) = symbol_option(command, "auxiliary_model_name") {
-            if !var_models.contains(&auxiliary) && !trend_models.contains(&auxiliary) {
-                out.push(error(
-                    span,
-                    "E446",
-                    "aux_model_name not recognized as VAR model or Trend Component model",
-                ));
-                return out;
-            }
+        if let Some((auxiliary, span)) = symbol_option(command, "auxiliary_model_name")
+            && !var_models.contains(&auxiliary)
+            && !trend_models.contains(&auxiliary)
+        {
+            out.push(error(
+                span,
+                "E446",
+                "aux_model_name not recognized as VAR model or Trend Component model",
+            ));
+            return out;
         }
         // Dynare matches the target equation before it checks PAC operator
         // uses. A direct E193 therefore wins over a later missing-use E449.
@@ -938,11 +934,10 @@ pub fn check_transform(model: &Model) -> Vec<Diagnostic> {
             .pac_target_info
             .iter()
             .find(|block| block.name == name)
+            && let Some(diag) = direct_target_equation_refusal(model, block)
         {
-            if let Some(diag) = direct_target_equation_refusal(model, block) {
-                out.push(diag);
-                return out;
-            }
+            out.push(diag);
+            return out;
         }
         let uses: Vec<_> = model
             .equations
@@ -1199,12 +1194,10 @@ fn pac_generated_name_clash(
                     } else {
                         None
                     }
-                }) {
-                    if let Some(diag) =
-                        generated_pac_variable_clash(model, aux_name, span, generated_vars, false)
-                    {
-                        return Some(diag);
-                    }
+                }) && let Some(diag) =
+                    generated_pac_variable_clash(model, aux_name, span, generated_vars, false)
+                {
+                    return Some(diag);
                 }
                 if component
                     .rows
@@ -1341,10 +1334,10 @@ fn direct_target_equation_refusal(model: &Model, block: &PacTargetInfoBlock) -> 
             return None;
         }
         for field in &component.rows {
-            if let PacTargetComponentRow::Growth(growth) = field {
-                if !direct_growth_is_safe(model, growth) {
-                    return None;
-                }
+            if let PacTargetComponentRow::Growth(growth) = field
+                && !direct_growth_is_safe(model, growth)
+            {
+                return None;
             }
         }
         components.push(name);
@@ -1767,10 +1760,10 @@ fn var_expectation_expression_reason(
     let id = expression.expr?;
     // A single deterministic exogenous is already the written expression.
     // Its matcher refusal does not depend on unary/diff substitution.
-    if let ExprKind::Ident { name, .. } = &model.exprs.get(id).kind {
-        if model.final_kind_or_written_if_excluded(*name) == Some("varexo_det") {
-            return Some(format!("Symbol {} not allowed here", model.name(*name)));
-        }
+    if let ExprKind::Ident { name, .. } = &model.exprs.get(id).kind
+        && model.final_kind_or_written_if_excluded(*name) == Some("varexo_det")
+    {
+        return Some(format!("Symbol {} not allowed here", model.name(*name)));
     }
     let mut terms = Vec::new();
     decompose_additive(model, id, &mut terms);

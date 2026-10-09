@@ -6,7 +6,6 @@
 //! function name an `external_function` statement carries, so the derivative
 //! values collide with a declaration or a repeat like the `name=` value does.
 
-use dygnosis::explain::known_codes;
 use dygnosis::{analyze, check_file, parse, Diagnostic};
 
 fn fixture(rel: &str) -> String {
@@ -142,9 +141,4 @@ fn different_derivative_names_are_quiet() {
             codes(&diags)
         );
     }
-}
-
-#[test]
-fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 381);
 }

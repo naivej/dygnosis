@@ -266,10 +266,8 @@ impl Inner {
             self.project.discovery = "pending";
         }
         let key = normalize_uri(changed.as_str());
-        if !deleted {
-            if let Some(entry) = self.project.roots.get_mut(changed) {
-                entry.identity = key.clone();
-            }
+        if !deleted && let Some(entry) = self.project.roots.get_mut(changed) {
+            entry.identity = key.clone();
         }
         let roots: Vec<Url> = self.project.roots.keys().cloned().collect();
         for root in roots {

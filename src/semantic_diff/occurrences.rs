@@ -391,14 +391,14 @@ pub fn compare_facts(
     }
     for (facts, side, model) in [(&old, Side::Before, before), (&new, Side::After, after)] {
         for fact in facts {
-            if let Some(id) = parent(fact) {
-                if let Some(statement) = model.statements.get(id) {
-                    for range in &fact.claims {
-                        if statement.token_range.start <= range.start
-                            && range.end <= statement.token_range.end
-                        {
-                            claims.claim(side, id, range.clone());
-                        }
+            if let Some(id) = parent(fact)
+                && let Some(statement) = model.statements.get(id)
+            {
+                for range in &fact.claims {
+                    if statement.token_range.start <= range.start
+                        && range.end <= statement.token_range.end
+                    {
+                        claims.claim(side, id, range.clone());
                     }
                 }
             }

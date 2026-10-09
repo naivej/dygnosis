@@ -4,7 +4,6 @@
 //! Stage rule: `dev_logs/0.5/0.5.5/probe-writer.md`. The write run itself is the
 //! honesty suite's (`tests/honesty.rs`); these locks are the product-side verdicts.
 
-use dygnosis::explain::known_codes;
 use dygnosis::{analyze, check_file, parse, Diagnostic};
 
 fn fixture(rel: &str) -> String {
@@ -221,9 +220,4 @@ fn e381_is_quiet_for_a_plain_operand() {
     let source = "var c; parameters p; p = 0.9; model; c = steady_state(p*c(-1)); end;";
     let diags = analyze(&parse(source));
     quiet(&diags, "E381");
-}
-
-#[test]
-fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 381);
 }

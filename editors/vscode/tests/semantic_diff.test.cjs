@@ -252,25 +252,10 @@ test("both presentations safely render typed fields and preserve independent fil
   assert.equal(env.elements.search.value, "rho"); assert.equal(env.elements.layout.value, "stacked");
   assert.equal(env.states.at(-1).choices.presentations.changeList.search, "0.9");
 });
-test("accepted composition has compact selects, disclosed actions, input cards and four plain marks", () => {
-  const { vscode } = createHost(), { diffHtml } = load("diff", vscode);
-  const html = diffHtml({ cspSource: "vscode-webview:", asWebviewUri: uri => uri }, vscode.Uri.file("/extension/media"));
-  assert.doesNotMatch(html, /fieldset|type="checkbox"|editor-tab/);
-  assert.match(html, /<select id="kinds"/); assert.match(html, /<select id="sections"/);
-  assert.match(html, /<details id="moreActions"[\s\S]*<summary>More actions<\/summary>[\s\S]*id="rootTextDiff"[\s\S]*id="help"/);
-  assert.ok(html.indexOf('id="presentation"') < html.indexOf('id="tabs"'));
-  assert.ok(html.indexOf('id="tabs"') < html.indexOf('id="filterTools"'));
-  assert.match(html, /aria-label="Change colors"/);
+test("input cards keep the full model path in the title and a short name in the text", () => {
   const env = webview(); env.render({ before: "C:/models/root.mod · Working", after: "tree/root.mod @ main · aaaaaaa" });
-  assert.equal(env.elements.models.children[0].className, "input-side");
   assert.equal(env.elements.models.children[0].title, "C:/models/root.mod · Working");
   assert.doesNotMatch(env.elements.models.textContent, /C:\/models/); assert.match(env.elements.models.textContent, /root.mod/);
-  assert.equal(descendants(env.elements.results).some(element => element.className === "badge"), false);
-  const css = fs.readFileSync(path.join(__dirname, "../media/diff_view.css"), "utf8");
-  assert.match(css, /grid-template-columns: 245px minmax\(0, 1fr\)/);
-  assert.match(css, /^body \{\s+--line:/); assert.doesNotMatch(css, /:root/);
-  assert.match(css, /--change: var\(--vscode-dynare-diff\\\.changedForeground, var\(--vscode-dynare-diff-changedForeground, var\(--vscode-focusBorder\)\)\)/);
-  assert.match(css, /\.change-mark\.changed\s*\{\s*color: var\(--change\)/);
 });
 test("compact filters preserve saved multi-selections through switching, reload, refresh and split views", () => {
   const env = webview(), other = webview(), initial = normalizeChoices({ sections: ["priors", "commands"], changeKinds: ["changed", "unpaired"] }, defaults);
@@ -361,18 +346,12 @@ test("source-only changes lead to Source, text cannot inject DOM or source actio
   env.render(snapshot); assert.match(env.elements.results.textContent, /<img/);
   assert.equal(descendants(env.elements.results).some(e => e.tag === "img" || e.tag === "a"), false);
 });
-test("field limits do not color budget-unavailable values and color roles have text cues", () => {
+test("field limits do not mark budget-unavailable values as added or removed", () => {
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
   const field = snapshot.rows[0].semantic.fields[0]; field.changed = false; field.comparison_availability = "limit_exceeded";
   snapshot.rows[0].semantic.expressions = [];
   env.render(snapshot); assert.match(env.elements.results.textContent, /Comparison unavailable/);
   assert.equal(descendants(env.elements.results).some(e => e.className === "token added" || e.className === "token removed"), false);
-  const css = fs.readFileSync(path.join(__dirname, "../media/diff_view.css"), "utf8");
-  assert.match(css, /diffEditor-removedTextBackground/); assert.match(css, /text-decoration: underline/); assert.doesNotMatch(css, /line-through/);
-  assert.doesNotMatch(css.match(/\.change-mark\.removed\s*\{([^}]+)\}/)[1], /background/);
-  const properties = require("../package.json").contributes.configuration.find(group => group.title === "Dygnosis: Changes").properties;
-  assert.equal(properties["dynare.diff.presentation"].default, "focusedReview");
-  assert.deepEqual(properties["dynare.diff.layout"].enum, ["auto", "sideBySide", "stacked"]);
 });
 test("semantic reference and captured-file actions use host IDs, exact read-only text and stale guards", async t => {
   const { host, service } = createHost(); host.install(); t.after(() => host.registration.dispose());

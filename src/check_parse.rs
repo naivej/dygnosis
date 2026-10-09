@@ -161,10 +161,10 @@ fn reserved_symbol_use_diags(model: &Model) -> Vec<Diagnostic> {
     }
     for row in &model.optim_weights {
         slots.push((row.first, row.first_span));
-        if let Some(second) = row.second {
-            if let Some(span) = row.second_span {
-                slots.push((second, span));
-            }
+        if let Some(second) = row.second
+            && let Some(span) = row.second_span
+        {
+            slots.push((second, span));
         }
     }
     slots.extend(model.observation_trends.iter().copied());

@@ -172,20 +172,20 @@ fn choose_offset(text: &str, scan: &Scan) -> Option<u32> {
     let decl_end = scan.last_decl_end.unwrap_or(0);
     let eof = text.len() as u32;
     let safe = |at: u32| !point_is_unsafe(text, at, &scan.block_spans);
-    if let Some(cmd) = scan.first_command {
-        if decl_end <= cmd {
-            if safe(cmd) {
-                let trimmed = before_horizontal_space(text, cmd);
-                if trimmed >= decl_end && safe(trimmed) {
-                    return Some(trimmed);
-                }
-                return Some(cmd);
+    if let Some(cmd) = scan.first_command
+        && decl_end <= cmd
+    {
+        if safe(cmd) {
+            let trimmed = before_horizontal_space(text, cmd);
+            if trimmed >= decl_end && safe(trimmed) {
+                return Some(trimmed);
             }
-            if decl_end < cmd && safe(decl_end) {
-                return Some(decl_end);
-            }
-            return None;
+            return Some(cmd);
         }
+        if decl_end < cmd && safe(decl_end) {
+            return Some(decl_end);
+        }
+        return None;
     }
     if safe(eof) {
         return Some(eof);

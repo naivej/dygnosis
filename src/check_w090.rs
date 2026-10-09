@@ -217,34 +217,34 @@ pub fn check_w090(model: &Model) -> Vec<Diagnostic> {
             }
         }
 
-        if let (Some(lower), Some(upper)) = (entry.lower, entry.upper) {
-            if lower >= upper {
-                diagnostics.push(Diagnostic::new(
-                    span,
-                    Severity::Warning,
-                    "W094",
-                    format!(
-                        "estimated_params: '{name}' has lower bound {} >= upper bound {}.",
-                        python_g(lower),
-                        python_g(upper)
-                    ),
-                ));
-            }
+        if let (Some(lower), Some(upper)) = (entry.lower, entry.upper)
+            && lower >= upper
+        {
+            diagnostics.push(Diagnostic::new(
+                span,
+                Severity::Warning,
+                "W094",
+                format!(
+                    "estimated_params: '{name}' has lower bound {} >= upper bound {}.",
+                    python_g(lower),
+                    python_g(upper)
+                ),
+            ));
         }
-        if let (Some(init), Some(lower), Some(upper)) = (entry.init, entry.lower, entry.upper) {
-            if !(lower <= init && init <= upper) {
-                diagnostics.push(Diagnostic::new(
-                    span,
-                    Severity::Warning,
-                    "W094",
-                    format!(
-                        "estimated_params: '{name}' initial value {} is outside its bounds [{}, {}].",
-                        python_g(init),
-                        python_g(lower),
-                        python_g(upper)
-                    ),
-                ));
-            }
+        if let (Some(init), Some(lower), Some(upper)) = (entry.init, entry.lower, entry.upper)
+            && !(lower <= init && init <= upper)
+        {
+            diagnostics.push(Diagnostic::new(
+                span,
+                Severity::Warning,
+                "W094",
+                format!(
+                    "estimated_params: '{name}' initial value {} is outside its bounds [{}, {}].",
+                    python_g(init),
+                    python_g(lower),
+                    python_g(upper)
+                ),
+            ));
         }
     }
 

@@ -202,10 +202,10 @@ fn taken_names(model: &Model) -> BTreeSet<String> {
             .flat_map(|block| block.equations.iter()),
     );
     for equation in equations {
-        if let Some(value) = equation.tag_map.get("name") {
-            if !value.is_empty() {
-                taken.insert(value.clone());
-            }
+        if let Some(value) = equation.tag_map.get("name")
+            && !value.is_empty()
+        {
+            taken.insert(value.clone());
         }
         if !equation.name.is_empty() {
             taken.insert(equation.name.clone());
@@ -1027,12 +1027,11 @@ fn group_completion_site(
         if entry_tokens.len() > 3 {
             return None;
         }
-        if let Some(value) = entry_tokens.get(2) {
-            if value.kind != TokenKind::String
-                || !matches!(value.text(entry), "'" | "\"" | "''" | "\"\"")
-            {
-                return None;
-            }
+        if let Some(value) = entry_tokens.get(2)
+            && (value.kind != TokenKind::String
+                || !matches!(value.text(entry), "'" | "\"" | "''" | "\"\""))
+        {
+            return None;
         }
         let last = entry_tokens.last()?;
         // Replacing a typed prefix must preserve comments; decline a prefix

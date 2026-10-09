@@ -1888,10 +1888,10 @@ fn analysis_group_option(setting: &ShockSetting) -> String {
 
 fn setting_summary(setting: &ShockSetting) -> String {
     let mut parts = vec![markdown_escape(&setting.block)];
-    if let Some(domain) = &setting.domain {
-        if domain == "measurement_error" {
-            parts.push("measurement error".into());
-        }
+    if let Some(domain) = &setting.domain
+        && domain == "measurement_error"
+    {
+        parts.push("measurement error".into());
     }
     if let Some(measure) = &setting.measure {
         parts.push(markdown_escape(measure));

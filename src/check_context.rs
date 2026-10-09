@@ -19,10 +19,10 @@ const E216_MSG: &str = "the 'periods' option of 'extended_path' is mandatory";
 pub fn check_context(model: &Model) -> Vec<Diagnostic> {
     let mut out = Vec::new();
 
-    if let Some(span) = model.write_latex_steady_state_model_span {
-        if model.ss_block.is_none() {
-            push(&mut out, span, "E200", E200_MSG);
-        }
+    if let Some(span) = model.write_latex_steady_state_model_span
+        && model.ss_block.is_none()
+    {
+        push(&mut out, span, "E200", E200_MSG);
     }
 
     if model.non_local_equation_count() == 0 && zero_eq_trigger(model) {
@@ -30,10 +30,11 @@ pub fn check_context(model: &Model) -> Vec<Diagnostic> {
         push(&mut out, span, "E201", E201_MSG);
     }
 
-    if model.is_pf_solver_context() && model.is_stochastic_context() {
-        if let Some(span) = mix_span(model) {
-            push(&mut out, span, "E205", E205_MSG);
-        }
+    if model.is_pf_solver_context()
+        && model.is_stochastic_context()
+        && let Some(span) = mix_span(model)
+    {
+        push(&mut out, span, "E205", E205_MSG);
     }
 
     if model.use_dll_span.is_some()
@@ -55,16 +56,16 @@ pub fn check_context(model: &Model) -> Vec<Diagnostic> {
         push(&mut out, span, "E207", E207_MSG);
     }
 
-    if let Some(solver) = model.perfect_foresight_solver_span {
-        if solver_before_setup(model.perfect_foresight_setup_span, solver) {
-            push(&mut out, solver, "E213", E213_MSG);
-        }
+    if let Some(solver) = model.perfect_foresight_solver_span
+        && solver_before_setup(model.perfect_foresight_setup_span, solver)
+    {
+        push(&mut out, solver, "E213", E213_MSG);
     }
 
-    if let Some(solver) = model.pfee_solver_span {
-        if solver_before_setup(model.pfee_setup_span, solver) {
-            push(&mut out, solver, "E214", E214_MSG);
-        }
+    if let Some(solver) = model.pfee_solver_span
+        && solver_before_setup(model.pfee_setup_span, solver)
+    {
+        push(&mut out, solver, "E214", E214_MSG);
     }
 
     if model.extended_path_span.is_some() && !model.extended_path_has_periods {
@@ -72,26 +73,26 @@ pub fn check_context(model: &Model) -> Vec<Diagnostic> {
         push(&mut out, span, "E216", E216_MSG);
     }
 
-    if let Some((n, span)) = model.identification_order {
-        if !(1..=3).contains(&n) {
-            push(
-                &mut out,
-                span,
-                "E236",
-                "the order option of identification command must be between 1 and 3",
-            );
-        }
+    if let Some((n, span)) = model.identification_order
+        && !(1..=3).contains(&n)
+    {
+        push(
+            &mut out,
+            span,
+            "E236",
+            "the order option of identification command must be between 1 and 3",
+        );
     }
 
-    if let Some((n, span)) = model.max_dim_cova_group {
-        if n <= 0 {
-            push(
-                &mut out,
-                span,
-                "E237",
-                "The max_dim_cova_group option to identification only accepts integers > 0.",
-            );
-        }
+    if let Some((n, span)) = model.max_dim_cova_group
+        && n <= 0
+    {
+        push(
+            &mut out,
+            span,
+            "E237",
+            "The max_dim_cova_group option to identification only accepts integers > 0.",
+        );
     }
 
     out
@@ -144,10 +145,9 @@ fn mix_span(model: &Model) -> Option<Span> {
     if model
         .policy_commands
         .contains(&crate::model::PolicyCommand::Osr)
+        && let Some(s) = model.policy_command_span
     {
-        if let Some(s) = model.policy_command_span {
-            stoch.push(s);
-        }
+        stoch.push(s);
     }
     let last_pf = pf.iter().max_by_key(|s| s.start)?;
     let last_stoch = stoch.iter().max_by_key(|s| s.start)?;

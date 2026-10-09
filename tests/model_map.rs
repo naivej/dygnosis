@@ -113,6 +113,29 @@ fn registry_covers_every_existing_block_branch_and_variant() {
             .map(|(key, _)| key.to_string())
             .collect()
     );
+    // These defaults are consumed by native Settings. Compare the manifest
+    // with the parsed categories, without depending on Rust source spelling.
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("editors/vscode/package.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let settings: HashMap<_, _> = manifest["contributes"]["configuration"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|group| group["properties"].as_object().unwrap())
+        .filter_map(|(key, value)| {
+            let category = key.strip_prefix("dynare.blockTint.")?;
+            if value["type"] != "string" {
+                return None;
+            }
+            Some((category, value["default"].as_str().unwrap()))
+        })
+        .collect();
+    assert_eq!(settings, BLOCK_CATEGORIES.iter().copied().collect());
 }
 
 #[test]

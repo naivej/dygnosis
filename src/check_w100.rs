@@ -55,10 +55,10 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
         ));
     }
 
-    if let Some(span) = model.ramsey_constraints_span {
-        if !has_ramsey {
-            diagnostics.push(Diagnostic::new(span, Severity::Error, "E203", E203_MSG));
-        }
+    if let Some(span) = model.ramsey_constraints_span
+        && !has_ramsey
+    {
+        diagnostics.push(Diagnostic::new(span, Severity::Error, "E203", E203_MSG));
     }
 
     if has_osr && model.has_optim_weights && has_planner {
@@ -144,15 +144,15 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
         }
     }
 
-    if let Some((n, span)) = model.discretionary_order {
-        if n > 1 {
-            diagnostics.push(Diagnostic::new(
-                span,
-                Severity::Error,
-                "E235",
-                "discretionary_policy: order > 1 is not yet implemented",
-            ));
-        }
+    if let Some((n, span)) = model.discretionary_order
+        && n > 1
+    {
+        diagnostics.push(Diagnostic::new(
+            span,
+            Severity::Error,
+            "E235",
+            "discretionary_policy: order > 1 is not yet implemented",
+        ));
     }
 
     if model.policy_commands.is_empty() {
@@ -199,18 +199,18 @@ pub fn check_w100(model: &Model) -> Vec<Diagnostic> {
         }
     }
 
-    if let Some(d) = model.planner_discount {
-        if !(0.0 < d && d <= 1.0) {
-            diagnostics.push(Diagnostic::new(
-                anchor,
-                Severity::Warning,
-                "W102",
-                format!(
-                    "planner_discount = {} should be a discount factor in the interval (0, 1].",
-                    python_g(d)
-                ),
-            ));
-        }
+    if let Some(d) = model.planner_discount
+        && !(0.0 < d && d <= 1.0)
+    {
+        diagnostics.push(Diagnostic::new(
+            anchor,
+            Severity::Warning,
+            "W102",
+            format!(
+                "planner_discount = {} should be a discount factor in the interval (0, 1].",
+                python_g(d)
+            ),
+        ));
     }
 
     if model.policy_commands.contains(&PolicyCommand::Osr) {

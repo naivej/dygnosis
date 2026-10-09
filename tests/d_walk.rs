@@ -3,7 +3,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use dygnosis::explain::known_codes;
 use dygnosis::{analyze, find_preprocessor, parse, run_preprocessor, Diagnostic, JsonStage};
 
 fn fixture(rel: &str) -> String {
@@ -32,11 +31,6 @@ fn quiet(diags: &[Diagnostic], code: &str) {
         "expected no {code}, got {:?}",
         codes(diags)
     );
-}
-
-#[test]
-fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 381);
 }
 
 #[test]

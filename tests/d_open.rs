@@ -1,6 +1,5 @@
 //! D-open family locks: thin parse of named openers with no later owner.
 
-use dygnosis::explain::known_codes;
 use dygnosis::model::DerivSpec;
 use dygnosis::{analyze, check_file, parse, Diagnostic};
 
@@ -512,11 +511,6 @@ fn some_shipped_codes_still_fire() {
     let dpw = diags("d_open/e303_dsge_prior_weight_parameter.mod");
     find(&dpw, "E303");
     quiet(&dpw, "E219");
-}
-
-#[test]
-fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 381);
 }
 
 #[test]

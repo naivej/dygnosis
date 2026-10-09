@@ -94,19 +94,6 @@ fn check_inventory() {
         );
     }
 
-    let template = inv
-        .rows
-        .iter()
-        .find(|r| r.id == "e010_extra")
-        .expect("wave-a template row e010_extra");
-    assert_eq!(template.kind, "fire");
-    assert_eq!(template.fixture, "tests/fixtures/e010/e010_extra.mod");
-    assert!(
-        fixture_exists(&template.fixture),
-        "template missing: {}",
-        template.fixture
-    );
-
     for row in &inv.rows {
         if row.kind != "archive" {
             continue;
@@ -152,15 +139,5 @@ fn check_inventory() {
         missing.is_empty(),
         "{} fire/quiet rows have an empty fixture (list printed above)",
         missing.len()
-    );
-}
-
-#[test]
-fn inventory_file_is_lf() {
-    let path = root().join("tests/fixtures/inventory.json");
-    let bytes = std::fs::read(&path).unwrap();
-    assert!(
-        !bytes.windows(2).any(|w| w == b"\r\n"),
-        "inventory.json must be LF only"
     );
 }

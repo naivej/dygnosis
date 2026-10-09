@@ -287,12 +287,11 @@ fn check_linear_ops(model: &Model) -> Vec<Diagnostic> {
                 )),
             }
         }
-        if eq.is_local {
-            if let (Some(name), Some(rhs)) = (ss_lhs_ident(model, eq), eq.rhs_expr) {
-                if has_variable(model, rhs, &vars) {
-                    vars.insert(name);
-                }
-            }
+        if eq.is_local
+            && let (Some(name), Some(rhs)) = (ss_lhs_ident(model, eq), eq.rhs_expr)
+            && has_variable(model, rhs, &vars)
+        {
+            vars.insert(name);
         }
     }
     diagnostics
@@ -576,10 +575,10 @@ fn check_w150(model: &Model) -> Vec<Diagnostic> {
         .map(|d| model.name(d.name).to_string())
         .collect();
     for eq in &model.equations {
-        if eq.is_local {
-            if let Some(name) = ss_lhs_ident(model, eq) {
-                declared.insert(model.name(name).to_string());
-            }
+        if eq.is_local
+            && let Some(name) = ss_lhs_ident(model, eq)
+        {
+            declared.insert(model.name(name).to_string());
         }
     }
 

@@ -577,15 +577,14 @@ impl Workspace {
                 .get_effective_model(uri)
                 .into_iter()
                 .flat_map(|model| {
-                    let loader = model.load_params_file.iter().map(|(name, _)| {
+                    model.load_params_file.iter().map(|(name, _)| {
                         let path = PathBuf::from(name);
                         if path.is_absolute() {
                             path
                         } else {
                             Path::new(&key).parent().unwrap_or(Path::new("")).join(path)
                         }
-                    });
-                    loader
+                    })
                 })
                 .collect();
             let directories = self

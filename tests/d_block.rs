@@ -2,7 +2,6 @@
 
 use std::time::Duration;
 
-use dygnosis::explain::known_codes;
 use dygnosis::expr::ExprKind;
 use dygnosis::model::{EstimatedParamKind, ShockKind};
 use dygnosis::preprocessor::find_preprocessor;
@@ -79,11 +78,6 @@ const E241_EXO: &str = "You have not set the following exogenous variables in en
 const E241_ENDO: &str = "You have not set the following endogenous variables in histval: y";
 const E242_MSG: &str = "histval: the lag on y should be less than or equal to 0";
 const E243_MSG: &str = "histval: y(0) declared twice";
-
-#[test]
-fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 381);
-}
 
 #[test]
 fn histval_fills_entries_not_initval() {

@@ -3607,15 +3607,15 @@ async fn signature_at_byte(text: &str, byte: usize) -> Option<SignatureHelp> {
         .inner()
         .did_open(open_params(uri.clone(), text.to_string(), 1))
         .await;
-    service
+    let response = service
         .inner()
         .signature_help(SignatureHelpParams {
             context: None,
             text_document_position_params: tdp(uri, text, byte),
             work_done_progress_params: WorkDoneProgressParams::default(),
         })
-        .await
-        .expect("signature rpc")
+        .await;
+    response.expect("signature rpc")
 }
 
 #[test]

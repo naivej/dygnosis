@@ -109,7 +109,7 @@ impl ExprArena {
     }
 
     /// Visits `Ident` nodes only (not Call callees, not String/Number contents).
-    pub fn walk_idents(&self, root: ExprId) -> impl Iterator<Item = IdentRef> {
+    pub fn walk_idents(&self, root: ExprId) -> impl Iterator<Item = IdentRef> + use<> {
         let mut out = Vec::new();
         self.collect_idents(root, &mut out);
         out.into_iter()

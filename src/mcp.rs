@@ -1233,14 +1233,14 @@ fn add_path_key(
     seen: &mut HashSet<String>,
     scope: &mut HashMap<String, String>,
 ) {
-    if let Some(orig) = supplied_by_key.get(path_key) {
-        if let Some(content) = files.get(orig) {
-            let key = normalize_uri(orig);
-            if seen.insert(key) {
-                scope.insert(orig.clone(), content.clone());
-            }
-            return;
+    if let Some(orig) = supplied_by_key.get(path_key)
+        && let Some(content) = files.get(orig)
+    {
+        let key = normalize_uri(orig);
+        if seen.insert(key) {
+            scope.insert(orig.clone(), content.clone());
         }
+        return;
     }
     if let Some(src) = ws.get_source(path_key) {
         let key = normalize_uri(path_key);

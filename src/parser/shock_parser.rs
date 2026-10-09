@@ -534,15 +534,14 @@ impl Parser<'_> {
                 self.i = after;
                 if let (PeriodPoint::Integer(first), Some(PeriodPoint::Integer(last))) =
                     (&first, &last)
+                    && first > last
                 {
-                    if first > last {
-                        let span = Span {
-                            start: self.tokens[at].span.start,
-                            end: self.tokens[self.i - 1].span.end,
-                        };
-                        self.path_error(span, "E395", "Can't have first period index greater than second index in range specification");
-                        break;
-                    }
+                    let span = Span {
+                        start: self.tokens[at].span.start,
+                        end: self.tokens[self.i - 1].span.end,
+                    };
+                    self.path_error(span, "E395", "Can't have first period index greater than second index in range specification");
+                    break;
                 }
                 if let Some(&span) = self.path_period_colons(self.i - 1, self.i).first() {
                     self.refuse_path_period_colon(
@@ -811,14 +810,13 @@ impl Parser<'_> {
         let mut written = token.text(self.src).to_string();
         let mut name_token = token.clone();
         let mut learnt_in = None;
-        if let Some(keyword) = self.ss_block_word_token(token_i) {
-            if !Self::ss_symbol_token(keyword)
-                && !is_dynare_expression_builtin(&written)
-                && !matches!(keyword, "LEARNT_IN" | "NAN_CONSTANT" | "INF_CONSTANT")
-            {
-                self.push_bison(token.span, format!("syntax error, unexpected {keyword}"));
-                return self.alloc_error(token.span);
-            }
+        if let Some(keyword) = self.ss_block_word_token(token_i)
+            && !Self::ss_symbol_token(keyword)
+            && !is_dynare_expression_builtin(&written)
+            && !matches!(keyword, "LEARNT_IN" | "NAN_CONSTANT" | "INF_CONSTANT")
+        {
+            self.push_bison(token.span, format!("syntax error, unexpected {keyword}"));
+            return self.alloc_error(token.span);
         }
         if written.eq_ignore_ascii_case("learnt_in") && self.at(TokenKind::LParen) {
             self.bump();
@@ -896,11 +894,11 @@ impl Parser<'_> {
                 );
                 return self.alloc_error(token.span);
             }
-            if let Some(keyword) = self.ss_block_word_token(token_i) {
-                if !Self::ss_symbol_token(keyword) {
-                    self.push_bison(token.span, format!("syntax error, unexpected {keyword}"));
-                    return self.alloc_error(token.span);
-                }
+            if let Some(keyword) = self.ss_block_word_token(token_i)
+                && !Self::ss_symbol_token(keyword)
+            {
+                self.push_bison(token.span, format!("syntax error, unexpected {keyword}"));
+                return self.alloc_error(token.span);
             }
             let name = self.intern.intern(&written);
             let kind = self.model.final_symbol_kind(name);
@@ -1071,25 +1069,25 @@ impl Parser<'_> {
             self.path_error(reference.span, "E411", format!("The syntax {syntax} is not accepted in a 'shock_paths' block without the 'learnt_in' option or in a 'shock_paths(learnt_in=1)' block"));
             return;
         }
-        if namespace == "learnt_in" {
-            if let Some(PeriodPoint::Integer(n)) = reference.learnt_in.as_ref() {
-                if *n < 1 {
-                    self.path_error(
-                        reference.span,
-                        "E412",
-                        format!("The syntax {syntax} is not accepted"),
-                    );
-                    return;
-                }
-                let block_n = match self.path_context.as_ref().unwrap().learnt_in.as_ref() {
-                    Some(PeriodPoint::Integer(n)) => Some(*n),
-                    None => Some(1),
-                    _ => None,
-                };
-                if let Some(block_n) = block_n.filter(|block_n| block_n <= n) {
-                    self.path_error(reference.span, "E413", format!("The syntax {syntax} is not accepted in a 'shock_paths' block without the 'learnt_in' option or in a 'shock_paths(learnt_in={block_n})' block"));
-                    return;
-                }
+        if namespace == "learnt_in"
+            && let Some(PeriodPoint::Integer(n)) = reference.learnt_in.as_ref()
+        {
+            if *n < 1 {
+                self.path_error(
+                    reference.span,
+                    "E412",
+                    format!("The syntax {syntax} is not accepted"),
+                );
+                return;
+            }
+            let block_n = match self.path_context.as_ref().unwrap().learnt_in.as_ref() {
+                Some(PeriodPoint::Integer(n)) => Some(*n),
+                None => Some(1),
+                _ => None,
+            };
+            if let Some(block_n) = block_n.filter(|block_n| block_n <= n) {
+                self.path_error(reference.span, "E413", format!("The syntax {syntax} is not accepted in a 'shock_paths' block without the 'learnt_in' option or in a 'shock_paths(learnt_in={block_n})' block"));
+                return;
             }
         }
         if self.path_context.as_ref().unwrap().controlled {
@@ -1218,11 +1216,17 @@ impl Parser<'_> {
                 self.record_path_value_facts(stanza);
                 for (period, value) in stanza.periods.iter().zip(&stanza.values) {
                     let max_lag = self.model.path_value_facts[&value.expr.unwrap()].max_lag;
-                    if let PeriodPoint::Integer(first) = period.first {
-                        if i64::from(first) <= max_lag {
-                            self.path_error(value.span, "E405", format!("shock_paths: a lag of {max_lag} is not allowed at period {first}"));
-                            return false;
-                        }
+                    if let PeriodPoint::Integer(first) = period.first
+                        && i64::from(first) <= max_lag
+                    {
+                        self.path_error(
+                            value.span,
+                            "E405",
+                            format!(
+                                "shock_paths: a lag of {max_lag} is not allowed at period {first}"
+                            ),
+                        );
+                        return false;
                     }
                 }
             }
@@ -1382,14 +1386,14 @@ impl Parser<'_> {
                         start_tok.span.start <= issue.span.start && issue.span.end <= opener_end
                     }),
                 });
-            if let Some(PeriodPoint::Integer(n)) = options.learnt_in.as_ref() {
-                if *n < 1 {
-                    self.path_error(
-                        options.learnt_in_span.unwrap_or(start_tok.span),
-                        "E421",
-                        format!("Value '{n}' is not allowed for 'learnt_in' option"),
-                    );
-                }
+            if let Some(PeriodPoint::Integer(n)) = options.learnt_in.as_ref()
+                && *n < 1
+            {
+                self.path_error(
+                    options.learnt_in_span.unwrap_or(start_tok.span),
+                    "E421",
+                    format!("Value '{n}' is not allowed for 'learnt_in' option"),
+                );
             }
         }
         let saved = self.i;
@@ -1739,21 +1743,19 @@ impl Parser<'_> {
                     | "plot_init_date"
                     | "plot_end_date"
             );
-            if date_option {
-                if let Some((value, next)) = self.date_at(i + 2) {
-                    self.model.date_options.push(DateOption {
-                        command: command.to_ascii_lowercase(),
-                        name,
-                        span: Span {
-                            start: tok.span.start,
-                            end: value.span.end,
-                        },
-                        value,
-                    });
-                    self.retain_fact_receipt("date_option", i, std::iter::once(i..next).collect());
-                    i = next;
-                    continue;
-                }
+            if date_option && let Some((value, next)) = self.date_at(i + 2) {
+                self.model.date_options.push(DateOption {
+                    command: command.to_ascii_lowercase(),
+                    name,
+                    span: Span {
+                        start: tok.span.start,
+                        end: value.span.end,
+                    },
+                    value,
+                });
+                self.retain_fact_receipt("date_option", i, std::iter::once(i..next).collect());
+                i = next;
+                continue;
             }
             i += 1;
         }
@@ -1788,11 +1790,10 @@ impl Parser<'_> {
                         .tokens
                         .get(i + 2)
                         .filter(|t| t.kind == TokenKind::Number)
+                        && let Ok(number) = tok.text(self.src).parse::<i32>()
                     {
-                        if let Ok(number) = tok.text(self.src).parse::<i32>() {
-                            request.irf = Some((number, tok.span));
-                            request.irf_tokens = Some(i..i + 3);
-                        }
+                        request.irf = Some((number, tok.span));
+                        request.irf_tokens = Some(i..i + 3);
                     }
                 } else if option == "irf_shocks"
                     && self.tokens.get(i + 1).map(|t| t.kind) == Some(TokenKind::Eq)
@@ -1828,23 +1829,22 @@ impl Parser<'_> {
         while i + 2 < close {
             if self.word_at(i, "irf")
                 && self.tokens.get(i + 1).map(|t| t.kind) == Some(TokenKind::Eq)
+                && let Some(value) = self.tokens.get(i + 2)
             {
-                if let Some(value) = self.tokens.get(i + 2) {
-                    let message = if value.kind == TokenKind::Minus {
-                        Some("syntax error, unexpected MINUS, expecting INT_NUMBER")
-                    } else if value.kind == TokenKind::Number
-                        && !is_integer_lexeme(value.text(self.src))
-                    {
-                        Some("syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER")
-                    } else {
-                        None
-                    };
-                    if let Some(message) = message {
-                        self.model.shape_refuses.push(
-                            ShapeRefuse::official(value.span, command, message)
-                                .with_parse_order(self.token_origins[i + 2].start),
-                        );
-                    }
+                let message = if value.kind == TokenKind::Minus {
+                    Some("syntax error, unexpected MINUS, expecting INT_NUMBER")
+                } else if value.kind == TokenKind::Number
+                    && !is_integer_lexeme(value.text(self.src))
+                {
+                    Some("syntax error, unexpected FLOAT_NUMBER, expecting INT_NUMBER")
+                } else {
+                    None
+                };
+                if let Some(message) = message {
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(value.span, command, message)
+                            .with_parse_order(self.token_origins[i + 2].start),
+                    );
                 }
             }
             if !self.word_at(i, "irf_shocks")
@@ -2019,17 +2019,17 @@ impl Parser<'_> {
                 continue;
             }
             let Some((first, after_first)) = self.date_at(i + 2) else {
-                if let Some(tok) = self.tokens.get(i + 2) {
-                    if tok.kind == TokenKind::Number {
-                        self.model.shape_refuses.push(
-                            ShapeRefuse::official(
-                                tok.span,
-                                "subsamples",
-                                "syntax error, unexpected INT_NUMBER, expecting DATE",
-                            )
-                            .with_parse_order(self.token_origins[i + 2].start),
-                        );
-                    }
+                if let Some(tok) = self.tokens.get(i + 2)
+                    && tok.kind == TokenKind::Number
+                {
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(
+                            tok.span,
+                            "subsamples",
+                            "syntax error, unexpected INT_NUMBER, expecting DATE",
+                        )
+                        .with_parse_order(self.token_origins[i + 2].start),
+                    );
                 }
                 i += 1;
                 continue;
@@ -2056,17 +2056,17 @@ impl Parser<'_> {
                 continue;
             }
             let Some((last, after_last)) = self.date_at(after_first) else {
-                if let Some(tok) = self.tokens.get(after_first) {
-                    if tok.kind == TokenKind::Number {
-                        self.model.shape_refuses.push(
-                            ShapeRefuse::official(
-                                tok.span,
-                                "subsamples",
-                                "syntax error, unexpected INT_NUMBER, expecting DATE",
-                            )
-                            .with_parse_order(self.token_origins[after_first].start),
-                        );
-                    }
+                if let Some(tok) = self.tokens.get(after_first)
+                    && tok.kind == TokenKind::Number
+                {
+                    self.model.shape_refuses.push(
+                        ShapeRefuse::official(
+                            tok.span,
+                            "subsamples",
+                            "syntax error, unexpected INT_NUMBER, expecting DATE",
+                        )
+                        .with_parse_order(self.token_origins[after_first].start),
+                    );
                 }
                 i += 1;
                 continue;

@@ -253,16 +253,15 @@ impl NameSites {
                     regions: Vec::new(),
                 });
             scope.regions.extend(spans(&occurrence.source, &key, text));
-            if row.equation.is_local {
-                if let Some(ExprKind::Ident {
+            if row.equation.is_local
+                && let Some(ExprKind::Ident {
                     name,
                     timing: 0,
                     timing_span: None,
                     ..
                 }) = row.equation.lhs_expr.map(|id| &model.exprs.get(id).kind)
-                {
-                    scope.names.insert(model.name(*name).to_string());
-                }
+            {
+                scope.names.insert(model.name(*name).to_string());
             }
         }
         Self {

@@ -448,30 +448,29 @@ pub fn handed_option_refusal(
         if let Some((_, shapes)) = DECOMPOSITION_VALUE_SHAPES
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case(&opt.name))
+            && !row_fits(src, shapes, opt)
         {
-            if !row_fits(src, shapes, opt) {
-                if shapes.contains(&Shape::Date)
-                    && opt.value_text.bytes().all(|b| b.is_ascii_digit())
-                    && !opt.value_text.is_empty()
-                {
-                    return Some(
-                        ShapeRefuse::official(
-                            opt.value_span,
-                            command,
-                            "syntax error, unexpected INT_NUMBER, expecting DATE",
-                        )
-                        .with_parse_order(opt.value_parse_order),
-                    );
-                }
+            if shapes.contains(&Shape::Date)
+                && opt.value_text.bytes().all(|b| b.is_ascii_digit())
+                && !opt.value_text.is_empty()
+            {
                 return Some(
-                    ShapeRefuse::new(
-                        opt.span,
+                    ShapeRefuse::official(
+                        opt.value_span,
                         command,
-                        "a value written in the shape that option has",
+                        "syntax error, unexpected INT_NUMBER, expecting DATE",
                     )
-                    .with_parse_order(opt.parse_order),
+                    .with_parse_order(opt.value_parse_order),
                 );
             }
+            return Some(
+                ShapeRefuse::new(
+                    opt.span,
+                    command,
+                    "a value written in the shape that option has",
+                )
+                .with_parse_order(opt.parse_order),
+            );
         }
     }
     None

@@ -765,14 +765,14 @@ fn collect_include_dirs(
                         span: tok.span,
                     });
                 }
-                if let Some((kind, argument)) = parse_dir_kind_arg(&text) {
-                    if kind != "include" {
-                        macro_directives.push(MacroDirective {
-                            kind,
-                            argument,
-                            span: tok.span,
-                        });
-                    }
+                if let Some((kind, argument)) = parse_dir_kind_arg(&text)
+                    && kind != "include"
+                {
+                    macro_directives.push(MacroDirective {
+                        kind,
+                        argument,
+                        span: tok.span,
+                    });
                 }
             }
             TokenKind::MacroInterp => {
@@ -1446,22 +1446,22 @@ impl Parser<'_> {
         } else {
             self.lexeme(&self.tokens[from]).to_ascii_lowercase()
         };
-        if let Some(index) = dotted_index {
-            if let Some(statement) = self.model.dotted_statements.get(index) {
-                let command = match statement.kind {
-                    DottedKind::Prior => "prior",
-                    DottedKind::Options => "options",
-                    DottedKind::Subsamples => "subsamples",
-                };
-                if let Some(word) = (from + 1..self.i).find(|&i| {
-                    self.tokens[i - 1].kind == TokenKind::Dot
-                        && self.tokens[i].text(self.src).eq_ignore_ascii_case(command)
-                }) {
-                    name = self.tokens[from..word + 1]
-                        .iter()
-                        .map(|token| token.text(self.src))
-                        .collect();
-                }
+        if let Some(index) = dotted_index
+            && let Some(statement) = self.model.dotted_statements.get(index)
+        {
+            let command = match statement.kind {
+                DottedKind::Prior => "prior",
+                DottedKind::Options => "options",
+                DottedKind::Subsamples => "subsamples",
+            };
+            if let Some(word) = (from + 1..self.i).find(|&i| {
+                self.tokens[i - 1].kind == TokenKind::Dot
+                    && self.tokens[i].text(self.src).eq_ignore_ascii_case(command)
+            }) {
+                name = self.tokens[from..word + 1]
+                    .iter()
+                    .map(|token| token.text(self.src))
+                    .collect();
             }
         }
         let block = crate::model_map::is_supported_block(&name);
@@ -1740,19 +1740,19 @@ impl Parser<'_> {
         while !self.at(TokenKind::Eof) && !self.at(TokenKind::Semi) {
             if self.at(TokenKind::Latex) {
                 let tok = self.bump();
-                if let Some(tex) = closed_tex_name(self.lexeme(&tok)) {
-                    if let Some(decl) = decls.last_mut() {
-                        decl.tex_name = Some(tex);
-                    }
+                if let Some(tex) = closed_tex_name(self.lexeme(&tok))
+                    && let Some(decl) = decls.last_mut()
+                {
+                    decl.tex_name = Some(tex);
                 }
                 continue;
             }
             if self.at(TokenKind::LParen) {
                 let long_name = self.take_symbol_long_name();
-                if let Some(text) = long_name {
-                    if let Some(decl) = decls.last_mut() {
-                        decl.long_name = Some(text);
-                    }
+                if let Some(text) = long_name
+                    && let Some(decl) = decls.last_mut()
+                {
+                    decl.long_name = Some(text);
                 }
                 continue;
             }
@@ -2005,11 +2005,11 @@ impl Parser<'_> {
 
     fn parse_model_block(&mut self) {
         let start = self.bump().span.start;
-        if self.at(TokenKind::LParen) {
-            if let Some((dimension, dimension_span)) = self.heterogeneous_model_dimension() {
-                self.parse_heterogeneous_model_body(start, dimension, dimension_span);
-                return;
-            }
+        if self.at(TokenKind::LParen)
+            && let Some((dimension, dimension_span)) = self.heterogeneous_model_dimension()
+        {
+            self.parse_heterogeneous_model_body(start, dimension, dimension_span);
+            return;
         }
         let mut linear = false;
         let mut linear_tokens = None;
@@ -2046,10 +2046,10 @@ impl Parser<'_> {
             end: opener_end,
         };
         if linear {
-            if !self.model.is_linear {
-                if let Some(tokens) = linear_tokens {
-                    self.record_setting_receipt("is_linear", tokens, linear_option_list);
-                }
+            if !self.model.is_linear
+                && let Some(tokens) = linear_tokens
+            {
+                self.record_setting_receipt("is_linear", tokens, linear_option_list);
             }
             self.model.is_linear = true;
         }
@@ -2494,25 +2494,23 @@ impl Parser<'_> {
                 !matches!(self.model.exprs.get(rhs).kind, ExprKind::Error)
                     && !self.refused_constructors.contains(&rhs)
             });
-            if !rhs_completed {
-                if let Some(target) = equation.lhs_expr {
-                    self.model.unattempted_model_local_targets.insert(target);
-                }
+            if !rhs_completed && let Some(target) = equation.lhs_expr {
+                self.model.unattempted_model_local_targets.insert(target);
             }
             if rhs_completed {
                 self.record_lhs_write(equation, range);
             }
-            if let (Some(lhs), Some(rhs)) = (equation.lhs_expr, equation.rhs_expr) {
-                if let ExprKind::Ident { name, .. } = self.model.exprs.get(lhs).kind {
-                    // A local's value is available only after its RHS is read.
-                    // The first definition owns it; a later duplicate is refused.
-                    if self.model.valid_model_local_targets.contains(&lhs)
-                        && !self.refused_constructors.contains(&rhs)
-                    {
-                        self.constructor_locals
-                            .entry((self.constructor_context, name))
-                            .or_insert(self.constructed[&rhs]);
-                    }
+            if let (Some(lhs), Some(rhs)) = (equation.lhs_expr, equation.rhs_expr)
+                && let ExprKind::Ident { name, .. } = self.model.exprs.get(lhs).kind
+            {
+                // A local's value is available only after its RHS is read.
+                // The first definition owns it; a later duplicate is refused.
+                if self.model.valid_model_local_targets.contains(&lhs)
+                    && !self.refused_constructors.contains(&rhs)
+                {
+                    self.constructor_locals
+                        .entry((self.constructor_context, name))
+                        .or_insert(self.constructed[&rhs]);
                 }
             }
         }
@@ -2797,10 +2795,10 @@ impl Parser<'_> {
     /// The endogenous a removed equation names: its `endogenous` tag value, or the one
     /// endogenous symbol on its left side. `None` when it names none (7.1 refuses that file).
     fn equation_named_endogenous(&self, eq: &Equation) -> Option<String> {
-        if let Some(name) = eq.tag_map.get("endogenous") {
-            if !name.is_empty() {
-                return Some(name.clone());
-            }
+        if let Some(name) = eq.tag_map.get("endogenous")
+            && !name.is_empty()
+        {
+            return Some(name.clone());
         }
         let id = eq.lhs_expr?;
         let mut names: Vec<String> = Vec::new();
@@ -3765,13 +3763,13 @@ impl Parser<'_> {
         } else {
             self.current_start()
         };
-        if self.model.load_params_file.is_none() {
-            if let Some(raw) = filename {
-                let file = unquote_string(&raw).replace('\\', "/");
-                self.model.load_params_file = Some((file, Span { start, end }));
-                if let Some(tokens) = filename_tokens {
-                    self.record_setting_receipt("load_params_file", tokens, None);
-                }
+        if self.model.load_params_file.is_none()
+            && let Some(raw) = filename
+        {
+            let file = unquote_string(&raw).replace('\\', "/");
+            self.model.load_params_file = Some((file, Span { start, end }));
+            if let Some(tokens) = filename_tokens {
+                self.record_setting_receipt("load_params_file", tokens, None);
             }
         }
     }
@@ -5469,14 +5467,13 @@ impl Parser<'_> {
         if self.at(TokenKind::Semi) {
             return self.bump().span.end;
         }
-        if let Some(prev) = self.i.checked_sub(1) {
-            if self
+        if let Some(prev) = self.i.checked_sub(1)
+            && self
                 .tokens
                 .get(prev)
                 .is_some_and(|t| t.kind == TokenKind::Semi)
-            {
-                return self.tokens[prev].span.end;
-            }
+        {
+            return self.tokens[prev].span.end;
         }
         self.finish_shock_stmt(end_i)
     }
@@ -5786,16 +5783,16 @@ impl Parser<'_> {
         if self.kind_at(1) != Some(TokenKind::Dot) {
             return None;
         }
-        if let Some((second, _)) = self.ident_at_name(2) {
-            if self.kind_at(3) == Some(TokenKind::Dot) {
-                return Some((
-                    DottedHead::Param {
-                        first,
-                        second: Some(second),
-                    },
-                    4,
-                ));
-            }
+        if let Some((second, _)) = self.ident_at_name(2)
+            && self.kind_at(3) == Some(TokenKind::Dot)
+        {
+            return Some((
+                DottedHead::Param {
+                    first,
+                    second: Some(second),
+                },
+                4,
+            ));
         }
         Some((
             DottedHead::Param {
@@ -7076,12 +7073,11 @@ impl Parser<'_> {
                 );
             } else if let Some(SvarIdentificationElement::ExclusionLag { equations, .. }) =
                 elements.last()
+                && let Some(row) = equations.last()
             {
-                if let Some(row) = equations.last() {
-                    *element_parse_orders
-                        .last_mut()
-                        .expect("recorded exclusion element") = row.parse_order;
-                }
+                *element_parse_orders
+                    .last_mut()
+                    .expect("recorded exclusion element") = row.parse_order;
             }
             if self.i <= before {
                 self.bump();
@@ -7111,10 +7107,9 @@ impl Parser<'_> {
                 span,
                 equations,
             } = element
+                && equations.is_empty()
             {
-                if equations.is_empty() {
-                    shape_refuses.push(ShapeRefuse::new(*span, "exclusion lag", "an equation row"));
-                }
+                shape_refuses.push(ShapeRefuse::new(*span, "exclusion lag", "an equation row"));
             }
         }
         self.model.svar_identifications.push(SvarIdentification {
@@ -7618,10 +7613,9 @@ impl Parser<'_> {
                     .chain(&self.model.parameters)
                     .chain(&self.model.retyped_trend_decls)
                     .any(|decl| decl.name == name)
+                    && let Some(declaration) = self.model.retyped_declaration(name)
                 {
-                    if let Some(declaration) = self.model.retyped_declaration(name) {
-                        self.model.retyped_trend_decls.push(declaration);
-                    }
+                    self.model.retyped_trend_decls.push(declaration);
                 }
                 self.symbol_roles.insert(name, role);
                 // `var_remove` leaves the declaration on its original list.
@@ -8534,10 +8528,11 @@ impl Parser<'_> {
             "planner_discount_value",
             "partial_information",
         ] {
-            if let Some(receipt) = self.model.setting_receipts.get_mut(name) {
-                if from <= receipt.tokens.start && receipt.tokens.end < self.i {
-                    receipt.option_list = Some(from..self.i);
-                }
+            if let Some(receipt) = self.model.setting_receipts.get_mut(name)
+                && from <= receipt.tokens.start
+                && receipt.tokens.end < self.i
+            {
+                receipt.option_list = Some(from..self.i);
             }
         }
         self.record_option_twice(from, self.i);
@@ -11057,11 +11052,12 @@ impl Parser<'_> {
             if lexeme.eq_ignore_ascii_case("nan") || lexeme.eq_ignore_ascii_case("inf") {
                 return self.alloc(ExprKind::Number, tok.span);
             }
-            if let Some(token) = self.ss_block_word_token(self.i - 1) {
-                if !Self::ss_symbol_token(token) && !is_dynare_expression_builtin(&lexeme) {
-                    self.push_bison(tok.span, format!("syntax error, unexpected {token}"));
-                    return self.alloc(ExprKind::Error, tok.span);
-                }
+            if let Some(token) = self.ss_block_word_token(self.i - 1)
+                && !Self::ss_symbol_token(token)
+                && !is_dynare_expression_builtin(&lexeme)
+            {
+                self.push_bison(tok.span, format!("syntax error, unexpected {token}"));
+                return self.alloc(ExprKind::Error, tok.span);
             }
         }
         if (self.in_steady_state_rhs || self.model_function_context)
@@ -11664,70 +11660,68 @@ impl Parser<'_> {
     }
 
     fn alloc(&mut self, kind: ExprKind, span: Span) -> ExprId {
-        if self.in_steady_state_rhs && !self.in_constructor_target {
-            if let ExprKind::Ident {
+        if self.in_steady_state_rhs
+            && !self.in_constructor_target
+            && let ExprKind::Ident {
                 name, ident_span, ..
             } = &kind
-            {
-                self.model.steady_state_rhs_uses.push((
-                    *name,
-                    *ident_span,
-                    self.model.symbol_context(),
-                ));
-            }
+        {
+            self.model.steady_state_rhs_uses.push((
+                *name,
+                *ident_span,
+                self.model.symbol_context(),
+            ));
         }
         if !self.model_function_context
             && !self.in_native_assignment
             && !self.in_constructor_target
             && self.path_context.is_none()
-        {
-            if let ExprKind::Ident {
+            && let ExprKind::Ident {
                 name, ident_span, ..
             } = &kind
-            {
-                self.model.outside_expression_uses.push((
-                    *name,
-                    *ident_span,
-                    self.model.symbol_context(),
-                ));
-                if matches!(
-                    self.model.final_symbol_kind(*name),
-                    Some("trend_var" | "log_trend_var")
-                ) {
-                    self.model.trend_outside_uses.push((*name, *ident_span));
-                }
+        {
+            self.model.outside_expression_uses.push((
+                *name,
+                *ident_span,
+                self.model.symbol_context(),
+            ));
+            if matches!(
+                self.model.final_symbol_kind(*name),
+                Some("trend_var" | "log_trend_var")
+            ) {
+                self.model.trend_outside_uses.push((*name, *ident_span));
             }
         }
-        if self.model_function_context && !self.in_constructor_target {
-            if let ExprKind::Ident {
+        if self.model_function_context
+            && !self.in_constructor_target
+            && let ExprKind::Ident {
                 name,
                 ident_span,
                 timing,
                 ..
             } = &kind
-            {
+        {
+            self.model
+                .model_expression_uses
+                .push(crate::model::ModelExpressionUse {
+                    parse_order: self.tokens[..self.i]
+                        .iter()
+                        .rposition(|token| {
+                            token.kind == TokenKind::Ident && token.span == *ident_span
+                        })
+                        .unwrap_or(self.i),
+                    statement_id: self.model.statements.len(),
+                    name: *name,
+                    span: *ident_span,
+                    full_span: span,
+                    timing: *timing,
+                    context: self.model.symbol_context(),
+                    command: self.model_expression_command,
+                });
+            if self.model.final_symbol_kind(*name) == Some("excluded") {
                 self.model
-                    .model_expression_uses
-                    .push(crate::model::ModelExpressionUse {
-                        parse_order: self.tokens[..self.i]
-                            .iter()
-                            .rposition(|token| {
-                                token.kind == TokenKind::Ident && token.span == *ident_span
-                            })
-                            .unwrap_or(self.i),
-                        statement_id: self.model.statements.len(),
-                        name: *name,
-                        span: *ident_span,
-                        full_span: span,
-                        timing: *timing,
-                        context: self.model.symbol_context(),
-                        command: self.model_expression_command,
-                    });
-                if self.model.final_symbol_kind(*name) == Some("excluded") {
-                    self.model
-                        .var_removed_model_uses
-                        .push((*name, *ident_span, self.i));
-                }
+                    .var_removed_model_uses
+                    .push((*name, *ident_span, self.i));
             }
         }
         let interned = match &kind {
@@ -11761,10 +11755,10 @@ impl Parser<'_> {
         }
         self.construct_expr(id);
         self.note_const_fold_errors(id);
-        if self.refused_constructors.contains(&id) {
-            if let Some(context) = &mut self.path_context {
-                context.failed = true;
-            }
+        if self.refused_constructors.contains(&id)
+            && let Some(context) = &mut self.path_context
+        {
+            context.failed = true;
         }
         id
     }
@@ -12200,18 +12194,18 @@ impl Parser<'_> {
                 }
             }
         }
-        if is_decomposition_command(opener) && self.model.with_epilogue_span.is_none() {
-            if let Some(opt) = opts
+        if is_decomposition_command(opener)
+            && self.model.with_epilogue_span.is_none()
+            && let Some(opt) = opts
                 .iter()
                 .find(|o| o.ident.eq_ignore_ascii_case("with_epilogue"))
-            {
-                self.model.with_epilogue_span = Some(opt.span);
-                self.record_setting_receipt(
-                    "with_epilogue",
-                    opt.token_index..opt.token_index + 1,
-                    Some(from..to),
-                );
-            }
+        {
+            self.model.with_epilogue_span = Some(opt.span);
+            self.record_setting_receipt(
+                "with_epilogue",
+                opt.token_index..opt.token_index + 1,
+                Some(from..to),
+            );
         }
         let mut stmt_estimated = None;
         let mut stmt_calibrated = None;
@@ -12385,27 +12379,26 @@ impl Parser<'_> {
                 }
             } else if opener.eq_ignore_ascii_case("identification") {
                 if opt.ident.eq_ignore_ascii_case("order") {
-                    if let Some(n) = parse_int_lexeme(&opt.value_lex) {
-                        if self.model.identification_order.is_none() {
-                            self.model.identification_order = Some((n, opt.value_span));
-                            self.record_setting_receipt(
-                                "identification_order",
-                                opt.active_tokens.clone(),
-                                Some(from..to),
-                            );
-                        }
+                    if let Some(n) = parse_int_lexeme(&opt.value_lex)
+                        && self.model.identification_order.is_none()
+                    {
+                        self.model.identification_order = Some((n, opt.value_span));
+                        self.record_setting_receipt(
+                            "identification_order",
+                            opt.active_tokens.clone(),
+                            Some(from..to),
+                        );
                     }
-                } else if opt.ident.eq_ignore_ascii_case("max_dim_cova_group") {
-                    if let Some(n) = parse_int_lexeme(&opt.value_lex) {
-                        if self.model.max_dim_cova_group.is_none() {
-                            self.model.max_dim_cova_group = Some((n, opt.value_span));
-                            self.record_setting_receipt(
-                                "max_dim_cova_group",
-                                opt.active_tokens.clone(),
-                                Some(from..to),
-                            );
-                        }
-                    }
+                } else if opt.ident.eq_ignore_ascii_case("max_dim_cova_group")
+                    && let Some(n) = parse_int_lexeme(&opt.value_lex)
+                    && self.model.max_dim_cova_group.is_none()
+                {
+                    self.model.max_dim_cova_group = Some((n, opt.value_span));
+                    self.record_setting_receipt(
+                        "max_dim_cova_group",
+                        opt.active_tokens.clone(),
+                        Some(from..to),
+                    );
                 }
             } else if opener.eq_ignore_ascii_case("stoch_simul") {
                 if opt.ident.eq_ignore_ascii_case("hp_filter")
@@ -12474,16 +12467,16 @@ impl Parser<'_> {
             return;
         }
         for opt in top_options(&self.tokens, self.src, from, to) {
-            if opt.ident.eq_ignore_ascii_case("order") {
-                if let Some(n) = parse_int_lexeme(&opt.value_lex) {
-                    self.model.discretionary_order = Some((n, opt.value_span));
-                    self.record_setting_receipt(
-                        "discretionary_order",
-                        opt.active_tokens.clone(),
-                        Some(from..to),
-                    );
-                    break;
-                }
+            if opt.ident.eq_ignore_ascii_case("order")
+                && let Some(n) = parse_int_lexeme(&opt.value_lex)
+            {
+                self.model.discretionary_order = Some((n, opt.value_span));
+                self.record_setting_receipt(
+                    "discretionary_order",
+                    opt.active_tokens.clone(),
+                    Some(from..to),
+                );
+                break;
             }
         }
     }
@@ -13443,21 +13436,23 @@ pub(crate) fn join_lexemes_recorded(
             prev = None;
             generated_native = None;
         }
-        if generated_native.is_none() && generated_native_candidate(tok, src) {
-            if let Some(emitted) = &tok.emitted {
-                generated_native = Some((
-                    emitted.source.clone(),
-                    crate::native_line::native_region_end(
-                        &emitted.source.text,
-                        emitted.span.start as usize,
-                    ),
-                ));
-            }
+        if generated_native.is_none()
+            && generated_native_candidate(tok, src)
+            && let Some(emitted) = &tok.emitted
+        {
+            generated_native = Some((
+                emitted.source.clone(),
+                crate::native_line::native_region_end(
+                    &emitted.source.text,
+                    emitted.span.start as usize,
+                ),
+            ));
         }
-        if let Some(p) = prev {
-            if !tok.glue_left && needs_space(p, tok.kind) {
-                out.push(' ');
-            }
+        if let Some(p) = prev
+            && !tok.glue_left
+            && needs_space(p, tok.kind)
+        {
+            out.push(' ');
         }
         let start = out.len();
         out.push_str(piece);
@@ -13580,10 +13575,10 @@ fn strip_leading_tags(raw: &str) -> (String, String) {
             break;
         };
         let tag = &s[..end];
-        if name.is_empty() {
-            if let Some(n) = tag_name_attr(tag) {
-                name = n;
-            }
+        if name.is_empty()
+            && let Some(n) = tag_name_attr(tag)
+        {
+            name = n;
         }
         s = s[end..].trim_start();
     }

@@ -76,15 +76,15 @@ pub fn find_preprocessor_from(
     env_path: Option<&Path>,
     common_candidates: &[PathBuf],
 ) -> Option<PathBuf> {
-    if let Some(path) = configured_path {
-        if is_executable_file(path) {
-            return Some(path.to_path_buf());
-        }
+    if let Some(path) = configured_path
+        && is_executable_file(path)
+    {
+        return Some(path.to_path_buf());
     }
-    if let Some(path) = env_path {
-        if is_executable_file(path) {
-            return Some(path.to_path_buf());
-        }
+    if let Some(path) = env_path
+        && is_executable_file(path)
+    {
+        return Some(path.to_path_buf());
     }
     for c in common_candidates {
         if is_executable_file(c) {
@@ -819,16 +819,14 @@ fn materialize_and_run(
     for fname in files.keys() {
         let target = tmp_root.join(relative_path(fname));
         let target_key = normcase_path(&target);
-        if let Some(prior) = target_owners.get(&target_key) {
-            if normalized[prior] != normalized[fname] {
-                return spawn_fail_result(
-                    preprocessor_path,
-                    files.get(entry_file).map(String::as_str).unwrap_or(""),
-                    &format!(
-                        "workspace files map to the same staged path: {prior:?} and {fname:?}"
-                    ),
-                );
-            }
+        if let Some(prior) = target_owners.get(&target_key)
+            && normalized[prior] != normalized[fname]
+        {
+            return spawn_fail_result(
+                preprocessor_path,
+                files.get(entry_file).map(String::as_str).unwrap_or(""),
+                &format!("workspace files map to the same staged path: {prior:?} and {fname:?}"),
+            );
         }
         target_owners.insert(target_key, fname.clone());
         planned.push((fname.clone(), target.clone()));
@@ -850,10 +848,10 @@ fn materialize_and_run(
     let mut materialized: Vec<(String, String, PathBuf)> = Vec::new();
     for (fname, target) in &planned {
         let content = &rewritten[fname];
-        if let Some(parent) = target.parent() {
-            if let Err(err) = std::fs::create_dir_all(parent) {
-                return spawn_fail_result(preprocessor_path, content, &err.to_string());
-            }
+        if let Some(parent) = target.parent()
+            && let Err(err) = std::fs::create_dir_all(parent)
+        {
+            return spawn_fail_result(preprocessor_path, content, &err.to_string());
         }
         if let Err(err) = std::fs::write(target, content.as_bytes()) {
             return spawn_fail_result(preprocessor_path, content, &err.to_string());
@@ -1052,12 +1050,11 @@ fn diagnostic_file_label(filename: &str, synthetic_path: Option<&Path>) -> Strin
     let filename_is_abs = is_absolute_macro_path(filename) && Path::new(filename).is_absolute();
     if filename_is_abs {
         let filename_abs = abs_path(Path::new(filename));
-        if let Some(synthetic_path) = synthetic_path {
-            if let Some(synthetic_dir) = abs_path(synthetic_path).parent() {
-                if let Ok(rel) = filename_abs.strip_prefix(synthetic_dir) {
-                    return slash_path(&rel.to_string_lossy());
-                }
-            }
+        if let Some(synthetic_path) = synthetic_path
+            && let Some(synthetic_dir) = abs_path(synthetic_path).parent()
+            && let Ok(rel) = filename_abs.strip_prefix(synthetic_dir)
+        {
+            return slash_path(&rel.to_string_lossy());
         }
         return slash_path(&filename_abs.to_string_lossy());
     }
@@ -1267,12 +1264,11 @@ fn cleanup_run(
     if let Some(pkg) = package_root {
         remove_with_retries(pkg);
     }
-    if let (Some(tmp_file), Some(source_dir)) = (tmp_file, source_dir_abs) {
-        if let Some(parent) = tmp_file.parent() {
-            if normcase_path(&abs_path(parent)) == normcase_path(source_dir) {
-                remove_with_retries(tmp_file);
-            }
-        }
+    if let (Some(tmp_file), Some(source_dir)) = (tmp_file, source_dir_abs)
+        && let Some(parent) = tmp_file.parent()
+        && normcase_path(&abs_path(parent)) == normcase_path(source_dir)
+    {
+        remove_with_retries(tmp_file);
     }
     remove_with_retries(tmp_dir);
 }

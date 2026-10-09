@@ -63,12 +63,12 @@ impl RepositorySelector {
                 "Each root_file must be an exact repository-relative .mod or .dyn path".into(),
             );
         }
-        if let Self::Git { requested_ref, .. } = self {
-            if requested_ref.is_empty() || requested_ref.contains('\0') {
-                return Err(
-                    "A Git selector requires a nonempty local ref without NUL characters".into(),
-                );
-            }
+        if let Self::Git { requested_ref, .. } = self
+            && (requested_ref.is_empty() || requested_ref.contains('\0'))
+        {
+            return Err(
+                "A Git selector requires a nonempty local ref without NUL characters".into(),
+            );
         }
         Ok(())
     }

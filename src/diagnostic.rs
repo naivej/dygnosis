@@ -357,13 +357,12 @@ fn analyze_positions(model: &Model) -> Vec<Diagnostic> {
             .or_insert(0usize) += 1;
     }
     for row in open_diags {
-        if row.code == "E294" {
-            if let Some(existing) = epilogue_roles.get_mut(&(row.span, row.message.clone())) {
-                if *existing > 0 {
-                    *existing -= 1;
-                    continue;
-                }
-            }
+        if row.code == "E294"
+            && let Some(existing) = epilogue_roles.get_mut(&(row.span, row.message.clone()))
+            && *existing > 0
+        {
+            *existing -= 1;
+            continue;
         }
         out.push(row);
     }
@@ -633,10 +632,10 @@ fn try_workspace_check(ws: &mut Workspace, abs_path: &str) -> Option<DiagnosticS
     // Preserve check_file's written coordinates for writing notes. Their file
     // and source snapshot are now per diagnostic in the ordinary origins list.
     for (diagnostic, origin) in diags.iter_mut().zip(&origins) {
-        if crate::check_writing::is_writing_code(&diagnostic.code) {
-            if let Some(origin) = origin {
-                diagnostic.span = origin.span;
-            }
+        if crate::check_writing::is_writing_code(&diagnostic.code)
+            && let Some(origin) = origin
+        {
+            diagnostic.span = origin.span;
         }
     }
     if !records.resolved.is_empty() {

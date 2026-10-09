@@ -484,10 +484,10 @@ impl ConstructorTree {
             return inner;
         }
         // AddUnaryOp skips evaluation for a negative numeric literal.
-        if !matches!(self.nodes[arg], Node::Number(_)) {
-            if let Some(value) = self.values[arg] {
-                return self.constant(-value);
-            }
+        if !matches!(self.nodes[arg], Node::Number(_))
+            && let Some(value) = self.values[arg]
+        {
+            return self.constant(-value);
         }
         self.intern(Node::Neg(arg), self.values[arg].map(|v| -v))
     }
@@ -514,15 +514,15 @@ impl ConstructorTree {
                 if let Node::Neg(arg) = self.nodes[lhs] {
                     return self.binary(BinOp::Sub, rhs, arg);
                 }
-                if let Some((x, y)) = self.pair(lhs, BinOp::Sub) {
-                    if y == rhs {
-                        return x;
-                    }
+                if let Some((x, y)) = self.pair(lhs, BinOp::Sub)
+                    && y == rhs
+                {
+                    return x;
                 }
-                if let Some((x, y)) = self.pair(rhs, BinOp::Sub) {
-                    if y == lhs {
-                        return x;
-                    }
+                if let Some((x, y)) = self.pair(rhs, BinOp::Sub)
+                    && y == lhs
+                {
+                    return x;
                 }
             }
             BinOp::Sub => {
@@ -563,15 +563,15 @@ impl ConstructorTree {
                 if rhs == self.minus_one {
                     return self.neg(lhs);
                 }
-                if let Some((x, y)) = self.pair(lhs, BinOp::Div) {
-                    if y == rhs {
-                        return x;
-                    }
+                if let Some((x, y)) = self.pair(lhs, BinOp::Div)
+                    && y == rhs
+                {
+                    return x;
                 }
-                if let Some((x, y)) = self.pair(rhs, BinOp::Div) {
-                    if y == lhs {
-                        return x;
-                    }
+                if let Some((x, y)) = self.pair(rhs, BinOp::Div)
+                    && y == lhs
+                {
+                    return x;
                 }
             }
             BinOp::Div => {
@@ -588,10 +588,10 @@ impl ConstructorTree {
                 if lhs == rhs {
                     return self.one;
                 }
-                if let Some((x, y)) = self.pair(rhs, BinOp::Div) {
-                    if x == self.one {
-                        return self.binary(BinOp::Mul, lhs, y);
-                    }
+                if let Some((x, y)) = self.pair(rhs, BinOp::Div)
+                    && x == self.one
+                {
+                    return self.binary(BinOp::Mul, lhs, y);
                 }
                 if let Some((x, y)) = self.pair(lhs, BinOp::Mul) {
                     if y == rhs {

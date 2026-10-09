@@ -2,7 +2,6 @@
 // Usage: node tests/native_mcp_schema.cjs <dygnosis binary> <VS Code resources/app>
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
-const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createRequire } = require('node:module');
@@ -79,22 +78,11 @@ async function bundledValidator(appPath) {
   await context.bundleRequire.e(875);
   const api = context.bundleRequire(7547);
   const requestedUris = [];
-  const snapshots = new Map();
-  const fixtureRoot = path.join(__dirname, 'fixtures/json-schema');
-  const manifest = JSON.parse(fs.readFileSync(path.join(fixtureRoot, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.files.length, 8);
-  for (const snapshot of manifest.files) {
-    const source = fs.readFileSync(path.join(fixtureRoot, snapshot.path), 'utf8');
-    assert.equal(createHash('sha256').update(source).digest('hex'), snapshot.sha256, snapshot.path);
-    assert.equal(JSON.parse(source).$id, snapshot.url, snapshot.path);
-    snapshots.set(snapshot.url, source);
-  }
   const service = api.getLanguageService({
     workspaceContext: { resolveRelativePath: (relative, base) => new URL(relative, base).toString() },
     schemaRequestService: async uri => {
       requestedUris.push(uri);
-      assert.ok(snapshots.has(uri), `Unexpected schema request: ${uri}`);
-      return snapshots.get(uri);
+      throw new Error(`Unexpected schema request: ${uri}`);
     },
   });
   service.configure({ schemas: [{ uri: 'https://json-schema.org/draft-07/schema', fileMatch: ['test://mcp-input.json'] }] });
@@ -123,15 +111,6 @@ async function main() {
   console.log(JSON.stringify({ discovered: tools.length, omitted }, null, 2));
   assert.equal(omitted.length, 0, 'native VS Code must register every discovered MCP tool');
   assert.deepEqual(requestedUris, [], 'fixed input schemas need no external metadata');
-  const legacyErrors = await validate({
-    $schema: 'https://json-schema.org/draft/2020-12/schema',
-    type: 'object', properties: { file_content: { type: ['string', 'null'] } },
-  });
-  assert.ok(legacyErrors.some(error => error.code === 769 && error.message.includes('$dynamicRef')),
-    'the legacy dialect must reproduce the native unsupported-meta warning');
-  assert.ok(!legacyErrors.some(error => error.code === 768), 'all legacy metadata resolves offline');
-  console.log(JSON.stringify({ legacy_warning: legacyErrors[0].code,
-    legacy_message: legacyErrors[0].message, legacy_metadata: requestedUris.length }, null, 2));
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

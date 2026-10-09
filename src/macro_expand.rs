@@ -1226,10 +1226,10 @@ pub(crate) fn scan_macro_tokens(src: &str) -> Vec<Token> {
     let mut bol = true;
     let mut text_start: Option<usize> = None;
     let flush = |tokens: &mut Vec<Token>, text_start: &mut Option<usize>, i: usize| {
-        if let Some(start) = text_start.take() {
-            if i > start {
-                tokens.push(Token::new(TokenKind::Ident, Span::new(start, i)));
-            }
+        if let Some(start) = text_start.take()
+            && i > start
+        {
+            tokens.push(Token::new(TokenKind::Ident, Span::new(start, i)));
         }
     };
     while i < src.len() {
@@ -2366,10 +2366,11 @@ fn emit(
 }
 
 fn record_source_emit(state: &mut ExpandState<'_, '_>, tok: &Token) -> Result<(), MacroEvalError> {
-    if !state.stopped && tok.kind != TokenKind::Eof {
-        if let Some(visitor) = state.file_visitor.as_deref_mut() {
-            visitor.emit_text(tok.text(state.src), state.budget)?;
-        }
+    if !state.stopped
+        && tok.kind != TokenKind::Eof
+        && let Some(visitor) = state.file_visitor.as_deref_mut()
+    {
+        visitor.emit_text(tok.text(state.src), state.budget)?;
     }
     if state.source.is_none() {
         return Ok(());
@@ -2697,10 +2698,10 @@ fn unroll_for(
         state.budget.exec_depth += 1;
         let (expanded, expanded_traces) = expand_seq(state, body);
         state.budget.exec_depth -= 1;
-        if !state.stopped {
-            if let Some(recorder) = state.source.as_deref_mut() {
-                recorder.finish_loop_body(body_text.end, true);
-            }
+        if !state.stopped
+            && let Some(recorder) = state.source.as_deref_mut()
+        {
+            recorder.finish_loop_body(body_text.end, true);
         }
         for (tok, trace) in expanded.into_iter().zip(expanded_traces) {
             if tok.kind != TokenKind::Eof {
@@ -3698,11 +3699,11 @@ fn push_macro_message(
         note_eval_failure(state, span, MacroEvalError::Limit("message size"), "");
         return;
     }
-    if let Some(visitor) = state.file_visitor.as_deref_mut() {
-        if let Err(error) = visitor.message(kind, &message, span, state.budget) {
-            note_eval_failure(state, span, error, "");
-            return;
-        }
+    if let Some(visitor) = state.file_visitor.as_deref_mut()
+        && let Err(error) = visitor.message(kind, &message, span, state.budget)
+    {
+        note_eval_failure(state, span, error, "");
+        return;
     }
     state.message_bytes += message.len();
     state.messages.push(MacroMessage {
@@ -3823,11 +3824,11 @@ fn define_rhs_expression(text: &str) -> &str {
         return rest.trim();
     };
     let rest = rest[n..].trim_start();
-    if let Some(after_open) = rest.strip_prefix('(') {
-        if let Some(close) = after_open.find(')') {
-            let after = after_open[close + 1..].trim_start();
-            return after.strip_prefix('=').map(str::trim).unwrap_or(after);
-        }
+    if let Some(after_open) = rest.strip_prefix('(')
+        && let Some(close) = after_open.find(')')
+    {
+        let after = after_open[close + 1..].trim_start();
+        return after.strip_prefix('=').map(str::trim).unwrap_or(after);
     }
     rest.strip_prefix('=').map(str::trim).unwrap_or(rest.trim())
 }

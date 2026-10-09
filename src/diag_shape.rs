@@ -116,24 +116,24 @@ fn check_e051(model: &Model) -> Vec<Diagnostic> {
         if text.starts_with('#') {
             continue;
         }
-        if let Some((lhs_val, rhs_val)) = match_number_eq(text) {
-            if lhs_val != rhs_val {
-                diagnostics.push(Diagnostic {
-                    span: eq.span,
-                    severity: Severity::Warning,
-                    code: "W055".to_string(),
-                    message: format!(
-                        "Contradictory equation '{text}' (always false). Fix: remove this equation."
-                    ),
-                    fix: None,
-                    related: Vec::new(),
-                    tags: Vec::new(),
-                    model_dimension: None,
-                    display_keyword: None,
-                    writing: None,
-                });
-                continue;
-            }
+        if let Some((lhs_val, rhs_val)) = match_number_eq(text)
+            && lhs_val != rhs_val
+        {
+            diagnostics.push(Diagnostic {
+                span: eq.span,
+                severity: Severity::Warning,
+                code: "W055".to_string(),
+                message: format!(
+                    "Contradictory equation '{text}' (always false). Fix: remove this equation."
+                ),
+                fix: None,
+                related: Vec::new(),
+                tags: Vec::new(),
+                model_dimension: None,
+                display_keyword: None,
+                writing: None,
+            });
+            continue;
         }
         if let Some((lhs, rhs)) = text.split_once('=') {
             let lhs_norm: String = lhs.chars().filter(|c| !c.is_whitespace()).collect();
@@ -211,9 +211,10 @@ fn check_e052(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
             known.insert(name.clone(), v);
         }
         if let Some(v) = value {
-            if let Some(prev) = seen.get(&a.name) {
-                if let Some((_, first_line, _)) = prev.iter().find(|(pv, _, _)| *pv == v) {
-                    diagnostics.push(Diagnostic {
+            if let Some(prev) = seen.get(&a.name)
+                && let Some((_, first_line, _)) = prev.iter().find(|(pv, _, _)| *pv == v)
+            {
+                diagnostics.push(Diagnostic {
                         span: a.span,
                         severity: Severity::Warning,
                         code: "W056".to_string(),
@@ -228,7 +229,6 @@ fn check_e052(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
                         display_keyword: None,
                         writing: None,
                     });
-                }
             }
             let line = index.position(&model.source, a.span.start).line + 1;
             seen.entry(a.name)

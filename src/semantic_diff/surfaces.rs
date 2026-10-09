@@ -456,10 +456,8 @@ fn history_facts(
             ),
             field("expression", "Expression", value, ChangeFacet::Expression).expression(),
         ];
-        if !available {
-            if let Some(field) = fact.fields.last_mut() {
-                field.comparison_available = false;
-            }
+        if !available && let Some(field) = fact.fields.last_mut() {
+            field.comparison_available = false;
         }
         if parent.is_some() {
             fact.claims.push(entry.active_tokens.clone());
@@ -484,10 +482,9 @@ fn primary_context(before: &Model, after: &Model, diff: &mut ModelDiff, claims: 
         for assignment in &model.param_assignments {
             if last_assignment(model, model.name(assignment.name))
                 .is_some_and(|last| std::ptr::eq(last, assignment))
+                && let Some(parent) = parent_at_order(model, assignment.active_tokens.start)
             {
-                if let Some(parent) = parent_at_order(model, assignment.active_tokens.start) {
-                    claims.claim(side, parent, assignment.active_tokens.clone());
-                }
+                claims.claim(side, parent, assignment.active_tokens.clone());
             }
         }
         for written in &model.written_equations {
@@ -523,15 +520,14 @@ fn primary_context(before: &Model, after: &Model, diff: &mut ModelDiff, claims: 
                 Side::Before => &mut row.before,
                 Side::After => &mut row.after,
             };
-            if let Some(row_side) = row_side {
-                if let Some(id) = row_side
+            if let Some(row_side) = row_side
+                && let Some(id) = row_side
                     .provenance
                     .as_ref()
                     .and_then(|provenance| provenance.statement_id)
-                {
-                    row_side.context =
-                        statement_side(model, id, &row_side.name, row_side.scope.clone()).context;
-                }
+            {
+                row_side.context =
+                    statement_side(model, id, &row_side.name, row_side.scope.clone()).context;
             }
         }
         for (index, change) in diff.shock_setup_changes.iter().enumerate() {

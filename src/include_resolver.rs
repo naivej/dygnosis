@@ -52,10 +52,10 @@ pub(crate) fn is_virtual_uri(uri_or_path: &str) -> bool {
 /// If none is found, the filesystem root is returned.
 pub fn find_workspace_root(start_path: &Path) -> PathBuf {
     let mut current = make_absolute(start_path);
-    if current.is_file() {
-        if let Some(parent) = current.parent() {
-            current = parent.to_path_buf();
-        }
+    if current.is_file()
+        && let Some(parent) = current.parent()
+    {
+        current = parent.to_path_buf();
     }
     loop {
         if current.join(".git").exists() {
@@ -333,12 +333,13 @@ fn percent_decode(s: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(hi), Some(lo)) = (from_hex(bytes[i + 1]), from_hex(bytes[i + 2])) {
-                out.push((hi << 4) | lo);
-                i += 3;
-                continue;
-            }
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (from_hex(bytes[i + 1]), from_hex(bytes[i + 2]))
+        {
+            out.push((hi << 4) | lo);
+            i += 3;
+            continue;
         }
         out.push(bytes[i]);
         i += 1;

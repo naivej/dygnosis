@@ -344,20 +344,22 @@ impl<'a> WrittenView<'a> {
             &written.written_kind
         };
         let mut details = vec![kind.to_string()];
-        if kind == "var" && self.final_types && self.authoritative {
-            if let Some(timing) = timing.get(self.model.name(declaration.name)) {
-                details.push(timing.class.label().to_string());
-            }
+        if kind == "var"
+            && self.final_types
+            && self.authoritative
+            && let Some(timing) = timing.get(self.model.name(declaration.name))
+        {
+            details.push(timing.class.label().to_string());
         }
-        if preferences.name_details.long_name {
-            if let Some(long) = &declaration.long_name {
-                details.push(long.clone());
-            }
+        if preferences.name_details.long_name
+            && let Some(long) = &declaration.long_name
+        {
+            details.push(long.clone());
         }
-        if preferences.name_details.tex {
-            if let Some(tex) = &declaration.tex_name {
-                details.push(format!("${tex}$"));
-            }
+        if preferences.name_details.tex
+            && let Some(tex) = &declaration.tex_name
+        {
+            details.push(format!("${tex}$"));
         }
         let icon = match kind {
             "parameters" => SymbolKind::NUMBER,
@@ -476,10 +478,11 @@ impl<'a> WrittenView<'a> {
                             });
                         item.copies += 1;
                         item.dimensions.insert(row.dimension.clone());
-                        if self.authoritative && preferences.outline.equation_numbers {
-                            if let Some(number) = row.number {
-                                item.numbers.insert(number);
-                            }
+                        if self.authoritative
+                            && preferences.outline.equation_numbers
+                            && let Some(number) = row.number
+                        {
+                            item.numbers.insert(number);
                         }
                         if row.local {
                             item.states.insert("model-local definition");

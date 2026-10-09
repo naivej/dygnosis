@@ -268,16 +268,16 @@ fn check_constraint_rows(model: &Model, out: &mut Vec<Diagnostic>) {
             }
             BindRoot::Ok => {}
         }
-        if let Some(relax) = c.relax.as_ref() {
-            if let Some(id) = relax.expr {
-                let kind = &model.exprs.get(id).kind;
-                if is_binary(kind) && !is_inequality(kind) {
-                    out.push(error(
-                        relax.span,
-                        "E181",
-                        "The 'relax' expression must be an inequality constraint.",
-                    ));
-                }
+        if let Some(relax) = c.relax.as_ref()
+            && let Some(id) = relax.expr
+        {
+            let kind = &model.exprs.get(id).kind;
+            if is_binary(kind) && !is_inequality(kind) {
+                out.push(error(
+                    relax.span,
+                    "E181",
+                    "The 'relax' expression must be an inequality constraint.",
+                ));
             }
         }
         let locals = model_locals(model);
@@ -609,14 +609,14 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
             out.push(d);
             check_mcp_form(model, eq, out);
         }
-        if let Some(comp) = eq.complementarity.as_ref() {
-            if comp.matched.is_none() {
-                out.push(error(
-                    comp.span,
-                    "E183",
-                    "Complementarity condition has an incorrect form",
-                ));
-            }
+        if let Some(comp) = eq.complementarity.as_ref()
+            && comp.matched.is_none()
+        {
+            out.push(error(
+                comp.span,
+                "E183",
+                "Complementarity condition has an incorrect form",
+            ));
         }
         if illegal_block {
             continue;
@@ -665,14 +665,14 @@ fn check_equation_tags(model: &Model, illegal_block: bool, out: &mut Vec<Diagnos
     // the heterogeneous owner's (02), so only the form check walks them here.
     for block in &model.heterogeneous_models {
         for eq in &block.equations {
-            if let Some(comp) = eq.complementarity.as_ref() {
-                if comp.matched.is_none() {
-                    out.push(error(
-                        comp.span,
-                        "E183",
-                        "Complementarity condition has an incorrect form",
-                    ));
-                }
+            if let Some(comp) = eq.complementarity.as_ref()
+                && comp.matched.is_none()
+            {
+                out.push(error(
+                    comp.span,
+                    "E183",
+                    "Complementarity condition has an incorrect form",
+                ));
             }
             if eq.tag_map.contains_key("mcp") && eq.complementarity.is_some() {
                 out.push(error(

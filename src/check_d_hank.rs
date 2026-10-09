@@ -213,15 +213,15 @@ fn unknown_and_repeated_dimensions(model: &Model, out: &mut Vec<Diagnostic>) {
         .chain(&model.exogenous)
         .chain(&model.parameters)
     {
-        if let Some((name, span)) = decl.heterogeneity {
-            if !known.contains(&name) {
-                out.push(error(
-                    span,
-                    "E459",
-                    format!("Unknown heterogeneity dimension: {}", model.name(name)),
-                ));
-                return;
-            }
+        if let Some((name, span)) = decl.heterogeneity
+            && !known.contains(&name)
+        {
+            out.push(error(
+                span,
+                "E459",
+                format!("Unknown heterogeneity dimension: {}", model.name(name)),
+            ));
+            return;
         }
     }
     for block in &model.heterogeneous_models {
@@ -246,15 +246,15 @@ fn unknown_and_repeated_dimensions(model: &Model, out: &mut Vec<Diagnostic>) {
             // dimension sentence when the row name is also unknown.
             continue;
         }
-        if let Some((name, span)) = shock.options.heterogeneity {
-            if !known.contains(&name) {
-                out.push(error(
-                    span,
-                    "E459",
-                    format!("Unknown heterogeneity dimension: {}", model.name(name)),
-                ));
-                return;
-            }
+        if let Some((name, span)) = shock.options.heterogeneity
+            && !known.contains(&name)
+        {
+            out.push(error(
+                span,
+                "E459",
+                format!("Unknown heterogeneity dimension: {}", model.name(name)),
+            ));
+            return;
         }
     }
 }
@@ -283,17 +283,17 @@ fn heterogeneous_shock_row_unknown(model: &Model, block: &ShockBlock) -> bool {
 }
 
 fn forbidden_symbols(model: &Model, out: &mut Vec<Diagnostic>) {
-    if let Some(expr) = model.planner_objective_expr {
-        if let Some((span, name)) = first_het_ident(model, expr) {
-            out.push(error(
+    if let Some(expr) = model.planner_objective_expr
+        && let Some((span, name)) = first_het_ident(model, expr)
+    {
+        out.push(error(
                 span,
                 "E461",
                 format!(
                     "Symbol '{name}' cannot be used in 'planner_objective', because it is heterogeneous."
                 ),
             ));
-            return;
-        }
+        return;
     }
     for constraint in &model.occbin_constraints {
         for piece in [
@@ -305,32 +305,32 @@ fn forbidden_symbols(model: &Model, out: &mut Vec<Diagnostic>) {
         .into_iter()
         .flatten()
         {
-            if let Some(expr) = piece.expr {
-                if let Some((span, name)) = first_het_ident(model, expr) {
-                    out.push(error(
+            if let Some(expr) = piece.expr
+                && let Some((span, name)) = first_het_ident(model, expr)
+            {
+                out.push(error(
                         span,
                         "E462",
                         format!(
                             "Symbol '{name}' cannot be used in 'occbin_constraints', because it is heterogeneous."
                         ),
                     ));
-                    return;
-                }
+                return;
             }
         }
     }
     for assignment in &model.epilogue {
-        if let Some(expr) = assignment.expr {
-            if let Some((span, name)) = first_het_ident(model, expr) {
-                out.push(error(
+        if let Some(expr) = assignment.expr
+            && let Some((span, name)) = first_het_ident(model, expr)
+        {
+            out.push(error(
                     span,
                     "E464",
                     format!(
                         "Symbol '{name}' cannot be used in epilogue block, because it is heterogeneous."
                     ),
                 ));
-                return;
-            }
+            return;
         }
     }
     let outside = outside_exprs(model);
@@ -397,10 +397,10 @@ fn first_sum_call(model: &Model, eq: &Equation) -> Option<Span> {
     if let Some(expr) = eq.lhs_expr {
         walk_sum_span(model, expr, &mut found);
     }
-    if found.is_none() {
-        if let Some(expr) = eq.rhs_expr {
-            walk_sum_span(model, expr, &mut found);
-        }
+    if found.is_none()
+        && let Some(expr) = eq.rhs_expr
+    {
+        walk_sum_span(model, expr, &mut found);
     }
     found
 }
@@ -441,10 +441,10 @@ fn aggregate_sum(model: &Model, eq: &Equation) -> Option<Diagnostic> {
     if let Some(expr) = eq.lhs_expr {
         walk_aggregate_sum(model, expr, &mut found);
     }
-    if found.is_none() {
-        if let Some(expr) = eq.rhs_expr {
-            walk_aggregate_sum(model, expr, &mut found);
-        }
+    if found.is_none()
+        && let Some(expr) = eq.rhs_expr
+    {
+        walk_aggregate_sum(model, expr, &mut found);
     }
     found
 }

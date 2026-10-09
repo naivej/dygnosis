@@ -169,11 +169,10 @@ impl ComparisonInput {
             input.parameters.remove(&name);
             if let Some(statement) = model.statements.iter().find(|statement| {
                 matches!(statement.assignment, Some(AssignmentIndex::Parameter(i)) if i == index)
-            }) {
-                if let Some(source) = report.model_map.statements.get(statement.id) {
+            })
+                && let Some(source) = report.model_map.statements.get(statement.id) {
                     input.parameters.insert(name, target(format!("s{}", statement.id), source, None));
                 }
-            }
         }
         // The metadata comparison takes the first final declaration after this
         // same span ordering. Match its parse-order occurrence, never its name
@@ -293,10 +292,10 @@ impl ComparisonInput {
             return (*owner == parent && proof.parse_order.is_none_or(|given| given == *order))
                 .then_some(target);
         }
-        if let Some(order) = proof.parse_order {
-            if let Some((owner, declaration)) = self.declarations.get(&order) {
-                return (*owner == parent).then_some(declaration);
-            }
+        if let Some(order) = proof.parse_order
+            && let Some((owner, declaration)) = self.declarations.get(&order)
+        {
+            return (*owner == parent).then_some(declaration);
         }
         self.statements.get(&parent)
     }

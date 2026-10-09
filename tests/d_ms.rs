@@ -468,11 +468,6 @@ fn data_statement_carries_file_or_series_for_the_e227_gate() {
     assert!(with_series.data_statements[0].has_file_or_series());
 }
 
-#[test]
-fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(dygnosis::explain::known_codes().len(), 381);
-}
-
 /// Every one of the family's 42 official sentences, on its fire fixture, with
 /// their text character for character.
 #[test]

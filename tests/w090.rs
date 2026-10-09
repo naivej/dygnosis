@@ -89,12 +89,10 @@ fn assert_span(text: &str, d: &Diag, needle: &str) {
 }
 
 fn offending_name(d: &Diag) -> &str {
-    let rest = d
-        .message
+    d.message
         .split('\'')
         .nth(1)
-        .expect("quoted name in message");
-    rest
+        .expect("quoted name in message")
 }
 
 fn ident_offsets(hay: &str, name: &str) -> Vec<usize> {

@@ -37,12 +37,12 @@ impl<'a> Usage<'a> {
         );
         for (context, equations) in trees {
             for eq in equations {
-                if eq.is_local && model.model_local_action_attempted(eq) {
-                    if let (Some(lhs), Some(rhs)) = (eq.lhs_expr, eq.rhs_expr) {
-                        if let ExprKind::Ident { name, .. } = model.exprs.get(lhs).kind {
-                            locals.entry((context, name)).or_insert(rhs);
-                        }
-                    }
+                if eq.is_local
+                    && model.model_local_action_attempted(eq)
+                    && let (Some(lhs), Some(rhs)) = (eq.lhs_expr, eq.rhs_expr)
+                    && let ExprKind::Ident { name, .. } = model.exprs.get(lhs).kind
+                {
+                    locals.entry((context, name)).or_insert(rhs);
                 }
                 let mut pending: Vec<_> =
                     [eq.lhs_expr, eq.rhs_expr].into_iter().flatten().collect();

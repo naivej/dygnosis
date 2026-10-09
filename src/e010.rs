@@ -31,12 +31,11 @@ pub fn check_e010(model: &Model) -> Vec<Diagnostic> {
     if gap.expected_delta.is_some() {
         return vec![planner_e010(model, span, n_eq, n_endo)];
     }
-    if n_endo > n_eq {
-        if let Some(linked) =
+    if n_endo > n_eq
+        && let Some(linked) =
             link_unused_endo(model, span, n_eq, n_endo, &gap.unreferenced_endogenous)
-        {
-            return vec![linked];
-        }
+    {
+        return vec![linked];
     }
     vec![generic_e010(span, n_eq, n_endo)]
 }

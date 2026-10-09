@@ -8,7 +8,6 @@
 //! character for character (see `honesty.rs` for the run against the installed
 //! preprocessor).
 
-use dygnosis::explain::known_codes;
 use dygnosis::{analyze, parse, Diagnostic};
 
 fn fixture(rel: &str) -> String {
@@ -626,10 +625,4 @@ fn a_declared_name_of_the_right_type_is_quiet() {
         quiet(&got, "E239");
         quiet(&got, "E240");
     }
-}
-
-/// W212 is the added removal guidance. The registry includes it.
-#[test]
-fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(known_codes().len(), 381);
 }

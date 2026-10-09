@@ -105,13 +105,12 @@ fn direct_constant_denominator(model: &Model) -> Option<Diagnostic> {
     }
     let mut lhs_counts = HashMap::<Name, usize>::new();
     for eq in &model.equations {
-        if let Some(lhs) = eq.lhs_expr {
-            if let ExprKind::Ident {
+        if let Some(lhs) = eq.lhs_expr
+            && let ExprKind::Ident {
                 name, timing: 0, ..
             } = model.exprs.get(lhs).kind
-            {
-                *lhs_counts.entry(name).or_default() += 1;
-            }
+        {
+            *lhs_counts.entry(name).or_default() += 1;
         }
     }
     let mut constants = HashMap::<Name, f64>::new();
@@ -127,10 +126,9 @@ fn direct_constant_denominator(model: &Model) -> Option<Diagnostic> {
         };
         if lhs_counts.get(&name) == Some(&1)
             && model.endogenous.iter().any(|decl| decl.name == name)
+            && let Some(value) = finite_number_token(model, rhs)
         {
-            if let Some(value) = finite_number_token(model, rhs) {
-                constants.insert(name, value);
-            }
+            constants.insert(name, value);
         }
     }
     for (index, eq) in model.equations.iter().enumerate() {
@@ -253,19 +251,19 @@ fn bad_expectation(model: &Model, id: ExprId, equation_index: usize) -> Option<S
     let node = model.exprs.get(id);
     match &node.kind {
         ExprKind::Expectation { shift, arg } => {
-            if *shift == 0 {
-                if let Some((left, right)) = direct_nonvariable_argument(model, *arg) {
-                    let other_definition = model.equations.iter().enumerate().any(|(i, eq)| {
-                        i != equation_index
-                            && eq.lhs_expr.is_some_and(|lhs| {
-                                matches!(&model.exprs.get(lhs).kind,
+            if *shift == 0
+                && let Some((left, right)) = direct_nonvariable_argument(model, *arg)
+            {
+                let other_definition = model.equations.iter().enumerate().any(|(i, eq)| {
+                    i != equation_index
+                        && eq.lhs_expr.is_some_and(|lhs| {
+                            matches!(&model.exprs.get(lhs).kind,
                                     ExprKind::Ident { name, timing: 0, .. }
                                     if *name == left || *name == right)
-                            })
-                    });
-                    if !other_definition {
-                        return Some(node.span);
-                    }
+                        })
+                });
+                if !other_definition {
+                    return Some(node.span);
                 }
             }
             bad_expectation(model, *arg, equation_index)

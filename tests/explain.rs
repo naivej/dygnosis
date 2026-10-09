@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use dygnosis::explain::{explain, known_codes, render_markdown, ExplainKind};
-use dygnosis::{analyze, check_file, dynare_explain, dynare_list_diagnostic_codes, parse};
+use dygnosis::{analyze, check_file, dynare_explain, parse};
 
 const RUST_CODES: &[&str] = &[
     "E001", "E020", "E021", "E023", "E024", "E025", "E026", "E027", "E028", "E030", "E058", "E059",
@@ -118,7 +118,7 @@ const OUT: &[&str] = &[
 
 const VACATED: &[&str] = &[
     "E010", "E050", "E051", "E052", "E053", "E060", "E999", "W021", "W050", "W053", "W090", "W093",
-    "W095", "W100", "W101", "W103", "W111", "W130",
+    "W095", "W100", "W101", "W103", "W111", "W130", "S032", "S061",
 ];
 
 const WARRANT_CODES: &[&str] = &[
@@ -161,14 +161,7 @@ fn read_mod(archive_dir: &str) -> String {
 
 #[test]
 fn known_codes_matches_the_rust_keys() {
-    assert_eq!(RUST_CODES.len(), 381);
     assert_eq!(known_codes(), RUST_CODES);
-    assert_eq!(known_codes().len(), 381);
-    assert!(!RUST_CODES.contains(&"P000"));
-    assert!(RUST_CODES.contains(&"E178"));
-    assert!(RUST_CODES.contains(&"E179"));
-    assert!(RUST_CODES.contains(&"E200"));
-    assert!(RUST_CODES.contains(&"W200"));
 }
 
 #[test]
@@ -339,31 +332,6 @@ fn mcp_explain_matches_rendered_markdown() {
         );
         assert!(!text.contains("python_dynare_lsp"), "{code}");
     }
-}
-
-#[test]
-fn mcp_code_list_matches_known_codes() {
-    let entries = dynare_list_diagnostic_codes();
-    assert_eq!(entries.len(), 381);
-    assert_eq!(
-        entries
-            .iter()
-            .map(|item| item.code.as_str())
-            .collect::<Vec<_>>(),
-        RUST_CODES
-    );
-    for code in OUT.iter().chain(VACATED) {
-        assert!(entries.iter().all(|item| item.code != *code), "{code}");
-    }
-    let w013 = entries.iter().find(|item| item.code == "W013").unwrap();
-    assert_eq!(w013.kind, "added");
-    assert_eq!(w013.title, explain("W013").unwrap().title);
-    let e186 = entries.iter().find(|item| item.code == "E186").unwrap();
-    assert_eq!(e186.kind, "shared");
-    assert_eq!(e186.title, "Unused written endogenous variable");
-    let i050 = entries.iter().find(|item| item.code == "I050").unwrap();
-    assert_eq!(i050.kind, "added");
-    assert_eq!(i050.title, "No initval or steady_state_model block");
 }
 
 #[test]

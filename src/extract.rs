@@ -477,12 +477,12 @@ fn absorb(
                     .map(|dimension| model.name(dimension).to_string()),
                 text,
             ));
-            if let Some(definition) = local_use.definition {
-                if let Some(local_place) = local_place_for_definition(model, facts, definition) {
-                    closure.local_places.insert(local_place);
-                    if !seen.contains(&local_place) {
-                        pending.push(local_place);
-                    }
+            if let Some(definition) = local_use.definition
+                && let Some(local_place) = local_place_for_definition(model, facts, definition)
+            {
+                closure.local_places.insert(local_place);
+                if !seen.contains(&local_place) {
+                    pending.push(local_place);
                 }
             }
         } else {
@@ -575,10 +575,10 @@ fn push_expr_symbols(
             .find(|binding| model.name(binding.name) == text)
         {
             closure.locals.insert((None, text));
-            if let Some(definition) = binding.definition {
-                if let Some(place) = local_place_for_definition(model, facts, definition) {
-                    closure.local_places.insert(place);
-                }
+            if let Some(definition) = binding.definition
+                && let Some(place) = local_place_for_definition(model, facts, definition)
+            {
+                closure.local_places.insert(place);
             }
         } else {
             closure.symbols.insert(text);
@@ -777,13 +777,13 @@ fn for_bodies(model: &Model) -> Vec<Span> {
     for directive in &model.macro_directives {
         if directive.kind == "for" {
             stack.push(directive.span.end);
-        } else if directive.kind == "endfor" {
-            if let Some(start) = stack.pop() {
-                bodies.push(Span {
-                    start,
-                    end: directive.span.start,
-                });
-            }
+        } else if directive.kind == "endfor"
+            && let Some(start) = stack.pop()
+        {
+            bodies.push(Span {
+                start,
+                end: directive.span.start,
+            });
         }
     }
     bodies
@@ -1168,10 +1168,10 @@ fn earliest_model_start(model: &Model, retained: &[EqRef]) -> Option<u32> {
     let mut consider = |at: u32| {
         start = Some(start.map_or(at, |cur: u32| cur.min(at)));
     };
-    if retained.iter().any(|place| place.block.is_none()) {
-        if let Some(block) = model.model_block {
-            consider(block.start);
-        }
+    if retained.iter().any(|place| place.block.is_none())
+        && let Some(block) = model.model_block
+    {
+        consider(block.start);
     }
     for place in retained {
         if let Some(block) = place.block {

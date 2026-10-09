@@ -58,10 +58,10 @@ fn check_w060(model: &Model) -> Vec<Diagnostic> {
                 specified.clear();
             }
             for stmt in &block.stochastic {
-                if let ShockKind::Var(name) | ShockKind::Stderr(name) = &stmt.kind {
-                    if exo.contains(name) {
-                        specified.insert(*name);
-                    }
+                if let ShockKind::Var(name) | ShockKind::Stderr(name) = &stmt.kind
+                    && exo.contains(name)
+                {
+                    specified.insert(*name);
                 }
             }
         }
@@ -93,15 +93,17 @@ fn check_w060(model: &Model) -> Vec<Diagnostic> {
                     ),
                 ));
             }
-        } else if let Some((irf, span)) = request.irf {
-            if irf > 0 && specified.is_empty() && estimated.is_empty() {
-                out.push(Diagnostic::new(
-                    nonempty(span),
-                    Severity::Warning,
-                    "W060",
-                    "stoch_simul requests IRFs, but no stochastic shock size is specified.",
-                ));
-            }
+        } else if let Some((irf, span)) = request.irf
+            && irf > 0
+            && specified.is_empty()
+            && estimated.is_empty()
+        {
+            out.push(Diagnostic::new(
+                nonempty(span),
+                Severity::Warning,
+                "W060",
+                "stoch_simul requests IRFs, but no stochastic shock size is specified.",
+            ));
         }
     }
     out
@@ -165,10 +167,10 @@ fn check_shock_stmts(model: &Model, mut parse_orders: Option<&mut Vec<usize>>) -
                     seen.entry(key).or_insert(stmt.span);
                     if let (ShockBlockKind::Regular, ShockKind::Var(_), Some(v)) =
                         (block.kind, &stmt.kind, stmt.rhs)
+                        && v < 0.0
                     {
-                        if v < 0.0 {
-                            let n = model.name(*name);
-                            diagnostics.push(Diagnostic::new(
+                        let n = model.name(*name);
+                        diagnostics.push(Diagnostic::new(
                             span,
                             Severity::Warning,
                             "W112",
@@ -177,7 +179,6 @@ fn check_shock_stmts(model: &Model, mut parse_orders: Option<&mut Vec<usize>>) -
                                 python_g(v)
                             ),
                         ));
-                        }
                     }
                 }
                 ShockKind::Cov(names) => {
@@ -255,11 +256,12 @@ fn check_shock_stmts(model: &Model, mut parse_orders: Option<&mut Vec<usize>>) -
                     ).with_related(RelatedDiagnostic::new(first_span, "Earlier covariance or correlation entry")));
                     }
                     seen.entry(key).or_insert(stmt.span);
-                    if let (ShockBlockKind::Regular, Some(v)) = (block.kind, stmt.rhs) {
-                        if v.abs() > 1.0 {
-                            let first = model.name(*a);
-                            let second = model.name(*b);
-                            diagnostics.push(Diagnostic::new(
+                    if let (ShockBlockKind::Regular, Some(v)) = (block.kind, stmt.rhs)
+                        && v.abs() > 1.0
+                    {
+                        let first = model.name(*a);
+                        let second = model.name(*b);
+                        diagnostics.push(Diagnostic::new(
                             span,
                             Severity::Warning,
                             "W110",
@@ -268,7 +270,6 @@ fn check_shock_stmts(model: &Model, mut parse_orders: Option<&mut Vec<usize>>) -
                                 python_g(v)
                             ),
                         ));
-                        }
                     }
                 }
             }

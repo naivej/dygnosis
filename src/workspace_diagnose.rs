@@ -1566,10 +1566,10 @@ end;
             slash_key(&a),
             path_arg(&b),
         ];
-        if let Ok(cwd) = std::env::current_dir() {
-            if let Ok(rel) = a.strip_prefix(&cwd) {
-                paths.push(rel.to_string_lossy().into_owned());
-            }
+        if let Ok(cwd) = std::env::current_dir()
+            && let Ok(rel) = a.strip_prefix(&cwd)
+        {
+            paths.push(rel.to_string_lossy().into_owned());
         }
         let body = dynare_workspace_diagnose(None, None, Some(&paths)).expect("dedup");
         assert_summary(&body);

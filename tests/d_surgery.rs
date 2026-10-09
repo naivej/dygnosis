@@ -363,8 +363,3 @@ fn refused_tag_list_does_not_remove_an_equation() {
     assert_eq!(model.equations.len(), 3);
     assert!(model.equation_surgery[0].removed.is_empty());
 }
-
-#[test]
-fn registry_known_codes_include_shock_diagnostics() {
-    assert_eq!(dygnosis::explain::known_codes().len(), 381);
-}

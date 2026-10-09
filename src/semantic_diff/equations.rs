@@ -327,13 +327,13 @@ fn populate_condition_rows(old: &Catalog<'_>, new: &Catalog<'_>, diff: &mut Mode
         }
     }
     for (body, candidates) in &bodies {
-        if body_counts[body] == [1, 1] {
-            if let ([before], [after]) = (&candidates[0][..], &candidates[1][..]) {
-                if condition_key(&old[before]) != condition_key(&new[after]) {
-                    push_condition_row(Some(&old[before]), Some(&new[after]), false, diff);
-                }
-                continue;
+        if body_counts[body] == [1, 1]
+            && let ([before], [after]) = (&candidates[0][..], &candidates[1][..])
+        {
+            if condition_key(&old[before]) != condition_key(&new[after]) {
+                push_condition_row(Some(&old[before]), Some(&new[after]), false, diff);
             }
+            continue;
         }
         let mut unchanged: BTreeMap<ConditionKey, VecDeque<&EquationKey>> = BTreeMap::new();
         for after in &candidates[1] {

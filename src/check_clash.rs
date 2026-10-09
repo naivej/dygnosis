@@ -50,10 +50,10 @@ pub fn check_clash(model: &Model) -> Vec<Diagnostic> {
         }
     }
 
-    if !model.occbin_constraints_blocks.is_empty() {
-        if let Some(span) = e179_span(model) {
-            push(&mut out, span, "E179", E179_MSG);
-        }
+    if !model.occbin_constraints_blocks.is_empty()
+        && let Some(span) = e179_span(model)
+    {
+        push(&mut out, span, "E179", E179_MSG);
     }
 
     if model.shocks_surprise && model.occbin_constraints_blocks.is_empty() {
@@ -64,13 +64,12 @@ pub fn check_clash(model: &Model) -> Vec<Diagnostic> {
         push(&mut out, span, "E178", E178_MSG);
     }
 
-    if let Some(span) = model.shock_paths_span {
-        if model.shocks_block.is_some()
+    if let Some(span) = model.shock_paths_span
+        && (model.shocks_block.is_some()
             || model.endval_block.is_some()
-            || model.perfect_foresight_controlled_paths_span.is_some()
-        {
-            push(&mut out, span, "E113", E113_MSG);
-        }
+            || model.perfect_foresight_controlled_paths_span.is_some())
+    {
+        push(&mut out, span, "E113", E113_MSG);
     }
 
     let learnt_gate = model.perfect_foresight_setup_span.is_some()
@@ -127,10 +126,10 @@ pub fn check_clash(model: &Model) -> Vec<Diagnostic> {
         }
     }
 
-    if model.dsge_var_estimated.is_some() || model.dsge_var_calibrated.is_some() {
-        if let Some(span) = dsge_prior_weight_decl(model) {
-            push(&mut out, span, "E219", E219_MSG);
-        }
+    if (model.dsge_var_estimated.is_some() || model.dsge_var_calibrated.is_some())
+        && let Some(span) = dsge_prior_weight_decl(model)
+    {
+        push(&mut out, span, "E219", E219_MSG);
     }
 
     if is_dsge_var(model) {
@@ -234,10 +233,10 @@ fn check_default_eq_tag(model: &Model) -> Vec<Diagnostic> {
         if eq.is_local {
             continue;
         }
-        if let Some(n) = eq.tag_map.get("name") {
-            if !n.is_empty() {
-                used.insert(n.clone());
-            }
+        if let Some(n) = eq.tag_map.get("name")
+            && !n.is_empty()
+        {
+            used.insert(n.clone());
         }
     }
     let mut out = Vec::new();

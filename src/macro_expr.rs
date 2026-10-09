@@ -3761,14 +3761,14 @@ impl<'a> Lexer<'a> {
     fn parse_bp_limited(&mut self, min: u8) -> Result<Expr, MacroEvalError> {
         let mut left = self.parse_prefix()?;
         loop {
-            if min <= 60 {
-                if let Tok::Word(":", _) = &self.peek {
-                    if 60 < min {
-                        break;
-                    }
-                    left = parse_colon(self, left)?;
-                    continue;
+            if min <= 60
+                && let Tok::Word(":", _) = &self.peek
+            {
+                if 60 < min {
+                    break;
                 }
+                left = parse_colon(self, left)?;
+                continue;
             }
             let Some((op, lbp, nonassoc)) = infix_binding(&self.peek) else {
                 break;

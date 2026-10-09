@@ -515,10 +515,10 @@ fn if_truth(argument: Option<&str>, defines: &HashMap<String, bool>) -> bool {
     if is_false_literal(raw) {
         return false;
     }
-    if let Some(ident) = leading_ident(raw) {
-        if raw[ident.len()..].trim().is_empty() {
-            return defines.get(ident).copied().unwrap_or(false);
-        }
+    if let Some(ident) = leading_ident(raw)
+        && raw[ident.len()..].trim().is_empty()
+    {
+        return defines.get(ident).copied().unwrap_or(false);
     }
     if let Ok(n) = raw.parse::<i64>() {
         return n != 0;

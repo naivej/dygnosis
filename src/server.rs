@@ -480,22 +480,22 @@ impl Inner {
             .collect();
         publish.sort_by(|a, b| a.as_str().cmp(b.as_str()));
         publish.dedup();
-        if let Some(first) = first {
-            if let Some(at) = publish.iter().position(|uri| uri == first) {
-                let first = publish.remove(at);
-                let key = identity(&first);
-                let mut aliases: Vec<_> = publish
-                    .iter()
-                    .filter(|uri| !routed.contains_key(*uri) && identity(uri) == key)
-                    .cloned()
-                    .collect();
-                publish.retain(|uri| !aliases.contains(uri));
-                // Clear a superseded URI before its native-equivalent current
-                // report, including clients whose collections ignore case.
-                aliases.push(first);
-                aliases.append(&mut publish);
-                publish = aliases;
-            }
+        if let Some(first) = first
+            && let Some(at) = publish.iter().position(|uri| uri == first)
+        {
+            let first = publish.remove(at);
+            let key = identity(&first);
+            let mut aliases: Vec<_> = publish
+                .iter()
+                .filter(|uri| !routed.contains_key(*uri) && identity(uri) == key)
+                .cloned()
+                .collect();
+            publish.retain(|uri| !aliases.contains(uri));
+            // Clear a superseded URI before its native-equivalent current
+            // report, including clients whose collections ignore case.
+            aliases.push(first);
+            aliases.append(&mut publish);
+            publish = aliases;
         }
         let mut open_versions = HashMap::new();
         for (uri, doc) in &self.docs {
@@ -668,25 +668,24 @@ impl Backend {
         let byte = index.offset_utf16(&text, span_pos(pos.position));
         let (word, span) = ident_at(&text, byte)?;
         let range = Some(span_range(&index, &text, span));
-        if let Some(cmd) = option_command_at(&text, byte) {
-            if let Some((name, command_doc)) = command_options(&cmd)
+        if let Some(cmd) = option_command_at(&text, byte)
+            && let Some((name, command_doc)) = command_options(&cmd)
                 .iter()
                 .find(|(name, _)| name.eq_ignore_ascii_case(&word))
-            {
-                let mut md = format!("**`{cmd}` option**: `{word}`");
-                let description = shocks_overwrite_doc(&text, byte, &cmd, name, command_doc);
-                if !description.is_empty() {
-                    md.push_str("\n\n");
-                    md.push_str(description);
-                }
-                return Some(markdown_hover(md, range));
+        {
+            let mut md = format!("**`{cmd}` option**: `{word}`");
+            let description = shocks_overwrite_doc(&text, byte, &cmd, name, command_doc);
+            if !description.is_empty() {
+                md.push_str("\n\n");
+                md.push_str(description);
             }
+            return Some(markdown_hover(md, range));
         }
-        if word.eq_ignore_ascii_case("heterogeneity") {
-            if let Some(head) = heterogeneity_declaration_head(&text, byte) {
-                let md = format!("**`{head}` option**: `heterogeneity`\n\n{HETEROGENEITY_OPTION}");
-                return Some(markdown_hover(md, range));
-            }
+        if word.eq_ignore_ascii_case("heterogeneity")
+            && let Some(head) = heterogeneity_declaration_head(&text, byte)
+        {
+            let md = format!("**`{head}` option**: `heterogeneity`\n\n{HETEROGENEITY_OPTION}");
+            return Some(markdown_hover(md, range));
         }
         if let Some(help) = family_help(&word) {
             return Some(markdown_hover(format!("**`{word}`**\n\n{help}"), range));
@@ -1597,10 +1596,10 @@ impl Backend {
             }
             let name = tok.text(&text);
             let start = index.position_utf16(&text, tok.span.start);
-            if let Some(range) = range {
-                if !pos_in_range_half_open(Position::new(start.line, start.character), range) {
-                    continue;
-                }
+            if let Some(range) = range
+                && !pos_in_range_half_open(Position::new(start.line, start.character), range)
+            {
+                continue;
             }
             let role = sites.first()?.0.role(name, tok.span);
             if !sites
@@ -1622,20 +1621,20 @@ impl Backend {
                     if sites.is_declaration(tok.span) {
                         mods |= mapping.declaration;
                     }
-                    if role == NameRole::Endogenous {
-                        if let Some(info) = timing.get(name) {
-                            match info.class {
-                                TimingClass::ForwardLooking | TimingClass::Mixed => {
-                                    mods |= mapping.forward
-                                }
-                                _ => {}
+                    if role == NameRole::Endogenous
+                        && let Some(info) = timing.get(name)
+                    {
+                        match info.class {
+                            TimingClass::ForwardLooking | TimingClass::Mixed => {
+                                mods |= mapping.forward
                             }
-                            match info.class {
-                                TimingClass::Predetermined | TimingClass::Mixed => {
-                                    mods |= mapping.predetermined
-                                }
-                                _ => {}
+                            _ => {}
+                        }
+                        match info.class {
+                            TimingClass::Predetermined | TimingClass::Mixed => {
+                                mods |= mapping.predetermined
                             }
+                            _ => {}
                         }
                     }
                     mods
@@ -2278,16 +2277,16 @@ impl Backend {
         let index = LineIndex::new(&doc.text);
         let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
         let mut items = Vec::new();
-        if let Some((word, _)) = ident_at(&doc.text, byte) {
-            if find_decl(model, &word).is_some() {
-                items.push(ch_variable_item(
-                    model,
-                    &index,
-                    &doc.text,
-                    &pos.text_document.uri,
-                    &word,
-                ));
-            }
+        if let Some((word, _)) = ident_at(&doc.text, byte)
+            && find_decl(model, &word).is_some()
+        {
+            items.push(ch_variable_item(
+                model,
+                &index,
+                &doc.text,
+                &pos.text_document.uri,
+                &word,
+            ));
         }
         if let Some(eq) = equation_at(model, &index, &doc.text, pos.position) {
             items.push(ch_equation_item(
@@ -3386,10 +3385,10 @@ fn lsp_macro_messages(
                 let index = LineIndex::new(source);
                 row["range"] = serde_json::json!(span_range(&index, source, message.span));
             }
-            if let Some(file) = &message.file {
-                if let Some(uri) = file_url_from_path_key(file) {
-                    row["uri"] = serde_json::json!(uri);
-                }
+            if let Some(file) = &message.file
+                && let Some(uri) = file_url_from_path_key(file)
+            {
+                row["uri"] = serde_json::json!(uri);
             }
             row
         })
@@ -3653,15 +3652,15 @@ fn append_name_metadata(
     else {
         return;
     };
-    if preferences.name_details.long_name {
-        if let Some(long) = &declaration.long_name {
-            parts.push(crate::server_names::literal(long));
-        }
+    if preferences.name_details.long_name
+        && let Some(long) = &declaration.long_name
+    {
+        parts.push(crate::server_names::literal(long));
     }
-    if preferences.name_details.tex {
-        if let Some(tex) = &declaration.tex_name {
-            parts.push(format!("TeX: {}", crate::server_names::code(tex)));
-        }
+    if preferences.name_details.tex
+        && let Some(tex) = &declaration.tex_name
+    {
+        parts.push(format!("TeX: {}", crate::server_names::code(tex)));
     }
 }
 
@@ -4315,10 +4314,10 @@ fn parse_compare_args(arguments: &[Value]) -> std::result::Result<(String, Strin
     } else {
         arguments
     };
-    if values.len() >= 2 {
-        if let (Some(a), Some(b)) = (values[0].as_str(), values[1].as_str()) {
-            return Ok((a.to_string(), b.to_string()));
-        }
+    if values.len() >= 2
+        && let (Some(a), Some(b)) = (values[0].as_str(), values[1].as_str())
+    {
+        return Ok((a.to_string(), b.to_string()));
     }
     if let Some(obj) = values.first().and_then(|v| v.as_object()) {
         let a = obj

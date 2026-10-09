@@ -50,16 +50,13 @@ fn claim_surgery_sources(model: &Model, side: Side, claims: &mut TokenClaims) {
         .iter()
         .flat_map(|operation| &operation.removed)
     {
-        if let Some(Some(written)) = written.get(&removed.equation.parse_order) {
-            if written.equation.active_tokens == removed.equation.active_tokens {
-                if let Some(statement) = model.statements.get(written.statement_id) {
-                    if statement.token_range.start <= written.token_range.start
-                        && written.token_range.end <= statement.token_range.end
-                    {
-                        claims.claim(side, written.statement_id, written.token_range.clone());
-                    }
-                }
-            }
+        if let Some(Some(written)) = written.get(&removed.equation.parse_order)
+            && written.equation.active_tokens == removed.equation.active_tokens
+            && let Some(statement) = model.statements.get(written.statement_id)
+            && statement.token_range.start <= written.token_range.start
+            && written.token_range.end <= statement.token_range.end
+        {
+            claims.claim(side, written.statement_id, written.token_range.clone());
         }
     }
 }
@@ -99,13 +96,13 @@ fn finalize_option_claims(model: &Model, side: Side, claims: &mut TokenClaims) {
         if end <= start + 1 || model.expanded_tokens.get(start..end).is_none() {
             continue;
         }
-        if let Some(id) = parent_at_order(model, start) {
-            if (start + 1..end - 1).all(|index| {
+        if let Some(id) = parent_at_order(model, start)
+            && (start + 1..end - 1).all(|index| {
                 model.expanded_tokens[index].kind == crate::lexer::TokenKind::Comma
                     || claims.contains(side, id, index)
-            }) {
-                claims.claim(side, id, start..end);
-            }
+            })
+        {
+            claims.claim(side, id, start..end);
         }
     }
 }
@@ -184,16 +181,15 @@ fn claim_opener(
 ) {
     use crate::lexer::TokenKind;
     for index in range.clone() {
-        if let Some(token) = model.expanded_tokens.get(index) {
-            if matches!(
+        if let Some(token) = model.expanded_tokens.get(index)
+            && (matches!(
                 token.kind,
                 TokenKind::LParen | TokenKind::RParen | TokenKind::Comma | TokenKind::Semi
             ) || words
                 .iter()
-                .any(|word| token.text(&model.source).eq_ignore_ascii_case(word))
-            {
-                fact.claims.push(index..index + 1);
-            }
+                .any(|word| token.text(&model.source).eq_ignore_ascii_case(word)))
+        {
+            fact.claims.push(index..index + 1);
         }
     }
 }

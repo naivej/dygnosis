@@ -65,24 +65,23 @@ pub fn parse_format_indent(value: &Value) -> Option<String> {
         if s.eq_ignore_ascii_case("tab") {
             return Some("\t".into());
         }
-        if s.chars().all(|c| c.is_ascii_digit()) {
-            if let Ok(n) = s.parse::<usize>() {
-                if (1..=8).contains(&n) {
-                    return Some(" ".repeat(n));
-                }
-            }
+        if s.chars().all(|c| c.is_ascii_digit())
+            && let Ok(n) = s.parse::<usize>()
+            && (1..=8).contains(&n)
+        {
+            return Some(" ".repeat(n));
         }
         return None;
     }
-    if let Some(n) = value.as_u64() {
-        if (1..=8).contains(&n) {
-            return Some(" ".repeat(n as usize));
-        }
+    if let Some(n) = value.as_u64()
+        && (1..=8).contains(&n)
+    {
+        return Some(" ".repeat(n as usize));
     }
-    if let Some(n) = value.as_i64() {
-        if (1..=8).contains(&n) {
-            return Some(" ".repeat(n as usize));
-        }
+    if let Some(n) = value.as_i64()
+        && (1..=8).contains(&n)
+    {
+        return Some(" ".repeat(n as usize));
     }
     None
 }
@@ -365,12 +364,12 @@ fn is_opener(structural: &str) -> bool {
     let mut s = structural.trim_start();
     let mut matched = false;
     for kw in BLOCK_OPENERS {
-        if let Some(rest) = strip_prefix_ci(s, kw) {
-            if word_boundary(rest) {
-                s = rest;
-                matched = true;
-                break;
-            }
+        if let Some(rest) = strip_prefix_ci(s, kw)
+            && word_boundary(rest)
+        {
+            s = rest;
+            matched = true;
+            break;
         }
     }
     if !matched {

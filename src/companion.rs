@@ -486,10 +486,10 @@ fn harvest_ident_helpers(
             continue;
         }
         let ident = &tokens[i];
-        if let Some(block) = model.model_block {
-            if span_contains(block, ident.span) {
-                continue;
-            }
+        if let Some(block) = model.model_block
+            && span_contains(block, ident.span)
+        {
+            continue;
         }
         if cmd_spans.iter().any(|s| span_contains(*s, ident.span)) {
             continue;

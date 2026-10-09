@@ -368,13 +368,13 @@ pub fn incomplete_reason_records(
 ) -> Vec<(Span, &'static str, String)> {
     // Missing includes suppress possibly downstream unknown names and I211,
     // as in workspace diagnostics. Independent proven macro Errors remain.
-    if let Some(records) = includes {
-        if !records.unresolved.is_empty() {
-            let mut reasons = incomplete_reason_records(model, None);
-            reasons.retain(|(_, code, _)| !matches!(*code, "E063" | "I211"));
-            reasons.extend(e061_reasons(records));
-            return reasons;
-        }
+    if let Some(records) = includes
+        && !records.unresolved.is_empty()
+    {
+        let mut reasons = incomplete_reason_records(model, None);
+        reasons.retain(|(_, code, _)| !matches!(*code, "E063" | "I211"));
+        reasons.extend(e061_reasons(records));
+        return reasons;
     }
     // Match analyze_positions: official macro Errors before I211.
     let e062 = crate::check_e060::check_e062(model);
