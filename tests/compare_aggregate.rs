@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use dygnosis::{compare_models, parse};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 fn fixture(name: &str) -> String {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -58,6 +58,81 @@ fn assert_list_shape(row: &Value) {
     assert_eq!(row["domain"], "aggregate");
     assert!(row["dimension"].is_null());
     assert!(row["tags"].is_object());
+}
+
+#[test]
+fn changing_one_regime_equation_with_a_repeated_name_is_a_paired_edit() {
+    let before = "var r; parameters rho; rho=.9; model; [name='policy',bind='ELB'] r=1; [name='policy',relax='ELB'] r=rho*r(-1); end;";
+    let after = before.replace("r=1", "r=0");
+    let diff = compare_models(&parse(before), &parse(&after)).to_json();
+    let changed = diff["changed_equations"].as_array().unwrap();
+    assert_eq!(changed.len(), 1, "one constant edit must stay paired");
+    assert_eq!(changed[0]["index_old"], 0);
+    assert_eq!(changed[0]["index_new"], 0);
+    assert_eq!(changed[0]["tags_old"]["bind"], "ELB");
+    for key in [
+        "added_equations",
+        "removed_equations",
+        "unmatched_same_name",
+    ] {
+        assert!(diff[key].as_array().unwrap().is_empty(), "{key}: {diff}");
+    }
+    let row = diff["semantic"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["family"] == "equations" && row["change"] == "changed")
+        .unwrap();
+    for (side, role, literal) in [("before", "removed", "1"), ("after", "added", "0")] {
+        let highlighted: String = row["expressions"][0][side]["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|run| run["role"] == role)
+            .map(|run| run["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(highlighted, literal);
+    }
+}
+
+#[test]
+fn regime_pairs_survive_reordering_far_rewrites_and_other_tag_edits() {
+    let before = "var r; model; [name='policy',bind='ELB',label='old'] r=1; [name='policy',relax='ELB'] r=2; end;";
+    let after = "var r; model; [name='policy',relax='ELB'] r=r(-1)+3; [name='policy',label='new',bind='ELB'] r=r(-2)*r(-3); end;";
+    let diff = compare_models(&parse(before), &parse(after)).to_json();
+    let changed = diff["changed_equations"].as_array().unwrap();
+    assert_eq!(changed.len(), 2);
+    for row in changed {
+        for role in ["bind", "relax"] {
+            assert_eq!(row["tags_old"][role], row["tags_new"][role]);
+        }
+        assert_ne!(row["index_old"], row["index_new"]);
+    }
+    assert!(diff["unmatched_same_name"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn an_unchanged_copy_cannot_make_a_repeated_regime_pair_unique() {
+    let before = "var r; model; [name='policy',bind='ELB'] r=0; [name='policy',bind='ELB'] r=0; [name='policy',relax='ELB'] r=r(-1); end;";
+    let after = "var r; model; [name='policy',bind='ELB'] r=0; [name='policy',bind='ELB'] r=1; [name='policy',relax='ELB'] r=r(-2); end;";
+    let diff = compare_models(&parse(before), &parse(after)).to_json();
+    let changed = diff["changed_equations"].as_array().unwrap();
+    assert_eq!(changed.len(), 1);
+    assert_eq!(changed[0]["tags_old"]["relax"], "ELB");
+    assert_eq!(
+        diff["unmatched_same_name"][0]["removed"][0]["tags"]["bind"],
+        "ELB"
+    );
+    assert_eq!(
+        diff["unmatched_same_name"][0]["added"][0]["tags"]["bind"],
+        "ELB"
+    );
+    assert!(diff["semantic"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["family"] == "equations" && row["change"] == "unpaired")
+        .all(|row| row["timing"].as_array().unwrap().is_empty()));
 }
 
 #[test]
@@ -145,29 +220,23 @@ fn repeated_regimes_reorder_when_text_and_tags_match() {
 }
 
 #[test]
-fn repeated_regime_text_edit_stays_add_remove() {
+fn repeated_regime_text_edit_keeps_the_regime_and_markdown_pair() {
     let diff = diff("regimes_before.mod", "regimes_edit_after.mod");
-    assert!(
-        diff["changed_equations"].as_array().unwrap().is_empty(),
-        "{diff}"
-    );
+    let changed = diff["changed_equations"].as_array().unwrap();
+    assert_eq!(changed.len(), 1);
+    assert_change_shape(&changed[0]);
     let removed = diff["removed_equations"].as_array().unwrap();
     let added = diff["added_equations"].as_array().unwrap();
-    assert_eq!(removed.len(), 1, "{diff}");
-    assert_eq!(added.len(), 1, "{diff}");
-    assert_list_shape(&removed[0]);
-    assert_eq!(removed[0]["name"], "policy");
-    assert_eq!(removed[0]["tags"]["bind"], "ELB");
-    assert_eq!(added[0]["tags"]["bind"], "ELB");
-    assert!(removed[0]["tags"].get("relax").is_none());
+    assert!(removed.is_empty());
+    assert!(added.is_empty());
+    assert_eq!(changed[0]["name_old"], "policy");
+    assert_eq!(changed[0]["tags_old"]["bind"], "ELB");
+    assert_eq!(changed[0]["tags_new"]["bind"], "ELB");
+    assert!(changed[0]["tags_old"].get("relax").is_none());
     let groups = diff["unmatched_same_name"].as_array().unwrap();
-    assert_eq!(groups.len(), 1, "{diff}");
-    assert_eq!(groups[0]["name"], "policy");
-    assert_eq!(groups[0]["removed"], json!([removed[0]]));
-    assert_eq!(groups[0]["added"], json!([added[0]]));
-    assert!(groups[0]["dimension"].is_null(), "{groups:?}");
+    assert!(groups.is_empty());
     let md = diff["markdown"].as_str().unwrap();
-    assert!(md.contains("## Unmatched same name"), "{md}");
+    assert!(md.contains("## Changed equations"), "{md}");
     assert!(md.contains("`policy`"), "{md}");
     assert!(md.contains("[bind=ELB]"), "{md}");
 }

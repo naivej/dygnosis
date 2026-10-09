@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use dygnosis::{compare_models, parse};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 fn fixture(name: &str) -> String {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -139,32 +139,22 @@ fn tag_only_edit_on_a_unique_name_is_a_change() {
 }
 
 #[test]
-fn repeated_name_pairs_only_on_exact_text_and_tags() {
+fn repeated_name_pairs_on_a_unique_regime_within_its_dimension() {
     let diff = diff("het_repeat_before.mod", "het_repeat_after.mod");
     assert_aggregate_equations_unchanged(&diff);
     let block = block(&diff, "h");
-    assert!(block["changed"].as_array().unwrap().is_empty(), "{diff}");
-    let removed = block["removed"].as_array().unwrap();
-    let added = block["added"].as_array().unwrap();
-    assert_eq!(removed.len(), 1, "{diff}");
-    assert_eq!(added.len(), 1, "{diff}");
-    assert_list_row(&removed[0], "h");
-    assert_list_row(&added[0], "h");
-    assert_eq!(removed[0]["name"], "policy");
-    assert_eq!(added[0]["name"], "policy");
-    assert_eq!(removed[0]["tags"]["bind"], "ELB");
-    assert_eq!(added[0]["tags"]["bind"], "ELB");
-    assert_ne!(removed[0]["text"], added[0]["text"]);
-    let groups = block["unmatched_same_name"].as_array().unwrap();
-    assert_eq!(groups.len(), 1, "{diff}");
-    assert_eq!(groups[0]["name"], "policy");
-    assert_eq!(groups[0]["dimension"], "h");
-    assert_eq!(groups[0]["removed"], json!([removed[0]]));
-    assert_eq!(groups[0]["added"], json!([added[0]]));
+    let changed = block["changed"].as_array().unwrap();
+    assert_eq!(changed.len(), 1);
+    assert_change_row(&changed[0], "h");
+    assert_eq!(changed[0]["tags_old"]["bind"], "ELB");
+    assert_eq!(changed[0]["tags_new"]["bind"], "ELB");
+    assert_ne!(changed[0]["text_old"], changed[0]["text_new"]);
+    for key in ["removed", "added", "unmatched_same_name"] {
+        assert!(block[key].as_array().unwrap().is_empty());
+    }
     let md = diff["markdown"].as_str().unwrap();
     assert!(md.contains("## Heterogeneous equations (`h`)"), "{md}");
-    assert!(md.contains("### Unmatched same name"), "{md}");
-    assert!(md.contains("`policy`"), "{md}");
+    assert!(md.contains("### Changed equations"), "{md}");
     assert!(md.contains("[bind=ELB]"), "{md}");
 }
 

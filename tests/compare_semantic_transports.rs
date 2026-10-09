@@ -78,6 +78,11 @@ async fn retained_families_and_prior_shapes_agree_across_current_and_snapshot_co
             "model; [name='extra'] v=x+2; end;",
         ),
         (
+            "regime_equations",
+            "model; [name='policy',bind='ELB'] y=1; [name='policy',relax='ELB'] y=y(-1); end;",
+            "model; [name='policy',bind='ELB'] y=0; [name='policy',relax='ELB'] y=y(-1); end;",
+        ),
+        (
             "shocks",
             "shocks; var e; stderr 1; end;",
             "shocks; var e; stderr 2; end;",

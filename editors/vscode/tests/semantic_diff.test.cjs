@@ -233,7 +233,7 @@ class Element {
 }
 const descendants = element => [element, ...element.children.flatMap(descendants)];
 function webview() {
-  const elements = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "counts", "results", "refresh", "comparisonLimits", "limitsSummary", "limitsBody", "layoutFilter", "help", "rootTextDiff", "capturedTextDiff", "moreActions", "filterTools", "kindFilter", "sectionFilter", "scopeFilter", "choosePath"].map(id => [id, new Element(id)]));
+  const elements = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "sectionsSummary", "counts", "results", "refresh", "comparisonLimits", "limitsSummary", "limitsBody", "layoutFilter", "help", "rootTextDiff", "capturedTextDiff", "moreActions", "filterTools", "kindFilter", "sectionFilter", "scopeFilter", "choosePath"].map(id => [id, new Element(id)]));
   const events = {}, posted = [], states = [], snapshot = parseDiff(response(), roots.before, roots.after, true);
   const sandbox = { document: { getElementById: id => elements[id], createElement: tag => new Element(tag) }, window: { addEventListener: (name, callback) => events[name] = callback }, acquireVsCodeApi: () => ({ getState: () => undefined, setState: value => states.push(structuredClone(value)), postMessage: value => posted.push(value) }) };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../media/diff_view.js"), "utf8"), sandbox);
@@ -259,17 +259,20 @@ test("input cards keep the full model path in the title and a short name in the 
 test("compact filters preserve saved multi-selections through reload, refresh and split views", () => {
   const env = webview(), other = webview(), initial = normalizeChoices({ sections: ["priors", "commands"], changeKinds: ["changed", "unpaired"] }, defaults);
   env.render({ choices: initial }); other.render();
-  assert.equal(env.elements.sections.value, "saved"); assert.equal(env.elements.kinds.value, "saved");
-  assert.match(env.elements.sections.textContent, /Saved selection \(2\)/);
+  const check = (key, selected) => { const input = descendants(env.elements.sections).find(element => element.id === "section-" + key); assert.ok(input); input.checked = selected; input.fire("change"); };
+  assert.equal(env.elements.sectionsSummary.textContent, "2 sections"); assert.equal(env.elements.kinds.value, "saved");
+  assert.equal(descendants(env.elements.sections).find(element => element.id === "section-all").indeterminate, true);
   env.elements.kinds.value = "removed"; env.elements.kinds.fire("change"); assert.match(env.elements.results.textContent, /No rows match/);
   env.elements.kinds.value = "saved"; env.elements.kinds.fire("change"); assert.match(env.elements.results.textContent, /Prior mean/);
-  env.elements.sections.value = "commands"; env.elements.sections.fire("change");
-  env.elements.sections.value = "saved"; env.elements.sections.fire("change");
-  assert.equal(env.elements.sections.value, "saved");
+  check("symbols", true); check("commands", false);
   const restored = normalizeChoices(env.states.at(-1).choices, defaults); env.render({ choices: restored, capture: "capture2" });
-  assert.deepEqual(env.states.at(-1).choices.sections, ["priors", "commands"]);
+  assert.deepEqual(env.states.at(-1).choices.sections, ["symbols", "priors"]);
   assert.deepEqual(env.states.at(-1).choices.customChangeKinds, ["changed", "unpaired"]);
-  assert.equal(other.elements.sections.value, "all"); assert.equal(other.elements.kinds.value, "all");
+  assert.equal(other.elements.sectionsSummary.textContent, "All sections"); assert.equal(other.elements.kinds.value, "all");
+  check("all", true);
+  assert.ok(descendants(env.elements.sections).filter(element => element.tag === "input").every(element => element.checked));
+  assert.deepEqual(env.states.at(-1).choices.sections, [...allDiffSections]);
+  check("all", false); assert.deepEqual(env.states.at(-1).choices.sections, []);
 });
 test("grouped model rows retain facets, scopes and accessible names", () => {
   for (const dimension of [null, "households"]) {
@@ -288,12 +291,27 @@ test("grouped model rows retain facets, scopes and accessible names", () => {
 
 test("empty filters have a route to All and expression layout hides without expression detail", () => {
   const env = webview(); env.render({ choices: normalizeChoices({ sections: [], changeKinds: [] }, defaults) });
-  assert.match(env.elements.sections.textContent, /No sections selected/); assert.match(env.elements.kinds.textContent, /No kinds selected/);
-  env.elements.sections.value = "all"; env.elements.sections.fire("change"); env.elements.kinds.value = "all"; env.elements.kinds.fire("change");
+  assert.equal(env.elements.sectionsSummary.textContent, "No sections"); assert.match(env.elements.kinds.textContent, /No kinds selected/);
+  const all = descendants(env.elements.sections).find(element => element.id === "section-all"); all.checked = true; all.fire("change"); env.elements.kinds.value = "all"; env.elements.kinds.fire("change");
   assert.match(env.elements.results.textContent, /Prior mean/);
   const snapshot = parseDiff(response(), roots.before, roots.after, true); snapshot.rows[0].semantic.expressions = [];
   env.render(snapshot); assert.equal(env.elements.layoutFilter.hidden, true);
   env.render(); assert.doesNotMatch(env.elements.sections.textContent, /Saved selection/); assert.doesNotMatch(env.elements.kinds.textContent, /Saved selection/);
+});
+
+test("absent and explicit empty field cells stay blank while zero and unknown values remain visible", () => {
+  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
+  const field = snapshot.rows[0].semantic.fields[0];
+  for (const state of ["absent", "empty"]) {
+    field.before = { state, value: state === "empty" ? { kind: "text", value: "" } : null };
+    field.after = { state: "present", value: { kind: "number", value: 0 } };
+    env.render(snapshot);
+    const table = descendants(env.elements.results).find(element => element.className === "fields");
+    assert.equal(table.children[1].children[1].textContent, "");
+    assert.match(table.children[1].children[2].textContent, /0/);
+  }
+  field.before = { state: "unknown", value: null }; env.render(snapshot);
+  assert.match(env.elements.results.textContent, /Unknown/);
 });
 test("More actions forwards capture tokens and paths stay in the relevant failure state", () => {
   const env = webview(); env.render(); env.elements.moreActions.open = true;

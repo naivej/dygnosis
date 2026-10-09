@@ -2308,6 +2308,15 @@ fn same_body(left: &EquationRow, right: &EquationRow) -> bool {
     normalize_equation(&left.text) == normalize_equation(&right.text) && left.tags == right.tags
 }
 
+/// Dynare's bind/relax tags distinguish regime variants of one name.
+/// Other tag fields remain compared values, not occurrence identities.
+fn equation_role(row: &EquationRow) -> (Option<&str>, Option<&str>) {
+    (
+        row.tags.get("bind").map(String::as_str),
+        row.tags.get("relax").map(String::as_str),
+    )
+}
+
 /// Two nonempty names pair only when they are the same name. An unnamed row may pair with either.
 fn names_compatible(left: &EquationRow, right: &EquationRow) -> bool {
     match (equation_name(left), equation_name(right)) {
@@ -2393,13 +2402,46 @@ fn diff_equations(
         } else if old_n > 1 || new_n > 1 {
             let old_idx = indexes_named(old_rows, name);
             let new_idx = indexes_named(new_rows, name);
+            let mut old_roles = BTreeMap::new();
+            let mut new_roles = BTreeMap::new();
+            for &i in &old_idx {
+                old_roles
+                    .entry(equation_role(&old_rows[i]))
+                    .or_insert_with(Vec::new)
+                    .push(i);
+            }
+            for &j in &new_idx {
+                new_roles
+                    .entry(equation_role(&new_rows[j]))
+                    .or_insert_with(Vec::new)
+                    .push(j);
+            }
+            // Uniqueness is measured before cancelling equal copies. A single
+            // leftover from a repeated role cannot manufacture a paired edit.
+            for (role, old) in &old_roles {
+                if let ([i], Some([j])) = (old.as_slice(), new_roles.get(role).map(Vec::as_slice)) {
+                    used_old.insert(*i);
+                    used_new.insert(*j);
+                    if !same_body(&old_rows[*i], &new_rows[*j]) {
+                        changes.push(equation_change(
+                            &old_rows[*i],
+                            &new_rows[*j],
+                            domain,
+                            dimension,
+                        ));
+                    }
+                }
+            }
             let mut taken_new = HashSet::new();
             for i in &old_idx {
-                if let Some(j) = new_idx
-                    .iter()
-                    .copied()
-                    .find(|j| !taken_new.contains(j) && same_body(&old_rows[*i], &new_rows[*j]))
-                {
+                if used_old.contains(i) {
+                    continue;
+                }
+                if let Some(j) = new_idx.iter().copied().find(|j| {
+                    !used_new.contains(j)
+                        && !taken_new.contains(j)
+                        && same_body(&old_rows[*i], &new_rows[*j])
+                }) {
                     taken_new.insert(j);
                     used_old.insert(*i);
                     used_new.insert(j);

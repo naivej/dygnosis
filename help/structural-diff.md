@@ -57,21 +57,27 @@ changes. Model counts describe displayed row appearances.
 A compact grouped list shows the model changes beside the selected detail.
 Each split keeps its own filters, selection, expression layout and expansion
 state while sharing the captured comparison.
+The change-color legend stays at the bottom while the review content scrolls.
 
-Details show named Before and After fields, with absent, empty and unknown values
-kept distinct. Equation expressions highlight changed identifiers, timing
+Missing and explicitly empty field values have blank Before or After cells.
+Unknown values say **Unknown**; zero displays as **0**. Equation expressions highlight changed identifiers, timing
 suffixes, operators and constants while keeping unchanged context readable.
 Timing shows written offsets and, where `predetermined_variables` applies,
 offsets after convention conversion. Details can list direct written references
 to changed symbols and parameters, including references in unchanged equations.
 References are not claims about indirect dependencies or numerical effects.
+Equations with the same name can pair when their unchanged regime tags identify
+one variant on each side. This includes an OccBin equation's `bind` or `relax`
+tag, even when its expression changes. Repeated copies with the same name and
+regime stay separate when their correspondence is uncertain.
 Uncertain occurrences remain separate and are labeled Unpaired; text-only
 highlights do not imply that two equations were paired. The comparison does not
 solve the model or report simulation, estimation or steady-state results.
 
-Find changes, Kind, Section and Scope filter model rows. Kind and Section offer
-All or one choice; a saved group of choices remains available as a saved
-selection. **Expression layout** supports Auto, Side by side and Stacked for
+Find changes, Kind, Section and Scope filter model rows. The Section menu has
+checkboxes for multiple sections. **All sections** selects or clears them all;
+its mixed check means only some sections are selected. Kind offers All or one
+choice, plus a saved group of choices. **Expression layout** supports Auto, Side by side and Stacked for
 Before and After expression panels. It appears when the selected row has
 expression detail; field tables keep their Before and After columns. When no
 model row is available, review Comparison limits and the native text diff

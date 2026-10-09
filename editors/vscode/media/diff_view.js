@@ -4,7 +4,7 @@
   const api = acquireVsCodeApi(), saved = api.getState();
   const names = { symbols: "Symbols", parameters: "Parameters", aggregateEquations: "Aggregate equations", heterogeneousEquations: "Equations by dimension", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "Steady state", priors: "Priors", commands: "Commands", observables: "Observables", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Moments and IRFs", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
   const kinds = ["added", "removed", "changed", "unpaired"], marks = { added: "+", removed: "−", changed: "~", unpaired: "?" };
-  const controls = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "counts", "results", "refresh", "comparisonLimits", "limitsSummary", "limitsBody", "layoutFilter"].map(id => [id, document.getElementById(id)]));
+  const controls = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "sectionsSummary", "counts", "results", "refresh", "comparisonLimits", "limitsSummary", "limitsBody", "layoutFilter"].map(id => [id, document.getElementById(id)]));
   let payload, choices, references = new Map();
   const node = (tag, text, className) => { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; };
   const titleCase = text => text.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase());
@@ -34,7 +34,22 @@
     if (choices.scope !== "all" && !scopes.includes(choices.scope)) { const option = node("option", scopeLabel(choices.scope) + " (no rows)"); option.value = choices.scope; controls.scope.append(option); }
     controls.scope.value = choices.scope;
     filterChoice(controls.kinds, kinds.map(kind => [kind, titleCase(kind)]), "changeKinds", "customChangeKinds", "kinds");
-    filterChoice(controls.sections, Object.entries(names), "sections", "customSections", "sections");
+    controls.sections.replaceChildren();
+    const all = Object.keys(names), selected = choices.sections;
+    for (const [value, text] of [["all", "All sections"], ...Object.entries(names)]) {
+      const label = node("label"), checkbox = node("input"); checkbox.type = "checkbox"; checkbox.id = "section-" + value;
+      checkbox.checked = value === "all" ? selected.length === all.length : selected.includes(value);
+      checkbox.indeterminate = value === "all" && selected.length > 0 && selected.length < all.length;
+      checkbox.addEventListener("change", () => {
+        choices.sections = value === "all" ? checkbox.checked ? [...all] : [] : all.filter(section => section === value ? checkbox.checked : choices.sections.includes(section));
+        choices.customSections = [...choices.sections]; renderControls(); update(); document.getElementById(checkbox.id)?.focus();
+      });
+      label.append(checkbox, node("span", text)); controls.sections.append(label);
+    }
+    if (controls.sectionsSummary) {
+      controls.sectionsSummary.textContent = selected.length === all.length ? "All sections" : selected.length === 0 ? "No sections" : selected.length === 1 ? names[selected[0]] : selected.length + " sections";
+      controls.sectionsSummary.title = selected.map(section => names[section]).join(", ") || "No sections selected";
+    }
   }
   function limits(parent, entries) {
     if (!entries?.length) return;
@@ -52,7 +67,7 @@
     return action("Open " + titleCase(side) + " source", "openSource", { rowId: row.id, side }, reason);
   }
   function codeLines(parent, expression, side) {
-    if (!expression) { parent.append(node("p", "Not present", "source-note")); return; }
+    if (!expression) return;
     const lines = [[]];
     // The host validates runs. Text insertion never creates HTML or actions.
     for (const run of expression.runs) run.text.split("\n").forEach((part, index, parts) => {
@@ -73,9 +88,8 @@
     heading.append(node("strong", titleCase(side)));
     if (row.sideScopes[side] !== null) heading.append(node("span", scopeLabel(row.sideScopes[side]), "scope-label"));
     panel.append(heading);
-    if (!row.semantic) panel.append(node("pre", row[side] === null ? "Not present" : row[side]));
-    else if (!own) panel.append(node("p", "Not present", "source-note"));
-    else {
+    if (!row.semantic) panel.append(node("pre", row[side] ?? ""));
+    else if (own) {
       if (own.context) panel.append(node("p", own.context.name + " · occurrence " + (own.context.execution_order + 1) + (own.scope.block ? " · " + own.scope.block : ""), "source-note"));
       if (own.equation_index !== null) panel.append(node("p", "Equation " + (own.equation_index + 1), "source-note"));
       for (const expression of row.semantic.expressions) {
@@ -89,14 +103,14 @@
   function valueText(value) {
     if (!value) return "Unknown";
     switch (value.kind) {
-      case "text": return value.value === "" ? '"" (explicit empty)' : value.value;
+      case "text": return value.value;
       case "number": case "integer": case "boolean": return String(value.value);
       case "list": return "[" + value.value.map(valueText).join(", ") + "]";
       case "record": return Object.entries(value.value).map(([name, value]) => titleCase(name) + ": " + valueText(value)).join("\n");
       default: return "Unknown";
     }
   }
-  const fieldText = field => field.state === "absent" ? "Not supplied" : field.state === "unknown" ? "Unknown" : valueText(field.value);
+  const fieldText = field => field.state === "absent" || field.state === "empty" ? "" : field.state === "unknown" ? "Unknown" : valueText(field.value);
   function fieldValue(field, className) {
     const text = fieldText(field), value = field.value;
     if (text.length <= 240 || !value || value.kind !== "list" && value.kind !== "record") return node("span", text, className);
@@ -125,7 +139,7 @@
           const tr = node("tr"), th = node("th", field.label); th.setAttribute("scope", "row"); tr.append(th);
           for (const side of ["before", "after"]) {
             const cell = node("td"), available = field.comparison_availability === "complete";
-            if (field.changed && available) cell.append(node("span", side === "before" ? "− " : "+ ", "field-cue"));
+            if (field.changed && available && fieldText(field[side]) !== "") cell.append(node("span", side === "before" ? "− " : "+ ", "field-cue"));
             cell.append(fieldValue(field[side], field.changed && available ? side === "before" ? "token removed" : "token added" : ""));
             if (!available) cell.append(node("p", "Comparison unavailable", "source-note")); tr.append(cell);
           }
@@ -214,9 +228,10 @@
   function focusRow(attribute, identity) { const entries = document.querySelectorAll?.("[" + attribute + "]") ?? []; [...entries].find(element => element.getAttribute(attribute) === identity)?.focus(); }
   controls.refresh.addEventListener("click", () => post("refresh"));
   for (const name of ["changeComparison", "swap", "rootTextDiff", "capturedTextDiff", "updateRevision", "choosePath", "details", "help"]) document.getElementById(name)?.addEventListener("click", () => { post(name); const more = document.getElementById("moreActions"); if (more) more.open = false; });
-  document.getElementById("moreActions")?.addEventListener("keydown", event => { if (event.key === "Escape") { const more = document.getElementById("moreActions"); more.open = false; more.querySelector("summary")?.focus(); } });
+  for (const id of ["moreActions", "sectionFilter"]) document.getElementById(id)?.addEventListener("keydown", event => { if (event.key === "Escape") { const menu = document.getElementById(id); menu.open = false; menu.querySelector("summary")?.focus(); } });
+  window.addEventListener("click", event => { for (const id of ["moreActions", "sectionFilter"]) { const menu = document.getElementById(id); if (menu?.open && !event.composedPath().includes(menu)) menu.open = false; } });
   controls.search.addEventListener("input", () => { choices.search = controls.search.value; update(); });
-  for (const [control, property, savedProperty, entries] of [[controls.kinds, "changeKinds", "customChangeKinds", kinds], [controls.sections, "sections", "customSections", Object.keys(names)]]) control.addEventListener("change", () => {
+  for (const [control, property, savedProperty, entries] of [[controls.kinds, "changeKinds", "customChangeKinds", kinds]]) control.addEventListener("change", () => {
     choices[property] = control.value === "all" ? [...entries] : control.value === "saved" ? [...choices[savedProperty]] : [control.value];
     renderControls(); update();
   });

@@ -6,6 +6,13 @@
   a pinned tab in the active editor group. A grouped list shows the selected
   change's named fields, expression tokens, written and convention-adjusted
   timing, and direct written references. Compact filters keep the review visible.
+- The change-color legend stays at the bottom during scrolling. The Section menu
+  selects multiple sections with checkboxes; All sections selects or clears all.
+  Missing and empty Before/After values have blank cells.
+- Equation changes pair across repeated names when their unchanged regime tags
+  identify a unique variant on each side. This includes an OccBin `r=1` to `r=0`
+  edit in one `bind` variant. Repeated copies with the same regime remain Unpaired
+  when their correspondence is uncertain.
 - **Comparison limits** is a collapsed note that marks partial comparisons and
   explains unavailable facts and the captured source boundary. **Captured file
   text diff…** opens VS Code's native diff for a changed captured root or include,
