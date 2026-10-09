@@ -15,9 +15,13 @@ These settings have resource scope, so a workspace or folder can override your
 defaults. An included file uses its own presentation settings and its chosen
 model owner. Use **Dygnosis: Choose model owner** when an include has several
 owners. Tint covers verified written portions of complete blocks; split include
-portions stay separate. An unfinished block receives no tint. Incomplete
-expansion can retain complete recovered blocks, so a background does not mean
-the model is valid or can run.
+portions stay separate. Incomplete expansion can retain complete recovered
+blocks, so a background does not mean the model is valid or can run.
+
+While you type, the existing background follows your edits. Tint refreshes
+after a 200 ms typing pause and stays visible while the new result is pending.
+The result replaces the background and removes tint from deleted or unfinished
+blocks. You do not need to save for tint or language checks to update.
 
 `dynare.blockTint.heterogeneousModels` overrides the heterogeneous model style
 by the dimension name written in the file. Its Settings entry includes

@@ -110,67 +110,106 @@ export function registerColors(service: DygnosisClient): vscode.Disposable {
       rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
       backgroundColor: new vscode.ThemeColor("dynare.blockTint.subtleBackground") }),
   };
-  const tracked = new Set<vscode.TextEditor>();
+  interface EditorState {
+    document: vscode.TextDocument;
+    client: DygnosisClient["client"];
+    instance: number;
+    root?: string;
+  }
+  const tracked = new Map<vscode.TextEditor, EditorState>();
   let generation = 0, disposed = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancelTimer = (): void => { if (timer !== undefined) clearTimeout(timer); timer = undefined; };
   const clear = (editor: vscode.TextEditor): void => {
     editor.setDecorations(decorations.model, []);
     editor.setDecorations(decorations.subtle, []);
   };
-  const refresh = (): void => {
-    const request = ++generation;
-    for (const editor of tracked) clear(editor);
-    tracked.clear();
-    if (disposed) return;
-    for (const editor of vscode.window.visibleTextEditors) {
-      tracked.add(editor);
-      const document = editor.document;
-      if (document.isClosed || !isAnalysisDocument(document) ||
-          !booleanSetting("blockTint.enabled", document.uri, true, service.log)) continue;
-      const version = document.version, uri = document.uri.toString();
-      const current = (): boolean => !disposed && request === generation &&
-        vscode.window.visibleTextEditors.includes(editor) && editor.document === document &&
-        !document.isClosed && document.version === version && document.uri.toString() === uri &&
-        isAnalysisDocument(document) && booleanSetting("blockTint.enabled", document.uri, true, service.log);
-      const update = async (): Promise<void> => {
-        const root = await service.rootForDocument(document);
-        if (!current() || !root) return;
-        const client = service.client, instance = service.currentInstance;
-        const info = await service.modelInfo(root, document.uri);
-        if (!current() || client !== service.client || instance !== service.currentInstance || !info ||
-            info.client_instance !== instance || info.root_uri !== root.toString() ||
-            info.document_uri !== uri || info.document_version !== version) return;
-        const selected = await service.rootForDocument(document);
-        if (!current() || client !== service.client || instance !== service.currentInstance || selected?.toString() !== root.toString()) return;
-        const ranges = tintRanges(info, document, tintPreferences(document, info.block_categories, service.log));
-        editor.setDecorations(decorations.model, ranges.model);
-        editor.setDecorations(decorations.subtle, ranges.subtle);
-      };
-      void update().catch((error: unknown) => { if (current()) service.log(String(error)); });
+  const update = async (editor: vscode.TextEditor, state: EditorState, request: number): Promise<void> => {
+    const { document, client, instance } = state;
+    const version = document.version, uri = document.uri.toString();
+    const current = (): boolean => !disposed && request === generation && tracked.get(editor) === state &&
+      vscode.window.visibleTextEditors.includes(editor) && editor.document === document &&
+      !document.isClosed && document.version === version && document.uri.toString() === uri &&
+      client === service.client && instance === service.currentInstance &&
+      isAnalysisDocument(document) && booleanSetting("blockTint.enabled", document.uri, true, service.log);
+    try {
+      if (!current()) return;
+      const root = await service.rootForDocument(document);
+      if (!current()) return;
+      if (!root) { clear(editor); state.root = undefined; return; }
+      if (state.root !== undefined && state.root !== root.toString()) clear(editor);
+      state.root = root.toString();
+      const info = await service.modelInfo(root, document.uri);
+      if (!current()) return;
+      if (!info || info.client_instance !== instance || info.root_uri !== root.toString() ||
+          info.document_uri !== uri || info.document_version !== version) { clear(editor); return; }
+      const selected = await service.rootForDocument(document);
+      if (!current()) return;
+      if (selected?.toString() !== root.toString()) { clear(editor); state.root = undefined; return; }
+      const ranges = tintRanges(info, document, tintPreferences(document, info.block_categories, service.log));
+      // VS Code moves the existing decorations with edits while this request is
+      // pending. Replace them only with current facts; do not repaint old offsets.
+      editor.setDecorations(decorations.model, ranges.model);
+      editor.setDecorations(decorations.subtle, ranges.subtle);
+    } catch (error: unknown) {
+      if (current()) { clear(editor); service.log(String(error)); }
     }
   };
+  const refresh = (delay = 0): void => {
+    if (disposed) return;
+    const request = ++generation;
+    cancelTimer();
+    const visible = vscode.window.visibleTextEditors;
+    for (const [editor, state] of tracked) {
+      if (!visible.includes(editor) || editor.document !== state.document) { clear(editor); tracked.delete(editor); }
+    }
+    const pending: Array<readonly [vscode.TextEditor, EditorState]> = [];
+    for (const editor of visible) {
+      const document = editor.document;
+      let state = tracked.get(editor);
+      if (!state || state.client !== service.client || state.instance !== service.currentInstance) {
+        if (state) clear(editor);
+        state = { document, client: service.client, instance: service.currentInstance };
+        tracked.set(editor, state);
+      }
+      if (document.isClosed || !isAnalysisDocument(document) ||
+          !booleanSetting("blockTint.enabled", document.uri, true, service.log)) { clear(editor); continue; }
+      pending.push([editor, state]);
+    }
+    const run = (): void => {
+      timer = undefined;
+      for (const [editor, state] of pending) void update(editor, state, request);
+    };
+    // Invalidate pending replies now, but keep the editor's tint through the
+    // typing pause and the next response. Lifecycle changes still clear above.
+    if (pending.length && delay) timer = setTimeout(run, delay);
+    else run();
+  };
+  const hasDocument = (document: vscode.TextDocument): boolean => [...tracked.keys()].some(editor => editor.document === document);
   const listeners = [
-    vscode.window.onDidChangeVisibleTextEditors(refresh),
-    vscode.window.onDidChangeActiveTextEditor(refresh),
+    vscode.window.onDidChangeVisibleTextEditors(() => refresh()),
+    vscode.window.onDidChangeActiveTextEditor(() => refresh()),
     vscode.workspace.onDidChangeTextDocument(event => {
-      if ([...tracked].some(editor => editor.document === event.document)) refresh();
+      if (event.contentChanges.length && hasDocument(event.document)) refresh(200);
     }),
-    vscode.workspace.onDidOpenTextDocument(document => {
-      if ([...tracked].some(editor => editor.document === document)) refresh();
-    }),
-    vscode.workspace.onDidCloseTextDocument(document => {
-      if ([...tracked].some(editor => editor.document === document)) refresh();
-    }),
+    vscode.workspace.onDidOpenTextDocument(document => { if (hasDocument(document)) refresh(); }),
+    vscode.workspace.onDidCloseTextDocument(document => { if (hasDocument(document)) refresh(); }),
     vscode.workspace.onDidChangeConfiguration(event => {
-      if ([...tracked].some(editor => event.affectsConfiguration("dynare.blockTint", editor.document.uri))) refresh();
+      let affected = false;
+      for (const editor of tracked.keys()) {
+        if (event.affectsConfiguration("dynare.blockTint", editor.document.uri)) { clear(editor); affected = true; }
+      }
+      if (affected) refresh();
     }),
-    service.onDidChange(refresh),
+    service.onDidChange(() => refresh(200)),
   ];
   refresh();
   return new vscode.Disposable(() => {
     disposed = true;
     ++generation;
+    cancelTimer();
     for (const listener of listeners) listener.dispose();
-    for (const editor of tracked) clear(editor);
+    for (const editor of tracked.keys()) clear(editor);
     tracked.clear();
     decorations.model.dispose(); decorations.subtle.dispose();
   });

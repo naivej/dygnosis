@@ -619,6 +619,7 @@ exports.run = async function run() {
     evidence.checks.push("real engine counts/native symbols");
     await checkParseFollowups(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
     await checkShockPathConstructors(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence);
+    await require("./helpers/color_host.cjs").checkBlockTintEditing(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, writeObservedInput });
     await require("./helpers/model_local_host.cjs").checkModelLocalEditing(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, currentSnapshot, writeObservedInput });
     await vscode.window.showTextDocument(document);
     let equationLens;

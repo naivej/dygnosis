@@ -41,7 +41,13 @@ function deferred() {
   const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
   return { promise, resolve, reject };
 }
-const flush = () => new Promise(resolve => setImmediate(resolve));
+const drain = () => new Promise(resolve => setImmediate(resolve));
+let timers;
+test.beforeEach(context => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  timers = context.mock.timers;
+});
+const flush = async () => { timers.tick(200); await drain(); };
 let host;
 const vscode = {
   Disposable, Range, ThemeColor, DecorationRangeBehavior: { ClosedClosed: 3 },
@@ -281,7 +287,7 @@ test("incomplete expansion keeps only complete file-local recovered blocks", asy
 test("removed and retyped blocks clear prior colors instead of accumulating decorations", async () => {
   const env = setup(); await flush(); assert.equal(env.ranges("model").length, 1);
   env.service.info = () => facts(env.doc, { statements: [block({ category: "initval" })] }); env.changed.fire();
-  assert.equal(env.ranges("model").length, 0); await flush(); assert.equal(env.ranges("subtle").length, 1);
+  assert.equal(env.ranges("model").length, 1); await flush(); assert.equal(env.ranges("model").length, 0); assert.equal(env.ranges("subtle").length, 1);
   env.service.info = () => facts(env.doc, { statements: [] }); env.changed.fire(); await flush();
   assert.equal(env.ranges("subtle").length, 0); env.registration.dispose();
 });
@@ -335,7 +341,7 @@ test("version, engine, document identity and visible-editor changes reject late 
   for (const kind of ["version", "instance", "client", "document", "hidden", "closed", "language"]) {
     const env = setup(); await flush(); const late = deferred(); env.service.modelInfo = () => late.promise;
     env.changed.fire(); await flush();
-    const original = env.host.editors[0];
+    const original = env.host.editors[0], calls = original.calls.length;
     if (kind === "version") ++env.doc.version;
     if (kind === "instance") ++env.service.currentInstance;
     if (kind === "client") env.service.client = {};
@@ -344,7 +350,7 @@ test("version, engine, document identity and visible-editor changes reject late 
     if (kind === "closed") env.doc.isClosed = true;
     if (kind === "language") env.doc.languageId = "plaintext";
     late.resolve(facts(env.doc)); await flush();
-    assert.equal(original.decorations.get("dynare.blockTint.modelBackground").length, 0, kind); env.registration.dispose();
+    assert.equal(original.calls.length, calls, kind); env.registration.dispose();
   }
 });
 
@@ -374,10 +380,10 @@ test("failed and unavailable snapshots clear stale tint and explain actual failu
   assert.equal(env.ranges("model").length, 0); assert.ok(env.service.logged.includes("Error: Unsupported schema")); env.registration.dispose();
 });
 
-test("edits and native visibility clear immediately; detached editors cannot receive old replies", async () => {
+test("edits retain tint; detached editors clear and cannot receive old replies", async () => {
   const env = setup(); await flush(); const first = env.host.editors[0];
   const late = deferred(); env.service.modelInfo = () => late.promise; ++env.doc.version;
-  env.host.edited.fire({ document: env.doc }); assert.equal(env.ranges("model").length, 0); await flush();
+  env.host.edited.fire({ document: env.doc, contentChanges: [{ text: "x" }] }); assert.equal(env.ranges("model").length, 1); await flush();
   const replacement = editor(document("file:///project/second.mod")); env.host.editors = [replacement]; env.host.visible.fire(env.host.editors);
   late.resolve(facts(env.doc)); await flush();
   assert.equal(first.decorations.get("dynare.blockTint.modelBackground").length, 0); assert.equal(env.ranges("model").length, 0);
@@ -400,4 +406,76 @@ test("disposal clears ranges, disposes both types/listeners and refuses pending 
   assert.equal(env.ranges("model").length, 0); assert.ok(env.host.types.every(type => type.disposed));
   for (const event of [env.changed, env.host.visible, env.host.active, env.host.edited, env.host.opened, env.host.closed, env.host.configured]) assert.equal(event.listeners.size, 0);
   env.registration.dispose();
+});
+
+
+test("typing retains tint through the 200 ms pause and the pending model response", async () => {
+  const env = setup(); await flush();
+  const painted = env.host.editors[0], calls = painted.calls.length, requests = env.service.requests.length;
+  const late = deferred(); env.service.info = () => late.promise;
+  ++env.doc.version;
+  env.host.edited.fire({ document: env.doc, contentChanges: [{ text: "x" }] });
+  env.changed.fire();
+  assert.equal(env.ranges("model").length, 1);
+  assert.equal(painted.calls.length, calls, "an edit must not clear the editor's tracked ranges");
+  timers.tick(199); await drain();
+  assert.equal(env.service.requests.length, requests);
+  timers.tick(1); await drain();
+  assert.equal(env.service.requests.length, requests + 1);
+  assert.equal(env.ranges("model").length, 1);
+  late.resolve(facts(env.doc, { statements: [block({ segments: [location(undefined, 4, 8)] })] })); await drain();
+  assert.deepEqual(env.ranges("model").map(range => [range.start.line, range.end.line]), [[4, 8]]);
+  assert.ok(painted.calls.slice(calls).filter(call => call.type.id === "dynare.blockTint.modelBackground").every(call => call.ranges.length === 1));
+  env.registration.dispose();
+});
+
+test("successive edits coalesce and reject a response that arrives during the next pause", async () => {
+  const env = setup(); await flush();
+  const old = deferred(), next = deferred(); env.service.info = () => old.promise;
+  env.changed.fire(); await flush();
+  const calls = env.host.editors[0].calls.length, requests = env.service.requests.length;
+  env.service.info = () => next.promise;
+  ++env.doc.version; env.host.edited.fire({ document: env.doc, contentChanges: [{ text: "x" }] });
+  timers.tick(100);
+  ++env.doc.version; env.host.edited.fire({ document: env.doc, contentChanges: [{ text: "y" }] }); env.changed.fire();
+  old.resolve(facts(env.doc, { statements: [] })); await drain();
+  assert.equal(env.host.editors[0].calls.length, calls);
+  timers.tick(199); await drain(); assert.equal(env.service.requests.length, requests);
+  timers.tick(1); await drain(); assert.equal(env.service.requests.length, requests + 1);
+  assert.equal(env.ranges("model").length, 1);
+  next.resolve(facts(env.doc, { statements: [] })); await drain();
+  assert.equal(env.ranges("model").length, 0, "a current result removes a deleted block");
+  env.registration.dispose();
+});
+
+test("focus changes preserve visible tint and empty document changes make no requests", async () => {
+  const env = setup(undefined, [document("file:///project/other.mod")]); await flush();
+  const editors = [...env.host.editors], offsets = editors.map(item => item.calls.length);
+  const requests = env.service.requests.length;
+  env.host.edited.fire({ document: env.doc, contentChanges: [] }); await flush();
+  assert.equal(env.service.requests.length, requests);
+  env.host.active.fire(); env.host.visible.fire(env.host.editors); await flush();
+  for (const [index, item] of editors.entries()) {
+    assert.equal(env.ranges("model", index).length, 1);
+    assert.ok(item.calls.slice(offsets[index]).filter(call => call.type.id === "dynare.blockTint.modelBackground").every(call => call.ranges.length === 1));
+  }
+  env.registration.dispose();
+});
+
+test("an engine change clears retained tint immediately and an owner loss clears after lookup", async () => {
+  for (const kind of ["instance", "client"]) {
+    const env = setup(); await flush();
+    if (kind === "instance") ++env.service.currentInstance; else env.service.client = {};
+    env.service.info = () => new Promise(() => {}); env.changed.fire();
+    assert.equal(env.ranges("model").length, 0, kind); env.registration.dispose();
+  }
+  const env = setup(); await flush(); env.service.rootForDocument = async () => undefined;
+  env.changed.fire(); await flush(); assert.equal(env.ranges("model").length, 0); env.registration.dispose();
+});
+
+test("disposal during the typing pause cancels the scheduled requests", async () => {
+  const env = setup(); await flush(); const requests = env.service.requests.length;
+  ++env.doc.version; env.host.edited.fire({ document: env.doc, contentChanges: [{ text: "x" }] });
+  env.registration.dispose(); await flush();
+  assert.equal(env.service.requests.length, requests); assert.equal(env.ranges("model").length, 0);
 });
