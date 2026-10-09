@@ -460,7 +460,21 @@ fn accepted_type_changes_clear_effective_convention_with_equal_equation_text() {
     assert_eq!(convention.references.len(), 2);
     let restored = after.replace("model;", "predetermined_variables k; model;");
     let diff = compare_models(&parse(before), &parse(&restored));
-    assert!(diff.semantic.rows.is_empty());
+    assert!(diff.symbols_changed.is_empty());
+    assert!(diff.changed_equations.is_empty());
+    assert!(!diff.semantic.rows.iter().any(|row| {
+        row.family == SemanticFamily::Equations
+            || row.family == SemanticFamily::Symbols && row.count_unit == CountUnit::FinalFact
+    }));
+    // Written operations remain visible after the final convention is restored.
+    assert_eq!(
+        diff.semantic
+            .rows
+            .iter()
+            .filter(|row| row.family == SemanticFamily::Operations && row.name == "change_type")
+            .count(),
+        2
+    );
 }
 
 #[test]
