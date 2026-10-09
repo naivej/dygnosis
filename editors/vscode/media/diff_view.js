@@ -4,13 +4,22 @@
   const api = acquireVsCodeApi(), saved = api.getState();
   const names = { symbols: "Symbols", parameters: "Parameters", aggregateEquations: "Aggregate equations", heterogeneousEquations: "Equations by dimension", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "Steady state", priors: "Priors", commands: "Commands", observables: "Observables", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Moments and IRFs", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
   const kinds = ["added", "removed", "changed", "unpaired"], marks = { added: "+", removed: "−", changed: "~", unpaired: "?" };
-  const controls = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "sectionsSummary", "counts", "results", "refresh", "comparisonLimits", "limitsSummary", "limitsBody", "layoutFilter"].map(id => [id, document.getElementById(id)]));
+  const controls = Object.fromEntries(["models", "status", "search", "kinds", "counts", "results", "refresh"].map(id => [id, document.getElementById(id)]));
   let payload, choices, references = new Map();
   const node = (tag, text, className) => { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; };
   const titleCase = text => text.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase());
   const scopeLabel = value => value === "aggregate" ? "Aggregate" : value === "global" ? "Global" : "Dimension: " + value;
   // These are display labels only. Source actions retain the host's exact keys.
-  const basename = value => value.replaceAll("\\", "/").split("/").at(-1) || value;
+  const basename = value => {
+    const name = value.split(/[?#]/)[0].replaceAll("\\", "/").split("/").at(-1) || value;
+    try { return decodeURIComponent(name); } catch { return name; }
+  };
+  const rowLabel = row => {
+    if (row.label !== "Equation" || !row.semantic) return row.label;
+    const indexes = [...new Set([row.semantic.before, row.semantic.after].filter(side => side?.equation_index !== null && side?.equation_index !== undefined).map(side => side.equation_index + 1))];
+    return indexes.length ? "Equation " + indexes.join(" → ") : row.label;
+  };
+  const contextScopes = row => row.scopes.filter(scope => scope !== "aggregate" && scope !== "global" || row.sideScopes.before !== null && row.sideScopes.after !== null && row.sideScopes.before !== row.sideScopes.after);
   const post = (type, args = {}) => api.postMessage({ type, token: payload.token, ...args });
   const remember = () => { api.setState({ key: payload.key, choices }); api.postMessage({ type: "choices", key: payload.key, choices }); };
   function update() { renderRows(); remember(); }
@@ -28,28 +37,8 @@
     container.title = selected.map(value => entries.find(([key]) => key === value)?.[1]).join(", ") || "No " + label + " selected";
   }
   function renderControls() {
-    controls.search.value = choices.search; controls.layout.value = choices.layout; controls.expansion.value = choices.expansion;
-    const scopes = [...new Set(payload.rows.flatMap(row => row.scopes))].sort(); controls.scope.replaceChildren();
-    for (const value of ["all", ...scopes]) { const option = node("option", value === "all" ? "All scopes" : scopeLabel(value)); option.value = value; controls.scope.append(option); }
-    if (choices.scope !== "all" && !scopes.includes(choices.scope)) { const option = node("option", scopeLabel(choices.scope) + " (no rows)"); option.value = choices.scope; controls.scope.append(option); }
-    controls.scope.value = choices.scope;
+    controls.search.value = choices.search;
     filterChoice(controls.kinds, kinds.map(kind => [kind, titleCase(kind)]), "changeKinds", "customChangeKinds", "kinds");
-    controls.sections.replaceChildren();
-    const all = Object.keys(names), selected = choices.sections;
-    for (const [value, text] of [["all", "All sections"], ...Object.entries(names)]) {
-      const label = node("label"), checkbox = node("input"); checkbox.type = "checkbox"; checkbox.id = "section-" + value;
-      checkbox.checked = value === "all" ? selected.length === all.length : selected.includes(value);
-      checkbox.indeterminate = value === "all" && selected.length > 0 && selected.length < all.length;
-      checkbox.addEventListener("change", () => {
-        choices.sections = value === "all" ? checkbox.checked ? [...all] : [] : all.filter(section => section === value ? checkbox.checked : choices.sections.includes(section));
-        choices.customSections = [...choices.sections]; renderControls(); update(); document.getElementById(checkbox.id)?.focus();
-      });
-      label.append(checkbox, node("span", text)); controls.sections.append(label);
-    }
-    if (controls.sectionsSummary) {
-      controls.sectionsSummary.textContent = selected.length === all.length ? "All sections" : selected.length === 0 ? "No sections" : selected.length === 1 ? names[selected[0]] : selected.length + " sections";
-      controls.sectionsSummary.title = selected.map(section => names[section]).join(", ") || "No sections selected";
-    }
   }
   function limits(parent, entries) {
     if (!entries?.length) return;
@@ -62,9 +51,25 @@
     button.addEventListener("click", () => { if (!button.disabled) post(type, args); }); return button;
   }
   function sourceAction(row, side) {
-    const value = row[side], target = row.navigation[side];
-    const reason = value === null ? "This row is absent on this side." : payload.status !== "ready" ? "Refresh the comparison to enable source actions." : !target?.written_locations.length ? "No verified written location is available for this row." : "";
-    return action("Open " + titleCase(side) + " source", "openSource", { rowId: row.id, side }, reason);
+    const target = row.navigation[side], files = row.sourceFiles?.[side] ?? [];
+    const locations = target?.written_locations ?? [];
+    const reason = payload.status !== "ready" ? "Refresh the comparison to enable source actions." : !locations.length && !files.length ? "No verified source is available on this side." : "";
+    const button = action("Open " + titleCase(side) + " source", "openSource", { rowId: row.id, side }, reason);
+    button.textContent = locations.length === 1 ? basename(locations[0].uri) + ":" + (locations[0].range.start.line + 1) : files.length === 1 ? basename(files[0]) : "Open source" + (locations.length > 1 || files.length > 1 ? "…" : "");
+    button.className = "source-link";
+    if (!reason) button.title = [...locations.map(location => location.uri), ...files].join("\n");
+    return button;
+  }
+  function plainShockOpeners(expression) {
+    // This changes color only. It does not parse facts or alter retained text.
+    const ranges = [...expression.text.matchAll(/^[ \t]*(shocks|mshocks|heteroskedastic_shocks|shock_paths|perfect_foresight_controlled_paths|initval|endval|end)\b[ \t]*;?/gim)].map(match => [match.index, match.index + match[0].length]);
+    let offset = 0;
+    return { runs: expression.runs.flatMap(run => {
+      const start = offset, end = offset += run.text.length;
+      const overlaps = ranges.filter(([a, b]) => a < end && b > start);
+      const edges = [...new Set([start, end, ...overlaps.flatMap(([a, b]) => [Math.max(start, a), Math.min(end, b)])])].sort((a, b) => a - b);
+      return edges.slice(0, -1).map((a, index) => ({ text: run.text.slice(a - start, edges[index + 1] - start), role: overlaps.some(([from, to]) => from <= a && a < to) ? "unchanged" : run.role }));
+    }) };
   }
   function codeLines(parent, expression, side) {
     if (!expression) return;
@@ -78,24 +83,87 @@
     });
     const block = node("div", undefined, "expression");
     for (const spans of lines) {
-      const line = node("div", undefined, "code-line"), gutter = node("span", "·", "gutter"), code = node("code");
-      gutter.setAttribute("aria-hidden", "true"); code.append(...spans); line.append(gutter, code); block.append(line);
+      const line = node("div", undefined, "code-line"), code = node("code");
+      code.append(...spans); line.append(code); block.append(line);
     }
     parent.append(block);
   }
+  const textField = (detail, name, side) => {
+    const field = detail.fields.find(field => field.name === name);
+    return field?.comparison_availability === "complete" && field[side].value?.kind === "text" ? field[side].value.value : null;
+  };
+  const localRole = detail => ["before", "after"].map(side => textField(detail, "role", side)).find(role => role === "model_local_definition" || role === "model_local_declaration");
+  function declaration(detail, side) {
+    const written = textField(detail, "written_kind", side);
+    return detail[side] && ["var", "varexo", "varexo_det", "parameters"].includes(written) ? written : localRole(detail) === "model_local_declaration" && detail[side] ? "model_local_variable" : null;
+  }
+  function visibleFields(detail) {
+    const statement = detail.family === "shocks" && detail.expressions.find(expression => expression.field === "statement_text");
+    const statementComplete = statement && ["before", "after"].every(side => !detail[side] || statement[side]);
+    return detail.fields.filter(field => {
+      if (statementComplete && statement.before?.text !== statement.after?.text && field.comparison_availability === "complete"
+        && (field.name !== "status" || [field.before, field.after].every(side => side.state === "absent" || side.value?.kind === "text" && ["active", "written"].includes(side.value.value)))) return false;
+      if (field.comparison_availability === "complete") {
+        if (detail.family === "commands" && field.name === "role" && [field.before, field.after].every(side => side.state === "absent" || side.value?.kind === "text" && ["command", "block_context"].includes(side.value.value))) return false;
+        if (detail.family === "symbols" && ["added", "removed"].includes(detail.change) && [field.before, field.after].every(side => ["absent", "empty"].includes(side.state) || ["log_transform", "predetermined"].includes(field.name) && side.value?.kind === "boolean" && !side.value.value)) return false;
+        if (localRole(detail) && (field.name === "role" || field.name === "target" && ["before", "after"].every(side => !detail[side] || textField(detail, "target", side) === detail[side].name))) return false;
+        if (field.name === "written_kind" && ["before", "after"].every(side => !detail[side] || declaration(detail, side))) return false;
+        if (field.name === "kind" && ["before", "after"].every(side => !detail[side] || textField(detail, "kind", side) === declaration(detail, side))) return false;
+        if (field.name === "written_dimension" && ["before", "after"].every(side => JSON.stringify(field[side]) === JSON.stringify(detail.fields.find(field => field.name === "dimension")?.[side]))) return false;
+      }
+      if (!field.changed && field.comparison_availability === "complete") {
+        // Nonempty equation tags distinguish named regime variants.
+        return field.name === "tags" && [field.before, field.after].some(side => side.value?.kind === "record" ? Object.keys(side.value.value).length : side.value?.kind === "list" ? side.value.value.length : fieldText(side) !== "");
+      }
+      const expression = detail.expressions.find(expression => expression.field === field.name);
+      // Omit only exact duplicate text. Unknown or independently retained values remain visible.
+      return !expression || field.comparison_availability !== "complete" || !["before", "after"].every(side => expression[side] === null ? field[side].state === "absent" : ["present", "empty"].includes(field[side].state) && field[side].value?.kind === "text" && field[side].value.value === expression[side].text);
+    });
+  }
+  const visibleExpressions = detail => detail.expressions.filter(expression => ["expression", "statement_text"].includes(expression.field) || expression.before?.text !== expression.after?.text || expression.availability !== "complete");
   function sidePanel(row, side) {
     const panel = node("div", undefined, "side " + side), heading = node("div", undefined, "side-title"), own = row.semantic?.[side];
     heading.append(node("strong", titleCase(side)));
-    if (row.sideScopes[side] !== null) heading.append(node("span", scopeLabel(row.sideScopes[side]), "scope-label"));
+    if (row.sideScopes[side] !== null && contextScopes(row).includes(row.sideScopes[side])) heading.append(node("span", scopeLabel(row.sideScopes[side]), "scope-label"));
+    heading.append(sourceAction(row, side));
     panel.append(heading);
-    if (!row.semantic) panel.append(node("pre", row[side] ?? ""));
+    if (row[side] === null) panel.append(node("p", "Not present", "source-note"));
+    else if (!row.semantic) panel.append(node("pre", row[side]));
     else if (own) {
-      if (own.context) panel.append(node("p", own.context.name + " · occurrence " + (own.context.execution_order + 1) + (own.scope.block ? " · " + own.scope.block : ""), "source-note"));
-      if (own.equation_index !== null) panel.append(node("p", "Equation " + (own.equation_index + 1), "source-note"));
-      for (const expression of row.semantic.expressions) {
-        panel.append(node("h3", titleCase(expression.field) + " · expanded text", "expression-heading")); codeLines(panel, expression[side], side);
-        if (expression.highlight_basis === "unpaired_text_only") panel.append(node("p", "Text only. Occurrence pairing is not proven.", "source-note"));
-        if (expression.availability !== "complete") panel.append(node("p", expression.reason ?? "Highlights: " + titleCase(expression.availability), "source-note"));
+      const keyword = declaration(row.semantic, side), role = localRole(row.semantic);
+      if (keyword) {
+        codeLines(panel, { runs: [{ text: keyword + " ", role: "unchanged" }, { text: own.name, role: row.kind === "added" ? "added" : row.kind === "removed" ? "removed" : "unchanged" }, { text: ";", role: "unchanged" }] }, side);
+      }
+      const expressions = visibleExpressions(row.semantic);
+      for (const expression of expressions) {
+        if (!["expression", "statement_text", "statement_tokens"].includes(expression.field) || expressions.length > 1) panel.append(node("h3", row.semantic.fields.find(field => field.name === expression.field)?.label ?? titleCase(expression.field), "field-label"));
+        const value = expression[side] && row.semantic.family === "shocks" && expression.field === "statement_text" ? plainShockOpeners(expression[side]) : expression[side];
+        const definitionRole = ["added", "removed"].includes(row.kind) ? row.kind : "unchanged";
+        codeLines(panel, value && role === "model_local_definition" && expression.field === "expression" ? { runs: [{ text: "# " + own.name + " = ", role: definitionRole }, ...value.runs, { text: ";", role: definitionRole }] } : value, side);
+      }
+      for (const field of visibleFields(row.semantic)) {
+        const value = node("div", undefined, "field"), available = field.comparison_availability === "complete";
+        value.setAttribute("data-field", field.name);
+        value.append(node("h3", field.label, "field-label"));
+        const text = node("div", undefined, "field-content");
+        if (field.changed && available && fieldText(field[side]) !== "") text.append(node("span", side === "before" ? "− " : "+ ", "field-cue"));
+        text.append(fieldValue(field[side], field.changed && available ? side === "before" ? "token removed" : "token added" : ""));
+        value.append(text); if (!available) value.append(node("p", "Comparison unavailable", "source-note")); panel.append(value);
+      }
+    }
+    if (row.semantic) {
+      const ownRefs = row.semantic.references.map(pointer => references.get(pointer)).filter(ref => ref?.side === side);
+      if (ownRefs.length) {
+        const conventionShown = row.semantic.family === "symbols" && visibleFields(row.semantic).some(field => field.name === "predetermined" && field.comparison_availability === "complete" && field[side].value?.kind === "boolean" && field[side].value.value);
+        const refs = node("section", undefined, "refs"); refs.append(node("h3", "Direct equation references"));
+        for (const ref of ownRefs) {
+          const line = node("p", undefined, "reference"), target = ref.navigation[side];
+          const button = action(ref.label, "openReference", { pointer: ref.pointer, side }, payload.status !== "ready" ? "Refresh to enable source actions." : !target?.written_locations.length ? "No verified written location is available." : "");
+          button.setAttribute("aria-label", "Open " + titleCase(side) + " reference: " + ref.label + (button.disabled ? ". " + button.title : ""));
+          const context = [ref.scope.dimension ? scopeLabel(ref.scope.dimension) : "", ref.timing.written_offset ? "written " + ref.timing.written_offset : "", !conventionShown && ref.timing.converted_offset !== ref.timing.written_offset ? "after convention " + ref.timing.converted_offset : ""].filter(Boolean).join(" · ");
+          line.append(button); if (context) line.append(node("span", context, "source-note")); refs.append(line);
+        }
+        panel.append(refs);
       }
     }
     return panel;
@@ -114,132 +182,75 @@
   function fieldValue(field, className) {
     const text = fieldText(field), value = field.value;
     if (text.length <= 240 || !value || value.kind !== "list" && value.kind !== "record") return node("span", text, className);
-    const detail = node("details", undefined, "field-value"), label = value.kind === "list" ? value.value.length + " retained items" : Object.keys(value.value).length + " named fields";
-    detail.append(node("summary", label + " · show values"), node("pre", text, className)); return detail;
+    return node("pre", text, "field-value " + className);
   }
   function rowDetail(row) {
     const article = node("article", undefined, "detail change " + row.kind), header = node("div", undefined, "detail-heading");
-    header.append(node("span", marks[row.kind], "change-mark " + row.kind), node("h2", row.label), node("span", titleCase(row.kind) + (row.semantic?.facets.length ? " · " + row.semantic.facets.map(titleCase).join(" · ") : ""), "facet")); article.append(header);
-    const locations = ["before", "after"].flatMap(side => (row.navigation[side]?.written_locations ?? []).map(location => titleCase(side) + ": " + basename(location.uri) + ":" + (location.range.start.line + 1)));
-    if (locations.length) {
-      const location = node("p", [...new Set(locations)].join(" · "), "location");
-      location.title = ["before", "after"].flatMap(side => (row.navigation[side]?.written_locations ?? []).map(location => titleCase(side) + ": " + location.uri)).join("\n"); article.append(location);
-    }
-    if (!row.semantic && payload.semantic) article.append(node("p", "Typed detail is unavailable for this row. Structural detail remains; review Comparison limits.", "source-note"));
-    if (row.semantic) {
-      const detail = row.semantic;
-      const changed = detail.fields.filter(field => field.changed && field.comparison_availability === "complete");
-      if (changed.length) article.append(node("p", "Changed fields: " + changed.map(field => field.label).join(", ") + ".", "summary-line"));
-      article.append(node("p", "Count unit: " + (detail.count_unit === "final_fact" ? "final fact" : detail.count_unit === "operation" ? "operation" : "accepted occurrence") + ". References and context do not add changes.", "count-note"));
-      if (detail.change === "unpaired") article.append(node("p", "Unpaired occurrence. Before and After do not prove a model transition.", "source-note"));
-      if (detail.fields.length) {
-        const table = node("table", undefined, "fields"), head = node("tr");
-        for (const label of ["Field", "Before", "After"]) head.append(node("th", label)); table.append(head);
-        for (const field of detail.fields) {
-          const tr = node("tr"), th = node("th", field.label); th.setAttribute("scope", "row"); tr.append(th);
-          for (const side of ["before", "after"]) {
-            const cell = node("td"), available = field.comparison_availability === "complete";
-            if (field.changed && available && fieldText(field[side]) !== "") cell.append(node("span", side === "before" ? "− " : "+ ", "field-cue"));
-            cell.append(fieldValue(field[side], field.changed && available ? side === "before" ? "token removed" : "token added" : ""));
-            if (!available) cell.append(node("p", "Comparison unavailable", "source-note")); tr.append(cell);
-          }
-          table.append(tr);
-        }
-        const scroll = node("div", undefined, "table-scroll"); scroll.append(table); article.append(scroll);
-        for (const field of detail.fields) if (field.numeric_difference !== null) article.append(node("p", field.label + " · After − Before: " + String(field.numeric_difference), "note"));
-      }
-      if (detail.timing.length) {
-        article.append(node("h3", "Timing"));
-        for (const use of detail.timing) {
-          const side = item => item ? item.name + " · written " + item.written_offset + " · after convention " + item.converted_offset + " · use " + (item.occurrence + 1) : "Not present";
-          article.append(node("p", "Before: " + side(use.before) + " → After: " + side(use.after)));
-        }
-      }
-    }
+    article.setAttribute("data-row-id", row.id);
+    article.setAttribute("aria-label", titleCase(row.kind) + " " + rowLabel(row) + ", " + row.scopes.map(scopeLabel).join(" · "));
+    header.append(node("span", marks[row.kind], "change-mark " + row.kind), node("h2", rowLabel(row))); article.append(header);
     const sides = node("div", undefined, "sides"); sides.append(sidePanel(row, "before"), sidePanel(row, "after")); article.append(sides);
     if (row.semantic) {
-      const refs = node("section", undefined, "refs");
-      if (row.semantic.references.length) refs.append(node("h3", "Direct equation references"));
-      for (const pointer of row.semantic.references) {
-        const ref = references.get(pointer); if (!ref) continue;
-        const line = node("p", undefined, "reference"), target = ref.navigation[ref.side];
-        const button = action(ref.label, "openReference", { pointer, side: ref.side }, payload.status !== "ready" ? "Refresh to enable source actions." : !target?.written_locations.length ? "No verified written location is available." : "");
-        button.setAttribute("aria-label", "Open " + titleCase(ref.side) + " reference: " + ref.label + (button.disabled ? ". " + button.title : ""));
-        line.append(button, node("span", titleCase(ref.side) + " · " + scopeLabel(ref.scope.dimension ?? ref.scope.domain) + " · written " + ref.timing.written_offset + ", after convention " + ref.timing.converted_offset, "source-note")); refs.append(line);
-      }
-      if (row.semantic.references.length) article.append(refs);
-      limits(article, row.semantic.limits);
+      for (const field of row.semantic.fields) if (field.numeric_difference !== null) article.append(node("p", field.label + " · After − Before: " + String(field.numeric_difference), "note"));
     }
-    const actions = node("div", undefined, "actions"); actions.append(sourceAction(row, "before"), sourceAction(row, "after")); article.append(actions);
     return article;
   }
-  function searchText(row) { return [row.label, row.group, row.before ?? "", row.after ?? "", ...(row.semantic?.facets ?? []).map(titleCase), ...(row.semantic?.fields ?? []).flatMap(field => [field.label, fieldText(field.before), fieldText(field.after)])].join("\n").toLocaleLowerCase(); }
-  function modelRows() {
-    const available = payload.rows.filter(row => choices.sections.includes(row.section)), query = choices.search.trim().toLocaleLowerCase();
-    const shown = available.filter(row => choices.changeKinds.includes(row.kind) && (choices.scope === "all" || row.scopes.includes(choices.scope)) && (!query || searchText(row).includes(query))).sort((a, b) => choices.sections.indexOf(a.section) - choices.sections.indexOf(b.section));
-    const breakdown = kinds.map(kind => shown.filter(row => row.kind === kind).length + " " + kind).join(" · ");
-    controls.counts.textContent = shown.length + " of " + available.length + " model rows shown · " + breakdown;
-    if (!shown.some(row => row.id === choices.selected)) choices.selected = shown[0]?.id ?? null;
-    if (!shown.length) {
-      const text = !choices.sections.length ? "All sections are hidden. Choose a section to show its rows." : ["failure", "incomplete", "loading"].includes(payload.status) ? "" : payload.rows.length ? "No rows match these filters." : payload.sourceChanges?.files.length ? "No model changes. Captured text differs; use Captured file text diff in More actions." : payload.coverage?.availability !== "complete" && payload.semantic ? "No model rows. Review Comparison limits before concluding that the model is unchanged." : payload.status === "ready" ? "No structural changes. Written text can still differ." : "Refresh to compare current inputs.";
-      if (text) controls.results.append(node("p", text, "empty")); return;
-    }
-    const groups = new Map();
-    for (const row of shown) { const key = row.section + ":" + row.group; if (!groups.has(key)) groups.set(key, { label: row.group, rows: [] }); groups.get(key).rows.push(row); }
-    const grid = node("div", undefined, "focused"), list = node("nav", undefined, "change-tree"); list.setAttribute("aria-label", "Model changes");
-    for (const [key, group] of groups) {
-      const section = node("details", undefined, "tree-group"), heading = node("summary", undefined, "group-heading"); section.open = choices.expanded[key] ?? choices.expansion !== "none";
-      heading.append(node("span", group.label), node("span", String(group.rows.length), "group-count")); heading.title = group.rows.length + " model row appearances"; section.append(heading);
-      section.addEventListener("toggle", () => { choices.expanded[key] = section.open; remember(); });
-      for (const row of group.rows) {
-        const button = node("button", undefined, "list-row " + row.kind + (row.id === choices.selected ? " selected" : "")); button.type = "button"; button.setAttribute("aria-pressed", String(row.id === choices.selected));
-        button.setAttribute("aria-label", titleCase(row.kind) + " " + row.label + ", " + row.scopes.map(scopeLabel).join(" · "));
-        const label = node("span"); label.append(node("span", row.label, "row-title"), node("span", (row.semantic?.facets.map(titleCase).join(" · ") || row.group) + " · " + row.scopes.map(scopeLabel).join(" · "), "row-subtitle"));
-        button.append(node("span", marks[row.kind], "change-mark " + row.kind), label);
-        button.setAttribute("data-row-id", row.id);
-        button.addEventListener("click", () => { choices.selected = row.id; update(); focusRow("data-row-id", row.id); }); section.append(button);
-      }
-      list.append(section);
-    }
-    const detail = node("section", undefined, "selected-detail"); detail.setAttribute("aria-label", "Selected change"); detail.append(rowDetail(shown.find(row => row.id === choices.selected))); grid.append(list, detail); controls.results.append(grid);
+  function groupNotes(rows) {
+    const entries = rows.flatMap(row => row.semantic ? [...row.semantic.limits, ...row.semantic.expressions.filter(expression => expression.availability !== "complete").map(expression => ({ reason: expression.reason ?? "Highlights: " + titleCase(expression.availability), omitted: null }))] : payload.semantic ? [{ reason: "Typed detail is unavailable for some rows. Structural detail remains.", omitted: null }] : []);
+    const unique = new Map(entries.map(entry => [JSON.stringify([entry.reason, entry.omitted]), entry]));
+    if (!unique.size) return null;
+    const notes = node("aside", undefined, "group-notes"); notes.setAttribute("aria-label", "Comparison limits"); limits(notes, [...unique.values()]); return notes;
   }
-  function comparisonLimits() {
-    if (!controls.comparisonLimits) return;
-    const coverage = payload.coverage, source = payload.sourceChanges;
-    controls.comparisonLimits.hidden = payload.status === "loading";
-    controls.limitsSummary.textContent = "Comparison limits" + (payload.status === "ready" && [coverage, source, payload.semantic].some(value => value && value.availability !== "complete") ? " · Partial" : "");
-    const body = controls.limitsBody; body.replaceChildren();
-    const boundary = !coverage || coverage.source_boundary === "parsed_models_only" ? "Captured source text is unavailable." : coverage.source_boundary.startsWith("supplied_") ? "Only supplied roots and executed include text are compared." : "Captured roots and executed includes are compared.";
-    body.append(node("p", boundary + " Unexecuted child files, external MATLAB functions and data-file contents are not captured."));
-    if (payload.semanticMessage) body.append(node("p", payload.semanticMessage));
-    const entries = [...(coverage?.limits ?? []), ...(payload.semantic?.limits ?? []), ...(source?.limits ?? []), ...(coverage?.families ?? []).flatMap(family => family.limits), ...(source?.files ?? []).flatMap(file => (file.limits ?? []).map(limit => ({ ...limit, reason: (file.after?.file_key ?? file.before?.file_key) + ": " + limit.reason })))];
-    const unique = new Map(entries.map(limit => [limit.reason + ":" + limit.omitted, limit]));
-    limits(body, [...unique.values()]);
-    for (const family of coverage?.families ?? []) if (family.availability !== "complete" && !family.limits.length) body.append(node("p", titleCase(family.family) + " comparison: " + titleCase(family.availability) + "."));
+  function searchText(row) { return [row.label, row.group, row.before ?? "", row.after ?? "", ...(row.semantic?.facets ?? []).map(titleCase), ...(row.semantic?.expressions ?? []).flatMap(expression => [expression.before?.text ?? "", expression.after?.text ?? ""]), ...(row.semantic?.fields ?? []).flatMap(field => [field.label, fieldText(field.before), fieldText(field.after)])].join("\n").toLocaleLowerCase(); }
+  function modelRows() {
+    const groupKey = row => row.section + ":" + row.group;
+    const available = payload.rows, query = choices.search.trim().toLocaleLowerCase();
+    const matches = row => choices.changeKinds.includes(row.kind) && (!query || searchText(row).includes(query));
+    const shown = available.filter(matches);
+    const breakdown = kinds.map(kind => shown.filter(row => row.kind === kind).length + " " + kind).join(" · ");
+    controls.counts.textContent = shown.length + " of " + available.length + " model rows match filters · " + breakdown;
+    const groups = new Map();
+    for (const row of [...payload.rows].sort((a, b) => Object.keys(names).indexOf(a.section) - Object.keys(names).indexOf(b.section))) {
+      const key = groupKey(row);
+      if (!groups.has(key)) groups.set(key, { label: row.group, rows: [] });
+      if (matches(row)) groups.get(key).rows.push(row);
+    }
+    if (groups.size && !groups.get(choices.group)?.rows.length) choices.group = [...groups].find(([, group]) => group.rows.length)?.[0] ?? null;
+    const grid = node("div", undefined, "grouped"), list = node("nav", undefined, "group-list"); list.setAttribute("aria-label", "Change groups");
+    for (const [key, group] of groups) {
+      const button = node("button", undefined, "group-button" + (key === choices.group ? " selected" : "")); button.type = "button";
+      button.disabled = !group.rows.length;
+      button.append(node("span", group.label), node("span", String(group.rows.length), "group-count"));
+      button.setAttribute("aria-label", group.label + ", " + group.rows.length + " changes"); button.setAttribute("aria-pressed", String(key === choices.group)); button.setAttribute("data-group", key);
+      button.addEventListener("click", () => { choices.group = key; update(); [...document.querySelectorAll("[data-group]")].find(element => element.getAttribute("data-group") === key)?.focus(); });
+      list.append(button);
+    }
+    const selected = groups.get(choices.group), rows = node("section", undefined, "group-rows"); rows.setAttribute("aria-label", selected?.label ?? "Model changes");
+    if (selected) {
+      for (const row of selected.rows) rows.append(rowDetail(row));
+      const notes = groupNotes(selected.rows); if (notes) rows.append(notes);
+    } else {
+      const text = ["failure", "incomplete", "loading"].includes(payload.status) ? "" : payload.rows.length ? "No rows match these filters." : payload.sourceChanges?.files.length ? "No model changes. Captured text differs; use Text diff." : payload.coverage?.availability !== "complete" && payload.semantic ? "No model rows. Some changes could not be compared." : payload.status === "ready" ? "No structural changes. Written text can still differ." : "Refresh to compare current inputs.";
+      if (text) rows.append(node("p", text, "empty"));
+    }
+    grid.append(list, rows); controls.results.append(grid);
   }
   function renderRows() {
     if (!payload || !choices) return;
-    controls.results.className = "results layout-" + choices.layout; controls.results.replaceChildren();
-    if (choices.capture !== payload.capture && payload.status === "ready") { choices.capture = payload.capture ?? ""; choices.selected = null; }
-    modelRows(); comparisonLimits();
-    const selected = payload.rows.find(row => row.id === choices.selected);
-    if (controls.layoutFilter) controls.layoutFilter.hidden = !selected || !!selected.semantic && !selected.semantic.expressions.length;
+    controls.results.className = "results"; controls.results.replaceChildren();
+    modelRows();
+    if (payload.semanticMessage) controls.results.append(node("p", payload.semanticMessage, "empty"));
   }
-  function focusRow(attribute, identity) { const entries = document.querySelectorAll?.("[" + attribute + "]") ?? []; [...entries].find(element => element.getAttribute(attribute) === identity)?.focus(); }
   controls.refresh.addEventListener("click", () => post("refresh"));
-  for (const name of ["changeComparison", "swap", "rootTextDiff", "capturedTextDiff", "updateRevision", "choosePath", "details", "help"]) document.getElementById(name)?.addEventListener("click", () => { post(name); const more = document.getElementById("moreActions"); if (more) more.open = false; });
-  for (const id of ["moreActions", "sectionFilter"]) document.getElementById(id)?.addEventListener("keydown", event => { if (event.key === "Escape") { const menu = document.getElementById(id); menu.open = false; menu.querySelector("summary")?.focus(); } });
-  window.addEventListener("click", event => { for (const id of ["moreActions", "sectionFilter"]) { const menu = document.getElementById(id); if (menu?.open && !event.composedPath().includes(menu)) menu.open = false; } });
+  for (const name of ["changeComparison", "swap", "rootTextDiff", "capturedTextDiff", "choosePath", "help"]) document.getElementById(name)?.addEventListener("click", () => post(name));
   controls.search.addEventListener("input", () => { choices.search = controls.search.value; update(); });
   for (const [control, property, savedProperty, entries] of [[controls.kinds, "changeKinds", "customChangeKinds", kinds]]) control.addEventListener("change", () => {
     choices[property] = control.value === "all" ? [...entries] : control.value === "saved" ? [...choices[savedProperty]] : [control.value];
     renderControls(); update();
   });
-  for (const name of ["scope", "layout", "expansion"]) controls[name].addEventListener("change", () => { choices[name] = controls[name].value; if (name === "expansion") choices.expanded = {}; update(); });
-  controls.comparisonLimits?.addEventListener("toggle", () => { if (payload && choices) { choices.limitsOpen = controls.comparisonLimits.open; remember(); } });
   window.addEventListener("message", event => {
     const message = event.data; if (!message || message.type !== "render" || !Array.isArray(message.rows)) return;
-    payload = message; references = new Map((message.references ?? []).map(reference => [reference.pointer, reference])); choices = message.choices; if (controls.comparisonLimits) controls.comparisonLimits.open = choices.limitsOpen;
+    payload = message; references = new Map((message.references ?? []).map(reference => [reference.pointer, reference])); choices = message.choices;
     controls.models.replaceChildren();
     for (const [label, input] of [["Before", message.before], ["After", message.after]]) {
       const model = node("div", undefined, "input-side"), parts = input.split(" · "); model.title = input;
@@ -247,12 +258,11 @@
     }
     controls.status.textContent = message.message; controls.status.className = message.status; controls.refresh.disabled = message.status === "loading";
     controls.status.hidden = message.status === "ready" && message.message === "Current comparison";
-    const folders = document.getElementById("folders"); if (folders) folders.textContent = message.hasHistory ? "Extra include folders use the current settings. Historical sources use only their selected commits." : "";
-    for (const name of ["swap", "changeComparison", "updateRevision"]) { const button = document.getElementById(name); if (button) button.disabled = name === "updateRevision" ? !message.hasHistory : false; }
     const path = document.getElementById("choosePath"); if (path) path.hidden = message.status !== "failure" || !/model|root|path|file|source/i.test(message.message);
     const boundary = document.getElementById("sourceBoundary"); if (boundary) boundary.textContent = !message.coverage ? "Captured source boundary unavailable" : message.coverage.source_boundary === "parsed_models_only" ? "Parsed models only · Source unavailable" : message.coverage.source_boundary.startsWith("supplied_") ? "Supplied root + executed includes" : "Captured root + executed includes";
-    const root = document.getElementById("rootTextDiff"); if (root) root.disabled = message.status !== "ready";
-    const captured = document.getElementById("capturedTextDiff"); if (captured) captured.disabled = message.status !== "ready" || !message.sourceChanges?.files.length;
+    const hasFiles = !!message.sourceChanges?.files.length;
+    const root = document.getElementById("rootTextDiff"); if (root) { root.disabled = message.status !== "ready"; root.hidden = hasFiles; }
+    const captured = document.getElementById("capturedTextDiff"); if (captured) { captured.disabled = message.status !== "ready" || !hasFiles; captured.hidden = !hasFiles; }
     renderControls(); renderRows(); remember();
   });
   api.postMessage({ type: "ready", key: saved?.key, choices: saved?.choices });

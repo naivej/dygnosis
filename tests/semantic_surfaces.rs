@@ -17,6 +17,105 @@ fn compare(a: &str, b: &str) -> ModelDiff {
 }
 
 #[test]
+fn added_predetermined_symbol_keeps_one_owning_symbol_row() {
+    let diff = compare(
+        "var y; model; y=1; end;",
+        "var y xxx; predetermined_variables xxx; model; y=xxx; end;",
+    );
+    let rows: Vec<_> = diff
+        .semantic
+        .rows
+        .iter()
+        .filter(|row| row.family == SemanticFamily::Symbols && row.name == "xxx")
+        .collect();
+    assert_eq!(
+        rows.len(),
+        1,
+        "predetermined declaration duplicated the primary symbol: {rows:?}"
+    );
+    assert!(rows[0]
+        .fields
+        .iter()
+        .any(|field| field.name == "predetermined" && field.after == FieldState::boolean(true)));
+    assert!(!rows[0].references.is_empty());
+    assert!(commands(&diff).is_empty());
+}
+
+#[test]
+fn shock_instruction_edits_do_not_duplicate_command_changes() {
+    let before = "varexo e u; shocks; var e=.1; var u=.2; end;";
+    for after in [
+        "varexo e u; shocks; var e=.3; var u=.2; end;",
+        "varexo e u; shocks; var e=.1; end;",
+    ] {
+        let diff = compare(before, after);
+        assert_eq!(diff.shock_setup_changes.len(), 1);
+        assert!(
+            commands(&diff).is_empty(),
+            "shock edit also appears in Commands: {:?}",
+            commands(&diff)
+        );
+    }
+}
+
+#[test]
+fn added_local_definition_does_not_change_model_separators() {
+    let diff = compare(
+        "var y; model; y=1; end;",
+        "var y; model; # helper=2; y=1; end;",
+    );
+    assert_eq!(role(&diff, "model_local_definition").len(), 1);
+    assert!(
+        commands(&diff).is_empty(),
+        "local insertion left a redundant model row: {:?}",
+        commands(&diff)
+    );
+    assert!(diff.added_equations.is_empty());
+    assert!(diff.changed_equations.is_empty());
+}
+
+#[test]
+fn shock_cards_retain_each_instruction_and_its_block_options() {
+    let before = "varexo e u; shocks; var e; stderr 1; var u; stderr 3; end;";
+    let after = "varexo e u; shocks(overwrite); var e; stderr 2; var u; stderr 3; end;";
+    let diff = compare(before, after);
+    let row = diff
+        .semantic
+        .rows
+        .iter()
+        .find(|row| row.family == SemanticFamily::Shocks && row.name == "e")
+        .unwrap();
+    let text = row
+        .expressions
+        .iter()
+        .find(|expression| expression.field == "statement_text")
+        .expect("shock statement text");
+    assert_eq!(
+        text.before.as_ref().unwrap().text,
+        "shocks;\nvar e; stderr 1;\nend;"
+    );
+    assert_eq!(
+        text.after.as_ref().unwrap().text,
+        "shocks(overwrite);\nvar e; stderr 2;\nend;"
+    );
+    assert!(!text.after.as_ref().unwrap().text.contains("var u"));
+    assert!(text
+        .after
+        .as_ref()
+        .unwrap()
+        .runs
+        .iter()
+        .any(|run| run.role == TokenRole::Added && run.text.contains('2')));
+    assert!(text
+        .after
+        .as_ref()
+        .unwrap()
+        .runs
+        .iter()
+        .any(|run| run.role == TokenRole::Added && run.text.contains("overwrite")));
+}
+
+#[test]
 fn local_only_edit_has_one_owner_and_direct_unchanged_equation_references() {
     let before = "var y; model; # a=1; [name='Output'] y=a+a(-1); end;";
     let diff = compare(before, &before.replace("# a=1", "# a=2"));

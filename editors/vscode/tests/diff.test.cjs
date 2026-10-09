@@ -34,7 +34,7 @@ function noChanges() {
   for (const key of Object.keys(result)) if (Array.isArray(result[key])) result[key] = [];
   result.navigation.rows = []; return result;
 }
-const defaults = { layout: "auto", expansion: "changes", sections: [...diffSections], changeKinds: [...changeKinds] };
+const defaults = { sections: [...diffSections], changeKinds: [...changeKinds] };
 
 test("every legacy comparison section keeps exact pointer, values, direction and engine pairing", () => {
   const parsed = parseDiff(fixture(), before, after);
@@ -82,10 +82,11 @@ test("incomplete expansion withholds rows and no-change responses remain complet
   const result = fixture(); result.navigation.after.complete = false;
   assert.deepEqual(parseDiff(result, before, after).rows, []);
 });
-test("control state normalizes lists and preserves empty sections and per-view choices", () => {
-  const choices = normalizeChoices({ layout: "stacked", expansion: "none", sections: [], changeKinds: ["changed", "changed", "bad"], search: "<img>", scope: "firms", expanded: { x: true, y: 3 } }, defaults);
-  assert.deepEqual(choices.sections, []); assert.deepEqual(choices.changeKinds, ["changed"]); assert.deepEqual(choices.expanded, { x: true });
-  assert.equal(choices.layout, "stacked"); assert.equal(choices.scope, "firms"); assert.equal(choices.search, "<img>");
+test("control state normalizes kinds and ignores retired section and scope filters", () => {
+  const choices = normalizeChoices({ layout: "stacked", expansion: "none", sections: [], changeKinds: ["changed", "changed", "bad"], search: "<img>", scope: "firms", expanded: { x: true, y: 3 }, group: "symbols:Symbols" }, defaults);
+  assert.equal(Object.hasOwn(choices, "sections"), false); assert.deepEqual(choices.changeKinds, ["changed"]); assert.equal(choices.group, "symbols:Symbols");
+  assert.equal(Object.hasOwn(choices, "expanded"), false); assert.equal(Object.hasOwn(choices, "expansion"), false);
+  assert.equal(Object.hasOwn(choices, "layout"), false); assert.equal(Object.hasOwn(choices, "scope"), false); assert.equal(choices.search, "<img>");
 });
 
 const preferenceScopes = [], preferenceLogs = [];
@@ -97,9 +98,9 @@ const vscode = { workspace: { getConfiguration: (_section, scope) => {
 const originalLoad = Module._load;
 Module._load = function(id, ...args) { return id === "vscode" ? vscode : originalLoad.call(this, id, ...args); };
 const { diffPreferences } = require("../out/diff"); Module._load = originalLoad;
-test("launching model preferences use resource scope, normalize settings and honor empty sections", () => {
+test("launching model Kind preferences use resource scope and ignore retired section settings", () => {
   const result = diffPreferences(uri(after), message => preferenceLogs.push(message));
-  assert.equal(result.layout, "auto"); assert.deepEqual(result.sections, []); assert.deepEqual(result.changeKinds, ["removed"]);
+  assert.equal(Object.hasOwn(result, "layout"), false); assert.equal(Object.hasOwn(result, "sections"), false); assert.deepEqual(result.changeKinds, ["removed"]);
   assert.ok(preferenceScopes.every(scope => scope.uri.toString() === after && scope.languageId === "dynare"));
 });
 
@@ -111,13 +112,15 @@ class Element {
   replaceChildren(...children) { this.children = children; this._text = ""; }
   addEventListener(name, listener) { this.listeners[name] = listener; }
   setAttribute(name, value) { this.attributes[name] = value; }
+  getAttribute(name) { return this.attributes[name]; }
+  focus() { this.focused = true; }
   fire(name) { this.listeners[name]?.(); }
 }
 function descendants(element) { return [element, ...element.children.flatMap(descendants)]; }
 function webview() {
-  const elements = Object.fromEntries(["models", "status", "search", "scope", "layout", "expansion", "kinds", "sections", "counts", "results", "refresh", "help"].map(id => [id, new Element(id)]));
+  const elements = Object.fromEntries(["models", "status", "search", "scope", "kinds", "sections", "counts", "results", "refresh", "help"].map(id => [id, new Element(id)]));
   const events = {}, posted = [], states = [];
-  const sandbox = { document: { getElementById: id => elements[id], createElement: tag => new Element(tag) }, window: { addEventListener: (name, callback) => events[name] = callback },
+  const sandbox = { document: { getElementById: id => elements[id] ?? descendants(elements.results).find(element => element.id === id), createElement: tag => new Element(tag), querySelectorAll: () => descendants(elements.results).filter(element => element.attributes["data-group"]) }, window: { addEventListener: (name, callback) => events[name] = callback },
     acquireVsCodeApi: () => ({ getState: () => undefined, setState: value => states.push(value), postMessage: message => posted.push(message) }) };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../media/diff_view.js"), "utf8"), sandbox);
   const render = (extra = {}) => events.message({ data: { type: "render", key: "view", token: 4, before, after, rows: parseDiff(fixture(), before, after).rows,
@@ -132,21 +135,42 @@ test("webview uses text nodes, labels source sides and disables missing/stale lo
   buttons[1].fire("click"); assert.equal(env.posted.at(-1).side, "after"); assert.equal(env.posted.at(-1).rowId, "/added_endogenous/0");
   env.render({ status: "stale", message: "Out of date" }); assert.ok(descendants(env.elements.results).filter(element => element.tag === "button" && element.attributes["aria-label"]?.startsWith("Open")).every(button => button.disabled));
 });
-test("webview text/kind/scope filters, counts, layout and expansion preserve state", () => {
-  const env = webview(); env.render(); assert.match(env.elements.counts.textContent, /11 of 11 model rows shown/);
-  env.elements.search.value = "goods"; env.elements.search.fire("input"); assert.match(env.elements.counts.textContent, /1 of 11 model rows shown/);
-  env.elements.layout.value = "stacked"; env.elements.layout.fire("change"); assert.equal(env.elements.results.className, "results layout-stacked");
-  env.elements.expansion.value = "none"; env.elements.expansion.fire("change"); assert.equal(env.elements.results.children[0].children[0].children[0].open, false);
-  env.elements.search.value = ""; env.elements.search.fire("input"); env.elements.scope.value = "households"; env.elements.scope.fire("change"); assert.match(env.elements.counts.textContent, /1 of 11 model rows shown/);
-  assert.equal(env.states.at(-1).choices.scope, "households");
-  env.elements.kinds.value = "removed"; env.elements.kinds.fire("change"); assert.match(env.elements.results.textContent, /No rows match/);
+test("every model change renders its own Before and After cards in its group", () => {
+  const env = webview(), rows = parseDiff(fixture(), before, after).rows; env.render();
+  const groups = descendants(env.elements.results).filter(element => element.attributes["data-group"]).map(element => element.attributes["data-group"]);
+  const visited = [];
+  for (const group of groups) {
+    descendants(env.elements.results).find(element => element.attributes["data-group"] === group).fire("click");
+    const articles = descendants(env.elements.results).filter(element => element.tag === "article");
+    assert.deepEqual(articles.map(article => article.attributes["data-row-id"]), rows.filter(row => row.section + ":" + row.group === group).map(row => row.id));
+    visited.push(...articles.map(article => article.attributes["data-row-id"]));
+    assert.equal(descendants(env.elements.results).find(element => element.attributes["data-group"] === group).focused, true);
+    for (const article of articles) {
+      const row = rows.find(row => row.id === article.attributes["data-row-id"]);
+      const cards = descendants(article).filter(element => element.className?.startsWith("side "));
+      assert.deepEqual(cards.map(card => card.className), ["side before", "side after"]);
+      for (const [index, side] of ["before", "after"].entries()) {
+        const button = descendants(cards[index]).find(element => element.className === "source-link");
+        if (!button.disabled) { button.fire("click"); assert.equal(env.posted.at(-1).rowId, row.id); assert.equal(env.posted.at(-1).side, side); }
+      }
+    }
+  }
+  assert.deepEqual(visited, rows.map(row => row.id));
+  const restored = normalizeChoices(env.states.at(-1).choices, defaults); env.render({ choices: restored });
+  assert.equal(env.states.at(-1).choices.group, groups.at(-1));
 });
-test("webview scope filters and side labels retain unmapped heterogeneous shock rows", () => {
+test("webview text and kind filters preserve state and choose a visible group", () => {
+  const env = webview(); env.render(); assert.match(env.elements.counts.textContent, /11 of 11 model rows match filters/);
+  env.elements.search.value = "goods"; env.elements.search.fire("input"); assert.match(env.elements.counts.textContent, /1 of 11 model rows match filters/);
+  assert.equal(env.states.at(-1).choices.group, "aggregateEquations:Aggregate equations");
+  env.elements.search.value = ""; env.elements.search.fire("input"); assert.match(env.elements.counts.textContent, /11 of 11 model rows match filters/);
+  env.elements.kinds.value = "removed"; env.elements.kinds.fire("change"); assert.match(env.elements.counts.textContent, /1 of 11 model rows match filters/);
+});
+test("side labels retain unmapped heterogeneous shock rows without a scope filter", () => {
   const result = fixture(), nav = result.navigation.rows.find(row => row.id === "/shock_setup_changes/0");
   nav.before = null; nav.after = null; nav.dimension = "households";
   const rows = parseDiff(result, before, after).rows.filter(row => row.id === nav.id), env = webview(); env.render({ rows });
   assert.match(env.elements.results.textContent, /Dimension: households/);
-  env.elements.scope.value = "households"; env.elements.scope.fire("change"); assert.match(env.elements.counts.textContent, /1 of 1 model rows shown/);
-  env.elements.scope.value = "aggregate"; env.elements.scope.fire("change"); assert.match(env.elements.counts.textContent, /0 of 1 model rows shown/);
-  assert.ok(descendants(env.elements.results).filter(element => element.tag === "button").every(button => button.disabled));
+  assert.match(env.elements.counts.textContent, /1 of 1 model rows match filters/);
+  assert.ok(descendants(env.elements.results).filter(element => element.className === "source-link").every(button => button.disabled));
 });

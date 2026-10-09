@@ -3,25 +3,40 @@
 ## v0.11.14
 
 - **Show mod changes** compares retained model facts across parser families in
-  a pinned tab in the active editor group. A grouped list shows the selected
-  change's named fields, expression tokens, written and convention-adjusted
-  timing, and direct written references. Compact filters keep the review visible.
-- The change-color legend stays at the bottom during scrolling. The Section menu
-  selects multiple sections with checkboxes; All sections selects or clears all.
-  Missing and empty Before/After values have blank cells.
+  a pinned tab in the active editor group. A left panel lists change groups.
+  Each group shows all its filtered changes as rows with Before on the left
+  and After on the right, expression tokens, other changed fields, and
+  direct written references within each side's card. Card headers open each
+  side's verified source, including the corresponding HEAD file for an added row.
+  Expressions appear once; unchanged timing entries and repeated metadata are
+  omitted. Change comparison and Swap sides sit beside the file indicators.
+- The change-color legend stays at the bottom during scrolling. All available
+  categories appear in the left panel. Find changes and Kind filter their rows.
+  Missing and empty Before/After values stay blank.
 - Equation changes pair across repeated names when their unchanged regime tags
   identify a unique variant on each side. This includes an OccBin `r=1` to `r=0`
   edit in one `bind` variant. Repeated copies with the same regime remain Unpaired
   when their correspondence is uncertain.
-- **Comparison limits** is a collapsed note that marks partial comparisons and
-  explains unavailable facts and the captured source boundary. **Captured file
-  text diff…** opens VS Code's native diff for a changed captured root or include,
-  including unsaved text. Out-of-date inputs disable source and text-diff actions
+- Added symbols show one declaration with available metadata. Model-local
+  variables are grouped with equations. Their semicolons no longer produce
+  redundant Commands changes.
+- Shock cards show written instructions and block options with token highlights.
+  Their body edits no longer create duplicate Commands rows. Symbol declaration
+  keywords and shock block openers stay plain. Added or removed shock instructions
+  and model-local definitions are highlighted in full. Commands omit repeated role and token headings.
+  Predetermined conventions stay in the symbol card without another declaration
+  row or the same conversion note on each direct reference.
+- Relevant comparison limits appear once after the selected group's rows. **Text diff…**
+  in the top bar opens VS Code's native diff for a changed captured root or include,
+  including unsaved text, with filenames and revision labels in its tab title.
+  Out-of-date inputs disable source and text-diff actions
   until Refresh. The comparison does not infer solver results or capture
   unexecuted child files, external MATLAB functions or data-file contents.
-- **Expression layout** affects Before and After expression panels; field tables
-  keep their Before and After columns. Change list and its Presentation setting
-  are removed. Saved filters and layout still restore in the single model view.
+- The Layout and group expansion controls and settings, Change list and its Presentation
+  setting, Scope and Section controls and the Section setting, More actions,
+  the Partial comparison explainer and Update revision
+  are removed. Saved filters and selected group still restore
+  in the single model view.
 - **Expand macros** and **Refresh macro expansion** replace the effective-model
   command labels. The preview remains read-only and expands macros and includes.
 

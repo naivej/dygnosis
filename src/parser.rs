@@ -4144,6 +4144,11 @@ impl Parser<'_> {
             let before = self.i;
             if let Some(group) = self.parse_shock_group(body_end_i) {
                 self.model.shock_groups.push(group);
+                self.retain_fact_receipt(
+                    "shock_instruction",
+                    before,
+                    std::iter::once(before..self.i).collect(),
+                );
             }
             if self.i <= before {
                 self.bump();
@@ -9315,6 +9320,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_shock_var_stmt(&mut self, end_i: usize) -> Option<ShockStmt> {
+        let row_i = self.i;
         let parse_order = self.token_origins[self.i].start;
         let start = self.current_start();
         self.bump();
@@ -9355,6 +9361,11 @@ impl Parser<'_> {
         } else {
             ShockKind::Cov(names)
         };
+        self.retain_fact_receipt(
+            "shock_instruction",
+            row_i,
+            std::iter::once(row_i..self.i).collect(),
+        );
         Some(ShockStmt {
             symbol_type_context: self.model.symbol_context(),
             parse_order,
@@ -9366,6 +9377,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_shock_corr_stmt(&mut self, end_i: usize) -> Option<ShockStmt> {
+        let row_i = self.i;
         let parse_order = self.token_origins[self.i].start;
         let start = self.current_start();
         self.bump();
@@ -9390,6 +9402,11 @@ impl Parser<'_> {
         if names.len() < 2 || !has_eq {
             return None;
         }
+        self.retain_fact_receipt(
+            "shock_instruction",
+            row_i,
+            std::iter::once(row_i..self.i).collect(),
+        );
         Some(ShockStmt {
             symbol_type_context: self.model.symbol_context(),
             parse_order,
@@ -9404,6 +9421,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_shock_skew_stmt(&mut self, end_i: usize) -> Option<ShockStmt> {
+        let row_i = self.i;
         let parse_order = self.token_origins[self.i].start;
         let start = self.current_start();
         self.bump();
@@ -9428,6 +9446,11 @@ impl Parser<'_> {
         if names.is_empty() || !has_eq {
             return None;
         }
+        self.retain_fact_receipt(
+            "shock_instruction",
+            row_i,
+            std::iter::once(row_i..self.i).collect(),
+        );
         Some(ShockStmt {
             symbol_type_context: self.model.symbol_context(),
             parse_order,

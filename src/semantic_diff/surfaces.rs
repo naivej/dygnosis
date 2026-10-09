@@ -469,6 +469,22 @@ fn history_facts(
 }
 fn primary_context(before: &Model, after: &Model, diff: &mut ModelDiff, claims: &mut TokenClaims) {
     for (model, side) in [(before, Side::Before), (after, Side::After)] {
+        // The shock reader owns these complete instructions on both sides,
+        // including unchanged rows. Written spans cannot identify macro copies.
+        for receipt in model
+            .fact_receipts
+            .get("shock_instruction")
+            .into_iter()
+            .flatten()
+        {
+            if let Some(id) = parent_at_order(model, receipt.parse_order)
+                && accepted_statement(model, &model.statements[id])
+            {
+                for range in &receipt.claims {
+                    claims.claim(side, id, range.clone());
+                }
+            }
+        }
         for (name, _) in final_symbol_declarations(model) {
             // Per-object declarations retain target tokens separately. Metadata
             // is represented by the primary symbol fields; declarations never
@@ -669,7 +685,7 @@ fn command_facts(
         fact.fields.push(
             field(
                 "statement_tokens",
-                "Unclaimed accepted tokens",
+                "Statement",
                 FieldState::text(&tokens),
                 ChangeFacet::Options,
             )
@@ -701,6 +717,14 @@ fn residual(
     let tokens: Vec<_> = range
         .clone()
         .filter(|&index| !claims.contains(side, statement.id, index))
+        // Written equations retain their body up to, but not including, `;`.
+        // A terminator after an owned body belongs to that same fact.
+        .filter(|&index| {
+            !(statement.name == "model"
+                && model.expanded_tokens[index].kind == crate::lexer::TokenKind::Semi
+                && index >= statement.opener_range.end
+                && claims.contains(side, statement.id, index - 1))
+        })
         .map(|index| model.expanded_tokens[index].clone())
         .collect();
     // Named fields can own all domain tokens while leaving separators behind.

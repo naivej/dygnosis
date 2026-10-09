@@ -1,6 +1,6 @@
 {
   "version": "0.11.14",
-  "fingerprint": "d8464bae591881510433b770569ffc7ff63effd27e179e267d6e65168d64c089",
+  "fingerprint": "5fe03fa0c92ca55765e44c918b1f7e8f79be74eb10aa24fbf55ad10420b9d2ef",
   "tools": [
     {
       "name": "dynare_auto_fix",

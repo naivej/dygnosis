@@ -173,6 +173,15 @@ impl Parser<'_> {
         } else {
             Vec::new()
         };
+        if !stochastic.is_empty() || !scheduled.is_empty() || options.overwrite {
+            // Every accepted opener option is retained in this block's typed
+            // shock instructions. Refused parents never acquire these claims.
+            self.retain_fact_receipt(
+                "shock_instruction",
+                opener_i,
+                vec![opener_i..body_i, body_end_i..saved],
+            );
+        }
         self.model.shock_blocks.push(ShockBlock {
             kind,
             options,
@@ -225,6 +234,7 @@ impl Parser<'_> {
         end_i: usize,
         block_kind: ShockBlockKind,
     ) -> Option<ScheduledShock> {
+        let row_i = self.i;
         let start = self.bump().span.start; // var
         let name_tok = self.tokens.get(self.i)?.clone();
         if name_tok.kind != TokenKind::Ident {
@@ -276,6 +286,11 @@ impl Parser<'_> {
         } else {
             self.current_start()
         };
+        self.retain_fact_receipt(
+            "shock_instruction",
+            row_i,
+            std::iter::once(row_i..self.i).collect(),
+        );
         Some(ScheduledShock {
             symbol_type_context: self.model.symbol_context(),
             name,
@@ -1473,6 +1488,7 @@ impl Parser<'_> {
         controlled: bool,
         companion: bool,
     ) -> Option<PathStanza> {
+        let row_i = self.i;
         let start = self.bump().span.start;
         let target_tok = self.tokens.get(self.i)?.clone();
         if target_tok.kind != TokenKind::Ident {
@@ -1558,6 +1574,13 @@ impl Parser<'_> {
         {
             stanza.callback_completed = self.path_stanza_action(&stanza);
         }
+        if stanza.callback_completed {
+            self.retain_fact_receipt(
+                "shock_instruction",
+                row_i,
+                std::iter::once(row_i..self.i).collect(),
+            );
+        }
         Some(stanza)
     }
 
@@ -1611,6 +1634,11 @@ impl Parser<'_> {
                 self.current_start()
             };
             if let Some(value) = value {
+                self.retain_fact_receipt(
+                    "shock_instruction",
+                    start,
+                    std::iter::once(start..self.i).collect(),
+                );
                 entries.push(EndvalEntry {
                     symbol_type_context: self.model.symbol_context(),
                     name,

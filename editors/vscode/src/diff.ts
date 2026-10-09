@@ -1,19 +1,10 @@
 import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
 import { listSetting } from "./settings";
-import { allDiffSections, changeKinds, DiffPreferences } from "./diff_view";
+import { changeKinds, DiffPreferences } from "./diff_view";
 
 export function diffPreferences(root: vscode.Uri, log: (message: string) => void): DiffPreferences {
-  const config = vscode.workspace.getConfiguration("dynare", { uri: root, languageId: "dynare" });
-  const choice = <T extends string>(key: string, allowed: T[], fallback: T): T => {
-    const value = config.get<unknown>(key, fallback);
-    if (typeof value === "string" && allowed.includes(value as T)) return value as T;
-    log(`Invalid dynare.${key}; using ${fallback}.`); return fallback;
-  };
   return {
-    layout: choice("diff.layout", ["auto", "sideBySide", "stacked"], "auto"),
-    expansion: choice("diff.defaultExpansion", ["changes", "all", "none"], "changes"),
-    sections: listSetting("diff.sections", root, [...allDiffSections], [...allDiffSections], log) as DiffPreferences["sections"],
     changeKinds: listSetting("diff.defaultChangeKinds", root, [...changeKinds], [...changeKinds], log) as DiffPreferences["changeKinds"],
   };
 }
@@ -26,15 +17,14 @@ export function diffHtml(webview: vscode.Webview, assets: vscode.Uri): string {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${style.toString()}"><title>Dygnosis Changes</title></head><body>
 <main><div id="reviewContent" class="review-content"><h1 class="sr-only">Changes</h1><p class="breadcrumb">Dygnosis <span aria-hidden="true">›</span> Changes</p>
-<header class="comparison-heading"><div id="models" class="comparison-inputs"></div>
-<div class="comparison-actions"><button id="changeComparison" type="button">Change comparison…</button><button id="swap" type="button" title="Swap Before and After">Swap sides</button><button id="refresh" type="button">Refresh</button>
-<details id="moreActions" class="more-actions"><summary>More actions</summary><div class="more-actions-panel"><button id="rootTextDiff" type="button">Root file text diff</button><button id="capturedTextDiff" type="button">Captured file text diff…</button><button id="updateRevision" type="button">Update revision</button><button id="details" type="button">Details</button><button id="help" type="button">Help</button><label>Expansion <select id="expansion"><option value="changes">Changes</option><option value="all">All</option><option value="none">None</option></select></label><p id="folders"></p></div></details></div></header>
-<details id="comparisonLimits" class="comparison-limits"><summary id="limitsSummary">Comparison limits</summary><div id="limitsBody"></div></details>
+<header class="comparison-heading"><div class="comparison-selector"><div id="models" class="comparison-inputs"></div>
+<button id="changeComparison" type="button">Change comparison…</button><button id="swap" type="button" title="Swap Before and After">Swap sides</button></div><div class="comparison-actions"><button id="refresh" type="button">Refresh</button>
+<button id="rootTextDiff" type="button">Text diff</button><button id="capturedTextDiff" type="button" hidden>Text diff…</button></div></header>
 <div id="filterTools" class="tools"><label class="search"><span class="sr-only">Find changes</span><input id="search" type="search" placeholder="Find changes"></label>
-<label id="kindFilter">Kind <select id="kinds" aria-label="Change kind"></select></label><details id="sectionFilter" class="section-filter"><summary id="sectionsSummary" aria-label="Shown sections">All sections</summary><div id="sections" class="section-options" role="group" aria-label="Shown sections"></div></details><label id="scopeFilter">Scope <select id="scope"><option value="all">All scopes</option></select></label>
-<label id="layoutFilter">Expression layout <select id="layout" aria-label="Before and After expression layout"><option value="auto">Auto</option><option value="sideBySide">Side by side</option><option value="stacked">Stacked</option></select></label></div>
+<label id="kindFilter">Kind <select id="kinds" aria-label="Change kind"></select></label>
+</div>
 <div class="capture-status"><p id="status" role="status" aria-live="polite">Loading comparison…</p><button id="choosePath" type="button" hidden>Choose model path</button></div>
 <p id="counts" aria-live="polite"></p><div id="results" aria-label="Model changes"></div></div>
-<footer class="footer" aria-label="Change colors"><span><b class="change-mark added" aria-hidden="true">+</b> Added</span><span><b class="change-mark removed" aria-hidden="true">−</b> Removed</span><span><b class="change-mark changed" aria-hidden="true">~</b> Changed</span><span><b class="change-mark unpaired" aria-hidden="true">?</b> Unpaired</span><span id="sourceBoundary" class="boundary">Captured source boundary unavailable</span></footer>
+<footer class="footer" aria-label="Change colors"><span><b class="change-mark added" aria-hidden="true">+</b> Added</span><span><b class="change-mark removed" aria-hidden="true">−</b> Removed</span><span><b class="change-mark changed" aria-hidden="true">~</b> Changed</span><span><b class="change-mark unpaired" aria-hidden="true">?</b> Unpaired</span><span id="sourceBoundary" class="boundary">Captured source boundary unavailable</span><button id="help" type="button">Help</button></footer>
 </main><script nonce="${nonce}" src="${script.toString()}"></script></body></html>`;
 }

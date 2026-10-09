@@ -9,11 +9,9 @@ export type DiffSection = typeof allDiffSections[number];
 export type ChangeKind = typeof changeKinds[number];
 export type DiffSide = "before" | "after";
 export interface DiffPreferences {
-  layout: "auto" | "sideBySide" | "stacked";
-  expansion: "changes" | "all" | "none";
-  sections: DiffSection[]; changeKinds: ChangeKind[];
+  changeKinds: ChangeKind[];
 }
-export interface DiffChoices { layout: DiffPreferences["layout"]; expansion: DiffPreferences["expansion"]; sections: DiffSection[]; changeKinds: ChangeKind[]; customSections: DiffSection[]; customChangeKinds: ChangeKind[]; search: string; scope: string; expanded: Record<string, boolean>; selected: string | null; capture: string; limitsOpen: boolean }
+export interface DiffChoices { changeKinds: ChangeKind[]; customChangeKinds: ChangeKind[]; search: string; group: string | null }
 export interface DiffTarget {
   occurrence_id: string; domain: string; dimension: string | null; written_locations: Location[];
 }
@@ -150,11 +148,12 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     for (const side of ["before", "after"] as const) registry[side] = Object.fromEntries(Object.entries(object(sources[side])).map(([key, value]) => [key, string(value)]));
   }
   const details = parseSemantic(result, ids, registry, expectedSemantic);
-  if (!details) return { before, after, rows: complete ? rows : [], complete, semanticMessage: "Semantic detail is unavailable with this engine. Showing structural changes; use Root file text diff for written edits." };
+  if (!details) return { before, after, rows: complete ? rows : [], complete, semanticMessage: "Semantic detail is unavailable with this engine. Showing structural changes; use Text diff for written edits." };
   const rowMap = new Map(rows.map(row => [row.id, row]));
+  const isLocal = (row: SemanticRow): boolean => row.family === "symbols" && row.fields.some(field => field.name === "role" && [field.before, field.after].some(side => side.value?.kind === "text" && ["model_local_definition", "model_local_declaration"].includes(side.value.value)));
   const section = (row: SemanticRow): DiffSection => {
     const mapped: Record<string, DiffSection> = { symbols: "symbols", parameters: "parameters", shocks: "shockSetup", steady_state: "steadyState", priors: "priors", commands: "commands", observables: "observables", data: "data", occbin: "occbin", policy: "policy", semi_structural: "semiStructural", moments: "moments", ms_sbvar: "msSbvar", heterogeneity: "heterogeneity", external_functions: "externalFunctions", trends: "trends", operations: "operations", macro_context: "macroContext" };
-    return row.family === "equations" ? row.before?.scope.dimension || row.after?.scope.dimension ? "heterogeneousEquations" : "aggregateEquations" : mapped[row.family];
+    return row.family === "equations" || isLocal(row) ? row.before?.scope.dimension || row.after?.scope.dimension ? "heterogeneousEquations" : "aggregateEquations" : mapped[row.family];
   };
   for (const [index, row] of details.semantic.rows.entries()) {
     const source = navigation.get(row.pointer), legacy = rowMap.get(row.pointer);
@@ -172,7 +171,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
       }
     }
     const sideScopes = { before: row.before?.scope.dimension ?? (row.before ? row.before.scope.domain : null), after: row.after?.scope.dimension ?? (row.after ? row.after.scope.domain : null) };
-    const projected: DiffRow = { id: row.pointer, section: legacy?.section ?? section(row), group: row.family === "parameters" ? "Parameters" : legacy?.group ?? semanticGroup(section(row)), kind: row.change, label: row.name, before: row.before?.name ?? null, after: row.after?.name ?? null, scopes: [...new Set(Object.values(sideScopes).filter((s): s is string => s !== null))], sideScopes, navigation: source, semantic: row };
+    const projected: DiffRow = { id: row.pointer, section: legacy?.section ?? section(row), group: isLocal(row) ? "Model-local variables" : row.family === "parameters" ? "Parameters" : legacy?.group ?? semanticGroup(section(row)), kind: row.change, label: row.name, before: row.before?.name ?? null, after: row.after?.name ?? null, scopes: [...new Set(Object.values(sideScopes).filter((s): s is string => s !== null))], sideScopes, navigation: source, semantic: row };
     if (legacy) Object.assign(legacy, projected); else rows.push(projected);
   }
   const equationOwners = new Map(rows.filter(row => row.section === "aggregateEquations" || row.section === "heterogeneousEquations").map(row => [row.id, row]));
@@ -226,17 +225,12 @@ export function parseSnapshotDiff(value: unknown, ids: Record<DiffSide, string>,
 export function normalizeChoices(value: unknown, defaults: DiffPreferences): DiffChoices {
   const row = record(value) ? value : {};
   const list = <T extends string>(value: unknown, allowed: readonly T[], fallback: T[]): T[] => Array.isArray(value) ? [...new Set(value.filter((item): item is T => typeof item === "string" && allowed.includes(item as T)))] : [...fallback];
-  // Old presentation/tab state is ignored; its current filters and layout survive.
+  // Retired presentation, selection, layout, section and scope state do not hide rows.
   return {
-    layout: ["auto", "sideBySide", "stacked"].includes(String(row.layout)) ? row.layout as DiffPreferences["layout"] : defaults.layout,
-    expansion: ["changes", "all", "none"].includes(String(row.expansion)) ? row.expansion as DiffPreferences["expansion"] : defaults.expansion,
-    sections: list(row.sections, allDiffSections, defaults.sections), changeKinds: list(row.changeKinds, changeKinds, defaults.changeKinds),
-    customSections: list(row.customSections, allDiffSections, list(row.sections, allDiffSections, defaults.sections)),
+    changeKinds: list(row.changeKinds, changeKinds, defaults.changeKinds),
     customChangeKinds: list(row.customChangeKinds, changeKinds, list(row.changeKinds, changeKinds, defaults.changeKinds)),
-    search: typeof row.search === "string" ? row.search.slice(0, 10000) : "", scope: typeof row.scope === "string" ? row.scope.slice(0, 1000) : "all",
-    expanded: record(row.expanded) ? Object.fromEntries(Object.entries(row.expanded).filter(([key, value]) => key.length <= 1000 && typeof value === "boolean")) as Record<string, boolean> : {},
-    selected: typeof row.selected === "string" ? row.selected.slice(0, 1000) : null,
-    capture: typeof row.capture === "string" ? row.capture.slice(0, 1000) : "", limitsOpen: row.limitsOpen === true,
+    search: typeof row.search === "string" ? row.search.slice(0, 10000) : "",
+    group: typeof row.group === "string" ? row.group.slice(0, 1000) : null,
   };
 }
 

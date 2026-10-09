@@ -101,8 +101,14 @@ pub(super) fn enrich_primary(
 }
 
 pub(super) fn collect(model: &Model, facts: &mut Vec<CapturedFact>, owned: &BTreeSet<usize>) {
+    let symbols = crate::model_diff::final_symbol_declarations(model);
     for (index, written) in model.written_declarations.iter().enumerate() {
+        // This command sets a convention on an existing symbol. Its primary
+        // predetermined field owns that fact; it declares no new symbol kind.
+        let convention = written.written_kind == "predetermined_variables"
+            && symbols.contains_key(model.name(written.declaration.name));
         if written.written_kind == "model_local_variable"
+            || convention
             || owned.contains(&written.declaration.parse_order)
         {
             continue;

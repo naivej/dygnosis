@@ -14,7 +14,7 @@ pub(super) fn populate(before: &Model, after: &Model, diff: &mut ModelDiff) {
     parameters(before, after, diff);
     symbols(before, after, diff);
     equation_fields(diff);
-    shocks(diff);
+    shocks(before, after, diff);
     diff.coverage.families = vec![
         coverage(
             SemanticFamily::Parameters,
@@ -600,7 +600,43 @@ fn shock_side(name: &str, setting: &ShockSetting) -> RowSide {
     side
 }
 
-fn shocks(diff: &mut ModelDiff) {
+fn shock_text(model: &Model, setting: &ShockSetting) -> Option<String> {
+    let span = setting.source_span?;
+    let text = model.source.get(span.start as usize..span.end as usize)?;
+    // This is display context for an already paired instruction. Spans do not
+    // establish correspondence, token ownership or additional model changes.
+    let parent = model
+        .statements
+        .iter()
+        .filter(|statement| {
+            statement.complete
+                && statement.name == setting.block.split('(').next().unwrap_or(&setting.block)
+                && statement.span.start <= span.start
+                && statement.span.end >= span.end
+        })
+        .min_by_key(|statement| statement.span.end - statement.span.start);
+    let Some(parent) = parent.filter(|statement| statement.span != span) else {
+        return Some(text.to_owned());
+    };
+    if parent.kind != crate::model::StatementKind::Block {
+        return model
+            .source
+            .get(parent.span.start as usize..parent.span.end as usize)
+            .map(str::to_owned);
+    }
+    let opener = model.expanded_tokens.get(parent.opener_range.clone())?;
+    let opener = model
+        .source
+        .get(opener.first()?.span.start as usize..opener.last()?.span.end as usize)?;
+    let tokens = model.expanded_tokens.get(parent.token_range.clone())?;
+    let closer = tokens.get(tokens.len().checked_sub(2)?..)?;
+    let closer = model
+        .source
+        .get(closer.first()?.span.start as usize..closer.last()?.span.end as usize)?;
+    Some(format!("{opener}\n{text}\n{closer}"))
+}
+
+fn shocks(before: &Model, after: &Model, diff: &mut ModelDiff) {
     for (index, change) in diff.shock_setup_changes.iter().enumerate() {
         let kind = match change.change.as_str() {
             "added" => ChangeKind::Added,
@@ -667,6 +703,25 @@ fn shocks(diff: &mut ModelDiff) {
                 label,
                 old.get(field).cloned().unwrap_or_else(FieldState::absent),
                 new.get(field).cloned().unwrap_or_else(FieldState::absent),
+            ));
+        }
+        let old_text = change
+            .before
+            .as_ref()
+            .and_then(|setting| shock_text(before, setting));
+        let new_text = change
+            .after
+            .as_ref()
+            .and_then(|setting| shock_text(after, setting));
+        // Partial text must not masquerade as an absent side of the instruction.
+        if change.before.is_none() == old_text.is_none()
+            && change.after.is_none() == new_text.is_none()
+        {
+            row.expressions.push(super::equations::expression_detail(
+                &mut diff.semantic,
+                "statement_text",
+                old_text.as_deref(),
+                new_text.as_deref(),
             ));
         }
         diff.semantic.push_row(row);

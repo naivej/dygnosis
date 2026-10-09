@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
-import { randomBytes } from "node:crypto";
 import { DygnosisClient } from "./client";
 import { diffHtml, diffPreferences } from "./diff";
 import { ComparisonResource, changesScheme, changesViewType, GitSelector, historyScheme, inputLabel, ModelSelector, resourceData, resourceName, resourceQuery } from "./changes_resource";
@@ -14,8 +13,29 @@ import { record } from "./protocol";
 import { CapturedTextSources } from "./captured_text";
 import { SourceFile } from "./semantic_view";
 
-interface EditorView { panel: vscode.WebviewPanel; choices: DiffChoices; subscriptions: vscode.Disposable[]; sectionsChanged?: boolean }
+interface EditorView { panel: vscode.WebviewPanel; choices: DiffChoices; subscriptions: vscode.Disposable[] }
 interface InputSelection { token: vscode.CancellationToken; signal: AbortSignal; dispose(): void }
+const sourceName = (key: string): string => path.posix.basename(key.startsWith("file:") ? vscode.Uri.parse(key).path : key.replaceAll("\\", "/"));
+function textDiffTitle(resource: ComparisonResource, beforeKey?: string, afterKey?: string): string {
+  const before = sourceName(beforeKey ?? afterKey!), after = sourceName(afterKey ?? beforeKey!);
+  if (before === after && resource.before.kind === "git" && resource.before.requested_ref === "HEAD" && resource.after.kind === "working") return `${after} (Working Tree)`;
+  const label = (name: string, input: ModelSelector): string => `${name} (${input.kind === "git" ? input.commit.slice(0, 7) : "Working Tree"})`;
+  return `${label(before, resource.before)} ↔ ${label(after, resource.after)}`;
+}
+function cardSourceFiles(result: CapturedComparison, row: DiffRow, side: DiffSide): string[] {
+  const other = side === "before" ? "after" : "before";
+  if (row[side] !== null || row.navigation[side] !== null) return [];
+  const uris = new Set<string>();
+  for (const location of row.navigation[other]?.written_locations ?? []) {
+    const key = [...result.sourceUris[other]].find(([, uri]) => uri.toString() === location.uri)?.[0];
+    if (!key) continue;
+    const pairs = result.snapshot.sourceChanges?.files.filter(file => file.correspondence !== "unpaired" && file[other]?.file_key === key && file[side]?.exact_text_available) ?? [];
+    if (pairs.length !== 1) continue;
+    const own = pairs[0][side]!, uri = result.sourceUris[side].get(own.file_key);
+    if (uri && Object.hasOwn(result.texts[side], own.file_key)) uris.add(uri.toString());
+  }
+  return [...uris];
+}
 function checkSelection(token: vscode.CancellationToken): void {
   if (token.isCancellationRequested) throw new ComparisonFailure("CANCELLED", "Input selection was cancelled.");
 }
@@ -26,7 +46,6 @@ class ChangesDocument implements vscode.CustomDocument {
   readonly closed = new vscode.EventEmitter<void>();
   readonly onDidDispose = this.closed.event;
   generation = 0; instance = 0; disposed = false;
-  captureId = "";
   status: ViewStatus = "loading"; message = "Loading comparison…";
   result?: CapturedComparison; capture?: vscode.CancellationTokenSource; loading?: Promise<void>;
   failureSide?: DiffSide;
@@ -72,10 +91,9 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
   const send = (doc: ChangesDocument): void => {
     for (const view of doc.views) void view.panel.webview.postMessage({ type: "render", key: doc.uri.toString(), token: doc.generation,
       before: inputLabel(doc.resource.before), after: inputLabel(doc.resource.after), status: doc.status, message: doc.message,
-      rows: doc.result?.snapshot.rows ?? [], choices: view.choices, hasHistory: doc.resource.before.kind === "git" || doc.resource.after.kind === "git",
-      capture: doc.captureId, defaults: diffPreferences(vscode.Uri.parse(doc.resource.context_uri), service.log), semantic: doc.result?.snapshot.semantic,
-      sourceChanges: doc.result?.snapshot.sourceChanges, coverage: doc.result?.snapshot.coverage, references: doc.result?.snapshot.references, semanticMessage: doc.result?.snapshot.semanticMessage,
-      details: doc.result ? { inputs: doc.result.inputs, sourcePolicy: "Current extra include folders; each historical side uses its own written directives." } : undefined });
+      rows: doc.result?.snapshot.rows.map(row => ({ ...row, sourceFiles: { before: cardSourceFiles(doc.result!, row, "before"), after: cardSourceFiles(doc.result!, row, "after") } })) ?? [], choices: view.choices,
+      defaults: diffPreferences(vscode.Uri.parse(doc.resource.context_uri), service.log), semantic: doc.result?.snapshot.semantic,
+      sourceChanges: doc.result?.snapshot.sourceChanges, coverage: doc.result?.snapshot.coverage, references: doc.result?.snapshot.references, semanticMessage: doc.result?.snapshot.semanticMessage });
   };
   const release = (doc: ChangesDocument): void => { if (doc.result) { history.release(doc.result.holder); capturedText.release(doc.result.holder); } doc.result = undefined; };
   const stale = (doc: ChangesDocument, message = "Out of date. Refresh to compare current inputs and enable source actions."): void => {
@@ -112,8 +130,7 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
       });
       if (!current(doc, generation, result.instance) || token.token.isCancellationRequested) { history.release(result.holder); return; }
       doc.instance = result.instance; doc.result = result; doc.status = "ready";
-      doc.captureId = randomBytes(16).toString("hex");
-      doc.message = result.snapshot.rows.length ? "Current comparison" : result.snapshot.sourceChanges?.files.length ? "No model changes. Captured text differs; use Captured file text diff in More actions." : result.snapshot.semantic ? "No model rows. Review Comparison limits before concluding that the model is unchanged." : "No structural changes. Written text can still differ.";
+      doc.message = result.snapshot.rows.length ? "Current comparison" : result.snapshot.sourceChanges?.files.length ? "No model changes. Captured text differs; use Text diff." : result.snapshot.semantic ? "No model rows." : "No structural changes. Written text can still differ.";
       watchInputs(doc); send(doc);
     } catch (error) {
       if (!current(doc, generation, service.currentInstance)) return;
@@ -126,7 +143,7 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
   const modelUri = (input: ModelSelector): vscode.Uri => input.kind === "working" ? vscode.Uri.parse(input.root_uri) : vscode.Uri.joinPath(vscode.Uri.parse(input.repository_uri), input.root_file);
   const openResource = async (resource: ComparisonResource, column?: vscode.ViewColumn, choices?: DiffChoices): Promise<void> => {
     const uri = vscode.Uri.from({ scheme: changesScheme, path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
-    if (choices) remembered.set(uri.toString(), { ...choices, expanded: {} });
+    if (choices) remembered.set(uri.toString(), { ...choices });
     await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: column ?? vscode.ViewColumn.Active, preview: false });
   };
   const rootForHistoricalInclude = async (input: GitSelector, invokingKey: string, token: vscode.CancellationToken, signal: AbortSignal): Promise<GitSelector | undefined> => {
@@ -343,13 +360,16 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
     return current(doc, generation, instance);
   };
   const openSource = async (doc: ChangesDocument, row: Pick<DiffRow, "id" | "navigation">, side: DiffSide): Promise<void> => {
-    const generation = doc.generation, instance = doc.instance, result = doc.result, target = row.navigation[side];
-    if (!result || !target?.written_locations.length) return;
+    const generation = doc.generation, instance = doc.instance, result = doc.result;
+    if (!result) return;
+    const own = result.snapshot.rows.find(candidate => candidate.id === row.id), target = row.navigation[side];
+    const locations = target?.written_locations ?? (own ? cardSourceFiles(result, own, side) : []).map(uri => ({ uri, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } }));
+    if (!locations.length) return;
     const refuse = (): void => { if (current(doc, generation, instance)) stale(doc); };
     try {
       if (!await validateWorking(doc, row)) { refuse(); return; }
-      const selected = target.written_locations.length === 1 ? target.written_locations[0] : (await vscode.window.showQuickPick(target.written_locations.map(location => ({
-        label: location.uri, description: `${side === "before" ? "Before" : "After"} · line ${location.range.start.line + 1}`, location,
+      const selected = locations.length === 1 ? locations[0] : (await vscode.window.showQuickPick(locations.map(location => ({
+        label: location.uri, description: `${side === "before" ? "Before" : "After"}${target ? ` · line ${location.range.start.line + 1}` : " · row not present"}`, location,
       })), { placeHolder: "Choose a contributing written source" }))?.location;
       if (!selected || !current(doc, generation, instance)) return;
       const source = vscode.Uri.parse(selected.uri);
@@ -371,12 +391,12 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
       const uri = (which: DiffSide): vscode.Uri | undefined => {
         const own = file[which];
         if (own && (!own.exact_text_available || !Object.hasOwn(result.texts[which], own.file_key))) return undefined;
-        const input = doc.resource[which], label = `${which} ${own?.file_key ?? "absent"}${input.kind === "git" ? ` ${input.commit.slice(0, 7)}` : " captured"}`;
+        const input = doc.resource[which], label = `${sourceName(own?.file_key ?? file.before?.file_key ?? file.after!.file_key)} (${which}${input.kind === "git" ? ` ${input.commit.slice(0, 7)}` : " captured"})`;
         if (input.kind === "git" && own) return result.sourceUris[which].get(own.file_key);
         return capturedText.retain(result.holder, `${file.pointer}:${which}`, label, own ? result.texts[which][own.file_key] : "");
       };
       const before = uri("before"), after = uri("after");
-      if (before && after && await validateWorking(doc) && current(doc, generation, instance)) await vscode.commands.executeCommand("vscode.diff", before, after, `Captured file text: ${file.before?.file_key ?? "absent"} → ${file.after?.file_key ?? "absent"}`);
+      if (before && after && await validateWorking(doc) && current(doc, generation, instance)) await vscode.commands.executeCommand("vscode.diff", before, after, textDiffTitle(doc.resource, file.before?.file_key, file.after?.file_key));
     } catch (error) { service.log(String(error)); if (current(doc, generation, instance)) stale(doc); }
   };
   const chooseCaptured = async (doc: ChangesDocument): Promise<void> => {
@@ -387,31 +407,15 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
     const selected = await vscode.window.showQuickPick(files.map(file => {
       const available = (["before", "after"] as const).every(side => !file[side] || file[side].exact_text_available && Object.hasOwn(doc.result!.texts[side], file[side].file_key));
       return {
-        label: file.after?.file_key ?? file.before!.file_key,
+        label: sourceName(file.after?.file_key ?? file.before!.file_key),
         description: available ? `${file.change}${file.correspondence === "unpaired" ? " · file correspondence not established" : ""}` : "Text diff unavailable: complete captured text is missing",
         detail: `Before: ${file.before?.file_key ?? "absent"} → After: ${file.after?.file_key ?? "absent"}`,
         file, available,
       };
     }), { placeHolder: "Choose a changed captured file for text diff" });
     if (!selected || !current(doc, generation, instance)) return;
-    if (!selected.available) { void vscode.window.showInformationMessage("Complete captured text is unavailable for this file. Review Comparison limits."); return; }
+    if (!selected.available) { void vscode.window.showInformationMessage("Complete captured text is unavailable for this file."); return; }
     await openCaptured(doc, selected.file);
-  };
-  const updateRevision = async (doc: ChangesDocument, view: EditorView): Promise<void> => {
-    const selection = beginSelection(doc, view), { token, signal } = selection;
-    try {
-      checkSelection(token); const sources = await git(); checkSelection(token);
-      const resource = { ...doc.resource }; let changed = false;
-      for (const side of ["before", "after"] as const) {
-        const input = resource[side]; if (input.kind !== "git") continue;
-        const repository = await sources.repositoryFor(vscode.Uri.parse(input.repository_uri), signal);
-        const revision = await sources.resolve(repository, input.requested_ref, signal); checkSelection(token);
-        if (revision.hash !== input.commit) { resource[side] = { ...input, commit: revision.hash }; changed = true; }
-      }
-      if (changed) await openResource(resource, view.panel.viewColumn, view.choices);
-      else void vscode.window.showInformationMessage("The selected revisions have not moved. Refresh keeps the captured commits.");
-    } catch (error) { if (!token.isCancellationRequested) throw error; }
-    finally { selection.dispose(); }
   };
   const choosePath = async (doc: ChangesDocument, view: EditorView): Promise<void> => {
     const selection = beginSelection(doc, view), { token, signal } = selection;
@@ -449,12 +453,7 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
           if (!record(message) || doc.disposed) return;
           if (message.type === "ready") {
             if (message.key === key) {
-              const restored = normalizeChoices(message.choices, defaults);
-              if (view.sectionsChanged) {
-                restored.sections = view.choices.sections;
-                restored.customSections = [...view.choices.sections];
-              }
-              view.choices = restored; view.sectionsChanged = false;
+              view.choices = normalizeChoices(message.choices, defaults);
             }
             send(doc);
           }
@@ -463,15 +462,13 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
           else if (message.type === "help") void vscode.commands.executeCommand("dygnosis.openHelp", "structural-diff");
           else if (message.type === "changeComparison") void start(undefined, false, doc, view);
           else if (message.type === "swap") void openResource({ ...doc.resource, before: doc.resource.after, after: doc.resource.before }, panel.viewColumn, view.choices);
-          else if (message.type === "updateRevision") void updateRevision(doc, view).catch(error => service.failure(String(error)));
           else if (message.type === "choosePath") void choosePath(doc, view).catch(error => service.failure(String(error)));
-          else if (message.type === "details" && doc.result) void vscode.window.showInformationMessage(`Extra include folders (current list): ${doc.result.inputs.after.search_paths.join(", ") || "none"}. Historical sources come only from their selected commit trees. Working sources include open unsaved text.`);
           else if (message.type === "rootTextDiff" && message.token === doc.generation && doc.status === "ready") {
             const generation = doc.generation;
             void validateWorking(doc).then(valid => {
               if (!valid) { if (doc.generation === generation) stale(doc); return; }
               const result = doc.result!, before = result.sourceUris.before.get(result.inputs.before.root_file), after = result.sourceUris.after.get(result.inputs.after.root_file);
-              if (before && after && doc.generation === generation) return vscode.commands.executeCommand("vscode.diff", before, after, `Root file text: ${inputLabel(doc.resource.before)} → ${inputLabel(doc.resource.after)}`);
+              if (before && after && doc.generation === generation) return vscode.commands.executeCommand("vscode.diff", before, after, textDiffTitle(doc.resource, result.inputs.before.root_file, result.inputs.after.root_file));
             }).catch(error => service.failure(String(error)));
           } else if (message.type === "openSource" && message.token === doc.generation && doc.status === "ready" && typeof message.rowId === "string" && (message.side === "before" || message.side === "after")) {
             const row = doc.result?.snapshot.rows.find(row => row.id === message.rowId); if (row) void openSource(doc, row, message.side);
@@ -503,14 +500,6 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
       const context = vscode.Uri.parse(doc.resource.context_uri);
       if (event.affectsConfiguration("dynare.serverPath")) stale(doc, "The engine selection changed. Refresh this comparison.");
       else if (event.affectsConfiguration("dynare.searchPaths", context) || (["before", "after"] as const).some(side => doc.resource[side].kind === "working" && event.affectsConfiguration("dynare.searchPaths", modelUri(doc.resource[side])))) stale(doc);
-      if (event.affectsConfiguration("dynare.diff.sections", context)) {
-        for (const view of doc.views) {
-          view.choices.sections = diffPreferences(context, service.log).sections;
-          view.choices.customSections = [...view.choices.sections];
-          view.sectionsChanged = true;
-        }
-        send(doc);
-      }
     }
   });
   return vscode.Disposable.from(history, capturedText, invalidated, settings,

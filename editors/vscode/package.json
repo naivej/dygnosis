@@ -1343,28 +1343,6 @@
       {
         "title": "Dygnosis: Changes",
         "properties": {
-          "dynare.diff.layout": {
-            "type": "string",
-            "enum": [
-              "auto",
-              "sideBySide",
-              "stacked"
-            ],
-            "default": "auto",
-            "scope": "resource",
-            "description": "Layout of Before and After expression panels. Auto stacks them in a narrow view. Field tables keep their Before and After columns. Defaults use the model that opened Changes."
-          },
-          "dynare.diff.defaultExpansion": {
-            "type": "string",
-            "enum": [
-              "changes",
-              "all",
-              "none"
-            ],
-            "default": "changes",
-            "scope": "resource",
-            "description": "Initial section expansion in a new Changes view; uses the model that opened it."
-          },
           "dynare.diff.defaultChangeKinds": {
             "type": "array",
             "uniqueItems": true,
@@ -1385,61 +1363,6 @@
             ],
             "scope": "resource",
             "description": "Change kinds initially shown in a new Changes view; uses the model that opened it. Empty hides all rows."
-          },
-          "dynare.diff.sections": {
-            "type": "array",
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "enum": [
-                "symbols",
-                "parameters",
-                "aggregateEquations",
-                "heterogeneousEquations",
-                "shockSetup",
-                "shockAnalysisSetup",
-                "steadyState",
-                "priors",
-                "commands",
-                "observables",
-                "data",
-                "occbin",
-                "policy",
-                "semiStructural",
-                "moments",
-                "msSbvar",
-                "heterogeneity",
-                "externalFunctions",
-                "trends",
-                "operations",
-                "macroContext"
-              ]
-            },
-            "default": [
-              "symbols",
-              "parameters",
-              "aggregateEquations",
-              "heterogeneousEquations",
-              "shockSetup",
-              "shockAnalysisSetup",
-              "steadyState",
-              "priors",
-              "commands",
-              "observables",
-              "data",
-              "occbin",
-              "policy",
-              "semiStructural",
-              "moments",
-              "msSbvar",
-              "heterogeneity",
-              "externalFunctions",
-              "trends",
-              "operations",
-              "macroContext"
-            ],
-            "scope": "resource",
-            "description": "Sections shown in Changes. Empty hides all content. Setting changes update open comparisons; list order sets section order."
           }
         }
       },

@@ -205,7 +205,7 @@ test("Swap opens a reversed resource while Change comparison restores baseline-t
   const swapped = host.panels.at(-1), resource = swapped.document.resource;
   assert.deepEqual(resource.before, original.after); assert.deepEqual(resource.after, original.before); assert.deepEqual(resource.anchor, original.anchor);
   assert.equal(host.last(swapped).status, "ready");
-  assert.equal(host.last(swapped).choices.search, "calibration"); assert.deepEqual(host.last(swapped).choices.expanded, {});
+  assert.equal(host.last(swapped).choices.search, "calibration"); assert.equal(Object.hasOwn(host.last(swapped).choices, "expanded"), false);
   host.pick = items => items.find(item => item.mode === "file"); host.message({ type: "changeComparison" }, swapped); await flush();
   const changed = host.panels.at(-1).document.resource;
   assert.deepEqual(changed.after, original.anchor); assert.deepEqual(changed.before, working(baselineUri)); assert.equal(panel.disposed, false);
@@ -246,11 +246,28 @@ test("historical include ownership uses a candidate root only after a proof at t
   }
 });
 
-test("Refresh retains selected commits after a branch moves; Update revision is explicit", async t => {
+test("Refresh retains selected commits after a branch moves", async t => {
   const { host, git } = setup(t); await host.openSaved(comparison(historical(commits.old, "main.mod", "release")));
   const nativeResolve = git.resolve; git.resolve = (repository, ref) => ref === "release" ? Promise.resolve({ hash: commits.moved, requested_ref: "release", parents: [], message: "new release" }) : nativeResolve(repository, ref);
   host.message({ type: "refresh" }); await flush(); assert.equal(host.captures.at(-1).resource.before.commit, commits.old);
-  host.message({ type: "updateRevision" }); await flush(); assert.equal(host.panels.at(-1).document.resource.before.commit, commits.moved); assert.deepEqual(host.panels.at(-1).document.resource.anchor, working());
+});
+
+test("an added row opens the verified Before file even though the row is absent", async t => {
+  const { host, service } = setup(t); let expected;
+  host.capture = (resource, cancel, history) => {
+    const result = captured(resource, history, host, service.currentInstance), row = result.snapshot.rows[0];
+    row.kind = "added"; row.before = null; row.navigation.before = null;
+    const beforeKey = [...result.sourceUris.before.keys()][1], afterKey = [...result.sourceUris.after.keys()][1];
+    expected = result.sourceUris.before.get(beforeKey).toString();
+    result.snapshot.sourceChanges = { files: [{ correspondence: "selected_roots", before: { file_key: beforeKey, exact_text_available: true }, after: { file_key: afterKey, exact_text_available: true } }] };
+    return result;
+  };
+  await host.openSaved(comparison()); host.source("before"); await flush();
+  assert.equal(host.shown.length, 1); assert.equal(host.shown[0].document.uri.toString(), expected);
+  assert.equal(host.shown[0].document.languageId, "dynare");
+  assert.equal(host.shown[0].options.selection.start.line, 0);
+  host.panels[0].document.result.snapshot.sourceChanges.files[0].correspondence = "unpaired";
+  host.source("before"); await flush(); assert.equal(host.shown.length, 1, "an unpaired source file cannot supply a missing-side link");
 });
 
 test("an old source load or validation cannot stale a newer ready comparison", async t => {
@@ -276,29 +293,21 @@ test("several contributing sources use an exact native picker and unavailable ro
 test("reopening a saved custom document captures again, retains selectors and restores per-view display state", async t => {
   const { host } = setup(t), resource = comparison(historical(commits.old), historical()); await host.openSaved(resource);
   const choices = { ...host.last().choices, search: "saved", layout: "stacked", sections: [] }; host.message({ type: "choices", key: host.last().key, choices }); host.close(host.panels[0]);
-  await host.openSaved(JSON.parse(resourceQuery(resource))); assert.equal(host.captures.length, 2); assert.equal(host.last().status, "ready"); assert.equal(host.last().choices.search, "saved"); assert.deepEqual(host.last().choices.sections, []);
+  await host.openSaved(JSON.parse(resourceQuery(resource))); assert.equal(host.captures.length, 2); assert.equal(host.last().status, "ready"); assert.equal(host.last().choices.search, "saved"); assert.equal(Object.hasOwn(host.last().choices, "sections"), false);
   assert.deepEqual(host.panels.at(-1).document.resource, resource);
 });
 
-test("a fresh host restores saved empty sections and hidden settings changes take precedence over older webview state", async t => {
-  const resource = comparison(historical(commits.old), historical()), first = createHost(); first.host.install();
-  await first.host.openSaved(resource); const initial = first.host.last().choices;
-  const savedChoices = { ...initial, search: "saved across reload", sections: [], customSections: ["priors", "commands"], presentations: {
-    focusedReview: { ...initial, sections: ["symbols"], customSections: ["symbols", "parameters"] },
-    changeList: { ...initial, sections: ["commands"], customSections: ["priors", "commands"] },
-  } };
-  first.host.message({ type: "choices", key: first.host.last().key, choices: savedChoices }); first.host.registration.dispose();
-  const { host } = setup(t); await host.openSaved(JSON.parse(resourceQuery(resource)));
-  assert.notDeepEqual(host.last().choices.sections, [], "fresh host begins with configured defaults");
-  host.message({ type: "ready", key: host.last().key, choices: savedChoices }); assert.deepEqual(host.last().choices.sections, []); assert.equal(host.last().choices.search, "saved across reload");
-  host.settings.set(anchorUri.toString(), { "diff.sections": ["aggregateEquations"] });
-  host.configChanged.fire({ affectsConfiguration: key => key === "dynare.diff.sections" });
-  host.message({ type: "ready", key: host.last().key, choices: savedChoices }); assert.deepEqual(host.last().choices.sections, ["aggregateEquations"]);
-  assert.deepEqual(host.last().choices.customSections, ["aggregateEquations"]);
+test("a fresh host restores search and category selection while ignoring retired section and scope filters", async t => {
+  const { host } = setup(t), resource = comparison(historical(commits.old), historical());
+  await host.openSaved(resource);
+  const saved = { ...host.last().choices, search: "saved across reload", group: "symbols:Symbols", sections: [], scope: "firms", groupVisibility: { "symbols:Symbols": false } };
+  host.message({ type: "ready", key: host.last().key, choices: saved });
+  assert.equal(host.last().choices.search, saved.search); assert.equal(host.last().choices.group, saved.group);
+  for (const key of ["sections", "scope", "groupVisibility"]) assert.equal(Object.hasOwn(host.last().choices, key), false);
+  const token = host.last().token;
   host.settings.set(anchorUri.toString(), { "diff.sections": [] });
   host.configChanged.fire({ affectsConfiguration: key => key === "dynare.diff.sections" });
-  assert.deepEqual(host.last().choices.customSections, []);
-  assert.equal(Object.hasOwn(host.last().choices, "presentations"), false);
+  assert.equal(host.last().token, token); assert.equal(host.last().choices.group, saved.group);
 });
 
 test("Open changes from a custom tab uses its recorded anchor while activeTextEditor points elsewhere", async t => {
@@ -344,7 +353,7 @@ test("exact candidate file watchers and include settings invalidate, while prese
   for (const watcher of candidates) watcher.create.fire(Uri.joinPath(rootUri, "missing.data")); assert.equal(host.last().status, "stale");
   host.message({ type: "refresh" }); await flush(); const token = host.last().token;
   host.settings.set(anchorUri.toString(), { "diff.sections": [] }); host.configChanged.fire({ affectsConfiguration: key => key === "dynare.diff.sections" });
-  assert.equal(host.last().status, "ready"); assert.equal(host.last().token, token); assert.deepEqual(host.last().choices.sections, []);
+  assert.equal(host.last().status, "ready"); assert.equal(host.last().token, token); assert.equal(Object.hasOwn(host.last().choices, "sections"), false);
   await host.openSaved(comparison(historical(commits.old), historical())); const fixed = host.panels.at(-1);
   host.configChanged.fire({ affectsConfiguration: key => key === "dynare.searchPaths" }); assert.equal(host.last(fixed).status, "stale");
 });
@@ -397,7 +406,7 @@ test("source actions use retained side identity, exact bytes and UTF-16 ranges; 
   host.message({ type: "rootTextDiff", token: initial.token - 1 }); await flush();
   assert.equal(host.calls.some(call => call.id === "vscode.diff"), false);
   host.message({ type: "rootTextDiff", token: host.last().token }); await flush(); const call = host.calls.find(call => call.id === "vscode.diff");
-  assert.equal(call.args[0].scheme, historyScheme); assert.equal(call.args[1].scheme, historyScheme); assert.match(call.args[2], /aaaaaaa.*bbbbbbb/);
+  assert.equal(call.args[0].scheme, historyScheme); assert.equal(call.args[1].scheme, historyScheme); assert.equal(call.args[2], "main.mod (aaaaaaa) ↔ main.mod (bbbbbbb)");
 });
 
 test("Working source navigation revalidates before and after document load and refuses modified exact text", async t => {

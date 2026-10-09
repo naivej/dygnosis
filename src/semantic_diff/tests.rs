@@ -554,7 +554,24 @@ fn all_existing_shock_forms_have_named_fields_at_their_legacy_pointer() {
                 Some(&FieldValue::Text(legacy.form.clone()))
             );
             assert!(row.fields.iter().any(|field| field.changed));
+            let statement = row
+                .expressions
+                .iter()
+                .find(|detail| detail.field == "statement_text")
+                .expect("retained shock statement text");
+            assert_ne!(
+                statement.before.as_ref().map(|side| &side.text),
+                statement.after.as_ref().map(|side| &side.text)
+            );
         }
+        assert!(
+            !diff
+                .semantic
+                .rows
+                .iter()
+                .any(|row| row.family == SemanticFamily::Commands),
+            "shock instruction also appears in Commands: {after}"
+        );
     }
 }
 
