@@ -2,6 +2,7 @@
 
 ## v0.11.14
 
+- The **Dynare project** status item shows check progress and coverage. Completed checks keep the check icon; error and warning counts remain in Problems and the project checks view.
 - **Show mod changes** compares retained model facts across parser families in
   a pinned tab in the active editor group. A left panel lists change groups.
   Each group shows all its filtered changes as rows with Before on the left

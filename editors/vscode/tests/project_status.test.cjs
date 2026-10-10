@@ -157,9 +157,11 @@ test("status schema checks required fields, counts and consistency but allows ad
   assert.throws(() => parseProjectStatus(facts([root("pending")], { complete: true })), /Unsupported/);
   assert.throws(() => parseProjectStatus(facts([root("failed")], { coverage_complete: true })), /Unsupported/);
 });
-test("coverage distinguishes checked with Errors, failure, incomplete, pending, cancellation, off and no roots", () => {
-  const checked = projectStatusContent(parseProjectStatus(facts([root("checked", { errors: 3 })])));
-  assert.match(checked.text, /1\/1 checked · 3 Errors/); assert.match(checked.tooltip, /Checked models may contain diagnostic Errors/);
+test("coverage is independent of diagnostics and distinguishes failure, incomplete, pending, cancellation, off and no roots", () => {
+  const checked = projectStatusContent(parseProjectStatus(facts([root("checked", { errors: 3, warnings: 2 })])));
+  assert.equal(checked.text, "$(check) Dynare project: 1/1 checked");
+  assert.equal(checked.accessibilityLabel, "Dynare project: 1/1 checked. Open project checks.");
+  assert.match(checked.tooltip, /Checked models may contain diagnostic Errors/);
   for (const state of ["incomplete", "failed"]) assert.match(projectStatusContent(parseProjectStatus(facts([root(state)]))).text, /incomplete · 0\/1 checked/);
   assert.match(projectStatusContent(parseProjectStatus(facts([root("pending")]))).text, /0\/1 finished/);
   assert.match(projectStatusContent(parseProjectStatus(facts([root("checking")]))).text, /sync~spin/);
@@ -301,8 +303,10 @@ test("newer notifications and passes reject obsolete query responses", async () 
   const registration = registerProjectStatus(env.service); await flush();
   env.service.client.notify(facts([root("checked", { errors: 4 })], { pass_revision: 3 }));
   pending.resolve(facts([root("pending")], { pass_revision: 1 })); await flush();
-  assert.match(env.host.items[0].text, /4 Errors/);
-  env.service.client.notify(facts([root("pending")], { pass_revision: 2 })); assert.match(env.host.items[0].text, /4 Errors/);
+  assert.match(env.host.items[0].text, /1\/1 checked/);
+  assert.equal(rows(env)[0].children[0].description, "Checked · 4 Errors, 0 Warnings");
+  env.service.client.notify(facts([root("pending")], { pass_revision: 2 }));
+  assert.equal(rows(env)[0].children[0].description, "Checked · 4 Errors, 0 Warnings");
   registration.dispose();
 });
 for (const action of ["edit", "Recheck", "settings"]) {
@@ -318,13 +322,14 @@ for (const action of ["edit", "Recheck", "settings"]) {
     await trigger();
     env.service.client.notify(facts([root("checked", { errors: 4 })], { pass_revision: 2 }));
     pending.resolve(facts([root("pending")], { pass_revision: 2 })); await flush();
-    assert.match(env.host.items[0].text, /1\/1 checked · 4 Errors/);
+    assert.match(env.host.items[0].text, /1\/1 checked/);
     assert.equal(rows(env)[0].children[0].description, "Checked · 4 Errors, 0 Warnings");
     assert.doesNotMatch(env.host.items[0].text, /0\/1 finished/);
     const later = deferred(); env.service.execute = async () => later.promise; await trigger();
     env.service.client.notify(facts([root("checked", { errors: 99 })], { pass_revision: 2 }));
     later.resolve(facts([root("pending")], { pass_revision: 3 })); await flush();
-    assert.match(env.host.items[0].text, /0\/1 finished/); assert.doesNotMatch(env.host.items[0].text, /99|4 Errors/);
+    assert.match(env.host.items[0].text, /0\/1 finished/);
+    assert.equal(rows(env)[0].children[0].description, "Pending");
     registration.dispose();
   });
 }
@@ -337,7 +342,7 @@ test("refresh discards pre-action passes and superseded-epoch notification buffe
   env.service.execute = async () => second.promise; env.configure("projectExcludePaths", ["generated/**"]); await flush();
   first.resolve(facts([root("pending")], { pass_revision: 2 }));
   second.resolve(facts([root("pending")], { pass_revision: 3 })); await flush();
-  assert.match(env.host.items[0].text, /0\/1 finished/); assert.doesNotMatch(env.host.items[0].text, /99|4 Errors/);
+  assert.match(env.host.items[0].text, /0\/1 finished/);
   assert.equal(rows(env)[0].children[0].description, "Pending"); registration.dispose();
 });
 test("an acknowledged later pass supersedes an earlier buffered completion", async () => {
@@ -346,7 +351,8 @@ test("an acknowledged later pass supersedes an earlier buffered completion", asy
   env.host.commands.get("dygnosis.recheckProject")(); await flush();
   env.service.client.notify(facts([root("checked", { errors: 99 })], { pass_revision: 2 }));
   pending.resolve(facts([root("pending")], { pass_revision: 3 })); await flush();
-  assert.match(env.host.items[0].text, /0\/1 finished/); assert.doesNotMatch(env.host.items[0].text, /99/); registration.dispose();
+  assert.match(env.host.items[0].text, /0\/1 finished/);
+  assert.equal(rows(env)[0].children[0].description, "Pending"); registration.dispose();
 });
 test("a buffered old-instance completion cannot replace a restarted instance's status", async () => {
   const env = setup(), registration = registerProjectStatus(env.service); await flush();
@@ -355,7 +361,8 @@ test("a buffered old-instance completion cannot replace a restarted instance's s
   oldClient.notify(facts([root("checked", { errors: 99 })], { pass_revision: 2 }));
   env.service.client = connection(); ++env.service.currentInstance; env.service.execute = async () => facts([], { pass_revision: 0 }); env.changed.fire(); await flush();
   pending.resolve(facts([root("pending")], { pass_revision: 2 })); await flush();
-  assert.match(env.host.items[0].text, /no root models/); assert.doesNotMatch(env.host.items[0].text, /99/); registration.dispose();
+  assert.match(env.host.items[0].text, /no root models/);
+  assert.equal(rows(env)[0].children[0].label, "No root .mod models"); registration.dispose();
 });
 test("cancel reply defeats a same-pass pre-cancel notification while retaining a newer cancelled report", async () => {
   for (const newerCancelled of [false, true]) {
@@ -368,7 +375,7 @@ test("cancel reply defeats a same-pass pre-cancel notification while retaining a
     pending.resolve(facts([root("pending")], { cancelled: true })); await flush();
     assert.match(env.host.items[0].text, /cancelled/);
     assert.equal(rows(env)[0].children[0].description, newerCancelled ? "Checked · 4 Errors, 0 Warnings" : "Pending");
-    assert.doesNotMatch(env.host.items[0].tooltip, /99/); registration.dispose();
+    registration.dispose();
   }
 });
 test("folder and settings changes reject replies captured under old inputs and clear contributions immediately", async () => {
@@ -380,9 +387,10 @@ test("folder and settings changes reject replies captured under old inputs and c
     if (change === "folder") { env.host.folders = [folder(other, "other")]; env.host.folderChanged.fire(); }
     else { env.configure("projectExcludePaths", ["generated/**"]); }
     assert.equal(rows(env).length, 0); await flush();
-    first.resolve(facts([root("checked", { errors: 99 })])); await flush(); assert.doesNotMatch(env.host.items[0].text, /99/);
-    second.resolve(facts([root("checked", { root_uri: `${other}/main.mod`, errors: 2 })], { pass_revision: 2 })); await flush();
-    assert.match(env.host.items[0].text, /2 Errors/); registration.dispose();
+    first.resolve(facts([root("checked", { errors: 99 })])); await flush(); assert.equal(rows(env).length, 0);
+    second.resolve(facts([root("checked", { root_uri: `${env.host.folders[0].uri.toString()}/main.mod`, errors: 2 })], { pass_revision: 2 })); await flush();
+    assert.match(env.host.items[0].text, /1\/1 checked/);
+    assert.equal(rows(env)[0].children[0].description, "Checked · 2 Errors, 0 Warnings"); registration.dispose();
   }
 });
 test("disabling queued work clears the project contribution and cannot be undone by a late enabled reply", async () => {
@@ -391,7 +399,7 @@ test("disabling queued work clears the project contribution and cannot be undone
   env.configure("projectDiagnostics", false); assert.match(env.host.items[0].text, /off/); assert.equal(rows(env).length, 0);
   assert.equal(liveWatchers(env).length, 0);
   pending.resolve(facts([root("checked", { errors: 99 })], { pass_revision: 2 })); await flush();
-  assert.match(env.host.items[0].text, /off/); assert.doesNotMatch(env.host.items[0].text, /99/); registration.dispose();
+  assert.match(env.host.items[0].text, /off/); assert.equal(rows(env).length, 0); registration.dispose();
 });
 test("server replacement drops old subscriptions, watchers and responses, then queries the new instance", async () => {
   const first = connection(), pending = deferred(), env = setup({ client: first }); env.service.execute = async () => pending.promise;
@@ -400,7 +408,9 @@ test("server replacement drops old subscriptions, watchers and responses, then q
   assert.equal(first.subscriptions.get(capability.status_notification).listeners.size, 0);
   assert.equal(liveWatchers(env, "**/*.mod").length, 1); assert.match(env.host.items[0].text, /no root models/);
   pending.resolve(facts([root("checked", { errors: 99 })])); first.notify(facts([root("checked", { errors: 99 })])); await flush();
-  assert.doesNotMatch(env.host.items[0].text, /99/); assert.ok(second.sent.some(value => value.name === capability.active_model_notification));
+  assert.match(env.host.items[0].text, /no root models/);
+  assert.equal(rows(env)[0].children[0].label, "No root .mod models");
+  assert.ok(second.sent.some(value => value.name === capability.active_model_notification));
   second.running = false; env.changed.fire(); assert.equal(second.subscriptions.get(capability.status_notification).listeners.size, 0); assert.equal(liveWatchers(env).length, 0);
   registration.dispose();
 });
@@ -424,7 +434,8 @@ test("rapid overlay edits coalesce a status query and close refreshes saved cove
   assert.equal(env.service.queries.length, before + 1); assert.match(env.host.items[0].text, /0\/1 finished/);
   env.service.status = facts([root("checked", { errors: 1 })], { pass_revision: 3 }); doc.isClosed = true; env.host.closed.fire(doc);
   assert.match(env.host.items[0].text, /updating/); await new Promise(resolve => setTimeout(resolve, 90)); await flush();
-  assert.match(env.host.items[0].text, /1 Error/); registration.dispose();
+  assert.match(env.host.items[0].text, /1\/1 checked/);
+  assert.equal(rows(env)[0].children[0].description, "Checked · 1 Error, 0 Warnings"); registration.dispose();
 });
 test("per-folder exclusion controls write only the chosen resource and reset its override", async () => {
   const env = setup({ folders: [folder(), folder(other, "other")] }); env.host.resources.set(other, { projectExcludePaths: ["old/**"] });

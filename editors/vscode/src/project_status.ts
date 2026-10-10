@@ -101,7 +101,6 @@ interface StatusContent { text: string; tooltip: string; accessibilityLabel: str
 export function projectStatusContent(status: ProjectStatus): StatusContent {
   const counts = status.counts, selected = status.roots.length - counts.excluded;
   const finished = counts.checked + counts.incomplete + counts.failed;
-  const errors = status.roots.filter(root => root.state === "checked").reduce((sum, root) => sum + root.errors, 0);
   let label: string, icon: string;
   if (!status.enabled) { label = "off"; icon = "circle-slash"; }
   else if (status.cancelled) { label = `cancelled · ${counts.checked}/${selected} checked`; icon = "debug-pause"; }
@@ -109,7 +108,7 @@ export function projectStatusContent(status: ProjectStatus): StatusContent {
   else if (!status.complete) { label = `${finished}/${selected} finished`; icon = "sync~spin"; }
   else if (!status.coverage_complete) { label = `incomplete · ${counts.checked}/${selected} checked`; icon = "warning"; }
   else if (!selected) { label = "no root models"; icon = "info"; }
-  else { label = `${counts.checked}/${selected} checked${errors ? ` · ${diagnostics(errors, "Error")}` : ""}`; icon = errors ? "error" : "check"; }
+  else { label = `${counts.checked}/${selected} checked`; icon = "check"; }
   const details = [
     "Project diagnostics: unopened saved .mod models",
     ...states.map(state => `${state[0].toUpperCase()}${state.slice(1)}: ${counts[state]}`),

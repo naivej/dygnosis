@@ -2,12 +2,9 @@
 
 Open a file-backed workspace folder to check unopened saved `.mod` models. Project diagnostics are on by default and start without opening a model. Dygnosis skips generated `+` directories, using recursive saved-model discovery. Open `.dyn`, excluded, loose, and untitled models retain ordinary editor diagnostics.
 
-![Dynare project checks view and coverage status](assets/project-checks.png)
+The **Dynare project** status item shows check progress and coverage, such as `30/30 checked`. Click it to open **Dynare project checks** in Explorer. The view groups models and discovery failures by workspace folder, shows each model's check state and diagnostic counts, and opens a model when you select its row.
 
-1. **Dynare project checks** groups each saved root by workspace folder with its current check state.
-2. The **Dynare project** status item summarizes checked roots and outstanding Errors or Warnings.
-
-The **Dynare project coverage** status item is separate from active-model counts. Click it to open **Dynare project checks** in Explorer. The view groups models and discovery failures by workspace folder and opens a model when you select its row.
+Error and warning totals appear in the Problems panel.
 
 | State | Meaning |
 |---|---|
