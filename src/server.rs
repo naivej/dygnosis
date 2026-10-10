@@ -1927,6 +1927,7 @@ impl Backend {
                 .map(|change| change.after.as_ref()),
         );
         let include_pairs = before.same_file_pairs(&after);
+        crate::compare_navigation::populate_written_statements(&mut diff, &before, &after);
         let boundary = crate::semantic_diff::CaptureBoundary::RootAndExecutedIncludes;
         let _ = crate::semantic_diff::populate_captured_sources(
             &mut diff,

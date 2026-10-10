@@ -1,7 +1,7 @@
 import { Location, location, record } from "./protocol";
 import { Coverage, parseSemantic, Reference, Semantic, SemanticRow, SourceChanges, SourceRegistry } from "./semantic_view";
 
-export const diffSections = ["symbols", "parameters", "aggregateEquations", "heterogeneousEquations", "shockSetup", "shockAnalysisSetup"] as const;
+export const diffSections = ["symbols", "parameters", "equations", "shockSetup", "shockAnalysisSetup"] as const;
 export const changeKinds = ["added", "removed", "changed", "unpaired"] as const;
 export const familySections = ["steadyState", "priors", "commands", "observables", "data", "occbin", "policy", "semiStructural", "moments", "msSbvar", "heterogeneity", "externalFunctions", "trends", "operations", "macroContext"] as const;
 export const allDiffSections = [...diffSections, ...familySections] as const;
@@ -64,7 +64,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
   const add = (id: string, section: DiffSection, group: string, kind: ChangeKind, label: string, old: string | null, next: string | null, dimension: string | null = null, sideDimensions?: { before: string | null | undefined; after: string | null | undefined }): void => {
     const source = navigation.get(id);
     if (!source) malformed();
-    const expected = section === "parameters" ? "parameter" : section.endsWith("Equations") ? "equation" : section === "symbols" ? "symbol" : "shock";
+    const expected = section === "parameters" ? "parameter" : section === "equations" ? "equation" : section === "symbols" ? "symbol" : "shock";
     if (source.kind !== expected || (old === null && source.before !== null) || (next === null && source.after !== null)) malformed();
     const scope = (side: DiffSide): string => (source[side] ? source[side].dimension : sideDimensions?.[side] ?? dimension ?? source.dimension) ?? "aggregate";
     const sideScopes = { before: old === null ? null : scope("before"), after: next === null ? null : scope("after") };
@@ -97,7 +97,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     add(`/changed_parameter_values/${index}`, "parameters", "Parameter values", "changed", string(row.name), valueText(row.old_raw, row.old_value), valueText(row.new_raw, row.new_value));
   });
   function equations(owner: Record<string, unknown>, prefix: string, dimension: string | null): void {
-    const section = dimension === null ? "aggregateEquations" : "heterogeneousEquations", group = dimension === null ? "Aggregate equations" : `Equations · ${dimension}`;
+    const section = "equations", group = "Equations";
     const suffix = prefix ? "" : "_equations";
     const text = (raw: unknown): string => {
       const row = object(raw);
@@ -153,11 +153,13 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
   const isLocal = (row: SemanticRow): boolean => row.family === "symbols" && row.fields.some(field => field.name === "role" && [field.before, field.after].some(side => side.value?.kind === "text" && ["model_local_definition", "model_local_declaration"].includes(side.value.value)));
   const section = (row: SemanticRow): DiffSection => {
     const mapped: Record<string, DiffSection> = { symbols: "symbols", parameters: "parameters", shocks: "shockSetup", steady_state: "steadyState", priors: "priors", commands: "commands", observables: "observables", data: "data", occbin: "occbin", policy: "policy", semi_structural: "semiStructural", moments: "moments", ms_sbvar: "msSbvar", heterogeneity: "heterogeneity", external_functions: "externalFunctions", trends: "trends", operations: "operations", macro_context: "macroContext" };
-    return row.family === "equations" || isLocal(row) ? row.before?.scope.dimension || row.after?.scope.dimension ? "heterogeneousEquations" : "aggregateEquations" : mapped[row.family];
+    return row.family === "equations" || isLocal(row) ? "equations" : mapped[row.family];
   };
   for (const [index, row] of details.semantic.rows.entries()) {
     const source = navigation.get(row.pointer), legacy = rowMap.get(row.pointer);
     if (!legacy && row.pointer !== `/semantic/rows/${index}`) malformed();
+    // The shared view group must not let typed detail change a legacy equation's domain.
+    if (legacy && row.family === "equations" && legacy.id.startsWith("/heterogeneous_equations/") !== Boolean(row.before?.scope.dimension || row.after?.scope.dimension)) malformed();
     // Duplicate-name equations retain legacy add/remove pointers. Their typed
     // detail refines those same one-sided occurrences to Unpaired.
     const unpairedEquation = legacy && row.family === "equations" && row.change === "unpaired" &&
@@ -174,7 +176,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     const projected: DiffRow = { id: row.pointer, section: legacy?.section ?? section(row), group: isLocal(row) ? "Model-local variables" : row.family === "parameters" ? "Parameters" : legacy?.group ?? semanticGroup(section(row)), kind: row.change, label: row.name, before: row.before?.name ?? null, after: row.after?.name ?? null, scopes: [...new Set(Object.values(sideScopes).filter((s): s is string => s !== null))], sideScopes, navigation: source, semantic: row };
     if (legacy) Object.assign(legacy, projected); else rows.push(projected);
   }
-  const equationOwners = new Map(rows.filter(row => row.section === "aggregateEquations" || row.section === "heterogeneousEquations").map(row => [row.id, row]));
+  const equationOwners = new Map(rows.filter(row => row.section === "equations").map(row => [row.id, row]));
   const references = details.semantic.references.map(ref => {
     const source = navigation.get(ref.pointer);
     if (!source || source.kind !== "reference" || source.name !== ref.symbol || source.equation_pointer !== ref.equation_pointer || source[ref.side === "before" ? "after" : "before"] !== null || source[ref.side] && (source[ref.side]!.domain !== (ref.scope.dimension === null ? "aggregate" : "heterogeneous") || source[ref.side]!.dimension !== ref.scope.dimension)) malformed();
@@ -189,7 +191,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
 }
 
 export function semanticGroup(section: DiffSection): string {
-  const labels: Record<DiffSection, string> = { symbols: "Symbols", parameters: "Parameters", aggregateEquations: "Aggregate equations", heterogeneousEquations: "Equations by dimension", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "Steady state", priors: "Priors", commands: "Commands", observables: "Observables", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Moments and IRFs", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
+  const labels: Record<DiffSection, string> = { symbols: "Symbols", parameters: "Parameters", equations: "Equations", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "Steady state", priors: "Priors", commands: "Commands", observables: "Observables", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Moments and IRFs", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
   return labels[section];
 }
 
@@ -225,12 +227,16 @@ export function parseSnapshotDiff(value: unknown, ids: Record<DiffSide, string>,
 export function normalizeChoices(value: unknown, defaults: DiffPreferences): DiffChoices {
   const row = record(value) ? value : {};
   const list = <T extends string>(value: unknown, allowed: readonly T[], fallback: T[]): T[] => Array.isArray(value) ? [...new Set(value.filter((item): item is T => typeof item === "string" && allowed.includes(item as T)))] : [...fallback];
+  let group = typeof row.group === "string" ? row.group.slice(0, 1000) : null;
+  if (group?.startsWith("aggregateEquations:") || group?.startsWith("heterogeneousEquations:")) {
+    group = group.endsWith(":Model-local variables") ? "equations:Model-local variables" : "equations:Equations";
+  }
   // Retired presentation, selection, layout, section and scope state do not hide rows.
   return {
     changeKinds: list(row.changeKinds, changeKinds, defaults.changeKinds),
     customChangeKinds: list(row.customChangeKinds, changeKinds, list(row.changeKinds, changeKinds, defaults.changeKinds)),
     search: typeof row.search === "string" ? row.search.slice(0, 10000) : "",
-    group: typeof row.group === "string" ? row.group.slice(0, 1000) : null,
+    group,
   };
 }
 

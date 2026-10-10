@@ -477,6 +477,9 @@ fn ms(model: &Model, facts: &mut Vec<CapturedFact>, work: &mut RetainedExpressio
                 row.parse_order,
                 index,
             );
+            if let Some(proof) = &mut value.side.provenance {
+                proof.parse_order = row.parse_order;
+            }
             text(&mut value, "target", name, ChangeFacet::Target);
             field(
                 &mut value,

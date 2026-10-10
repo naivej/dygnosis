@@ -61,7 +61,7 @@ function captured(resource, history, host, instance = 1, changed = true) {
   }
   const location = side => ({ uri: sourceUris[side].get(Object.keys(texts[side])[1]).toString(), range: { start: { line: 0, character: 3 }, end: { line: 0, character: 5 } } });
   const target = side => ({ occurrence_id: `${side}:equation:1`, domain: "aggregate", dimension: null, written_locations: [location(side)] });
-  const row = { id: "/changed_equations/0", section: "aggregateEquations", group: "Aggregate equations", kind: "changed", label: "goods", before: "y=1", after: "y=2", scopes: ["aggregate"], sideScopes: { before: "aggregate", after: "aggregate" }, navigation: { id: "/changed_equations/0", kind: "equation", before: target("before"), after: target("after") } };
+  const row = { id: "/changed_equations/0", section: "equations", group: "Equations", kind: "changed", label: "goods", before: "y=1", after: "y=2", scopes: ["aggregate"], sideScopes: { before: "aggregate", after: "aggregate" }, navigation: { id: "/changed_equations/0", kind: "equation", before: target("before"), after: target("after") } };
   return { snapshot: { before: { root_uri: "before", revision: inputs.before.revision, complete: true }, after: { root_uri: "after", revision: inputs.after.revision, complete: true }, rows: changed ? [row] : [], complete: true }, inputs, texts, sourceUris, working: workingInputs, holder, instance };
 }
 function snapshotResponse(request, changed = true) {

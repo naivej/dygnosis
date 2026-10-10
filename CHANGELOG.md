@@ -27,6 +27,21 @@
   and model-local definitions are highlighted in full. Commands omit repeated role and token headings.
   Predetermined conventions stay in the symbol card without another declaration
   row or the same conversion note on each direct reference.
+  Heterogeneous dimensions stay in card headers; repeated dimension fields and
+  matching labels on direct references are omitted.
+  **Equations** combines aggregate and heterogeneous equation changes in one group.
+- Extra properties use change colors without `−` or `+` prefixes. Numeric
+  difference lines are removed. Evaluated parameter values appear only when
+  Before or After contains an expression, including when both results are equal.
+- Commands and Operations show captured `.mod` instructions with their original
+  spacing, quotes and comments. An owned `model_replace` block no longer adds a
+  Commands row containing only `; end ;`. Formatting-only edits stay in Text diff.
+- **Type of changes** replaces Kind with a checkbox menu. Added, Removed,
+  Replaced and Unpaired can be selected together; All selects every type.
+  Replaced is the label in the menu, counts, legend and accessibility text.
+- MS-SBVAR cards show captured command text. Forecast-path cards show only the
+  changed variable inside its block context, with replaced values highlighted.
+  An unchanged named shock-group heading stays plain when its members change.
 - Relevant comparison limits appear once after the selected group's rows. **Text diff…**
   in the top bar opens VS Code's native diff for a changed captured root or include,
   including unsaved text, with filenames and revision labels in its tab title.

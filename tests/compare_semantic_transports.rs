@@ -264,3 +264,89 @@ async fn retained_families_and_prior_shapes_agree_across_current_and_snapshot_co
         }
     }
 }
+
+#[tokio::test]
+async fn equation_surgery_written_source_is_exact_across_compare_adapters() {
+    let old = "var c; model; [name='Consumption'] c=.8; end;";
+    let instruction = "model_replace( 'Consumption' );\n  // retain written spelling and spacing\n  [name='Consumption'] c = .8;\nend;";
+    let new = format!("var c; model; [name='Consumption'] c=1; end;\n{instruction}");
+    let supplied = dynare_compare_models(old, &new, None, None, None, None, None);
+    let (service, _socket) = new_service();
+    for (adapter, result) in [
+        ("supplied MCP", supplied),
+        ("current LSP", current(service.inner(), old, &new).await),
+        (
+            "snapshot LSP",
+            compare_captured_snapshots(
+                captured("before", old),
+                captured("after", &new),
+                SnapshotCoordinates::Lsp,
+            )["diff"]
+                .clone(),
+        ),
+        (
+            "snapshot MCP",
+            compare_captured_snapshots(
+                captured("before", old),
+                captured("after", &new),
+                SnapshotCoordinates::Mcp,
+            )["diff"]
+                .clone(),
+        ),
+    ] {
+        let rows = result["semantic"]["rows"].as_array().unwrap();
+        let operation = rows
+            .iter()
+            .find(|row| row["family"] == "operations" && row["name"] == "model_replace")
+            .unwrap();
+        let text = operation["expressions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|expression| expression["field"] == "statement_text");
+        assert_eq!(
+            text.map(|expression| expression["after"]["text"].as_str().unwrap()),
+            Some(instruction),
+            "{adapter} must display the captured written operation, not its internal records"
+        );
+        assert!(
+            rows.iter().all(|row| row["family"] != "commands"),
+            "{adapter} has a duplicate replacement Commands row"
+        );
+    }
+    let spaced = new.replace("c = .8;", "c   =   .8;");
+    let source_only = dynare_compare_models(&new, &spaced, None, None, None, None, None);
+    assert!(
+        source_only["semantic"]["rows"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "display context must not count a formatting edit as a model change"
+    );
+    assert!(!source_only["source_changes"]["files"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn forecast_path_written_context_omits_unchanged_variable_paths() {
+    let base = "var y pi; model; y=0; pi=0; end;\nconditional_forecast_paths;\nvar y;\nperiods 1 2 3;\nvalues 0.1 0.25 0.1;\nvar pi;\nperiods 1 2 3;\nvalues 0.5 0.5 0.5;\nend;";
+    let after = base.replace("values 0.1 0.25 0.1;", "values 0.2 0.25 0.1;");
+    let result = dynare_compare_models(base, &after, None, None, None, None, None);
+    let rows = result["semantic"]["rows"].as_array().unwrap();
+    let path = rows
+        .iter()
+        .find(|row| row["family"] == "ms_sbvar" && row["name"] == "y")
+        .unwrap();
+    let text = path["expressions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|expression| expression["field"] == "statement_text");
+    assert_eq!(
+        text.map(|expression| expression["after"]["text"].as_str().unwrap()),
+        Some("conditional_forecast_paths;\nvar y;\nperiods 1 2 3;\nvalues 0.2 0.25 0.1;\nend;")
+    );
+    assert!(rows.iter().all(|row| row["name"] != "pi"));
+}

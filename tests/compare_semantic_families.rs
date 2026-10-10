@@ -484,6 +484,26 @@ fn type_surgery_and_pruning_count_operations_separately() {
 }
 
 #[test]
+fn equation_surgery_written_source_has_no_extra_terminator_command() {
+    let old = "var c; model; [name='Consumption'] c=.8; end;";
+    let new = "var c; model; [name='Consumption'] c=1; end; model_replace('Consumption'); [name='Consumption'] c=.8; end;";
+    let diff = comparison(old, new);
+    assert!(diff.changed_equations.is_empty());
+    assert!(diff
+        .semantic
+        .rows
+        .iter()
+        .any(|row| row.family == SemanticFamily::Operations && row.name == "model_replace"));
+    assert!(
+        diff.semantic
+            .rows
+            .iter()
+            .all(|row| row.family != SemanticFamily::Commands),
+        "owned replacement equations and block delimiters must not create a Commands row"
+    );
+}
+
+#[test]
 fn written_macro_context_does_not_claim_expanded_occurrence_pairs() {
     assert_case(
         SemanticFamily::MacroContext,

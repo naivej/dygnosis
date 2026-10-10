@@ -23,10 +23,18 @@ fn assert_pointers(diff: &Value) {
 }
 
 fn without_capture(mut diff: Value) -> Value {
-    // Captured Source and its boundary are transport facts; parsed models alone
-    // retain the same legacy arrays and semantic model facts.
+    // Captured Source, its boundary and written display context are transport
+    // facts; parsed models alone retain the same model values and row owners.
     for key in ["navigation", "sources", "source_changes", "coverage"] {
         diff.as_object_mut().unwrap().remove(key);
+    }
+    for row in diff["semantic"]["rows"].as_array_mut().unwrap() {
+        if row["family"] == "commands" || row["family"] == "operations" {
+            row["expressions"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|expression| expression["field"] != "statement_text");
+        }
     }
     diff
 }

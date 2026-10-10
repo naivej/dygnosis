@@ -39,7 +39,12 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .tools { padding: 9px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; min-width: 0; }
 .tools .search { flex: 1 1 170px; min-width: 0; }
 .search input { width: 100%; min-width: 0; }
-.tools select { max-width: 175px; }
+.change-type-filter { position: relative; flex: 0 0 auto; }
+.change-type-filter summary { cursor: pointer; border: 1px solid var(--input-border); border-radius: 2px; background: var(--vscode-input-background); padding: 3px 8px; }
+.change-type-options { position: absolute; z-index: 10; top: calc(100% + 4px); right: 0; min-width: 175px; padding: 5px; background: var(--vscode-dropdown-background, var(--panel)); border: 1px solid var(--input-border); box-shadow: 0 2px 8px var(--vscode-widget-shadow); }
+.change-type-options label { padding: 4px 7px; cursor: pointer; color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); }
+.change-type-options label:hover { background: var(--vscode-list-hoverBackground); }
+.change-type-options input { accent-color: var(--vscode-checkbox-selectBackground, var(--vscode-focusBorder)); }
 .capture-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 #status { padding: 5px 14px; color: var(--secondary); font-size: 12px; overflow-wrap: anywhere; }
 #status.stale, #status.incomplete { border-left: 2px solid var(--unpaired); }
@@ -63,7 +68,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .detail-heading h2 { font-size: 14px; overflow-wrap: anywhere; }
 .source-note, .scope-label { color: var(--secondary); font-size: 12px; overflow-wrap: anywhere; }
 .source-note { margin: 4px 0; }
-.note { border-left: 2px solid var(--line); padding: 3px 9px; color: var(--secondary); font-size: 12px; margin: 8px 0 14px; }
 .field { padding: 5px 9px 9px; }
 .field-label { font-size: 12px; color: var(--secondary); padding: 5px 9px 0; }
 .field .field-label { padding: 0 0 3px; }
@@ -71,7 +75,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .field-value { max-height: 320px; overflow: auto; }
 .token.added { background: var(--vscode-diffEditor-insertedTextBackground, var(--vscode-diffEditor-insertedLineBackground)); text-decoration: underline; text-underline-offset: 3px; }
 .token.removed { background: var(--vscode-diffEditor-removedTextBackground, var(--vscode-diffEditor-removedLineBackground)); text-decoration: none; }
-.field-cue { font-family: var(--vscode-editor-font-family); }
 .sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .side { min-width: 0; border: 1px solid var(--line); }
 .side-title { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 5px 9px; background: var(--chrome); font-size: 12px; color: var(--secondary); }

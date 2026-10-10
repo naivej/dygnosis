@@ -2,10 +2,11 @@
 (() => {
   "use strict";
   const api = acquireVsCodeApi(), saved = api.getState();
-  const names = { symbols: "Symbols", parameters: "Parameters", aggregateEquations: "Aggregate equations", heterogeneousEquations: "Equations by dimension", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "Steady state", priors: "Priors", commands: "Commands", observables: "Observables", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Moments and IRFs", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
+  const names = { symbols: "Symbols", parameters: "Parameters", equations: "Equations", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "Steady state", priors: "Priors", commands: "Commands", observables: "Observables", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Moments and IRFs", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
   const kinds = ["added", "removed", "changed", "unpaired"], marks = { added: "+", removed: "−", changed: "~", unpaired: "?" };
+  const changeLabel = kind => kind === "changed" ? "Replaced" : titleCase(kind);
   const controls = Object.fromEntries(["models", "status", "search", "kinds", "counts", "results", "refresh"].map(id => [id, document.getElementById(id)]));
-  let payload, choices, references = new Map();
+  let payload, choices, references = new Map(), unchangedBlockOpeners = new Set();
   const node = (tag, text, className) => { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; };
   const titleCase = text => text.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase());
   const scopeLabel = value => value === "aggregate" ? "Aggregate" : value === "global" ? "Global" : "Dimension: " + value;
@@ -23,22 +24,26 @@
   const post = (type, args = {}) => api.postMessage({ type, token: payload.token, ...args });
   const remember = () => { api.setState({ key: payload.key, choices }); api.postMessage({ type: "choices", key: payload.key, choices }); };
   function update() { renderRows(); remember(); }
-  function filterChoice(container, entries, property, savedProperty, label) {
-    const selected = choices[property], all = entries.map(([value]) => value);
-    const mode = selected.length === all.length && all.every(value => selected.includes(value)) ? "all" : selected.length === 1 ? selected[0] : "saved";
-    if (mode === "saved") choices[savedProperty] = [...selected];
-    choices[savedProperty] ??= [...selected];
-    container.replaceChildren();
-    const saved = choices[savedProperty], savedChoices = saved.length === 0 ? [["saved", "No " + label + " selected"]] : saved.length > 1 && saved.length < all.length ? [["saved", "Saved selection (" + saved.length + ")"]] : [];
-    for (const [value, text] of [["all", "All " + label], ...entries, ...savedChoices]) {
-      const option = node("option", text); option.value = value; container.append(option);
-    }
-    container.value = mode;
-    container.title = selected.map(value => entries.find(([key]) => key === value)?.[1]).join(", ") || "No " + label + " selected";
-  }
   function renderControls() {
     controls.search.value = choices.search;
-    filterChoice(controls.kinds, kinds.map(kind => [kind, titleCase(kind)]), "changeKinds", "customChangeKinds", "kinds");
+    const focused = document.activeElement?.getAttribute("data-change-type"), selected = choices.changeKinds;
+    const summary = node("summary", "Type of changes"), options = node("div", undefined, "change-type-options");
+    options.setAttribute("role", "group"); options.setAttribute("aria-label", "Type of changes");
+    for (const kind of ["all", ...kinds]) {
+      const label = node("label"), checkbox = node("input"); checkbox.type = "checkbox";
+      checkbox.id = "change-type-" + kind; checkbox.setAttribute("data-change-type", kind);
+      checkbox.checked = kind === "all" ? kinds.every(value => selected.includes(value)) : selected.includes(kind);
+      checkbox.indeterminate = kind === "all" && selected.length > 0 && selected.length < kinds.length;
+      checkbox.addEventListener("change", () => {
+        choices.changeKinds = kind === "all" ? checkbox.checked ? [...kinds] : [] : kinds.filter(value => value === kind ? checkbox.checked : choices.changeKinds.includes(value));
+        choices.customChangeKinds = [...choices.changeKinds]; renderControls(); update();
+        document.getElementById(checkbox.id)?.focus();
+      });
+      label.append(checkbox, node("span", kind === "all" ? "All" : changeLabel(kind))); options.append(label);
+    }
+    summary.title = selected.map(changeLabel).join(", ") || "No types selected";
+    controls.kinds.replaceChildren(summary, options);
+    if (focused) document.getElementById("change-type-" + focused)?.focus();
   }
   function limits(parent, entries) {
     if (!entries?.length) return;
@@ -62,7 +67,10 @@
   }
   function plainShockOpeners(expression) {
     // This changes color only. It does not parse facts or alter retained text.
-    const ranges = [...expression.text.matchAll(/^[ \t]*(shocks|mshocks|heteroskedastic_shocks|shock_paths|perfect_foresight_controlled_paths|initval|endval|end)\b[ \t]*;?/gim)].map(match => [match.index, match.index + match[0].length]);
+    const ranges = [...expression.text.matchAll(/^[ \t]*(shocks|mshocks|heteroskedastic_shocks|shock_paths|shock_groups|perfect_foresight_controlled_paths|initval|endval|end)\b[ \t]*;?/gim)].map(match => [match.index, match.index + match[0].length]);
+    for (const match of expression.text.matchAll(/^[ \t]*shock_groups\b[^\r\n]*;/gim)) {
+      if (unchangedBlockOpeners.has(match[0].trim())) ranges.push([match.index, match.index + match[0].length]);
+    }
     let offset = 0;
     return { runs: expression.runs.flatMap(run => {
       const start = offset, end = offset += run.text.length;
@@ -98,9 +106,18 @@
     return detail[side] && ["var", "varexo", "varexo_det", "parameters"].includes(written) ? written : localRole(detail) === "model_local_declaration" && detail[side] ? "model_local_variable" : null;
   }
   function visibleFields(detail) {
+    if (["commands", "operations", "ms_sbvar"].includes(detail.family)) {
+      return detail.fields.filter(field => ["order", "execution_order"].includes(field.name) && (field.changed || field.comparison_availability !== "complete"));
+    }
+    const assignment = detail.expressions.find(expression => expression.field === "expression");
+    const evaluatedValueNeeded = ["before", "after"].some(side => {
+      const text = assignment?.[side]?.text ?? textField(detail, "expression", side);
+      return text !== null && text.trim() !== "" && !/^(?:[+-]\s*)?(?:\d+(?:\.\d*)?|\.\d+)(?:[eEdD][+-]?\d+)?$/.test(text.trim());
+    });
     const statement = detail.family === "shocks" && detail.expressions.find(expression => expression.field === "statement_text");
     const statementComplete = statement && ["before", "after"].every(side => !detail[side] || statement[side]);
     return detail.fields.filter(field => {
+      if (field.name === "evaluated_value") return evaluatedValueNeeded;
       if (statementComplete && statement.before?.text !== statement.after?.text && field.comparison_availability === "complete"
         && (field.name !== "status" || [field.before, field.after].every(side => side.state === "absent" || side.value?.kind === "text" && ["active", "written"].includes(side.value.value)))) return false;
       if (field.comparison_availability === "complete") {
@@ -120,11 +137,12 @@
       return !expression || field.comparison_availability !== "complete" || !["before", "after"].every(side => expression[side] === null ? field[side].state === "absent" : ["present", "empty"].includes(field[side].state) && field[side].value?.kind === "text" && field[side].value.value === expression[side].text);
     });
   }
-  const visibleExpressions = detail => detail.expressions.filter(expression => ["expression", "statement_text"].includes(expression.field) || expression.before?.text !== expression.after?.text || expression.availability !== "complete");
+  const visibleExpressions = detail => detail.expressions.filter(expression => ["commands", "operations", "ms_sbvar"].includes(detail.family) ? expression.field === "statement_text" : ["expression", "statement_text"].includes(expression.field) || expression.before?.text !== expression.after?.text || expression.availability !== "complete");
   function sidePanel(row, side) {
     const panel = node("div", undefined, "side " + side), heading = node("div", undefined, "side-title"), own = row.semantic?.[side];
+    const scope = row.sideScopes[side], scopeShown = scope !== null && contextScopes(row).includes(scope);
     heading.append(node("strong", titleCase(side)));
-    if (row.sideScopes[side] !== null && contextScopes(row).includes(row.sideScopes[side])) heading.append(node("span", scopeLabel(row.sideScopes[side]), "scope-label"));
+    if (scopeShown) heading.append(node("span", scopeLabel(scope), "scope-label"));
     heading.append(sourceAction(row, side));
     panel.append(heading);
     if (row[side] === null) panel.append(node("p", "Not present", "source-note"));
@@ -135,6 +153,7 @@
         codeLines(panel, { runs: [{ text: keyword + " ", role: "unchanged" }, { text: own.name, role: row.kind === "added" ? "added" : row.kind === "removed" ? "removed" : "unchanged" }, { text: ";", role: "unchanged" }] }, side);
       }
       const expressions = visibleExpressions(row.semantic);
+      if (["commands", "operations", "ms_sbvar"].includes(row.semantic.family) && !expressions.some(expression => expression[side])) panel.append(node("p", "Written source text is unavailable for this instruction. Use Text diff to inspect the captured files.", "source-note"));
       for (const expression of expressions) {
         if (!["expression", "statement_text", "statement_tokens"].includes(expression.field) || expressions.length > 1) panel.append(node("h3", row.semantic.fields.find(field => field.name === expression.field)?.label ?? titleCase(expression.field), "field-label"));
         const value = expression[side] && row.semantic.family === "shocks" && expression.field === "statement_text" ? plainShockOpeners(expression[side]) : expression[side];
@@ -142,11 +161,11 @@
         codeLines(panel, value && role === "model_local_definition" && expression.field === "expression" ? { runs: [{ text: "# " + own.name + " = ", role: definitionRole }, ...value.runs, { text: ";", role: definitionRole }] } : value, side);
       }
       for (const field of visibleFields(row.semantic)) {
+        if (field.name === "dimension" && field.comparison_availability === "complete" && scopeShown && field[side].value?.kind === "text" && field[side].value.value === scope) continue;
         const value = node("div", undefined, "field"), available = field.comparison_availability === "complete";
         value.setAttribute("data-field", field.name);
         value.append(node("h3", field.label, "field-label"));
         const text = node("div", undefined, "field-content");
-        if (field.changed && available && fieldText(field[side]) !== "") text.append(node("span", side === "before" ? "− " : "+ ", "field-cue"));
         text.append(fieldValue(field[side], field.changed && available ? side === "before" ? "token removed" : "token added" : ""));
         value.append(text); if (!available) value.append(node("p", "Comparison unavailable", "source-note")); panel.append(value);
       }
@@ -160,7 +179,7 @@
           const line = node("p", undefined, "reference"), target = ref.navigation[side];
           const button = action(ref.label, "openReference", { pointer: ref.pointer, side }, payload.status !== "ready" ? "Refresh to enable source actions." : !target?.written_locations.length ? "No verified written location is available." : "");
           button.setAttribute("aria-label", "Open " + titleCase(side) + " reference: " + ref.label + (button.disabled ? ". " + button.title : ""));
-          const context = [ref.scope.dimension ? scopeLabel(ref.scope.dimension) : "", ref.timing.written_offset ? "written " + ref.timing.written_offset : "", !conventionShown && ref.timing.converted_offset !== ref.timing.written_offset ? "after convention " + ref.timing.converted_offset : ""].filter(Boolean).join(" · ");
+          const context = [ref.scope.dimension && (!scopeShown || ref.scope.dimension !== scope) ? scopeLabel(ref.scope.dimension) : "", ref.timing.written_offset ? "written " + ref.timing.written_offset : "", !conventionShown && ref.timing.converted_offset !== ref.timing.written_offset ? "after convention " + ref.timing.converted_offset : ""].filter(Boolean).join(" · ");
           line.append(button); if (context) line.append(node("span", context, "source-note")); refs.append(line);
         }
         panel.append(refs);
@@ -187,12 +206,11 @@
   function rowDetail(row) {
     const article = node("article", undefined, "detail change " + row.kind), header = node("div", undefined, "detail-heading");
     article.setAttribute("data-row-id", row.id);
-    article.setAttribute("aria-label", titleCase(row.kind) + " " + rowLabel(row) + ", " + row.scopes.map(scopeLabel).join(" · "));
+    article.setAttribute("aria-label", changeLabel(row.kind) + " " + rowLabel(row) + ", " + row.scopes.map(scopeLabel).join(" · "));
     header.append(node("span", marks[row.kind], "change-mark " + row.kind), node("h2", rowLabel(row))); article.append(header);
     const sides = node("div", undefined, "sides"); sides.append(sidePanel(row, "before"), sidePanel(row, "after")); article.append(sides);
-    if (row.semantic) {
-      for (const field of row.semantic.fields) if (field.numeric_difference !== null) article.append(node("p", field.label + " · After − Before: " + String(field.numeric_difference), "note"));
-    }
+    const instruction = row.semantic?.expressions.find(expression => expression.field === "statement_text");
+    if (row.semantic?.family === "operations" && instruction?.before && instruction.after && instruction.before.text === instruction.after.text && row.semantic.fields.some(field => field.changed && !["role", "order"].includes(field.name))) article.append(node("p", "The written instruction is unchanged; its recorded effects differ.", "source-note"));
     return article;
   }
   function groupNotes(rows) {
@@ -207,7 +225,7 @@
     const available = payload.rows, query = choices.search.trim().toLocaleLowerCase();
     const matches = row => choices.changeKinds.includes(row.kind) && (!query || searchText(row).includes(query));
     const shown = available.filter(matches);
-    const breakdown = kinds.map(kind => shown.filter(row => row.kind === kind).length + " " + kind).join(" · ");
+    const breakdown = kinds.map(kind => shown.filter(row => row.kind === kind).length + " " + changeLabel(kind).toLowerCase()).join(" · ");
     controls.counts.textContent = shown.length + " of " + available.length + " model rows match filters · " + breakdown;
     const groups = new Map();
     for (const row of [...payload.rows].sort((a, b) => Object.keys(names).indexOf(a.section) - Object.keys(names).indexOf(b.section))) {
@@ -244,13 +262,14 @@
   controls.refresh.addEventListener("click", () => post("refresh"));
   for (const name of ["changeComparison", "swap", "rootTextDiff", "capturedTextDiff", "choosePath", "help"]) document.getElementById(name)?.addEventListener("click", () => post(name));
   controls.search.addEventListener("input", () => { choices.search = controls.search.value; update(); });
-  for (const [control, property, savedProperty, entries] of [[controls.kinds, "changeKinds", "customChangeKinds", kinds]]) control.addEventListener("change", () => {
-    choices[property] = control.value === "all" ? [...entries] : control.value === "saved" ? [...choices[savedProperty]] : [control.value];
-    renderControls(); update();
-  });
+  controls.kinds.addEventListener("keydown", event => { if (event.key === "Escape") { controls.kinds.open = false; controls.kinds.children[0]?.focus(); } });
+  document.addEventListener?.("pointerdown", event => { if (!controls.kinds.contains(event.target)) controls.kinds.open = false; });
   window.addEventListener("message", event => {
     const message = event.data; if (!message || message.type !== "render" || !Array.isArray(message.rows)) return;
     payload = message; references = new Map((message.references ?? []).map(reference => [reference.pointer, reference])); choices = message.choices;
+    const openers = side => new Set(message.rows.filter(row => row.semantic?.family === "shocks").flatMap(row => row.semantic.expressions.filter(expression => expression.field === "statement_text").map(expression => expression[side]?.text.split(/\r?\n/)[0].trim()).filter(Boolean)));
+    const beforeOpeners = openers("before"), afterOpeners = openers("after");
+    unchangedBlockOpeners = new Set([...beforeOpeners].filter(opener => afterOpeners.has(opener)));
     controls.models.replaceChildren();
     for (const [label, input] of [["Before", message.before], ["After", message.after]]) {
       const model = node("div", undefined, "input-side"), parts = input.split(" · "); model.title = input;

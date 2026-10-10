@@ -615,6 +615,7 @@ pub fn compare_captured_snapshots(
     )
     .with_snapshot_identity(&after.input_id, after.inputs["commit"].as_str());
     let include_pairs = source_pairs(&before, &after);
+    crate::compare_navigation::populate_written_statements(&mut diff, &old, &new);
     let boundary = CaptureBoundary::RootAndExecutedIncludes;
     let _ = crate::semantic_diff::populate_captured_sources(
         &mut diff,

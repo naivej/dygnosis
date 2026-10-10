@@ -87,6 +87,10 @@ test("control state normalizes kinds and ignores retired section and scope filte
   assert.equal(Object.hasOwn(choices, "sections"), false); assert.deepEqual(choices.changeKinds, ["changed"]); assert.equal(choices.group, "symbols:Symbols");
   assert.equal(Object.hasOwn(choices, "expanded"), false); assert.equal(Object.hasOwn(choices, "expansion"), false);
   assert.equal(Object.hasOwn(choices, "layout"), false); assert.equal(Object.hasOwn(choices, "scope"), false); assert.equal(choices.search, "<img>");
+  for (const group of ["aggregateEquations:Aggregate equations", "heterogeneousEquations:Equations · households"]) {
+    assert.equal(normalizeChoices({ group }, defaults).group, "equations:Equations");
+  }
+  assert.equal(normalizeChoices({ group: "heterogeneousEquations:Model-local variables" }, defaults).group, "equations:Model-local variables");
 });
 
 const preferenceScopes = [], preferenceLogs = [];
@@ -138,6 +142,7 @@ test("webview uses text nodes, labels source sides and disables missing/stale lo
 test("every model change renders its own Before and After cards in its group", () => {
   const env = webview(), rows = parseDiff(fixture(), before, after).rows; env.render();
   const groups = descendants(env.elements.results).filter(element => element.attributes["data-group"]).map(element => element.attributes["data-group"]);
+  assert.deepEqual(groups.filter(group => group.startsWith("equations:")), ["equations:Equations"]);
   const visited = [];
   for (const group of groups) {
     descendants(env.elements.results).find(element => element.attributes["data-group"] === group).fire("click");
@@ -162,9 +167,11 @@ test("every model change renders its own Before and After cards in its group", (
 test("webview text and kind filters preserve state and choose a visible group", () => {
   const env = webview(); env.render(); assert.match(env.elements.counts.textContent, /11 of 11 model rows match filters/);
   env.elements.search.value = "goods"; env.elements.search.fire("input"); assert.match(env.elements.counts.textContent, /1 of 11 model rows match filters/);
-  assert.equal(env.states.at(-1).choices.group, "aggregateEquations:Aggregate equations");
+  assert.equal(env.states.at(-1).choices.group, "equations:Equations");
   env.elements.search.value = ""; env.elements.search.fire("input"); assert.match(env.elements.counts.textContent, /11 of 11 model rows match filters/);
-  env.elements.kinds.value = "removed"; env.elements.kinds.fire("change"); assert.match(env.elements.counts.textContent, /1 of 11 model rows match filters/);
+  const all = descendants(env.elements.kinds).find(element => element.attributes["data-change-type"] === "all"); all.checked = false; all.fire("change");
+  const removed = descendants(env.elements.kinds).find(element => element.attributes["data-change-type"] === "removed"); removed.checked = true; removed.fire("change");
+  assert.match(env.elements.counts.textContent, /1 of 11 model rows match filters/);
 });
 test("side labels retain unmapped heterogeneous shock rows without a scope filter", () => {
   const result = fixture(), nav = result.navigation.rows.find(row => row.id === "/shock_setup_changes/0");

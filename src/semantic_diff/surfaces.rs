@@ -720,7 +720,7 @@ fn residual(
         // Written equations retain their body up to, but not including, `;`.
         // A terminator after an owned body belongs to that same fact.
         .filter(|&index| {
-            !(statement.name == "model"
+            !(matches!(statement.name.as_str(), "model" | "model_replace")
                 && model.expanded_tokens[index].kind == crate::lexer::TokenKind::Semi
                 && index >= statement.opener_range.end
                 && claims.contains(side, statement.id, index - 1))
@@ -730,6 +730,10 @@ fn residual(
     // Named fields can own all domain tokens while leaving separators behind.
     // Punctuation alone does not establish an additional accepted fact. Keep
     // every residual identifier, value, operator and unowned block-body token.
+    let closer = (statement.kind == StatementKind::Block && statement.complete)
+        .then(|| model.expanded_tokens.get(range.end.checked_sub(2)?))
+        .flatten()
+        .filter(|token| token.text(&model.source).eq_ignore_ascii_case("end"));
     if tokens.iter().all(|token| {
         matches!(
             token.kind,
@@ -739,7 +743,7 @@ fn residual(
                 | crate::lexer::TokenKind::RParen
                 | crate::lexer::TokenKind::LBrack
                 | crate::lexer::TokenKind::RBrack
-        )
+        ) || closer.is_some_and(|closer| token.span == closer.span)
     }) {
         return String::new();
     }

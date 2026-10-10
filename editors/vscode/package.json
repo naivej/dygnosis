@@ -1353,7 +1353,8 @@
                 "removed",
                 "changed",
                 "unpaired"
-              ]
+              ],
+              "enumItemLabels": ["Added", "Removed", "Replaced", "Unpaired"]
             },
             "default": [
               "added",
@@ -1362,7 +1363,7 @@
               "unpaired"
             ],
             "scope": "resource",
-            "description": "Change kinds initially shown in a new Changes view; uses the model that opened it. Empty hides all rows."
+            "description": "Types of changes initially shown in a new Changes view: Added, Removed, Replaced and Unpaired. Uses the model that opened it. Empty hides all rows."
           }
         }
       },
@@ -1441,7 +1442,7 @@
     "colors": [
       {
         "id": "dynare.diff.changedForeground",
-        "description": "Blue cue for a paired changed model row in Changes. Before and After fields keep removal and addition cues.",
+        "description": "Blue cue for a paired Replaced model row in Changes. Before and After fields keep removal and addition cues.",
         "defaults": {
           "dark": "#3794FF",
           "light": "#005FB8",

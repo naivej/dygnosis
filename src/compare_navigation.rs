@@ -46,6 +46,7 @@ pub(crate) struct ComparisonInput {
     symbols: BTreeMap<String, Target>,
     shocks: HashMap<usize, Target>,
     statements: BTreeMap<usize, Target>,
+    forecast_paths: BTreeMap<(usize, usize), [Vec<WrittenSegment>; 3]>,
     written_equations: BTreeMap<usize, (usize, usize, Target)>,
     declarations: BTreeMap<usize, (usize, Target)>,
     statement_ranges: BTreeMap<usize, std::ops::Range<usize>>,
@@ -92,6 +93,7 @@ impl ComparisonInput {
             symbols: BTreeMap::new(),
             shocks: HashMap::new(),
             statements: BTreeMap::new(),
+            forecast_paths: BTreeMap::new(),
             written_equations: BTreeMap::new(),
             declarations: BTreeMap::new(),
             statement_ranges: model
@@ -231,6 +233,68 @@ impl ComparisonInput {
                 .get(name)
                 .and_then(|symbol| symbol.dimension.clone());
         }
+        for block in &model.conditional_forecast_paths {
+            for row in &block.rows {
+                let Some(order) = row.parse_order else {
+                    continue;
+                };
+                let Some(parent) = model.statements.iter().find(|statement| {
+                    statement.name == "conditional_forecast_paths"
+                        && statement.token_range.contains(&order)
+                }) else {
+                    continue;
+                };
+                let Some(last) = model
+                    .expanded_tokens
+                    .get(order)
+                    .filter(|token| token.kind == crate::lexer::TokenKind::Semi)
+                else {
+                    continue;
+                };
+                let Some(opener) = model.expanded_tokens.get(parent.opener_range.clone()) else {
+                    continue;
+                };
+                let Some(closer) = parent
+                    .token_range
+                    .end
+                    .checked_sub(2)
+                    .and_then(|start| model.expanded_tokens.get(start..parent.token_range.end))
+                else {
+                    continue;
+                };
+                let Some((first_open, last_open, first_close, last_close)) = opener
+                    .first()
+                    .zip(opener.last())
+                    .zip(closer.first().zip(closer.last()))
+                    .map(|((a, b), (c, d))| (a, b, c, d))
+                else {
+                    continue;
+                };
+                input.forecast_paths.insert(
+                    (parent.id, order),
+                    [
+                        workspace.map_effective_segments(
+                            root,
+                            crate::span::Span::new(
+                                first_open.span.start as usize,
+                                last_open.span.end as usize,
+                            ),
+                        ),
+                        workspace.map_effective_segments(
+                            root,
+                            crate::span::Span::new(row.span.start as usize, last.span.end as usize),
+                        ),
+                        workspace.map_effective_segments(
+                            root,
+                            crate::span::Span::new(
+                                first_close.span.start as usize,
+                                last_close.span.end as usize,
+                            ),
+                        ),
+                    ],
+                );
+            }
+        }
         for setting in shocks.flatten() {
             if let Some(span) = setting.source_span {
                 input.shocks.insert(
@@ -298,6 +362,49 @@ impl ComparisonInput {
             return (*owner == parent).then_some(declaration);
         }
         self.statements.get(&parent)
+    }
+
+    fn written_statement(&self, proof: Option<&OccurrenceProvenance>) -> Option<Vec<&str>> {
+        let proof = proof?;
+        let range = self.statement_ranges.get(&proof.statement_id?)?;
+        if range.len() > 10_000 {
+            return None;
+        }
+        if let Some(parts) = proof
+            .parse_order
+            .and_then(|order| self.forecast_paths.get(&(proof.statement_id?, order)))
+        {
+            let file = parts
+                .first()?
+                .first()?
+                .file
+                .as_deref()
+                .unwrap_or(&self.root_key);
+            return parts
+                .iter()
+                .map(|part| {
+                    let [segment] = part.as_slice() else {
+                        return None;
+                    };
+                    if segment.file.as_deref().unwrap_or(&self.root_key) != file {
+                        return None;
+                    }
+                    self.sources
+                        .get(file)?
+                        .get(segment.span.start as usize..segment.span.end as usize)
+                        .map(str::trim_end)
+                })
+                .collect();
+        }
+        let target = self.proven_target(Some(proof))?;
+        let [segment] = target.segments.as_slice() else {
+            return None;
+        };
+        let key = segment.file.as_deref().unwrap_or(&self.root_key);
+        self.sources
+            .get(key)?
+            .get(segment.span.start as usize..segment.span.end as usize)
+            .map(|text| vec![text])
     }
 
     pub(crate) fn with_snapshot_identity(mut self, input_id: &str, commit: Option<&str>) -> Self {
@@ -398,6 +505,67 @@ impl ComparisonInput {
             return json!({"input_id":input_id,"root_file":self.root_key,"revision":self.revision,"complete":self.complete});
         }
         json!({"root_uri": self.root_uri, "revision": self.revision, "complete": self.complete})
+    }
+}
+
+/// Display context comes from verified captured source, after semantic comparison.
+/// It never supplies token claims, pairing or additional model changes.
+pub(crate) fn populate_written_statements(
+    diff: &mut ModelDiff,
+    before: &ComparisonInput,
+    after: &ComparisonInput,
+) {
+    use crate::semantic_diff::{HighlightBasis, SemanticFamily};
+    let mut remaining = diff
+        .semantic
+        .budgets
+        .serialized_output_bytes
+        .min(8 * 1024 * 1024);
+    for index in 0..diff.semantic.rows.len() {
+        let row = &diff.semantic.rows[index];
+        if !matches!(
+            row.family,
+            SemanticFamily::Commands | SemanticFamily::Operations | SemanticFamily::MsSbvar
+        ) {
+            continue;
+        }
+        let old = before.written_statement(
+            row.before
+                .as_ref()
+                .and_then(|side| side.provenance.as_ref()),
+        );
+        let new =
+            after.written_statement(row.after.as_ref().and_then(|side| side.provenance.as_ref()));
+        if row.before.is_some() != old.is_some() || row.after.is_some() != new.is_some() {
+            continue;
+        }
+        let size = |parts: &Option<Vec<&str>>| {
+            parts.as_ref().map_or(0, |parts| {
+                parts
+                    .iter()
+                    .map(|text| text.len())
+                    .sum::<usize>()
+                    .saturating_add(parts.len().saturating_sub(1))
+            })
+        };
+        let bytes = size(&old).saturating_add(size(&new));
+        if bytes > remaining {
+            continue;
+        }
+        remaining -= bytes;
+        let old = old.map(|parts| parts.join("\n"));
+        let new = new.map(|parts| parts.join("\n"));
+        let unpaired = row.change == crate::semantic_diff::ChangeKind::Unpaired;
+        let mut detail = crate::semantic_diff::equations::expression_detail(
+            &mut diff.semantic,
+            "statement_text",
+            old.as_deref(),
+            new.as_deref(),
+        );
+        if unpaired && detail.highlight_basis == HighlightBasis::PairedExpression {
+            detail.highlight_basis = HighlightBasis::UnpairedTextOnly;
+        }
+        diff.semantic.rows[index].expressions.push(detail);
     }
 }
 

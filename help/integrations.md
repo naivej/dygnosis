@@ -413,6 +413,23 @@ or `operation`; written history and final settings can differ. Each fact has
 one owner. Supporting statement context and references do not count again.
 Source file and hunk counts remain separate from model row appearances.
 
+Command, operation and MS-SBVAR rows can add an expression with `field: "statement_text"`.
+Its text is copied from one verified range in that side's captured written file,
+with spacing, quotes and comments. It is display context, not a compared field:
+adding it does not change row ownership, pairing or model counts. Structured
+fields still describe the retained facts, so identical instruction text can have
+different operation results. A missing context expression means that a complete
+written range or its materialization budget was unavailable; it is not an absent
+model row. Clients can use captured-file text diff when this context is missing.
+Unpaired rows keep text-only highlight meaning. The existing schema versions and
+coordinate contracts apply.
+Conditional forecast paths use their direct parser row position to select the
+variable's written range. The block opener and closer supply display context;
+other variable paths do not enter that row's text. Each selected source part is
+verified in the same captured file. This context is not a new statement or a
+new comparison owner. The VS Code label Replaced maps to the unchanged wire
+`change: "changed"` value.
+
 Existing owners retain their exact legacy pointers. New rows use
 `/semantic/rows/N`; references use `/semantic/references/N`; files use
 `/source_changes/files/N`, with N their index in that array. Semantic navigation

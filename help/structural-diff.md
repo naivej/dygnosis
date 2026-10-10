@@ -54,6 +54,8 @@ row. Supporting statement context and equation references do not add more model
 changes. Model counts describe displayed row appearances.
 
 The left panel lists Symbols, Equations, Commands and the other change groups.
+**Equations** includes aggregate equations and equations from every heterogeneity
+dimension.
 Choose a group to see all its filtered changes as rows, with Before on the left
 and After on the right. All available groups are listed. Parameter declarations stay
 in Symbols; parameter value changes stay in Parameters.
@@ -64,8 +66,13 @@ state while sharing the captured comparison.
 The change-color legend stays at the bottom while the review content scrolls.
 
 Before and After cards show each expression once and retain other changed
-fields. Unchanged fields are omitted, except nonempty equation tags that identify
-regime variants. Missing and explicitly empty values stay blank; unknown values
+fields. Extra properties, including equation tags and predetermined conventions,
+use change colors without `−` or `+` prefixes. Numeric difference lines are omitted.
+**Evaluated value** appears on both cards only when at least one assignment is
+an expression, such as `1/2` or `beta*0.9`. It stays visible when both sides
+give the same result. Two written numbers, such as `0.9` and `0.8`, need no
+evaluated values. Other unchanged fields are omitted, except nonempty equation
+tags that identify regime variants. Missing and explicitly empty values stay blank; unknown values
 say **Unknown**; zero displays as **0**. Added symbols show their declaration,
 such as `var y;`, with available metadata. A kind changed by `change_type`
 remains visible when it differs from the declaration. A missing row says
@@ -75,13 +82,24 @@ context readable. Written suffix changes need no separate timing list. Each card
 that side's direct written references to changed symbols and parameters,
 including references in unchanged equations.
 References are not claims about indirect dependencies or numerical effects.
+Cards show their dimension in the header. A direct reference names a dimension
+only when it differs from that card's dimension.
 Shock cards show the written instruction and its block options, with edits
 highlighted in the text. Symbol declaration keywords and shock block openers
 stay plain. Added or removed shock instructions, such as `var ua = cstd;`,
-and model-local definitions, such as `# xdddd = yf;`, are highlighted in full. Changed
-facts remain visible when written text is unavailable or does not show the
-change, such as an instruction becoming superseded.
-Commands show their statement without a repeated role or token heading.
+and model-local definitions, such as `# xdddd = yf;`, are highlighted in full.
+Shock cards keep changed fields when their captured instruction is unavailable
+or unchanged, such as an instruction becoming superseded.
+Commands, Operations and MS-SBVAR show the captured written instructions, including their
+spacing, quotes and comments. For example, a replacement shows its complete
+`model_replace(...); ... end;` block. A card whose written instruction is unchanged
+can explain that its recorded effects differ. If a complete written range cannot
+be verified, the card directs you to **Text diff**. Relative order changes remain
+visible beside the code.
+Forecast-path cards keep `conditional_forecast_paths;` and `end;` around the
+changed variable's `var`, `periods` and `values` lines. Unchanged variable paths
+are omitted. An unchanged `shock_groups(name=...);` heading stays plain when its
+group members change.
 When a symbol card shows its predetermined convention, its references omit
 the same conversion note. The convention belongs to that symbol's row.
 Equations with the same name can pair when their unchanged regime tags identify
@@ -92,8 +110,10 @@ Uncertain occurrences remain separate and are labeled Unpaired; text-only
 highlights do not imply that two equations were paired. The comparison does not
 solve the model or report simulation, estimation or steady-state results.
 
-Find changes and Kind filter model rows. The left panel selects a group to display.
-Kind offers All or one choice, plus a saved group of choices.
+Find changes and **Type of changes** filter model rows. The left panel selects a
+group to display. Tick any combination of Added, Removed, Replaced and Unpaired.
+**All** ticks every type; clearing it clears every type. A partly selected menu
+shows All as mixed. Selections survive Refresh, reload and split views.
 When no model row is available, review any unavailable facts and the native text diff
 before concluding that the written files are unchanged.
 

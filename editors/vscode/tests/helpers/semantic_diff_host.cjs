@@ -35,11 +35,77 @@ async function checkSemanticDiff(service, workspaceRoot, evidence, waitFor) {
   const saved = Object.fromEntries(["diff.defaultChangeKinds"].map(key => [key, config.inspect(key)?.workspaceValue]));
   try {
     await config.update("diff.defaultChangeKinds", ["added", "changed", "unpaired"], vscode.ConfigurationTarget.Workspace);
+    await checkEquationSurgerySource(service, workspaceRoot, evidence, waitFor);
+    await checkForecastSource(service, workspaceRoot, evidence, waitFor);
     await runSemanticDiff(service, workspaceRoot, evidence, waitFor);
     await checkHistoryCardSource(service, workspaceRoot, evidence, waitFor);
   } finally {
     for (const [key, value] of Object.entries(saved)) await config.update(key, value, vscode.ConfigurationTarget.Workspace);
   }
+}
+
+async function checkEquationSurgerySource(service, workspaceRoot, evidence, waitFor) {
+  const directory = path.join(workspaceRoot, "equation-surgery-source");
+  await fs.mkdir(directory, { recursive: true });
+  const beforeFile = path.join(directory, "equation_surgery_1.mod"), afterFile = path.join(directory, "equation_surgery_2.mod");
+  const beforeText = "var c;\nmodel;\n[name='Consumption'] c=.8;\nend;\n";
+  const instruction = "model_replace( 'Consumption' );\n  // retain original spacing and comments\n  [name='Consumption'] c = .8;\nend;";
+  await fs.writeFile(beforeFile, beforeText);
+  await fs.writeFile(afterFile, beforeText.replace("c=.8", "c=1") + instruction + "\n");
+  const after = { kind: "working", root_uri: vscode.Uri.file(afterFile).toString() };
+  const document = await vscode.workspace.openTextDocument(vscode.Uri.file(afterFile));
+  await vscode.window.showTextDocument(document);
+  await waitFor(async () => (await service.modelInfo(document.uri))?.complete, "replacement model facts");
+  const resource = { schema_version: 1, before: { kind: "working", root_uri: vscode.Uri.file(beforeFile).toString() }, after, anchor: after, context_uri: after.root_uri };
+  const uri = vscode.Uri.from({ scheme: "dygnosis-changes", path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
+  await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
+  await waitFor(async () => {
+    try { return await nativeChanges(async ({ evaluate }) => { evidence.semantic_surgery_state = await evaluate('({status:document.getElementById("status").className,message:document.getElementById("status").textContent,groups:[...document.querySelectorAll(".group-button")].map(node=>node.textContent),code:document.querySelector(".side.after .expression")?.textContent,models:document.getElementById("models").textContent})'); return evidence.semantic_surgery_state.status === "ready" && Boolean(evidence.semantic_surgery_state.code); }); }
+    catch (error) { if (error.code === "NATIVE_FRAME_PENDING") { evidence.semantic_surgery_discovery = error.discovery; return false; } throw error; }
+  }, "written replacement card");
+  await nativeChanges(async ({ evaluate, send }) => {
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".group-button > span:first-child")].map(node=>node.textContent)'), ["Operations"]);
+    assert.equal(await evaluate('document.querySelector(".side.after .expression").textContent'), instruction);
+    assert.equal(await evaluate('document.querySelectorAll("article [data-field]").length'), 0, "operation records do not become displayed model syntax");
+    const screenshot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+    const filename = path.join(path.dirname(process.env.DYGNOSIS_HOST_RESULT), `semantic-equation-surgery-${vscode.version}.png`);
+    await fs.writeFile(filename, Buffer.from(screenshot.data, "base64")); evidence.semantic_equation_surgery_screenshot = filename;
+  });
+  evidence.semantic_equation_surgery_written_source = true;
+}
+
+async function checkForecastSource(service, workspaceRoot, evidence, waitFor) {
+  await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+  const directory = path.join(workspaceRoot, "forecast-source"); await fs.mkdir(directory, { recursive: true });
+  const beforeFile = path.join(directory, "forecast_groups_1.mod"), afterFile = path.join(directory, "forecast_groups_2.mod");
+  const beforeText = "var y pi; varexo e u; model; y=e; pi=u; end;\nshock_groups(name=drivers);\ndemand=e;\nsupply=u;\nend;\nconditional_forecast_paths;\nvar y;\nperiods 1 2 3;\nvalues 0.1 0.25 0.1;\nvar pi;\nperiods 1 2 3;\nvalues 0.5 0.5 0.5;\nend;";
+  await fs.writeFile(beforeFile, beforeText);
+  await fs.writeFile(afterFile, beforeText.replace("demand=e;\nsupply=u;", "joint=e u;").replace("values 0.1 0.25 0.1;", "values 0.2 0.25 0.1;"));
+  const beforeDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(beforeFile));
+  await vscode.window.showTextDocument(beforeDocument);
+  await waitFor(async () => { const facts = await service.modelInfo(beforeDocument.uri); evidence.semantic_forecast_before = facts ? { complete: facts.complete, root_uri: facts.root_uri } : null; return facts?.complete; }, "forecast Before model facts");
+  const after = { kind: "working", root_uri: vscode.Uri.file(afterFile).toString() }, document = await vscode.workspace.openTextDocument(vscode.Uri.file(afterFile));
+  await vscode.window.showTextDocument(document);
+  await waitFor(async () => (await service.modelInfo(document.uri))?.complete, "forecast model facts");
+  const resource = { schema_version: 1, before: { kind: "working", root_uri: vscode.Uri.file(beforeFile).toString() }, after, anchor: after, context_uri: after.root_uri };
+  const uri = vscode.Uri.from({ scheme: "dygnosis-changes", path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
+  await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
+  await waitFor(async () => {
+    try { return await nativeChanges(async ({ evaluate }) => { evidence.semantic_forecast_state = await evaluate('({status:document.getElementById("status").className,message:document.getElementById("status").textContent,groups:[...document.querySelectorAll(".group-button")].map(node=>node.textContent),models:document.getElementById("models").textContent})'); return evidence.semantic_forecast_state.status === "ready" && evidence.semantic_forecast_state.groups.length > 0; }); }
+    catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
+  }, "forecast source cards");
+  await nativeChanges(async ({ evaluate, send }) => {
+    assert.equal(await evaluate('document.querySelector("#kinds summary").textContent'), "Type of changes");
+    assert.equal(await evaluate('[...document.querySelectorAll(".token.added,.token.removed")].some(node=>node.textContent.includes("name=drivers"))'), false);
+    await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="MS-SBVAR").click()');
+    assert.equal(await evaluate('document.querySelector(".side.after .expression").textContent'), "conditional_forecast_paths;\nvar y;\nperiods 1 2 3;\nvalues 0.2 0.25 0.1;\nend;");
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".side.after .token.added")].map(node=>node.textContent)'), ["0.2"]);
+    assert.equal(await evaluate('document.querySelectorAll("article [data-field]").length'), 0);
+    const screenshot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+    const filename = path.join(path.dirname(process.env.DYGNOSIS_HOST_RESULT), `semantic-forecast-source-${vscode.version}.png`);
+    await fs.writeFile(filename, Buffer.from(screenshot.data, "base64")); evidence.semantic_forecast_source_screenshot = filename;
+  });
+  evidence.semantic_forecast_written_source = true;
 }
 
 async function checkHistoryCardSource(service, workspaceRoot, evidence, waitFor) {
@@ -95,10 +161,10 @@ async function checkHistoryCardSource(service, workspaceRoot, evidence, waitFor)
     await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
     await ready();
     await nativeChanges(async ({ evaluate, send }) => {
-      await evaluate('const kinds=document.getElementById("kinds"); kinds.value="all"; kinds.dispatchEvent(new Event("change"));');
+      await evaluate('const all=document.querySelector("[data-change-type=all]"); if (!all.checked) all.click();');
       await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Model-local variables").click()');
       assert.equal(await evaluate('[...document.querySelectorAll(".side.after .expression .token.added")].map(token=>token.textContent).join("")'), "# helper = 2;");
-      await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Aggregate equations").click()');
+      await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Equations").click()');
       assert.equal(await evaluate('document.querySelector(".group-rows").textContent.includes("after convention")'), false);
       await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Shock setup").click()');
       assert.equal(await evaluate('document.querySelectorAll("article[data-row-id]").length'), 2);
@@ -178,12 +244,6 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: name, code, windowsVirtualKeyCode: virtualKey, ...(text ? { text, unmodifiedText: text } : {}) });
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: name, code, windowsVirtualKeyCode: virtualKey });
     };
-    const select = (selector, value) => evaluate(`(() => {
-      const control = document.querySelector(${JSON.stringify(selector)});
-      if (!control) throw new Error("Missing native control");
-      control.value = ${JSON.stringify(value)};
-      control.dispatchEvent(new Event("change", { bubbles: true }));
-    })()`);
     const click = selector => evaluate(`(() => {
       const control = document.querySelector(${JSON.stringify(selector)});
       if (!control || !control.getClientRects().length || control.disabled) throw new Error("Missing enabled visible native control: " + ${JSON.stringify(selector)});
@@ -214,16 +274,17 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     assert.deepEqual(header.cards.map(card => [card.label, card.name]), [["Before", "root.mod"], ["After", "root.mod"]]);
     assert.ok(header.cards[0].title.includes(decodeURIComponent(new URL(roots.before.toString()).pathname)));
     assert.ok(header.cards[1].title.includes(decodeURIComponent(new URL(roots.after.toString()).pathname)));
-    assert.equal(header.kinds, "SELECT"); assert.equal(header.checkboxes, 0);
+    assert.equal(header.kinds, "DETAILS"); assert.equal(header.checkboxes, 5);
     const placement = await evaluate('({models:document.getElementById("models").getBoundingClientRect().right,change:document.getElementById("changeComparison").getBoundingClientRect().x,swap:document.getElementById("swap").getBoundingClientRect().right,refresh:document.getElementById("refresh").getBoundingClientRect().x})');
     assert.ok(placement.change >= placement.models && placement.refresh > placement.swap);
-    assert.deepEqual(header.legend, ["+ Added", "− Removed", "~ Changed", "? Unpaired"]);
-    assert.equal(await evaluate('document.getElementById("kinds").value'), "saved");
-    await select("#kinds", "changed");
+    assert.deepEqual(header.legend, ["+ Added", "− Removed", "~ Replaced", "? Unpaired"]);
+    assert.equal(await evaluate('document.querySelector("[data-change-type=all]").indeterminate'), true);
+    const selectTypes = selected => evaluate(`(() => { const selected=${JSON.stringify(selected)}; for (const kind of ["added","removed","changed","unpaired"]) { const input=document.querySelector('[data-change-type="'+kind+'"]'); if (input.checked !== selected.includes(kind)) input.click(); } })()`);
+    await selectTypes(["changed"]);
     assert.equal(await evaluate('[...document.querySelectorAll("article[data-row-id]")].every(row=>row.classList.contains("changed"))'), true);
-    await select("#kinds", "saved");
+    await selectTypes(["added", "changed", "unpaired"]);
     assert.equal(await evaluate('Boolean(document.querySelector("article.removed"))'), false);
-    await select("#kinds", "all");
+    await evaluate('document.querySelector("[data-change-type=all]").click()');
     await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Parameters").click()');
     assert.equal(await evaluate('document.querySelectorAll("article[data-row-id]").length'), 1);
     assert.equal(await evaluate('Boolean(document.getElementById("scope") || document.getElementById("sectionFilter") || document.getElementById("section-all"))'), false);
@@ -242,7 +303,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     }
     assert.equal(new Set(visited).size, 15, "all filtered changes are available as full rows in their groups");
     evidence.semantic_group_rows = { groups: groupLabels, rows: visited.length };
-    await group("Aggregate equations");
+    await group("Equations");
     evidence.semantic_compact_controls = header;
     evidence.semantic_saved_filters = true;
     const legend = await evaluate('(() => {const content=document.getElementById("reviewContent"),footer=document.querySelector("footer"),before=footer.getBoundingClientRect().top;content.scrollTop=content.scrollHeight;return {before,after:footer.getBoundingClientRect().top,bottom:footer.getBoundingClientRect().bottom,height:innerHeight,scroll:content.scrollTop};})()');
@@ -321,7 +382,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
       assert.ok(fills.removed.every(color => color.startsWith("rgba(170, 51, 68,")));
       evidence.semantic_native_diff_fills = fills;
       const changedColor = await evaluate('getComputedStyle(document.querySelector("footer .change-mark.changed")).color');
-      assert.equal(changedColor, "rgb(34, 102, 170)", "Changed glyph uses the customized native semantic color");
+      assert.equal(changedColor, "rgb(34, 102, 170)", "Replaced glyph uses the customized native semantic color");
       evidence.semantic_changed_color = changedColor;
       await appearance.update("activityBar.location", "hidden", vscode.ConfigurationTarget.Workspace);
       await send("Emulation.setDeviceMetricsOverride", { width: 320, height: 1000, deviceScaleFactor: 1, mobile: false });
@@ -353,7 +414,7 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     assert.equal(await evaluate(`Boolean(document.querySelector(${localQuery(".reference")}))`), true, "local row retains direct counted-equation references");
     assert.equal(await evaluate('Array.from(document.querySelectorAll(".reference")).every(ref=>Boolean(ref.closest(".side")))'), true);
     await vscode.commands.executeCommand("notifications.clearAll");
-    await group("Aggregate equations");
+    await group("Equations");
     await evaluate('document.getElementById("reviewContent").scrollTop=0');
     const screenshot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
     await fs.writeFile(filename, Buffer.from(screenshot.data, "base64"));

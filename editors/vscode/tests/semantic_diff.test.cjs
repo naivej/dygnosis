@@ -64,9 +64,9 @@ function unpairedEquations(dimension = null) {
 
 test("real producer Unpaired equation refinements keep legacy owners and separate side appearances", () => {
   for (const dimension of [null, "households"]) {
-    const r = unpairedEquations(dimension), expected = dimension === null ? "aggregateEquations" : "heterogeneousEquations";
+    const r = unpairedEquations(dimension);
     const parsed = parseDiff(r, roots.before, roots.after, true);
-    assert.equal(parsed.rows.length, 8); assert.ok(parsed.rows.every(row => row.kind === "unpaired" && row.section === expected));
+    assert.equal(parsed.rows.length, 8); assert.ok(parsed.rows.every(row => row.kind === "unpaired" && row.section === "equations" && row.group === "Equations"));
     assert.equal(parsed.rows.filter(row => row.semantic).length, 4);
     for (const row of parsed.rows) assert.notEqual(row.before === null, row.after === null);
     const snapshot = structuredClone(r), ids = { before: "before", after: "after" }, inputs = { before: { root_file: roots.before, revision: "old" }, after: { root_file: roots.after, revision: "new" } };
@@ -80,9 +80,15 @@ test("real producer Unpaired equation refinements keep legacy owners and separat
   }
 });
 
-test("Unpaired refinement cannot replace another family or reverse an equation owner side", () => {
+test("Unpaired refinement cannot replace another family, change equation domain or reverse an owner side", () => {
   for (const mutate of [r => r.semantic.rows[0].family = "symbols", r => { r.semantic.rows[0].after = r.semantic.rows[0].before; r.semantic.rows[0].before = null; }, r => r.semantic.rows[0].change = "added"]) {
     const r = unpairedEquations(); mutate(r);
+    assert.throws(() => parseDiff(r, roots.before, roots.after, true), /unsupported comparison/);
+  }
+  for (const dimension of [null, "households"]) {
+    const r = unpairedEquations(dimension);
+    r.navigation.rows[0].before = null;
+    r.semantic.rows[0].before.scope = { domain: dimension === null ? "heterogeneous" : "aggregate", dimension: dimension === null ? "firms" : null, block: null };
     assert.throws(() => parseDiff(r, roots.before, roots.after, true), /unsupported comparison/);
   }
 });
@@ -238,7 +244,7 @@ test("model-local definitions appear with equations and keep their exact source 
   row.fields.push({ name: "role", label: "Role", before: value("model_local_definition"), after: value("model_local_definition"), changed: false, comparison_availability: "complete", numeric_difference: null });
   Object.assign(r.navigation.rows[0], { family: "symbols", name: "helper" }); r.semantic.references = []; r.navigation.rows.pop();
   const parsed = parseDiff(r, roots.before, roots.after, true).rows[0];
-  assert.equal(parsed.section, "aggregateEquations");
+  assert.equal(parsed.section, "equations");
   assert.equal(parsed.group, "Model-local variables");
   assert.equal(parsed.id, row.pointer);
 });
@@ -260,16 +266,18 @@ test("unassigned parameter declarations keep their Symbols category and old sect
   }
 });
 
-test("added symbol cards show one declaration and omit empty metadata", () => {
+test("added symbol cards show one declaration and omit repeated or empty metadata", () => {
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0], detail = row.semantic;
-  Object.assign(row, { kind: "added", before: null, label: "xxx", after: "xxx" });
-  Object.assign(detail, { family: "symbols", change: "added", name: "xxx", before: null, after: side("xxx"), expressions: [], references: [], limits: [] });
-  detail.fields = [["kind", "Symbol kind", "var"], ["written_kind", "Written declaration kind", "var"], ["long_name", "Long name", null], ["log_transform", "Log transformed", false]].map(([name, label, item]) => ({ name, label, before: { state: "absent", value: null }, after: item === null ? { state: "absent", value: null } : { state: "present", value: { kind: typeof item === "boolean" ? "boolean" : "text", value: item } }, changed: true, comparison_availability: "complete", numeric_difference: null }));
+  Object.assign(row, { kind: "added", before: null, label: "xxx", after: "xxx", scopes: ["households"], sideScopes: { before: null, after: "households" } });
+  Object.assign(detail, { family: "symbols", change: "added", name: "xxx", before: null, after: { ...side("xxx"), scope: { domain: "heterogeneous", dimension: "households", block: null } }, expressions: [], references: [], limits: [] });
+  detail.fields = [["kind", "Symbol kind", "var"], ["written_kind", "Written declaration kind", "var"], ["long_name", "Long name", null], ["log_transform", "Log transformed", false], ["dimension", "Dimension", "households"], ["written_dimension", "Written declaration dimension", "households"]].map(([name, label, item]) => ({ name, label, before: { state: "absent", value: null }, after: item === null ? { state: "absent", value: null } : { state: "present", value: { kind: typeof item === "boolean" ? "boolean" : "text", value: item } }, changed: true, comparison_availability: "complete", numeric_difference: null }));
   row.navigation.before = null; env.render(snapshot);
   assert.match(env.elements.results.textContent, /var xxx;/);
   assert.doesNotMatch(env.elements.results.textContent, /Symbol kind|Written declaration kind|Long name|false/);
   assert.match(env.elements.results.textContent, /Not present/);
   assert.deepEqual(descendants(env.elements.results).filter(element => element.className === "token added").map(element => element.textContent), ["xxx"]);
+  assert.deepEqual(descendants(env.elements.results).filter(element => element.className === "scope-label").map(element => element.textContent), ["Dimension: households"]);
+  assert.equal(descendants(env.elements.results).some(element => ["dimension", "written_dimension"].includes(element.attributes["data-field"])), false);
   assert.doesNotMatch(env.elements.counts.textContent, /· \d+ in /);
   detail.fields[0].after = value("parameters"); env.render(snapshot);
   assert.match(env.elements.results.textContent, /Symbol kind/); assert.match(env.elements.results.textContent, /parameters/);
@@ -282,10 +290,19 @@ test("direct references belong to their card side and retain exact actions", () 
   const button = descendants(panels[1]).find(element => element.attributes["aria-label"]?.startsWith("Open After reference:"));
   button.fire("click"); assert.equal(env.posted.at(-1).pointer, "/semantic/references/0"); assert.equal(env.posted.at(-1).side, "after");
   const snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+  row.semantic.after.scope = { domain: "heterogeneous", dimension: "households", block: null };
+  row.sideScopes.after = "households"; row.scopes.push("households"); snapshot.references[0].scope.dimension = "households";
+  env.render(snapshot);
+  const after = descendants(env.elements.results).find(element => element.className === "side after");
+  assert.match(after.children[0].textContent, /Dimension: households/);
+  assert.doesNotMatch(descendants(after).find(element => element.className === "refs").textContent, /Dimension:/);
+  snapshot.references[0].scope.dimension = "firms"; env.render(snapshot);
+  assert.match(descendants(env.elements.results).find(element => element.className === "refs").textContent, /Dimension: firms/);
   row.semantic.family = "symbols"; snapshot.references[0].timing.converted_offset = -1;
   env.render(snapshot); assert.match(env.elements.results.textContent, /after convention -1/);
   row.semantic.fields.push({ name: "predetermined", label: "Predetermined convention", before: { state: "absent", value: null }, after: { state: "present", value: { kind: "boolean", value: true } }, changed: true, comparison_availability: "complete", numeric_difference: null });
   env.render(snapshot); assert.match(env.elements.results.textContent, /Predetermined convention.*true/); assert.doesNotMatch(env.elements.results.textContent, /after convention -1/);
+  assert.deepEqual(descendants(env.elements.results).filter(element => element.attributes["data-field"] === "predetermined").map(element => element.children[1].textContent), ["", "true"]);
 });
 function webview() {
   const elements = Object.fromEntries(["models", "status", "search", "scope", "kinds", "sections", "sectionsSummary", "counts", "results", "refresh", "help", "rootTextDiff", "capturedTextDiff", "filterTools", "kindFilter", "sectionFilter", "scopeFilter", "choosePath"].map(id => [id, new Element(id)]));
@@ -312,10 +329,10 @@ test("input cards keep the full model path in the title and a short name in the 
 
 test("all categories stay in the left panel when Find changes filters out their rows", () => {
   const env = webview(), row = parseDiff(response(), roots.before, roots.after, true).rows[0];
-  const rows = [{ ...row, id: "equation", section: "aggregateEquations", group: "Aggregate equations", label: "Output" }, { ...row, id: "local", section: "aggregateEquations", group: "Model-local variables", label: "helper" }];
+  const rows = [{ ...row, id: "equation", section: "equations", group: "Equations", label: "Output" }, { ...row, id: "local", section: "equations", group: "Model-local variables", label: "helper" }];
   env.render({ rows }); env.elements.search.value = "helper"; env.elements.search.fire("input");
   const groups = descendants(env.elements.results).filter(element => element.attributes["data-group"]);
-  assert.deepEqual(groups.map(group => group.attributes["data-group"]), ["aggregateEquations:Aggregate equations", "aggregateEquations:Model-local variables"]);
+  assert.deepEqual(groups.map(group => group.attributes["data-group"]), ["equations:Equations", "equations:Model-local variables"]);
   assert.equal(groups[0].disabled, true); assert.equal(groups[1].disabled, false);
   assert.equal(descendants(env.elements.results).find(element => element.tag === "article").attributes["data-row-id"], "local");
   env.elements.search.value = ""; env.elements.search.fire("input");
@@ -346,7 +363,7 @@ test("card source links show decoded file labels and send exact row and side ide
   before.fire("click"); assert.equal(env.posted.at(-1).type, "openSource"); assert.equal(env.posted.at(-1).rowId, row.id); assert.equal(env.posted.at(-1).side, "before");
   after.fire("click"); assert.equal(env.posted.at(-1).rowId, row.id); assert.equal(env.posted.at(-1).side, "after");
 });
-test("expression cards omit duplicate text and unchanged empty fields but retain changed facts and regime tags", () => {
+test("expression cards omit duplicate values and property prefixes but retain changed facts and regime tags", () => {
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
   row.label = "Equation"; row.semantic.before.equation_index = 4; row.semantic.after.equation_index = 4;
   row.semantic.expressions[0].field = row.semantic.fields[0].name = "expression";
@@ -362,6 +379,33 @@ test("expression cards omit duplicate text and unchanged empty fields but retain
   const tags = row.semantic.fields[1]; tags.before.value.value.bind = { kind: "text", value: "constraint" }; tags.after = structuredClone(tags.before);
   env.render(snapshot);
   assert.match(env.elements.results.textContent, /Regime/); assert.match(env.elements.results.textContent, /bind/); assert.match(env.elements.results.textContent, /relax/); assert.match(env.elements.results.textContent, /Tags/);
+  assert.deepEqual(descendants(env.elements.results).filter(element => element.attributes["data-field"] === "tag_role").map(element => element.children[1].textContent), ["bind", "relax"]);
+  const assignment = row.semantic.fields[0], expression = row.semantic.expressions[0];
+  const evaluated = { name: "evaluated_value", label: "Evaluated value", comparison_availability: "complete" };
+  row.section = row.semantic.family = "parameters"; row.group = "Parameters"; row.label = "rho";
+  row.semantic.before.equation_index = row.semantic.after.equation_index = null;
+  row.semantic.fields = [assignment, evaluated]; assignment.label = "Assigned expression";
+  for (const [before, after, oldValue, newValue, shown] of [
+    ["0.8", "0.9", 0.8, 0.9, false],
+    ["-0.8", "+8D-1", -0.8, 0.8, false],
+    ["8e-1", ".9", 0.8, 0.9, false],
+    ["0.4+0.4", "0.9", 0.8, 0.9, true],
+    ["0.8", "0.3*3", 0.8, 0.9, true],
+    ["1/2", "0.5", 0.5, 0.5, true],
+    ["0.5", "1/2", 0.5, 0.5, true],
+  ]) {
+    assignment.before = value(before); assignment.after = value(after);
+    expression.before = { text: before, runs: [{ text: before, role: "removed" }] };
+    expression.after = { text: after, runs: [{ text: after, role: "added" }] };
+    evaluated.before = { state: "present", value: { kind: "number", value: oldValue } };
+    evaluated.after = { state: "present", value: { kind: "number", value: newValue } };
+    evaluated.changed = oldValue !== newValue; evaluated.numeric_difference = newValue - oldValue;
+    env.render(snapshot);
+    const fields = descendants(env.elements.results).filter(element => element.attributes["data-field"] === "evaluated_value");
+    assert.deepEqual(fields.map(element => element.children[1].textContent), shown ? [String(oldValue), String(newValue)] : []);
+    assert.doesNotMatch(env.elements.results.textContent, /After − Before:/);
+    if (shown && evaluated.changed) assert.deepEqual(fields.map(element => element.children[1].children[0].className), ["token removed", "token added"]);
+  }
 });
 test("equation cards omit timing and convention prose already owned by symbol facts", () => {
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), detail = snapshot.rows[0].semantic;
@@ -372,16 +416,26 @@ test("equation cards omit timing and convention prose already owned by symbol fa
   assert.doesNotMatch(env.elements.results.textContent, /after convention/);
   assert.doesNotMatch(env.elements.results.textContent, /unchanged · after convention/);
 });
-test("Kind filters preserve saved choices through reload, refresh and split views", () => {
+test("Type of changes allows multiple checks and preserves them through reload, refresh and split views", () => {
   const env = webview(), other = webview(), initial = normalizeChoices({ sections: [], changeKinds: ["changed", "unpaired"] }, defaults);
   env.render({ choices: initial }); other.render();
-  assert.equal(env.elements.kinds.value, "saved");
-  env.elements.kinds.value = "removed"; env.elements.kinds.fire("change"); assert.match(env.elements.results.textContent, /No rows match/);
-  env.elements.kinds.value = "saved"; env.elements.kinds.fire("change"); assert.match(env.elements.results.textContent, /Prior mean/);
+  const option = (view, kind) => descendants(view.elements.kinds).find(element => element.attributes["data-change-type"] === kind);
+  const tick = (kind, checked) => { const input = option(env, kind); input.checked = checked; input.fire("change"); };
+  assert.equal(env.elements.kinds.children[0].textContent, "Type of changes");
+  assert.equal(option(env, "all").indeterminate, true);
+  assert.equal(option(env, "changed").checked, true); assert.equal(option(env, "unpaired").checked, true);
+  tick("changed", false); assert.match(env.elements.results.textContent, /No rows match/);
+  tick("changed", true); tick("added", true); assert.match(env.elements.results.textContent, /Prior mean/);
+  assert.equal(option(env, "unpaired").checked, true);
   env.render({ choices: normalizeChoices(env.states.at(-1).choices, defaults), capture: "capture2" });
-  assert.deepEqual(env.states.at(-1).choices.customChangeKinds, ["changed", "unpaired"]);
+  assert.deepEqual(env.states.at(-1).choices.changeKinds, ["added", "changed", "unpaired"]);
   assert.equal(Object.hasOwn(env.states.at(-1).choices, "sections"), false);
-  assert.equal(other.elements.kinds.value, "all");
+  assert.equal(option(other, "all").checked, true);
+  tick("all", true); assert.ok(changeKinds.every(kind => option(env, kind).checked));
+  tick("removed", false); assert.equal(option(env, "all").indeterminate, true);
+  tick("all", false); assert.ok(changeKinds.every(kind => !option(env, kind).checked));
+  assert.match(env.elements.counts.textContent, /0 replaced/);
+  assert.match(env.elements.kinds.textContent, /Replaced/); assert.doesNotMatch(env.elements.kinds.textContent, /Changed/);
 });
 
 test("grouped model rows show distinguishing dimensions and keep change kinds accessible", () => {
@@ -402,8 +456,9 @@ test("grouped model rows show distinguishing dimensions and keep change kinds ac
 
 test("empty filters have a route to All and field rows retain both cards", () => {
   const env = webview(); env.render({ choices: normalizeChoices({ sections: [], changeKinds: [] }, defaults) });
-  assert.match(env.elements.kinds.textContent, /No kinds selected/);
-  env.elements.kinds.value = "all"; env.elements.kinds.fire("change");
+  const all = descendants(env.elements.kinds).find(element => element.attributes["data-change-type"] === "all");
+  assert.equal(all.checked, false); assert.equal(all.indeterminate, false);
+  all.checked = true; all.fire("change");
   assert.match(env.elements.results.textContent, /Prior mean/);
   const snapshot = parseDiff(response(), roots.before, roots.after, true); snapshot.rows[0].semantic.expressions = [];
   env.render(snapshot); assert.equal(descendants(env.elements.results).filter(element => element.className?.startsWith("side ")).length, 2);
@@ -501,17 +556,62 @@ test("removed commands show the statement without a redundant role or token head
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
   row.section = "commands"; row.group = "Commands"; row.label = row.semantic.name = "steady"; row.kind = row.semantic.change = "removed";
   row.after = row.semantic.after = null; row.semantic.family = "commands"; row.semantic.references = [];
-  row.semantic.expressions = [{ field: "statement_tokens", before: { text: "steady ;", runs: [{ text: "steady ;", role: "removed" }] }, after: null, highlight_basis: "paired_expression", availability: "complete", reason: null }];
+  row.semantic.expressions = [{ field: "statement_text", before: { text: "steady;", runs: [{ text: "steady;", role: "removed" }] }, after: null, highlight_basis: "paired_expression", availability: "complete", reason: null }];
   row.semantic.fields = [{ name: "role", label: "Role", before: value("command"), after: { state: "absent", value: null }, changed: true, comparison_availability: "complete", numeric_difference: null }];
   env.render(snapshot);
-  assert.match(env.elements.results.textContent, /steady ;/);
+  assert.equal(descendants(env.elements.results).find(element => element.className === "expression").textContent, "steady;");
   assert.equal(descendants(env.elements.results).some(element => element.attributes["data-field"] === "role"), false);
   assert.equal(descendants(env.elements.results).some(element => element.className === "field-label"), false);
 });
 
+test("operation cards use captured written instructions instead of internal records", () => {
+  const r = response(), row = r.semantic.rows[0], source = "model_replace( 'Consumption' );\n  [name='Consumption'] c = 0.8*y;\nend;";
+  Object.assign(row, { family: "operations", change: "added", name: "model_replace", before: null, after: side("model_replace"), references: [], limits: [] });
+  row.fields = [
+    { name: "role", label: "Role", before: { state: "absent", value: null }, after: value("equation_surgery"), changed: true, comparison_availability: "complete", numeric_difference: null },
+    { name: "removed_equations", label: "Removed equations", before: { state: "absent", value: null }, after: { state: "present", value: { kind: "list", value: [{ kind: "record", value: { expression: { kind: "text", value: "c = y" }, dynamic_tag: { kind: "boolean", value: false } } }] } }, changed: true, comparison_availability: "complete", numeric_difference: null },
+  ];
+  row.expressions = [{ field: "statement_text", before: null, after: { text: source, runs: [{ text: source, role: "added" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
+  Object.assign(r.navigation.rows[0], { family: "operations", name: row.name, before: null }); r.navigation.rows.pop(); r.semantic.references = [];
+  r.sources.after[roots.after] = source;
+  const snapshot = parseDiff(r, roots.before, roots.after, true), env = webview(); env.render(snapshot);
+  assert.equal(descendants(env.elements.results).find(element => element.className === "expression").textContent, source);
+  assert.doesNotMatch(env.elements.results.textContent, /Removed equations|Dynamic tag|equation_surgery/);
+  snapshot.rows[0].semantic.expressions = []; env.render(snapshot);
+  assert.match(env.elements.results.textContent, /Written source text is unavailable.*Text diff/);
+  assert.doesNotMatch(env.elements.results.textContent, /Removed equations|Dynamic tag|equation_surgery/);
+});
+
+test("MS-SBVAR cards render written path context with only replaced numbers highlighted", () => {
+  const r = response(), row = r.semantic.rows[0], prefix = "conditional_forecast_paths;\nvar y;\nperiods 1 2 3;\nvalues ", suffix = " 0.25 0.1;\nend;";
+  row.family = r.navigation.rows[0].family = "ms_sbvar";
+  row.references = []; r.semantic.references = []; r.navigation.rows.pop();
+  row.expressions = [{ field: "statement_text", before: { text: prefix + "0.1" + suffix, runs: [{ text: prefix, role: "unchanged" }, { text: "0.1", role: "removed" }, { text: suffix, role: "unchanged" }] }, after: { text: prefix + "0.2" + suffix, runs: [{ text: prefix, role: "unchanged" }, { text: "0.2", role: "added" }, { text: suffix, role: "unchanged" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
+  const env = webview(); env.render(parseDiff(r, roots.before, roots.after, true));
+  assert.deepEqual(descendants(env.elements.results).filter(element => element.className === "token added").map(element => element.textContent), ["0.2"]);
+  assert.deepEqual(descendants(env.elements.results).filter(element => element.className === "expression").map(element => element.textContent), [prefix + "0.1" + suffix, prefix + "0.2" + suffix]);
+  assert.equal(descendants(env.elements.results).some(element => element.attributes["data-field"]), false);
+});
+
+test("unchanged named shock-group headings stay plain across added and removed members", () => {
+  const snapshot = parseDiff(response(), roots.before, roots.after, true), base = snapshot.rows[0];
+  const header = "shock_groups(name=drivers);\n", footer = "\nend;";
+  snapshot.rows = [["removed", "before", "demand = eps_demand;"], ["added", "after", "joint = eps_demand eps_supply;"]].map(([kind, side, body], index) => {
+    const row = structuredClone(base); row.id += index; row.kind = kind; row.before = side === "before" ? "demand" : null; row.after = side === "after" ? "joint" : null;
+    row.semantic.family = "shocks"; row.semantic.change = kind; row.semantic[side === "before" ? "after" : "before"] = null; row.semantic.fields = []; row.semantic.references = [];
+    const text = header + body + footer;
+    row.semantic.expressions = [{ field: "statement_text", before: null, after: null, [side]: { text, runs: [{ text, role: kind }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
+    return row;
+  });
+  const env = webview(); env.render(snapshot);
+  const highlighted = descendants(env.elements.results).filter(element => ["token added", "token removed"].includes(element.className)).map(element => element.textContent).join("");
+  assert.doesNotMatch(highlighted, /shock_groups|name=drivers/);
+  assert.match(highlighted, /demand = eps_demand/); assert.match(highlighted, /joint = eps_demand eps_supply/);
+});
+
 test("an added local definition highlights its whole instruction", () => {
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
-  row.section = "aggregateEquations"; row.group = "Model-local variables"; row.kind = row.semantic.change = "added";
+  row.section = "equations"; row.group = "Model-local variables"; row.kind = row.semantic.change = "added";
   row.before = row.semantic.before = null; row.after = "xdddd"; row.semantic.after = side("xdddd"); row.semantic.family = "symbols"; row.semantic.references = [];
   row.semantic.fields = [{ name: "role", label: "Role", before: { state: "absent", value: null }, after: value("model_local_definition"), changed: true, comparison_availability: "complete", numeric_difference: null }];
   row.semantic.expressions = [{ field: "expression", before: null, after: { text: "yf", runs: [{ text: "yf", role: "added" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];

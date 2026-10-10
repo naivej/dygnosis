@@ -836,6 +836,7 @@ pub fn dynare_compare_models(
             .flat_map(|map| map.keys()),
     );
     let include_pairs = before.same_file_pairs(&after);
+    crate::compare_navigation::populate_written_statements(&mut diff, &before, &after);
     let boundary = crate::semantic_diff::CaptureBoundary::SuppliedRootAndExecutedIncludes;
     // Invalid retained maps leave explicit unavailable Source coverage.
     let _ = crate::semantic_diff::populate_captured_sources(
