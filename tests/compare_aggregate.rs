@@ -131,7 +131,12 @@ fn an_unchanged_copy_cannot_make_a_repeated_regime_pair_unique() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|row| row["family"] == "equations" && row["change"] == "unpaired")
+        .filter(|row| row["family"] == "equations"
+            && row["limits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|limit| limit["code"] == "equation_correspondence_unpaired"))
         .all(|row| row["timing"].as_array().unwrap().is_empty()));
 }
 

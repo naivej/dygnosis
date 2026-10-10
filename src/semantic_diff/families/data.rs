@@ -1,6 +1,10 @@
 use super::*;
 
-pub(super) fn collect(model: &Model, facts: &mut Vec<CapturedFact>) {
+pub(super) fn collect(
+    model: &Model,
+    facts: &mut Vec<CapturedFact>,
+    work: &mut RetainedExpressionWork,
+) {
     command_fields(model, facts);
     for (role, rows) in [("varobs", &model.varobs), ("varexobs", &model.varexobs)] {
         for (index, row) in rows.iter().enumerate() {
@@ -23,6 +27,15 @@ pub(super) fn collect(model: &Model, facts: &mut Vec<CapturedFact>) {
                 ),
                 ChangeFacet::SymbolKind,
             );
+            if let Some(statement) = parent_id(&value).and_then(|id| model.statements.get(id)) {
+                // The retained list owns its accepted declaration keyword;
+                // name receipts keep each target independent.
+                if statement.name == role && occurrences::accepted_statement(model, statement) {
+                    value
+                        .claims
+                        .push(statement.token_range.start..statement.token_range.start + 1);
+                }
+            }
             facts.push(value);
         }
     }
@@ -211,6 +224,21 @@ pub(super) fn collect(model: &Model, facts: &mut Vec<CapturedFact>) {
                 .iter()
                 .map(|option| option.active_tokens.clone()),
         );
+        if let Some(statement) = parent_id(&value).and_then(|id| model.statements.get(id))
+            && occurrences::accepted_statement(model, statement)
+        {
+            // One accepted occurrence owns both named data options and the
+            // remaining command text. The bounded selector claims only text
+            // that it retained; unavailable text stays with residual Commands.
+            let tokens = range_text(
+                model,
+                &mut value,
+                "statement_tokens",
+                statement.token_range.clone(),
+                work,
+            );
+            expr(&mut value, "statement_tokens", tokens);
+        }
         facts.push(value);
     }
     for (index, row) in model.estimation_dsge_var_stmts.iter().enumerate() {

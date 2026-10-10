@@ -47,6 +47,7 @@ pub(crate) struct ComparisonInput {
     shocks: HashMap<usize, Target>,
     statements: BTreeMap<usize, Target>,
     forecast_paths: BTreeMap<(usize, usize), [Vec<WrittenSegment>; 3]>,
+    instructions: BTreeMap<String, Vec<Vec<WrittenSegment>>>,
     written_equations: BTreeMap<usize, (usize, usize, Target)>,
     declarations: BTreeMap<usize, (usize, Target)>,
     statement_ranges: BTreeMap<usize, std::ops::Range<usize>>,
@@ -94,6 +95,7 @@ impl ComparisonInput {
             shocks: HashMap::new(),
             statements: BTreeMap::new(),
             forecast_paths: BTreeMap::new(),
+            instructions: BTreeMap::new(),
             written_equations: BTreeMap::new(),
             declarations: BTreeMap::new(),
             statement_ranges: model
@@ -364,16 +366,111 @@ impl ComparisonInput {
         self.statements.get(&parent)
     }
 
-    fn written_statement(&self, proof: Option<&OccurrenceProvenance>) -> Option<Vec<&str>> {
-        let proof = proof?;
+    /// Select instructions from existing accepted producer receipts. Mapping is
+    /// captured while the workspace is current; it never supplies correspondence.
+    pub(crate) fn with_written_facts(
+        mut self,
+        workspace: &mut Workspace,
+        root: &str,
+        model: &Model,
+        diff: &ModelDiff,
+        side: Side,
+    ) -> Self {
+        for row in &diff.semantic.rows {
+            if !written_family(row.family) {
+                continue;
+            }
+            let own = match side {
+                Side::Before => &row.before,
+                Side::After => &row.after,
+            };
+            let Some(own) = own else {
+                continue;
+            };
+            let Some(parent) = own
+                .provenance
+                .as_ref()
+                .and_then(|proof| proof.statement_id)
+                .and_then(|id| model.statements.get(id))
+            else {
+                continue;
+            };
+            if parent.token_range.len() > 10_000 || own.instruction_tokens.is_empty() {
+                continue;
+            }
+            let start = own
+                .instruction_tokens
+                .iter()
+                .map(|range| range.start)
+                .min()
+                .unwrap();
+            let mut end = own
+                .instruction_tokens
+                .iter()
+                .map(|range| range.end)
+                .max()
+                .unwrap();
+            if start < parent.token_range.start || end > parent.token_range.end || start >= end {
+                continue;
+            }
+            let mut ranges = vec![parent.token_range.clone()];
+            if parent.kind == crate::model::StatementKind::Block && start >= parent.opener_range.end
+            {
+                let Some(close) = parent.token_range.end.checked_sub(2) else {
+                    continue;
+                };
+                if end > close {
+                    continue;
+                }
+                if model
+                    .expanded_tokens
+                    .get(end)
+                    .is_some_and(|token| token.kind == crate::lexer::TokenKind::Semi)
+                {
+                    end += 1;
+                }
+                ranges = vec![
+                    parent.opener_range.clone(),
+                    start..end,
+                    close..parent.token_range.end,
+                ];
+            }
+            let parts = ranges
+                .into_iter()
+                .map(|range| {
+                    let tokens = model.expanded_tokens.get(range)?;
+                    let span = crate::span::Span {
+                        start: tokens.first()?.span.start,
+                        end: tokens.last()?.span.end,
+                    };
+                    Some(workspace.map_effective_segments(root, span))
+                })
+                .collect::<Option<Vec<_>>>();
+            if let Some(parts) = parts {
+                self.instructions.insert(row.pointer.clone(), parts);
+            }
+        }
+        self
+    }
+
+    fn written_statement(
+        &self,
+        pointer: &str,
+        own: Option<&crate::semantic_diff::RowSide>,
+    ) -> Option<Vec<&str>> {
+        let own = own?;
+        let proof = own.provenance.as_ref()?;
         let range = self.statement_ranges.get(&proof.statement_id?)?;
         if range.len() > 10_000 {
             return None;
         }
-        if let Some(parts) = proof
+        let forecast = proof
             .parse_order
-            .and_then(|order| self.forecast_paths.get(&(proof.statement_id?, order)))
-        {
+            .and_then(|order| self.forecast_paths.get(&(proof.statement_id?, order)));
+        let parts = forecast
+            .map(|parts| parts.as_slice())
+            .or_else(|| self.instructions.get(pointer).map(Vec::as_slice));
+        if let Some(parts) = parts {
             let file = parts
                 .first()?
                 .first()?
@@ -395,6 +492,10 @@ impl ComparisonInput {
                         .map(str::trim_end)
                 })
                 .collect();
+        }
+        // Failed instruction selection must not expose unrelated block siblings.
+        if !own.instruction_tokens.is_empty() {
+            return None;
         }
         let target = self.proven_target(Some(proof))?;
         let [segment] = target.segments.as_slice() else {
@@ -508,6 +609,18 @@ impl ComparisonInput {
     }
 }
 
+fn written_family(family: crate::semantic_diff::SemanticFamily) -> bool {
+    use crate::semantic_diff::SemanticFamily;
+    !matches!(
+        family,
+        SemanticFamily::Symbols
+            | SemanticFamily::Parameters
+            | SemanticFamily::Equations
+            | SemanticFamily::Shocks
+            | SemanticFamily::MacroContext
+    )
+}
+
 /// Display context comes from verified captured source, after semantic comparison.
 /// It never supplies token claims, pairing or additional model changes.
 pub(crate) fn populate_written_statements(
@@ -515,7 +628,7 @@ pub(crate) fn populate_written_statements(
     before: &ComparisonInput,
     after: &ComparisonInput,
 ) {
-    use crate::semantic_diff::{HighlightBasis, SemanticFamily};
+    use crate::semantic_diff::HighlightBasis;
     let mut remaining = diff
         .semantic
         .budgets
@@ -523,19 +636,11 @@ pub(crate) fn populate_written_statements(
         .min(8 * 1024 * 1024);
     for index in 0..diff.semantic.rows.len() {
         let row = &diff.semantic.rows[index];
-        if !matches!(
-            row.family,
-            SemanticFamily::Commands | SemanticFamily::Operations | SemanticFamily::MsSbvar
-        ) {
+        if !written_family(row.family) {
             continue;
         }
-        let old = before.written_statement(
-            row.before
-                .as_ref()
-                .and_then(|side| side.provenance.as_ref()),
-        );
-        let new =
-            after.written_statement(row.after.as_ref().and_then(|side| side.provenance.as_ref()));
+        let old = before.written_statement(&row.pointer, row.before.as_ref());
+        let new = after.written_statement(&row.pointer, row.after.as_ref());
         if row.before.is_some() != old.is_some() || row.after.is_some() != new.is_some() {
             continue;
         }
@@ -555,7 +660,15 @@ pub(crate) fn populate_written_statements(
         remaining -= bytes;
         let old = old.map(|parts| parts.join("\n"));
         let new = new.map(|parts| parts.join("\n"));
-        let unpaired = row.change == crate::semantic_diff::ChangeKind::Unpaired;
+        let unpaired = row.correspondence_uncertain;
+        let old_context = row
+            .before
+            .as_ref()
+            .and_then(|side| side.block_context.clone());
+        let new_context = row
+            .after
+            .as_ref()
+            .and_then(|side| side.block_context.clone());
         let mut detail = crate::semantic_diff::equations::expression_detail(
             &mut diff.semantic,
             "statement_text",
@@ -565,6 +678,12 @@ pub(crate) fn populate_written_statements(
         if unpaired && detail.highlight_basis == HighlightBasis::PairedExpression {
             detail.highlight_basis = HighlightBasis::UnpairedTextOnly;
         }
+        crate::semantic_diff::equations::highlight_block_boundaries(
+            &mut diff.semantic,
+            &mut detail,
+            old_context.as_ref(),
+            new_context.as_ref(),
+        );
         diff.semantic.rows[index].expressions.push(detail);
     }
 }

@@ -2,8 +2,8 @@ import { Location, location, record } from "./protocol";
 import { Coverage, parseSemantic, Reference, Semantic, SemanticRow, SourceChanges, SourceRegistry } from "./semantic_view";
 
 export const diffSections = ["symbols", "parameters", "equations", "shockSetup", "shockAnalysisSetup"] as const;
-export const changeKinds = ["added", "removed", "changed", "unpaired"] as const;
-export const familySections = ["steadyState", "priors", "commands", "observables", "data", "occbin", "policy", "semiStructural", "moments", "msSbvar", "heterogeneity", "externalFunctions", "trends", "operations", "macroContext"] as const;
+export const changeKinds = ["added", "removed", "changed"] as const;
+export const familySections = ["steadyState", "forecast", "priors", "commands", "data", "occbin", "policy", "semiStructural", "moments", "msSbvar", "heterogeneity", "externalFunctions", "trends", "operations", "macroContext"] as const;
 export const allDiffSections = [...diffSections, ...familySections] as const;
 export type DiffSection = typeof allDiffSections[number];
 export type ChangeKind = typeof changeKinds[number];
@@ -24,6 +24,12 @@ export interface DiffRow {
 }
 export interface DiffReference extends Reference { navigation: DiffNavigationRow }
 export interface DiffSnapshot { before: DiffEnvelope; after: DiffEnvelope; rows: DiffRow[]; complete: boolean; semantic?: Semantic; sourceChanges?: SourceChanges; coverage?: Coverage; references?: DiffReference[]; semanticMessage?: string }
+
+/** Retired Unpaired selections now include both independent side appearances. */
+export function normalizeChangeKinds(value: unknown, fallback: ChangeKind[]): ChangeKind[] {
+  if (!Array.isArray(value)) return [...fallback];
+  return [...new Set(value.flatMap(item => item === "unpaired" ? ["added", "removed"] : typeof item === "string" && changeKinds.includes(item as ChangeKind) ? [item] : []))] as ChangeKind[];
+}
 function malformed(): never { throw new Error("This engine returned an unsupported comparison. Update dynare.serverPath or use the bundled binary."); }
 const string = (value: unknown): string => typeof value === "string" ? value : malformed();
 const object = (value: unknown): Record<string, unknown> => record(value) ? value : malformed();
@@ -61,7 +67,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     navigation.set(id, { id, kind: string(row.kind), dimension: row.dimension === undefined ? undefined : nullableString(row.dimension), family: row.family === undefined ? undefined : string(row.family), name: row.name === undefined ? undefined : string(row.name), equation_pointer: row.equation_pointer === undefined ? undefined : string(row.equation_pointer), before: target(row.before, snapshots), after: target(row.after, snapshots) });
   }
   const rows: DiffRow[] = [];
-  const add = (id: string, section: DiffSection, group: string, kind: ChangeKind, label: string, old: string | null, next: string | null, dimension: string | null = null, sideDimensions?: { before: string | null | undefined; after: string | null | undefined }): void => {
+  const add = (id: string, section: DiffSection, group: string, kind: SemanticRow["change"], label: string, old: string | null, next: string | null, dimension: string | null = null, sideDimensions?: { before: string | null | undefined; after: string | null | undefined }): void => {
     const source = navigation.get(id);
     if (!source) malformed();
     const expected = section === "parameters" ? "parameter" : section === "equations" ? "equation" : section === "symbols" ? "symbol" : "shock";
@@ -117,7 +123,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     array(owner.unmatched_same_name).forEach((raw, groupIndex) => {
       const unmatched = object(raw), name = string(unmatched.name);
       for (const kind of ["removed", "added"] as const) array(unmatched[kind]).forEach((row, index) => {
-        add(`${prefix}/unmatched_same_name/${groupIndex}/${kind}/${index}`, section, group, "unpaired", `${name} · unpaired ${kind === "added" ? "After" : "Before"}`, kind === "removed" ? text(row) : null, kind === "added" ? text(row) : null, dimension);
+        add(`${prefix}/unmatched_same_name/${groupIndex}/${kind}/${index}`, section, group, kind, name, kind === "removed" ? text(row) : null, kind === "added" ? text(row) : null, dimension);
       });
     });
   }
@@ -139,7 +145,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
       const value = object(raw).heterogeneity;
       return value === undefined ? undefined : nullableString(value);
     };
-    add(`/shock_setup_changes/${index}`, section, section === "shockSetup" ? "Shock setup" : "Shock analysis setup", kind as ChangeKind, `${string(row.target)} · ${string(row.form)} · ${string(row.role)}`, side(row.before), side(row.after), null, { before: dimension(row.before), after: dimension(row.after) });
+    add(`/shock_setup_changes/${index}`, section, section === "shockSetup" ? "Shock setup" : "Shock analysis setup", kind as SemanticRow["change"], `${string(row.target)} · ${string(row.form)} · ${string(row.role)}`, side(row.before), side(row.after), null, { before: dimension(row.before), after: dimension(row.after) });
   });
   const complete = before.complete && after.complete && !!before.revision && !!after.revision;
   const registry: SourceRegistry = { before: {}, after: {} };
@@ -152,7 +158,20 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
   const rowMap = new Map(rows.map(row => [row.id, row]));
   const isLocal = (row: SemanticRow): boolean => row.family === "symbols" && row.fields.some(field => field.name === "role" && [field.before, field.after].some(side => side.value?.kind === "text" && ["model_local_definition", "model_local_declaration"].includes(side.value.value)));
   const section = (row: SemanticRow): DiffSection => {
-    const mapped: Record<string, DiffSection> = { symbols: "symbols", parameters: "parameters", shocks: "shockSetup", steady_state: "steadyState", priors: "priors", commands: "commands", observables: "observables", data: "data", occbin: "occbin", policy: "policy", semi_structural: "semiStructural", moments: "moments", ms_sbvar: "msSbvar", heterogeneity: "heterogeneity", external_functions: "externalFunctions", trends: "trends", operations: "operations", macro_context: "macroContext" };
+    // An instruction's retained facts and residual context use the same tab.
+    const instructions: Partial<Record<string, DiffSection>> = {
+      initval: "steadyState", endval: "steadyState", histval: "steadyState", steady_state_model: "steadyState",
+      varobs: "data", varexobs: "data", observation_trends: "data",
+      estimation: "commands",
+      forecast: "forecast", bvar_forecast: "forecast", conditional_forecast: "forecast", conditional_forecast_paths: "forecast", plot_conditional_forecast: "forecast",
+      estimated_params: "priors", estimated_params_init: "priors", estimated_params_bounds: "priors",
+      method_of_moments: "moments", matched_moments: "moments", matched_irfs: "moments", matched_irfs_weights: "moments", moment_calibration: "moments", irf_calibration: "moments", generate_irfs: "moments",
+    };
+    if (!["symbols", "parameters", "equations", "shocks", "macro_context"].includes(row.family)) {
+      const instruction = [row.before, row.after].map(side => side?.context && instructions[side.context.name]).find(Boolean);
+      if (instruction) return instruction;
+    }
+    const mapped: Record<string, DiffSection> = { symbols: "symbols", parameters: "parameters", shocks: "shockSetup", steady_state: "steadyState", priors: "priors", commands: "commands", observables: "data", data: "data", occbin: "occbin", policy: "policy", semi_structural: "semiStructural", moments: "moments", ms_sbvar: "msSbvar", heterogeneity: "heterogeneity", external_functions: "externalFunctions", trends: "trends", operations: "operations", macro_context: "macroContext" };
     return row.family === "equations" || isLocal(row) ? "equations" : mapped[row.family];
   };
   for (const [index, row] of details.semantic.rows.entries()) {
@@ -160,12 +179,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     if (!legacy && row.pointer !== `/semantic/rows/${index}`) malformed();
     // The shared view group must not let typed detail change a legacy equation's domain.
     if (legacy && row.family === "equations" && legacy.id.startsWith("/heterogeneous_equations/") !== Boolean(row.before?.scope.dimension || row.after?.scope.dimension)) malformed();
-    // Duplicate-name equations retain legacy add/remove pointers. Their typed
-    // detail refines those same one-sided occurrences to Unpaired.
-    const unpairedEquation = legacy && row.family === "equations" && row.change === "unpaired" &&
-      (legacy.kind === "added" || legacy.kind === "removed") &&
-      (legacy.before === null) === (row.before === null) && (legacy.after === null) === (row.after === null);
-    if (!source || legacy && (legacy.kind !== row.change && !unpairedEquation || section(row) !== legacy.section && row.family !== "shocks") || !legacy && (source.kind !== "semantic" || source.family !== row.family || source.name !== row.name)) malformed();
+    if (!source || legacy && (legacy.kind !== row.change || section(row) !== legacy.section && row.family !== "shocks") || !legacy && (source.kind !== "semantic" || source.family !== row.family || source.name !== row.name)) malformed();
     for (const side of ["before", "after"] as const) {
       if (!row[side] && source[side] || row[side] && source[side] && (source[side].domain !== (row[side].scope.dimension === null ? "aggregate" : "heterogeneous") || source[side].dimension !== row[side].scope.dimension)) malformed();
       for (const location of source[side]?.written_locations ?? []) {
@@ -191,7 +205,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
 }
 
 export function semanticGroup(section: DiffSection): string {
-  const labels: Record<DiffSection, string> = { symbols: "Symbols", parameters: "Parameters", equations: "Equations", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "Steady state", priors: "Priors", commands: "Commands", observables: "Observables", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Moments and IRFs", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
+  const labels: Record<DiffSection, string> = { symbols: "Symbols", parameters: "Parameters", equations: "Equations", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "State", forecast: "Forecast", priors: "Priors", commands: "Commands", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Method of moments", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
   return labels[section];
 }
 
@@ -226,15 +240,16 @@ export function parseSnapshotDiff(value: unknown, ids: Record<DiffSide, string>,
 
 export function normalizeChoices(value: unknown, defaults: DiffPreferences): DiffChoices {
   const row = record(value) ? value : {};
-  const list = <T extends string>(value: unknown, allowed: readonly T[], fallback: T[]): T[] => Array.isArray(value) ? [...new Set(value.filter((item): item is T => typeof item === "string" && allowed.includes(item as T)))] : [...fallback];
   let group = typeof row.group === "string" ? row.group.slice(0, 1000) : null;
   if (group?.startsWith("aggregateEquations:") || group?.startsWith("heterogeneousEquations:")) {
     group = group.endsWith(":Model-local variables") ? "equations:Model-local variables" : "equations:Equations";
   }
+  if (group === "moments:Moments and IRFs") group = "moments:Method of moments";
+  if (group === "observables:Observables") group = "data:Data";
   // Retired presentation, selection, layout, section and scope state do not hide rows.
   return {
-    changeKinds: list(row.changeKinds, changeKinds, defaults.changeKinds),
-    customChangeKinds: list(row.customChangeKinds, changeKinds, list(row.changeKinds, changeKinds, defaults.changeKinds)),
+    changeKinds: normalizeChangeKinds(row.changeKinds, defaults.changeKinds),
+    customChangeKinds: normalizeChangeKinds(row.customChangeKinds, normalizeChangeKinds(row.changeKinds, defaults.changeKinds)),
     search: typeof row.search === "string" ? row.search.slice(0, 10000) : "",
     group,
   };

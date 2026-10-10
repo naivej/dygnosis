@@ -34,7 +34,8 @@ async function checkSemanticDiff(service, workspaceRoot, evidence, waitFor) {
   const config = vscode.workspace.getConfiguration("dynare");
   const saved = Object.fromEntries(["diff.defaultChangeKinds"].map(key => [key, config.inspect(key)?.workspaceValue]));
   try {
-    await config.update("diff.defaultChangeKinds", ["added", "changed", "unpaired"], vscode.ConfigurationTarget.Workspace);
+    await config.update("diff.defaultChangeKinds", ["added", "changed"], vscode.ConfigurationTarget.Workspace);
+    await checkStateSource(service, workspaceRoot, evidence, waitFor);
     await checkEquationSurgerySource(service, workspaceRoot, evidence, waitFor);
     await checkForecastSource(service, workspaceRoot, evidence, waitFor);
     await runSemanticDiff(service, workspaceRoot, evidence, waitFor);
@@ -97,7 +98,7 @@ async function checkForecastSource(service, workspaceRoot, evidence, waitFor) {
   await nativeChanges(async ({ evaluate, send }) => {
     assert.equal(await evaluate('document.querySelector("#kinds summary").textContent'), "Type of changes");
     assert.equal(await evaluate('[...document.querySelectorAll(".token.added,.token.removed")].some(node=>node.textContent.includes("name=drivers"))'), false);
-    await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="MS-SBVAR").click()');
+    await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Forecast").click()');
     assert.equal(await evaluate('document.querySelector(".side.after .expression").textContent'), "conditional_forecast_paths;\nvar y;\nperiods 1 2 3;\nvalues 0.2 0.25 0.1;\nend;");
     assert.deepEqual(await evaluate('[...document.querySelectorAll(".side.after .token.added")].map(node=>node.textContent)'), ["0.2"]);
     assert.equal(await evaluate('document.querySelectorAll("article [data-field]").length'), 0);
@@ -106,6 +107,42 @@ async function checkForecastSource(service, workspaceRoot, evidence, waitFor) {
     await fs.writeFile(filename, Buffer.from(screenshot.data, "base64")); evidence.semantic_forecast_source_screenshot = filename;
   });
   evidence.semantic_forecast_written_source = true;
+}
+
+// Checks the rendered user case, including omitted unchanged periods and partial token highlights.
+async function checkStateSource(service, workspaceRoot, evidence, waitFor) {
+  await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+  const directory = path.join(workspaceRoot, "state-source"); await fs.mkdir(directory, { recursive: true });
+  const beforeFile = path.join(directory, "history_1.mod"), afterFile = path.join(directory, "history_2.mod");
+  const beforeText = "var y c; model; y=y(-1); c=y; end;\nhistval;\ny(0) = 0.1;\ny(-1) = 0.05;\ny(-2) = 0.3;\nc(0) = 0;\nend;";
+  await fs.writeFile(beforeFile, beforeText);
+  await fs.writeFile(afterFile, beforeText.replace("0.1;", "0.2;").replace("0.05;", "-0.05;"));
+  const beforeDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(beforeFile));
+  await vscode.window.showTextDocument(beforeDocument);
+  await waitFor(async () => (await service.modelInfo(beforeDocument.uri))?.complete, "history Before model facts");
+  const after = { kind: "working", root_uri: vscode.Uri.file(afterFile).toString() };
+  const document = await vscode.workspace.openTextDocument(vscode.Uri.file(afterFile));
+  await vscode.window.showTextDocument(document);
+  await waitFor(async () => (await service.modelInfo(document.uri))?.complete, "history state model facts");
+  const resource = { schema_version: 1, before: { kind: "working", root_uri: vscode.Uri.file(beforeFile).toString() }, after, anchor: after, context_uri: after.root_uri };
+  const uri = vscode.Uri.from({ scheme: "dygnosis-changes", path: `/${resourceName(resource)}`, query: resourceQuery(resource) });
+  await vscode.commands.executeCommand("vscode.openWith", uri, changesViewType, { viewColumn: vscode.ViewColumn.One, preview: false });
+  await waitFor(async () => {
+    try { return await nativeChanges(async ({ evaluate }) => { evidence.semantic_state_view = await evaluate('({status:document.getElementById("status").className,message:document.getElementById("status").textContent,groups:[...document.querySelectorAll(".group-button")].map(button=>button.textContent),code:document.querySelector(".side.after .expression")?.textContent})'); return evidence.semantic_state_view.status === "ready" && evidence.semantic_state_view.groups.some(group=>group.startsWith("State")); }); }
+    catch (error) { if (error.code === "NATIVE_FRAME_PENDING") return false; throw error; }
+  }, "written history state cards");
+  await nativeChanges(async ({ evaluate, send }) => {
+    await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="State").click()');
+    assert.equal(await evaluate('document.querySelectorAll("article").length'), 1);
+    assert.equal(await evaluate('document.querySelector(".side.after .expression").textContent'), "histval;\ny(0) = 0.2;\ny(-1) = -0.05;\nend;");
+    assert.equal(await evaluate('document.querySelector(".side.before .expression").textContent'), "histval;\ny(0) = 0.1;\ny(-1) = 0.05;\nend;");
+    assert.equal(await evaluate('document.querySelectorAll("article [data-field]").length'), 0);
+    assert.equal(await evaluate('[...document.querySelectorAll(".side.after .token.added")].map(node=>node.textContent).join("")'), "0.2-");
+    const filename = path.join(path.dirname(process.env.DYGNOSIS_HOST_RESULT), `semantic-state-source-${vscode.version}.png`);
+    const screenshot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+    await fs.writeFile(filename, Buffer.from(screenshot.data, "base64")); evidence.semantic_state_source_screenshot = filename;
+  });
+  evidence.semantic_history_periods_written_source = true;
 }
 
 async function checkHistoryCardSource(service, workspaceRoot, evidence, waitFor) {
@@ -274,15 +311,15 @@ async function runSemanticDiff(service, workspaceRoot, evidence, waitFor) {
     assert.deepEqual(header.cards.map(card => [card.label, card.name]), [["Before", "root.mod"], ["After", "root.mod"]]);
     assert.ok(header.cards[0].title.includes(decodeURIComponent(new URL(roots.before.toString()).pathname)));
     assert.ok(header.cards[1].title.includes(decodeURIComponent(new URL(roots.after.toString()).pathname)));
-    assert.equal(header.kinds, "DETAILS"); assert.equal(header.checkboxes, 5);
+    assert.equal(header.kinds, "DETAILS"); assert.equal(header.checkboxes, 4);
     const placement = await evaluate('({models:document.getElementById("models").getBoundingClientRect().right,change:document.getElementById("changeComparison").getBoundingClientRect().x,swap:document.getElementById("swap").getBoundingClientRect().right,refresh:document.getElementById("refresh").getBoundingClientRect().x})');
     assert.ok(placement.change >= placement.models && placement.refresh > placement.swap);
-    assert.deepEqual(header.legend, ["+ Added", "− Removed", "~ Replaced", "? Unpaired"]);
+    assert.deepEqual(header.legend, ["+ Added", "− Removed", "~ Replaced"]);
     assert.equal(await evaluate('document.querySelector("[data-change-type=all]").indeterminate'), true);
-    const selectTypes = selected => evaluate(`(() => { const selected=${JSON.stringify(selected)}; for (const kind of ["added","removed","changed","unpaired"]) { const input=document.querySelector('[data-change-type="'+kind+'"]'); if (input.checked !== selected.includes(kind)) input.click(); } })()`);
+    const selectTypes = selected => evaluate(`(() => { const selected=${JSON.stringify(selected)}; for (const kind of ["added","removed","changed"]) { const input=document.querySelector('[data-change-type="'+kind+'"]'); if (input.checked !== selected.includes(kind)) input.click(); } })()`);
     await selectTypes(["changed"]);
     assert.equal(await evaluate('[...document.querySelectorAll("article[data-row-id]")].every(row=>row.classList.contains("changed"))'), true);
-    await selectTypes(["added", "changed", "unpaired"]);
+    await selectTypes(["added", "changed"]);
     assert.equal(await evaluate('Boolean(document.querySelector("article.removed"))'), false);
     await evaluate('document.querySelector("[data-change-type=all]").click()');
     await evaluate('[...document.querySelectorAll(".group-button")].find(button=>button.querySelector("span").textContent==="Parameters").click()');

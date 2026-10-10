@@ -114,7 +114,7 @@ fn collect(
 ) -> Vec<CapturedFact> {
     let mut facts = Vec::new();
     declarations::collect(model, &mut facts, owned_dimensions);
-    data::collect(model, &mut facts);
+    data::collect(model, &mut facts, work);
     advanced::collect(model, &mut facts, work);
     moments::collect(model, &mut facts, work);
     operations::collect(model, &mut facts, work);

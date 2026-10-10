@@ -33,7 +33,7 @@ pub(super) fn collect(
             SemanticFamily::Operations,
             "filter_initial_state",
             name,
-            vec![name.into()],
+            vec![name.into(), row.lag.to_string()],
             (!row.active_tokens.is_empty()).then_some(row.active_tokens.start),
             index,
         );
@@ -673,7 +673,21 @@ fn markers(model: &Model, facts: &mut Vec<CapturedFact>) {
         ),
         (SemanticFamily::MsSbvar, "bvar_present", model.bvar_present),
     ];
+    let named_datafile = model.estimation_statements.iter().any(|row| {
+        row.has_datafile
+            && row
+                .data_options
+                .first()
+                .and_then(|option| parent_at_order(model, option.parse_order))
+                .and_then(|id| model.statements.get(id))
+                .is_some_and(|statement| occurrences::accepted_statement(model, statement))
+    });
     for (family, name, present) in markers {
+        // The occurrence's has_datafile field already owns this exact presence
+        // fact. Keep a marker only when accepted history cannot represent it.
+        if name == "estimation_datafile" && present == named_datafile {
+            continue;
+        }
         facts.push(marker(model, family, name, FieldState::boolean(present)));
     }
     for (name, value) in [

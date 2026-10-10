@@ -1915,6 +1915,13 @@ impl Backend {
             diff.shock_setup_changes
                 .iter()
                 .map(|change| change.before.as_ref()),
+        )
+        .with_written_facts(
+            &mut inner.workspace,
+            &uri_a,
+            &model_a,
+            &diff,
+            crate::semantic_diff::Side::Before,
         );
         let after = crate::compare_navigation::ComparisonInput::capture(
             &mut inner.workspace,
@@ -1925,6 +1932,13 @@ impl Backend {
             diff.shock_setup_changes
                 .iter()
                 .map(|change| change.after.as_ref()),
+        )
+        .with_written_facts(
+            &mut inner.workspace,
+            &uri_b,
+            &model_b,
+            &diff,
+            crate::semantic_diff::Side::After,
         );
         let include_pairs = before.same_file_pairs(&after);
         crate::compare_navigation::populate_written_statements(&mut diff, &before, &after);

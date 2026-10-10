@@ -79,7 +79,6 @@ pub enum ChangeKind {
     Added,
     Removed,
     Changed,
-    Unpaired,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -190,6 +189,18 @@ pub struct RowSide {
     /// Accepted parser provenance for navigation; never a displayed-text offset.
     #[serde(skip)]
     pub provenance: Option<OccurrenceProvenance>,
+    /// Existing producer receipts used only to select captured display text.
+    #[serde(skip)]
+    pub(crate) instruction_tokens: Vec<std::ops::Range<usize>>,
+    /// Accepted parent boundaries and existing correspondence, for colors only.
+    #[serde(skip)]
+    pub(crate) block_context: Option<BlockContext>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BlockContext {
+    pub own: [String; 2],
+    pub counterpart: Option<[String; 2]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -211,6 +222,8 @@ impl RowSide {
             equation_index: None,
             context: None,
             provenance: None,
+            instruction_tokens: Vec::new(),
+            block_context: None,
         }
     }
 }
@@ -410,6 +423,10 @@ pub struct SemanticRow {
     pub timing: Vec<TimingChange>,
     pub references: Vec<String>,
     pub limits: Vec<ComparisonLimit>,
+    /// Private correspondence state; uncertain occurrences still have a side's
+    /// ordinary Added/Removed change kind and retain their public limits.
+    #[serde(skip)]
+    pub(crate) correspondence_uncertain: bool,
 }
 
 impl SemanticRow {
@@ -428,6 +445,7 @@ impl SemanticRow {
             timing: Vec::new(),
             references: Vec::new(),
             limits: Vec::new(),
+            correspondence_uncertain: false,
         }
     }
 }

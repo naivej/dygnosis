@@ -55,6 +55,9 @@ pub struct CapturedFact {
     pub claims: Vec<Range<usize>>,
     pub limits: Vec<ComparisonLimit>,
     pub count_unit: CountUnit,
+    /// A one-sided default header adds no fact beyond its retained children.
+    /// Keep it for paired option comparisons and for ownership claims.
+    pub presence_implied_by_children: bool,
 }
 
 impl CapturedFact {
@@ -68,6 +71,7 @@ impl CapturedFact {
             claims: Vec::new(),
             limits: Vec::new(),
             count_unit: CountUnit::AcceptedOccurrence,
+            presence_implied_by_children: false,
         }
     }
 }
@@ -347,6 +351,119 @@ impl ParentPairs {
 fn parent(fact: &CapturedFact) -> Option<usize> {
     fact.side.provenance.as_ref()?.statement_id
 }
+
+/// Reuse accepted parent correspondence for display colors, including unchanged
+/// parents with no output row. This does not pair children or add token claims.
+pub(super) fn populate_block_context(before: &Model, after: &Model, diff: &mut ModelDiff) {
+    fn boundaries(model: &Model) -> BTreeMap<usize, [String; 2]> {
+        model
+            .statements
+            .iter()
+            .filter_map(|statement| {
+                let observable = statement.kind == crate::model::StatementKind::Command
+                    && matches!(statement.name.as_str(), "varobs" | "varexobs");
+                if (statement.kind != crate::model::StatementKind::Block && !observable)
+                    || statement.token_range.len() > 10_000
+                    || !accepted_statement(model, statement)
+                {
+                    return None;
+                }
+                Some((
+                    statement.id,
+                    [
+                        statement_text(
+                            model,
+                            if observable {
+                                statement.token_range.start..statement.token_range.start + 1
+                            } else {
+                                statement.opener_range.clone()
+                            },
+                        )?,
+                        statement_text(
+                            model,
+                            statement
+                                .token_range
+                                .end
+                                .checked_sub(if observable { 1 } else { 2 })?
+                                ..statement.token_range.end,
+                        )?,
+                    ],
+                ))
+            })
+            .collect()
+    }
+    let pairs = ParentPairs::new(before, after);
+    let reverse: BTreeMap<_, _> = pairs
+        .before_to_after
+        .iter()
+        .map(|(&a, &b)| (b, a))
+        .collect();
+    let old = boundaries(before);
+    let new = boundaries(after);
+    for index in 0..diff.semantic.rows.len() {
+        let row = &mut diff.semantic.rows[index];
+        for (side, model, own, opposite, pairs) in [
+            (&mut row.before, before, &old, &new, &pairs.before_to_after),
+            (&mut row.after, after, &new, &old, &reverse),
+        ] {
+            let Some(side) = side else {
+                continue;
+            };
+            let Some(id) = side
+                .provenance
+                .as_ref()
+                .and_then(|proof| proof.statement_id)
+                .or_else(|| {
+                    // Legacy shock rows retain written spans rather than child
+                    // execution receipts. A unique containing block can supply
+                    // display context only; it never pairs or claims a child.
+                    if row.family != SemanticFamily::Shocks {
+                        return None;
+                    }
+                    let span = side.provenance.as_ref()?.span;
+                    let name = side.scope.block.as_deref()?.split('(').next()?;
+                    let mut parents = model.statements.iter().filter(|statement| {
+                        own.contains_key(&statement.id)
+                            && statement.name == name
+                            && statement.span.start <= span.start
+                            && span.end <= statement.span.end
+                    });
+                    let parent = parents.next()?;
+                    parents.next().is_none().then_some(parent.id)
+                })
+            else {
+                continue;
+            };
+            if let Some(boundaries) = own.get(&id) {
+                side.block_context = Some(BlockContext {
+                    own: boundaries.clone(),
+                    counterpart: pairs.get(&id).and_then(|id| opposite.get(id)).cloned(),
+                });
+            }
+        }
+        let old_context = row
+            .before
+            .as_ref()
+            .and_then(|side| side.block_context.clone());
+        let new_context = row
+            .after
+            .as_ref()
+            .and_then(|side| side.block_context.clone());
+        let mut expressions = std::mem::take(&mut row.expressions);
+        for expression in &mut expressions {
+            if expression.field == "statement_text" {
+                super::equations::highlight_block_boundaries(
+                    &mut diff.semantic,
+                    expression,
+                    old_context.as_ref(),
+                    new_context.as_ref(),
+                );
+            }
+        }
+        diff.semantic.rows[index].expressions = expressions;
+    }
+}
+
 type FactKey = (
     String,
     String,
@@ -617,22 +734,27 @@ fn emit(
         return;
     }
     let fact = after.or(before).expect("one fact side");
+    if before.is_none() != after.is_none() && fact.presence_implied_by_children {
+        return;
+    }
     let mut row = SemanticRow::new(
         fact.family,
-        if unpaired {
-            ChangeKind::Unpaired
-        } else {
-            match (before, after) {
-                (Some(_), Some(_)) => ChangeKind::Changed,
-                (Some(_), None) => ChangeKind::Removed,
-                _ => ChangeKind::Added,
-            }
+        match (before, after) {
+            (Some(_), Some(_)) => ChangeKind::Changed,
+            (Some(_), None) => ChangeKind::Removed,
+            _ => ChangeKind::Added,
         },
         &fact.side.name,
     );
     row.count_unit = fact.count_unit;
-    row.before = before.map(|fact| fact.side.clone());
-    row.after = after.map(|fact| fact.side.clone());
+    row.correspondence_uncertain = unpaired;
+    let written_side = |fact: &CapturedFact| {
+        let mut side = fact.side.clone();
+        side.instruction_tokens = fact.claims.clone();
+        side
+    };
+    row.before = before.map(written_side);
+    row.after = after.map(written_side);
     row.fields.push(FieldChange::new(
         "role",
         "Role",

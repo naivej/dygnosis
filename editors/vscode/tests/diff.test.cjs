@@ -42,8 +42,9 @@ test("every legacy comparison section keeps exact pointer, values, direction and
   assert.deepEqual([...new Set(parsed.rows.map(row => row.section))], [...diffSections]);
   assert.equal(parsed.rows.find(row => row.id === "/added_endogenous/0").before, null);
   assert.equal(parsed.rows.find(row => row.id === "/removed_endogenous/0").after, null);
-  const unpaired = parsed.rows.filter(row => row.kind === "unpaired");
+  const unpaired = parsed.rows.filter(row => row.id.includes("unmatched_same_name"));
   assert.equal(unpaired.length, 2); assert.equal(unpaired[0].after, null); assert.equal(unpaired[1].before, null);
+  assert.deepEqual(unpaired.map(row => row.kind), ["removed", "added"]);
   assert.match(parsed.rows.find(row => row.section === "parameters").before, /0.99/);
   assert.equal(parsed.rows.some(row => row.id.includes("common_")), false);
 });
@@ -94,9 +95,10 @@ test("control state normalizes kinds and ignores retired section and scope filte
 });
 
 const preferenceScopes = [], preferenceLogs = [];
+let preferenceKinds = ["removed", "removed", "bad"];
 const vscode = { workspace: { getConfiguration: (_section, scope) => {
   preferenceScopes.push(scope);
-  const settings = { "diff.layout": "bad", "diff.sections": [], "diff.defaultChangeKinds": ["removed", "removed", "bad"] };
+  const settings = { "diff.layout": "bad", "diff.sections": [], "diff.defaultChangeKinds": preferenceKinds };
   return { get: (key, fallback) => settings[key] ?? fallback };
 } } };
 const originalLoad = Module._load;
@@ -106,6 +108,12 @@ test("launching model Kind preferences use resource scope and ignore retired sec
   const result = diffPreferences(uri(after), message => preferenceLogs.push(message));
   assert.equal(Object.hasOwn(result, "layout"), false); assert.equal(Object.hasOwn(result, "sections"), false); assert.deepEqual(result.changeKinds, ["removed"]);
   assert.ok(preferenceScopes.every(scope => scope.uri.toString() === after && scope.languageId === "dynare"));
+});
+
+test("a saved Unpaired setting enables Added and Removed in new views", () => {
+  preferenceKinds = ["changed", "unpaired"];
+  try { assert.deepEqual(diffPreferences(uri(after), message => preferenceLogs.push(message)).changeKinds, ["changed", "added", "removed"]); }
+  finally { preferenceKinds = ["removed", "removed", "bad"]; }
 });
 
 class Element {
@@ -171,7 +179,7 @@ test("webview text and kind filters preserve state and choose a visible group", 
   env.elements.search.value = ""; env.elements.search.fire("input"); assert.match(env.elements.counts.textContent, /11 of 11 model rows match filters/);
   const all = descendants(env.elements.kinds).find(element => element.attributes["data-change-type"] === "all"); all.checked = false; all.fire("change");
   const removed = descendants(env.elements.kinds).find(element => element.attributes["data-change-type"] === "removed"); removed.checked = true; removed.fire("change");
-  assert.match(env.elements.counts.textContent, /1 of 11 model rows match filters/);
+  assert.match(env.elements.counts.textContent, /2 of 11 model rows match filters/);
 });
 test("side labels retain unmapped heterogeneous shock rows without a scope filter", () => {
   const result = fixture(), nav = result.navigation.rows.find(row => row.id === "/shock_setup_changes/0");

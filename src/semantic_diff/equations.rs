@@ -242,15 +242,16 @@ fn push_condition_row(
 ) {
     let mut row = SemanticRow::new(
         SemanticFamily::Equations,
-        if unpaired {
-            ChangeKind::Unpaired
-        } else {
-            ChangeKind::Changed
+        match (before, after) {
+            (Some(_), Some(_)) => ChangeKind::Changed,
+            (Some(_), None) => ChangeKind::Removed,
+            _ => ChangeKind::Added,
         },
         &equation_label(after.or(before).expect("one condition side")),
     );
     row.before = before.map(condition_row_side);
     row.after = after.map(condition_row_side);
+    row.correspondence_uncertain = unpaired;
     row.fields.push(FieldChange::new(
         "expression",
         "Expression",
@@ -522,6 +523,107 @@ pub fn expression_detail(
 struct CandidateTokens {
     lexemes: BTreeSet<String>,
     pairs: BTreeSet<(String, String)>,
+}
+
+/// Color only verified boundary tokens. A child can be one-sided while its
+/// accepted parent is shared; the parent proof comes from the engine, not text.
+pub(crate) fn highlight_block_boundaries(
+    semantic: &mut SemanticDiff,
+    detail: &mut ExpressionDetail,
+    before: Option<&BlockContext>,
+    after: Option<&BlockContext>,
+) {
+    fn roles(tokens: &[LexToken], side: &ExpressionSide) -> Vec<TokenRole> {
+        let mut runs = side.runs.iter();
+        let mut run = runs.next();
+        let mut end = run.map_or(0, |run| run.text.len());
+        tokens
+            .iter()
+            .map(|token| {
+                while token.start >= end && run.is_some() {
+                    run = runs.next();
+                    end += run.map_or(0, |run| run.text.len());
+                }
+                run.map_or(TokenRole::Unchanged, |run| run.role)
+            })
+            .collect()
+    }
+    if detail.availability != Availability::Complete {
+        return;
+    }
+    for (side, context, role) in [
+        (Side::Before, before, TokenRole::Removed),
+        (Side::After, after, TokenRole::Added),
+    ] {
+        let side = match side {
+            Side::Before => &mut detail.before,
+            Side::After => &mut detail.after,
+        };
+        let (Some(side), Some(context)) = (side, context) else {
+            continue;
+        };
+        let own_tokens = tokens(&side.text);
+        let opener = tokens(&context.own[0]);
+        let closer = tokens(&context.own[1]);
+        if opener.is_empty()
+            || closer.is_empty()
+            || own_tokens.len() < opener.len() + closer.len()
+            || !own_tokens[..opener.len()]
+                .iter()
+                .map(|token| &token.key)
+                .eq(opener.iter().map(|token| &token.key))
+            || !own_tokens[own_tokens.len() - closer.len()..]
+                .iter()
+                .map(|token| &token.key)
+                .eq(closer.iter().map(|token| &token.key))
+        {
+            continue;
+        }
+        let mut own_roles = roles(&own_tokens, side);
+        for (boundary, range) in [
+            0..opener.len(),
+            own_tokens.len() - closer.len()..own_tokens.len(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let Some(opposite) = &context.counterpart else {
+                own_roles[range].fill(role);
+                continue;
+            };
+            let start = own_tokens[range.start].start;
+            let end = own_tokens[range.end - 1].end;
+            let text = &side.text[start..end];
+            let (old, new) = if role == TokenRole::Removed {
+                (text, opposite[boundary].as_str())
+            } else {
+                (opposite[boundary].as_str(), text)
+            };
+            let alignment = expression_detail(semantic, "block_context", Some(old), Some(new));
+            if alignment.availability != Availability::Complete {
+                detail.availability = alignment.availability;
+                detail.reason = alignment.reason;
+                detail.highlight_basis = HighlightBasis::None;
+                detail.before = detail
+                    .before
+                    .as_ref()
+                    .map(|side| ExpressionSide::plain(&side.text));
+                detail.after = detail
+                    .after
+                    .as_ref()
+                    .map(|side| ExpressionSide::plain(&side.text));
+                return;
+            }
+            let aligned = if role == TokenRole::Removed {
+                alignment.before
+            } else {
+                alignment.after
+            }
+            .unwrap();
+            own_roles[range].copy_from_slice(&roles(&tokens(text), &aligned));
+        }
+        *side = runs(&side.text, &own_tokens, &own_roles);
+    }
 }
 
 fn candidate_tokens(candidates: &[&str]) -> CandidateTokens {
@@ -939,7 +1041,7 @@ fn populate_rows(
                     old_candidates.into_iter().map(str::to_string).collect();
                 let new_candidates: Vec<_> =
                     new_candidates.into_iter().map(str::to_string).collect();
-                row.change = ChangeKind::Unpaired;
+                row.correspondence_uncertain = true;
                 row.expressions.push(unpaired_detail(
                     &mut diff.semantic,
                     before_text,
@@ -1087,7 +1189,7 @@ fn append_conditions(
     let after_values = condition_values(after);
     let before_text = text(&before_values[0]);
     let after_text = text(&after_values[0]);
-    row.expressions.push(if row.change == ChangeKind::Unpaired {
+    row.expressions.push(if row.correspondence_uncertain {
         plain(
             "complementarity.text",
             before_text,

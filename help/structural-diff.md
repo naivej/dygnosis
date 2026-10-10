@@ -56,6 +56,14 @@ changes. Model counts describe displayed row appearances.
 The left panel lists Symbols, Equations, Commands and the other change groups.
 **Equations** includes aggregate equations and equations from every heterogeneity
 dimension.
+**State** contains initial, terminal, historical and steady-state assignments.
+`steady_state_model` changes stay in State, including their statement context.
+**Data** combines observables and data settings. `varobs` and `varexobs` changes
+stay in Data. `estimation` and its options stay in Commands.
+**Method of moments** groups matched moments, matched IRFs
+and their settings. Instruction facts and their supporting context use one group.
+**Forecast** contains `forecast`, `bvar_forecast`, `conditional_forecast`,
+`conditional_forecast_paths` and `plot_conditional_forecast`.
 Choose a group to see all its filtered changes as rows, with Before on the left
 and After on the right. All available groups are listed. Parameter declarations stay
 in Symbols; parameter value changes stay in Parameters.
@@ -74,7 +82,11 @@ give the same result. Two written numbers, such as `0.9` and `0.8`, need no
 evaluated values. Other unchanged fields are omitted, except nonempty equation
 tags that identify regime variants. Missing and explicitly empty values stay blank; unknown values
 say **Unknown**; zero displays as **0**. Added symbols show their declaration,
-such as `var y;`, with available metadata. A kind changed by `change_type`
+such as `var y;`, with available metadata. Each observable shows its own
+declaration: `varobs y c;` gives separate `varobs y;` and `varobs c;` cards.
+A new or removed observable declaration highlights its keyword and names. If
+both models have the declaration, only added or removed names are highlighted.
+A kind changed by `change_type`
 remains visible when it differs from the declaration. A missing row says
 **Not present**. Equation expressions highlight changed
 identifiers, timing suffixes, operators and constants while keeping unchanged
@@ -85,17 +97,31 @@ References are not claims about indirect dependencies or numerical effects.
 Cards show their dimension in the header. A direct reference names a dimension
 only when it differs from that card's dimension.
 Shock cards show the written instruction and its block options, with edits
-highlighted in the text. Symbol declaration keywords and shock block openers
-stay plain. Added or removed shock instructions, such as `var ua = cstd;`,
+highlighted in the text. Symbol declaration keywords stay plain.
+Added or removed shock instructions, such as `var ua = cstd;`,
 and model-local definitions, such as `# xdddd = yf;`, are highlighted in full.
 Shock cards keep changed fields when their captured instruction is unavailable
 or unchanged, such as an instruction becoming superseded.
-Commands, Operations and MS-SBVAR show the captured written instructions, including their
+State, Priors, Commands and other instruction cards show captured written text, including its
 spacing, quotes and comments. For example, a replacement shows its complete
 `model_replace(...); ... end;` block. A card whose written instruction is unchanged
 can explain that its recorded effects differ. If a complete written range cannot
 be verified, the card directs you to **Text diff**. Relative order changes remain
 visible beside the code.
+Block cards show the changed instruction between the written opener and `end;`.
+Added or removed content already shows that block's presence; a plain heading
+does not add a separate block change. Empty accepted blocks and independent
+block-option changes remain visible. An `estimation` command shows once, with
+its data options and other written settings in the same card.
+When a whole block is added or removed, its opener and `end;` are highlighted.
+When both models have the corresponding block, unchanged boundaries stay plain,
+including when an instruction is added or removed inside it. Changed opener
+options still carry highlights.
+Unchanged assignments are omitted. Historical assignments pair by variable and
+period within corresponding blocks. Changed periods of one variable share a
+card, such as `histval;` with `y(0) = 0.2;` and `y(-1) = -0.05;` on separate
+lines. Only edited tokens carry highlights. Counts and filters still apply to
+each period; repeated occurrences with uncertain correspondence stay separate.
 Forecast-path cards keep `conditional_forecast_paths;` and `end;` around the
 changed variable's `var`, `periods` and `values` lines. Unchanged variable paths
 are omitted. An unchanged `shock_groups(name=...);` heading stays plain when its
@@ -106,12 +132,13 @@ Equations with the same name can pair when their unchanged regime tags identify
 one variant on each side. This includes an OccBin equation's `bind` or `relax`
 tag, even when its expression changes. Repeated copies with the same name and
 regime stay separate when their correspondence is uncertain.
-Uncertain occurrences remain separate and are labeled Unpaired; text-only
-highlights do not imply that two equations were paired. The comparison does not
+Occurrences with uncertain correspondence appear separately as Removed on
+Before and Added on After; text-only highlights do not imply a paired edit.
+The comparison does not
 solve the model or report simulation, estimation or steady-state results.
 
 Find changes and **Type of changes** filter model rows. The left panel selects a
-group to display. Tick any combination of Added, Removed, Replaced and Unpaired.
+group to display. Tick any combination of Added, Removed and Replaced.
 **All** ticks every type; clearing it clears every type. A partly selected menu
 shows All as mixed. Selections survive Refresh, reload and split views.
 When no model row is available, review any unavailable facts and the native text diff

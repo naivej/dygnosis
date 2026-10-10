@@ -602,6 +602,13 @@ pub fn compare_captured_snapshots(
             .iter()
             .map(|change| change.before.as_ref()),
     )
+    .with_written_facts(
+        &mut before.workspace,
+        &before.root,
+        &before.model,
+        &diff,
+        crate::semantic_diff::Side::Before,
+    )
     .with_snapshot_identity(&before.input_id, before.inputs["commit"].as_str());
     let new = ComparisonInput::capture(
         &mut after.workspace,
@@ -612,6 +619,13 @@ pub fn compare_captured_snapshots(
         diff.shock_setup_changes
             .iter()
             .map(|change| change.after.as_ref()),
+    )
+    .with_written_facts(
+        &mut after.workspace,
+        &after.root,
+        &after.model,
+        &diff,
+        crate::semantic_diff::Side::After,
     )
     .with_snapshot_identity(&after.input_id, after.inputs["commit"].as_str());
     let include_pairs = source_pairs(&before, &after);

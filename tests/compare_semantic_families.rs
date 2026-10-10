@@ -524,7 +524,12 @@ fn written_macro_context_does_not_claim_expanded_occurrence_pairs() {
         .filter(|row| row.family == SemanticFamily::Occbin)
         .collect();
     assert_eq!(rows.len(), 4);
-    assert!(rows.iter().all(|row| row.change == ChangeKind::Unpaired));
+    assert!(rows.iter().all(|row| row.change
+        == if row.before.is_some() {
+            ChangeKind::Removed
+        } else {
+            ChangeKind::Added
+        }));
     assert!(diff
         .semantic
         .rows
@@ -721,11 +726,12 @@ fn command_list_proof_keeps_options_diagnostics_and_macro_ambiguity() {
     assert_eq!(list_rows(&comparison(&old, &old)), 0);
     let repeated = comparison(&old, &new);
     assert_eq!(list_rows(&repeated), 4);
-    assert!(repeated
-        .semantic
-        .rows
-        .iter()
-        .all(|row| row.change == ChangeKind::Unpaired));
+    assert!(repeated.semantic.rows.iter().all(|row| row.change
+        == if row.before.is_some() {
+            ChangeKind::Removed
+        } else {
+            ChangeKind::Added
+        }));
 
     let old = parse(&format!("{BASE}stoch_simul ghost;"));
     let new = parse(&format!("{BASE}stoch_simul(order=1) ghost;"));
@@ -834,11 +840,12 @@ fn written_declarations_survive_the_same_final_retype() {
         diff.to_json()
     );
     assert_eq!(diff.semantic.rows.len(), 2);
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .all(|row| row.change == ChangeKind::Unpaired));
+    assert!(diff.semantic.rows.iter().all(|row| row.change
+        == if row.before.is_some() {
+            ChangeKind::Removed
+        } else {
+            ChangeKind::Added
+        }));
     assert!(diff.symbols_changed.is_empty());
     let old = "heterogeneity_dimension d e; var(heterogeneity=d) x; change_type(parameters) x;";
     let new = old.replace("heterogeneity=d", "heterogeneity=e");
@@ -1009,6 +1016,11 @@ fn direct_condition_request_and_selected_setting_receipts_have_one_owner() {
 
 #[test]
 fn presence_receipts_preserve_unretained_values_and_arguments() {
+    let compact = |text: &str| {
+        text.chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>()
+    };
     for (old, new) in [
         ("estimation(bayesian_irf=0);", "estimation(bayesian_irf=1);"),
         (
@@ -1034,7 +1046,21 @@ fn presence_receipts_preserve_unretained_values_and_arguments() {
             diff.semantic
                 .rows
                 .iter()
-                .any(|row| row.family == SemanticFamily::Commands),
+                .any(|row| row.family == SemanticFamily::Commands
+                    || old.starts_with("estimation(")
+                        && row.family == SemanticFamily::Data
+                        && row.expressions.iter().any(|expression| {
+                            expression.field == "statement_tokens"
+                                && expression
+                                    .before
+                                    .as_ref()
+                                    .zip(expression.after.as_ref())
+                                    .is_some_and(|(before, after)| {
+                                        before.text != after.text
+                                            && compact(old).contains(&compact(&before.text))
+                                            && compact(new).contains(&compact(&after.text))
+                                    })
+                        })),
             "lost unretained option {old}: {}",
             diff.to_json()
         );
@@ -1210,16 +1236,29 @@ fn target_date_and_subsample_receipts_do_not_count_command_context_twice() {
     let old = format!("{BASE}estimation(first_obs=2000Q1,order=1);");
     let new = old.replace("order=1", "order=2");
     let diff = comparison(&old, &new);
+    let rows: Vec<_> = diff
+        .semantic
+        .rows
+        .iter()
+        .filter(|row| row.family == SemanticFamily::Data)
+        .collect();
+    assert_eq!(rows.len(), 1);
+    let text = rows[0]
+        .expressions
+        .iter()
+        .find(|expression| expression.field == "statement_tokens")
+        .unwrap();
+    assert!(text.before.as_ref().unwrap().text.contains("order = 1"));
+    assert!(text.after.as_ref().unwrap().text.contains("order = 2"));
+    assert!(rows[0]
+        .fields
+        .iter()
+        .any(|field| field.name == "data_options" && !field.changed));
     assert!(diff
         .semantic
         .rows
         .iter()
-        .any(|row| row.family == SemanticFamily::Commands));
-    assert!(diff
-        .semantic
-        .rows
-        .iter()
-        .all(|row| row.family != SemanticFamily::Data));
+        .all(|row| row.family != SemanticFamily::Commands));
     let old = format!(
         "{BASE}load_params_and_steady_state('a.mat'); load_params_and_steady_state('b.mat');"
     );

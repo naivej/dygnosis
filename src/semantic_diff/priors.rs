@@ -119,7 +119,7 @@ pub(crate) fn populate(
             .extend(SLOTS.iter().map(|(name, _, _)| format!("{name}.value")));
     }
     if diff.semantic.rows[start..].iter().any(|row| {
-        row.change == ChangeKind::Unpaired
+        row.correspondence_uncertain
             || row
                 .expressions
                 .iter()
@@ -430,6 +430,28 @@ fn facts(model: &Model) -> Vec<CapturedFact> {
         }
         fact.claims.push(statement.token_range.clone());
         out.push(fact);
+    }
+    let entry_parents: BTreeSet<_> = out
+        .iter()
+        .filter(|fact| fact.role.ends_with("_entry"))
+        .filter_map(|fact| fact.side.provenance.as_ref()?.statement_id)
+        .collect();
+    for fact in &mut out {
+        if fact.role == "estimated_parameter_block"
+            && fact
+                .side
+                .provenance
+                .as_ref()
+                .and_then(|proof| proof.statement_id)
+                .is_some_and(|id| entry_parents.contains(&id))
+            && fact
+                .fields
+                .iter()
+                .filter(|field| ["overwrite", "use_calibration"].contains(&field.name.as_str()))
+                .all(|field| field.value == FieldState::boolean(false))
+        {
+            fact.presence_implied_by_children = true;
+        }
     }
     out.sort_by_key(|fact| {
         fact.side

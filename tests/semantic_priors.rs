@@ -463,7 +463,7 @@ fn repeated_targets_and_blocks_never_pair_by_name_or_list_index() {
         for row in rows {
             if row.fields.iter().any(|field| field.name == "distribution") {
                 assert!(row.before.is_none() || row.after.is_none());
-                assert_eq!(row.change, ChangeKind::Unpaired);
+                assert_eq!(row.change, if row.before.is_some() { ChangeKind::Removed } else { ChangeKind::Added });
                 assert!(row.expressions.iter().all(|detail| detail.highlight_basis == HighlightBasis::None));
             }
         }

@@ -15,7 +15,7 @@ export interface ExpressionSide { text: string; runs: TokenRun[] }
 export interface Expression { field: string; before: ExpressionSide | null; after: ExpressionSide | null; highlight_basis: "paired_expression" | "unpaired_text_only" | "none"; availability: Availability; reason: string | null }
 export interface TimingSide { name: string; class: string; written_offset: number; converted_offset: number; occurrence: number }
 export interface Reference { pointer: string; symbol: string; side: "before" | "after"; equation_pointer: string; equation_index: number; label: string; scope: Scope; occurrence: number; timing: TimingSide }
-export interface SemanticRow { pointer: string; family: SemanticFamily; change: "added" | "removed" | "changed" | "unpaired"; name: string; count_unit: "final_fact" | "accepted_occurrence" | "operation"; facets: typeof facets[number][]; before: RowSide | null; after: RowSide | null; fields: FieldChange[]; expressions: Expression[]; timing: { before: TimingSide | null; after: TimingSide | null }[]; references: string[]; limits: Limit[] }
+export interface SemanticRow { pointer: string; family: SemanticFamily; change: "added" | "removed" | "changed"; name: string; count_unit: "final_fact" | "accepted_occurrence" | "operation"; facets: typeof facets[number][]; before: RowSide | null; after: RowSide | null; fields: FieldChange[]; expressions: Expression[]; timing: { before: TimingSide | null; after: TimingSide | null }[]; references: string[]; limits: Limit[] }
 export interface Semantic { schema_version: 1; availability: Availability; budgets: Record<string, number>; rows: SemanticRow[]; references: Reference[]; limits: Limit[] }
 export interface SourceSide { input_id: string | null; file_key: string; exact_text_available: boolean }
 export interface SourceHunk { before_start: number; before_lines: number; after_start: number; after_lines: number; lines: TokenRun[] }
@@ -25,7 +25,7 @@ export interface Coverage { schema_version: 1; availability: Availability; sourc
 export interface SemanticPayload { semantic: Semantic; sourceChanges: SourceChanges; coverage: Coverage }
 export type SourceRegistry = Record<"before" | "after", Record<string, string>>;
 const availability = ["complete", "partial", "not_available", "limit_exceeded"] as const;
-const changes = ["added", "removed", "changed", "unpaired"] as const;
+const changes = ["added", "removed", "changed"] as const;
 const roles = ["unchanged", "added", "removed"] as const;
 function invalid(): never { throw new Error("This engine returned an unsupported comparison detail. Update dynare.serverPath or use the bundled binary."); }
 function object(value: unknown, keys: string[]): Record<string, unknown> {
@@ -87,7 +87,6 @@ function semanticRow(value: unknown): SemanticRow {
   const result: SemanticRow = { pointer: pointer(r.pointer), family: one(r.family, semanticFamilies), change: one(r.change, changes), name: text(r.name), count_unit: one(r.count_unit, ["final_fact", "accepted_occurrence", "operation"]), facets: unique(array(r.facets).map(v => one(v, facets))), before: nullable(r.before, rowSide), after: nullable(r.after, rowSide), fields: array(r.fields).map(field), expressions: array(r.expressions).map(expression), timing: array(r.timing).map(v => { const t = object(v, ["before", "after"]); const before = nullable(t.before, timing), after = nullable(t.after, timing); if (!before && !after) invalid(); return { before, after }; }), references: unique(array(r.references).map(pointer)), limits: array(r.limits).map(limit) };
   if (!result.before && !result.after || result.change === "added" && result.before || result.change === "removed" && result.after || result.change === "changed" && (!result.before || !result.after)) invalid();
   unique(result.fields.map(f => f.name)); unique(result.expressions.map(e => e.field));
-  if (result.change === "unpaired" && result.expressions.some(e => e.highlight_basis === "paired_expression")) invalid();
   return result;
 }
 function reference(value: unknown): Reference { const r = object(value, ["pointer", "symbol", "side", "equation_pointer", "equation_index", "label", "scope", "occurrence", "timing"]); return { pointer: pointer(r.pointer), symbol: text(r.symbol), side: one(r.side, ["before", "after"]), equation_pointer: pointer(r.equation_pointer), equation_index: integer(r.equation_index), label: text(r.label), scope: scope(r.scope), occurrence: integer(r.occurrence), timing: timing(r.timing) }; }

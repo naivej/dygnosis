@@ -408,27 +408,55 @@ Families are `symbols`, `parameters`, `equations`, `shocks`, `steady_state`,
 `priors`, `commands`, `observables`, `data`, `occbin`, `policy`,
 `semi_structural`, `moments`, `ms_sbvar`, `heterogeneity`, `external_functions`,
 `trends`, `operations` and `macro_context`. `change` is `added`, `removed`,
-`changed` or `unpaired`. `count_unit` is `final_fact`, `accepted_occurrence`
+or `changed`. `count_unit` is `final_fact`, `accepted_occurrence`
 or `operation`; written history and final settings can differ. Each fact has
 one owner. Supporting statement context and references do not count again.
 Source file and hunk counts remain separate from model row appearances.
+An accepted `estimation` occurrence owns its named data options and bounded
+complete `statement_tokens` text together. The equivalent datafile presence
+marker adds no second row. Unavailable text remains eligible for residual
+Commands. Plain block headings with fully owned bodies add no Commands row;
+default prior-block presence is implied by retained entries. Empty accepted
+blocks and independent block operations still compare separately.
 
-Command, operation and MS-SBVAR rows can add an expression with `field: "statement_text"`.
-Its text is copied from one verified range in that side's captured written file,
+Instruction-family rows can add an expression with `field: "statement_text"`.
+Its text is copied from verified ranges in that side's captured written file,
 with spacing, quotes and comments. It is display context, not a compared field:
 adding it does not change row ownership, pairing or model counts. Structured
 fields still describe the retained facts, so identical instruction text can have
 different operation results. A missing context expression means that a complete
 written range or its materialization budget was unavailable; it is not an absent
 model row. Clients can use captured-file text diff when this context is missing.
-Unpaired rows keep text-only highlight meaning. The existing schema versions and
-coordinate contracts apply.
+Occurrences with uncertain correspondence use `removed` on Before and `added`
+on After. Their limits and `unpaired_text_only` highlight basis retain the
+uncertainty; neither establishes a paired edit. The existing schema versions
+and coordinate contracts apply.
 Conditional forecast paths use their direct parser row position to select the
 variable's written range. The block opener and closer supply display context;
 other variable paths do not enter that row's text. Each selected source part is
 verified in the same captured file. This context is not a new statement or a
-new comparison owner. The VS Code label Replaced maps to the unchanged wire
-`change: "changed"` value.
+new comparison owner. Other block instructions use existing producer receipts
+to select their body text with the owning opener and closer, without unchanged
+sibling instructions. Historical and filter-initial-state targets pair by name
+and written period within proven parents. Boundary runs use accepted parent
+correspondence independently of child presence: new or removed blocks highlight
+their opener and closer; shared blocks keep unchanged boundaries plain and
+highlight changed opener options. Clients retain these supplied runs.
+The same accepted-parent boundary proof applies to observable declaration
+keywords: a new or removed declaration colors its keyword; a shared declaration
+keeps it plain when a name is added or removed. Per-name cards use that supplied
+keyword run without repeating the parent list.
+The VS Code label Replaced maps to the unchanged wire `change: "changed"` value.
+VS Code uses the engine's change type, highlight basis, limits and exact
+navigation pointer. Saved Unpaired filter selections enable both Added and
+Removed. The instruction's
+accepted context selects the same display category for retained facts and
+residual statement context: `steady_state_model` uses State, `varobs` and
+`varexobs` use Data, and `estimation` uses Commands. The Data display group
+combines the `observables` and `data` families. Each observable card shows one
+declaration for its retained target, like a symbol card, instead of repeating
+the parent list. Display category names do not change the semantic family
+values. The `moments` display group is Method of moments.
 
 Existing owners retain their exact legacy pointers. New rows use
 `/semantic/rows/N`; references use `/semantic/references/N`; files use

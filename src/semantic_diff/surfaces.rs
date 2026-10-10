@@ -412,7 +412,7 @@ fn history_facts(
         let mut fact = CapturedFact::new(
             SemanticFamily::SteadyState,
             "histval_assignment",
-            vec![name.into()],
+            vec![name.into(), entry.lag.to_string()],
             side,
         );
         let value = if parent.is_some() {
@@ -734,6 +734,11 @@ fn residual(
         .then(|| model.expanded_tokens.get(range.end.checked_sub(2)?))
         .flatten()
         .filter(|token| token.text(&model.source).eq_ignore_ascii_case("end"));
+    // A bare block heading is context of its retained body. Empty blocks and
+    // unowned opener options/body tokens still need their own comparison row.
+    let body_implies_heading = statement.kind == StatementKind::Block
+        && (statement.opener_range.end..range.end)
+            .any(|index| claims.contains(side, statement.id, index));
     if tokens.iter().all(|token| {
         matches!(
             token.kind,
@@ -744,6 +749,7 @@ fn residual(
                 | crate::lexer::TokenKind::LBrack
                 | crate::lexer::TokenKind::RBrack
         ) || closer.is_some_and(|closer| token.span == closer.span)
+            || body_implies_heading && token.span == statement.keyword_span
     }) {
         return String::new();
     }

@@ -7,7 +7,7 @@ body {
   --add: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-foreground));
   --remove: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-foreground));
   --change: var(--vscode-dynare-diff\.changedForeground, var(--vscode-dynare-diff-changedForeground, var(--vscode-focusBorder)));
-  --unpaired: var(--vscode-editorWarning-foreground, var(--vscode-foreground));
+  --warning: var(--vscode-editorWarning-foreground, var(--vscode-foreground));
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -47,7 +47,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .change-type-options input { accent-color: var(--vscode-checkbox-selectBackground, var(--vscode-focusBorder)); }
 .capture-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 #status { padding: 5px 14px; color: var(--secondary); font-size: 12px; overflow-wrap: anywhere; }
-#status.stale, #status.incomplete { border-left: 2px solid var(--unpaired); }
+#status.stale, #status.incomplete { border-left: 2px solid var(--warning); }
 #status.failure { border-left: 2px solid var(--vscode-editorError-foreground); }
 #counts { padding: 7px 14px; color: var(--secondary); font-size: 12px; border-bottom: 1px solid var(--line); }
 .results { flex: 1; min-width: 0; }
@@ -62,7 +62,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; tab-size: 4
 .change-mark.added { color: var(--add); }
 .change-mark.removed { color: var(--remove); }
 .change-mark.changed { color: var(--change); }
-.change-mark.unpaired { color: var(--unpaired); }
 .detail { min-width: 0; padding: 10px 14px 14px; border-bottom: 1px solid var(--line); }
 .detail-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
 .detail-heading h2 { font-size: 14px; overflow-wrap: anywhere; }

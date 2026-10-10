@@ -187,9 +187,13 @@ fn unpaired_group_keeps_text_only_unique_fragment_and_no_timing_pairs() {
         .filter(|row| row.family == SemanticFamily::Equations)
         .collect();
     assert_eq!(rows.len(), 4);
-    assert!(rows
-        .iter()
-        .all(|row| row.change == ChangeKind::Unpaired && row.timing.is_empty()));
+    assert!(rows.iter().all(|row| row.change
+        == if row.before.is_some() {
+            ChangeKind::Removed
+        } else {
+            ChangeKind::Added
+        }
+        && row.timing.is_empty()));
     for row in rows {
         let expression = &row.expressions[0];
         assert_eq!(expression.highlight_basis, HighlightBasis::UnpairedTextOnly);
@@ -214,7 +218,14 @@ fn unpaired_repetition_count_cannot_highlight_an_inserted_occurrence() {
         .filter(|row| row.family == SemanticFamily::Equations)
     {
         let expression = &row.expressions[0];
-        assert_eq!(row.change, ChangeKind::Unpaired);
+        assert_eq!(
+            row.change,
+            if row.before.is_some() {
+                ChangeKind::Removed
+            } else {
+                ChangeKind::Added
+            }
+        );
         assert!(expression
             .before
             .iter()
@@ -713,7 +724,14 @@ fn repeated_condition_candidates_stay_separate_without_inferred_pairing() {
         assert!(diff.removed_equations.is_empty());
         assert_eq!(diff.semantic.rows.len(), 2);
         for row in &diff.semantic.rows {
-            assert_eq!(row.change, ChangeKind::Unpaired);
+            assert_eq!(
+                row.change,
+                if row.before.is_some() {
+                    ChangeKind::Removed
+                } else {
+                    ChangeKind::Added
+                }
+            );
             assert!(row.before.is_none() || row.after.is_none());
             assert!(row.timing.is_empty());
             assert!(row
@@ -772,9 +790,12 @@ fn removing_a_duplicate_candidate_cannot_create_new_condition_correspondence() {
         .filter(|row| row.pointer.starts_with("/semantic/rows/"))
         .collect();
     assert_eq!(condition_rows.len(), 2);
-    assert!(condition_rows
-        .iter()
-        .all(|row| row.change == ChangeKind::Unpaired));
+    assert!(condition_rows.iter().all(|row| row.change
+        == if row.before.is_some() {
+            ChangeKind::Removed
+        } else {
+            ChangeKind::Added
+        }));
     assert!(diff
         .coverage
         .limits

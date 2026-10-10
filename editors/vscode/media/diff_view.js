@@ -2,11 +2,11 @@
 (() => {
   "use strict";
   const api = acquireVsCodeApi(), saved = api.getState();
-  const names = { symbols: "Symbols", parameters: "Parameters", equations: "Equations", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "Steady state", priors: "Priors", commands: "Commands", observables: "Observables", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Moments and IRFs", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
-  const kinds = ["added", "removed", "changed", "unpaired"], marks = { added: "+", removed: "−", changed: "~", unpaired: "?" };
+  const names = { symbols: "Symbols", parameters: "Parameters", equations: "Equations", shockSetup: "Shock setup", shockAnalysisSetup: "Shock analysis setup", steadyState: "State", forecast: "Forecast", priors: "Priors", commands: "Commands", data: "Data", occbin: "OccBin", policy: "Policy", semiStructural: "Semi-structural", moments: "Method of moments", msSbvar: "MS-SBVAR", heterogeneity: "Heterogeneity", externalFunctions: "External functions", trends: "Trends", operations: "Operations", macroContext: "Macro context" };
+  const kinds = ["added", "removed", "changed"], marks = { added: "+", removed: "−", changed: "~" };
   const changeLabel = kind => kind === "changed" ? "Replaced" : titleCase(kind);
   const controls = Object.fromEntries(["models", "status", "search", "kinds", "counts", "results", "refresh"].map(id => [id, document.getElementById(id)]));
-  let payload, choices, references = new Map(), unchangedBlockOpeners = new Set();
+  let payload, choices, references = new Map();
   const node = (tag, text, className) => { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; };
   const titleCase = text => text.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase());
   const scopeLabel = value => value === "aggregate" ? "Aggregate" : value === "global" ? "Global" : "Dimension: " + value;
@@ -65,20 +65,6 @@
     if (!reason) button.title = [...locations.map(location => location.uri), ...files].join("\n");
     return button;
   }
-  function plainShockOpeners(expression) {
-    // This changes color only. It does not parse facts or alter retained text.
-    const ranges = [...expression.text.matchAll(/^[ \t]*(shocks|mshocks|heteroskedastic_shocks|shock_paths|shock_groups|perfect_foresight_controlled_paths|initval|endval|end)\b[ \t]*;?/gim)].map(match => [match.index, match.index + match[0].length]);
-    for (const match of expression.text.matchAll(/^[ \t]*shock_groups\b[^\r\n]*;/gim)) {
-      if (unchangedBlockOpeners.has(match[0].trim())) ranges.push([match.index, match.index + match[0].length]);
-    }
-    let offset = 0;
-    return { runs: expression.runs.flatMap(run => {
-      const start = offset, end = offset += run.text.length;
-      const overlaps = ranges.filter(([a, b]) => a < end && b > start);
-      const edges = [...new Set([start, end, ...overlaps.flatMap(([a, b]) => [Math.max(start, a), Math.min(end, b)])])].sort((a, b) => a - b);
-      return edges.slice(0, -1).map((a, index) => ({ text: run.text.slice(a - start, edges[index + 1] - start), role: overlaps.some(([from, to]) => from <= a && a < to) ? "unchanged" : run.role }));
-    }) };
-  }
   function codeLines(parent, expression, side) {
     if (!expression) return;
     const lines = [[]];
@@ -101,9 +87,25 @@
     return field?.comparison_availability === "complete" && field[side].value?.kind === "text" ? field[side].value.value : null;
   };
   const localRole = detail => ["before", "after"].map(side => textField(detail, "role", side)).find(role => role === "model_local_definition" || role === "model_local_declaration");
+  const observableKeyword = (detail, side) => {
+    const role = textField(detail, "role", side);
+    return detail.family === "observables" && detail[side] && ["varobs", "varexobs"].includes(role) ? role : null;
+  };
+  const observableDeclaration = detail => detail.family === "observables" && ["before", "after"].every(side => !detail[side] || observableKeyword(detail, side));
   function declaration(detail, side) {
+    if (observableKeyword(detail, side)) return observableKeyword(detail, side);
     const written = textField(detail, "written_kind", side);
     return detail[side] && ["var", "varexo", "varexo_det", "parameters"].includes(written) ? written : localRole(detail) === "model_local_declaration" && detail[side] ? "model_local_variable" : null;
+  }
+  const writtenStatement = detail => detail.expressions.find(expression => expression.field === "statement_text" && ["before", "after"].every(side => !detail[side] || expression[side]));
+  function declarationKeywordRole(detail, side, keyword) {
+    if (!observableKeyword(detail, side)) return "unchanged";
+    const text = writtenStatement(detail)?.[side];
+    if (!text) return "unchanged";
+    const start = text.text.length - text.text.trimStart().length;
+    if (text.text.slice(start, start + keyword.length).toLowerCase() !== keyword) return "unchanged";
+    const roles = new Set(sliceRuns(text, start, start + keyword.length).map(run => run.role));
+    return roles.size === 1 ? [...roles][0] : "unchanged";
   }
   function visibleFields(detail) {
     if (["commands", "operations", "ms_sbvar"].includes(detail.family)) {
@@ -114,11 +116,14 @@
       const text = assignment?.[side]?.text ?? textField(detail, "expression", side);
       return text !== null && text.trim() !== "" && !/^(?:[+-]\s*)?(?:\d+(?:\.\d*)?|\.\d+)(?:[eEdD][+-]?\d+)?$/.test(text.trim());
     });
-    const statement = detail.family === "shocks" && detail.expressions.find(expression => expression.field === "statement_text");
-    const statementComplete = statement && ["before", "after"].every(side => !detail[side] || statement[side]);
+    const statement = writtenStatement(detail);
     return detail.fields.filter(field => {
+      if (observableDeclaration(detail) && field.comparison_availability === "complete") {
+        if (field.name === "role" || field.name === "target" && ["before", "after"].every(side => !detail[side] || textField(detail, "target", side) === detail[side].name)) return false;
+        if (field.name === "captured_kind" && ["before", "after"].every(side => !detail[side] || textField(detail, "captured_kind", side) === (observableKeyword(detail, side) === "varobs" ? "var" : "varexo"))) return false;
+      }
       if (field.name === "evaluated_value") return evaluatedValueNeeded;
-      if (statementComplete && statement.before?.text !== statement.after?.text && field.comparison_availability === "complete"
+      if (statement && statement.before?.text !== statement.after?.text && field.comparison_availability === "complete" && !["order", "execution_order"].includes(field.name)
         && (field.name !== "status" || [field.before, field.after].every(side => side.state === "absent" || side.value?.kind === "text" && ["active", "written"].includes(side.value.value)))) return false;
       if (field.comparison_availability === "complete") {
         if (detail.family === "commands" && field.name === "role" && [field.before, field.after].every(side => side.state === "absent" || side.value?.kind === "text" && ["command", "block_context"].includes(side.value.value))) return false;
@@ -137,7 +142,7 @@
       return !expression || field.comparison_availability !== "complete" || !["before", "after"].every(side => expression[side] === null ? field[side].state === "absent" : ["present", "empty"].includes(field[side].state) && field[side].value?.kind === "text" && field[side].value.value === expression[side].text);
     });
   }
-  const visibleExpressions = detail => detail.expressions.filter(expression => ["commands", "operations", "ms_sbvar"].includes(detail.family) ? expression.field === "statement_text" : ["expression", "statement_text"].includes(expression.field) || expression.before?.text !== expression.after?.text || expression.availability !== "complete");
+  const visibleExpressions = detail => observableDeclaration(detail) ? [] : writtenStatement(detail) ? [writtenStatement(detail)] : detail.expressions.filter(expression => ["commands", "operations", "ms_sbvar"].includes(detail.family) ? expression.field === "statement_text" : ["expression", "statement_text"].includes(expression.field) || expression.before?.text !== expression.after?.text || expression.availability !== "complete");
   function sidePanel(row, side) {
     const panel = node("div", undefined, "side " + side), heading = node("div", undefined, "side-title"), own = row.semantic?.[side];
     const scope = row.sideScopes[side], scopeShown = scope !== null && contextScopes(row).includes(scope);
@@ -150,13 +155,13 @@
     else if (own) {
       const keyword = declaration(row.semantic, side), role = localRole(row.semantic);
       if (keyword) {
-        codeLines(panel, { runs: [{ text: keyword + " ", role: "unchanged" }, { text: own.name, role: row.kind === "added" ? "added" : row.kind === "removed" ? "removed" : "unchanged" }, { text: ";", role: "unchanged" }] }, side);
+        codeLines(panel, { runs: [{ text: keyword, role: declarationKeywordRole(row.semantic, side, keyword) }, { text: " ", role: "unchanged" }, { text: own.name, role: row.kind === "added" ? "added" : row.kind === "removed" ? "removed" : "unchanged" }, { text: ";", role: "unchanged" }] }, side);
       }
       const expressions = visibleExpressions(row.semantic);
-      if (["commands", "operations", "ms_sbvar"].includes(row.semantic.family) && !expressions.some(expression => expression[side])) panel.append(node("p", "Written source text is unavailable for this instruction. Use Text diff to inspect the captured files.", "source-note"));
+      if (!keyword && !["symbols", "parameters", "equations", "shocks", "macro_context"].includes(row.semantic.family) && !writtenStatement(row.semantic)?.[side]) panel.append(node("p", "Written source text is unavailable for this instruction. Use Text diff to inspect the captured files.", "source-note"));
       for (const expression of expressions) {
         if (!["expression", "statement_text", "statement_tokens"].includes(expression.field) || expressions.length > 1) panel.append(node("h3", row.semantic.fields.find(field => field.name === expression.field)?.label ?? titleCase(expression.field), "field-label"));
-        const value = expression[side] && row.semantic.family === "shocks" && expression.field === "statement_text" ? plainShockOpeners(expression[side]) : expression[side];
+        const value = expression[side];
         const definitionRole = ["added", "removed"].includes(row.kind) ? row.kind : "unchanged";
         codeLines(panel, value && role === "model_local_definition" && expression.field === "expression" ? { runs: [{ text: "# " + own.name + " = ", role: definitionRole }, ...value.runs, { text: ";", role: definitionRole }] } : value, side);
       }
@@ -213,6 +218,43 @@
     if (row.semantic?.family === "operations" && instruction?.before && instruction.after && instruction.before.text === instruction.after.text && row.semantic.fields.some(field => field.changed && !["role", "order"].includes(field.name))) article.append(node("p", "The written instruction is unchanged; its recorded effects differ.", "source-note"));
     return article;
   }
+  function sliceRuns(expression, start, end) {
+    let offset = 0;
+    return expression.runs.flatMap(run => {
+      const from = offset, to = offset += run.text.length;
+      return from < end && to > start ? [{ text: run.text.slice(Math.max(start, from) - from, Math.min(end, to) - from), role: run.role }] : [];
+    });
+  }
+  function historyCards(rows) {
+    // Group display context only after filtering. Each period keeps its semantic
+    // owner/count; the shared source action still opens the verified parent block.
+    const cards = [], groups = new Map();
+    for (const row of rows) {
+      const detail = row.semantic, statement = detail && writtenStatement(detail);
+      const target = detail && (textField(detail, "target", "after") ?? textField(detail, "target", "before"));
+      const history = detail && ["before", "after"].every(side => !detail[side] || ["histval", "filter_initial_state"].includes(detail[side].context?.name));
+      const parts = statement && Object.fromEntries(["before", "after"].map(side => {
+        const text = statement[side]?.text, match = text?.match(/^([^\n]*;\r?\n)([\s\S]*)(\r?\nend;)$/);
+        return [side, match && { start: match[1].length, end: text.length - match[3].length, header: match[1], footer: match[3] }];
+      }));
+      if (!history || !target || detail.limits.some(limit => limit.code === "occurrence_correspondence_unpaired") || !parts || ["before", "after"].some(side => detail[side] && !parts[side]) || detail.fields.some(field => field.changed && field.comparison_availability === "complete" && !["expression", "role", "target", "lag"].includes(field.name))) { cards.push(row); continue; }
+      const key = JSON.stringify([target, row.kind, ...["before", "after"].map(side => [detail[side]?.context, row.navigation[side]?.written_locations, parts[side]?.header, parts[side]?.footer])]);
+      const existing = groups.get(key);
+      if (!existing) {
+        const card = { ...row, semantic: { ...detail, expressions: [{ ...statement, ...Object.fromEntries(["before", "after"].map(side => [side, statement[side] && { ...statement[side], runs: [...statement[side].runs] }])) }] } };
+        groups.set(key, { card, parts }); cards.push(card); continue;
+      }
+      existing.card.label = target;
+      const combined = existing.card.semantic.expressions[0];
+      for (const side of ["before", "after"]) {
+        if (!combined[side]) continue;
+        const own = combined[side], footer = existing.parts[side].footer;
+        const runs = [...sliceRuns(own, 0, own.text.length - footer.length), { text: "\n", role: "unchanged" }, ...sliceRuns(statement[side], parts[side].start, parts[side].end), ...sliceRuns(own, own.text.length - footer.length, own.text.length)];
+        combined[side] = { text: runs.map(run => run.text).join(""), runs };
+      }
+    }
+    return cards;
+  }
   function groupNotes(rows) {
     const entries = rows.flatMap(row => row.semantic ? [...row.semantic.limits, ...row.semantic.expressions.filter(expression => expression.availability !== "complete").map(expression => ({ reason: expression.reason ?? "Highlights: " + titleCase(expression.availability), omitted: null }))] : payload.semantic ? [{ reason: "Typed detail is unavailable for some rows. Structural detail remains.", omitted: null }] : []);
     const unique = new Map(entries.map(entry => [JSON.stringify([entry.reason, entry.omitted]), entry]));
@@ -245,7 +287,7 @@
     }
     const selected = groups.get(choices.group), rows = node("section", undefined, "group-rows"); rows.setAttribute("aria-label", selected?.label ?? "Model changes");
     if (selected) {
-      for (const row of selected.rows) rows.append(rowDetail(row));
+      for (const row of historyCards(selected.rows)) rows.append(rowDetail(row));
       const notes = groupNotes(selected.rows); if (notes) rows.append(notes);
     } else {
       const text = ["failure", "incomplete", "loading"].includes(payload.status) ? "" : payload.rows.length ? "No rows match these filters." : payload.sourceChanges?.files.length ? "No model changes. Captured text differs; use Text diff." : payload.coverage?.availability !== "complete" && payload.semantic ? "No model rows. Some changes could not be compared." : payload.status === "ready" ? "No structural changes. Written text can still differ." : "Refresh to compare current inputs.";
@@ -267,9 +309,6 @@
   window.addEventListener("message", event => {
     const message = event.data; if (!message || message.type !== "render" || !Array.isArray(message.rows)) return;
     payload = message; references = new Map((message.references ?? []).map(reference => [reference.pointer, reference])); choices = message.choices;
-    const openers = side => new Set(message.rows.filter(row => row.semantic?.family === "shocks").flatMap(row => row.semantic.expressions.filter(expression => expression.field === "statement_text").map(expression => expression[side]?.text.split(/\r?\n/)[0].trim()).filter(Boolean)));
-    const beforeOpeners = openers("before"), afterOpeners = openers("after");
-    unchangedBlockOpeners = new Set([...beforeOpeners].filter(opener => afterOpeners.has(opener)));
     controls.models.replaceChildren();
     for (const [label, input] of [["Before", message.before], ["After", message.after]]) {
       const model = node("div", undefined, "input-side"), parts = input.split(" · "); model.title = input;

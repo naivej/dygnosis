@@ -815,6 +815,13 @@ pub fn dynare_compare_models(
             .iter()
             .map(|change| change.before.as_ref()),
     )
+    .with_written_facts(
+        &mut workspace_a,
+        &root_a,
+        &model_a,
+        &diff,
+        crate::semantic_diff::Side::Before,
+    )
     .with_file_names(
         first_nonempty_files(files_a, files)
             .into_iter()
@@ -829,6 +836,13 @@ pub fn dynare_compare_models(
         diff.shock_setup_changes
             .iter()
             .map(|change| change.after.as_ref()),
+    )
+    .with_written_facts(
+        &mut workspace_b,
+        &root_b,
+        &model_b,
+        &diff,
+        crate::semantic_diff::Side::After,
     )
     .with_file_names(
         first_nonempty_files(files_b, files)

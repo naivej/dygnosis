@@ -229,8 +229,10 @@ fn state_and_history_fields_compare_with_proven_parent() {
         "var y; histval; y(-2)=1; end;",
     );
     let rows = role(&diff, "histval_assignment");
-    assert_eq!(rows.len(), 1);
-    assert!(rows[0].facets.contains(&ChangeFacet::Timing));
+    assert_eq!(rows.len(), 2);
+    assert!(rows
+        .iter()
+        .all(|row| row.change == ChangeKind::Added || row.change == ChangeKind::Removed));
 }
 
 #[test]
@@ -282,7 +284,12 @@ fn repeated_changed_commands_cancel_equal_controls_without_pairing() {
     let diff = compare(before, after);
     let rows = commands(&diff);
     assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row.change == ChangeKind::Unpaired));
+    assert!(rows.iter().all(|row| row.change
+        == if row.before.is_some() {
+            ChangeKind::Removed
+        } else {
+            ChangeKind::Added
+        }));
 }
 
 #[test]
@@ -293,7 +300,12 @@ fn repeated_state_target_keeps_unchanged_control_out_of_rows() {
     );
     let rows = role(&diff, "initval");
     assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row.change == ChangeKind::Unpaired));
+    assert!(rows.iter().all(|row| row.change
+        == if row.before.is_some() {
+            ChangeKind::Removed
+        } else {
+            ChangeKind::Added
+        }));
     assert!(rows.iter().all(|row| row.name == "y"));
 }
 
@@ -426,9 +438,13 @@ fn relative_order_is_separate_from_insertion_shifts_and_repeated_pairing() {
     );
     let rows = role(&diff, "initval");
     assert_eq!(rows.len(), 4);
-    assert!(rows
-        .iter()
-        .all(|row| row.change == ChangeKind::Unpaired && row.facets.contains(&ChangeFacet::Order)));
+    assert!(rows.iter().all(|row| row.change
+        == if row.before.is_some() {
+            ChangeKind::Removed
+        } else {
+            ChangeKind::Added
+        }
+        && row.facets.contains(&ChangeFacet::Order)));
 }
 
 #[test]
@@ -458,7 +474,12 @@ fn shared_written_spans_do_not_pair_changed_macro_occurrences() {
     let diff = compare(before, &before.replace("order=1", "order=2"));
     let rows = commands(&diff);
     assert_eq!(rows.len(), 4);
-    assert!(rows.iter().all(|row| row.change == ChangeKind::Unpaired));
+    assert!(rows.iter().all(|row| row.change
+        == if row.before.is_some() {
+            ChangeKind::Removed
+        } else {
+            ChangeKind::Added
+        }));
     let orders: std::collections::BTreeSet<_> = rows
         .iter()
         .filter_map(|row| row.after.as_ref())
@@ -500,7 +521,12 @@ fn histval_execution_link_survives_recovery_records_before_its_parent() {
     let diff = compare(before, &before.replace("y(-1)=1", "y(-1)=2"));
     let rows = role(&diff, "histval_assignment");
     assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row.change == ChangeKind::Unpaired));
+    assert!(rows.iter().all(|row| row.change
+        == if row.before.is_some() {
+            ChangeKind::Removed
+        } else {
+            ChangeKind::Added
+        }));
     assert!(rows.iter().all(|row| row.name == "y(-1)"));
 }
 

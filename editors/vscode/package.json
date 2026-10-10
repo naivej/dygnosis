@@ -1351,19 +1351,17 @@
               "enum": [
                 "added",
                 "removed",
-                "changed",
-                "unpaired"
+                "changed"
               ],
-              "enumItemLabels": ["Added", "Removed", "Replaced", "Unpaired"]
+              "enumItemLabels": ["Added", "Removed", "Replaced"]
             },
             "default": [
               "added",
               "removed",
-              "changed",
-              "unpaired"
+              "changed"
             ],
             "scope": "resource",
-            "description": "Types of changes initially shown in a new Changes view: Added, Removed, Replaced and Unpaired. Uses the model that opened it. Empty hides all rows."
+            "description": "Types of changes initially shown in a new Changes view: Added, Removed and Replaced. Occurrences without a proven match are shown separately as Added and Removed. Uses the model that opened it. Empty hides all rows."
           }
         }
       },

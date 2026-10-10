@@ -16,14 +16,14 @@
   Missing and empty Before/After values stay blank.
 - Equation changes pair across repeated names when their unchanged regime tags
   identify a unique variant on each side. This includes an OccBin `r=1` to `r=0`
-  edit in one `bind` variant. Repeated copies with the same regime remain Unpaired
-  when their correspondence is uncertain.
+  edit in one `bind` variant. Repeated copies with the same regime appear as
+  separate Removed and Added rows when their correspondence is uncertain.
 - Added symbols show one declaration with available metadata. Model-local
   variables are grouped with equations. Their semicolons no longer produce
   redundant Commands changes.
 - Shock cards show written instructions and block options with token highlights.
   Their body edits no longer create duplicate Commands rows. Symbol declaration
-  keywords and shock block openers stay plain. Added or removed shock instructions
+  keywords stay plain. Added or removed shock instructions
   and model-local definitions are highlighted in full. Commands omit repeated role and token headings.
   Predetermined conventions stay in the symbol card without another declaration
   row or the same conversion note on each direct reference.
@@ -36,10 +36,30 @@
 - Commands and Operations show captured `.mod` instructions with their original
   spacing, quotes and comments. An owned `model_replace` block no longer adds a
   Commands row containing only `; end ;`. Formatting-only edits stay in Text diff.
-- **Type of changes** replaces Kind with a checkbox menu. Added, Removed,
-  Replaced and Unpaired can be selected together; All selects every type.
+- **Type of changes** replaces Kind with a checkbox menu. Added, Removed
+  and Replaced can be selected together; All selects every type.
   Replaced is the label in the menu, counts, legend and accessibility text.
-- MS-SBVAR cards show captured command text. Forecast-path cards show only the
+  Occurrences without a proven match use Removed and Added in the view and
+  comparison result, with no Unpaired change type.
+- **Forecast** groups forecast commands and conditional paths. **State** replaces
+  Steady state and includes historical, initial and terminal values. Historical
+  assignments pair by variable and period. Changed periods of one variable share
+  a written block; unchanged periods are omitted and only edited tokens are highlighted.
+  `steady_state_model` uses State, `varobs` uses Data and `estimation`
+  uses Commands, including their retained options and statement context.
+  **Method of moments** replaces Moments and IRFs.
+- **Data** combines Observables and Data. Each observable shows one declaration,
+  such as `varobs y;` or `varobs c;`. New or removed declarations highlight the
+  keyword and name; shared declarations highlight only changed names.
+  The observable list no longer adds a redundant Commands row.
+- Instruction cards, including State, Priors and policy blocks, show captured
+  `.mod` text. Unchanged sibling instructions and duplicate field records are omitted.
+  New or removed blocks highlight their opener and `end;`. Unchanged boundaries
+  stay plain when both models have the block, even for an added or removed instruction.
+  Plain block additions do not add another card beside their added content.
+  Empty accepted blocks and block-option changes remain visible. An `estimation`
+  command shows once with its data options and other written settings.
+  Forecast-path cards show only the
   changed variable inside its block context, with replaced values highlighted.
   An unchanged named shock-group heading stays plain when its members change.
 - Relevant comparison limits appear once after the selected group's rows. **Text diff…**
