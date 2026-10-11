@@ -1,120 +1,69 @@
-# Native MCP tools in VS Code
+# Work with an agent
 
-The extension registers a **Dygnosis** MCP server using its bundled engine.
-Registration does not require an open model or a running language server.
-It provides the same fifteen analysis/editing tools as the standalone MCP
-transport. Model inputs and results remain engine data.
+Dygnosis provides these MCP tools to agents in VS Code and other MCP clients.
+They analyze model source; they do not run Dynare or numerical experiments.
 
-![MCP server list showing the Dygnosis server](assets/agents-mcp.png)
+## Understand the model
 
-1. **MCP: List Servers** opens Select an MCP Server.
-2. **Dygnosis** is the server the extension registers. It stays stopped until an agent starts it.
+| Tool | Available result |
+|---|---|
+| [dynare_model_info](tool:dynare_model_info) | Names, counts, timing, dimensions and model-local definitions. |
+| [dynare_equations](tool:dynare_equations) | Equations, tags, identifiers, timing and source locations. |
+| [dynare_related_files](tool:dynare_related_files) | Includes and companion files. |
+| [dynare_expand](tool:dynare_expand) | Expanded model text and written source locations. |
+| [dynare_find_references](tool:dynare_find_references) | Occurrences of a name by identifier spelling. |
 
-Use the Command Palette's **MCP: List Servers** to manage the server and view
-its Output. In a chat that supports MCP, the tool picker controls which tools
-are available. VS Code manages its own server/tool approval and trust controls;
-see its [MCP guide](https://code.visualstudio.com/docs/agent-customization/mcp-servers).
+## Write and revise
 
-An absolute user/machine [server path](settings:dynare.serverPath) override applies to both the
-language client and native MCP provider. Use the matching native engine for
-the workspace host. A remote window runs the workspace extension and its
-engine there. If an override is incompatible, the Dygnosis Output and Settings
-provide the recovery path; use a compatible engine or the bundled binary.
+| Tool | Available result |
+|---|---|
+| [dynare_list_options](tool:dynare_list_options) | Recognized commands and their options. |
+| [dynare_rename](tool:dynare_rename) | Rewritten text with matching identifier spellings renamed. |
+| [dynare_auto_fix](tool:dynare_auto_fix) | Text with available stored diagnostic fixes applied. |
+| [dynare_format](tool:dynare_format) | Formatted model text. |
+| [dynare_extract](tool:dynare_extract) | Selected equations with required declarations and model locals, as a fragment. |
 
-For another agent that reads project-local configuration, run **Dygnosis: Set
-up MCP for this project** and follow [Project MCP setup](agents.md#project-mcp-setup). That
-command preserves other servers and uses a managed copy or your explicit
-override. It is a separate setup from native VS Code MCP registration.
+MCP reference search and rename match spelling; they do not distinguish
+model-local definitions as [editor navigation](navigate-code.md#model-local-variables)
+does. Extracted fragments need completion before they can run. Editing tools
+return text for the agent to apply.
 
-## Project MCP setup
+## Check and compare
 
-Run **Dygnosis: Set up MCP for this project** in a trusted workspace. You can
-run it without opening a Dynare model. In a window with several folders, choose
-the project. Dygnosis uses its containing repository root when VS Code's Git
-extension exposes one; otherwise it uses the selected folder. The command
-shows the `.mcp.json` destination and opens the result for review.
+| Tool | Available result |
+|---|---|
+| [dynare_diagnose](tool:dynare_diagnose) | Diagnostics for supplied model text and includes. |
+| [dynare_explain](tool:dynare_explain) | Explanation of a diagnostic code. |
+| [dynare_list_diagnostic_codes](tool:dynare_list_diagnostic_codes) | Shared, added and skipped check codes. |
+| [dynare_compare_models](tool:dynare_compare_models) | Model and source changes between supplied models or Git and saved Working inputs. |
+| [dynare_workspace_diagnose](tool:dynare_workspace_diagnose) | Checks for several model roots, from supplied files or saved paths. |
 
-The command writes the [Claude Code project format](https://code.claude.com/docs/en/mcp#project-scope):
+Supplied-text tools use the text the agent provides; repository comparison
+reads saved Working files, not unsaved editor buffers.
 
-```json
-{
-  "mcpServers": {
-    "dygnosis": {
-      "type": "stdio",
-      "command": "<absolute executable path on this host>",
-      "args": ["mcp"]
-    }
-  }
-}
-```
+## Connections
 
-Other servers, unrelated keys and their original text stay intact. An identical
-Dygnosis entry needs no change. An existing different entry or a dirty editor
-buffer opens a read-only Before/Proposed diff. Choose **Save reviewed setup**
-to save that result, or cancel to leave the configuration unchanged. Setup
-uses the unsaved buffer as its source and checks its version and the disk
-contents before saving. If either changes, review the current file and run
-setup again. Invalid JSON, comments, trailing commas, duplicate keys, a
-non-object `mcpServers`, and symlinked config files must be resolved before
-setup; the command does not repair them.
+The extension registers a **Dygnosis** server with VS Code's MCP controls.
+No open model is required. The agent client controls tool access and approval.
 
-Start Claude Code in that project and use its MCP controls to approve and
-connect the server. Claude Code owns those approval and trust prompts. After
-an executable update, restart or reconnect its Dygnosis MCP server to load the
-new version.
+**Set up MCP for this project** creates or updates a project `.mcp.json` for
+clients that read that format. It requires a trusted workspace, preserves other
+server entries, and offers a review for a changed existing setup. Other client
+formats need their own configuration.
 
-## Executable updates
+Setup uses a managed copy of the bundled executable at a stable path. The
+extension updates that copy; a running agent needs to reconnect to load the
+new version. On Windows, a running server can delay replacement until it stops.
+The path belongs to the host where setup ran and is not portable across machines.
 
-With the included engine, setup copies verified package bytes to
-`bin/dygnosis.exe` on Windows or `bin/dygnosis` on macOS/Linux under the
-extension's [API-provided global storage](https://code.visualstudio.com/api/references/vscode-api#ExtensionContext).
-That path is independent of the installed extension version. The copy retains
-the package's version, native target, SHA-256 checksum and source provenance.
-It is created by setup, then checked for updates whenever the extension
-activates. Update staging, version comparison and replacement share a
-filesystem lock across windows; an older window cannot downgrade the copy.
-An update with different bytes for the same version is refused for review.
+[Server path](settings:dynare.serverPath) selects a user-managed executable for
+the editor and VS Code MCP. An existing project config changes only when
+project setup runs again.
 
-Windows can prevent replacement while another agent runs the executable.
-Dygnosis preserves the working version, reports the pending version, and
-retries up to five times at 15-second intervals. It retries again on the next
-activation or setup invocation. Stop the other agent's Dygnosis MCP server to
-release the file, then restart it after the update completes. Running servers
-continue using their loaded version. The `.mcp.json` path stays the same.
-An interrupted binary/metadata commit is recovered from the verified pending
-record before a later update proceeds.
+## MCP without VS Code
 
-A live window's lock is never removed automatically. A dead process's lock is
-recovered under a separate guard. Malformed locks or a guard left by an
-interruption during lock recovery time out safely; close all Dygnosis windows
-and remove only the named `.dygnosis.lock`/`.recovery` files in extension
-storage, or the `.mcp.json.dygnosis.lock`/`.recovery` files beside that project's
-config, before retrying. Keep the executable and provenance records intact.
-
-If you set the user/machine `dynare.serverPath`, setup uses that absolute path
-after checking the executable's MCP compatibility. Its updates are
-user-managed. Overrides are never copied into managed storage or overwritten.
-Changing the setting changes LSP and VS Code's MCP provider; an existing
-project config changes only when you run setup and review its proposed edit.
-
-## Host and storage limits
-
-The generated path belongs to the machine where the extension runs. A remote
-workspace uses the remote extension host's copy. Run setup on each host or
-checkout that needs its own path. An agent running on another host needs its
-own matching local binary; an absolute path in a committed config is not
-portable across machines.
-
-The managed path lasts while that extension's storage remains present.
-Uninstalling the extension, switching to a profile with separate storage, or
-deleting the storage can require setup again. A
-[standalone release binary](https://github.com/naivej/dygnosis/releases) is an
-independent installation route for users who want to maintain their own path.
-Dygnosis does not install a system command or change `PATH`.
-
-The extension generates only `.mcp.json` and leaves agent-global settings
-untouched. For another agent format, ask that agent:
-
-> Port this repo's `.mcp.json` to your project-local MCP configuration. Keep
-> dygnosis's command and arguments, preserve other server entries, and leave
-> global settings untouched.
+Standalone binaries are available from
+[GitHub Releases](https://github.com/naivej/dygnosis/releases) when published for
+the host. The MCP connection uses the executable's absolute path as its command
+and `mcp` as a separate argument, over standard input and output. No VS Code or
+Node.js installation is required. Client configuration formats differ.

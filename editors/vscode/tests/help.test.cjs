@@ -9,7 +9,12 @@ test('Help uses every current command, check, option and setting feature owner w
   assert.equal(ids.size, pages.length);
   for (const code of bundle.reference.codes) assert.ok(ids.has(`check:${code.code}`));
   for (const tool of bundle.reference.tools) assert.ok(ids.has(`tool:${tool.name}`));
-  for (const command of bundle.commands) assert.ok(ids.has(bundle.commandsTopics[command.command]));
+  for (const command of bundle.commands) {
+    const owner = pages.find(page => page.id === bundle.commandsTopics[command.command]);
+    assert.ok(owner, command.command);
+    assert.ok(owner.keywords.includes(command.command), command.command);
+    assert.ok(owner.keywords.includes(`${command.category}: ${command.title}`), command.title);
+  }
   for (const [key, id] of Object.entries(bundle.settingsTopics)) assert.ok(pages.find(page => page.id === id).keywords.includes(key));
   assert.ok(!ids.has('settings'));
   assert.equal(JSON.stringify(bundle), original);

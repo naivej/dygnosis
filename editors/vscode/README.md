@@ -7,7 +7,7 @@ Dygnosis provides language support for Dynare, acting as a second preprocessor t
 
 Dygnosis works out of the box when installed from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis). Run **Dygnosis: Open Help** to learn more.
 
-For MCP without VS Code, download the native Rust binary from [GitHub Releases](https://github.com/naivej/dygnosis/releases) and follow [MCP setup](../../help/get-started.md#mcp-without-vs-code).
+For MCP without VS Code, standalone binaries are available from [GitHub Releases](https://github.com/naivej/dygnosis/releases) when published for your host. [Agent tools](../../help/agents.md) lists the tools and connection options.
 
 ## Limits
 

@@ -1,6 +1,22 @@
-# Connect an LSP client
+# LSP and MCP integration contracts
 
-Configure an LSP client to launch `dygnosis` over stdio, without arguments. The [executable](get-started.md#executable) section lists every launch. The VS Code extension adds native Settings, a [count bar](model-and-includes.md), [model view](model-and-includes.md), [colors](appearance.md), [CodeLens](model-and-includes.md), [diagnostic controls](diagnostics.md), [model Diff](structural-diff.md), [origin navigation](effective-model.md), and [project checks](project-checks.md). See [distribution](get-started.md) for host packages and runtime requirements.
+This developer reference is kept in the repository, outside built-in GUI Help.
+The [feature overview](get-started.md) describes the VS Code extension.
+
+## Executable
+
+Configure an LSP client to launch `dygnosis` over stdio without arguments.
+
+| Launch | Result |
+|---|---|
+| No arguments | Language server over standard input and output. |
+| `mcp` | MCP over standard input and output. |
+| `--version`, `-V` | Print the version and exit. |
+| `--help`, `-h` | Print usage and exit. |
+| `--tcp` | Language server over TCP for debugging; accepts one connection. |
+
+`--host` defaults to `127.0.0.1`; `--port` defaults to `2087`. With `mcp`, the
+program starts MCP and leaves the TCP port closed.
 
 ## LSP configuration messages
 
@@ -207,11 +223,29 @@ The server negotiates four role types against the types and modifiers advertised
 
 If neither the custom type nor `variable` is supported, that role is omitted. Initialize without semantic-token capabilities yields an empty legend and no semantic role tokens. Unsupported modifiers are omitted independently. Clients can advertise `declaration`, `forwardLooking`, and `predetermined` to retain their existing meanings. Distinct roles may still have the same color in a theme or in a standard-only client.
 
-[Appearance](appearance.md) owns the VS Code selector migration and styling examples. Other LSP clients supply their own token registrations and theme rules.
+[Appearance](appearance.md#custom-colors) lists current VS Code selectors.
+For rules written before 0.11, use these replacements:
+
+| Old selector | Current selector |
+|---|---|
+| `variable:dynare` | `dynareEndogenous:dynare` |
+| `type:dynare` | `dynareExogenous:dynare` |
+| `macro:dynare` | `dynareParameter:dynare` |
+| `parameter:dynare` | `dynareModelLocal:dynare` |
+
+All four roles inherit from `variable`. Their TextMate fallback scopes are
+`variable.other.readwrite.dynare.endogenous`, `.exogenous`, `.parameter`, and
+`.modelLocal`, respectively, with the same `variable.other.readwrite.dynare`
+prefix. Other LSP clients supply their own token registrations and theme rules.
 
 ## Expression value hints
 
-The LSP inlay-hint provider returns values at verified written source positions. [Appearance](appearance.md#expression-value-hints) owns the folding limits and visibility controls.
+The LSP inlay-hint provider returns finite arithmetic values at verified written
+top-level assignments, excluding plain numeric assignments. Unknown inputs,
+non-finite arithmetic and opaque execution withhold a value until an explicit
+assignment establishes it again. Repeated macro sites require the same value
+in every occurrence; incomplete expansion or ambiguous owners withhold hints.
+[Appearance](appearance.md#expression-value-hints) owns visibility controls.
 
 ## Diagnostic locations and fixes
 

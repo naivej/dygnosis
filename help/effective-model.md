@@ -1,34 +1,23 @@
-# Trace macro expansion
+# Inspect macro expansion
 
-Expand macros opens include and macro expansion in a read-only editor. The preview shows the model before Dynare transforms equations. Edit the written files, then use Refresh macro expansion to update the preview.
+**Expand macros** opens a read-only model preview with includes, macro loops,
+conditions and substitutions expanded. Written spacing stays in place around
+the expanded text. The preview is before Dynare's equation transformations.
+[Macro tint](settings:dynare.effectiveModel.macroTint) can shade the expanded
+regions. [Editor actions](settings:dynare.editorActions) controls where model
+actions appear in title bars and context menus; commands remain in the Command
+Palette.
 
-With the bundled engine or an engine that supports source layout, the preview keeps the written spaces and line breaks. Macro substitution and includes expand in place. Strings, native text, and matrix contents stay as written. An older engine that only advertises readable layout keeps the indented preview, which does not preserve written spacing. Engines without either layout keep the compact preview.
+| Action | Result |
+|---|---|
+| Go to written source | The written text behind the cursor or selection. A generated name such as `beta_1` leads to `beta_@{j}`. |
+| Refresh macro expansion | A new preview from the current model and includes. |
 
-Macro interpolation also expands inside quoted values, `//` comments, and `%` comments. For example, a loop over `j` with `[name='eq@{j}']` and `long_name='Output @{j}'` produces `eq1`, `eq2`, and their corresponding labels. Each repeated equation keeps its own source. A replacement is read again as model text, including when it joins a name (`var y@{""}z` is `yz`), closes or opens a comment, or closes the surrounding quote. A loop that includes a different file on each pass includes each of those files. `@#echo` and `@#echomacrovars` print in the Dygnosis output channel when you open or refresh this preview. They are not Problems. `@#echomacrovars(save)` writes assignment text into the preview, using the line number in the file that contains the directive. An older engine omits those messages. The first fatal macro error stops the preview body after the messages already printed.
+Source changes make the preview out of date. Source jumps remain unavailable
+until refresh, and a selection spanning several source regions may have no
+single target. Incomplete expansion shows its reason and has no source jumps.
 
-Macro expressions follow Dynare's evaluation order, including changes a comprehension makes to macro variables. Syntax is checked in every branch of each file that is read before that file runs. A child cannot close a macro block in its parent.
-
-![Written source beside the read-only macro expansion preview](assets/effective-model.png)
-
-1. The written `.mod` file stays editable in the primary editor column.
-2. The **macro expansion** preview shows expanded include and macro text read-only beside it.
-3. Native preview commands refresh the text and jump back to verified written locations.
-
-Macro-expanded text has a faint background: loop and branch bodies, included text, substitutions, and a complete macro-built name such as `beta_1`. Unchanged root text stays unshaded. Nested macros use that same background. [Macro tint](settings:dynare.effectiveModel.macroTint) turns the background off. An older engine does not shade the preview. Incomplete expansion has no background.
-
-Place the cursor on written text in the preview, or select part of one written region. Go to written source opens the editor that already has that file when it is open, and moves the selection to the written range. It opens another editor only when that file is not open. A macro-built name such as `beta_1` or `beta_2` selects the complete written name `beta_@{j}`. A selection that crosses several written regions has no jump. Text with no verified written location has no source action. An older engine without source navigation still jumps from mapped model equation rows only.
-
-The commands appear in the Command Palette while a preview is active. [Editor actions](settings:dynare.editorActions) controls preview title and context menus. Default keyboard shortcuts apply only in a preview editor:
-
-| Action | Windows/Linux | macOS |
-|---|---|---|
-| Go to written source | Ctrl+Alt+G | Cmd+Alt+G |
-| Refresh macro expansion | Ctrl+Alt+R | Cmd+Alt+R |
-
-[Keyboard Shortcuts](action:shortcuts) can change these bindings. Pickers use VS Code's native keyboard controls and theme.
-
-Each preview retains its chosen root and input revision. It can refresh after that root closes, and several previews can refer to different roots. Source edits, dependency changes, model settings changes, and a language-server restart disable origin actions until Refresh. Changing macro tint keeps source jumps available and applies the background without Refresh. Open, Refresh, and source jumps use one layout for that engine. Refresh replaces text and navigation together; an older response cannot overwrite a newer request. Refresh does not jump to a location based on the previous cursor mapping.
-
-A missing or changed source cancels a jump. Refresh the preview and choose the place again.
-
-Incomplete expansion is labelled and has no origin actions. An older engine can keep the basic text preview and Refresh while navigation remains unavailable. Unsupported navigation reports an engine-update recovery action. [Integration contracts](integrations.md) describe source ranges and input revisions for other clients.
+`@#echo` and `@#echomacrovars` messages appear in
+[Dygnosis Output](action:output) when the preview opens or refreshes.
+`@#echomacrovars(save)` adds assignment text to the preview. These messages do
+not appear as diagnostics.

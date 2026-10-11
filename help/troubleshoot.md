@@ -1,63 +1,27 @@
-# Resolve a problem
+# Troubleshooting
 
-Open [Dygnosis Output](action:output) for the failure details. Help remains
-available without an open model or a working engine.
+[Dygnosis Output](action:output) records startup and failure details. Help stays
+available when the engine cannot run.
 
-![Dygnosis Output channel and project status while recovering](assets/troubleshoot.png)
-
-1. **Dygnosis** Output records startup, engine selection and recovery messages.
-2. The **Dynare project** status item stays visible while you restart the language server or clear an override.
-
-## The engine does not start
-
-The extension includes the native engine for its workspace host. Reinstall the
-matching extension package if that binary is absent or damaged. A remote
-workspace runs it on the remote host. Use a supported host from
-[Get started](get-started.md).
-
-An absolute User or machine [server path](settings:dynare.serverPath) selects
-another executable for LSP and VS Code MCP. Clear it to use the included
-engine, then [restart the language server](action:restart). Workspace settings
-cannot select an executable in an untrusted workspace. Never select MATLAB,
-Octave or the official Dynare preprocessor as this server.
-
-An older engine can lack a requested capability. Update the selected binary or
-use the included one. An unsupported schema is not treated as a compatible
-result. A missing explanation can still be read from this Help edition's
-[check index](reference.md).
-
-## A feature has no result
-
-| Visible state | What to do |
+| Problem | Recovery |
 |---|---|
-| No model root / no owner | Open the owner `.mod` or `.dyn`; choose its owner for an include. |
-| Updating / out of date / changed input | Wait for current model data, or refresh the preview or comparison. Request a picker action again. |
-| Incomplete expansion | Resolve the include or macro problem. Counts and verified source jumps are withheld when they cannot be established. |
-| No counted or named equations | Check the chosen scope. Model locals and static-only rows have no counted number. |
-| No verified written location | Edit the written files directly; the engine does not guess a location from text. |
-| No changes | The structural comparison found no displayed change. This is not numerical equivalence. |
-| Pending / failed project root | Open the project view and Output. Resolve read/discovery failures and Recheck. |
-| No folders / no root models | Open a file-backed workspace folder with saved `.mod` roots. |
-| Off / excluded | Change the project controls. Opening a model still gives editor checks. |
-| Missing hint, color, lens or row | Check the feature's Dygnosis setting and its native editor visibility control. Reset a setting to its default if needed. |
+| Engine does not start | Reinstall the extension package for the workspace host, or check the [server path](settings:dynare.serverPath) override. It must name a Dygnosis executable. |
+| Feature unavailable with an older engine | Clear the override to use the bundled engine, then [restart the language server](action:restart). |
+| Include has no model owner | Open its root `.mod` or `.dyn`. **Choose model owner** selects between known owners. |
+| Incomplete analysis | Resolve the reported include, parse or macro problem. Counts and source jumps can be unavailable until then. |
+| Preview or comparison out of date | Refresh it to use current inputs. |
+| Hint, color or CodeLens missing | Check the feature setting and native VS Code visibility controls. |
+| No project roots | Background discovery needs a file-backed folder with saved `.mod` roots. |
+| Project check failed | The project view and Output identify read or discovery failures. **Recheck project** retries. |
+| MCP setup rejected | Setup needs a trusted file-backed workspace and valid `.mcp.json`; duplicate keys, unsupported file structure and symlinks require correction. |
+| MCP update pending on Windows | Stop the other client's Dygnosis server so its executable can be replaced, then reconnect. |
 
-Virtual filesystems have grammar support only. Untitled Dynare documents can
-receive analysis but have no disk base for includes. Save the root to a
-file-backed folder for disk includes and project checks. `.inc` needs a known
-model owner. Check the language-mode control if a file is treated as plain text.
-
-## Project MCP setup fails
-
-Use a trusted file-backed workspace and follow [Connect an agent](agents.md).
-Resolve invalid or duplicate JSON keys, unsupported config shape and symlinks
-before setup. Changed disk or editor text requires a fresh review. A locked
-managed binary can wait until the other agent stops its server. The agent owns
-its tool approval and reconnect controls.
+Virtual filesystems have syntax coloring only. Untitled files have no disk
+base for includes. A file treated as plain text needs Dynare language mode.
 
 ## Report a problem
 
-Include the extension and active engine versions, host OS/architecture, whether
-the workspace is remote, the command used, and relevant Output. Give the
-smallest shareable `.mod` and include files that show the problem. State the
-expected and observed result. Review logs and model text before sharing them.
-[Open the issue tracker](https://github.com/naivej/dygnosis/issues).
+The [issue tracker](https://github.com/naivej/dygnosis/issues) accepts reports.
+Useful details are the extension and selected engine versions, OS, remote
+workspace status, relevant Output and a small shareable model that shows the
+expected and actual result.

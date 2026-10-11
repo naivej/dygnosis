@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.11.17
+
+- Help follows the Dynare workflow: understand the model and files, write
+  equations and experiment setup, inspect and check, then review changes and
+  project models. Agent tools follow the same stages. Configuration appears
+  with the feature it affects. Short descriptions replace GUI tutorials and
+  internal implementation details; important result limits remain.
+- Adds an overview of every MCP tool and links to missing configuration controls,
+  including the default comparison filters. Developer integration contracts stay
+  in the repository, outside the Help contents.
+
 ## v0.11.16
 
 - In **Show mod changes**, a source link on the missing side of an added or

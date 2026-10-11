@@ -1,106 +1,58 @@
-# Get started
+# Dynare workflow
 
-Install **Dygnosis** from the
-[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis).
-For a candidate build, use **Install from VSIX…** as described below. The
-extension includes its Rust engine. Analysis needs no separate Rust,
-Python, MATLAB, Octave or Dynare installation. VS Code updates the extension
-and its engine together.
+Dygnosis adds Dynare language support to VS Code for `.mod`, `.dyn` and `.inc`
+files. Analysis works without a separate Dynare, MATLAB or Octave installation.
 
-## Open your first model
+## Understand the model
 
-1. Open a folder containing your model, then open its `.mod` or `.dyn` file.
-2. Check that the editor's language mode is **Dynare**. `.mod`, `.dyn` and `.inc`
-   are associated with that mode. Use **Change Language Mode** if necessary.
-3. Read checks in **Problems**, inspect **Dynare model** in Explorer, or use
-   **Quick Fix** on a marked problem. [Edit a model](edit-models.md) describes
-   completion, formatting and source actions.
+[Model files and structure](model-and-includes.md) brings together includes,
+related files, counts and timing. [Equation and name navigation](navigate-code.md)
+connects declarations to their uses across the model.
 
-**Dygnosis: Open Help** is always in the Command Palette. The question-mark
-action on either Dygnosis Explorer view opens it. The first-install invitation
-and native **Get started with Dygnosis** walkthrough lead here too. Dismissing
-the invitation does not remove these entrances.
+## Write equations and experiment setup
 
-The header search box searches Help topics. With Help focused, **Find** searches
-the rendered open page: Ctrl+F on Windows/Linux or Cmd+F on macOS. A Help panel
-opened before this update can need closing and reopening to enable Find.
+[Editing support](edit-models.md) covers declarations, parameters, equations,
+steady-state blocks, shocks and commands. [Labels, hints and colors](appearance.md)
+make names, known values and block structure easier to read.
 
-![Dygnosis Explorer views before a model is open](assets/get-started.png)
+## Inspect and check
 
-1. **Dynare model** shows a welcome row with **Open Dygnosis Help** before any model opens.
-2. **Dynare project checks** appears in every workspace folder and links to project-check topics.
-3. The question-mark action on the Dynare project checks view title opens Help.
+[Macro expansion](effective-model.md) shows the text produced by includes,
+loops and substitutions. [Model checks](diagnostics.md) report problems while
+you edit, with explanations and available fixes.
 
-Loose and untitled Dynare files receive ordinary editor analysis. Save a model
-to establish its disk base for includes. An `.inc` file needs a known model
-owner; open its root first. A folder also starts [project checks](project-checks.md)
-on unopened saved `.mod` roots.
+## Review changes and model variants
 
-## Hosts and manual installation
+[Model comparison](structural-diff.md) shows changes against Git history or
+another model. [Project checks](project-checks.md) cover unopened saved models
+alongside the one being edited.
 
-The extension requires **VS Code 1.102.0 or later** and runs in the workspace
-extension host. WSL, SSH and container workspaces need the package for that
-host. Virtual filesystems have grammar support only. Browser-only, Alpine and
-32-bit hosts are outside the package matrix.
+## Numerical work
 
-| Package target | Verified host for the preceding package series | Engine requirement measured there |
-|---|---|---|
-| `win32-x64` | Windows Server 2022, build 20348 | Statically linked C runtime |
-| `win32-arm64` | Windows 11 ARM, build 26200 | Native ARM64 launch |
-| `darwin-x64` | macOS 15 Intel, Darwin 24.6 | Deployment target 13.0 is not a tested minimum |
-| `darwin-arm64` | macOS 15 ARM, Darwin 24.6 | Native ARM64 launch |
-| `linux-x64` | Ubuntu 22.04 x64 | Highest required glibc symbol 2.34 |
-| `linux-arm64` | Ubuntu 22.04 ARM | Highest required glibc symbol 2.34 |
+Official Dynare with MATLAB or Octave performs steady-state calculations,
+simulation, estimation and other numerical tasks. Dygnosis supports the source
+work above; it does not run those tasks. [Analysis limits](about.md#analysis-limits)
+explain what its results establish.
 
-Linux also needs the package's recorded `libgcc_s`, `libm` and loader. VS Code
-has its own [host requirements](https://code.visualstudio.com/docs/supporting/requirements).
-The table reports tested hosts and measured symbols, not every possible OS.
+[Agent tools](agents.md) support the same source workflow through MCP.
 
-For manual installation, download `dygnosis-<version>-<target>.vsix` from
-[GitHub Releases](https://github.com/naivej/dygnosis/releases). In Extensions,
-choose **Install from VSIX…** and select the workspace host's package. Verify
-its SHA-256 against `SHA256SUMS` before installation.
+**Dygnosis: Open Settings** contains the full configuration list. Feature pages
+mention configuration where it changes that feature's behavior or appearance.
+The [reference](reference.md) provides command, check and option lookup;
+[troubleshooting](troubleshoot.md) covers extension problems.
 
-## MCP without VS Code
+## Availability
 
-Download the GitHub Release Rust binary archive for your host, verify its
-SHA-256 against `SHA256SUMS`, and extract it to a persistent directory. Windows
-uses `dygnosis.exe`; macOS and Linux use `dygnosis`. A loose binary asset can
-also have its target in its name. Keep the accompanying license and provenance
-files. No Node.js or VS Code installation is needed.
+The extension requires **VS Code 1.102.0 or later**. Packages target Windows,
+macOS and Linux on x64 and ARM64. Remote workspaces use the package on the
+remote host. Virtual filesystems have syntax coloring only; browser-only,
+Alpine and 32-bit hosts are outside the package targets.
 
-Configure your MCP client with separate executable and argument fields:
+Loose and untitled Dynare models receive editor analysis. A saved model gives
+includes a disk location. An included file needs a known
+[model owner](model-and-includes.md#model-roots-and-includes).
 
-```json
-{
-  "mcpServers": {
-    "dygnosis": {
-      "type": "stdio",
-      "command": "/absolute/path/to/dygnosis",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-Use the extracted executable's absolute path on the host running the agent.
-The configuration format above is `.mcp.json`; other clients have their own
-format. Reconnect the server after replacing the binary.
-File checks use editor diagnostics, project checks or `dynare_workspace_diagnose`;
-diagnostic explanations use Help or `dynare_explain`.
-
-## Executable
-
-| Launch | Result |
-|---|---|
-| No arguments | Language server over standard input and output |
-| `mcp` | MCP over standard input and output |
-| `--version`, `-V` | Print the version and exit |
-| `--help`, `-h` | Print the command usage and exit |
-| `--tcp` | Language server over TCP for debugging. The listener accepts one connection. |
-
-`--host` sets the TCP address. The default is `127.0.0.1`. `--port` sets the TCP port. The default is `2087`. When the `mcp` argument is present, the program starts MCP and leaves the TCP port closed.
-
-[Connect an agent](agents.md) covers VS Code's native MCP provider and reviewed
-project setup. [Troubleshooting](troubleshoot.md) covers an executable override,
-workspace trust and startup recovery. [About](about.md) covers scope and licenses.
+[Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis)
+provides the extension; [GitHub Releases](https://github.com/naivej/dygnosis/releases)
+provides candidate packages and standalone binaries when available.
+[About Dygnosis](about.md) describes the scope of its checks and results.
