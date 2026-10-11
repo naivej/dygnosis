@@ -15,7 +15,7 @@ fn scratch(label: &str) -> PathBuf {
             .as_nanos()
     ));
     fs::create_dir_all(&dir).unwrap();
-    dir
+    uri(&dir.canonicalize().unwrap()).to_file_path().unwrap()
 }
 
 fn uri(path: &std::path::Path) -> Url {

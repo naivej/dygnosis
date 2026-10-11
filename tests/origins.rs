@@ -16,7 +16,10 @@ fn scratch(label: &str) -> PathBuf {
             .as_nanos()
     ));
     fs::create_dir_all(&dir).unwrap();
-    dir
+    tower_lsp::lsp_types::Url::from_file_path(dir.canonicalize().unwrap())
+        .unwrap()
+        .to_file_path()
+        .unwrap()
 }
 
 #[test]

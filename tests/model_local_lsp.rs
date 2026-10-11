@@ -215,6 +215,7 @@ async fn unopened_include_navigation_and_versioned_rename_use_written_files() {
             .as_nanos()
     ));
     std::fs::create_dir_all(&folder).unwrap();
+    let folder = folder.canonicalize().unwrap();
     let helper = folder.join("helper.inc");
     std::fs::write(&helper, "#z=p*y(-1);\r\n").unwrap();
     let uri = Url::from_file_path(folder.join("root.mod")).unwrap();

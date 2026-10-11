@@ -59,7 +59,10 @@ fn tmp_unique() -> PathBuf {
             .as_nanos()
     ));
     fs::create_dir_all(&p).unwrap();
-    p
+    tower_lsp::lsp_types::Url::from_file_path(p.canonicalize().unwrap())
+        .unwrap()
+        .to_file_path()
+        .unwrap()
 }
 
 fn no_include_codes(model: &dygnosis::Model) {

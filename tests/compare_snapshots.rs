@@ -505,6 +505,8 @@ fn git_source_pairing_requires_the_exact_repository_and_keeps_empty_includes() {
 fn git_working_source_aliases_pair_repository_relative_includes_lexically() {
     let directory = std::env::temp_dir().join(format!("dygnosis-aliases-{}", std::process::id()));
     std::fs::create_dir_all(directory.join("shared")).unwrap();
+    // Working capture resolves disk paths; history must use the same repository spelling.
+    let directory = directory.canonicalize().unwrap();
     let root = "@#include \"shared/./part\"\n@#include \"shared/empty\"\n";
     std::fs::write(directory.join("root.mod"), root).unwrap();
     std::fs::write(directory.join("shared/part"), "% new\n").unwrap();

@@ -1160,7 +1160,7 @@ impl Files {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&root).unwrap();
-        Self(root)
+        Self(root.canonicalize().unwrap())
     }
     fn write(&self, name: &str, text: &str) -> Url {
         let path = self.0.join(name);

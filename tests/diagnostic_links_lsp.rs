@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dygnosis::server::{new_service, Backend};
@@ -20,7 +20,7 @@ impl Scratch {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(&path).unwrap();
-        Self(path)
+        Self(path.canonicalize().unwrap())
     }
     fn file(&self, name: &str, text: &str) -> Url {
         let file = self.0.join(name);
@@ -299,7 +299,7 @@ async fn naming_from_unopened_include_preserves_roots_versions_and_stale_context
 async fn unnecessary_tags_are_only_on_unused_warnings_and_macro_context_is_additive() {
     let (service, _socket) = new_service();
     let server = service.inner();
-    let uri = Url::from_file_path(Path::new("C:/dygnosis-related/tags.mod")).unwrap();
+    let uri = Url::parse("file:///dygnosis-related/tags.mod").unwrap();
     let text = "var y unused_y; varexo unused_e; parameters unused_p; model; y=y(-1); end;";
     open(server, &uri, text, 1).await;
     let rows = pull(server, &uri).await;
