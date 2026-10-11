@@ -1,6 +1,8 @@
 import { registerProjectStatus } from "./project_status";
 import { registerChanges } from "./changes_editor";
 import { registerProjectMcp } from "./project_mcp";
+// The installed-package harness verifies and stages the actual bundled engine.
+export { verifyPackagedBundle, ensureManagedBinary } from "./project_mcp";
 import { registerOriginJumps } from "./origin_jumps";
 import { registerDiagnosticActions } from "./quickfix";
 import { registerLenses } from "./lenses";

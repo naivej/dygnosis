@@ -4,6 +4,7 @@ const path = require("node:path");
 const { parseArgs } = require("node:util");
 const vsce = require("@vscode/vsce");
 const { collectLicenses } = require("./licenses.cjs");
+const { bundle } = require("./bundle.cjs");
 const { sourceFileHashes } = require("./source-hash.cjs");
 const { assertNative, execute, extensionRoot, productRoot, binaryName, hostFacts, sha256, writeJson } = require("./common.cjs");
 const { checkVersion } = require("../../../scripts/version.cjs");
@@ -53,8 +54,8 @@ async function main() {
   await fs.writeFile(changelog, (await fs.readFile(changelog, "utf8"))
     .replace(/\]\((docs\/[^)]+)\)/g, '](https://github.com/naivej/dygnosis/blob/v0.11.6/$1)')
     .replace(/\]\((help\/[^)]+)\)/g, `](https://github.com/naivej/dygnosis/blob/${commit}/$1)`));
-  const runtimeFiles = await vsce.listFiles({ cwd: extensionRoot, packageManager: vsce.PackageManager.Npm });
-  const notices = await collectLicenses(info.rust, runtimeFiles);
+  const client = await bundle();
+  await collectLicenses(info.rust, client.dependencies.map(dependency => dependency.packagePath));
   const cargoLock = await sourceFileHashes(productRoot, commit, "Cargo.lock");
   const npmLock = await sourceFileHashes(productRoot, commit, "editors/vscode/package-lock.json");
   const provenance = {
@@ -67,18 +68,20 @@ async function main() {
     rustc: execute("rustc", ["--version"]).trim(), cargo_lock_sha256: cargoLock.committed, cargo_lock_checkout_sha256: cargoLock.checkout,
     build: values.binary ? "provided candidate binary" : "native cargo --locked --release", rustflags: values.binary ? null : rustFlags,
     npm_lock_sha256: npmLock.committed, npm_lock_checkout_sha256: npmLock.checkout, host: hostFacts(),
-    runtime_dependencies: notices.filter(notice => notice.kind === "npm").map(notice => notice.packagePath),
+    client, runtime_dependencies: [],
   };
   await writeJson(path.join(extensionRoot, "SOURCE.json"), provenance);
   const output = path.join(extensionRoot, "dist", target);
   await fs.mkdir(output, { recursive: true });
   const vsix = path.join(output, `dygnosis-${version}-${target}.vsix`);
-  await vsce.createVSIX({ cwd: extensionRoot, target, packagePath: vsix, dependencies: true, useYarn: false, githubBranch: commit,
+  await vsce.createVSIX({ cwd: extensionRoot, target, packagePath: vsix, dependencies: false, useYarn: false, githubBranch: commit,
     baseContentUrl: `https://github.com/naivej/dygnosis/blob/${commit}/editors/vscode`,
     baseImagesUrl: `https://github.com/naivej/dygnosis/raw/${commit}/editors/vscode` });
   const { inspectVsix } = require("./vsix.cjs");
   await inspectVsix(vsix, provenance);
   const standalone = path.join(output, `dygnosis-${version}-${target}`);
+  assert.equal(path.dirname(path.resolve(standalone)), path.resolve(output));
+  await fs.rm(standalone, { recursive: true, force: true });
   await fs.mkdir(standalone, { recursive: true });
   for (const file of ["LICENSE", "SOURCE.json", "THIRD-PARTY-NOTICES.json"]) await fs.copyFile(path.join(extensionRoot, file), path.join(standalone, file));
   await fs.cp(path.join(extensionRoot, "licenses"), path.join(standalone, "licenses"), { recursive: true });

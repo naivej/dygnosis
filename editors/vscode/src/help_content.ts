@@ -1,7 +1,7 @@
-import { createRequire } from "node:module";
 import type { MarkedToken, Token } from "marked" with { "resolution-mode": "import" };
 
-const { Lexer } = createRequire(__filename)("marked") as { Lexer: { lex(markdown: string): Token[] } };
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- Static require lets the package bundle include this ESM dependency.
+const { Lexer } = require("marked") as { Lexer: { lex(markdown: string): Token[] } };
 export interface HelpTopic { id: string; title: string; keywords: string[]; markdown: string }
 export interface HelpCode { code: string; title: string; kind: string; markdown: string }
 export interface HelpTool { name: string; description: string; inputSchema: unknown }

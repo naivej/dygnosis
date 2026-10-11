@@ -1,4 +1,4 @@
-# Keep the compiled client, production dependencies, grammar, logo and licenses.
+# Keep one client bundle, runtime assets, the native engine and license notices.
 src/**
 tests/**
 scripts/**
@@ -6,7 +6,9 @@ scripts/**
 .vscode-test/**
 .npm-cache/**
 dist/**
-node_modules/.cache/**
+node_modules/**
+out/**
+!out/extension.js
 **/*.ts
 **/*.map
 **/*.log

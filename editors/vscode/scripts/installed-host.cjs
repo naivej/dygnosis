@@ -41,7 +41,7 @@ exports.run = async function run() {
     // Guard real executable verification and staging against the installed
     // artifact, independently of generated files left in the source checkout.
     await checkpoint("installed bundle verification and managed MCP staging");
-    const { verifyPackagedBundle, ensureManagedBinary } = require(path.join(extension.extensionPath, "out", "project_mcp"));
+    const { verifyPackagedBundle, ensureManagedBinary } = require(path.join(extension.extensionPath, extension.packageJSON.main));
     const frozen = await verifyPackagedBundle({ extensionPath: extension.extensionPath, extension });
     const managed = await ensureManagedBinary(path.join(workspace, "managed engine with spaces"), frozen);
     assert.deepEqual(await fs.readFile(managed.path), frozen.bytes);

@@ -79,22 +79,38 @@ async function inspectVsix(file, expected) {
   assert.equal(source.license.standalone_path, "LICENSE");
   assert.equal(source.license.source_sha256, await sha256(path.join(productRoot, "LICENSE")));
   assert.equal(hash(data(source.license.vsix_path)), source.license.source_sha256);
-  data("extension/out/extension.js"); data("extension/language-configuration.json"); data("extension/syntaxes/dynare.tmLanguage.json");
-  data("extension/out/help.js"); data("extension/out/help_content.js");
+  assert.equal(manifest.main, `./${source.client.entry}`);
+  assert.equal(source.client.entry, "out/extension.js");
+  assert.equal(hash(data(`extension/${source.client.entry}`)), source.client.sha256, "Changed client bundle");
+  assert.deepEqual([...entries.keys()].filter(name => name.startsWith("extension/out/")), [`extension/${source.client.entry}`]);
+  data("extension/language-configuration.json"); data("extension/syntaxes/dynare.tmLanguage.json");
   data("extension/media/help.css"); data("extension/media/help.js"); data("extension/media/welcome.md");
   const help = json("help/bundle.json");
   assert.equal(help.version, source.version); assert.equal(help.reference.version, source.version);
   assert.deepEqual(help.reference.tools, JSON.parse(await require("node:fs/promises").readFile(path.join(productRoot, "help/reference.json"), "utf8")).tools);
-  for (const topic of help.topics) for (const [, image] of topic.markdown.matchAll(/!\[[^\]]*\]\((assets\/[^)]+)\)/g)) data(`extension/help/${image}`);
+  const images = new Set();
+  for (const topic of help.topics) for (const [, image] of topic.markdown.matchAll(/!\[[^\]]*\]\((assets\/[^)]+)\)/g)) {
+    const name = `extension/help/${image}`;
+    data(name); images.add(name);
+  }
+  assert.deepEqual([...entries.keys()].filter(name => name.startsWith("extension/help/assets/")).sort(), [...images].sort(), "Unused Help assets in VSIX");
   assert.ok(manifest.contributes.commands.some(command => command.command === "dygnosis.openHelp"));
   assert.ok(manifest.activationEvents.includes("onWebviewPanel:dygnosis.help"));
-  for (const dependency of source.runtime_dependencies) data(`extension/${dependency}`);
+  assert.deepEqual(source.runtime_dependencies, []);
   const notices = json("THIRD-PARTY-NOTICES.json");
   assert.ok(notices.some(notice => notice.kind === "toolchain"));
   assert.ok(notices.some(notice => notice.name === "vscode-languageclient"));
-  for (const notice of notices) for (const license of notice.files) assert.equal(hash(data(`extension/${license.path}`)), license.sha256, `Changed license: ${license.path}`);
+  assert.deepEqual(notices.filter(notice => notice.kind === "npm").map(({ name, version, packagePath }) => ({ name, version, packagePath })), source.client.dependencies, "Missing bundled dependency notices");
+  const licensePaths = new Set();
+  for (const notice of notices) for (const license of notice.files) {
+    assert.equal(license.path, `licenses/texts/${license.sha256}`);
+    assert.ok(license.original_path, "License source filename is missing");
+    assert.equal(hash(data(`extension/${license.path}`)), license.sha256, `Changed license: ${license.path}`);
+    licensePaths.add(`extension/${license.path}`);
+  }
+  assert.deepEqual([...entries.keys()].filter(name => name.startsWith("extension/licenses/")).sort(), [...licensePaths].sort(), "Unused license files in VSIX");
   for (const filename of entries.keys()) {
-    assert.ok(!/^extension\/(?:src|tests|scripts|dist|\.test-data|\.vscode-test|\.npm-cache)\//.test(filename), `Development file in VSIX: ${filename}`);
+    assert.ok(!/^extension\/(?:src|tests|scripts|dist|node_modules|\.test-data|\.vscode-test|\.npm-cache)\//.test(filename), `Development file in VSIX: ${filename}`);
     assert.ok(!filename.endsWith(".ts") && !filename.endsWith(".map"), `Source file in VSIX: ${filename}`);
     assert.ok(!filename.endsWith(".log"), `Test log in VSIX: ${filename}`);
   }

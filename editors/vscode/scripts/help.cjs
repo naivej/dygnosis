@@ -7,6 +7,24 @@ const { productRoot, extensionRoot, rpc } = require('./common.cjs');
 const { readVersion, checkVersion } = require('../../../scripts/version.cjs');
 const source = path.join(productRoot, 'help');
 
+async function copyHelpAssets(topics, sourceRoot, targetRoot) {
+  const images = new Set();
+  for (const topic of topics) for (const [, file] of topic.markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)) {
+    assert.match(file, /^assets\/[a-zA-Z0-9/_-]+\.(png|jpg|svg)$/);
+    assert.ok((await fs.stat(path.join(sourceRoot, file))).isFile(), `Missing image ${file}`);
+    images.add(file);
+  }
+  const assets = path.resolve(targetRoot, 'assets');
+  assert.equal(path.dirname(assets), path.resolve(targetRoot));
+  assert.notEqual(assets, path.resolve(sourceRoot, 'assets'));
+  await fs.rm(assets, { recursive: true, force: true });
+  for (const file of images) {
+    const destination = path.join(targetRoot, file);
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.copyFile(path.join(sourceRoot, file), destination);
+  }
+}
+
 async function engineFingerprint() {
   const files = ['src/explain.rs', 'src/mcp.rs', 'Cargo.toml', 'Cargo.lock'];
   // Options live in the command catalog. Include all Rust inputs so a changed
@@ -75,10 +93,6 @@ async function build() {
         assert.ok(headings.includes(anchor), `Unknown heading ${id}#${anchor} in ${topic.id}`);
       }
     }
-    for (const [, file] of topic.markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)) {
-      assert.match(file, /^assets\/[a-zA-Z0-9/_-]+\.(png|jpg|svg)$/);
-      assert.ok((await fs.stat(path.join(source, file))).isFile(), `Missing image ${file}`);
-    }
   }
   const target = path.join(extensionRoot, 'help');
   await fs.mkdir(target, { recursive: true });
@@ -89,13 +103,7 @@ async function build() {
   assert.deepEqual(Object.keys(settingsTopics).sort(), Object.keys(settings).sort(), 'Every setting needs a feature owner');
   for (const id of Object.values(settingsTopics)) assert.ok(ids.has(id), `Unknown setting owner ${id}`);
   await fs.writeFile(path.join(target, 'bundle.json'), JSON.stringify({ version: manifest.version, topics, reference, commands: manifest.contributes.commands, keybindings: manifest.contributes.keybindings, settingsTopics, commandsTopics }) + '\n');
-  const assets = path.join(target, 'assets');
-  assert.equal(path.dirname(path.dirname(assets)), extensionRoot);
-  await fs.rm(assets, { recursive: true, force: true });
-  await fs.cp(path.join(source, 'assets'), assets, {
-    recursive: true,
-    filter: (src) => path.basename(src) !== 'originals' && !src.split(path.sep).includes('originals'),
-  });
+  await copyHelpAssets(topics, source, target);
   // The Marketplace introduction is generated from the short product README.
   // This file is editors/vscode/README.md. Two levels up reaches product help/.
   // vsce joins the link onto .../editors/vscode; the client then resolves "..".
@@ -111,4 +119,4 @@ if (require.main === module) (async () => {
   if (process.argv[2] === '--generate') await generate(path.resolve(process.argv[3] ?? path.join(extensionRoot, 'bin', process.platform === 'win32' ? 'dygnosis.exe' : 'dygnosis')));
   await build();
 })().catch(error => { console.error(error); process.exitCode = 1; });
-module.exports = { build, generate, engineFingerprint };
+module.exports = { build, generate, engineFingerprint, copyHelpAssets };

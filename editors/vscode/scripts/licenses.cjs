@@ -1,7 +1,8 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { execute, productRoot, extensionRoot, writeJson, sha256 } = require("./common.cjs");
+const { createHash } = require("node:crypto");
+const { execute, productRoot, extensionRoot, writeJson } = require("./common.cjs");
 const { fetch, AbortSignal } = globalThis;
 
 async function licenseFiles(directory) {
@@ -14,37 +15,40 @@ async function licenseFiles(directory) {
   }
   return files.sort();
 }
-async function collectLicenses(target, runtimeFiles) {
-  const root = path.join(extensionRoot, "licenses");
-  await fs.mkdir(root, { recursive: true });
-  const notices = [];
-  async function collect(kind, metadata, directory, fallback) {
-    assert.ok(metadata.license, `${kind} ${metadata.name} has no declared license`);
-    let files = await licenseFiles(directory);
-    const identity = `${kind}/${metadata.name.replaceAll("/", "_")}/${metadata.version}`;
-    const destination = path.join(root, identity);
-    await fs.mkdir(destination, { recursive: true });
-    if (!files.length && fallback?.directory) {
-      directory = fallback.directory;
-      files = await licenseFiles(directory);
-    }
-    const copied = [];
-    for (const file of files) {
-      await fs.mkdir(path.dirname(path.join(destination, file)), { recursive: true });
-      await fs.copyFile(path.join(directory, file), path.join(destination, file));
-      copied.push({ path: `licenses/${identity}/${file}`, sha256: await sha256(path.join(destination, file)) });
-    }
-    if (!copied.length && fallback?.url) {
-      const response = await fetch(fallback.url, { signal: AbortSignal.timeout(30000) });
-      assert.ok(response.ok, `Cannot retrieve pinned license: ${fallback.url}`);
-      const text = await response.text();
-      assert.ok(text.includes("Apache License") && text.length > 1000 && text.length < 100000, "Invalid upstream license response");
-      await fs.writeFile(path.join(destination, "LICENSE"), text);
-      copied.push({ path: `licenses/${identity}/LICENSE`, source: fallback.url, sha256: await sha256(path.join(destination, "LICENSE")) });
-    }
-    assert.ok(copied.length, `No license text for ${kind} ${metadata.name} ${metadata.version}; add a checked pinned source`);
-    notices.push({ kind, ...metadata, files: copied });
+async function collectNotice(root, kind, metadata, directory, fallback) {
+  assert.ok(metadata.license, `${kind} ${metadata.name} has no declared license`);
+  let files = await licenseFiles(directory);
+  if (!files.length && fallback?.directory) {
+    directory = fallback.directory;
+    files = await licenseFiles(directory);
   }
+  const copied = [];
+  async function store(bytes, originalPath, source) {
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const destination = path.join(root, "texts", hash);
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.writeFile(destination, bytes);
+    copied.push({ path: `licenses/texts/${hash}`, sha256: hash, original_path: originalPath, ...(source ? { source } : {}) });
+  }
+  for (const file of files) {
+    await store(await fs.readFile(path.join(directory, file)), file);
+  }
+  if (!copied.length && fallback?.url) {
+    const response = await fetch(fallback.url, { signal: AbortSignal.timeout(30000) });
+    assert.ok(response.ok, `Cannot retrieve pinned license: ${fallback.url}`);
+    const text = await response.text();
+    assert.ok(text.includes("Apache License") && text.length > 1000 && text.length < 100000, "Invalid upstream license response");
+    await store(text, "LICENSE", fallback.url);
+  }
+  assert.ok(copied.length, `No license text for ${kind} ${metadata.name} ${metadata.version}; add a checked pinned source`);
+  return { kind, ...metadata, files: copied };
+}
+async function collectLicenses(target, runtimeFiles) {
+  const root = path.resolve(extensionRoot, "licenses");
+  assert.equal(path.dirname(root), extensionRoot);
+  await fs.rm(root, { recursive: true, force: true });
+  const notices = [];
+  const collect = async (...args) => { notices.push(await collectNotice(root, ...args)); };
   const cargo = JSON.parse(execute("cargo", ["metadata", "--locked", "--filter-platform", target, "--format-version", "1"], { cwd: productRoot }));
   const packages = cargo.packages.filter(pkg => pkg.id !== cargo.resolve.root);
   for (const pkg of packages.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -64,8 +68,7 @@ async function collectLicenses(target, runtimeFiles) {
     }
     await collect("cargo", { name: pkg.name, version: pkg.version, license: pkg.license, repository: pkg.repository, authors: pkg.authors }, path.dirname(pkg.manifest_path), fallback);
   }
-  // VSCE supplies the production closure; the package inspector later verifies
-  // that every package and license listed here really made it into the VSIX.
+  // The client bundler supplies the packages whose code enters the VSIX.
   for (const file of runtimeFiles.filter(file => /(?:^|\/)node_modules\/(?:@[^/]+\/)?[^/]+\/package.json$/.test(file)).sort()) {
     const absolute = path.join(extensionRoot, file);
     const pkg = JSON.parse(await fs.readFile(absolute, "utf8"));
@@ -76,4 +79,4 @@ async function collectLicenses(target, runtimeFiles) {
   await writeJson(path.join(extensionRoot, "THIRD-PARTY-NOTICES.json"), notices);
   return notices;
 }
-module.exports = { collectLicenses };
+module.exports = { collectLicenses, collectNotice };
