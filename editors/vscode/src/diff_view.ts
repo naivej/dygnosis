@@ -159,7 +159,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     for (const side of ["before", "after"] as const) registry[side] = Object.fromEntries(Object.entries(object(sources[side])).map(([key, value]) => [key, string(value)]));
   }
   const details = parseSemantic(result, ids, registry, expectedSemantic);
-  if (!details) return { before, after, rows: complete ? rows : [], complete, semanticMessage: "Semantic detail is unavailable with this engine. Showing structural changes; use Text diff for written edits." };
+  if (!details) return { before, after, rows: complete ? rows : [], complete, semanticMessage: "This engine shows fewer model details. Use Text diff to review the files." };
   const rowMap = new Map(rows.map(row => [row.id, row]));
   const isLocal = (row: SemanticRow): boolean => row.family === "symbols" && row.fields.some(field => field.name === "role" && [field.before, field.after].some(side => side.value?.kind === "text" && ["model_local_definition", "model_local_declaration"].includes(side.value.value)));
   const section = (row: SemanticRow): DiffSection => {

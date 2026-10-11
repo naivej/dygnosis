@@ -59,8 +59,8 @@
   keywords stay plain. Added or removed shock instructions
   and model-local definitions are highlighted in full. Commands omit repeated role and token headings.
   Predetermined conventions stay in the symbol card without another declaration
-  row or the same conversion note on each direct reference.
-  Each direct equation appears once per side; written offset notes are omitted.
+  row or timing notes on direct references.
+  Each direct equation appears once per side.
   Heterogeneous dimensions stay in card headers; repeated dimension fields and
   matching labels on direct references are omitted.
   **Equations** combines aggregate and heterogeneous equation changes in one group.
@@ -98,7 +98,8 @@
   Forecast-path cards show only the
   changed variable inside its block context, with replaced values highlighted.
   An unchanged named shock-group heading stays plain when its members change.
-- Relevant comparison limits appear once after the selected group's rows. **Text diff…**
+- Notes explain missing details in plain language, once below the shown changes.
+  Notes about hidden details are omitted. **Text diff…**
   in the top bar opens VS Code's native diff for a changed captured root or include,
   including unsaved text, with filenames and revision labels in its tab title.
   Out-of-date inputs disable source and text-diff actions

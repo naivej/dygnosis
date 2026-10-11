@@ -96,7 +96,7 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
       sourceChanges: doc.result?.snapshot.sourceChanges, coverage: doc.result?.snapshot.coverage, references: doc.result?.snapshot.references, semanticMessage: doc.result?.snapshot.semanticMessage });
   };
   const release = (doc: ChangesDocument): void => { if (doc.result) { history.release(doc.result.holder); capturedText.release(doc.result.holder); } doc.result = undefined; };
-  const stale = (doc: ChangesDocument, message = "Out of date. Refresh to compare current inputs and enable source actions."): void => {
+  const stale = (doc: ChangesDocument, message = "Out of date. Refresh to compare current files and open source links."): void => {
     if (doc.disposed || doc.status === "stale") return;
     ++doc.generation; doc.capture?.cancel(); doc.status = "stale"; doc.message = message; send(doc);
   };
@@ -130,11 +130,11 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
       });
       if (!current(doc, generation, result.instance) || token.token.isCancellationRequested) { history.release(result.holder); return; }
       doc.instance = result.instance; doc.result = result; doc.status = "ready";
-      doc.message = result.snapshot.rows.length ? "Current comparison" : result.snapshot.sourceChanges?.files.length ? "No model changes. Captured text differs; use Text diff." : result.snapshot.semantic ? "No model rows." : "No structural changes. Written text can still differ.";
+      doc.message = result.snapshot.rows.length ? "Current comparison" : result.snapshot.sourceChanges?.files.length ? "No model changes. File text differs; use Text diff." : result.snapshot.semantic ? "No model changes shown." : "No model changes found. File text may still differ.";
       watchInputs(doc); send(doc);
     } catch (error) {
       if (!current(doc, generation, service.currentInstance)) return;
-      if (token.token.isCancellationRequested) { doc.status = "failure"; doc.message = "Comparison capture was cancelled. Refresh to try again."; release(doc); send(doc); return; }
+      if (token.token.isCancellationRequested) { doc.status = "failure"; doc.message = "Comparison cancelled. Refresh to try again."; release(doc); send(doc); return; }
       doc.status = error instanceof ComparisonFailure && error.code === "INCOMPLETE_INPUT" ? "incomplete" : "failure";
       doc.message = String(error); if (error instanceof ComparisonFailure) doc.failureSide = error.side;
       release(doc); service.log(doc.message); send(doc);

@@ -45,11 +45,6 @@
     controls.kinds.replaceChildren(summary, options);
     if (focused) document.getElementById("change-type-" + focused)?.focus();
   }
-  function limits(parent, entries) {
-    if (!entries?.length) return;
-    const list = node("ul", undefined, "limits");
-    for (const limit of entries) list.append(node("li", limit.reason + (limit.omitted === null ? "" : " (" + limit.omitted + " omitted)"))); parent.append(list);
-  }
   function action(label, type, args, reason) {
     const button = node("button", label); button.type = "button"; button.disabled = !!reason;
     button.setAttribute("aria-label", reason ? label + " unavailable: " + reason : label); if (reason) button.title = reason;
@@ -58,7 +53,7 @@
   function sourceAction(row, side) {
     const target = row.navigation[side] ?? row.navigation.block_openers?.[side], files = row.sourceFiles?.[side] ?? [];
     const locations = target?.written_locations ?? [];
-    const reason = payload.status !== "ready" ? "Refresh the comparison to enable source actions." : !locations.length && !files.length ? "No verified source is available on this side." : "";
+    const reason = payload.status !== "ready" ? "Refresh to open source links." : !locations.length && !files.length ? "The source for this side is unavailable." : "";
     const button = action("Open " + titleCase(side) + " source", "openSource", { rowId: row.id, side }, reason);
     button.textContent = locations.length === 1 ? basename(locations[0].uri) + ":" + (locations[0].range.start.line + 1) : files.length === 1 ? basename(files[0]) : "Open source" + (locations.length > 1 || files.length > 1 ? "…" : "");
     button.className = "source-link";
@@ -165,7 +160,7 @@
         codeLines(panel, { runs: [{ text: keyword, role: declarationKeywordRole(row.semantic, side, keyword) }, { text: " ", role: "unchanged" }, { text: own.name, role: row.kind === "added" ? "added" : row.kind === "removed" ? "removed" : "unchanged" }, { text: ";", role: "unchanged" }] }, side);
       }
       const expressions = visibleExpressions(row.semantic);
-      if (!keyword && !["symbols", "parameters", "equations", "shocks", "macro_context"].includes(row.semantic.family) && !writtenStatement(row.semantic)?.[side]) panel.append(node("p", "Written source text is unavailable for this instruction. Use Text diff to inspect the captured files.", "source-note"));
+      if (!keyword && !["symbols", "parameters", "equations", "shocks", "macro_context"].includes(row.semantic.family) && !writtenStatement(row.semantic)?.[side]) panel.append(node("p", "The file text for this instruction is unavailable. Use Text diff to review the files.", "source-note"));
       for (const expression of expressions) {
         if (!["expression", "statement_text"].includes(expression.field) || expressions.length > 1) panel.append(node("h3", expression.field === "statement_text" ? "Written instruction" : expression.field === "statement_tokens" ? "Expanded instruction" : row.semantic.fields.find(field => field.name === expression.field)?.label ?? titleCase(expression.field), "field-label"));
         const value = expression[side];
@@ -179,13 +174,12 @@
         value.append(node("h3", field.label, "field-label"));
         const text = node("div", undefined, "field-content");
         text.append(fieldValue(field[side], field.changed && available ? side === "before" ? "token removed" : "token added" : ""));
-        value.append(text); if (!available) value.append(node("p", "Comparison unavailable", "source-note")); panel.append(value);
+        value.append(text); if (!available) value.append(node("p", "This value could not be compared.", "source-note")); panel.append(value);
       }
     }
     if (row.semantic) {
       const ownRefs = row.semantic.references.map(pointer => references.get(pointer)).filter(ref => ref?.side === side);
       if (ownRefs.length) {
-        const conventionShown = row.semantic.family === "symbols" && visibleFields(row.semantic).some(field => field.name === "predetermined" && field.comparison_availability === "complete" && field[side].value?.kind === "boolean" && field[side].value.value);
         const refs = node("section", undefined, "refs"); refs.append(node("h3", "Direct equation references"));
         const seenEquations = new Set();
         for (const ref of ownRefs) {
@@ -194,9 +188,9 @@
           if (seenEquations.has(equationKey)) continue;
           seenEquations.add(equationKey);
           const line = node("p", undefined, "reference"), target = ref.navigation[side];
-          const button = action(ref.label, "openReference", { pointer: ref.pointer, side }, payload.status !== "ready" ? "Refresh to enable source actions." : !target?.written_locations.length ? "No verified written location is available." : "");
+          const button = action(ref.label, "openReference", { pointer: ref.pointer, side }, payload.status !== "ready" ? "Refresh to open this equation." : !target?.written_locations.length ? "The source line for this equation is unavailable." : "");
           button.setAttribute("aria-label", "Open " + titleCase(side) + " reference: " + ref.label + (button.disabled ? ". " + button.title : ""));
-          const context = [ref.scope.dimension && (!scopeShown || ref.scope.dimension !== scope) ? scopeLabel(ref.scope.dimension) : "", !conventionShown && ref.timing.converted_offset !== ref.timing.written_offset ? "after convention " + ref.timing.converted_offset : ""].filter(Boolean).join(" · ");
+          const context = ref.scope.dimension && (!scopeShown || ref.scope.dimension !== scope) ? scopeLabel(ref.scope.dimension) : "";
           line.append(button); if (context) line.append(node("span", context, "source-note")); refs.append(line);
         }
         panel.append(refs);
@@ -227,7 +221,7 @@
     header.append(node("span", marks[row.kind], "change-mark " + row.kind), node("h2", rowLabel(row))); article.append(header);
     const sides = node("div", undefined, "sides"); sides.append(sidePanel(row, "before"), sidePanel(row, "after")); article.append(sides);
     const instruction = row.semantic?.expressions.find(expression => expression.field === "statement_text");
-    if (row.semantic?.family === "operations" && instruction?.before && instruction.after && instruction.before.text === instruction.after.text && row.semantic.fields.some(field => field.changed && !["role", "order"].includes(field.name))) article.append(node("p", "The written instruction is unchanged; its recorded effects differ.", "source-note"));
+    if (row.semantic?.family === "operations" && instruction?.before && instruction.after && instruction.before.text === instruction.after.text && row.semantic.fields.some(field => field.changed && !["role", "order"].includes(field.name))) article.append(node("p", "The text is the same, but the resulting changes to the model differ.", "source-note"));
     return article;
   }
   function sliceRuns(expression, start, end) {
@@ -267,11 +261,65 @@
     }
     return cards;
   }
+  // Engine reasons describe the data contract. The view explains only what a
+  // reader needs to know about the displayed changes, with no raw reason fallback.
+  const comparisonNotes = {
+    identifier_correspondence_unpaired: null, timing_correspondence_limit: null,
+    statement_options_text_only: null, matched_irf_expression_positions: null,
+    command_list_empty_occurrences_not_retained: null, type_result_history_association: null,
+    prior_function_history_unavailable: null,
+    equation_correspondence_unpaired: "Some equations could not be matched between Before and After. They are shown as Removed and Added.",
+    condition_correspondence_unpaired: "Some conditions could not be matched between Before and After. They are shown as Removed and Added.",
+    occurrence_correspondence_unpaired: "Some repeated settings could not be matched between Before and After. They are shown as Removed and Added.",
+    complementarity_unmatched: "Some conditions could only be compared as text.",
+    references_partial: "Some equations may be missing from the list.",
+    reference_limit: "Some equations may be missing from the list.",
+    detail_output_partial: "This comparison is too large to show every detail. Use Text diff to review the files.",
+    history_identity_unavailable: "Source text and source links are unavailable for some historical values.",
+    producer_occurrence_context: "The source lines for some instructions could not be found.",
+    setting_origin_unavailable: "The source lines for some settings could not be found.",
+    prior_copy_effective_unavailable: "Copied prior and optimizer values are not compared.",
+    prior_positional_fields_unavailable: "Some prior settings could only be compared as text.",
+    planner_objective_first_only: "Only the first planner objective is shown here.",
+    planner_discount_first_only: "The discount expression and value shown here each come from the first available setting.",
+    planner_discount_selected_origins: "The discount expression and value come from different settings.",
+    instrument_union_first_seen: "Each instrument is listed once, in the order it first appears.",
+    load_params_history_first_only: "Only the first filename is shown here. Loaded file contents are not compared.",
+    heterogeneity_numerical_data_not_captured: "Data files and computed results used by these settings are not compared.",
+    external_function_body_not_captured: "Only the function declaration is compared. Function files and computed results are not compared.",
+    macro_context_written_boundary: "Macro lines are compared as written, including branches that were not used.",
+  };
+  function comparisonNote(detail, limit) {
+    const code = limit.code;
+    if (Object.hasOwn(comparisonNotes, code)) return comparisonNotes[code];
+    if (["token_alignment_limit", "occurrence_token_alignment_limit"].includes(code) || code.endsWith("_path_owner")) return null;
+    const instructionShown = ["before", "after"].every(side => !detail[side] || visibleExpressions(detail).some(expression => ["statement_text", "statement_tokens", "written_row"].includes(expression.field) && expression[side]?.text));
+    if (["policy_options_context", "estimation_other_options_context", "dsge_var_calibration_value_context"].includes(code) || code.endsWith("_retained_history")) return instructionShown ? null : "Some command options are not shown here. Use Text diff to review them.";
+    if (code === "observation_trend_expression_not_retained") return instructionShown ? null : "Trend expressions are not shown here. Use Text diff to review them.";
+    if (code === "homotopy_endpoints_not_retained") return instructionShown ? null : "Initial and final homotopy values are not shown here. Use Text diff to review them.";
+    if (code === "pruned_initialization_rhs_not_retained") return instructionShown ? null : "The former value of a removed assignment is unavailable.";
+    if (/_evaluation_unavailable$/.test(code)) {
+      const name = code.replace(/_evaluation_unavailable$/, "") + "_value";
+      const field = detail.fields.find(field => field.name.replaceAll(".", "_") === name);
+      return field && ["before", "after"].every(side => !detail[side] || field[side].state !== "unknown") ? null : "Some expressions have no calculated value.";
+    }
+    if (/_number_spelling_unavailable$/.test(code)) return "Some numbers could not be compared exactly.";
+    if (/_named_operator_association_unavailable$/.test(code)) return "Some expressions have an unknown model name.";
+    if (/_tree_recovered$/.test(code)) return "Some expressions could not be read. Use Text diff to review them.";
+    if (/_tree_(?:node|materialization)_limit$/.test(code) || code === "expression_tree_materialization_limit") return "This comparison is too large to show every value.";
+    if (/_(?:selector_(?:visit|token)|text_materialization)_limit$/.test(code)) return instructionShown ? null : "This comparison is too large to show all instruction text. Use Text diff to review the files.";
+    if (/_text_unavailable$/.test(code)) return instructionShown ? null : "The text for some values is unavailable. Use Text diff to review the files.";
+    return "Some details could not be compared. Use Text diff to review the files.";
+  }
   function groupNotes(rows) {
-    const entries = rows.flatMap(row => row.semantic ? [...row.semantic.limits, ...row.semantic.expressions.filter(expression => expression.availability !== "complete").map(expression => ({ reason: expression.reason ?? "Highlights: " + titleCase(expression.availability), omitted: null }))] : payload.semantic ? [{ reason: "Typed detail is unavailable for some rows. Structural detail remains.", omitted: null }] : []);
-    const unique = new Map(entries.map(entry => [JSON.stringify([entry.reason, entry.omitted]), entry]));
+    const entries = rows.flatMap(row => row.semantic ? [
+      ...row.semantic.limits.map(limit => comparisonNote(row.semantic, limit)),
+      ...visibleExpressions(row.semantic).filter(expression => expression.availability !== "complete").map(expression => expression.availability === "not_available" ? "Some text could not be compared. Use Text diff to review the files." : "Some text changes are not highlighted. Use Text diff to review them."),
+    ] : payload.semantic ? ["Some details are unavailable. The available changes are shown."] : []);
+    const unique = new Set(entries.filter(Boolean));
     if (!unique.size) return null;
-    const notes = node("aside", undefined, "group-notes"); notes.setAttribute("aria-label", "Comparison limits"); limits(notes, [...unique.values()]); return notes;
+    const notes = node("aside", undefined, "group-notes"), list = node("ul", undefined, "limits"); notes.setAttribute("aria-label", "Comparison limits");
+    for (const text of unique) list.append(node("li", text)); notes.append(list); return notes;
   }
   function searchText(row) { return [row.label, row.group, row.before ?? "", row.after ?? "", ...(row.semantic?.facets ?? []).map(titleCase), ...(row.semantic?.expressions ?? []).flatMap(expression => [expression.before?.text ?? "", expression.after?.text ?? ""]), ...(row.semantic?.fields ?? []).flatMap(field => [field.label, fieldText(field.before), fieldText(field.after)])].join("\n").toLocaleLowerCase(); }
   function modelRows() {
@@ -302,7 +350,7 @@
       for (const row of historyCards(selected.rows)) rows.append(rowDetail(row));
       const notes = groupNotes(selected.rows); if (notes) rows.append(notes);
     } else {
-      const text = ["failure", "incomplete", "loading"].includes(payload.status) ? "" : payload.rows.length ? "No rows match these filters." : payload.sourceChanges?.files.length ? "No model changes. Captured text differs; use Text diff." : payload.coverage?.availability !== "complete" && payload.semantic ? "No model rows. Some changes could not be compared." : payload.status === "ready" ? "No structural changes. Written text can still differ." : "Refresh to compare current inputs.";
+      const text = ["failure", "incomplete", "loading"].includes(payload.status) ? "" : payload.rows.length ? "No changes match these filters." : payload.sourceChanges?.files.length ? "No model changes. File text differs; use Text diff." : payload.coverage?.availability !== "complete" && payload.semantic ? "No model changes shown. Some details could not be compared." : payload.status === "ready" ? "No model changes found. File text may still differ." : "Refresh to compare current files.";
       if (text) rows.append(node("p", text, "empty"));
     }
     grid.append(list, rows); controls.results.append(grid);
@@ -329,7 +377,7 @@
     controls.status.textContent = message.message; controls.status.className = message.status; controls.refresh.disabled = message.status === "loading";
     controls.status.hidden = message.status === "ready" && message.message === "Current comparison";
     const path = document.getElementById("choosePath"); if (path) path.hidden = message.status !== "failure" || !/model|root|path|file|source/i.test(message.message);
-    const boundary = document.getElementById("sourceBoundary"); if (boundary) boundary.textContent = !message.coverage ? "Captured source boundary unavailable" : message.coverage.source_boundary === "parsed_models_only" ? "Parsed models only · Source unavailable" : message.coverage.source_boundary.startsWith("supplied_") ? "Supplied root + executed includes" : "Captured root + executed includes";
+    const boundary = document.getElementById("sourceBoundary"); if (boundary) { boundary.hidden = !message.coverage; boundary.textContent = !message.coverage ? "" : message.coverage.source_boundary === "parsed_models_only" ? "File text is unavailable" : message.coverage.source_boundary.startsWith("supplied_") ? "Provided model files and the includes they use" : "Model files and the includes they use"; }
     const hasFiles = !!message.sourceChanges?.files.length;
     const root = document.getElementById("rootTextDiff"); if (root) { root.disabled = message.status !== "ready"; root.hidden = hasFiles; }
     const captured = document.getElementById("capturedTextDiff"); if (captured) { captured.disabled = message.status !== "ready" || !hasFiles; captured.hidden = !hasFiles; }

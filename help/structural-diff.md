@@ -38,6 +38,8 @@ A model comparison describes source facts, not numerical or algebraic
 equivalence. Uncertain equation matches appear as separate Removed and Added
 rows. A view with no model changes can still have text changes or unavailable
 facts. Active filters also affect the rows shown.
+Notes below the shown changes explain missing values or highlights. Use
+**Text diff…** to review the file text when details could not be compared.
 
 Text diff covers captured roots and executed includes. It does not include
 inactive child files, external MATLAB functions or data-file contents.

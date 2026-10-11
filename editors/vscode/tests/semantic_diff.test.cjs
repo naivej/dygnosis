@@ -126,7 +126,7 @@ test("older advertisement falls back while partial and unsupported advertisement
   assert.throws(() => semanticCapability({ semantic_schema_version: 1 }), /unsupported/);
   assert.throws(() => semanticCapability({ semantic_schema_version: 2, source_changes_schema_version: 1, coverage_schema_version: 1 }), /unsupported/);
   const r = response(); for (const key of ["comparison_versions", "semantic", "source_changes", "coverage"]) delete r[key];
-  const parsed = parseDiff(r, roots.before, roots.after, false); assert.match(parsed.semanticMessage, /unavailable/);
+  const parsed = parseDiff(r, roots.before, roots.after, false); assert.match(parsed.semanticMessage, /This engine shows fewer model details/);
 });
 test("wrong navigation kind, identity and reference side fail before rendering", () => {
   for (const mutate of [r => r.navigation.rows[0].family = "commands", r => r.navigation.rows[0].after.dimension = "firms", r => r.navigation.rows[1].before = r.navigation.rows[1].after, r => r.navigation.rows[1].equation_pointer = "/bad"]) {
@@ -354,7 +354,7 @@ test("valid older compareModels capability preserves Working structural fallback
   const { captureComparison } = load("snapshot_compare", vscode);
   const result = await captureComparison(service, async () => git, history, comparison(working(baselineUri), working(anchorUri)), token());
   assert.equal(result.legacy, true);
-  assert.match(result.snapshot.semanticMessage, /Semantic detail is unavailable/);
+  assert.match(result.snapshot.semanticMessage, /This engine shows fewer model details/);
 });
 class Element {
   constructor(tag) { this.tag = tag; this.children = []; this.listeners = {}; this.attributes = {}; this._text = ""; }
@@ -465,13 +465,13 @@ test("direct references belong to their card side and retain exact actions", () 
   snapshot.references[0].scope.dimension = "firms"; env.render(snapshot);
   assert.match(descendants(env.elements.results).find(element => element.className === "refs").textContent, /Dimension: firms/);
   row.semantic.family = "symbols"; snapshot.references[0].timing.converted_offset = -1;
-  env.render(snapshot); assert.match(env.elements.results.textContent, /after convention -1/);
+  env.render(snapshot); assert.doesNotMatch(env.elements.results.textContent, /after convention/);
   row.semantic.fields.push({ name: "predetermined", label: "Predetermined convention", before: { state: "absent", value: null }, after: { state: "present", value: { kind: "boolean", value: true } }, changed: true, comparison_availability: "complete", numeric_difference: null });
   env.render(snapshot); assert.match(env.elements.results.textContent, /Predetermined convention.*true/); assert.doesNotMatch(env.elements.results.textContent, /after convention -1/);
   assert.deepEqual(descendants(env.elements.results).filter(element => element.attributes["data-field"] === "predetermined").map(element => element.children[1].textContent), ["", "true"]);
 });
 function webview() {
-  const elements = Object.fromEntries(["models", "status", "search", "scope", "kinds", "sections", "sectionsSummary", "counts", "results", "refresh", "help", "rootTextDiff", "capturedTextDiff", "filterTools", "kindFilter", "sectionFilter", "scopeFilter", "choosePath"].map(id => [id, new Element(id)]));
+  const elements = Object.fromEntries(["models", "status", "search", "scope", "kinds", "sections", "sectionsSummary", "counts", "results", "refresh", "help", "rootTextDiff", "capturedTextDiff", "filterTools", "kindFilter", "sectionFilter", "scopeFilter", "choosePath", "sourceBoundary"].map(id => [id, new Element(id)]));
   const events = {}, posted = [], states = [], snapshot = parseDiff(response(), roots.before, roots.after, true);
   const sandbox = { document: { getElementById: id => elements[id] ?? descendants(elements.results).find(element => element.id === id), createElement: tag => new Element(tag), querySelectorAll: () => descendants(elements.results).filter(element => element.attributes["data-group"]) }, window: { addEventListener: (name, callback) => events[name] = callback }, acquireVsCodeApi: () => ({ getState: () => undefined, setState: value => states.push(structuredClone(value)), postMessage: value => posted.push(value) }) };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../media/diff_view.js"), "utf8"), sandbox);
@@ -649,7 +649,7 @@ test("Type of changes allows multiple checks and preserves them through reload, 
   assert.equal(env.elements.kinds.children[0].textContent, "Type of changes");
   assert.equal(option(env, "all").indeterminate, true);
   assert.equal(option(env, "changed").checked, true); assert.equal(option(env, "unpaired"), undefined);
-  tick("changed", false); assert.match(env.elements.results.textContent, /No rows match/);
+  tick("changed", false); assert.match(env.elements.results.textContent, /No changes match/);
   tick("changed", true); tick("added", true); assert.match(env.elements.results.textContent, /Prior mean/);
   env.render({ choices: normalizeChoices(env.states.at(-1).choices, defaults), capture: "capture2" });
   assert.deepEqual(env.states.at(-1).choices.changeKinds, ["added", "changed"]);
@@ -729,7 +729,7 @@ test("retired comparison explainer contents do not leak into results", () => {
   assert.doesNotMatch(env.elements.results.textContent, /Effective inherited prior/);
   assert.match(env.elements.results.textContent, /Text diff/);
   snapshot.coverage.limits = [...snapshot.coverage.families[0].limits]; env.render(snapshot);
-  assert.equal(env.elements.results.textContent.match(/Effective inherited prior/g).length, 1, "only the affected row's own limit remains");
+  assert.equal(env.elements.results.textContent.match(/Some details could not be compared/g).length, 1, "only the affected row's own limit remains");
   snapshot.sourceChanges.files[0].limits = [{ code: "source_alignment_limit", reason: "Source alignment budget exceeded.", omitted: null }]; env.render(snapshot);
   assert.doesNotMatch(env.elements.results.textContent, /Source alignment budget exceeded/);
   env.elements.capturedTextDiff.fire("click");
@@ -737,17 +737,79 @@ test("retired comparison explainer contents do not leak into results", () => {
   env.render({ status: "stale" }); assert.equal(env.elements.capturedTextDiff.disabled, true);
 });
 
+// Guards raw source-boundary terms returning in the visible footer.
+test("diff footer describes the files compared without internal capture terms", () => {
+  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
+  env.render(snapshot); assert.equal(env.elements.sourceBoundary.textContent, "Model files and the includes they use");
+  snapshot.coverage.source_boundary = "supplied_root_and_executed_includes"; env.render(snapshot);
+  assert.equal(env.elements.sourceBoundary.textContent, "Provided model files and the includes they use");
+  snapshot.coverage.source_boundary = "parsed_models_only"; env.render(snapshot);
+  assert.equal(env.elements.sourceBoundary.textContent, "File text is unavailable");
+  env.render({ ...snapshot, coverage: undefined }); assert.equal(env.elements.sourceBoundary.hidden, true); assert.equal(env.elements.sourceBoundary.textContent, "");
+  env.render(snapshot); assert.equal(env.elements.sourceBoundary.hidden, false);
+});
+
+// Guards internal notes returning for details that the view does not display.
+test("diff notes omit hidden timing details and routine text comparison explanations", () => {
+  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
+  snapshot.rows[0].semantic.limits = ["identifier_correspondence_unpaired", "timing_correspondence_limit", "statement_options_text_only", "matched_irf_expression_positions", "policy_options_context", "is_linear_retained_history"].map(code => ({ code, reason: "Internal correspondence and retained token mechanism.", omitted: null, owner: "semantic" }));
+  snapshot.rows[0].semantic.expressions.push({ field: "statement_text", before: { text: "old;", runs: [{ text: "old;", role: "removed" }] }, after: { text: "new;", runs: [{ text: "new;", role: "added" }] }, availability: "complete", highlight_basis: "paired_expression", reason: null });
+  env.render(snapshot);
+  assert.equal(descendants(env.elements.results).some(element => element.className === "group-notes"), false);
+  assert.match(env.elements.results.textContent, /new;/);
+  snapshot.rows[0].semantic.expressions.pop(); env.render(snapshot);
+  assert.equal(descendants(env.elements.results).find(element => element.className === "group-notes").textContent, "Some command options are not shown here. Use Text diff to review them.");
+});
+
+// Guards hidden expression limits warning about highlights that are visible and complete.
+test("diff highlight notes follow visible expressions and combine repeated causes", () => {
+  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), detail = snapshot.rows[0].semantic;
+  detail.limits = [{ code: "occurrence_token_alignment_limit", reason: "Shared token alignment budget exceeded.", omitted: null, owner: "semantic" }];
+  const expression = detail.expressions[0]; expression.availability = "limit_exceeded"; expression.highlight_basis = "none"; expression.reason = "Serialized detail budget exceeded.";
+  for (const side of ["before", "after"]) expression[side].runs = [{ text: expression[side].text, role: "unchanged" }];
+  detail.expressions.push({ field: "statement_text", before: { text: "old;", runs: [{ text: "old;", role: "removed" }] }, after: { text: "new;", runs: [{ text: "new;", role: "added" }] }, availability: "complete", highlight_basis: "paired_expression", reason: null });
+  env.render(snapshot); assert.equal(descendants(env.elements.results).some(element => element.className === "group-notes"), false);
+  detail.expressions.pop(); env.render(snapshot);
+  const notes = descendants(env.elements.results).find(element => element.className === "group-notes");
+  assert.equal(notes.textContent, "Some text changes are not highlighted. Use Text diff to review them.");
+  assert.doesNotMatch(notes.textContent, /budget|token|Serialized/);
+});
+
+// Guards per-use omission counts being presented as missing equations, and raw future reasons leaking into the view.
+test("diff calculation notes require a missing calculated value", () => {
+  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), detail = snapshot.rows[0].semantic;
+  detail.limits = [{ code: "prior_mean_evaluation_unavailable", reason: "The reader retains no expression tree for this slot.", omitted: null, owner: "semantic_priors" }];
+  const field = { name: "prior.mean.value", label: "Prior mean: known value", before: { state: "present", value: { kind: "number", value: 0.8 } }, after: { state: "present", value: { kind: "number", value: 0.9 } }, changed: true, comparison_availability: "complete", numeric_difference: null };
+  detail.fields.push(field); env.render(snapshot);
+  assert.equal(descendants(env.elements.results).some(element => element.className === "group-notes"), false);
+  field.before = { state: "unknown", value: null }; env.render(snapshot);
+  assert.equal(descendants(env.elements.results).find(element => element.className === "group-notes").textContent, "Some expressions have no calculated value.");
+});
+
+// Guards per-use omission counts being presented as missing equations, and raw future reasons leaking into the view.
+test("diff notes keep useful missing-detail warnings and a plain fallback", () => {
+  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
+  row.semantic.limits = [{ code: "references_partial", reason: "Direct local references were omitted by the comparison-wide reference limit.", omitted: 12, owner: "semantic_equations" }];
+  env.render(snapshot);
+  assert.equal(descendants(env.elements.results).find(element => element.className === "group-notes").textContent, "Some equations may be missing from the list.");
+  row.semantic.limits.push({ code: "future_limit", reason: "Unknown retained producer correspondence.", omitted: 5, owner: "future" }); env.render(snapshot);
+  assert.match(env.elements.results.textContent, /Some details could not be compared\. Use Text diff to review the files\./);
+  assert.doesNotMatch(env.elements.results.textContent, /12 omitted|5 omitted|producer|correspondence/);
+  env.elements.search.value = "not a matching name"; env.elements.search.fire("input");
+  assert.equal(descendants(env.elements.results).some(element => element.className === "group-notes"), false);
+});
+
 test("repeated row limitations appear once after all changes in the selected group", () => {
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), original = snapshot.rows[0];
-  const reason = "These remaining accepted tokens have no complete named option facts; token detail makes no numerical-effect claim.";
-  original.semantic.limits = [{ code: "statement_options_text_only", reason, owner: "semantic_surfaces", omitted: null }];
+  const reason = "The written copy source is retained; inherited prior or optimizer values are not resolved.", message = "Copied prior and optimizer values are not compared.";
+  original.semantic.limits = [{ code: "prior_copy_effective_unavailable", reason, owner: "semantic_priors", omitted: null }];
   const next = structuredClone(original); next.id = next.semantic.pointer = next.navigation.id = "/semantic/rows/1"; next.label = "other"; snapshot.rows.push(next);
   env.render(snapshot);
   const articles = descendants(env.elements.results).filter(element => element.tag === "article");
   assert.equal(articles.length, 2); assert.ok(articles.every(article => !article.textContent.includes(reason)));
-  assert.equal(env.elements.results.textContent.split(reason).length - 1, 1);
+  assert.equal(env.elements.results.textContent.split(message).length - 1, 1); assert.doesNotMatch(env.elements.results.textContent, /retained|inherited/);
   const group = descendants(env.elements.results).find(element => element.className === "group-rows");
-  assert.equal(group.children.at(-1).className, "group-notes"); assert.match(group.children.at(-1).textContent, /remaining accepted tokens/);
+  assert.equal(group.children.at(-1).className, "group-notes"); assert.equal(group.children.at(-1).textContent, message);
 });
 
 test("shock cards use captured statement text and omit its duplicate named attributes", () => {
@@ -857,7 +919,7 @@ test("operation cards prefer captured instructions and retain fallback values", 
   assert.equal(descendants(env.elements.results).find(element => element.className === "expression").textContent, source);
   assert.doesNotMatch(env.elements.results.textContent, /Removed equations|Dynamic tag|equation_surgery/);
   snapshot.rows[0].semantic.expressions = []; env.render(snapshot);
-  assert.match(env.elements.results.textContent, /Written source text is unavailable.*Text diff/);
+  assert.match(env.elements.results.textContent, /The file text for this instruction is unavailable.*Text diff/);
   assert.match(env.elements.results.textContent, /Removed equations/);
   assert.match(env.elements.results.textContent, /c = y/);
   assert.doesNotMatch(env.elements.results.textContent, /equation_surgery/);
@@ -949,7 +1011,7 @@ test("an added local definition highlights its whole instruction", () => {
 
 test("filters can hide all rows, retired selection cannot hide rows and stale actions remain disabled", () => {
   const env = webview(); env.render(); env.elements.search.value = "nothing"; env.elements.search.fire("input");
-  assert.match(env.elements.results.textContent, /No rows match/);
+  assert.match(env.elements.results.textContent, /No changes match/);
   env.render({ status: "stale" });
   const actions = descendants(env.elements.results).filter(element => element.tag === "button" && element.attributes["aria-label"]?.startsWith("Open"));
   assert.ok(actions.length); assert.ok(actions.every(button => button.disabled));
@@ -959,7 +1021,7 @@ test("filters can hide all rows, retired selection cannot hide rows and stale ac
 });
 test("source-only changes lead to native text diff, text cannot inject DOM or source actions", () => {
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
-  env.render({ rows: [] }); assert.match(env.elements.results.textContent, /Captured text differs/);
+  env.render({ rows: [] }); assert.match(env.elements.results.textContent, /File text differs/);
   snapshot.rows[0].label = "<img src=x onerror=bad()>"; snapshot.rows[0].semantic.fields[0].after.value.value = "command:bad";
   env.render(snapshot); assert.match(env.elements.results.textContent, /<img/);
   assert.equal(descendants(env.elements.results).some(e => e.tag === "img" || e.tag === "a"), false);
@@ -968,7 +1030,7 @@ test("field limits do not mark budget-unavailable values as added or removed", (
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
   const field = snapshot.rows[0].semantic.fields[0]; field.changed = false; field.comparison_availability = "limit_exceeded";
   snapshot.rows[0].semantic.expressions = [];
-  env.render(snapshot); assert.match(env.elements.results.textContent, /Comparison unavailable/);
+  env.render(snapshot); assert.match(env.elements.results.textContent, /This value could not be compared/);
   assert.equal(descendants(env.elements.results).some(e => e.className === "token added" || e.className === "token removed"), false);
 });
 test("reference and captured-file picker actions use exact retained text and stale guards", async t => {

@@ -25,6 +25,6 @@ export function diffHtml(webview: vscode.Webview, assets: vscode.Uri): string {
 </div>
 <div class="capture-status"><p id="status" role="status" aria-live="polite">Loading comparison…</p><button id="choosePath" type="button" hidden>Choose model path</button></div>
 <p id="counts" aria-live="polite"></p><div id="results" aria-label="Model changes"></div></div>
-<footer class="footer" aria-label="Change colors"><span><b class="change-mark added" aria-hidden="true">+</b> Added</span><span><b class="change-mark removed" aria-hidden="true">−</b> Removed</span><span><b class="change-mark changed" aria-hidden="true">~</b> Replaced</span><span id="sourceBoundary" class="boundary">Captured source boundary unavailable</span><button id="help" type="button">Help</button></footer>
+<footer class="footer" aria-label="Change colors"><span><b class="change-mark added" aria-hidden="true">+</b> Added</span><span><b class="change-mark removed" aria-hidden="true">−</b> Removed</span><span><b class="change-mark changed" aria-hidden="true">~</b> Replaced</span><span id="sourceBoundary" class="boundary" hidden></span><button id="help" type="button">Help</button></footer>
 </main><script nonce="${nonce}" src="${script.toString()}"></script></body></html>`;
 }
