@@ -290,6 +290,11 @@ fn shipped_generic_checks_reach_existing_row_variants() {
     }
 }
 
+fn overlay_uri(path: &str) -> Url {
+    let root = if cfg!(windows) { "C:/" } else { "/" };
+    Url::from_file_path(PathBuf::from(root).join(path)).unwrap()
+}
+
 async fn open(server: &Backend, uri: &Url, text: &str, version: i32) {
     server
         .did_open(DidOpenTextDocumentParams {
@@ -394,8 +399,8 @@ async fn lsp_first_sites_use_utf16_and_clear_after_row_removal() {
 
 #[tokio::test]
 async fn lsp_include_and_repeated_macro_sites_keep_written_locations() {
-    let root = Url::parse("file:///C:/hetero-shock-links/root.mod").unwrap();
-    let child = Url::parse("file:///C:/hetero-shock-links/first.inc").unwrap();
+    let root = overlay_uri("hetero-shock-links/root.mod");
+    let child = overlay_uri("hetero-shock-links/first.inc");
     let source = format!(
         "{PREFIX}shocks(heterogeneity=d);\n@#include \"first.inc\"\n/* 🧮 */ var eh=.2;\nend;"
     );
@@ -477,8 +482,8 @@ fn ordinary_blocks_check_retained_skew_types_at_the_written_row() {
 
 #[tokio::test]
 async fn retained_skew_type_error_maps_to_its_included_row_in_both_transports() {
-    let root = Url::parse("file:///C:/hetero-skew-types/root.mod").unwrap();
-    let child = Url::parse("file:///C:/hetero-skew-types/first.inc").unwrap();
+    let root = overlay_uri("hetero-skew-types/root.mod");
+    let child = overlay_uri("hetero-skew-types/first.inc");
     let source = format!(
         "{PREFIX}shocks(heterogeneity=d);\n@#include \"first.inc\"\nend;\nshocks; var e=.1; end;"
     );

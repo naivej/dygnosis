@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use dygnosis::server::new_service;
 use dygnosis::{
@@ -9,16 +10,18 @@ use dygnosis::{
 use tower_lsp::{lsp_types::*, LanguageServer};
 
 struct Fixture(PathBuf);
+static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
 impl Fixture {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
-            "dygnosis-qualified-companions-{}-{}",
+            "dygnosis-qualified-companions-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&path).unwrap();
         Self(path)

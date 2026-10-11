@@ -67,7 +67,7 @@ jobs:
         run: node scripts/version.cjs --check
 
       - name: Test the engine
-        run: cargo test --locked
+        run: cargo test --locked --no-fail-fast
 
       - name: Linux display dependencies
         if: runner.os == 'Linux'
