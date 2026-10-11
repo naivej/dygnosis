@@ -1246,7 +1246,9 @@ end;
             std::env::temp_dir().join(format!("dygnosis-b14-{}-{label}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).expect("scratch dir");
-        Scratch { path }
+        Scratch {
+            path: crate::include_resolver::make_absolute(&path),
+        }
     }
 
     struct Scratch {

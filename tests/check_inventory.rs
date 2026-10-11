@@ -29,7 +29,20 @@ fn inventory() -> Inventory {
 }
 
 fn fixture_exists(rel: &str) -> bool {
-    let path = root().join(rel);
+    // Fixture paths are consumed on case-sensitive CI filesystems too.
+    let mut path = root();
+    for component in std::path::Path::new(rel).components() {
+        let Ok(entries) = std::fs::read_dir(&path) else {
+            return false;
+        };
+        if !entries
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name() == component.as_os_str())
+        {
+            return false;
+        }
+        path.push(component);
+    }
     path.is_file() || path.is_dir()
 }
 

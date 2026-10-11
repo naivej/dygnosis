@@ -318,7 +318,7 @@ fn w122_inf() {
 
 #[test]
 fn w122_capital_inf() {
-    let src = check_mod("w120/w122_Inf.mod");
+    let src = check_mod("w120/w122_capital_inf.mod");
     let rust = rust_family(&src);
     assert_eq!(rust.len(), 1);
     assert_eq!(rust[0].code, "W122");

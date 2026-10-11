@@ -3038,9 +3038,9 @@
       ],
       "kind": "fire",
       "package": "w120",
-      "fixture": "tests/fixtures/w120/w122_Inf.mod",
+      "fixture": "tests/fixtures/w120/w122_capital_inf.mod",
       "source": "w120.rs::w122_capital_inf",
-      "cluster": "w120/w122_Inf.mod",
+      "cluster": "w120/w122_capital_inf.mod",
       "notes": "Inf"
     },
     {

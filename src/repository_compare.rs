@@ -697,7 +697,8 @@ mod tests {
                 NEXT_REPO.fetch_add(1, Ordering::Relaxed)
             ));
             std::fs::create_dir(&path).expect("unique temporary repository");
-            let repo = Self(path);
+            // Absolute historical paths must use the repository's real spelling.
+            let repo = Self(crate::include_resolver::make_absolute(&path));
             repo.git(&["init", "--quiet"]);
             repo.git(&["config", "user.name", "Dygnosis test"]);
             repo.git(&["config", "user.email", "test@example.invalid"]);
