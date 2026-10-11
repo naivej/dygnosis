@@ -67,6 +67,21 @@ fn records_execution_order_and_every_model_opener() {
 
 #[test]
 fn registry_covers_every_existing_block_branch_and_variant() {
+    let grammar: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("editors/vscode/syntaxes/dynare.tmLanguage.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let keywords = grammar["patterns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pattern| pattern["name"] == "keyword.control.dynare")
+        .unwrap();
+    let keyword_pattern = regex::Regex::new(keywords["match"].as_str().unwrap()).unwrap();
     let mut seen = HashSet::new();
     for &name in SUPPORTED_BLOCKS {
         let opener = if name == "pac_target_info" {
@@ -75,6 +90,13 @@ fn registry_covers_every_existing_block_branch_and_variant() {
             name
         };
         let text = format!("{opener};\nend;\n");
+        // The TextMate keyword rule is a consumed contract. A parser-supported
+        // block must not lose its opener styling in the editor.
+        assert_eq!(
+            keyword_pattern.find(opener).map(|matched| matched.as_str()),
+            Some(name),
+            "unstyled block opener: {name}"
+        );
         let model = parse(&text);
         let row = model
             .statements
