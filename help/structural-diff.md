@@ -26,7 +26,7 @@ Equations. Direct equation references show where changed names are used.
 | Action or control | Result |
 |---|---|
 | Change groups, Find changes and Type of changes | Filter the model rows. [Default change types](settings:dynare.diff.defaultChangeKinds) sets the initial Added, Removed and Replaced selection for a new comparison. |
-| Source links | Each side's written source. For a missing instruction, a link can lead to the corresponding block opener. Historical source is read-only. |
+| Source links | Each side's written source. When a row is absent on one side, its link can lead to the start of the corresponding declaration, command or block. Historical source is read-only. |
 | Text diff… | VS Code text comparison for captured roots and active includes, including formatting and comment changes. |
 | Change comparison… | Another baseline for the model that opened the view. |
 | Swap sides | Exchanges Before and After. |

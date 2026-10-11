@@ -46,7 +46,7 @@ pub(crate) struct ComparisonInput {
     symbols: BTreeMap<String, Target>,
     shocks: HashMap<usize, Target>,
     statements: BTreeMap<usize, Target>,
-    block_openers: BTreeMap<usize, Target>,
+    context_openers: BTreeMap<usize, Target>,
     forecast_paths: BTreeMap<(usize, usize), [Vec<WrittenSegment>; 3]>,
     instructions: BTreeMap<String, Vec<Vec<WrittenSegment>>>,
     written_equations: BTreeMap<usize, (usize, usize, Target)>,
@@ -95,7 +95,7 @@ impl ComparisonInput {
             symbols: BTreeMap::new(),
             shocks: HashMap::new(),
             statements: BTreeMap::new(),
-            block_openers: BTreeMap::new(),
+            context_openers: BTreeMap::new(),
             forecast_paths: BTreeMap::new(),
             instructions: BTreeMap::new(),
             written_equations: BTreeMap::new(),
@@ -121,27 +121,30 @@ impl ComparisonInput {
                     id,
                     target(format!("s{id}"), source, statement.dimension.clone()),
                 );
-                if statement.kind == crate::model::StatementKind::Block {
-                    if let Some((first, last)) = model
-                        .expanded_tokens
-                        .get(statement.opener_range.clone())
-                        .and_then(|tokens| tokens.first().zip(tokens.last()))
-                    {
-                        input.block_openers.insert(
-                            id,
-                            Target {
-                                occurrence_id: format!("s{id}:opener"),
-                                dimension: statement.dimension.clone(),
-                                segments: workspace.map_effective_segments(
-                                    root,
-                                    crate::span::Span::new(
-                                        first.span.start as usize,
-                                        last.span.end as usize,
-                                    ),
+                let opener_range = if statement.kind == crate::model::StatementKind::Block {
+                    statement.opener_range.clone()
+                } else {
+                    statement.token_range.start..statement.token_range.start + 1
+                };
+                if let Some((first, last)) = model
+                    .expanded_tokens
+                    .get(opener_range)
+                    .and_then(|tokens| tokens.first().zip(tokens.last()))
+                {
+                    input.context_openers.insert(
+                        id,
+                        Target {
+                            occurrence_id: format!("s{id}:opener"),
+                            dimension: statement.dimension.clone(),
+                            segments: workspace.map_effective_segments(
+                                root,
+                                crate::span::Span::new(
+                                    first.span.start as usize,
+                                    last.span.end as usize,
                                 ),
-                            },
-                        );
-                    }
+                            ),
+                        },
+                    );
                 }
             }
         }
@@ -813,13 +816,16 @@ pub(crate) fn navigation_json(
             let opener = |missing: bool,
                           present: Option<&crate::semantic_diff::RowSide>,
                           input: &ComparisonInput| {
-                input.render(
-                    missing
-                        .then(|| present?.block_context.as_ref()?.counterpart_block)
-                        .flatten()
-                        .and_then(|id| input.block_openers.get(&id)),
-                    &builder.coordinates,
-                )
+                let context = present.filter(|_| missing).and_then(|side| {
+                    let target = input.context_openers.get(&side.counterpart_statement?)?;
+                    // Like direct symbol targets, context targets use the row's
+                    // scope even when the written declaration has another scope.
+                    Some(Target {
+                        dimension: side.scope.dimension.clone(),
+                        ..target.clone()
+                    })
+                });
+                input.render(context.as_ref(), &builder.coordinates)
             };
             let old = opener(row.before.is_none(), row.after.as_ref(), before);
             let new = opener(row.after.is_none(), row.before.as_ref(), after);
@@ -829,6 +835,7 @@ pub(crate) fn navigation_json(
         .collect();
     for row in &mut builder.rows {
         if let Some(context) = row["id"].as_str().and_then(|id| contexts.get(id)) {
+            // Retain the original wire name for compatible extension clients.
             row["block_openers"] = context.clone();
         }
     }

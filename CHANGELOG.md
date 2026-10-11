@@ -14,9 +14,10 @@
 ## v0.11.16
 
 - In **Show mod changes**, a source link on the missing side of an added or
-  removed instruction opens the corresponding block opener when that block is
-  verified. The link shows the opener's line instead of opening the file at
-  the top.
+  removed row opens the start of the corresponding declaration, command or
+  block when verified. This includes `var`, `varexo`, `parameters` and
+  observable lists. The link shows that context's line instead of opening the
+  file at the top.
 
 ## v0.11.15
 

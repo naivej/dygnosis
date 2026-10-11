@@ -504,13 +504,17 @@ captured registry membership before display or actions. Private parser receipts
 are not serialized. Missing proof yields a null target; display offsets and
 hunk lines cannot create one.
 
-Navigation rows can also include `block_openers: {before, after}`. Each value
-is a nullable navigation target in that transport's existing coordinate format.
-A target exists only for an absent child side whose corresponding accepted
-block and written opener are verified. The ordinary `before` or `after` target
-stays null: this is a block location, not a paired child. Clients prefer the
-opener to a file-only fallback, validate its side/input and captured source,
-and apply the same stale-input guards. Older engines omit `block_openers`.
+Navigation rows can also include `block_openers: {before, after}`. This legacy
+field name covers context targets for all accepted statements, including
+symbol declarations, observable lists and blocks. Each value is a nullable
+target in that transport's existing coordinate format. A target exists only
+for an absent row side with verified statement correspondence and written
+source. It selects the block opener or the first token of another statement,
+and carries the present row's scope, including after symbol type changes.
+The ordinary `before` or `after` target stays null; the context target does not
+establish a paired row. Clients prefer it to a file-only fallback, validate
+its side/input and captured source, and apply the same stale-input guards.
+Older engines omit `block_openers` or supply it only for blocks.
 
 `semantic.budgets` reports comparison-wide token alignment cells (250,000),
 source alignment cells (1,000,000), references per side (2,000), source hunks

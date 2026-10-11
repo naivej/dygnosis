@@ -354,7 +354,7 @@ fn parent(fact: &CapturedFact) -> Option<usize> {
 
 /// Reuse accepted parent correspondence for display and navigation, including unchanged
 /// parents with no output row. This does not pair children or add token claims.
-pub(super) fn populate_block_context(before: &Model, after: &Model, diff: &mut ModelDiff) {
+pub(super) fn populate_context(before: &Model, after: &Model, diff: &mut ModelDiff) {
     fn boundaries(model: &Model) -> BTreeMap<usize, [String; 2]> {
         model
             .statements
@@ -416,7 +416,7 @@ pub(super) fn populate_block_context(before: &Model, after: &Model, diff: &mut M
                 .or_else(|| {
                     // Legacy shock rows retain written spans rather than child
                     // execution receipts. A unique containing block can supply
-                    // display context only; it never pairs or claims a child.
+                    // display and source context; it never pairs or claims a child.
                     if row.family != SemanticFamily::Shocks {
                         return None;
                     }
@@ -434,14 +434,11 @@ pub(super) fn populate_block_context(before: &Model, after: &Model, diff: &mut M
             else {
                 continue;
             };
+            side.counterpart_statement = pairs.get(&id).copied();
             if let Some(boundaries) = own.get(&id) {
                 side.block_context = Some(BlockContext {
                     own: boundaries.clone(),
                     counterpart: pairs.get(&id).and_then(|id| opposite.get(id)).cloned(),
-                    counterpart_block: pairs.get(&id).copied().filter(|other| {
-                        opposite.contains_key(other)
-                            && model.statements[id].kind == crate::model::StatementKind::Block
-                    }),
                 });
             }
         }

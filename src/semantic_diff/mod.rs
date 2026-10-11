@@ -36,5 +36,5 @@ pub(crate) fn populate(before: &Model, after: &Model, diff: &mut ModelDiff) {
     priors::populate(before, after, diff, &mut claims);
     families::populate(before, after, diff, &mut claims);
     surfaces::populate_commands(before, after, diff, &claims);
-    occurrences::populate_block_context(before, after, diff);
+    occurrences::populate_context(before, after, diff);
 }

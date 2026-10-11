@@ -14,6 +14,120 @@ use tower_lsp::LanguageServer;
 
 const BASE: &str = "var y c x v; varexo e u; parameters a b; a=.5; b=.9; model; y=a*y(-1)+e; c=y; x=c+u; v=x; end;\n";
 
+// Guards added and removed declarations falling back to the file start even
+// though the same declaration context exists on the other side.
+#[tokio::test]
+async fn missing_symbol_source_uses_corresponding_declaration() {
+    for (keyword, family) in [
+        ("var", "symbols"),
+        ("varexo", "symbols"),
+        ("varexo_det", "symbols"),
+        ("parameters", "symbols"),
+        ("model_local_variable", "symbols"),
+        ("varobs", "observables"),
+        ("varexobs", "observables"),
+    ] {
+        let plain = format!("// source\n\n  {keyword} existing;\n");
+        let changed = plain.replace("existing;", "existing extra;");
+        for (before, after, missing) in [
+            (plain.as_str(), changed.as_str(), "before"),
+            (changed.as_str(), plain.as_str(), "after"),
+        ] {
+            let (service, _) = new_service();
+            let result = current(service.inner(), before, after).await;
+            let row = result["semantic"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["family"] == family && row["name"] == "extra")
+                .expect("added or removed declaration");
+            let nav = result["navigation"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|nav| nav["id"] == row["pointer"])
+                .unwrap();
+            assert!(nav[missing].is_null());
+            let target = nav["block_openers"][missing].as_object();
+            assert_eq!(
+                target.map(|target| &target["written_locations"][0]["range"]["start"]),
+                Some(&json!({"line":2,"character":2})),
+                "{keyword}: {nav}"
+            );
+        }
+    }
+}
+
+// Guards selecting the first same-keyword declaration instead of its accepted
+// counterpart, and inventing a counterpart for ambiguous or absent contexts.
+#[tokio::test]
+async fn declaration_context_requires_unambiguous_statement_correspondence() {
+    for (plain, changed, line) in [
+        (
+            "// source\nvar first;\nvar second;\n",
+            "// source\nvar first;\nvar second extra;\n",
+            Some(2),
+        ),
+        (
+            "// source\nvar first;\nvar second;\n",
+            "// source\nvar first extra;\nvar second;\n",
+            Some(1),
+        ),
+        (
+            "// source\nvar first;\nvar second;\n",
+            "// source\nvar changed;\nvar second extra;\n",
+            None,
+        ),
+        (
+            "// source\nparameters first;\n",
+            "// source\nparameters first;\nvar extra;\n",
+            None,
+        ),
+        (
+            "heterogeneity_dimension d e;\nvar(heterogeneity=d) existing;\n",
+            "heterogeneity_dimension d e;\nvar(heterogeneity=e) existing extra;\n",
+            Some(1),
+        ),
+    ] {
+        for (before, after, missing) in [(plain, changed, "before"), (changed, plain, "after")] {
+            let (service, _) = new_service();
+            let result = current(service.inner(), before, after).await;
+            let row = result["semantic"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["family"] == "symbols" && row["name"] == "extra")
+                .unwrap();
+            let nav = result["navigation"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|nav| nav["id"] == row["pointer"])
+                .unwrap();
+            let context = &nav["block_openers"][missing];
+            assert!(nav[missing].is_null());
+            if let Some(line) = line {
+                assert_eq!(
+                    context["written_locations"][0]["range"]["start"],
+                    json!({"line":line,"character":0}),
+                    "{nav}"
+                );
+            } else {
+                assert!(context.is_null(), "{nav}");
+            }
+        }
+    }
+    for (before, after) in [
+        ("var first", "var first extra;"),
+        ("var first extra;", "var first"),
+    ] {
+        let (service, _) = new_service();
+        let result = current(service.inner(), before, after).await;
+        assert_eq!(result["status"], "incomplete", "{result}");
+        assert!(result["navigation"].is_null());
+    }
+}
+
 // Guards missing-side source links falling back to line zero when the accepted
 // corresponding block still exists but has no paired child change.
 #[tokio::test]
@@ -47,29 +161,58 @@ async fn missing_side_source_uses_corresponding_block_opener() {
     }
 }
 
-// Guards opener navigation across child families and historical include maps.
-// A new whole block must not borrow an unrelated block or a root-file location.
+// Guards context navigation across families and historical include maps.
+// A new statement must not borrow an unrelated context or a root-file location.
 #[test]
-fn block_opener_targets_keep_include_identity_and_absent_blocks_unlinked() {
-    for (family, block, common, added) in [
-        ("steady_state", "initval", "y=1;", "c=2;"),
+fn context_targets_keep_include_identity_and_absent_statements_unlinked() {
+    for (family, plain_body, changed_body) in [
+        (
+            "steady_state",
+            "initval; y=1; end;",
+            "initval; y=1; c=2; end;",
+        ),
         (
             "priors",
-            "estimated_params",
-            "a, beta_pdf, .5, .1;",
-            "b, beta_pdf, .6, .1;",
+            "estimated_params; a, beta_pdf, .5, .1; end;",
+            "estimated_params; a, beta_pdf, .5, .1; b, beta_pdf, .6, .1; end;",
         ),
-        ("shocks", "shocks", "var e; stderr 1;", "var u; stderr 2;"),
-        ("symbols", "model", "#existing=1;", "#extra=2;"),
+        (
+            "shocks",
+            "shocks; var e; stderr 1; end;",
+            "shocks; var e; stderr 1; var u; stderr 2; end;",
+        ),
+        (
+            "symbols",
+            "model; #existing=1; end;",
+            "model; #existing=1; #extra=2; end;",
+        ),
         (
             "equations",
-            "model",
-            "[name='existing'] y=1;",
-            "[name='extra'] c=2;",
+            "model; [name='existing'] y=1; end;",
+            "model; [name='existing'] y=1; [name='extra'] c=2; end;",
         ),
+        ("symbols", "var existing;", "var existing extra;"),
+        ("symbols", "varexo existing;", "varexo existing extra;"),
+        (
+            "symbols",
+            "parameters existing;",
+            "parameters existing extra;",
+        ),
+        (
+            "symbols",
+            "var(heterogeneity=d) existing;",
+            "var(heterogeneity=d) existing extra;",
+        ),
+        (
+            "symbols",
+            "var(heterogeneity=d) existing; change_type(parameters) existing;",
+            "var(heterogeneity=d) existing extra; change_type(parameters) existing extra;",
+        ),
+        ("observables", "varobs y;", "varobs y c;"),
+        ("observables", "varexobs e;", "varexobs e u;"),
     ] {
-        let plain = format!("// include\n/*😀*/  {block};\n{common}\nend;\n");
-        let changed = plain.replace("\nend;", &format!("\n{added}\nend;"));
+        let plain = format!("// include\n/*😀*/  {plain_body}\n");
+        let changed = format!("// include\n/*😀*/  {changed_body}\n");
         for (old, new, missing) in [
             (plain.as_str(), changed.as_str(), "before"),
             (changed.as_str(), plain.as_str(), "after"),
@@ -79,7 +222,10 @@ fn block_opener_targets_keep_include_identity_and_absent_blocks_unlinked() {
                 captured_files(
                     id,
                     BTreeMap::from([
-                        ("root.mod".into(), format!("{BASE}@#include \"body.mod\"\n")),
+                        (
+                            "root.mod".into(),
+                            format!("{BASE}heterogeneity_dimension d;\n@#include \"body.mod\"\n"),
+                        ),
                         ("body.mod".into(), body.into()),
                     ]),
                 )
@@ -112,6 +258,16 @@ fn block_opener_targets_keep_include_identity_and_absent_blocks_unlinked() {
                         continue;
                     }
                     let location = &nav["block_openers"][missing]["written_locations"][0];
+                    let present = if missing == "before" {
+                        "after"
+                    } else {
+                        "before"
+                    };
+                    assert_eq!(
+                        nav["block_openers"][missing]["dimension"],
+                        row[present]["scope"]["dimension"],
+                        "{nav}"
+                    );
                     assert_eq!(location["file_key"], "body.mod", "{family}: {nav}");
                     assert_eq!(location["input_id"], missing);
                     assert_eq!(
