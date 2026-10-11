@@ -40,7 +40,8 @@
   Each group shows all its filtered changes as rows with Before on the left
   and After on the right, expression tokens, other changed fields, and
   direct written references within each side's card. Card headers open each
-  side's verified source, including the corresponding HEAD file for an added row.
+  side's verified source at the instruction's line when known, including the
+  corresponding HEAD file for an added row.
   Expressions appear once; unchanged timing entries and repeated metadata are
   omitted. Change comparison and Swap sides sit beside the file indicators.
 - The change-color legend stays at the bottom during scrolling. All available
@@ -59,6 +60,7 @@
   and model-local definitions are highlighted in full. Commands omit repeated role and token headings.
   Predetermined conventions stay in the symbol card without another declaration
   row or the same conversion note on each direct reference.
+  Each direct equation appears once per side; written offset notes are omitted.
   Heterogeneous dimensions stay in card headers; repeated dimension fields and
   matching labels on direct references are omitted.
   **Equations** combines aggregate and heterogeneous equation changes in one group.
@@ -74,9 +76,11 @@
   Occurrences without a proven match use Removed and Added in the view and
   comparison result, with no Unpaired change type.
 - **Forecast** groups forecast commands and conditional paths. **State** replaces
-  Steady state and includes historical, initial and terminal values. Historical
+  Steady state and includes historical, initial and terminal values. Each `endval`
+  assignment appears once in State, including exogenous values. Historical
   assignments pair by variable and period. Changed periods of one variable share
   a written block; unchanged periods are omitted and only edited tokens are highlighted.
+  The source link opens the first visible assignment after filtering.
   `steady_state_model` uses State, `varobs` uses Data and `estimation`
   uses Commands, including their retained options and statement context.
   **Method of moments** replaces Moments and IRFs.

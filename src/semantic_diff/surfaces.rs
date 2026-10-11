@@ -20,18 +20,31 @@ pub(crate) fn populate(
 ) {
     primary_context(before, after, diff, claims);
     let owned = |side: Side| {
+        let model = match side {
+            Side::Before => before,
+            Side::After => after,
+        };
         diff.shock_setup_changes
             .iter()
             .filter_map(|change| match side {
                 Side::Before => change.before.as_ref(),
                 Side::After => change.after.as_ref(),
             })
-            .filter_map(|setting| {
-                setting
-                    .assignment_tokens
-                    .as_ref()
-                    .map(|range| (range.start, range.end))
-            })
+            .filter_map(|setting| setting.assignment_tokens.as_ref().map(|range| range.start))
+            // The direct reader position identifies the same assignment even
+            // when its instruction receipt also includes the terminator.
+            .chain(
+                model
+                    .fact_receipts
+                    .get("shock_instruction")
+                    .into_iter()
+                    .flatten()
+                    .filter(|receipt| {
+                        parent_at_order(model, receipt.parse_order)
+                            .is_some_and(|id| accepted_statement(model, &model.statements[id]))
+                    })
+                    .map(|receipt| receipt.parse_order),
+            )
             .collect::<BTreeSet<_>>()
     };
     let old = facts(before, &owned(Side::Before), &mut claims.expression_work);
@@ -84,7 +97,7 @@ fn side_at(model: &Model, order: usize, label: &str, scope: ComparisonScope) -> 
 
 fn facts(
     model: &Model,
-    owned_assignments: &BTreeSet<(usize, usize)>,
+    owned_assignments: &BTreeSet<usize>,
     work: &mut super::expression_values::RetainedExpressionWork,
 ) -> Vec<CapturedFact> {
     let mut facts = Vec::new();
@@ -278,10 +291,7 @@ fn facts(
     }
     for (role, assignments) in [("initval", &model.initval), ("endval", &model.endval)] {
         for assignment in assignments {
-            if assignment.native
-                || owned_assignments
-                    .contains(&(assignment.active_tokens.start, assignment.active_tokens.end))
-            {
+            if assignment.native || owned_assignments.contains(&assignment.active_tokens.start) {
                 continue;
             }
             facts.push(assignment_fact(

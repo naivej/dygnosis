@@ -187,11 +187,16 @@
       if (ownRefs.length) {
         const conventionShown = row.semantic.family === "symbols" && visibleFields(row.semantic).some(field => field.name === "predetermined" && field.comparison_availability === "complete" && field[side].value?.kind === "boolean" && field[side].value.value);
         const refs = node("section", undefined, "refs"); refs.append(node("h3", "Direct equation references"));
+        const seenEquations = new Set();
         for (const ref of ownRefs) {
+          // The wire retains each symbol use; the card lists its equations.
+          const equationKey = JSON.stringify([ref.scope.domain, ref.scope.dimension, ref.equation_index]);
+          if (seenEquations.has(equationKey)) continue;
+          seenEquations.add(equationKey);
           const line = node("p", undefined, "reference"), target = ref.navigation[side];
           const button = action(ref.label, "openReference", { pointer: ref.pointer, side }, payload.status !== "ready" ? "Refresh to enable source actions." : !target?.written_locations.length ? "No verified written location is available." : "");
           button.setAttribute("aria-label", "Open " + titleCase(side) + " reference: " + ref.label + (button.disabled ? ". " + button.title : ""));
-          const context = [ref.scope.dimension && (!scopeShown || ref.scope.dimension !== scope) ? scopeLabel(ref.scope.dimension) : "", ref.timing.written_offset ? "written " + ref.timing.written_offset : "", !conventionShown && ref.timing.converted_offset !== ref.timing.written_offset ? "after convention " + ref.timing.converted_offset : ""].filter(Boolean).join(" · ");
+          const context = [ref.scope.dimension && (!scopeShown || ref.scope.dimension !== scope) ? scopeLabel(ref.scope.dimension) : "", !conventionShown && ref.timing.converted_offset !== ref.timing.written_offset ? "after convention " + ref.timing.converted_offset : ""].filter(Boolean).join(" · ");
           line.append(button); if (context) line.append(node("span", context, "source-note")); refs.append(line);
         }
         panel.append(refs);
@@ -234,7 +239,7 @@
   }
   function historyCards(rows) {
     // Group display context only after filtering. Each period keeps its semantic
-    // owner/count; the shared source action still opens the verified parent block.
+    // owner/count; the source action opens the first visible instruction.
     const cards = [], groups = new Map();
     for (const row of rows) {
       const detail = row.semantic, statement = detail && writtenStatement(detail);
@@ -245,7 +250,7 @@
         return [side, match && { start: match[1].length, end: text.length - match[3].length, header: match[1], footer: match[3] }];
       }));
       if (!history || !target || detail.limits.some(limit => limit.code === "occurrence_correspondence_unpaired") || !parts || ["before", "after"].some(side => detail[side] && !parts[side]) || detail.fields.some(field => field.changed && field.comparison_availability === "complete" && !["expression", "role", "target", "lag"].includes(field.name))) { cards.push(row); continue; }
-      const key = JSON.stringify([target, row.kind, ...["before", "after"].map(side => [detail[side]?.context, row.navigation[side]?.written_locations, parts[side]?.header, parts[side]?.footer])]);
+      const key = JSON.stringify([target, row.kind, ...["before", "after"].map(side => [detail[side]?.context, row.navigation[side]?.occurrence_id, row.navigation[side]?.written_locations.map(location => location.uri), parts[side]?.header, parts[side]?.footer])]);
       const existing = groups.get(key);
       if (!existing) {
         const card = { ...row, semantic: { ...detail, expressions: [{ ...statement, ...Object.fromEntries(["before", "after"].map(side => [side, statement[side] && { ...statement[side], runs: [...statement[side].runs] }])) }] } };

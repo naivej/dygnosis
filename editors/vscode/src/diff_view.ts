@@ -138,7 +138,8 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
   array(result.shock_setup_changes).forEach((raw, index) => {
     const row = object(raw), kind = string(row.change);
     if (!changeKinds.includes(kind as ChangeKind)) malformed();
-    const section = ["shock_group", "init2shocks"].includes(string(row.form)) ? "shockAnalysisSetup" : "shockSetup";
+    const form = string(row.form);
+    const section = form === "endval" ? "steadyState" : ["shock_group", "init2shocks"].includes(form) ? "shockAnalysisSetup" : "shockSetup";
     const side = (raw: unknown): string | null => {
       if (raw === undefined || raw === null) return null;
       const fields = Object.entries(object(raw)).filter(([key]) => !["location", "group_location", "origin_uri"].includes(key));
@@ -149,7 +150,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
       const value = object(raw).heterogeneity;
       return value === undefined ? undefined : nullableString(value);
     };
-    add(`/shock_setup_changes/${index}`, section, section === "shockSetup" ? "Shock setup" : "Shock analysis setup", kind as SemanticRow["change"], `${string(row.target)} · ${string(row.form)} · ${string(row.role)}`, side(row.before), side(row.after), null, { before: dimension(row.before), after: dimension(row.after) });
+    add(`/shock_setup_changes/${index}`, section, semanticGroup(section), kind as SemanticRow["change"], `${string(row.target)} · ${form} · ${string(row.role)}`, side(row.before), side(row.after), null, { before: dimension(row.before), after: dimension(row.after) });
   });
   const complete = before.complete && after.complete && !!before.revision && !!after.revision;
   const registry: SourceRegistry = { before: {}, after: {} };
@@ -171,7 +172,7 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
       estimated_params: "priors", estimated_params_init: "priors", estimated_params_bounds: "priors",
       method_of_moments: "moments", matched_moments: "moments", matched_irfs: "moments", matched_irfs_weights: "moments", moment_calibration: "moments", irf_calibration: "moments", generate_irfs: "moments",
     };
-    if (!["symbols", "parameters", "equations", "shocks", "macro_context"].includes(row.family)) {
+    if (!["symbols", "parameters", "equations", "macro_context"].includes(row.family)) {
       const instruction = [row.before, row.after].map(side => side?.context && instructions[side.context.name]).find(Boolean);
       if (instruction) return instruction;
     }

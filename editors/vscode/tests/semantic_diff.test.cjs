@@ -176,6 +176,7 @@ test("forecast commands and paths have a Forecast category; state blocks have St
 test("retained facts and residual instruction context share one category", () => {
   for (const [name, family, section, group] of [
     ["steady_state_model", "steady_state", "steadyState", "State"],
+    ["endval", "shocks", "steadyState", "State"],
     ["varobs", "observables", "data", "Data"],
     ["varexobs", "observables", "data", "Data"],
     ["estimation", "data", "commands", "Commands"],
@@ -191,6 +192,22 @@ test("retained facts and residual instruction context share one category", () =>
     const rows = parseDiff(r, roots.before, roots.after, true).rows;
     assert.deepEqual(rows.map(row => [row.section, row.group]), [[section, group], [section, group]], name);
     assert.deepEqual(rows.map(row => row.id), [retained.pointer, residual.pointer]);
+  }
+});
+
+// Guards legacy endval facts keeping their old Shock setup display group.
+test("legacy endval shock rows use State in semantic and structural comparisons", () => {
+  for (const semantic of [true, false]) {
+    const r = response(), retained = r.semantic.rows[0];
+    retained.pointer = "/shock_setup_changes/0"; retained.family = "shocks";
+    retained.name = retained.before.name = retained.after.name = "demand";
+    retained.before.context = retained.after.context = null;
+    retained.before.scope = retained.after.scope = { ...scope, block: "endval" };
+    r.shock_setup_changes.push({ form: "endval", role: "terminal", target: "demand", change: "changed", before: { block: "endval", values: ["0.1"] }, after: { block: "endval", values: ["0.2"] } });
+    r.navigation.rows[0].id = retained.pointer; r.navigation.rows[0].kind = "shock";
+    if (!semantic) for (const key of ["semantic", "comparison_versions", "source_changes", "coverage"]) delete r[key];
+    const row = parseDiff(r, roots.before, roots.after, semantic).rows[0];
+    assert.equal(row.section, "steadyState"); assert.equal(row.group, "State");
   }
 });
 
@@ -396,6 +413,41 @@ test("added symbol cards show one declaration and omit repeated or empty metadat
   detail.fields[0].after = value("parameters"); env.render(snapshot);
   assert.match(env.elements.results.textContent, /Symbol kind/); assert.match(env.elements.results.textContent, /parameters/);
 });
+// Guards repeated uses of a name becoming repeated links to the same equation.
+test("direct references list each scoped equation once per card side", () => {
+  const r = response(), template = r.semantic.references[0], navigation = r.navigation.rows.pop();
+  r.semantic.references = []; r.semantic.rows[0].references = [];
+  for (const side of ["before", "after"]) {
+    for (const [index, label, offset, dimension] of [[1, "Production", -1, null], [3, "Capital accumulation", 0, null], [3, "Capital accumulation", -1, null], [4, "Capital accumulation", 0, null], [3, "Capital accumulation", 0, "firms"]]) {
+      const occurrence = r.semantic.references.length, pointer = `/semantic/references/${occurrence}`;
+      const ref = { ...template, pointer, side, equation_pointer: pointer, equation_index: index, label, scope: { domain: dimension ? "heterogeneous" : "aggregate", dimension, block: null }, occurrence, timing: { ...template.timing, written_offset: offset, converted_offset: offset, occurrence } };
+      r.semantic.references.push(ref); r.semantic.rows[0].references.push(pointer);
+      const target = { ...navigation.after, occurrence_id: side + ":" + index, domain: ref.scope.domain, dimension, written_locations: [{ ...navigation.after.written_locations[0], uri: roots[side] }] };
+      r.navigation.rows.push({ ...navigation, id: pointer, equation_pointer: pointer, before: side === "before" ? target : null, after: side === "after" ? target : null });
+    }
+  }
+  const env = webview(); env.render(parseDiff(r, roots.before, roots.after, true));
+  const panels = descendants(env.elements.results).filter(element => ["side before", "side after"].includes(element.className));
+  for (const [index, side] of ["before", "after"].entries()) {
+    const links = descendants(panels[index]).filter(element => element.attributes["aria-label"]?.startsWith(`Open ${index ? "After" : "Before"} reference:`));
+    assert.deepEqual(links.map(link => link.textContent), ["Production", "Capital accumulation", "Capital accumulation", "Capital accumulation"]);
+    for (const [i, occurrence] of [0, 1, 3, 4].entries()) {
+      links[i].fire("click"); assert.equal(env.posted.at(-1).pointer, `/semantic/references/${index * 5 + occurrence}`); assert.equal(env.posted.at(-1).side, side);
+    }
+  }
+});
+
+// Guards the written offset note returning beside a direct equation link.
+test("direct references omit written timing notes", () => {
+  const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true);
+  for (const offset of [-1, 1]) {
+    snapshot.references[0].timing.written_offset = snapshot.references[0].timing.converted_offset = offset;
+    env.render(snapshot);
+    const refs = descendants(env.elements.results).find(element => element.className === "refs");
+    assert.match(refs.textContent, /Unchanged production/); assert.doesNotMatch(refs.textContent, /written [+-]?\d/);
+  }
+});
+
 test("direct references belong to their card side and retain exact actions", () => {
   const env = webview(); env.render();
   const panels = descendants(env.elements.results).filter(element => ["side before", "side after"].includes(element.className));
@@ -841,7 +893,11 @@ test("changed periods of one history variable share a block and retain row filte
     row.id = row.navigation.id = "/semantic/rows/" + index;
     row.section = "steadyState"; row.group = "State"; row.label = row.semantic.name = `y(${lag})`;
     row.semantic.family = "steady_state"; row.semantic.references = [];
-    for (const side of ["before", "after"]) row.semantic[side].context.name = "histval";
+    for (const side of ["before", "after"]) {
+      row.semantic[side].context.name = "histval";
+      row.navigation[side].written_locations[0].range.start.line = index + 2;
+      row.navigation[side].written_locations[0].range.end.line = index + 2;
+    }
     row.semantic.fields = [{ name: "target", label: "Historical target", before: value("y"), after: value("y"), changed: false, comparison_availability: "complete", numeric_difference: null }];
     row.semantic.expressions = [{ field: "statement_text", before: { text: prefix + before + suffix, runs: [{ text: prefix, role: "unchanged" }, { text: before, role: "removed" }, { text: suffix, role: "unchanged" }] }, after: { text: prefix + after + suffix, runs: [{ text: prefix, role: "unchanged" }, { text: after, role: "added" }, { text: suffix, role: "unchanged" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
     return row;
@@ -850,11 +906,19 @@ test("changed periods of one history variable share a block and retain row filte
   assert.equal(descendants(env.elements.results).filter(element => element.tag === "article").length, 1);
   assert.deepEqual(descendants(env.elements.results).filter(element => element.className === "expression").map(element => element.textContent), ["histval;\ny(0) = 0.1;\ny(-1) = 0.05;\nend;", "histval;\ny(0) = 0.2;\ny(-1) = -0.05;\nend;"]);
   assert.match(env.elements.counts.textContent, /2 of 2 model rows/);
+  assert.equal(descendants(env.elements.results).find(element => element.className === "source-link").textContent, "main.mod:3");
   descendants(env.elements.results).find(element => element.className === "source-link").fire("click");
   assert.equal(env.posted.at(-1).rowId, snapshot.rows[0].id);
   env.elements.search.value = "y(-1)"; env.elements.search.fire("input");
   assert.doesNotMatch(env.elements.results.textContent, /y\(0\)/);
   assert.match(env.elements.counts.textContent, /1 of 2 model rows/);
+  const filtered = descendants(env.elements.results).find(element => element.className === "source-link");
+  assert.equal(filtered.textContent, "main.mod:4"); filtered.fire("click");
+  assert.equal(env.posted.at(-1).rowId, snapshot.rows[1].id);
+  const separate = structuredClone(snapshot);
+  for (const side of ["before", "after"]) separate.rows[1].semantic[side].context.execution_order++;
+  const separateEnv = webview(); separateEnv.render(separate);
+  assert.equal(descendants(separateEnv.elements.results).filter(element => element.tag === "article").length, 2, "different accepted blocks must remain separate");
 });
 
 test("unchanged named shock-group headings stay plain across added and removed members", () => {

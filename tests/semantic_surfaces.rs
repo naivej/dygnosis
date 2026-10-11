@@ -191,17 +191,12 @@ fn ordered_steady_outputs_and_temporary_roles_remain_one_assignment() {
 }
 
 #[test]
-fn state_and_history_fields_compare_with_proven_parent() {
+fn initial_and_history_fields_compare_with_proven_parent() {
     for (before, after, expected) in [
         (
             "var y; initval; y=1; end;",
             "var y; initval; y=2; end;",
             "initval",
-        ),
-        (
-            "var y; endval; y=1; end;",
-            "var y; endval; y=2; end;",
-            "endval",
         ),
         (
             "var y; histval; y(-1)=1; end;",

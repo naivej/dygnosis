@@ -393,6 +393,30 @@ impl ComparisonInput {
         self.statements.get(&parent)
     }
 
+    /// The selected instruction supplies navigation; its block boundaries are
+    /// display context. Accepted occurrence proof still owns the target identity.
+    fn semantic_target(
+        &self,
+        pointer: &str,
+        own: Option<&crate::semantic_diff::RowSide>,
+    ) -> Option<Target> {
+        let proof = own?.provenance.as_ref()?;
+        let target = self.proven_target(Some(proof))?;
+        let parts = proof
+            .parse_order
+            .and_then(|order| self.forecast_paths.get(&(proof.statement_id?, order)))
+            .map(|parts| parts.as_slice())
+            .or_else(|| self.instructions.get(pointer).map(Vec::as_slice));
+        let segments = parts
+            .and_then(|parts| parts.get(if parts.len() == 3 { 1 } else { 0 }))
+            .unwrap_or(&target.segments);
+        Some(Target {
+            segments: segments.clone(),
+            occurrence_id: target.occurrence_id.clone(),
+            dimension: target.dimension.clone(),
+        })
+    }
+
     /// Select instructions from existing accepted producer receipts. Mapping is
     /// captured while the workspace is current; it never supplies correspondence.
     pub(crate) fn with_written_facts(
@@ -796,14 +820,12 @@ pub(crate) fn navigation_json(
         if !ids.insert(row.pointer.clone()) {
             continue;
         }
+        let old = before.semantic_target(&row.pointer, row.before.as_ref());
+        let new = after.semantic_target(&row.pointer, row.after.as_ref());
         builder.push(
             json!({"id":row.pointer,"kind":"semantic","family":row.family,"name":row.name}),
-            before.proven_target(
-                row.before
-                    .as_ref()
-                    .and_then(|side| side.provenance.as_ref()),
-            ),
-            after.proven_target(row.after.as_ref().and_then(|side| side.provenance.as_ref())),
+            old.as_ref(),
+            new.as_ref(),
         );
     }
     // A missing child can navigate to its proven counterpart parent without

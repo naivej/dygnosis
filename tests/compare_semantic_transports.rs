@@ -14,6 +14,77 @@ use tower_lsp::LanguageServer;
 
 const BASE: &str = "var y c x v; varexo e u; parameters a b; a=.5; b=.9; model; y=a*y(-1)+e; c=y; x=c+u; v=x; end;\n";
 
+// Guards paired assignments opening their own line rather than the block opener.
+#[tokio::test]
+async fn paired_state_sources_select_the_changed_instruction() {
+    let before = "var y;\nvarexo e;\ninitval;\ny = 0.5;\ne = 0.1;\nend;\n";
+    let after = format!(
+        "// shifted source\n{}",
+        before.replace("0.5", "1").replace("0.1", "0.2")
+    );
+    let (service, _) = new_service();
+    let live = current(service.inner(), before, &after).await;
+    let historical = compare_captured_snapshots(
+        captured("before", before),
+        captured("after", &after),
+        SnapshotCoordinates::Lsp,
+    );
+    for (diff, navigation) in [
+        (&live, &live["navigation"]),
+        (&historical["diff"], &historical["navigation"]),
+    ] {
+        let rows = diff["semantic"]["rows"].as_array().unwrap();
+        for (target, line) in [("y", 3), ("e", 4)] {
+            let row = rows
+                .iter()
+                .find(|row| row["name"] == target && row["before"]["context"]["name"] == "initval")
+                .expect("paired initial assignment");
+            assert_eq!(row["change"], "changed", "{row}");
+            let nav = navigation["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|nav| nav["id"] == row["pointer"])
+                .unwrap();
+            for (side, line) in [("before", line), ("after", line + 1)] {
+                assert_eq!(
+                    nav[side]["written_locations"][0]["range"]["start"],
+                    json!({"line":line,"character":0}),
+                    "{target} {side}: {nav}"
+                );
+            }
+        }
+    }
+}
+
+// Guards terminal instructions getting duplicate shock and state owners.
+#[test]
+fn terminal_assignments_have_one_owner() {
+    let before = "var y; varexo e;\nendval;\ny=0.5;\ne=0.1;\nend;";
+    let after = before.replace("0.5", "1").replace("0.1", "0.2");
+    let result = dynare_compare_models(before, &after, None, None, None, None, None);
+    let rows: Vec<_> = result["semantic"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["before"]["scope"]["block"] == "endval")
+        .collect();
+    assert_eq!(rows.len(), 2, "one owner per terminal assignment: {rows:?}");
+    for (target, line) in [("y", 3), ("e", 4)] {
+        let row = rows.iter().find(|row| row["name"] == target).unwrap();
+        assert_eq!(row["change"], "changed");
+        let nav = result["navigation"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|nav| nav["id"] == row["pointer"])
+            .unwrap();
+        for side in ["before", "after"] {
+            assert_eq!(nav[side]["written_locations"][0]["line"], line, "{nav}");
+        }
+    }
+}
+
 // Guards added and removed declarations falling back to the file start even
 // though the same declaration context exists on the other side.
 #[tokio::test]
@@ -983,7 +1054,7 @@ fn history_periods_pair_and_show_only_changed_written_assignments() {
 fn retained_block_cards_keep_written_syntax_and_omit_unchanged_siblings() {
     for (block, changed, unchanged, family) in [
         ("initval", "y = 0.1;", "c = 0;", "steady_state"),
-        ("endval", "y = 0.1;", "c = 0;", "steady_state"),
+        ("endval", "y = 0.1;", "c = 0;", "shocks"),
         (
             "steady_state_model",
             "[y, x] = pair(0.1);",
@@ -1034,7 +1105,7 @@ fn retained_block_cards_keep_written_syntax_and_omit_unchanged_siblings() {
 fn written_block_boundaries_follow_parent_presence() {
     for (block, added, existing, family) in [
         ("initval", "y = 0.1;", "c = 0;", "steady_state"),
-        ("endval", "y = 0.1;", "c = 0;", "steady_state"),
+        ("endval", "y = 0.1;", "c = 0;", "shocks"),
         ("histval", "y(0) = 0.1;", "c(0) = 0;", "steady_state"),
         ("steady_state_model", "y = 0.1;", "c = 0;", "steady_state"),
         (
