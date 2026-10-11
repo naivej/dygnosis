@@ -144,6 +144,44 @@ fn preserves_crlf() {
     assert!(out.contains("y = 1;"), "spaces around =, got {out:?}");
 }
 
+// Guards command arguments being split by operator spacing, including a native
+// tail after a Dynare statement and arguments continued onto another line.
+#[test]
+fn native_command_arguments_survive_document_and_range_formatting() {
+    for native in [
+        "disp hello-world",
+        "save results -ascii",
+        "parameters a; a=1; disp hello-world",
+        "x=1, disp hello-world",
+        "if(true), disp hello-world, end",
+        "foo(); model;\ndisp hello-world",
+        "@#if 0\nmodel;\n@#endif\ndisp hello-world",
+        "@#if 0\ndisp hello-world\n@#endif",
+        "@#if 0\nverbatim;\ndisp hello-world\nend;\n@#endif",
+        "@#define BAD 1\ndisp hello-world",
+        "verbatim;\ndisp hello-world\nend;",
+        "disp hello-world ...\n1+2",
+        "disp hello-world ...\nend;",
+    ] {
+        let source = format!("var y;\nmodel;\ny=1;\nend;\n{native}\n");
+        let formatted = format_text(&source, "\t").expect("model equation formats");
+        assert!(formatted.contains("\ty = 1;"), "{formatted}");
+        assert!(
+            formatted.contains(native),
+            "native arguments changed: {formatted}"
+        );
+        assert_eq!(format_text(&formatted, "\t"), None);
+        let end = source.lines().count() as u32 - 1;
+        let (_, _, replacement) = format_range(&source, 2, end, "\t")
+            .expect("range containing the model equation formats");
+        assert!(
+            replacement.contains(native),
+            "native range changed: {replacement}"
+        );
+        assert_eq!(format_range(&source, 4, end, "\t"), None);
+    }
+}
+
 #[test]
 fn format_range_assignments() {
     let src = trend();

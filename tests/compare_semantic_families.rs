@@ -665,7 +665,7 @@ fn command_lists_and_irf_requests_keep_named_ordered_fields() {
         "stoch_simul(irf_shocks=(u));",
     );
     appended(
-        SemanticFamily::Shocks,
+        SemanticFamily::Data,
         "irf_shocks",
         "estimation(irf_shocks=(e));",
         "estimation(irf_shocks=(u));",

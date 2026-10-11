@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.14",
+  "version": "0.11.15",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -1353,7 +1353,11 @@
                 "removed",
                 "changed"
               ],
-              "enumItemLabels": ["Added", "Removed", "Replaced"]
+              "enumItemLabels": [
+                "Added",
+                "Removed",
+                "Replaced"
+              ]
             },
             "default": [
               "added",

@@ -14,6 +14,101 @@ use tower_lsp::LanguageServer;
 
 const BASE: &str = "var y c x v; varexo e u; parameters a b; a=.5; b=.9; model; y=a*y(-1)+e; c=y; x=c+u; v=x; end;\n";
 
+// Guards a block option edit being turned into a removed/added whole block when
+// the plain counterpart's body already owns all of its tokens.
+#[test]
+fn block_option_edits_keep_both_accepted_parents() {
+    for (plain, option) in [
+        ("var y; model; y=1; end;", "model(cutoff=1e-12)"),
+        ("var y; model; y=1; end;", "model(mfs=1)"),
+    ] {
+        let block = option.split('(').next().unwrap();
+        let changed = plain.replace(&format!("{block};"), &format!("{option};"));
+        for (before, after) in [(plain, changed.as_str()), (changed.as_str(), plain)] {
+            let result = dynare_compare_models(before, after, None, None, None, None, None);
+            let rows: Vec<_> = result["semantic"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|row| {
+                    ["before", "after"]
+                        .iter()
+                        .any(|side| row[side]["context"]["name"] == block)
+                })
+                .collect();
+            assert_eq!(rows.len(), 1, "{before} -> {after}: {rows:?}");
+            assert_eq!(rows[0]["change"], "changed", "{rows:?}");
+            let text = rows[0]["expressions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|expression| expression["field"] == "statement_text")
+                .unwrap();
+            assert!(text["before"]["text"].as_str().unwrap().contains("y=1;"));
+            assert!(text["after"]["text"].as_str().unwrap().contains("y=1;"));
+        }
+    }
+}
+
+// Guards overlap between a complete estimation instruction and its retained
+// symbol/IRF lists. The named fields must survive in the one command owner.
+#[test]
+fn estimation_lists_share_the_complete_command_owner() {
+    for (instruction, from, to, named_field) in [
+        ("estimation(order=1) y;", " y;", " c;", "symbols"),
+        (
+            "estimation(order=1, irf_shocks=(e));",
+            "(e)",
+            "(u)",
+            "irf_shocks",
+        ),
+        (
+            "estimation(order=1, irf_shocks=(e)) y;",
+            " y;",
+            " c;",
+            "symbols",
+        ),
+        (
+            "estimation(order=1, irf_shocks=(e)) y;",
+            "(e)",
+            "(u)",
+            "irf_shocks",
+        ),
+    ] {
+        let before = format!("{BASE}{instruction}");
+        let after = format!("{BASE}{}", instruction.replace(from, to));
+        let result = dynare_compare_models(&before, &after, None, None, None, None, None);
+        let rows: Vec<_> = result["semantic"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| {
+                ["before", "after"]
+                    .iter()
+                    .any(|side| row[side]["context"]["name"] == "estimation")
+            })
+            .collect();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["change"], "changed");
+        assert!(
+            rows[0]["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|field| field["name"] == named_field && field["changed"] == true),
+            "{rows:?}"
+        );
+        let text = rows[0]["expressions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|expression| expression["field"] == "statement_text")
+            .unwrap();
+        assert_eq!(text["before"]["text"], instruction);
+        assert_eq!(text["after"]["text"], instruction.replace(from, to));
+    }
+}
+
 // Guards counted instruction context repeating a command or an added block
 // already represented by its retained options or body facts.
 #[test]

@@ -104,15 +104,17 @@ Shock cards keep changed fields when their captured instruction is unavailable
 or unchanged, such as an instruction becoming superseded.
 State, Priors, Commands and other instruction cards show captured written text, including its
 spacing, quotes and comments. For example, a replacement shows its complete
-`model_replace(...); ... end;` block. A card whose written instruction is unchanged
-can explain that its recorded effects differ. If a complete written range cannot
-be verified, the card directs you to **Text diff**. Relative order changes remain
-visible beside the code.
+`model_replace(...); ... end;` block. When written text is unchanged, the card
+also shows changed expanded instructions or recorded values. This includes a
+macro value changing inside the same written command. If a complete written
+range cannot be verified, available values remain visible and the card directs
+you to **Text diff**. Relative order changes remain visible beside the code.
 Block cards show the changed instruction between the written opener and `end;`.
 Added or removed content already shows that block's presence; a plain heading
 does not add a separate block change. Empty accepted blocks and independent
 block-option changes remain visible. An `estimation` command shows once, with
-its data options and other written settings in the same card.
+its data options, output-variable list, `irf_shocks` and other written settings
+in the same card.
 When a whole block is added or removed, its opener and `end;` are highlighted.
 When both models have the corresponding block, unchanged boundaries stay plain,
 including when an instruction is added or removed inside it. Changed opener

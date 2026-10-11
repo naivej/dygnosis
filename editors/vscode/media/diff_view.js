@@ -108,15 +108,13 @@
     return roles.size === 1 ? [...roles][0] : "unchanged";
   }
   function visibleFields(detail) {
-    if (["commands", "operations", "ms_sbvar"].includes(detail.family)) {
-      return detail.fields.filter(field => ["order", "execution_order"].includes(field.name) && (field.changed || field.comparison_availability !== "complete"));
-    }
     const assignment = detail.expressions.find(expression => expression.field === "expression");
     const evaluatedValueNeeded = ["before", "after"].some(side => {
       const text = assignment?.[side]?.text ?? textField(detail, "expression", side);
       return text !== null && text.trim() !== "" && !/^(?:[+-]\s*)?(?:\d+(?:\.\d*)?|\.\d+)(?:[eEdD][+-]?\d+)?$/.test(text.trim());
     });
     const statement = writtenStatement(detail);
+    const expressions = visibleExpressions(detail);
     return detail.fields.filter(field => {
       if (observableDeclaration(detail) && field.comparison_availability === "complete") {
         if (field.name === "role" || field.name === "target" && ["before", "after"].every(side => !detail[side] || textField(detail, "target", side) === detail[side].name)) return false;
@@ -126,7 +124,7 @@
       if (statement && statement.before?.text !== statement.after?.text && field.comparison_availability === "complete" && !["order", "execution_order"].includes(field.name)
         && (field.name !== "status" || [field.before, field.after].every(side => side.state === "absent" || side.value?.kind === "text" && ["active", "written"].includes(side.value.value)))) return false;
       if (field.comparison_availability === "complete") {
-        if (detail.family === "commands" && field.name === "role" && [field.before, field.after].every(side => side.state === "absent" || side.value?.kind === "text" && ["command", "block_context"].includes(side.value.value))) return false;
+        if (field.name === "role" && ["commands", "operations", "ms_sbvar"].includes(detail.family)) return false;
         if (detail.family === "symbols" && ["added", "removed"].includes(detail.change) && [field.before, field.after].every(side => ["absent", "empty"].includes(side.state) || ["log_transform", "predetermined"].includes(field.name) && side.value?.kind === "boolean" && !side.value.value)) return false;
         if (localRole(detail) && (field.name === "role" || field.name === "target" && ["before", "after"].every(side => !detail[side] || textField(detail, "target", side) === detail[side].name))) return false;
         if (field.name === "written_kind" && ["before", "after"].every(side => !detail[side] || declaration(detail, side))) return false;
@@ -137,12 +135,21 @@
         // Nonempty equation tags distinguish named regime variants.
         return field.name === "tags" && [field.before, field.after].some(side => side.value?.kind === "record" ? Object.keys(side.value.value).length : side.value?.kind === "list" ? side.value.value.length : fieldText(side) !== "");
       }
-      const expression = detail.expressions.find(expression => expression.field === field.name);
+      const expression = expressions.find(expression => expression.field === field.name);
       // Omit only exact duplicate text. Unknown or independently retained values remain visible.
       return !expression || field.comparison_availability !== "complete" || !["before", "after"].every(side => expression[side] === null ? field[side].state === "absent" : ["present", "empty"].includes(field[side].state) && field[side].value?.kind === "text" && field[side].value.value === expression[side].text);
     });
   }
-  const visibleExpressions = detail => observableDeclaration(detail) ? [] : writtenStatement(detail) ? [writtenStatement(detail)] : detail.expressions.filter(expression => ["commands", "operations", "ms_sbvar"].includes(detail.family) ? expression.field === "statement_text" : ["expression", "statement_text"].includes(expression.field) || expression.before?.text !== expression.after?.text || expression.availability !== "complete");
+  function visibleExpressions(detail) {
+    if (observableDeclaration(detail)) return [];
+    const written = writtenStatement(detail);
+    // Captured text can stay identical while macro expansion or retained
+    // operation results change. Only hide detail that the written edit explains.
+    if (written && written.before?.text !== written.after?.text) return [written];
+    const values = detail.expressions.filter(expression => expression !== written &&
+      (expression.before?.text !== expression.after?.text || expression.availability !== "complete" || !written && expression.field === "expression"));
+    return written ? [written, ...values] : values;
+  }
   function sidePanel(row, side) {
     const panel = node("div", undefined, "side " + side), heading = node("div", undefined, "side-title"), own = row.semantic?.[side];
     const scope = row.sideScopes[side], scopeShown = scope !== null && contextScopes(row).includes(scope);
@@ -160,7 +167,7 @@
       const expressions = visibleExpressions(row.semantic);
       if (!keyword && !["symbols", "parameters", "equations", "shocks", "macro_context"].includes(row.semantic.family) && !writtenStatement(row.semantic)?.[side]) panel.append(node("p", "Written source text is unavailable for this instruction. Use Text diff to inspect the captured files.", "source-note"));
       for (const expression of expressions) {
-        if (!["expression", "statement_text", "statement_tokens"].includes(expression.field) || expressions.length > 1) panel.append(node("h3", row.semantic.fields.find(field => field.name === expression.field)?.label ?? titleCase(expression.field), "field-label"));
+        if (!["expression", "statement_text"].includes(expression.field) || expressions.length > 1) panel.append(node("h3", expression.field === "statement_text" ? "Written instruction" : expression.field === "statement_tokens" ? "Expanded instruction" : row.semantic.fields.find(field => field.name === expression.field)?.label ?? titleCase(expression.field), "field-label"));
         const value = expression[side];
         const definitionRole = ["added", "removed"].includes(row.kind) ? row.kind : "unchanged";
         codeLines(panel, value && role === "model_local_definition" && expression.field === "expression" ? { runs: [{ text: "# " + own.name + " = ", role: definitionRole }, ...value.runs, { text: ";", role: definitionRole }] } : value, side);

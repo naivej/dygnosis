@@ -37,6 +37,16 @@ exports.run = async function run() {
     assert.ok(!config?.globalValue && !config?.workspaceValue && !config?.workspaceFolderValue, "The first launch must use the packaged binary");
     const binary = path.join(extension.extensionPath, "bin", binaryName(source.target));
     assert.equal(await sha256(binary), source.binary_sha256);
+    const workspace = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    // Guard real executable verification and staging against the installed
+    // artifact, independently of generated files left in the source checkout.
+    await checkpoint("installed bundle verification and managed MCP staging");
+    const { verifyPackagedBundle, ensureManagedBinary } = require(path.join(extension.extensionPath, "out", "project_mcp"));
+    const frozen = await verifyPackagedBundle({ extensionPath: extension.extensionPath, extension });
+    const managed = await ensureManagedBinary(path.join(workspace, "managed engine with spaces"), frozen);
+    assert.deepEqual(await fs.readFile(managed.path), frozen.bytes);
+    assert.equal(managed.version, source.version);
+    evidence.checks.push("installed bundle provenance, checksum and real version verification; frozen bytes stage and run from a managed path");
     service = await extension.activate();
     await checkpoint("offline Help before opening a model");
     const helpBundle = JSON.parse(await fs.readFile(path.join(extension.extensionPath, "help/bundle.json"), "utf8"));
@@ -61,7 +71,6 @@ exports.run = async function run() {
     if (!projectDiagnostics) assert.equal(service.client, undefined, "Native MCP must work before the first LSP launch");
     evidence.checks.push("native VS Code MCP discovery and actual invocation of all fifteen tools before opening a model");
     await checkpoint("bundled LSP counts, symbols and Problems diagnostics");
-    const workspace = vscode.workspace.workspaceFolders[0].uri.fsPath;
     const file = path.join(workspace, "installed model.mod");
     await fs.writeFile(file, model);
     const document = await vscode.workspace.openTextDocument(file);

@@ -194,15 +194,6 @@ test("Unix staged install retains executable permissions", { skip: process.platf
   const folder = await directory(t), result = await ensureManagedBinary(folder, bundle("0.11.2"), options);
   assert.equal((await fs.stat(result.path)).mode & 0o777, 0o755);
 });
-test("actual bundled engine is frozen, staged and version-verified using real --version", async t => {
-  const extensionPath = path.resolve(__dirname, "..");
-  try { await fs.stat(path.join(extensionPath, "SOURCE.json")); } catch { t.skip("No generated native candidate; installed-package gate remains separate"); return; }
-  const context = { extensionPath, extension: { packageJSON: JSON.parse(await fs.readFile(path.join(extensionPath, "package.json"), "utf8")) } };
-  const frozen = await verifyPackagedBundle(context), folder = await directory(t);
-  const installed = await ensureManagedBinary(folder, frozen);
-  assert.deepEqual(await fs.readFile(installed.path), frozen.bytes);
-  assert.equal(installed.version, frozen.provenance.version);
-});
 test("package verification rejects mismatched extension metadata before launching", async t => {
   const folder = await directory(t), source = bundle("0.11.2");
   await fs.writeFile(path.join(folder, "SOURCE.json"), JSON.stringify(source.provenance));

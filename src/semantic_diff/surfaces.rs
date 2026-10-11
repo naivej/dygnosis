@@ -658,7 +658,8 @@ fn command_facts(
         }
         let tokens = residual(model, statement, side, claims);
         let order = order_changes.get(&statement.id);
-        if tokens.is_empty() && order.is_none() {
+        let implied = tokens.is_empty() && order.is_none();
+        if implied && statement.kind != StatementKind::Block {
             continue;
         }
         let scope = ComparisonScope {
@@ -682,6 +683,9 @@ fn command_facts(
             vec![statement.name.clone()],
             statement_side(model, statement.id, &statement.name, scope),
         );
+        // Keep the plain counterpart until accepted parents have paired. Its
+        // presence alone belongs to the body, but an option edit needs both sides.
+        fact.presence_implied_by_children = implied;
         fact.fields.push(
             field(
                 "statement_tokens",

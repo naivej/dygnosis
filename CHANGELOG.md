@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.11.15
+
+- Formatting preserves native MATLAB command arguments, continuations and
+  verbatim text in document and selection edits.
+- Command cards show changed expanded values when their written macro text is
+  unchanged, and retain available values when written text is unavailable.
+- Adding or removing a model block option keeps both sides of the block in
+  the comparison instead of reporting the block as added or removed.
+- Estimation output-variable and `irf_shocks` edits appear once, with their
+  named lists retained in the command's comparison row.
+
 ## v0.11.14
 
 - Syntax highlighting recognizes every supported block opener, including

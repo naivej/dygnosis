@@ -117,10 +117,12 @@ pub fn format_range(
     if start > end {
         return None;
     }
-    let depth = depth_before(&stripped_lines, start);
+    let preserved = native_command_lines(text);
+    let depth = depth_before(&stripped_lines, &preserved, start);
     let formatted = format_lines(
         &orig_lines[start..=end],
         &stripped_lines[start..=end],
+        &preserved[start..=end],
         indent_unit,
         depth,
     )?;
@@ -149,7 +151,8 @@ fn reformat(text: &str, indent_unit: &str) -> Option<String> {
     }
     let orig_owned: Vec<String> = orig_lines.iter().map(|s| s.to_string()).collect();
     let stripped_owned: Vec<String> = stripped_lines.iter().map(|s| s.to_string()).collect();
-    let mut out = format_lines(&orig_owned, &stripped_owned, indent_unit, 0)?;
+    let preserved = native_command_lines(&normalised);
+    let mut out = format_lines(&orig_owned, &stripped_owned, &preserved, indent_unit, 0)?;
     while out.last().is_some_and(|s| s.is_empty()) {
         out.pop();
     }
@@ -221,9 +224,91 @@ fn structural_line(text: &str) -> &str {
     text.strip_prefix('\u{feff}').unwrap_or(text)
 }
 
-fn depth_before(stripped_lines: &[String], upto: usize) -> usize {
+/// Spaces separate arguments in MATLAB command syntax. The shared parser owns
+/// native line boundaries, including continuations and macro execution. Preserve
+/// whole physical lines when any part is native, verbatim, or opaque recovery.
+fn native_command_lines(text: &str) -> Vec<bool> {
+    let mut starts = vec![0];
+    starts.extend(text.match_indices('\n').map(|(at, _)| at + 1));
+    let model = crate::parser::parse(text);
+    // Difference marks avoid rescanning long spans repeated by macro execution.
+    let mut marks = vec![0i64; starts.len() + 1];
+    let mut spans: Vec<_> = model
+        .execution_steps
+        .iter()
+        .filter_map(|step| match step {
+            crate::model::ExecutionStep::Opaque(span) => Some(*span),
+            crate::model::ExecutionStep::Statement(id) => {
+                let statement = &model.statements[*id];
+                (statement.native || statement.name == "verbatim").then_some(statement.span)
+            }
+        })
+        .chain(
+            model
+                .ms_unparsed_spans
+                .iter()
+                .copied()
+                .filter(|_| !model.macro_incomplete()),
+        )
+        .chain(crate::macro_expand::inactive_macro_spans(text))
+        .collect();
+    if model.macro_incomplete() {
+        // Failed expansion cannot prove block ownership. Preserve possible
+        // command arguments even in text whose execution could not be read.
+        let tokens = tokenize(text);
+        for (index, pair) in tokens.windows(2).enumerate() {
+            let head = &pair[0];
+            let next = &pair[1];
+            if head.kind != TokenKind::Ident
+                || crate::command_skip::is_pin_statement_keyword(head.text(text))
+                || matches!(
+                    next.kind,
+                    TokenKind::Eq | TokenKind::LParen | TokenKind::Eof
+                )
+            {
+                continue;
+            }
+            let gap = &text[head.span.end as usize..next.span.start as usize];
+            let boundary = index == 0
+                || matches!(tokens[index - 1].kind, TokenKind::Semi | TokenKind::Comma)
+                || text[tokens[index - 1].span.end as usize..head.span.start as usize]
+                    .contains('\n');
+            if boundary
+                && !gap.is_empty()
+                && !gap.contains('\n')
+                && gap.chars().all(char::is_whitespace)
+            {
+                spans.push(crate::span::Span::new(
+                    head.span.start as usize,
+                    crate::native_line::native_region_end(text, head.span.start as usize),
+                ));
+            }
+        }
+    }
+    for span in spans {
+        let first = starts.partition_point(|&at| at <= span.start as usize) - 1;
+        let last = starts.partition_point(|&at| at <= span.end.saturating_sub(1) as usize) - 1;
+        if first <= last {
+            marks[first] += 1;
+            marks[last + 1] -= 1;
+        }
+    }
+    let mut active = 0;
+    marks[..starts.len()]
+        .iter()
+        .map(|mark| {
+            active += mark;
+            active > 0
+        })
+        .collect()
+}
+
+fn depth_before(stripped_lines: &[String], preserved: &[bool], upto: usize) -> usize {
     let mut depth = 0usize;
-    for stripped in stripped_lines.iter().take(upto) {
+    for (stripped, preserve) in stripped_lines.iter().zip(preserved).take(upto) {
+        if *preserve {
+            continue;
+        }
         let structural = structural_line(stripped);
         if is_end_line(structural) {
             depth = depth.saturating_sub(1);
@@ -237,17 +322,23 @@ fn depth_before(stripped_lines: &[String], upto: usize) -> usize {
 fn format_lines(
     orig_lines: &[String],
     stripped_lines: &[String],
+    preserved: &[bool],
     indent_unit: &str,
     start_depth: usize,
 ) -> Option<Vec<String>> {
-    if orig_lines.len() != stripped_lines.len() {
+    if orig_lines.len() != stripped_lines.len() || orig_lines.len() != preserved.len() {
         return None;
     }
     let mut out: Vec<String> = Vec::new();
     let mut depth = start_depth;
     let mut assign_run: Vec<(usize, String, String)> = Vec::new();
 
-    for (orig, stripped) in orig_lines.iter().zip(stripped_lines.iter()) {
+    for ((orig, stripped), preserve) in orig_lines.iter().zip(stripped_lines).zip(preserved) {
+        if *preserve {
+            flush_run(&mut out, &mut assign_run);
+            out.push(orig.clone());
+            continue;
+        }
         let code = stripped.trim_end();
         let structural = structural_line(stripped);
 

@@ -134,6 +134,10 @@ a tab or 1–8 spaces. For four spaces, put this in User or Workspace settings:
 {"dynare.formatIndent": 4}
 ```
 
+Native MATLAB lines and `verbatim` blocks keep their spacing, including command
+arguments and continued lines. A selection uses the surrounding file to locate
+these regions.
+
 **Expand Selection** uses the language server's nested source ranges. Enable native `editor.linkedEditing` to edit all known occurrences of a declared name in the current document together. At least two source ranges are needed.
 An incomplete or unsafe region can have no edit or range; finish the construct
 and request the action again. Undo uses VS Code's normal edit history.

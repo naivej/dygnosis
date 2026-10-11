@@ -5,7 +5,6 @@ pub(super) fn collect(
     facts: &mut Vec<CapturedFact>,
     work: &mut RetainedExpressionWork,
 ) {
-    command_fields(model, facts);
     for (role, rows) in [("varobs", &model.varobs), ("varexobs", &model.varexobs)] {
         for (index, row) in rows.iter().enumerate() {
             let name = model.name(row.name);
@@ -218,7 +217,7 @@ pub(super) fn collect(
             FieldState::present(options(model, &row.data_options)),
             ChangeFacet::Options,
         );
-        gap(&mut value, "estimation_other_options_context", "Only data locating options have named data fields. Other accepted estimation settings retain statement context.", "parser_command_option_retention");
+        gap(&mut value, "estimation_other_options_context", "Named fields describe retained options and variable lists. Other accepted estimation settings retain statement context.", "parser_command_option_retention");
         value.claims.extend(
             row.data_options
                 .iter()
@@ -290,6 +289,32 @@ pub(super) fn collect(
     );
     gap(&mut value, "load_params_history_first_only", "Only the first nonempty load filename is retained. All accepted load occurrences remain in statement context; loaded data is not captured.", "parser_load_params_retention");
     facts.push(value);
+    command_fields(model, facts);
+}
+
+/// An accepted estimation occurrence owns its whole instruction. Keep the
+/// separately retained lists and option facts there too, including their claims
+/// and limits, so they cannot count the same written edit again.
+fn push_command_fact(model: &Model, facts: &mut Vec<CapturedFact>, mut value: CapturedFact) {
+    if let Some(id) = parent_id(&value)
+        && let Some(statement) = model.statements.get(id)
+        && statement.name == "estimation"
+        && occurrences::accepted_statement(model, statement)
+        && let Some(owner) = facts
+            .iter_mut()
+            .find(|fact| fact.role == "estimation_data" && parent_id(fact) == Some(id))
+    {
+        owner.fields.extend(
+            value
+                .fields
+                .drain(..)
+                .filter(|field| field.name != "command"),
+        );
+        owner.claims.append(&mut value.claims);
+        owner.limits.append(&mut value.limits);
+    } else {
+        facts.push(value);
+    }
 }
 
 fn command_fields(model: &Model, facts: &mut Vec<CapturedFact>) {
@@ -347,7 +372,7 @@ fn command_fields(model: &Model, facts: &mut Vec<CapturedFact>) {
                 }
             }
         }
-        facts.push(value);
+        push_command_fact(model, facts, value);
     }
     for (ordinal, request) in model.stoch_simul_requests.iter().enumerate() {
         let mut value = fact(
@@ -414,7 +439,7 @@ fn command_fields(model: &Model, facts: &mut Vec<CapturedFact>) {
             option.option_tokens.clone(),
             std::slice::from_ref(&option.active_tokens),
         );
-        facts.push(value);
+        push_command_fact(model, facts, value);
     }
 }
 

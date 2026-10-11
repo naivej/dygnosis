@@ -677,6 +677,27 @@ test("removed commands show the statement without a redundant role or token head
   assert.equal(descendants(env.elements.results).some(element => element.className === "field-label"), false);
 });
 
+// Guards macro-driven values disappearing behind unchanged written context.
+// The fallback also has to work when no complete written range was captured.
+test("instruction cards retain changed facts behind identical or unavailable written text", () => {
+  for (const family of ["commands", "operations", "ms_sbvar"]) for (const captured of [true, false]) {
+    const r = response(), row = r.semantic.rows[0];
+    row.family = r.navigation.rows[0].family = family; row.references = []; r.semantic.references = []; r.navigation.rows.pop();
+    const written = "stoch_simul(order=@{n});", before = "stoch_simul(order = 1) ;", after = "stoch_simul(order = 2) ;";
+    row.fields = [{ name: "statement_tokens", label: "Statement", before: value(before), after: value(after), changed: true, comparison_availability: "complete", numeric_difference: null }];
+    row.expressions = [{ field: "statement_tokens", before: { text: before, runs: [{ text: before, role: "removed" }] }, after: { text: after, runs: [{ text: after, role: "added" }] }, highlight_basis: "paired_expression", availability: "complete", reason: null }];
+    if (captured) row.expressions.push({ field: "statement_text", before: { text: written, runs: [{ text: written, role: "unchanged" }] }, after: { text: written, runs: [{ text: written, role: "unchanged" }] }, highlight_basis: "none", availability: "complete", reason: null });
+    const env = webview(); env.render(parseDiff(r, roots.before, roots.after, true));
+    const cards = descendants(env.elements.results).filter(element => element.className?.startsWith("side "));
+    assert.match(cards[0].textContent, /order = 1/); assert.match(cards[1].textContent, /order = 2/);
+    assert.equal(cards[0].textContent.split(before).length - 1, 1);
+    assert.equal(cards[1].textContent.split(after).length - 1, 1);
+    if (captured) assert.ok(cards.every(card => card.textContent.includes(written)));
+    assert.ok(descendants(cards[0]).some(element => element.className === "token removed"));
+    assert.ok(descendants(cards[1]).some(element => element.className === "token added"));
+  }
+});
+
 // Guards lost block-boundary highlights when the complete block is added or removed.
 test("new and removed blocks retain the engine's opener and closer highlights", () => {
   for (const [block, body, family] of [
@@ -711,7 +732,7 @@ test("an added prior in an existing block retains plain engine boundary runs", (
   assert.equal(descendants(env.elements.results).filter(element => element.className === "token added").map(element => element.textContent).join(""), body);
 });
 
-test("operation cards use captured written instructions instead of internal records", () => {
+test("operation cards prefer captured instructions and retain fallback values", () => {
   const r = response(), row = r.semantic.rows[0], source = "model_replace( 'Consumption' );\n  [name='Consumption'] c = 0.8*y;\nend;";
   Object.assign(row, { family: "operations", change: "added", name: "model_replace", before: null, after: side("model_replace"), references: [], limits: [] });
   row.fields = [
@@ -726,7 +747,9 @@ test("operation cards use captured written instructions instead of internal reco
   assert.doesNotMatch(env.elements.results.textContent, /Removed equations|Dynamic tag|equation_surgery/);
   snapshot.rows[0].semantic.expressions = []; env.render(snapshot);
   assert.match(env.elements.results.textContent, /Written source text is unavailable.*Text diff/);
-  assert.doesNotMatch(env.elements.results.textContent, /Removed equations|Dynamic tag|equation_surgery/);
+  assert.match(env.elements.results.textContent, /Removed equations/);
+  assert.match(env.elements.results.textContent, /c = y/);
+  assert.doesNotMatch(env.elements.results.textContent, /equation_surgery/);
 });
 
 test("MS-SBVAR cards render written path context with only replaced numbers highlighted", () => {

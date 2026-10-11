@@ -3,5 +3,5 @@ model;
 	y = 1;
 end;
 verbatim;
-	a == b;
+a==b;
 end;
