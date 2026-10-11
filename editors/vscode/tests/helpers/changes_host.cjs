@@ -81,7 +81,7 @@ function snapshotResponse(request, changed = true) {
 }
 
 function load(name, vscode, injections = {}) {
-  for (const moduleName of ["changes_editor", "snapshot_compare", "history_sources", "diff", "settings", "extension"]) delete require.cache[require.resolve(`../../out/${moduleName}`)];
+  for (const moduleName of ["changes_editor", "snapshot_compare", "history_sources", "captured_text", "diff", "settings", "extension"]) delete require.cache[require.resolve(`../../out/${moduleName}`)];
   const originalLoad = Module._load;
   Module._load = function(id, ...args) {
     if (id === "vscode") return vscode;

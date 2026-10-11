@@ -470,6 +470,14 @@ captured registry membership before display or actions. Private parser receipts
 are not serialized. Missing proof yields a null target; display offsets and
 hunk lines cannot create one.
 
+Navigation rows can also include `block_openers: {before, after}`. Each value
+is a nullable navigation target in that transport's existing coordinate format.
+A target exists only for an absent child side whose corresponding accepted
+block and written opener are verified. The ordinary `before` or `after` target
+stays null: this is a block location, not a paired child. Clients prefer the
+opener to a file-only fallback, validate its side/input and captured source,
+and apply the same stale-input guards. Older engines omit `block_openers`.
+
 `semantic.budgets` reports comparison-wide token alignment cells (250,000),
 source alignment cells (1,000,000), references per side (2,000), source hunks
 (2,000) and optional serialized detail bytes (8,388,608). Limits retain exact

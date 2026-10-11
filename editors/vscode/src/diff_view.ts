@@ -15,7 +15,7 @@ export interface DiffChoices { changeKinds: ChangeKind[]; customChangeKinds: Cha
 export interface DiffTarget {
   occurrence_id: string; domain: string; dimension: string | null; written_locations: Location[];
 }
-export interface DiffNavigationRow { id: string; kind: string; dimension?: string | null; family?: string; name?: string; equation_pointer?: string; before: DiffTarget | null; after: DiffTarget | null }
+export interface DiffNavigationRow { id: string; kind: string; dimension?: string | null; family?: string; name?: string; equation_pointer?: string; before: DiffTarget | null; after: DiffTarget | null; block_openers?: Record<DiffSide, DiffTarget | null> }
 export interface DiffEnvelope { root_uri: string; revision: string | null; complete: boolean }
 export interface DiffRow {
   id: string; section: DiffSection; group: string; kind: ChangeKind; label: string;
@@ -65,6 +65,10 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     const row = object(raw), id = string(row.id);
     if (navigation.has(id)) malformed();
     navigation.set(id, { id, kind: string(row.kind), dimension: row.dimension === undefined ? undefined : nullableString(row.dimension), family: row.family === undefined ? undefined : string(row.family), name: row.name === undefined ? undefined : string(row.name), equation_pointer: row.equation_pointer === undefined ? undefined : string(row.equation_pointer), before: target(row.before, snapshots), after: target(row.after, snapshots) });
+    if (row.block_openers !== undefined) {
+      const openers = object(row.block_openers);
+      navigation.get(id)!.block_openers = { before: target(openers.before, snapshots), after: target(openers.after, snapshots) };
+    }
   }
   const rows: DiffRow[] = [];
   const add = (id: string, section: DiffSection, group: string, kind: SemanticRow["change"], label: string, old: string | null, next: string | null, dimension: string | null = null, sideDimensions?: { before: string | null | undefined; after: string | null | undefined }): void => {
@@ -182,7 +186,9 @@ function projectDiff(value: unknown, beforeRoot: string, afterRoot: string, snap
     if (!source || legacy && (legacy.kind !== row.change || section(row) !== legacy.section && row.family !== "shocks") || !legacy && (source.kind !== "semantic" || source.family !== row.family || source.name !== row.name)) malformed();
     for (const side of ["before", "after"] as const) {
       if (!row[side] && source[side] || row[side] && source[side] && (source[side].domain !== (row[side].scope.dimension === null ? "aggregate" : "heterogeneous") || source[side].dimension !== row[side].scope.dimension)) malformed();
-      for (const location of source[side]?.written_locations ?? []) {
+      const opener = source.block_openers?.[side], other = row[side === "before" ? "after" : "before"];
+      if (opener && (row[side] || !other || opener.dimension !== other.scope.dimension || opener.domain !== (other.scope.dimension === null ? "aggregate" : "heterogeneous"))) malformed();
+      for (const location of [...source[side]?.written_locations ?? [], ...opener?.written_locations ?? []]) {
         if (!snapshots && !(registeredSource ? registeredSource(side, location.uri) : Object.hasOwn(registry[side], location.uri))) malformed();
       }
     }
@@ -233,7 +239,9 @@ export function parseSnapshotDiff(value: unknown, ids: Record<DiffSide, string>,
   };
   const rows = array(nav.rows).map(raw => {
     const row = object(raw);
-    return { ...row, before: mapped("before", row.before), after: mapped("after", row.after) };
+    const openers = row.block_openers === undefined ? undefined : object(row.block_openers);
+    return { ...row, before: mapped("before", row.before), after: mapped("after", row.after),
+      ...(openers ? { block_openers: { before: mapped("before", openers.before), after: mapped("after", openers.after) } } : {}) };
   });
   return projectDiff({ ...object(response.diff), sources: response.sources, navigation: { schema_version: 1, before: envelope("before"), after: envelope("after"), rows } }, ids.before, ids.after, true, ids, expectedSemantic);
 }

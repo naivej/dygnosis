@@ -477,6 +477,65 @@ test("card source links show decoded file labels and send exact row and side ide
   before.fire("click"); assert.equal(env.posted.at(-1).type, "openSource"); assert.equal(env.posted.at(-1).rowId, row.id); assert.equal(env.posted.at(-1).side, "before");
   after.fire("click"); assert.equal(env.posted.at(-1).rowId, row.id); assert.equal(env.posted.at(-1).side, "after");
 });
+// Guards a missing child losing its verified opener during projection, display,
+// or the actual host source action, which previously selected line zero.
+test("missing-side block opener survives projection and labels the source link", () => {
+  for (const missing of ["before", "after"]) {
+    const r = response(), nav = r.navigation.rows[0], row = r.semantic.rows[0];
+    row.change = missing === "before" ? "added" : "removed"; row[missing] = null;
+    row.references = []; r.semantic.references = [];
+    for (const field of row.fields) field[missing] = { state: "absent", value: null };
+    for (const expression of row.expressions) expression[missing] = null;
+    nav.block_openers = { before: null, after: null, [missing]: structuredClone(nav[missing]) };
+    nav.block_openers[missing].written_locations[0].range = { start: { line: 3, character: 2 }, end: { line: 3, character: 10 } };
+    nav[missing] = null;
+    const snapshot = parseDiff(r, roots.before, roots.after, true), env = webview(); env.render(snapshot);
+    const card = descendants(env.elements.results).find(element => element.className === "side " + missing);
+    const button = descendants(card).find(element => element.className === "source-link");
+    assert.equal(button.textContent, "main.mod:4"); assert.equal(button.disabled, false);
+    button.fire("click"); assert.equal(env.posted.at(-1).side, missing);
+    assert.equal(snapshot.rows[0].navigation[missing], null);
+    const bad = structuredClone(r); bad.navigation.rows[0].block_openers[missing].written_locations[0].uri = "file:///unregistered.mod";
+    assert.throws(() => parseDiff(bad, roots.before, roots.after, true), /unsupported/);
+    const snapshotResponse = structuredClone(r), ids = { before: "before", after: "after" };
+    const inputs = { before: { root_file: roots.before, revision: "old", commit: "a".repeat(40) }, after: { root_file: roots.after, revision: "new" } };
+    for (const side of ["before", "after"]) {
+      snapshotResponse.navigation[side] = { input_id: ids[side], ...inputs[side], complete: true };
+      snapshotResponse.source_changes.files[0][side].input_id = ids[side];
+      for (const row of snapshotResponse.navigation.rows) for (const target of [row[side], row.block_openers?.[side]]) {
+        if (target) target.written_locations = target.written_locations.map(location => ({ input_id: ids[side], file_key: location.uri, commit: inputs[side].commit, range: location.range }));
+      }
+    }
+    const envelope = { state: "result", diff: snapshotResponse, navigation: { ...snapshotResponse.navigation, schema_version: 2 }, sources: registry };
+    const project = input => parseSnapshotDiff(input, ids, (side, key) => { assert.ok(Object.hasOwn(registry[side], key)); return key; }, inputs, true);
+    assert.deepEqual(project(envelope).rows[0].navigation.block_openers, snapshot.rows[0].navigation.block_openers);
+    for (const change of [location => location.input_id = "wrong", location => location.commit = "wrong"]) {
+      const badSnapshot = structuredClone(envelope); change(badSnapshot.navigation.rows[0].block_openers[missing].written_locations[0]);
+      assert.throws(() => project(badSnapshot), /unsupported/);
+    }
+  }
+});
+
+test("missing-side source actions select the retained block opener in Working and historical files", async t => {
+  for (const missing of ["before", "after"]) {
+    const { host, service } = createHost(); host.install(); t.after(() => host.registration.dispose());
+    host.capture = (resource, cancel, history) => {
+      const result = captured(resource, history, host, service.currentInstance), row = result.snapshot.rows[0];
+      row.kind = missing === "before" ? "added" : "removed"; row[missing] = null;
+      row.navigation.block_openers = { before: null, after: null, [missing]: structuredClone(row.navigation[missing]) };
+      row.navigation.block_openers[missing].written_locations[0].range = { start: { line: 3, character: 2 }, end: { line: 3, character: 10 } };
+      row.navigation[missing] = null;
+      return result;
+    };
+    await host.open(); host.source(missing); await flush();
+    assert.equal(host.shown.length, 1);
+    assert.equal(host.shown[0].options.selection.start.line, 3);
+    assert.equal(host.shown[0].options.selection.start.character, 2);
+    host.changed.fire({ reason: "lifecycle" }); host.source(missing); await flush();
+    assert.equal(host.shown.length, 1, "stale opener actions stay disabled");
+  }
+});
+
 test("expression cards omit duplicate values and property prefixes but retain changed facts and regime tags", () => {
   const env = webview(), snapshot = parseDiff(response(), roots.before, roots.after, true), row = snapshot.rows[0];
   row.label = "Equation"; row.semantic.before.equation_index = 4; row.semantic.after.equation_index = 4;

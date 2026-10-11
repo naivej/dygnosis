@@ -352,7 +352,7 @@ fn parent(fact: &CapturedFact) -> Option<usize> {
     fact.side.provenance.as_ref()?.statement_id
 }
 
-/// Reuse accepted parent correspondence for display colors, including unchanged
+/// Reuse accepted parent correspondence for display and navigation, including unchanged
 /// parents with no output row. This does not pair children or add token claims.
 pub(super) fn populate_block_context(before: &Model, after: &Model, diff: &mut ModelDiff) {
     fn boundaries(model: &Model) -> BTreeMap<usize, [String; 2]> {
@@ -438,6 +438,10 @@ pub(super) fn populate_block_context(before: &Model, after: &Model, diff: &mut M
                 side.block_context = Some(BlockContext {
                     own: boundaries.clone(),
                     counterpart: pairs.get(&id).and_then(|id| opposite.get(id)).cloned(),
+                    counterpart_block: pairs.get(&id).copied().filter(|other| {
+                        opposite.contains_key(other)
+                            && model.statements[id].kind == crate::model::StatementKind::Block
+                    }),
                 });
             }
         }

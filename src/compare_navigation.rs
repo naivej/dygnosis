@@ -46,6 +46,7 @@ pub(crate) struct ComparisonInput {
     symbols: BTreeMap<String, Target>,
     shocks: HashMap<usize, Target>,
     statements: BTreeMap<usize, Target>,
+    block_openers: BTreeMap<usize, Target>,
     forecast_paths: BTreeMap<(usize, usize), [Vec<WrittenSegment>; 3]>,
     instructions: BTreeMap<String, Vec<Vec<WrittenSegment>>>,
     written_equations: BTreeMap<usize, (usize, usize, Target)>,
@@ -94,6 +95,7 @@ impl ComparisonInput {
             symbols: BTreeMap::new(),
             shocks: HashMap::new(),
             statements: BTreeMap::new(),
+            block_openers: BTreeMap::new(),
             forecast_paths: BTreeMap::new(),
             instructions: BTreeMap::new(),
             written_equations: BTreeMap::new(),
@@ -119,6 +121,28 @@ impl ComparisonInput {
                     id,
                     target(format!("s{id}"), source, statement.dimension.clone()),
                 );
+                if statement.kind == crate::model::StatementKind::Block {
+                    if let Some((first, last)) = model
+                        .expanded_tokens
+                        .get(statement.opener_range.clone())
+                        .and_then(|tokens| tokens.first().zip(tokens.last()))
+                    {
+                        input.block_openers.insert(
+                            id,
+                            Target {
+                                occurrence_id: format!("s{id}:opener"),
+                                dimension: statement.dimension.clone(),
+                                segments: workspace.map_effective_segments(
+                                    root,
+                                    crate::span::Span::new(
+                                        first.span.start as usize,
+                                        last.span.end as usize,
+                                    ),
+                                ),
+                            },
+                        );
+                    }
+                }
             }
         }
         for (id, row) in report.model_map.equations.iter().enumerate() {
@@ -778,6 +802,35 @@ pub(crate) fn navigation_json(
             ),
             after.proven_target(row.after.as_ref().and_then(|side| side.provenance.as_ref())),
         );
+    }
+    // A missing child can navigate to its proven counterpart parent without
+    // inventing a child occurrence or changing the legacy row's side presence.
+    let contexts: HashMap<_, _> = diff
+        .semantic
+        .rows
+        .iter()
+        .filter_map(|row| {
+            let opener = |missing: bool,
+                          present: Option<&crate::semantic_diff::RowSide>,
+                          input: &ComparisonInput| {
+                input.render(
+                    missing
+                        .then(|| present?.block_context.as_ref()?.counterpart_block)
+                        .flatten()
+                        .and_then(|id| input.block_openers.get(&id)),
+                    &builder.coordinates,
+                )
+            };
+            let old = opener(row.before.is_none(), row.after.as_ref(), before);
+            let new = opener(row.after.is_none(), row.before.as_ref(), after);
+            (!old.is_null() || !new.is_null())
+                .then(|| (row.pointer.as_str(), json!({"before":old,"after":new})))
+        })
+        .collect();
+    for row in &mut builder.rows {
+        if let Some(context) = row["id"].as_str().and_then(|id| contexts.get(id)) {
+            row["block_openers"] = context.clone();
+        }
     }
     for reference in &diff.semantic.references {
         if !ids.insert(reference.pointer.clone()) {

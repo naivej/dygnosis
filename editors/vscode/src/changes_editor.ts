@@ -24,7 +24,7 @@ function textDiffTitle(resource: ComparisonResource, beforeKey?: string, afterKe
 }
 function cardSourceFiles(result: CapturedComparison, row: DiffRow, side: DiffSide): string[] {
   const other = side === "before" ? "after" : "before";
-  if (row[side] !== null || row.navigation[side] !== null) return [];
+  if (row[side] !== null || row.navigation[side] !== null || row.navigation.block_openers?.[side]?.written_locations.length) return [];
   const uris = new Set<string>();
   for (const location of row.navigation[other]?.written_locations ?? []) {
     const key = [...result.sourceUris[other]].find(([, uri]) => uri.toString() === location.uri)?.[0];
@@ -362,7 +362,7 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
   const openSource = async (doc: ChangesDocument, row: Pick<DiffRow, "id" | "navigation">, side: DiffSide): Promise<void> => {
     const generation = doc.generation, instance = doc.instance, result = doc.result;
     if (!result) return;
-    const own = result.snapshot.rows.find(candidate => candidate.id === row.id), target = row.navigation[side];
+    const own = result.snapshot.rows.find(candidate => candidate.id === row.id), target = row.navigation[side] ?? row.navigation.block_openers?.[side];
     const locations = target?.written_locations ?? (own ? cardSourceFiles(result, own, side) : []).map(uri => ({ uri, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } }));
     if (!locations.length) return;
     const refuse = (): void => { if (current(doc, generation, instance)) stale(doc); };

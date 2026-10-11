@@ -192,7 +192,7 @@ pub struct RowSide {
     /// Existing producer receipts used only to select captured display text.
     #[serde(skip)]
     pub(crate) instruction_tokens: Vec<std::ops::Range<usize>>,
-    /// Accepted parent boundaries and existing correspondence, for colors only.
+    /// Accepted parent boundaries and correspondence for display and navigation.
     #[serde(skip)]
     pub(crate) block_context: Option<BlockContext>,
 }
@@ -201,6 +201,7 @@ pub struct RowSide {
 pub(crate) struct BlockContext {
     pub own: [String; 2],
     pub counterpart: Option<[String; 2]>,
+    pub counterpart_block: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

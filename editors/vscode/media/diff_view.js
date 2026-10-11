@@ -56,7 +56,7 @@
     button.addEventListener("click", () => { if (!button.disabled) post(type, args); }); return button;
   }
   function sourceAction(row, side) {
-    const target = row.navigation[side], files = row.sourceFiles?.[side] ?? [];
+    const target = row.navigation[side] ?? row.navigation.block_openers?.[side], files = row.sourceFiles?.[side] ?? [];
     const locations = target?.written_locations ?? [];
     const reason = payload.status !== "ready" ? "Refresh the comparison to enable source actions." : !locations.length && !files.length ? "No verified source is available on this side." : "";
     const button = action("Open " + titleCase(side) + " source", "openSource", { rowId: row.id, side }, reason);

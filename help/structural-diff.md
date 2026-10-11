@@ -149,9 +149,12 @@ before concluding that the written files are unchanged.
 Each card header has a source action. A single verified target shows its filename
 and line; **Open source…** offers a picker for several contributing locations.
 The action opens that side's written file. Direct reference actions open the
-referenced equation. For an added or removed row, the missing side can open its
-corresponding captured file when the file pair is verified. It shows the filename
-without an invented row line. An unavailable source has a disabled action and
+referenced equation. For an added or removed instruction, the missing side opens
+the corresponding block opener when that block is verified. The link shows
+the opener's filename and line; the instruction still says **Not present**.
+If no corresponding block is verified, the missing side can open its corresponding
+captured file when the file pair is verified, with no row line in the label.
+An unavailable source has a disabled action and
 a reason. Historical sources are read-only and retain their commit and
 captured text after the Changes tab closes.
 

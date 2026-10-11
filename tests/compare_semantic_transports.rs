@@ -14,6 +14,126 @@ use tower_lsp::LanguageServer;
 
 const BASE: &str = "var y c x v; varexo e u; parameters a b; a=.5; b=.9; model; y=a*y(-1)+e; c=y; x=c+u; v=x; end;\n";
 
+// Guards missing-side source links falling back to line zero when the accepted
+// corresponding block still exists but has no paired child change.
+#[tokio::test]
+async fn missing_side_source_uses_corresponding_block_opener() {
+    let plain = "var y c;\nmodel; y=1; c=y; end;\n\ninitval;\n y=1;\nend;\n";
+    let changed = plain.replace(" y=1;\nend;", " y=1;\n c=2;\nend;");
+    for (before, after, missing) in [
+        (plain, changed.as_str(), "before"),
+        (changed.as_str(), plain, "after"),
+    ] {
+        let (service, _) = new_service();
+        let result = current(service.inner(), before, after).await;
+        let row = result["semantic"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["family"] == "steady_state" && row[missing].is_null())
+            .expect("one-sided initial value");
+        let nav = result["navigation"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|nav| nav["id"] == row["pointer"])
+            .unwrap();
+        assert!(nav[missing].is_null(), "the child must stay absent");
+        assert_eq!(
+            nav["block_openers"][missing]["written_locations"][0]["range"]["start"],
+            json!({"line": 3, "character": 0}),
+            "{nav}"
+        );
+    }
+}
+
+// Guards opener navigation across child families and historical include maps.
+// A new whole block must not borrow an unrelated block or a root-file location.
+#[test]
+fn block_opener_targets_keep_include_identity_and_absent_blocks_unlinked() {
+    for (family, block, common, added) in [
+        ("steady_state", "initval", "y=1;", "c=2;"),
+        (
+            "priors",
+            "estimated_params",
+            "a, beta_pdf, .5, .1;",
+            "b, beta_pdf, .6, .1;",
+        ),
+        ("shocks", "shocks", "var e; stderr 1;", "var u; stderr 2;"),
+        ("symbols", "model", "#existing=1;", "#extra=2;"),
+        (
+            "equations",
+            "model",
+            "[name='existing'] y=1;",
+            "[name='extra'] c=2;",
+        ),
+    ] {
+        let plain = format!("// include\n/*😀*/  {block};\n{common}\nend;\n");
+        let changed = plain.replace("\nend;", &format!("\n{added}\nend;"));
+        for (old, new, missing) in [
+            (plain.as_str(), changed.as_str(), "before"),
+            (changed.as_str(), plain.as_str(), "after"),
+            ("", changed.as_str(), "before"),
+        ] {
+            let capture = |id, body: &str| {
+                captured_files(
+                    id,
+                    BTreeMap::from([
+                        ("root.mod".into(), format!("{BASE}@#include \"body.mod\"\n")),
+                        ("body.mod".into(), body.into()),
+                    ]),
+                )
+            };
+            for (coordinates, lsp) in [
+                (SnapshotCoordinates::Lsp, true),
+                (SnapshotCoordinates::Mcp, false),
+            ] {
+                let result = compare_captured_snapshots(
+                    capture("before", old),
+                    capture("after", new),
+                    coordinates,
+                );
+                let rows: Vec<_> = result["diff"]["semantic"]["rows"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|row| row["family"] == family && row[missing].is_null())
+                    .collect();
+                assert!(!rows.is_empty(), "{family}: {result}");
+                for row in rows {
+                    let nav = result["navigation"]["rows"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|nav| nav["id"] == row["pointer"])
+                        .unwrap();
+                    if old.is_empty() {
+                        assert!(nav["block_openers"][missing].is_null(), "{family}: {nav}");
+                        continue;
+                    }
+                    let location = &nav["block_openers"][missing]["written_locations"][0];
+                    assert_eq!(location["file_key"], "body.mod", "{family}: {nav}");
+                    assert_eq!(location["input_id"], missing);
+                    assert_eq!(
+                        location["commit"],
+                        if missing == "before" {
+                            "a".repeat(40)
+                        } else {
+                            "b".repeat(40)
+                        }
+                    );
+                    if lsp {
+                        assert_eq!(location["range"]["start"], json!({"line":1,"character":8}));
+                    } else {
+                        assert_eq!(location["line"], 2);
+                        assert_eq!(location["column"], 8);
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Guards a block option edit being turned into a removed/added whole block when
 // the plain counterpart's body already owns all of its tokens.
 #[test]
@@ -304,6 +424,10 @@ fn uncertain_moments_use_only_added_and_removed_change_types() {
 }
 
 fn captured(id: &str, text: &str) -> CapturedSnapshot {
+    captured_files(id, BTreeMap::from([("root.mod".into(), text.into())]))
+}
+
+fn captured_files(id: &str, files: BTreeMap<String, String>) -> CapturedSnapshot {
     let input = GitSnapshotInput {
         input_id: id.into(),
         root_file: "root.mod".into(),
@@ -315,14 +439,22 @@ fn captured(id: &str, text: &str) -> CapturedSnapshot {
         },
         requested_ref: None,
         search_paths: Vec::new(),
-        manifest: BTreeMap::from([(
-            "root.mod".into(),
-            ManifestEntry {
-                mode: "100644".into(),
-                object_id: "c".repeat(40),
-            },
-        )]),
-        sources: BTreeMap::from([("root.mod".into(), SourceFact::Text { text: text.into() })]),
+        manifest: files
+            .keys()
+            .map(|key| {
+                (
+                    key.clone(),
+                    ManifestEntry {
+                        mode: "100644".into(),
+                        object_id: "c".repeat(40),
+                    },
+                )
+            })
+            .collect(),
+        sources: files
+            .into_iter()
+            .map(|(key, text)| (key, SourceFact::Text { text }))
+            .collect(),
     };
     match capture_git_snapshot(&input) {
         SnapshotCapture::Ready(snapshot) => *snapshot,
