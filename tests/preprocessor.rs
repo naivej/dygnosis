@@ -102,11 +102,17 @@ fn windows_candidate_shape_prefers_pin_over_newer_version() {
     )]);
     assert_eq!(
         cands[0],
-        PathBuf::from(r"C:\dynare\7.2\preprocessor\dynare-preprocessor.exe")
+        PathBuf::from(r"C:\dynare")
+            .join("7.2")
+            .join("preprocessor")
+            .join("dynare-preprocessor.exe")
     );
     assert_eq!(
         cands[1],
-        PathBuf::from(r"C:\dynare\7.3\preprocessor\dynare-preprocessor.exe")
+        PathBuf::from(r"C:\dynare")
+            .join("7.3")
+            .join("preprocessor")
+            .join("dynare-preprocessor.exe")
     );
 }
 
@@ -121,7 +127,10 @@ fn windows_candidate_pin_precedes_other_roots() {
     ]);
     assert_eq!(
         cands[0],
-        PathBuf::from(r"C:\dynare\7.2\preprocessor\dynare-preprocessor.exe")
+        PathBuf::from(r"C:\dynare")
+            .join("7.2")
+            .join("preprocessor")
+            .join("dynare-preprocessor.exe")
     );
 }
 
@@ -221,12 +230,17 @@ fn parse_p000_timeout_message() {
         std::fs::set_permissions(&path, perms).unwrap();
         path
     };
+    let started = std::time::Instant::now();
     let result = run_preprocessor(
         "var y;\n",
         &sleeper,
         None,
         Duration::from_secs(1),
         JsonStage::Check,
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "timeout must terminate the process tree before the 20-second sleeper exits"
     );
     assert!(!result.success);
     assert_eq!(result.diagnostics.len(), 1);

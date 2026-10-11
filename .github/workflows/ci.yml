@@ -21,7 +21,8 @@ on:
         default: false
         type: boolean
 
-# Cross-platform compatibility for the Rust engine and the VS Code extension.
+# Core tests on each OS, native package checks on every target, current VS Code
+# on each OS, and the minimum VS Code API on Linux x64.
 # Format, Clippy, the TypeScript client checks, and publication stay local.
 
 permissions:
@@ -67,15 +68,16 @@ jobs:
         run: node scripts/version.cjs --check
 
       - name: Test the engine
+        if: matrix.arch == 'x64'
         run: cargo test --locked --no-fail-fast
 
       - name: Linux display dependencies
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.arch == 'x64'
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libasound2 libgbm1 libgtk-3-0 libnss3
 
-      - name: Package and launch the extension
+      - name: Build the native packages
         working-directory: editors/vscode
         shell: bash
         env:
@@ -93,16 +95,28 @@ jobs:
             ldd "bin/dygnosis" > "dist/$TARGET/runtime-libraries.txt"
             readelf --version-info "bin/dygnosis" >> "dist/$TARGET/runtime-libraries.txt"
             ldd --version >> "dist/$TARGET/runtime-libraries.txt"
-            xvfb-run -a npm run verify:package -- --target "$TARGET" --vscode 1.102.0
-            xvfb-run -a npm run verify:package -- --target "$TARGET" --vscode stable
           elif [ "$RUNNER_OS" = macOS ]; then
             otool -L "bin/dygnosis" > "dist/$TARGET/runtime-libraries.txt"
             otool -l "bin/dygnosis" >> "dist/$TARGET/runtime-libraries.txt"
-            npm run verify:package -- --target "$TARGET" --vscode 1.102.0
-            npm run verify:package -- --target "$TARGET" --vscode stable
           else
             powershell -NoProfile -Command 'Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,OSArchitecture | Format-List' > "dist/$TARGET/runtime-libraries.txt"
-            npm run verify:package -- --target "$TARGET" --vscode 1.102.0
+          fi
+
+      - name: Check native packages and launch LSP and MCP
+        working-directory: editors/vscode
+        run: npm run verify:package -- --target ${{ matrix.target }} --native-only
+
+      - name: Check the installed extension on this OS
+        if: matrix.arch == 'x64'
+        working-directory: editors/vscode
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a npm run verify:package -- --target "$TARGET" --vscode 1.102.0
+            xvfb-run -a npm run verify:package -- --target "$TARGET" --vscode stable
+          else
             npm run verify:package -- --target "$TARGET" --vscode stable
           fi
 
@@ -119,7 +133,7 @@ jobs:
             editors/vscode/dist/${{ matrix.target }}/*.txt
 
       - name: Upload installed host logs after success or failure
-        if: always()
+        if: always() && matrix.arch == 'x64'
         uses: actions/upload-artifact@v4
         with:
           name: host-logs-${{ matrix.target }}

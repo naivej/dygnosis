@@ -151,7 +151,12 @@ fn written_native_callee_shadows_survive_unknown_values_and_invalidate_later_kno
 }
 
 fn uri(name: &str) -> Url {
-    Url::parse(&format!("file:///C:/dygnosis-inlay/{name}")).unwrap()
+    let root = if cfg!(windows) {
+        "C:/dygnosis-inlay"
+    } else {
+        "/dygnosis-inlay"
+    };
+    Url::from_file_path(std::path::Path::new(root).join(name)).unwrap()
 }
 async fn open(server: &dygnosis::server::Backend, uri: &Url, text: &str) {
     server
@@ -318,7 +323,7 @@ async fn resource_preferences_and_include_edits_affect_only_the_requested_surfac
     server.initialize(InitializeParams {
         workspace_folders: Some(vec![WorkspaceFolder { uri:uri("a"), name:"a".into() }, WorkspaceFolder { uri:uri("b"),name:"b".into() }]),
         initialization_options: Some(json!({"configuration":{"schemaVersion":1,"loose":{},"folders":[
-            {"uri":uri("a"),"settings":{"searchPaths":["C:/dygnosis-inlay/b"],"parameterValueHints":false}},
+            {"uri":uri("a"),"settings":{"searchPaths":[uri("b").to_file_path().unwrap()],"parameterValueHints":false}},
             {"uri":uri("b"),"settings":{"parameterValueHints":true}}
         ]}})), ..InitializeParams::default()
     }).await.unwrap();

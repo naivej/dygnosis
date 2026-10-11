@@ -10,7 +10,7 @@ const { runHost } = require("./package-host.cjs");
 const { assertNative, binaryName, execute, extensionRoot, hostFacts, probeBinary, sha256, writeJson } = require("./common.cjs");
 
 async function main() {
-  const { values } = parseArgs({ options: { target: { type: "string" }, vscode: { type: "string", default: "stable" }, executable: { type: "string" } } });
+  const { values } = parseArgs({ options: { target: { type: "string" }, vscode: { type: "string", default: "stable" }, executable: { type: "string" }, "native-only": { type: "boolean" } } });
   const info = assertNative(values.target);
   const output = path.join(extensionRoot, "dist", values.target);
   const source = JSON.parse(await fs.readFile(path.join(output, "artifacts.json"), "utf8"));
@@ -24,15 +24,7 @@ async function main() {
   const root = path.join(extensionRoot, ".test-data", `installed package with spaces ${runId}`);
   const unpacked = path.join(root, "standalone with spaces");
   const workspace = path.join(root, "workspace with spaces");
-  // Recent VS Code uses a Unix socket under the profile. A deep checkout plus
-  // our evidence UUID exceeds macOS's 103-byte limit; keep only that profile
-  // short. Packages, executables, extensions and workspace still test spaces.
-  const profile = process.platform === "darwin"
-    ? await fs.mkdtemp(path.join("/tmp", "dyg profile "))
-    : path.join(root, "profile with spaces");
-  const extensions = path.join(root, "extensions with spaces");
-  const harness = path.join(root, "extension harness");
-  for (const directory of [unpacked, workspace, profile, extensions, harness]) await fs.mkdir(directory, { recursive: true });
+  for (const directory of [unpacked, workspace]) await fs.mkdir(directory, { recursive: true });
   const archiveRoot = path.basename(archive, ".tar.gz");
   const archiveEntries = execute("tar", ["-tzf", archive]).trim().split(/\r?\n/);
   assert.ok(archiveEntries.every(entry => entry.startsWith(archiveRoot + "/") && !entry.split("/").includes("..") && !entry.includes("\\")), "Unsafe standalone archive entry");
@@ -45,6 +37,21 @@ async function main() {
   assert.equal(await sha256(binary), source.binary_sha256);
   if (process.platform !== "win32") assert.ok((await fs.stat(binary)).mode & 0o111, "Standalone archive lost the executable permission");
   const launch = await probeBinary(binary, source.version, workspace);
+  const evidence = { schema_version: 1, runId, target: source.target, version: source.version, commit: source.commit, release: source.release, host: hostFacts(), package: packageInspection, standalone: { sha256: await sha256(archive), launch }, passed: true };
+  await writeJson(path.join(output, "verification-native.json"), evidence);
+  if (values["native-only"]) {
+    process.stdout.write(`${JSON.stringify({ target: source.target, runId, native: true, passed: true })}\n`);
+    return;
+  }
+  // Recent VS Code uses a Unix socket under the profile. A deep checkout plus
+  // our evidence UUID exceeds macOS's 103-byte limit; keep only that profile
+  // short. Packages, executables, extensions and workspace still test spaces.
+  const profile = process.platform === "darwin"
+    ? await fs.mkdtemp(path.join("/tmp", "dyg profile "))
+    : path.join(root, "profile with spaces");
+  const extensions = path.join(root, "extensions with spaces");
+  const harness = path.join(root, "extension harness");
+  for (const directory of [profile, extensions, harness]) await fs.mkdir(directory, { recursive: true });
   const executable = values.executable ? path.resolve(values.executable) : await downloadAndUnzipVSCode({ version: values.vscode, platform: info.vscode, cachePath: path.join(extensionRoot, ".vscode-test") });
   const cli = await resolveCli(executable, values.vscode === "stable" ? undefined : values.vscode);
   const cliArgs = [cli, "--user-data-dir", profile, "--extensions-dir", extensions];
@@ -65,8 +72,7 @@ async function main() {
   assert.equal(host.runId, runId); assert.equal(host.passed, true);
   assert.equal(host.platform, info.platform); assert.equal(host.arch, info.arch);
   if (values.vscode !== "stable") assert.equal(host.vscode, values.vscode, "VS Code version differs from the requested minimum/current host");
-  const evidence = { schema_version: 1, runId, target: source.target, version: source.version, commit: source.commit, release: source.release, host: hostFacts(), package: packageInspection, standalone: { sha256: await sha256(archive), launch }, installed: host, passed: true };
-  await writeJson(path.join(output, `verification-${host.vscode}.json`), evidence);
+  await writeJson(path.join(output, `verification-${host.vscode}.json`), { ...evidence, requested_vscode: values.vscode, installed: host });
   process.stdout.write(`${JSON.stringify({ target: source.target, vscode: host.vscode, runId, passed: true })}\n`);
 }
 main().catch(error => { process.stderr.write(`${error.stack}\n`); process.exitCode = 1; });

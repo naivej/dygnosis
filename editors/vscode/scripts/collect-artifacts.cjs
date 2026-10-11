@@ -22,18 +22,27 @@ async function main() {
     const vsixHash = await sha256(path.join(directory, source.vsix));
     const standaloneHash = await sha256(path.join(directory, source.standalone));
     assert.ok(checksums.includes(`${vsixHash}  ${source.vsix}\n`) && checksums.includes(`${standaloneHash}  ${source.standalone}\n`));
-    const verificationFiles = (await fs.readdir(directory)).filter(file => /^verification-[0-9.]+\.json$/.test(file));
-    const verified = await Promise.all(verificationFiles.map(async file => JSON.parse(await fs.readFile(path.join(directory, file), "utf8"))));
-    assert.ok(verified.some(result => result.installed.vscode === "1.102.0"), `Missing minimum-version installed check: ${target}`);
-    assert.ok(verified.some(result => result.installed.vscode !== "1.102.0"), `Missing current-version installed check: ${target}`);
-    for (const result of verified) {
-      assert.equal(result.passed, true); assert.equal(result.installed.passed, true);
+    const checkEvidence = result => {
+      assert.equal(result.passed, true);
       assert.equal(result.target, target); assert.equal(result.commit, source.commit); assert.equal(result.version, source.version);
+      assert.equal(result.release, source.release);
       assert.equal(result.package.sha256, vsixHash); assert.equal(result.standalone.sha256, standaloneHash);
       assert.equal(result.host.platform, targets[target].platform); assert.equal(result.host.arch, targets[target].arch);
+      assert.equal(result.standalone.launch.lsp.initialize, true); assert.equal(result.standalone.launch.lsp.symbols, true);
       assert.equal(result.standalone.launch.mcp.tool, "dynare_model_info");
+    };
+    const native = JSON.parse(await fs.readFile(path.join(directory, "verification-native.json"), "utf8"));
+    checkEvidence(native);
+    const verificationFiles = (await fs.readdir(directory)).filter(file => /^verification-[0-9.]+\.json$/.test(file));
+    const verified = await Promise.all(verificationFiles.map(async file => JSON.parse(await fs.readFile(path.join(directory, file), "utf8"))));
+    if (target === "linux-x64") assert.ok(verified.some(result => result.requested_vscode === "1.102.0" && result.installed.vscode === "1.102.0"), `Missing minimum-version installed check: ${target}`);
+    if (targets[target].arch === "x64") assert.ok(verified.some(result => result.requested_vscode === "stable"), `Missing current-version installed check: ${target}`);
+    for (const result of verified) {
+      checkEvidence(result);
+      assert.equal(result.installed.passed, true);
+      assert.equal(result.installed.platform, targets[target].platform); assert.equal(result.installed.arch, targets[target].arch);
     }
-    matrix.push({ target, vsix: source.vsix, vsix_sha256: vsixHash, standalone: source.standalone, standalone_sha256: standaloneHash, vscode: verified.map(result => result.installed.vscode) });
+    matrix.push({ target, vsix: source.vsix, vsix_sha256: vsixHash, standalone: source.standalone, standalone_sha256: standaloneHash, native: true, vscode: verified.map(result => result.installed.vscode) });
   }
   await writeJson(path.join(root, "verified-artifacts.json"), { schema_version: 1, ...identity, matrix });
   await fs.writeFile(path.join(root, "SHA256SUMS.txt"), matrix.flatMap(item => [`${item.vsix_sha256}  ${item.vsix}`, `${item.standalone_sha256}  ${item.standalone}`]).join("\n") + "\n");

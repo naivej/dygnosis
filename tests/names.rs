@@ -4,7 +4,12 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
 
 fn uri(name: &str) -> Url {
-    Url::parse(&format!("file:///C:/dygnosis-names/{name}")).unwrap()
+    let root = if cfg!(windows) {
+        "C:/dygnosis-names"
+    } else {
+        "/dygnosis-names"
+    };
+    Url::from_file_path(std::path::Path::new(root).join(name)).unwrap()
 }
 async fn initialize(
     server: &Backend,
@@ -760,7 +765,7 @@ async fn displayed_include_preferences_are_independent_of_its_owner() {
         .await;
     server.did_change_configuration(DidChangeConfigurationParams {
         settings:json!({"dynare":{"configuration":{"schemaVersion":1,"loose":{},"folders":[
-            {"uri":a,"settings":{"searchPaths":["C:/dygnosis-names/b"],"nameDetails":{"longName":false,"tex":true}}},
+            {"uri":a,"settings":{"searchPaths":[uri("b").to_file_path().unwrap()],"nameDetails":{"longName":false,"tex":true}}},
             {"uri":b,"settings":{"nameDetails":{"longName":true,"tex":false}}}
         ]}}}),
     }).await;
@@ -791,7 +796,7 @@ async fn displayed_include_preferences_are_independent_of_its_owner() {
         dygnosis::compare_models(&dygnosis::parse(text), &dygnosis::parse(text)).to_json();
     server.did_change_configuration(DidChangeConfigurationParams {
         settings:json!({"dynare":{"configuration":{"schemaVersion":1,"loose":{},"folders":[
-            {"uri":a,"settings":{"searchPaths":["C:/dygnosis-names/b"],"nameDetails":{"longName":false,"tex":true}}},
+            {"uri":a,"settings":{"searchPaths":[uri("b").to_file_path().unwrap()],"nameDetails":{"longName":false,"tex":true}}},
             {"uri":b,"settings":{"nameDetails":{"longName":false,"tex":true}}}
         ]}}}),
     }).await;

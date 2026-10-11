@@ -1244,7 +1244,7 @@ fn terminate_tree(child: &std::process::Child) {
     #[cfg(unix)]
     {
         let _ = Command::new("kill")
-            .args(["-9", &format!("-{pid}")])
+            .args(["-9", "--", &format!("-{pid}")])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();

@@ -36,6 +36,7 @@ impl Files {
     }
 
     fn folder(&self, name: &str) -> WorkspaceFolder {
+        fs::create_dir_all(self.0.join(name)).unwrap();
         WorkspaceFolder {
             uri: self.uri(name),
             name: name.to_owned(),
