@@ -1,0 +1,766 @@
+//! W010–W012 / W020–W022 usage, timing, and calibration diagnostics.
+
+use std::collections::{HashMap, HashSet};
+
+use crate::engine::diagnostics::{Diagnostic, Severity};
+use crate::engine::language::expr::{BinOp, ExprId, ExprKind, UnOp};
+use crate::engine::language::intern::Name;
+use crate::engine::language::lexer::{tokenize, TokenKind};
+use crate::engine::language::model::{Assignment, Decl, Equation, Model};
+use crate::engine::language::span::{LineIndex, Span};
+
+const RUN_COMMANDS: &[&str] = &[
+    "steady",
+    "check",
+    "stoch_simul",
+    "simul",
+    "estimation",
+    "perfect_foresight_setup",
+    "perfect_foresight_solver",
+    "ramsey_policy",
+    "discretionary_policy",
+    "osr",
+    "calib_smoother",
+    "forecast",
+];
+
+pub fn check_w010(model: &Model) -> Vec<Diagnostic> {
+    let mut assigned: HashSet<Name> = model.param_assignments.iter().map(|a| a.name).collect();
+    for eq in &model.steady_state_equations {
+        assigned.extend(eq.steady_state_targets.iter().map(|target| target.name));
+    }
+    let mut diagnostics = Vec::new();
+    for p in model.final_parameters() {
+        if assigned.contains(&p.name) {
+            continue;
+        }
+        // A heterogeneous parameter takes its value from the loaded steady
+        // state, not from an assignment; 7.2 accepts it unassigned.
+        if p.heterogeneity.is_some() {
+            continue;
+        }
+        let name = model.name(p.name);
+        diagnostics.push(Diagnostic::new(
+            p.span,
+            Severity::Warning,
+            "W010",
+            format!("Parameter '{name}' is declared but never assigned a value."),
+        ));
+    }
+    diagnostics
+}
+
+pub fn check_w011(model: &Model) -> Vec<Diagnostic> {
+    let param_names: HashSet<Name> = model.final_parameters().iter().map(|d| d.name).collect();
+    let subjects = unevaluable_subjects(model, &param_names);
+    if subjects.is_empty() {
+        return Vec::new();
+    }
+
+    let mut diagnostics = Vec::new();
+    let mut reported: HashSet<(Name, u32)> = HashSet::new();
+    let commands = run_command_positions(&model.source);
+
+    for cmd in &commands {
+        let mut latest: HashMap<Name, usize> = HashMap::new();
+        for (i, row) in subjects.iter().enumerate() {
+            if row.span.start < *cmd {
+                latest.insert(row.name, i);
+            }
+        }
+        for i in latest.values() {
+            push_w011(&mut diagnostics, &mut reported, model, &subjects[*i]);
+        }
+    }
+
+    let mut latest: HashMap<Name, usize> = HashMap::new();
+    for (i, row) in subjects.iter().enumerate() {
+        latest.insert(row.name, i);
+    }
+    for i in latest.values() {
+        push_w011(&mut diagnostics, &mut reported, model, &subjects[*i]);
+    }
+    // HashMap order varies between checks. Macro copies can share a written
+    // span, so the unchanged message also supplies a deterministic tie-break.
+    diagnostics.sort_by(|left, right| {
+        (left.span.start, left.span.end, &left.message).cmp(&(
+            right.span.start,
+            right.span.end,
+            &right.message,
+        ))
+    });
+    diagnostics
+}
+
+pub fn check_w012(model: &Model) -> Vec<Diagnostic> {
+    let declared = declared_names(model);
+    let index = LineIndex::new(&model.source);
+    let first_block_line = [
+        model.model_block,
+        model.initval_block,
+        model.ss_block,
+        model.shocks_block,
+    ]
+    .into_iter()
+    .flatten()
+    .map(|span| index.position(&model.source, span.start).line)
+    .min();
+
+    let mut diagnostics = Vec::new();
+    for a in &model.helper_assignments {
+        if declared.contains(&a.name) {
+            continue;
+        }
+        if let Some(line) = first_block_line {
+            let assign_line = index.position(&model.source, a.span.start).line;
+            if assign_line >= line {
+                continue;
+            }
+        }
+        let name = model.name(a.name);
+        diagnostics.push(Diagnostic::new(
+            a.span,
+            Severity::Warning,
+            "W012",
+            format!(
+                "'{name}' is assigned but not declared as a parameter. If it is used to compute other parameters, consider declaring it in the parameters block."
+            ),
+        ));
+    }
+    diagnostics
+}
+
+pub fn check_w020(model: &Model) -> Vec<Diagnostic> {
+    let has_static = written_model_equations(model).any(|eq| !eq.is_local && !eq.dynamic_tag);
+    if !has_static {
+        return Vec::new();
+    }
+    let referenced = model_and_het_eq_refs(model);
+    // `findUnusedEndogenous` collects `SymbolType::endogenous` only. A
+    // heterogeneous endogenous that nothing uses is accepted.
+    unused_decls(
+        model,
+        model.final_endogenous(),
+        &referenced,
+        "W020",
+        Severity::Warning,
+        "Endogenous variable",
+        "the model block",
+    )
+}
+
+pub fn check_w021(model: &Model) -> Vec<Diagnostic> {
+    if !has_usage_model_or_complete_root(model) {
+        return Vec::new();
+    }
+    // The official unused-exogenous check counts a heterogeneous body as a use
+    // (a plain exogenous used only there accepts at check). A
+    // heterogeneous-declared exogenous is exempt: the binary accepts one that
+    // no tree, block, or shock row uses at all.
+    let usage = crate::engine::diagnostics::usage::Usage::new(model);
+    let mut referenced = usage.model_names();
+    referenced.extend(usage.exogenous_exemptions());
+    // `Model::exogenous` holds `varexo_det` names too; 7.1's unused check covers
+    // plain `varexo` only, so filter them out as the other plain-`varexo`
+    // readers do — an unused `varexo_det` is accepted there.
+    let exo_det: HashSet<Name> = model
+        .deterministic_exogenous
+        .iter()
+        .map(|d| d.name)
+        .collect();
+    let mut diagnostics = Vec::new();
+    let mut reported = HashSet::new();
+    for d in model
+        .exogenous
+        .iter()
+        .filter(|d| !exo_det.contains(&d.name))
+    {
+        consider_unused_exogenous(model, d, &referenced, &mut reported, &mut diagnostics);
+    }
+    // `change_type(varexo)` leaves the written `var` declaration in place.
+    // The unused check still applies to that final plain exogenous.
+    for d in &model.endogenous {
+        if model.final_symbol_kind(d.name) == Some("varexo") {
+            consider_unused_exogenous(model, d, &referenced, &mut reported, &mut diagnostics);
+        }
+    }
+    for d in &model.retyped_trend_decls {
+        consider_unused_exogenous(model, d, &referenced, &mut reported, &mut diagnostics);
+    }
+    diagnostics
+}
+
+fn consider_unused_exogenous(
+    model: &Model,
+    decl: &Decl,
+    referenced: &HashSet<Name>,
+    reported: &mut HashSet<Name>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if !reported.insert(decl.name) || !final_type_is_plain_varexo(model, decl.name) {
+        return;
+    }
+    if decl.heterogeneity.is_some() || referenced.contains(&decl.name) {
+        return;
+    }
+    let name = model.name(decl.name);
+    diagnostics.push(Diagnostic::new(
+        decl.span,
+        Severity::Error,
+        "E021",
+        format!(
+            "{name} not used in model block. To bypass this error, use the `nostrict` option. This may lead to crashes or unexpected behavior."
+        ),
+    ));
+}
+
+/// Plain `varexo` for the unused check: the final type, not the list `var_remove`
+/// or `change_type` left behind. A later declaration of a different type is an
+/// E030 clash and does not restore an accepted exogenous.
+fn final_type_is_plain_varexo(model: &Model, name: Name) -> bool {
+    if exclusion_still_final(model, name) {
+        return false;
+    }
+    match model.final_symbol_kind(name) {
+        Some("varexo") => true,
+        Some(_) => false,
+        None => true,
+    }
+}
+
+/// True while `name` is still excluded for the unused-exogenous check.
+///
+/// The last `excluded` event is final until a later `change_type` replaces it.
+/// A declaration whose type differs from the event before it is the E030 clash:
+/// official refuses that declaration and never reaches this check.
+fn exclusion_still_final(model: &Model, name: Name) -> bool {
+    let events: Vec<_> = model
+        .symbol_type_events
+        .iter()
+        .filter(|event| event.name == name)
+        .collect();
+    let Some(last) = events.last() else {
+        return false;
+    };
+    if last.kind == crate::engine::language::model::SymbolKind::Excluded {
+        return true;
+    }
+    if last.changed || events.len() < 2 {
+        return false;
+    }
+    events[events.len() - 2].kind != last.kind
+}
+
+pub fn check_w022(model: &Model) -> Vec<Diagnostic> {
+    if !has_usage_model_or_complete_root(model) {
+        return Vec::new();
+    }
+    let referenced = crate::engine::diagnostics::usage::Usage::new(model).parameter_names();
+
+    let mut diagnostics = Vec::new();
+    for p in model.final_parameters() {
+        if referenced.contains(&p.name) {
+            continue;
+        }
+        let name = model.name(p.name);
+        diagnostics.push(Diagnostic::new(
+            p.span,
+            Severity::Warning,
+            "W022",
+            format!("Parameter(s) {name} not used in the model"),
+        ));
+    }
+    diagnostics
+}
+
+pub fn check_w010_family(model: &Model) -> Vec<Diagnostic> {
+    let mut out = check_w010(model);
+    out.extend(check_w011(model));
+    out.extend(check_w012(model));
+    out.extend(check_w020(model));
+    out.extend(check_w021(model));
+    out.extend(check_w022(model));
+    out
+}
+
+struct CalibRow {
+    name: Name,
+    expression: String,
+    span: Span,
+    value: Option<f64>,
+    namespace_refused: bool,
+}
+
+fn unevaluable_subjects(model: &Model, param_names: &HashSet<Name>) -> Vec<CalibRow> {
+    let mut known: HashMap<Name, f64> = HashMap::new();
+    let mut indexed: Vec<(usize, &Assignment)> = model
+        .param_assignments
+        .iter()
+        .chain(model.helper_assignments.iter())
+        .enumerate()
+        .collect();
+    indexed.sort_by_key(|(i, a)| (a.span.start, *i));
+
+    let mut subjects = Vec::new();
+    for (_, a) in indexed {
+        let value = a.expr.and_then(|id| eval_expr(model, id, &known));
+        bind(&mut known, a.name, value);
+        if param_names.contains(&a.name) {
+            subjects.push(CalibRow {
+                name: a.name,
+                expression: a.expression.trim().to_string(),
+                span: a.span,
+                value,
+                namespace_refused: a.expr.is_some_and(|id| namespace_refused(model, id)),
+            });
+        }
+    }
+
+    for exo in &model.exogenous {
+        known.insert(exo.name, 0.0);
+    }
+
+    for eq in &model.steady_state_equations {
+        let Some(name) = ss_lhs_ident(model, eq) else {
+            // A multiple-output RHS does not provide one scalar value per name.
+            // Its outputs also replace any earlier scalar calibration knowledge.
+            for target in &eq.steady_state_targets {
+                known.remove(&target.name);
+            }
+            continue;
+        };
+        let value = eq.rhs_expr.and_then(|id| eval_expr(model, id, &known));
+        bind(&mut known, name, value);
+        if param_names.contains(&name) {
+            subjects.push(CalibRow {
+                name,
+                expression: eq.rhs.trim().to_string(),
+                span: eq.span,
+                value,
+                namespace_refused: eq.rhs_expr.is_some_and(|id| namespace_refused(model, id)),
+            });
+        }
+    }
+    subjects
+}
+
+fn bind(known: &mut HashMap<Name, f64>, name: Name, value: Option<f64>) {
+    match value {
+        Some(v) => {
+            known.insert(name, v);
+        }
+        None => {
+            known.remove(&name);
+        }
+    }
+}
+
+fn namespace_refused(model: &Model, id: ExprId) -> bool {
+    if model.namespace_qualified_exprs.contains(&id) {
+        return true;
+    }
+    match &model.exprs.get(id).kind {
+        ExprKind::Unary { arg, .. }
+        | ExprKind::SteadyState { arg }
+        | ExprKind::Expectation { arg, .. } => namespace_refused(model, *arg),
+        ExprKind::Binary { lhs, rhs, .. } => {
+            namespace_refused(model, *lhs) || namespace_refused(model, *rhs)
+        }
+        ExprKind::Call { args, .. } => args.iter().any(|id| namespace_refused(model, *id)),
+        ExprKind::Number
+        | ExprKind::String
+        | ExprKind::Ident { .. }
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. } => false,
+    }
+}
+
+fn push_w011(
+    diagnostics: &mut Vec<Diagnostic>,
+    reported: &mut HashSet<(Name, u32)>,
+    model: &Model,
+    row: &CalibRow,
+) {
+    if row.value.is_some() || row.namespace_refused {
+        return;
+    }
+    if !reported.insert((row.name, row.span.start)) {
+        return;
+    }
+    let name = model.name(row.name);
+    diagnostics.push(Diagnostic::new(
+        row.span,
+        Severity::Warning,
+        "W011",
+        format!(
+            "Parameter '{name}' assignment could not be evaluated: {name} = {}. Check that all referenced names are declared and assigned.",
+            row.expression
+        ),
+    ));
+}
+
+fn run_command_positions(source: &str) -> Vec<u32> {
+    tokenize(source)
+        .into_iter()
+        .filter(|tok| {
+            tok.kind == TokenKind::Ident
+                && RUN_COMMANDS
+                    .iter()
+                    .any(|cmd| tok.text(source).eq_ignore_ascii_case(cmd))
+        })
+        .map(|tok| tok.span.start)
+        .collect()
+}
+
+fn ss_lhs_ident(model: &Model, eq: &Equation) -> Option<Name> {
+    if eq.is_local {
+        return None;
+    }
+    let id = eq.lhs_expr?;
+    match &model.exprs.get(id).kind {
+        ExprKind::Ident { name, .. } => Some(*name),
+        _ => None,
+    }
+}
+
+fn declared_names(model: &Model) -> HashSet<Name> {
+    model
+        .endogenous
+        .iter()
+        .chain(model.exogenous.iter())
+        .chain(model.parameters.iter())
+        .map(|d| d.name)
+        .collect()
+}
+
+fn model_eq_refs(model: &Model) -> HashSet<Name> {
+    let mut refs = HashSet::new();
+    for eq in &model.equations {
+        for r in model.ident_refs(eq) {
+            refs.insert(r.name);
+        }
+    }
+    refs
+}
+
+/// `model_eq_refs` plus every heterogeneous body's references. The official
+/// unused-endogenous/parameter warnings count a heterogeneous body as a use
+/// (`ph` used only there prints no `Parameter(s) … not used in the model`).
+fn model_and_het_eq_refs(model: &Model) -> HashSet<Name> {
+    let mut refs = model_eq_refs(model);
+    for block in &model.heterogeneous_models {
+        for eq in &block.equations {
+            for r in model.ident_refs(eq) {
+                refs.insert(r.name);
+            }
+        }
+    }
+    refs
+}
+
+fn has_written_model(model: &Model) -> bool {
+    written_model_equations(model).next().is_some()
+}
+
+/// CheckPass also examines complete roots with no model block. An unfinished
+/// include or macro may still supply the equations, so that extension is quiet.
+fn has_usage_model_or_complete_root(model: &Model) -> bool {
+    if model.model_rows_rejected() {
+        return false;
+    }
+    has_written_model(model)
+        || (model.model_block.is_none()
+            && model.heterogeneous_models.is_empty()
+            && !crate::engine::diagnostics::check_writing::model_structure_incomplete(model))
+}
+
+fn written_model_equations(model: &Model) -> impl Iterator<Item = &Equation> {
+    model.equations.iter().chain(
+        model
+            .heterogeneous_models
+            .iter()
+            .flat_map(|block| block.equations.iter()),
+    )
+}
+
+fn unused_decls<'a>(
+    model: &Model,
+    decls: impl IntoIterator<Item = &'a Decl>,
+    referenced: &HashSet<Name>,
+    code: &str,
+    severity: Severity,
+    kind: &str,
+    where_: &str,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for d in decls {
+        if referenced.contains(&d.name) {
+            continue;
+        }
+        let name = model.name(d.name);
+        diagnostics.push(Diagnostic::new(
+            d.span,
+            severity,
+            code,
+            format!("{kind} '{name}' is declared but never referenced in {where_}."),
+        ));
+    }
+    diagnostics
+}
+
+fn eval_expr(model: &Model, id: ExprId, known: &HashMap<Name, f64>) -> Option<f64> {
+    match &model.exprs.get(id).kind {
+        ExprKind::Number => {
+            let span = model.exprs.get(id).span;
+            let raw = model.source.get(span.start as usize..span.end as usize)?;
+            raw.parse().ok()
+        }
+        ExprKind::Ident { name, timing, .. } => {
+            if *timing != 0 {
+                return None;
+            }
+            if let Some(&v) = known.get(name) {
+                return Some(v);
+            }
+            let s = model.name(*name);
+            if s.eq_ignore_ascii_case("pi") {
+                Some(std::f64::consts::PI)
+            } else if s.eq_ignore_ascii_case("inf") {
+                Some(f64::INFINITY)
+            } else if s.eq_ignore_ascii_case("nan") {
+                Some(f64::NAN)
+            } else {
+                None
+            }
+        }
+        ExprKind::Unary { op, arg } => {
+            let v = eval_expr(model, *arg, known)?;
+            Some(match op {
+                UnOp::Pos => v,
+                UnOp::Neg => -v,
+            })
+        }
+        ExprKind::Binary { op, lhs, rhs } => {
+            let l = eval_expr(model, *lhs, known)?;
+            let r = eval_expr(model, *rhs, known)?;
+            match op {
+                BinOp::Add => Some(l + r),
+                BinOp::Sub => Some(l - r),
+                BinOp::Mul => Some(l * r),
+                BinOp::Div => Some(l / r),
+                BinOp::Pow => Some(l.powf(r)),
+                BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::EqEq | BinOp::Ne => None,
+            }
+        }
+        ExprKind::Call { callee, args } => {
+            let fname = model.name(*callee);
+            eval_call(model, fname, args, known)
+        }
+        ExprKind::String
+        | ExprKind::Error
+        | ExprKind::PathNamespace { .. }
+        | ExprKind::SteadyState { .. }
+        | ExprKind::Expectation { .. } => None,
+    }
+}
+
+fn eval_call(
+    model: &Model,
+    fname: &str,
+    args: &[ExprId],
+    known: &HashMap<Name, f64>,
+) -> Option<f64> {
+    let mut vals = Vec::with_capacity(args.len());
+    for a in args {
+        vals.push(eval_expr(model, *a, known)?);
+    }
+    let f = fname.to_ascii_lowercase();
+    match f.as_str() {
+        "exp" => unary(&vals, f64::exp),
+        "log" | "ln" => unary(&vals, f64::ln),
+        "log2" => unary(&vals, f64::log2),
+        "log10" => unary(&vals, f64::log10),
+        "sqrt" => unary(&vals, f64::sqrt),
+        "cbrt" => unary(&vals, |x| x.abs().powf(1.0 / 3.0).copysign(x)),
+        "abs" => unary(&vals, f64::abs),
+        "sign" => unary(&vals, |x| {
+            if x > 0.0 {
+                1.0
+            } else if x < 0.0 {
+                -1.0
+            } else {
+                0.0
+            }
+        }),
+        "sin" => unary(&vals, f64::sin),
+        "cos" => unary(&vals, f64::cos),
+        "tan" => unary(&vals, f64::tan),
+        "asin" => unary(&vals, f64::asin),
+        "acos" => unary(&vals, f64::acos),
+        "atan" => unary(&vals, f64::atan),
+        "sinh" => unary(&vals, f64::sinh),
+        "cosh" => unary(&vals, f64::cosh),
+        "tanh" => unary(&vals, f64::tanh),
+        "asinh" => unary(&vals, f64::asinh),
+        "acosh" => unary(&vals, f64::acosh),
+        "atanh" => unary(&vals, f64::atanh),
+        "floor" => unary(&vals, f64::floor),
+        "ceil" => unary(&vals, f64::ceil),
+        "round" => unary(&vals, dynare_round),
+        "erf" => unary(&vals, erf),
+        "erfc" => unary(&vals, |x| 1.0 - erf(x)),
+        "min" => {
+            if vals.is_empty() {
+                None
+            } else {
+                vals.into_iter().reduce(f64::min)
+            }
+        }
+        "max" => {
+            if vals.is_empty() {
+                None
+            } else {
+                vals.into_iter().reduce(f64::max)
+            }
+        }
+        "normpdf" => {
+            let x = *vals.first()?;
+            let mu = vals.get(1).copied().unwrap_or(0.0);
+            let sigma = vals.get(2).copied().unwrap_or(1.0);
+            if vals.len() > 3 {
+                return None;
+            }
+            Some(
+                (-0.5 * ((x - mu) / sigma).powi(2)).exp()
+                    / (sigma * (2.0 * std::f64::consts::PI).sqrt()),
+            )
+        }
+        "normcdf" => {
+            let x = *vals.first()?;
+            let mu = vals.get(1).copied().unwrap_or(0.0);
+            let sigma = vals.get(2).copied().unwrap_or(1.0);
+            if vals.len() > 3 {
+                return None;
+            }
+            Some(0.5 * (1.0 + erf((x - mu) / (sigma * 2.0_f64.sqrt()))))
+        }
+        "norminv" => {
+            let p = *vals.first()?;
+            let mu = vals.get(1).copied().unwrap_or(0.0);
+            let sigma = vals.get(2).copied().unwrap_or(1.0);
+            if vals.len() > 3 {
+                return None;
+            }
+            Some(norminv(p, mu, sigma))
+        }
+        "logncdf" => {
+            let x = *vals.first()?;
+            let mu = vals.get(1).copied().unwrap_or(0.0);
+            let sigma = vals.get(2).copied().unwrap_or(1.0);
+            if vals.len() > 3 {
+                return None;
+            }
+            if sigma <= 0.0 {
+                return Some(f64::NAN);
+            }
+            if x <= 0.0 {
+                return Some(0.0);
+            }
+            Some(0.5 * (1.0 + erf((x.ln() - mu) / (sigma * 2.0_f64.sqrt()))))
+        }
+        _ => None,
+    }
+}
+
+fn unary(vals: &[f64], f: fn(f64) -> f64) -> Option<f64> {
+    if vals.len() == 1 {
+        Some(f(vals[0]))
+    } else {
+        None
+    }
+}
+
+fn dynare_round(value: f64) -> f64 {
+    if value >= 0.0 {
+        (value + 0.5).floor()
+    } else {
+        (value - 0.5).ceil()
+    }
+}
+
+/// Abramowitz & Stegun 7.1.26.
+fn erf(x: f64) -> f64 {
+    let z = x.abs();
+    let t = 1.0 / (1.0 + 0.5 * z);
+    let ans = t * f64::exp(
+        -z * z - 1.26551223
+            + t * (1.00002368
+                + t * (0.37409196
+                    + t * (0.09678418
+                        + t * (-0.18628806
+                            + t * (0.27886807
+                                + t * (-1.13520398
+                                    + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))),
+    );
+    if x >= 0.0 {
+        1.0 - ans
+    } else {
+        ans - 1.0
+    }
+}
+
+/// Acklam's inverse normal CDF, then affine scale.
+fn norminv(p: f64, mu: f64, sigma: f64) -> f64 {
+    if sigma <= 0.0 || !(0.0 < p && p < 1.0) {
+        return f64::NAN;
+    }
+    mu + sigma * standard_norminv(p)
+}
+
+fn standard_norminv(p: f64) -> f64 {
+    const A: [f64; 6] = [
+        -3.969683028665376e+01,
+        2.209460984245205e+02,
+        -2.759285104469687e+02,
+        1.383577459006915e+02,
+        -3.066479806614716e+01,
+        2.506628277459239e+00,
+    ];
+    const B: [f64; 5] = [
+        -5.447609879822406e+01,
+        1.615858368580409e+02,
+        -1.556989798598866e+02,
+        6.680131188771972e+01,
+        -1.328068155288572e+01,
+    ];
+    const C: [f64; 6] = [
+        -7.784894002430293e-03,
+        -3.223964580411365e-01,
+        -2.400758277161838e+00,
+        -2.549732539343734e+00,
+        4.374664141464968e+00,
+        2.938163982698783e+00,
+    ];
+    const D: [f64; 4] = [
+        7.784695709041462e-03,
+        3.224671290700398e-01,
+        2.445134137142996e+00,
+        3.754408661907416e+00,
+    ];
+    const P_LOW: f64 = 0.02425;
+    const P_HIGH: f64 = 1.0 - P_LOW;
+    if p < P_LOW {
+        let q = (-2.0 * p.ln()).sqrt();
+        (((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
+            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+    } else if p <= P_HIGH {
+        let q = p - 0.5;
+        let r = q * q;
+        (((((A[0] * r + A[1]) * r + A[2]) * r + A[3]) * r + A[4]) * r + A[5]) * q
+            / (((((B[0] * r + B[1]) * r + B[2]) * r + B[3]) * r + B[4]) * r + 1.0)
+    } else {
+        let q = (-2.0 * (1.0 - p).ln()).sqrt();
+        -(((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
+            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+    }
+}

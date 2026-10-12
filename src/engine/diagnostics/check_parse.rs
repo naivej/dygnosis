@@ -1,0 +1,1976 @@
+//! E001 parse diagnostics. Token/AST walks; Python supplies messages, not regex.
+
+use crate::engine::diagnostics::{Diagnostic, Severity, TextEdit};
+use crate::engine::language::intern::Name;
+use crate::engine::language::lexer::{tokenize, Token, TokenKind};
+use crate::engine::language::model::{Decl, Model, ParseIssueKind, ShocksSemiFamily};
+use crate::engine::language::span::{LineIndex, Span};
+
+const BLOCK_OPENERS: &[&str] = &[
+    "model",
+    "initval",
+    "endval",
+    "shocks",
+    "occbin_constraints",
+    "steady_state_model",
+];
+
+const DECL_KEYWORDS: &[&str] = &[
+    "varexo_det",
+    "var",
+    "varexo",
+    "parameters",
+    "predetermined_variables",
+];
+
+const DECL_OR_BLOCK: &[&str] = &[
+    "varexo_det",
+    "var",
+    "varexo",
+    "parameters",
+    "predetermined_variables",
+    "varobs",
+    "epilogue",
+    "init2shocks",
+];
+
+/// Words that are not identifiers even inside a statement: each has a
+/// `<DYNARE_STATEMENT>` lexer rule, so `var y stoch_simul;` is a syntax error.
+/// An `<INITIAL>`-only command (`steady`, `check`, `dynatype`, …) is a legal
+/// name there and is not in this list. At statement head that same word is
+/// still the command: `steady = 0.9;` is `parser::INITIAL_COMMANDS`.
+const DYNARE_COMMANDS: &[&str] = &["stoch_simul", "simul", "forecast", "identification"];
+
+const TERMINAL_COMMANDS: &[&str] = &[
+    "stoch_simul",
+    "estimation",
+    "simul",
+    "perfect_foresight_solver",
+    "ramsey_policy",
+    "discretionary_policy",
+    "osr",
+    "sensitivity",
+    "dynare_sensitivity",
+    "send_endogenous_variables_to_workspace",
+];
+
+const BUILTINS: &[&str] = &[
+    "exp",
+    "log",
+    "ln",
+    "log2",
+    "log10",
+    "sqrt",
+    "cbrt",
+    "abs",
+    "sign",
+    "sin",
+    "cos",
+    "tan",
+    "asin",
+    "acos",
+    "atan",
+    "sinh",
+    "cosh",
+    "tanh",
+    "asinh",
+    "acosh",
+    "atanh",
+    "floor",
+    "ceil",
+    "round",
+    "min",
+    "max",
+    "normpdf",
+    "normcdf",
+    "norminv",
+    "logncdf",
+    "erf",
+    "erfc",
+    "inf",
+    "nan",
+    "steady_state",
+    "expectation",
+    "pac_expectation",
+    "var_expectation",
+    "pac_target_nonstationary",
+    "diff",
+    "adl",
+];
+
+const EXPRESSION_OPERATOR_RESERVED: &[&str] = &["var_expectation", "pac_target_nonstationary"];
+
+/// Declaration keywords and `varobs`. Each has a `<DYNARE_STATEMENT>` rule, so
+/// none of them can be a declared name. Block openers and `<INITIAL>`-only
+/// commands are legal names and are not listed here. `end` is legal in a
+/// declaration list (its only rule is `<DYNARE_BLOCK>`); a use inside a block
+/// is the closer, which the block parsers refuse.
+const RESERVED_BLOCK_KEYWORDS: &[&str] = &[
+    "var",
+    "varexo",
+    "varexo_det",
+    "parameters",
+    "predetermined_variables",
+    "varobs",
+];
+
+pub fn check_parse(model: &Model) -> Vec<Diagnostic> {
+    let index = LineIndex::new(&model.source);
+    let tokens = tokenize(&model.source);
+    let mut out = Vec::new();
+    out.extend(format_recorded_issues(model, &index));
+    out.extend(invalid_ident_diags(model, &tokens, &index));
+    out.extend(reserved_ident_diags(model, &index));
+    out.extend(reserved_symbol_use_diags(model));
+    out.extend(merged_equation_diags(model, &index, &out));
+    out.extend(merged_assignment_diags(model, &index, &out));
+    out.extend(unbalanced_paren_diags(model));
+    out
+}
+
+/// `dsge_prior_weight` is reserved inside Dynare blocks. The parser records
+/// those expression uses; ordinary statement expressions keep the identifier.
+/// A declaration list and `estimated_params` may name it. The slots below name
+/// a symbol inside a block without building an expression for it.
+/// `shocks` / `mshocks` var lists are the exception: their names carry no span
+/// of their own, and the shock type checks (E266–E270, their texts) refuse
+/// them instead.
+const RESERVED_SYMBOL: &str = "dsge_prior_weight";
+
+fn reserved_symbol_use_diags(model: &Model) -> Vec<Diagnostic> {
+    let mut spans = model.reserved_block_symbol_uses.clone();
+
+    let mut slots: Vec<(Name, Span)> = Vec::new();
+    for entry in model.initval.iter().chain(&model.endval) {
+        slots.push((entry.name, entry.span));
+    }
+    for entry in model.histval.iter().chain(&model.filter_initial_state) {
+        slots.push((entry.name, entry.span));
+    }
+    for block in &model.init2shocks_blocks {
+        for row in &block.rows {
+            slots.push((row.endo, row.endo_span));
+            slots.push((row.exo, row.exo_span));
+        }
+    }
+    for row in &model.homotopy_rows {
+        slots.push((row.name, row.span));
+    }
+    for group in &model.shock_groups {
+        slots.extend(group.members.iter().copied());
+    }
+    for row in &model.optim_weights {
+        slots.push((row.first, row.first_span));
+        if let Some(second) = row.second
+            && let Some(span) = row.second_span
+        {
+            slots.push((second, span));
+        }
+    }
+    slots.extend(model.observation_trends.iter().copied());
+    for assignment in &model.epilogue {
+        slots.push((assignment.name, assignment.span));
+    }
+    for (name, span) in slots {
+        if model.name(name) == RESERVED_SYMBOL {
+            spans.push(span);
+        }
+    }
+
+    spans.sort_by_key(|span| (span.start, span.end));
+    spans.dedup();
+    spans
+        .into_iter()
+        .map(|span| {
+            e001(
+                span,
+                format!(
+                    "Invalid use of '{RESERVED_SYMBOL}' in a Dynare block: \
+                     reserved preprocessor symbol. Choose a different name."
+                ),
+                None,
+            )
+        })
+        .collect()
+}
+
+pub fn has_structural_error(model: &Model) -> bool {
+    !check_parse(model).is_empty()
+}
+
+fn e001(span: Span, message: String, fix: Option<TextEdit>) -> Diagnostic {
+    Diagnostic {
+        span,
+        severity: Severity::Error,
+        code: "E001".to_string(),
+        message,
+        fix,
+        related: Vec::new(),
+        tags: Vec::new(),
+        model_dimension: None,
+        display_keyword: None,
+        writing: None,
+    }
+}
+
+fn ident_eq(tok: &Token, src: &str, name: &str) -> bool {
+    tok.kind == TokenKind::Ident && tok.text(src).eq_ignore_ascii_case(name)
+}
+
+fn ident_in(tok: &Token, src: &str, names: &[&str]) -> bool {
+    tok.kind == TokenKind::Ident && names.iter().any(|n| tok.text(src).eq_ignore_ascii_case(n))
+}
+
+fn skip_balanced(tokens: &[Token], mut i: usize, open: TokenKind, close: TokenKind) -> usize {
+    if i >= tokens.len() || tokens[i].kind != open {
+        return i;
+    }
+    let mut depth = 1;
+    i += 1;
+    while i < tokens.len() && depth > 0 {
+        if tokens[i].kind == open {
+            depth += 1;
+        } else if tokens[i].kind == close {
+            depth -= 1;
+        }
+        i += 1;
+    }
+    i
+}
+
+/// A block opener at `i`: the word heads a statement, and its `;` closes that
+/// statement. A spelling the file declares as a symbol before `i` is a use, not an
+/// opener — their lexer scopes every opener rule to `INITIAL` and reads a declared
+/// name inside a body through the identifier rule, so `var y shocks;` declares two
+/// endogenous and `+ shocks` resolves against the declaration. A word whose `;` is
+/// followed by `end;` is a bare row of the open body, whose block would otherwise be
+/// empty and which 7.1 refuses.
+fn opener_at(
+    tokens: &[Token],
+    src: &str,
+    i: usize,
+    declared: &[(String, u32)],
+) -> Option<(String, Span, usize)> {
+    let tok = tokens.get(i)?;
+    if tok.kind != TokenKind::Ident {
+        return None;
+    }
+    if !at_statement_head(tokens, i) {
+        return None;
+    }
+    let name = tok.text(src);
+    let key = BLOCK_OPENERS
+        .iter()
+        .find(|k| name.eq_ignore_ascii_case(k))?
+        .to_string();
+    if declared
+        .iter()
+        .any(|(spelling, start)| spelling.eq_ignore_ascii_case(&key) && *start < tok.span.start)
+    {
+        return None;
+    }
+    let mut j = i + 1;
+    if tokens.get(j).is_some_and(|t| t.kind == TokenKind::LParen) {
+        j = skip_balanced(tokens, j, TokenKind::LParen, TokenKind::RParen);
+    }
+    let semi = tokens.get(j)?;
+    if semi.kind != TokenKind::Semi {
+        return None;
+    }
+    if ident_eq(&tokens[j + 1], src, "end")
+        && tokens.get(j + 2).is_some_and(|t| t.kind == TokenKind::Semi)
+    {
+        return None;
+    }
+    Some((
+        key,
+        Span {
+            start: tok.span.start,
+            end: semi.span.end,
+        },
+        j,
+    ))
+}
+
+/// The token at `i` heads a statement: it is the first token, or the token after a
+/// `;`. Macro directives carry no token of their own once the file is expanded, so
+/// they are stepped over, exactly as `Parser::starts_statement` does.
+fn at_statement_head(tokens: &[Token], i: usize) -> bool {
+    let mut k = i;
+    while k > 0 && tokens[k - 1].kind == TokenKind::MacroDir {
+        k -= 1;
+    }
+    k == 0 || tokens.get(k - 1).is_some_and(|t| t.kind == TokenKind::Semi)
+}
+
+/// Every declared symbol with the offset of its declaration, for the as-of test the
+/// opener walk needs.
+fn declared_spellings(model: &Model) -> Vec<(String, u32)> {
+    model
+        .endogenous
+        .iter()
+        .chain(&model.exogenous)
+        .chain(&model.deterministic_exogenous)
+        .chain(&model.parameters)
+        .chain(&model.predetermined)
+        .map(|decl| (model.name(decl.name).to_string(), decl.span.start))
+        .collect()
+}
+
+fn is_end_semi(tokens: &[Token], src: &str, i: usize) -> bool {
+    ident_eq(&tokens[i], src, "end") && tokens.get(i + 1).is_some_and(|t| t.kind == TokenKind::Semi)
+}
+
+fn complete_block_ranges(tokens: &[Token], src: &str, declared: &[(String, u32)]) -> Vec<Span> {
+    let mut ranges = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        if let Some((_, span, semi_i)) = opener_at(tokens, src, i, declared) {
+            let mut j = semi_i + 1;
+            while j < tokens.len() {
+                if is_end_semi(tokens, src, j) {
+                    ranges.push(Span {
+                        start: span.start,
+                        end: tokens[j + 1].span.end,
+                    });
+                    break;
+                }
+                if opener_at(tokens, src, j, declared).is_some() {
+                    break;
+                }
+                j += 1;
+            }
+            i = semi_i + 1;
+            continue;
+        }
+        i += 1;
+    }
+    ranges
+}
+
+fn inside_span(offset: u32, ranges: &[Span]) -> bool {
+    ranges.iter().any(|r| offset >= r.start && offset < r.end)
+}
+
+fn last_eq_line(src: &str, index: &LineIndex, from: u32, to: u32) -> Option<u32> {
+    let to = to.min(src.len() as u32);
+    if from >= to {
+        return None;
+    }
+    let body = mask_line_comments(&src[from as usize..to as usize]);
+    let mut last = None;
+    let mut start = 0;
+    for (rel, _) in body.match_indices(';') {
+        let stmt = body[start..rel].trim();
+        start = rel + 1;
+        if stmt.is_empty() || !stmt.chars().any(|c| c.is_ascii_alphabetic()) {
+            continue;
+        }
+        if let Some(first) = leading_ident(stmt) {
+            let after = stmt.trim_start()[first.len()..].trim_start();
+            // Skip command statements, not `ident =` even when ident is a catalog name.
+            if crate::engine::language::command_skip::is_parse_skip_command(first)
+                && !after.starts_with('=')
+            {
+                continue;
+            }
+        }
+        let semi_abs = from + rel as u32;
+        last = Some(index.position(src, semi_abs).line + 1);
+    }
+    last
+}
+
+fn mask_line_comments(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for line in s.split_inclusive('\n') {
+        let (content, had_nl) = match line.strip_suffix('\n') {
+            Some(c) => (c, true),
+            None => (line, false),
+        };
+        let cut = content
+            .find("//")
+            .or_else(|| content.find('%'))
+            .unwrap_or(content.len());
+        out.push_str(&content[..cut]);
+        out.extend(std::iter::repeat_n(' ', content[cut..].len()));
+        if had_nl {
+            out.push('\n');
+        }
+    }
+    out
+}
+
+fn leading_ident(s: &str) -> Option<&str> {
+    let s = s.trim_start();
+    let mut end = 0;
+    for (i, c) in s.char_indices() {
+        if i == 0 {
+            if !(c.is_ascii_alphabetic() || c == '_') {
+                return None;
+            }
+            end = i + c.len_utf8();
+        } else if c.is_ascii_alphanumeric() || c == '_' {
+            end = i + c.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if end == 0 {
+        None
+    } else {
+        Some(&s[..end])
+    }
+}
+
+fn format_recorded_issues(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
+    let src = &model.source;
+    let mut out = Vec::new();
+    for issue in &model.parse_issues {
+        match &issue.kind {
+            ParseIssueKind::BisonSyntax(message) => {
+                out.push(e001(issue.span, message.clone(), None));
+            }
+            ParseIssueKind::BisonMissingSemi {
+                message,
+                active_tokens,
+            } => {
+                let fix = command_separator_edit(model, index, active_tokens);
+                out.push(e001(issue.span, message.clone(), fix));
+            }
+            ParseIssueKind::MissingEnd {
+                keyword,
+                next_block_label,
+                insert_offset,
+                ..
+            } => {
+                let last = last_eq_line(src, index, issue.span.end, *insert_offset);
+                let start_line = index.position(src, issue.span.start).line + 1;
+                let insert_line = index.position(src, *insert_offset).line + 1;
+                let msg = if let (Some(label), Some(last_eq)) = (next_block_label.as_deref(), last)
+                {
+                    format!(
+                        "Missing 'end;' for '{keyword}' block (line {start_line}). \
+                         Fix: add a new line containing only 'end;' between \
+                         line {last_eq} and line {insert_line} (before '{label};')."
+                    )
+                } else if let Some(label) = next_block_label.as_deref() {
+                    format!(
+                        "Missing 'end;' for '{keyword}' block (line {start_line}). \
+                         Fix: add a new line containing only 'end;' before \
+                         '{label};' on line {insert_line}."
+                    )
+                } else {
+                    format!(
+                        "Missing 'end;' for '{keyword}' block (line {start_line}). \
+                         Fix: add 'end;' on its own line before line {insert_line}."
+                    )
+                };
+                let fix_line = last
+                    .unwrap_or(insert_line.saturating_sub(1))
+                    .saturating_sub(1);
+                out.push(e001(
+                    issue.span,
+                    msg,
+                    Some(TextEdit {
+                        start_line: fix_line,
+                        start_char: 999_999,
+                        end_line: fix_line,
+                        end_char: 999_999,
+                        new_text: "\nend;".to_string(),
+                    }),
+                ));
+            }
+            ParseIssueKind::MissingDeclSemi {
+                keyword,
+                next_is_assign,
+                next_span,
+            } => {
+                if let Some(next_span) = next_span {
+                    out.push(decl_semi_diagnostic(
+                        src,
+                        index,
+                        keyword,
+                        issue.span.start,
+                        issue.span.end,
+                        *next_is_assign,
+                        *next_span,
+                    ));
+                } else {
+                    let lines: Vec<&str> = src.split('\n').collect();
+                    let mut fix_line = lines.len().saturating_sub(1) as u32;
+                    while fix_line > 0 {
+                        let t = lines[fix_line as usize].trim();
+                        if t.is_empty() || t.starts_with("@#") {
+                            fix_line -= 1;
+                            continue;
+                        }
+                        break;
+                    }
+                    let code = strip_line_comment(lines[fix_line as usize]);
+                    out.push(e001(
+                        issue.span,
+                        format!(
+                            "Declaration '{keyword}' is missing its terminating semicolon. \
+                             Add ';' after the last variable name in this declaration."
+                        ),
+                        Some(TextEdit {
+                            start_line: fix_line,
+                            start_char: code.chars().count() as u32,
+                            end_line: fix_line,
+                            end_char: code.chars().count() as u32,
+                            new_text: ";".to_string(),
+                        }),
+                    ));
+                }
+            }
+            ParseIssueKind::MissingAssignSemi { name } => {
+                let start = index.position(src, issue.span.start);
+                let line = src.split('\n').nth(start.line as usize).unwrap_or("");
+                let code = strip_line_comment(line);
+                let fix_char = code.chars().count() as u32;
+                let complete = complete_equation(&tokens_starting_in(model, issue.span));
+                let mut message =
+                    format!("Parameter assignment '{name}' is missing its terminating semicolon.");
+                if complete {
+                    message.push_str(&format!(
+                        " Fix: add ';' at the end of line {}.",
+                        start.line + 1
+                    ));
+                }
+                out.push(e001(
+                    issue.span,
+                    message,
+                    complete.then(|| TextEdit {
+                        start_line: start.line,
+                        start_char: fix_char,
+                        end_line: start.line,
+                        end_char: fix_char,
+                        new_text: ";".to_string(),
+                    }),
+                ));
+            }
+            ParseIssueKind::MissingFinalSemi {
+                keyword,
+                body_code_end,
+            } => {
+                let fix_pos = index.position(src, *body_code_end);
+                out.push(e001(
+                    issue.span,
+                    format!(
+                        "Statement in '{keyword}' block is missing its terminating semicolon \
+                         before 'end;'. Fix: add ';' at the end of line {}.",
+                        fix_pos.line + 1
+                    ),
+                    Some(TextEdit {
+                        start_line: fix_pos.line,
+                        start_char: fix_pos.character,
+                        end_line: fix_pos.line,
+                        end_char: fix_pos.character,
+                        new_text: ";".to_string(),
+                    }),
+                ));
+            }
+            ParseIssueKind::MissingSurgeryTag { keyword } => {
+                let line = index.position(src, issue.span.start).line + 1;
+                out.push(e001(
+                    issue.span,
+                    format!(
+                        "Missing equation tag in the '{keyword}' statement (line {line}). \
+                         Fix: list a tag, e.g. {keyword}('eq1');."
+                    ),
+                    None,
+                ));
+            }
+            ParseIssueKind::DoubleQuotedString => {
+                let line = index.position(src, issue.span.start).line + 1;
+                out.push(e001(
+                    issue.span,
+                    format!(
+                        "Double-quoted string in the .mod file (line {line}). \
+                         Dynare accepts only single quotes. Fix: replace the double quotes \
+                         with single ones."
+                    ),
+                    None,
+                ));
+            }
+            ParseIssueKind::SurgeryTagUnquoted { keyword } => {
+                let line = index.position(src, issue.span.start).line + 1;
+                out.push(e001(
+                    issue.span,
+                    format!(
+                        "Unquoted tag value in the '{keyword}' statement (line {line}). \
+                         Fix: quote the value, e.g. name='eq1'."
+                    ),
+                    None,
+                ));
+            }
+            ParseIssueKind::EmptyReplaceBody => {
+                let line = index.position(src, issue.span.start).line + 1;
+                out.push(e001(
+                    issue.span,
+                    format!(
+                        "Missing equation in the 'model_replace' block (line {line}). \
+                         Fix: add an equation before 'end;'."
+                    ),
+                    None,
+                ));
+            }
+            ParseIssueKind::UnexpectedEqual => out.push(e001(
+                issue.span,
+                "syntax error, unexpected EQUAL, expecting ';' or '('".to_string(),
+                None,
+            )),
+            ParseIssueKind::UnexpectedEndAssign => out.push(e001(
+                issue.span,
+                "syntax error, unexpected IDENTIFIER, expecting ';'".to_string(),
+                None,
+            )),
+            ParseIssueKind::UnexpectedEnd => out.push(e001(
+                issue.span,
+                "syntax error, unexpected END".to_string(),
+                None,
+            )),
+            ParseIssueKind::KeywordTypo { found, correct } => {
+                let start = index.position(src, issue.span.start);
+                let end = index.position(src, issue.span.end);
+                out.push(e001(
+                    issue.span,
+                    format!(
+                        "Possible misspelling of '{correct}' keyword: '{found}'. \
+                         Fix: replace '{found}' with '{correct}'."
+                    ),
+                    Some(TextEdit {
+                        start_line: start.line,
+                        start_char: start.character,
+                        end_line: end.line,
+                        end_char: end.character,
+                        new_text: correct.clone(),
+                    }),
+                ));
+            }
+            ParseIssueKind::MissingShocksSemi {
+                family,
+                label,
+                fix_start,
+                fix_end,
+            } => {
+                let fix_start_pos = index.position(src, *fix_start);
+                let fix_end_pos = index.position(src, *fix_end);
+                let (msg, new_text) = match family {
+                    ShocksSemiFamily::BeforeKeyword => (
+                        format!(
+                            "Missing semicolon in shocks block before '{label}'. \
+                             Fix: add ';' before '{label}' on line {}.",
+                            fix_end_pos.line + 1
+                        ),
+                        "; ".to_string(),
+                    ),
+                    ShocksSemiFamily::AfterVar => (
+                        format!(
+                            "Missing semicolon after 'var {label}' in shocks block. \
+                             Fix: add ';' after '{label}' on line {}.",
+                            fix_end_pos.line + 1
+                        ),
+                        ";".to_string(),
+                    ),
+                    ShocksSemiFamily::EndOfStmt => (
+                        format!(
+                            "Missing semicolon at end of '{label}' shock statement. \
+                             Fix: add ';' at the end of line {}.",
+                            fix_end_pos.line + 1
+                        ),
+                        ";".to_string(),
+                    ),
+                };
+                out.push(e001(
+                    issue.span,
+                    msg,
+                    Some(TextEdit {
+                        start_line: fix_start_pos.line,
+                        start_char: fix_start_pos.character,
+                        end_line: fix_end_pos.line,
+                        end_char: fix_end_pos.character,
+                        new_text,
+                    }),
+                ));
+            }
+        }
+    }
+    out
+}
+
+fn strip_line_comment(line: &str) -> &str {
+    if let Some(i) = line.find("//") {
+        return line[..i].trim_end();
+    }
+    if let Some(i) = line.find('%') {
+        return line[..i].trim_end();
+    }
+    line.trim_end()
+}
+
+fn last_ident_in(text: &str) -> Option<&str> {
+    let mut last = None;
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c.is_ascii_alphabetic() || c == b'_' {
+            let start = i;
+            i += 1;
+            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            last = Some(&text[start..i]);
+        } else {
+            i += 1;
+        }
+    }
+    last
+}
+
+fn decl_semi_diagnostic(
+    src: &str,
+    index: &LineIndex,
+    kw: &str,
+    kw_start: u32,
+    range_end: u32,
+    is_assign: bool,
+    next_span: Span,
+) -> Diagnostic {
+    let next_pos = index.position(src, next_span.start);
+    let next_line_1 = next_pos.line + 1;
+    let lines: Vec<&str> = src.split('\n').collect();
+    let mut insert_line = next_line_1.saturating_sub(1);
+    let mut last_var = String::new();
+    while insert_line > 0 {
+        let idx = (insert_line - 1) as usize;
+        if idx >= lines.len() {
+            break;
+        }
+        let line_text = lines[idx].trim();
+        if line_text.starts_with("@#") {
+            insert_line -= 1;
+            continue;
+        }
+        if line_text.is_empty() {
+            insert_line -= 1;
+            continue;
+        }
+        let no_comment = strip_line_comment(line_text).trim();
+        if no_comment.is_empty() {
+            insert_line -= 1;
+            continue;
+        }
+        if let Some(id) = last_ident_in(no_comment) {
+            last_var = id.to_string();
+        }
+        break;
+    }
+    let next_label = if is_assign {
+        "assignment".to_string()
+    } else {
+        format!(
+            "'{}' declaration",
+            src[next_span.start as usize..next_span.end as usize].trim()
+        )
+    };
+    let mut msg = format!(
+        "Declaration '{kw}' appears to be missing its terminating semicolon \
+         (the next {next_label} starts before a ';' is found). "
+    );
+    if last_var.is_empty() {
+        msg.push_str(&format!(
+            "Add ';' after the last variable name in this {kw} declaration."
+        ));
+    } else {
+        msg.push_str(&format!(
+            "Fix: add ';' at the end of line {insert_line} (after '{last_var}')."
+        ));
+    }
+    let mut fix_line_0 = insert_line.saturating_sub(1);
+    if fix_line_0 >= lines.len() as u32 {
+        fix_line_0 = lines.len().saturating_sub(1) as u32;
+    }
+    let fix_line_text = lines.get(fix_line_0 as usize).copied().unwrap_or("");
+    let fix = if next_pos.line == fix_line_0 {
+        let mut start_char = next_pos.character as i32;
+        if is_assign {
+            // Same-line assignment: only auto-fix when a prior decl name exists.
+            start_char = -1;
+        }
+        if start_char >= 0 {
+            let mut sc = start_char as usize;
+            let bytes = fix_line_text.as_bytes();
+            while sc > 0 && matches!(bytes.get(sc - 1), Some(b' ' | b'\t')) {
+                sc -= 1;
+            }
+            Some(TextEdit {
+                start_line: fix_line_0,
+                start_char: sc as u32,
+                end_line: fix_line_0,
+                end_char: sc as u32,
+                new_text: ";".to_string(),
+            })
+        } else {
+            None
+        }
+    } else {
+        let code = strip_line_comment(fix_line_text);
+        let sc = code.chars().count() as u32;
+        Some(TextEdit {
+            start_line: fix_line_0,
+            start_char: sc,
+            end_line: fix_line_0,
+            end_char: sc,
+            new_text: ";".to_string(),
+        })
+    };
+    e001(
+        Span {
+            start: kw_start,
+            end: range_end,
+        },
+        msg,
+        fix,
+    )
+}
+
+fn trailing_code_line(tokens: &[Token], src: &str, index: &LineIndex) -> Option<u32> {
+    for tok in tokens {
+        if ident_in(tok, src, TERMINAL_COMMANDS) {
+            return Some(index.position(src, tok.span.start).line);
+        }
+    }
+    None
+}
+
+fn looks_like_matlab(rhs: &str) -> bool {
+    rhs.contains('\'')
+        || rhs.contains('"')
+        || rhs.contains('[')
+        || rhs.contains(']')
+        || rhs.contains('{')
+        || rhs.contains('}')
+        || rhs
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .any(|w| matches!(w, "M_" | "oo_" | "options_"))
+}
+
+fn invalid_ident_diags(model: &Model, tokens: &[Token], index: &LineIndex) -> Vec<Diagnostic> {
+    let _ = index;
+    let src = &model.source;
+    let mut out = Vec::new();
+    // Decl-overlap refuses to guess: emit E001 only when a run overlaps an
+    // active Decl. Incomplete expansion must not hide those decidable errors.
+    let inactive = crate::engine::language::macro_expand::inactive_macro_spans(src);
+    let active_decls = active_decl_spans(model);
+    let declared = declared_spellings(model);
+    let mut blocks = complete_block_ranges(tokens, src, &declared);
+    // Statements the parser read claim their own spans: a `keyword=[…]` option
+    // value inside one is not a declaration.
+    blocks.extend(model.statement_spans());
+    let mut i = 0;
+    while i < tokens.len() {
+        let tok = &tokens[i];
+        if inside_span(tok.span.start, &blocks)
+            || inside_span(tok.span.start, &inactive)
+            || !ident_in(tok, src, DECL_KEYWORDS)
+        {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        if tokens.get(j).is_some_and(|t| t.kind == TokenKind::LParen) {
+            j = skip_balanced(tokens, j, TokenKind::LParen, TokenKind::RParen);
+        }
+        let body_start_i = j;
+        let mut k = j;
+        let mut saw_inner_kw = false;
+        while k < tokens.len()
+            && tokens[k].kind != TokenKind::Semi
+            && tokens[k].kind != TokenKind::Eof
+        {
+            if tokens[k].kind == TokenKind::Latex {
+                k += 1;
+                continue;
+            }
+            if tokens[k].kind == TokenKind::LParen {
+                k = skip_balanced(tokens, k, TokenKind::LParen, TokenKind::RParen);
+                continue;
+            }
+            if ident_in(&tokens[k], src, DECL_OR_BLOCK) {
+                saw_inner_kw = true;
+                break;
+            }
+            k += 1;
+        }
+        if saw_inner_kw || k >= tokens.len() || tokens[k].kind != TokenKind::Semi {
+            i += 1;
+            continue;
+        }
+        let mut kept: Vec<usize> = Vec::new();
+        let mut t = body_start_i;
+        while t < k {
+            if tokens[t].kind == TokenKind::Latex
+                || tokens[t].kind == TokenKind::MacroDir
+                || inside_span(tokens[t].span.start, &inactive)
+            {
+                t += 1;
+                continue;
+            }
+            if tokens[t].kind == TokenKind::LParen {
+                t = skip_balanced(tokens, t, TokenKind::LParen, TokenKind::RParen);
+                continue;
+            }
+            if tokens[t].kind == TokenKind::Comma {
+                flush_invalid_runs(src, tokens, &kept, &active_decls, &mut out);
+                kept.clear();
+                t += 1;
+                continue;
+            }
+            kept.push(t);
+            t += 1;
+        }
+        flush_invalid_runs(src, tokens, &kept, &active_decls, &mut out);
+        i = k + 1;
+    }
+    push_unrecognized_file_gaps(src, tokens, &excluded_character_spans(model), &mut out);
+    out
+}
+
+fn active_decl_spans(model: &Model) -> Vec<Span> {
+    model
+        .endogenous
+        .iter()
+        .chain(&model.exogenous)
+        .chain(&model.deterministic_exogenous)
+        .chain(&model.parameters)
+        .chain(&model.predetermined)
+        .map(|decl| decl.span)
+        .collect()
+}
+
+/// Byte ranges that are not active Dynare syntax. The lexer still skips
+/// non-ASCII there, and Dynare accepts it.
+fn excluded_character_spans(model: &Model) -> Vec<Span> {
+    let src = &model.source;
+    let mut spans = crate::engine::language::macro_expand::inactive_macro_spans(src);
+    spans.extend(
+        model
+            .expanded_tokens
+            .iter()
+            .filter(|token| {
+                token.kind == TokenKind::String
+                    && token.text(src).starts_with('\'')
+                    && token.text(src).len() > 1
+                    && token.text(src).ends_with('\'')
+            })
+            .map(|token| token.span),
+    );
+    for span in model.ms_unparsed_spans.iter().copied() {
+        spans.push(native_line_span(src, span));
+    }
+    for assignment in &model.helper_assignments {
+        if !declared_statement_head(model, assignment.name, assignment.symbol_type_context) {
+            spans.push(native_line_span(src, assignment.span));
+        }
+    }
+    spans
+}
+
+/// A NATIVE entry keeps the rest of its region, including mid-line entries.
+fn native_line_span(src: &str, span: Span) -> Span {
+    Span {
+        start: span.start,
+        end: span
+            .end
+            .max(
+                crate::engine::language::native_line::native_region_end(src, span.start as usize)
+                    as u32,
+            ),
+    }
+}
+
+fn declared_statement_head(
+    model: &Model,
+    name: Name,
+    context: crate::engine::language::model::SymbolContext,
+) -> bool {
+    model
+        .symbol_kind_in_context(name, context)
+        .is_some_and(|kind| !matches!(kind, "mod_file_local" | "external_function"))
+}
+
+/// Non-ASCII characters the lexer skips. Dynare's `<*>.` rule refuses them
+/// with `character unrecognized by lexer` in active Dynare syntax, including
+/// declarations, equations, and shock lines. Comments, quoted text, `$…$`
+/// TeX, verbatim bodies, and the complementarity sign are tokens or trivia.
+/// Native MATLAB text and discarded macro branches are not active syntax.
+fn push_unrecognized_file_gaps(
+    src: &str,
+    tokens: &[Token],
+    excluded: &[Span],
+    out: &mut Vec<Diagnostic>,
+) {
+    let verbatim = verbatim_body_spans(src, tokens);
+    let mut prev = 0u32;
+    for tok in tokens {
+        if !span_contains(prev, &verbatim) {
+            push_unrecognized_gap(src, prev, tok.span.start, excluded, out);
+        }
+        prev = tok.span.end;
+    }
+    if !span_contains(prev, &verbatim) {
+        push_unrecognized_gap(src, prev, src.len() as u32, excluded, out);
+    }
+}
+
+fn span_contains(pos: u32, spans: &[Span]) -> bool {
+    spans.iter().any(|span| pos >= span.start && pos < span.end)
+}
+
+fn verbatim_body_spans(src: &str, tokens: &[Token]) -> Vec<Span> {
+    let mut ranges = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        if tokens[i].kind == TokenKind::Ident
+            && tokens[i].text(src).eq_ignore_ascii_case("verbatim")
+            && tokens
+                .get(i + 1)
+                .is_some_and(|tok| tok.kind == TokenKind::Semi)
+            && crate::engine::language::native_line::verbatim_opener(
+                src,
+                tokens[i].span.start as usize,
+            )
+        {
+            let start = tokens[i + 1].span.end;
+            i += 2;
+            while i < tokens.len() {
+                if tokens[i].kind == TokenKind::Ident
+                    && tokens[i].text(src).eq_ignore_ascii_case("end")
+                    && tokens
+                        .get(i + 1)
+                        .is_some_and(|tok| tok.kind == TokenKind::Semi)
+                {
+                    ranges.push(Span {
+                        start,
+                        end: tokens[i].span.start,
+                    });
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        i += 1;
+    }
+    ranges
+}
+
+fn push_unrecognized_gap(
+    src: &str,
+    from: u32,
+    to: u32,
+    excluded: &[Span],
+    out: &mut Vec<Diagnostic>,
+) {
+    let end = to as usize;
+    let mut i = from as usize;
+    if i > end || end > src.len() {
+        return;
+    }
+    while i < end {
+        let rest = &src[i..end];
+        if rest.starts_with("//") || rest.starts_with('%') {
+            while i < end && !src[i..].starts_with('\n') {
+                i += src[i..].chars().next().map(char::len_utf8).unwrap_or(1);
+            }
+            continue;
+        }
+        if rest.starts_with("/*") {
+            if let Some(rel) = src[i + 2..end].find("*/") {
+                i = i + 2 + rel + 2;
+            } else {
+                i = end;
+            }
+            continue;
+        }
+        let Some(ch) = src[i..].chars().next() else {
+            break;
+        };
+        let len = ch.len_utf8();
+        if i + len > end {
+            break;
+        }
+        if ch.is_ascii() || span_contains(i as u32, excluded) {
+            i += len;
+            continue;
+        }
+        let run_start = i;
+        i += len;
+        while i < end {
+            let Some(c) = src[i..].chars().next() else {
+                break;
+            };
+            let n = c.len_utf8();
+            if i + n > end || c.is_ascii() || span_contains(i as u32, excluded) {
+                break;
+            }
+            i += n;
+        }
+        out.push(e001(
+            Span {
+                start: run_start as u32,
+                end: i as u32,
+            },
+            "character unrecognized by lexer".to_string(),
+            None,
+        ));
+    }
+}
+
+fn is_dynare_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    first.is_ascii_alphabetic() && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn flush_invalid_runs(
+    src: &str,
+    tokens: &[Token],
+    kept: &[usize],
+    active_decls: &[Span],
+    out: &mut Vec<Diagnostic>,
+) {
+    if kept.is_empty() {
+        return;
+    }
+    let mut run: Vec<usize> = vec![kept[0]];
+    for &i in &kept[1..] {
+        let prev = &tokens[*run.last().unwrap()];
+        let cur = &tokens[i];
+        let between = &src[prev.span.end as usize..cur.span.start as usize];
+        if between.chars().any(char::is_whitespace) {
+            push_invalid_run(src, tokens, &run, active_decls, out);
+            run = vec![i];
+        } else {
+            run.push(i);
+        }
+    }
+    push_invalid_run(src, tokens, &run, active_decls, out);
+}
+
+fn push_invalid_run(
+    src: &str,
+    tokens: &[Token],
+    run: &[usize],
+    active_decls: &[Span],
+    out: &mut Vec<Diagnostic>,
+) {
+    if run.is_empty() {
+        return;
+    }
+    let start = tokens[run[0]].span.start;
+    let end = tokens[*run.last().unwrap()].span.end;
+    let token = &src[start as usize..end as usize];
+    if token.contains("@{") {
+        return;
+    }
+    if !token.chars().any(|c| c.is_ascii_alphabetic() || c == '_') {
+        return;
+    }
+    if is_dynare_ident(token) {
+        return;
+    }
+    // Ident-like runs must cover an active Decl. A discarded `@#for` body or
+    // similar leftover with no Decl stays quiet. A lone string/junk token in an
+    // active list has no Decl and still refuses.
+    let run_span = Span { start, end };
+    let overlaps_decl = active_decls
+        .iter()
+        .any(|decl| spans_overlap(run_span, *decl));
+    let ident_like = run.iter().any(|&i| {
+        matches!(
+            tokens[i].kind,
+            TokenKind::Ident
+                | TokenKind::Number
+                | TokenKind::Minus
+                | TokenKind::Plus
+                | TokenKind::Star
+                | TokenKind::Slash
+                | TokenKind::Dot
+                | TokenKind::Caret
+        )
+    });
+    if ident_like && !overlaps_decl {
+        return;
+    }
+    out.push(e001(
+        Span { start, end },
+        format!(
+            "Invalid Dynare identifier '{token}'. \
+             Identifiers must start with a letter and contain only \
+             letters, digits, and underscores."
+        ),
+        None,
+    ));
+}
+
+fn spans_overlap(a: Span, b: Span) -> bool {
+    a.start < b.end && b.start < a.end
+}
+
+pub(crate) fn reserved_reason(name: &str) -> Option<&'static str> {
+    let lowered = name.to_ascii_lowercase();
+    if BUILTINS.iter().any(|b| *b == lowered) {
+        return Some("Dynare built-in function or operator");
+    }
+    if EXPRESSION_OPERATOR_RESERVED.iter().any(|b| *b == lowered) {
+        return Some("Dynare reserved model-expression operator");
+    }
+    if DYNARE_COMMANDS.iter().any(|b| *b == lowered)
+        || RESERVED_BLOCK_KEYWORDS.iter().any(|b| *b == lowered)
+    {
+        return Some("Dynare command or block keyword");
+    }
+    None
+}
+
+fn reserved_ident_diags(model: &Model, index: &LineIndex) -> Vec<Diagnostic> {
+    let src = &model.source;
+    let mut seen = Vec::new();
+    let mut out = Vec::new();
+    let decls: Vec<&Decl> = model
+        .endogenous
+        .iter()
+        .chain(&model.exogenous)
+        .chain(&model.deterministic_exogenous)
+        .chain(&model.parameters)
+        .chain(&model.predetermined)
+        .collect();
+    for decl in decls {
+        let name = model.name(decl.name);
+        // A block opener whose lexer rule is `<INITIAL>` only is a legal
+        // declaration name: a declaration list reads it as an identifier, and
+        // 7.1 accepts `var y shocks;`. `epilogue` and `init2shocks` also have a
+        // `<DYNARE_STATEMENT>` rule, so the declaration scan still refuses them;
+        // skipping the reserved-identifier line here only avoids a second E001.
+        if crate::engine::language::parser::BLOCK_OPENERS
+            .iter()
+            .any(|kw| name.eq_ignore_ascii_case(kw))
+        {
+            continue;
+        }
+        let Some(reason) = reserved_reason(name) else {
+            continue;
+        };
+        let key = name.to_ascii_lowercase();
+        if seen.iter().any(|s: &String| s == &key) {
+            continue;
+        }
+        let pos = index.position(src, decl.span.start);
+        let line = src.split('\n').nth(pos.line as usize).unwrap_or("");
+        let leading = line.len() - line.trim_start().len();
+        if pos.character == leading as u32 {
+            continue;
+        }
+        seen.push(key);
+        out.push(e001(
+            decl.span,
+            format!(
+                "Invalid Dynare identifier '{name}': reserved {}. Choose a different name.",
+                reason.to_ascii_lowercase()
+            ),
+            None,
+        ));
+    }
+    out
+}
+
+/// Active tokens of one equation or assignment execution.
+///
+/// The slice is the parser's expanded-token range. A raw written span is not
+/// used: it can cover a discarded macro branch, and a later execution can
+/// select a different branch at that same span. An empty range, a
+/// `MacroDir` or `MacroInterp` inside the slice, or a retained unresolved
+/// directive around the slice is not proof, so the scan does not guess.
+fn execution_tokens<'a>(model: &'a Model, range: &std::ops::Range<usize>) -> Option<&'a [Token]> {
+    if range.is_empty() {
+        return None;
+    }
+    let tokens = model.expanded_tokens.get(range.clone())?;
+    if tokens
+        .iter()
+        .any(|token| matches!(token.kind, TokenKind::MacroDir | TokenKind::MacroInterp))
+        || raw_directive_encloses(model, range.start)
+    {
+        return None;
+    }
+    Some(tokens)
+}
+
+/// Resolved `@#if` and `@#for` directives leave the expanded stream. A retained
+/// directive keeps its opener, so depth is positive only inside that raw block.
+fn raw_directive_encloses(model: &Model, index: usize) -> bool {
+    let mut depth = 0i32;
+    for token in model.expanded_tokens.iter().take(index) {
+        if token.kind != TokenKind::MacroDir {
+            continue;
+        }
+        depth += directive_delta(token.text(&model.source));
+        if depth < 0 {
+            depth = 0;
+        }
+    }
+    depth > 0
+}
+
+fn directive_delta(text: &str) -> i32 {
+    let word = text
+        .trim()
+        .trim_start_matches("@#")
+        .split_whitespace()
+        .next()
+        .unwrap_or("");
+    if word.eq_ignore_ascii_case("if")
+        || word.eq_ignore_ascii_case("ifdef")
+        || word.eq_ignore_ascii_case("ifndef")
+        || word.eq_ignore_ascii_case("for")
+    {
+        1
+    } else if word.eq_ignore_ascii_case("endif") || word.eq_ignore_ascii_case("endfor") {
+        -1
+    } else {
+        0
+    }
+}
+
+fn skip_tag_tokens(toks: &[Token], mut i: usize) -> usize {
+    if i >= toks.len() || toks[i].kind != TokenKind::LBrack {
+        return i;
+    }
+    i += 1;
+    while i < toks.len() && toks[i].kind != TokenKind::RBrack {
+        i += 1;
+    }
+    if i < toks.len() {
+        i + 1
+    } else {
+        i
+    }
+}
+
+fn standalone_eq_indices(toks: &[Token]) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < toks.len() {
+        if toks[i].kind == TokenKind::LBrack {
+            i = skip_tag_tokens(toks, i);
+            continue;
+        }
+        if toks[i].kind == TokenKind::Eq {
+            out.push(i);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The token span is a written separator candidate.
+///
+/// A plain token and a macro copy both keep the source bytes in `span`. A
+/// generated lexeme is a candidate when `span` is one whole `@{...}` interpolation.
+/// Pieces of one multi-token replacement share that span, including pieces whose
+/// `expanded_adjacent_next` is set. [`proved_separator_edge`] keeps only the written
+/// start of the first piece and the written end of the last.
+fn written_boundary(src: &str, token: &Token) -> bool {
+    if token.lexeme.is_none() && token.expanded_adjacent_next.is_some() {
+        return false;
+    }
+    let Some(written) = src.get(token.span.start as usize..token.span.end as usize) else {
+        return false;
+    };
+    if token.lexeme.is_none() {
+        return written == token.text(src);
+    }
+    written.starts_with("@{") && written.ends_with('}')
+}
+
+fn byte_inside_other_token(tokens: &[Token], skip: usize, at: u32) -> bool {
+    tokens
+        .iter()
+        .enumerate()
+        .any(|(index, token)| index != skip && token.span.start < at && at < token.span.end)
+}
+
+fn shares_generated_span(tokens: &[Token], index: usize, earlier: bool) -> bool {
+    let span = tokens[index].span;
+    tokens.iter().enumerate().any(|(other_i, other)| {
+        let side = if earlier {
+            other_i < index
+        } else {
+            other_i > index
+        };
+        side && other.lexeme.is_some() && other.span.start < span.end && span.start < other.span.end
+    })
+}
+
+/// `at` is this active token's own written edge.
+///
+/// Copied literals own both edges of their span. A single-token `@{...}` does
+/// too. In a multi-token replacement every piece carries the whole interpolation
+/// span, so only the first piece's start and the last piece's end are written
+/// boundaries. An equal span does not count as a strict overlap.
+fn proved_separator_edge(src: &str, tokens: &[Token], index: usize, at: u32) -> bool {
+    let Some(token) = tokens.get(index) else {
+        return false;
+    };
+    if !written_boundary(src, token) || byte_inside_other_token(tokens, index, at) {
+        return false;
+    }
+    if token.lexeme.is_none() {
+        return true;
+    }
+    if at == token.span.start {
+        return !shares_generated_span(tokens, index, true);
+    }
+    if at == token.span.end {
+        return !shares_generated_span(tokens, index, false);
+    }
+    false
+}
+
+/// A semicolon edit needs one complete resid production and a proved written
+/// edge. Macro copies retain their edge; pieces inside interpolation do not.
+fn command_separator_edit(
+    model: &Model,
+    index: &LineIndex,
+    active_tokens: &std::ops::Range<usize>,
+) -> Option<TextEdit> {
+    let tokens = execution_tokens(model, active_tokens)?;
+    let complete = match tokens {
+        [head] => {
+            head.kind == TokenKind::Ident && head.text(&model.source).eq_ignore_ascii_case("resid")
+        }
+        [head, open, option, close] => {
+            head.kind == TokenKind::Ident
+                && head.text(&model.source).eq_ignore_ascii_case("resid")
+                && open.kind == TokenKind::LParen
+                && option.kind == TokenKind::Ident
+                && option.text(&model.source).eq_ignore_ascii_case("non_zero")
+                && close.kind == TokenKind::RParen
+        }
+        _ => false,
+    };
+    let last_i = tokens.len().checked_sub(1)?;
+    let at = tokens[last_i].span.end;
+    // Include the refusing token. It can be another piece of the same
+    // interpolation, even though it is outside the complete command prefix.
+    let proof_end = (active_tokens.end + 1).min(model.expanded_tokens.len());
+    let proof = execution_tokens(model, &(active_tokens.start..proof_end))?;
+    if !complete || !proved_separator_edge(&model.source, proof, last_i, at) {
+        return None;
+    }
+    let position = index.position(&model.source, at);
+    Some(TextEdit {
+        start_line: position.line,
+        start_char: position.character,
+        end_line: position.line,
+        end_char: position.character,
+        new_text: ";".to_string(),
+    })
+}
+
+const EXPR_UNARY_BP: u8 = 7;
+
+/// Binding powers of the infix tokens `parse_expr` already accepts.
+fn infix_binding(kind: TokenKind) -> Option<(u8, u8)> {
+    match kind {
+        TokenKind::Plus | TokenKind::Minus => Some((3, 4)),
+        TokenKind::Star | TokenKind::Slash => Some((5, 6)),
+        TokenKind::Caret => Some((9, 8)),
+        TokenKind::Lt
+        | TokenKind::Gt
+        | TokenKind::Le
+        | TokenKind::Ge
+        | TokenKind::EqEq
+        | TokenKind::Ne => Some((1, 2)),
+        _ => None,
+    }
+}
+
+struct ExprWalk<'a> {
+    tokens: &'a [Token],
+    i: usize,
+}
+
+impl<'a> ExprWalk<'a> {
+    fn kind(&self) -> Option<TokenKind> {
+        self.tokens.get(self.i).map(|token| token.kind)
+    }
+
+    /// One expression, using the parser's prefix, infix, call, and timing tokens.
+    /// A missing operand, an open delimiter, or a trailing operator returns false.
+    fn parse_bp(&mut self, min_bp: u8) -> bool {
+        if !self.parse_prefix() {
+            return false;
+        }
+        while let Some((left_bp, right_bp)) = self.kind().and_then(infix_binding) {
+            if left_bp < min_bp {
+                break;
+            }
+            self.i += 1;
+            if !self.parse_bp(right_bp) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn parse_prefix(&mut self) -> bool {
+        let Some(kind) = self.kind() else {
+            return false;
+        };
+        match kind {
+            TokenKind::Plus | TokenKind::Minus => {
+                self.i += 1;
+                self.parse_bp(EXPR_UNARY_BP)
+            }
+            TokenKind::LParen => self.parse_grouping(),
+            TokenKind::Number | TokenKind::String => {
+                self.i += 1;
+                true
+            }
+            TokenKind::Ident => {
+                self.i += 1;
+                self.parse_postfix()
+            }
+            _ => false,
+        }
+    }
+
+    fn parse_postfix(&mut self) -> bool {
+        loop {
+            match self.kind() {
+                Some(TokenKind::LParen) => {
+                    if !self.parse_call_args() {
+                        return false;
+                    }
+                }
+                Some(TokenKind::Dot) => {
+                    self.i += 1;
+                    if self.kind() != Some(TokenKind::Ident) {
+                        return false;
+                    }
+                    self.i += 1;
+                }
+                _ => return true,
+            }
+        }
+    }
+
+    /// Bare `(...)` is one nonempty expression and its close. A comma is a call argument.
+    fn parse_grouping(&mut self) -> bool {
+        if self.kind() != Some(TokenKind::LParen) {
+            return false;
+        }
+        self.i += 1;
+        if !self.parse_bp(0) || self.kind() != Some(TokenKind::RParen) {
+            return false;
+        }
+        self.i += 1;
+        true
+    }
+
+    /// Arguments of a call or a timing suffix. Empty `()` and `a, b` are allowed.
+    fn parse_call_args(&mut self) -> bool {
+        if self.kind() != Some(TokenKind::LParen) {
+            return false;
+        }
+        self.i += 1;
+        if self.kind() == Some(TokenKind::RParen) {
+            self.i += 1;
+            return true;
+        }
+        loop {
+            if !self.parse_bp(0) {
+                return false;
+            }
+            if self.kind() == Some(TokenKind::Comma) {
+                self.i += 1;
+                continue;
+            }
+            break;
+        }
+        if self.kind() != Some(TokenKind::RParen) {
+            return false;
+        }
+        self.i += 1;
+        true
+    }
+}
+
+fn skip_leading_tags(tokens: &[Token]) -> usize {
+    let mut i = 0;
+    while tokens
+        .get(i)
+        .is_some_and(|token| token.kind == TokenKind::LBrack)
+    {
+        let mut depth = 0i32;
+        loop {
+            let Some(kind) = tokens.get(i).map(|token| token.kind) else {
+                return i;
+            };
+            i += 1;
+            match kind {
+                TokenKind::LBrack => depth += 1,
+                TokenKind::RBrack => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    i
+}
+
+/// `tokens` is one equation or assignment: optional tags, then a complete
+/// left-hand expression, `=`, and a complete right-hand expression.
+fn complete_equation(tokens: &[Token]) -> bool {
+    let mut walk = ExprWalk {
+        tokens,
+        i: skip_leading_tags(tokens),
+    };
+    if !walk.parse_bp(0) || walk.kind() != Some(TokenKind::Eq) {
+        return false;
+    }
+    walk.i += 1;
+    walk.parse_bp(0) && walk.i == tokens.len()
+}
+
+fn tokens_starting_in(model: &Model, span: Span) -> Vec<Token> {
+    model
+        .expanded_tokens
+        .iter()
+        .filter(|token| {
+            token.kind != TokenKind::Eof
+                && token.span.start >= span.start
+                && token.span.start < span.end
+        })
+        .cloned()
+        .collect()
+}
+
+/// Semicolon for a merged equation, at a proved active-token boundary that
+/// also ends a complete equation.
+///
+/// A second equation that starts on its own line takes `;` at the end of the
+/// previous active token. That skips directives, dormant branches, and comments,
+/// which are not tokens. A same-line pair still inserts `;\n` before the name.
+/// An unproved generated span, or a boundary after an unfinished expression,
+/// stores no edit.
+fn equation_separator_edit(
+    src: &str,
+    index: &LineIndex,
+    eq_span: Span,
+    tokens: &[Token],
+    ident_i: usize,
+) -> Option<TextEdit> {
+    let ident = tokens.get(ident_i)?;
+    if !proved_separator_edge(src, tokens, ident_i, ident.span.start)
+        || !complete_equation(&tokens[..ident_i])
+    {
+        return None;
+    }
+    let split_pos = index.position(src, ident.span.start);
+    let line = src.split('\n').nth(split_pos.line as usize).unwrap_or("");
+    let prefix = {
+        let mut end = 0;
+        for (n, c) in line.chars().enumerate() {
+            if n as u32 >= split_pos.character {
+                break;
+            }
+            end += c.len_utf8();
+        }
+        &line[..end]
+    };
+    let eq_start_line = index.position(src, eq_span.start).line;
+    if !(split_pos.line > eq_start_line && prefix.trim().is_empty()) {
+        return Some(TextEdit {
+            start_line: split_pos.line,
+            start_char: split_pos.character,
+            end_line: split_pos.line,
+            end_char: split_pos.character,
+            new_text: ";\n".to_string(),
+        });
+    }
+    let anchor_i = ident_i.checked_sub(1)?;
+    let anchor = &tokens[anchor_i];
+    let at = anchor.span.end;
+    if !proved_separator_edge(src, tokens, anchor_i, at) || at > ident.span.start {
+        return None;
+    }
+    let pos = index.position(src, at);
+    Some(TextEdit {
+        start_line: pos.line,
+        start_char: pos.character,
+        end_line: pos.line,
+        end_char: pos.character,
+        new_text: ";".to_string(),
+    })
+}
+
+fn merged_equation_diags(
+    model: &Model,
+    index: &LineIndex,
+    already: &[Diagnostic],
+) -> Vec<Diagnostic> {
+    let src = &model.source;
+    let mut out = Vec::new();
+    for eq in crate::engine::diagnostics::check_e020::all_model_equations(model) {
+        if eq.text.trim_start().starts_with('#') {
+            continue;
+        }
+        if already.iter().any(|d| {
+            d.message.contains("missing its terminating semicolon")
+                && d.span.start <= eq.span.end
+                && eq.span.start <= d.span.end
+        }) {
+            continue;
+        }
+        let Some(toks) = execution_tokens(model, &eq.active_tokens) else {
+            continue;
+        };
+        let eqs = standalone_eq_indices(toks);
+        if eqs.len() < 2 {
+            continue;
+        }
+        let second = eqs[1];
+        // Walk left from the second '=' to the next equation's left-hand name.
+        let mut ident_i = None;
+        let mut j = second;
+        while j > 0 {
+            j -= 1;
+            if toks[j].kind == TokenKind::Ident {
+                ident_i = Some(j);
+                break;
+            }
+            if matches!(
+                toks[j].kind,
+                TokenKind::RParen | TokenKind::Number | TokenKind::RBrack
+            ) {
+                break;
+            }
+        }
+        let split_var = ident_i.map(|ii| toks[ii].text(src).to_string());
+        let fix = ident_i.and_then(|ii| equation_separator_edit(src, index, eq.span, toks, ii));
+        let mut msg =
+            "Equation appears to contain multiple equations merged due to a missing semicolon."
+                .to_string();
+        if let Some(var) = &split_var {
+            msg.push_str(&format!(
+                " It looks like '{var} = ...' should be a separate equation."
+            ));
+            if fix.is_some() {
+                msg.push_str(&format!(" Fix: add ';' before '{var}'."));
+            }
+        } else if fix.is_some() {
+            msg.push_str(" Fix: add ';' between the two equations.");
+        }
+        out.push(e001(eq.span, msg, fix));
+    }
+    out
+}
+
+fn merged_assignment_diags(
+    model: &Model,
+    index: &LineIndex,
+    already: &[Diagnostic],
+) -> Vec<Diagnostic> {
+    let src = &model.source;
+    let trailing = trailing_code_line(&model.expanded_tokens, src, index);
+    let cmd_spans =
+        crate::engine::language::command_skip::command_stmt_spans(&model.expanded_tokens, src);
+    let mut out = Vec::new();
+
+    let skip_span = |span: Span| {
+        already.iter().any(|d| {
+            d.message.contains("missing its terminating semicolon")
+                && d.span.start <= span.end
+                && span.start <= d.span.end
+        }) || cmd_spans
+            .iter()
+            .any(|r| span.start >= r.start && span.end <= r.end)
+    };
+
+    let mut consider = |span: Span, active: std::ops::Range<usize>, name: &str, context: &str| {
+        if skip_span(span) {
+            return;
+        }
+        let Some(toks) = execution_tokens(model, &active) else {
+            return;
+        };
+        if context == "top-level" {
+            if trailing.is_some_and(|t| index.position(src, span.start).line > t) {
+                return;
+            }
+            let joined = toks
+                .iter()
+                .map(|token| token.text(src))
+                .collect::<Vec<_>>()
+                .join(" ");
+            if looks_like_matlab(&joined) {
+                return;
+            }
+        }
+        let mut lhs_hits: Vec<usize> = Vec::new();
+        for (i, tok) in toks.iter().enumerate() {
+            if tok.kind == TokenKind::Ident
+                && toks.get(i + 1).is_some_and(|n| n.kind == TokenKind::Eq)
+            {
+                lhs_hits.push(i);
+            }
+        }
+        if lhs_hits.len() < 2 {
+            return;
+        }
+        let second = lhs_hits[1];
+        let second_name = toks[second].text(src);
+        let proved = proved_separator_edge(src, toks, second, toks[second].span.start)
+            && complete_equation(&toks[..second]);
+        let split_pos = index.position(src, toks[second].span.start);
+        let mut fix_start = toks[second].span.start;
+        if proved {
+            while fix_start > span.start {
+                let b = src.as_bytes()[(fix_start - 1) as usize];
+                if b == b' ' || b == b'\t' {
+                    fix_start -= 1;
+                } else {
+                    break;
+                }
+            }
+        }
+        let fix_start_pos = index.position(src, fix_start);
+        let attach = proved && !byte_inside_other_token(toks, second, fix_start);
+        let message = if context == "top-level" {
+            let mut message = format!(
+                "Parameter/helper assignment '{name}' appears to contain \
+                 multiple assignments merged due to a missing semicolon."
+            );
+            if attach {
+                message.push_str(&format!(" Fix: add ';' before '{second_name} = ...'."));
+            }
+            message
+        } else {
+            let mut message = format!(
+                "Statement in '{context}' appears to contain multiple assignments \
+                 merged due to a missing semicolon."
+            );
+            if attach {
+                message.push_str(&format!(" Fix: add ';' before '{second_name} = ...'."));
+            }
+            message
+        };
+        let fix = attach.then(|| TextEdit {
+            start_line: fix_start_pos.line,
+            start_char: fix_start_pos.character,
+            end_line: split_pos.line,
+            end_char: split_pos.character,
+            new_text: "; ".to_string(),
+        });
+        out.push(e001(span, message, fix));
+    };
+
+    for a in model
+        .param_assignments
+        .iter()
+        .chain(&model.helper_assignments)
+    {
+        // A true native line stores MATLAB text and no expression. `nobs = 1`
+        // inside `data(nobs=1)` is not a second Dynare assignment.
+        if a.native && a.expr.is_none() {
+            continue;
+        }
+        consider(
+            a.span,
+            a.active_tokens.clone(),
+            model.name(a.name),
+            "top-level",
+        );
+    }
+    for a in &model.initval {
+        consider(
+            a.span,
+            a.active_tokens.clone(),
+            model.name(a.name),
+            "initval",
+        );
+    }
+    for a in &model.endval {
+        consider(
+            a.span,
+            a.active_tokens.clone(),
+            model.name(a.name),
+            "endval",
+        );
+    }
+    for eq in &model.steady_state_equations {
+        if eq.text.trim_start().starts_with('#') {
+            continue;
+        }
+        let lhs = if eq.lhs.is_empty() {
+            eq.text.split('=').next().unwrap_or("").trim()
+        } else {
+            eq.lhs.as_str()
+        };
+        consider(eq.span, eq.active_tokens.clone(), lhs, "steady_state_model");
+    }
+    out
+}
+
+fn unbalanced_paren_diags(model: &Model) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    for eq in crate::engine::diagnostics::check_e020::all_model_equations(model) {
+        let Some(toks) = execution_tokens(model, &eq.active_tokens) else {
+            continue;
+        };
+        let mut depth = 0i32;
+        let mut orphan = false;
+        let mut i = 0;
+        while i < toks.len() {
+            if toks[i].kind == TokenKind::LBrack {
+                i = skip_tag_tokens(toks, i);
+                continue;
+            }
+            match toks[i].kind {
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen => {
+                    depth -= 1;
+                    if depth < 0 {
+                        orphan = true;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        if orphan || depth != 0 {
+            let unmatched = if orphan { "')'" } else { "'('" };
+            out.push(e001(
+                eq.span,
+                format!("Unbalanced parentheses in equation: unmatched {unmatched}."),
+                None,
+            ));
+        }
+    }
+    out
+}

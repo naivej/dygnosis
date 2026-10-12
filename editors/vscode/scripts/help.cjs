@@ -26,7 +26,7 @@ async function copyHelpAssets(topics, sourceRoot, targetRoot) {
 }
 
 async function engineFingerprint() {
-  const files = ['src/explain.rs', 'src/mcp.rs', 'Cargo.toml', 'Cargo.lock'];
+  const files = ['src/engine/diagnostics/explain.rs', 'src/mcp/mod.rs', 'Cargo.toml', 'Cargo.lock'];
   // Options live in the command catalog. Include all Rust inputs so a changed
   // fact cannot leave an apparently current snapshot behind.
   async function walk(dir) {
