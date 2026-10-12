@@ -1,3 +1,4 @@
+const { compiledModule, importedModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const { Buffer } = require("node:buffer");
 const { spawn } = require("node:child_process");
@@ -61,13 +62,13 @@ const vscode = {
 const originalLoad = Module._load;
 Module._load = function(id, ...args) {
   if (id === "vscode") return vscode;
-  if (id === "./binary") return {
+  if (importedModule(id, args[0]) === "binary") return {
     resolveBinary: async () => { ++host.resolved; return host.binary; },
     validateMcpBinary: async () => { ++host.validated; },
   };
   return originalLoad.call(this, id, ...args);
 };
-const { compareVersions, mergeProjectConfig, chooseProjectRoot, ensureManagedBinary, verifyPackagedBundle, withProjectLock, writeProjectConfig, registerProjectMcp } = require("../out/project_mcp");
+const { compareVersions, mergeProjectConfig, chooseProjectRoot, ensureManagedBinary, verifyPackagedBundle, withProjectLock, writeProjectConfig, registerProjectMcp } = require(compiledModule("project_mcp"));
 Module._load = originalLoad;
 function reset() {
   host = { trusted: true, folders: [], documents: [], commands: new Map(), providers: new Map(), opened: [], picks: [], executed: [], messages: [], errors: [], resolved: 0, validated: 0, saved: 0, binary: { path: path.resolve("user-managed engine"), override: true, version: "test" } };
@@ -206,7 +207,7 @@ test("package verification rejects mismatched extension metadata before launchin
 test("a real child process owns the lock; contender waits and enters only after release", async t => {
   const folder = await directory(t), lock = path.join(folder, "cross-window.lock"), signal = path.join(folder, "release");
   const script = `const Module=require('node:module'), fs=require('node:fs/promises');const load=Module._load;Module._load=function(id,...args){return id==='vscode'?{}:load.call(this,id,...args)};const {withProjectLock}=require(process.argv[1]);withProjectLock(process.argv[2],async()=>{process.stdout.write('acquired\\n');while(true){try{await fs.stat(process.argv[3]);break}catch{}await new Promise(r=>setTimeout(r,10))}process.stdout.write('released\\n')}).catch(e=>{process.stderr.write(e.stack);process.exitCode=1});`;
-  const child = spawn(process.execPath, ["-e", script, path.resolve(__dirname, "../out/project_mcp"), lock, signal], { windowsHide: true });
+  const child = spawn(process.execPath, ["-e", script, compiledModule("project_mcp"), lock, signal], { windowsHide: true });
   t.after(() => { child.kill(); });
   const acquired = new Promise((resolve, reject) => { child.stdout.once("data", resolve); child.once("error", reject); child.once("exit", code => { if (code !== 0) reject(new Error(`Lock child exited ${code}`)); }); });
   await acquired;

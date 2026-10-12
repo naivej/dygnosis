@@ -1,11 +1,12 @@
+const { compiledModule } = require("./helpers/extension_modules.cjs");
 /* global structuredClone */
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const { parseSemantic, semanticCapability, semanticFamilies } = require("../out/semantic_view");
-const { parseDiff, parseSnapshotDiff, normalizeChoices, allDiffSections, changeKinds } = require("../out/diff_view");
+const { parseSemantic, semanticCapability, semanticFamilies } = require(compiledModule("semantic_view"));
+const { parseDiff, parseSnapshotDiff, normalizeChoices, allDiffSections, changeKinds } = require(compiledModule("diff_view"));
 const { createHost, captured, deferred, flush, load, working, comparison, anchorUri, baselineUri } = require("./helpers/changes_host.cjs");
 const roots = { before: "file:///before/main.mod", after: "file:///after/main.mod" };
 const scope = { domain: "global", dimension: null, block: null };

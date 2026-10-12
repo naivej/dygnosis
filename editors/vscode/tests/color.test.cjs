@@ -1,3 +1,4 @@
+const { compiledModule, importedModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const Module = require("node:module");
@@ -76,12 +77,12 @@ const vscode = {
 const originalLoad = Module._load;
 Module._load = function(id, ...args) {
   if (id === "vscode") return vscode;
-  if (id === "./client" && args[0]?.filename.endsWith("color.js")) return {
+  if (importedModule(id, args[0]) === "client" && args[0]?.filename.endsWith("color.js")) return {
     isAnalysisDocument: doc => doc.languageId === "dynare" && ["file", "untitled"].includes(doc.uri.scheme),
   };
   return originalLoad.call(this, id, ...args);
 };
-const { dimensionOverrides, registerColors, tintCategoryDefaults, tintPreferences, tintRanges } = require("../out/color");
+const { dimensionOverrides, registerColors, tintCategoryDefaults, tintPreferences, tintRanges } = require(compiledModule("color"));
 Module._load = originalLoad;
 const manifest = require("../package.json").contributes;
 const colorContributions = { ...manifest, configuration: manifest.configuration.find(group => group.title === "Dygnosis: Appearance") };

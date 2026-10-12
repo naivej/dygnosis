@@ -1,4 +1,4 @@
-import { Location, location, record } from "./protocol";
+import { Location, location, record } from "../client/protocol";
 import { Coverage, parseSemantic, Reference, Semantic, SemanticRow, SourceChanges, SourceRegistry } from "./semantic_view";
 
 export const diffSections = ["symbols", "parameters", "equations", "shockSetup", "shockAnalysisSetup"] as const;

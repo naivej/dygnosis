@@ -1,19 +1,33 @@
+const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const { createHost, load, captured, snapshotResponse, deferred, flush, working, historical, comparison, commits, Uri, rootUri, anchorUri, baselineUri, Disposable, CancellationTokenSource, historyScheme, changesViewType } = require("./helpers/changes_host.cjs");
-const { resourceData, resourceQuery, resourceName, selector } = require("../out/changes_resource");
+const { resourceData, resourceQuery, resourceName, selector } = require(compiledModule("changes_resource"));
 
 function setup(t) { const env = createHost(); env.host.install(); t.after(() => env.host.registration.dispose()); return env; }
 const fourChoices = ["With previous revision", "With revision…", "With branch or tag…", "With .mod file…"];
 function activateHost(env) {
   const { host, service, vscode } = env; host.registeredChanges = 0;
-  const registrations = { "./changes_editor": { registerChanges: value => { assert.equal(value, service); host.registeredChanges++; return new Disposable(); } },
-    "./client": { DygnosisClient: class { constructor() { return service; } }, isAnalysisDocument: document => document.uri.scheme === "file" },
+  const registrations = { "changes_editor": { registerChanges: value => { assert.equal(value, service); host.registeredChanges++; return new Disposable(); } },
+    "client": { DygnosisClient: class { constructor() { return service; } }, isAnalysisDocument: document => document.uri.scheme === "file" },
   };
-  for (const [module, name] of [["project_status", "registerProjectStatus"], ["project_mcp", "registerProjectMcp"], ["origin_jumps", "registerOriginJumps"], ["quickfix", "registerDiagnosticActions"], ["lenses", "registerLenses"], ["color", "registerColors"], ["model_view", "registerModelView"], ["status", "registerStatus"], ["mcp", "registerMcp"], ["preview", "registerEffectivePreview"], ["help", "registerHelp"]]) registrations[`./${module}`] = { [name]: () => new Disposable() };
+  for (const [module, name] of [["project_status", "registerProjectStatus"], ["project_mcp", "registerProjectMcp"], ["origin_jumps", "registerOriginJumps"], ["quickfix", "registerDiagnosticActions"], ["lenses", "registerLenses"], ["color", "registerColors"], ["model_view", "registerModelView"], ["status", "registerStatus"], ["mcp", "registerMcp"], ["preview", "registerEffectivePreview"], ["help", "registerHelp"]]) registrations[module] = { [name]: () => new Disposable() };
   const { activate } = load("extension", vscode, registrations), context = { subscriptions: [] };
   assert.equal(activate(context), service); return context;
 }
+
+test("Diff webviews load assets from the extension installation", async t => {
+  const { host, vscode } = setup(t); await host.open();
+  const panel = host.panels[0], [media] = panel.webview.options.localResourceRoots;
+  assert.equal(media.toString(), vscode.Uri.file(path.resolve(__dirname, "../media")).toString());
+  for (const file of ["diff_view.js", "diff_view.css"]) {
+    const uri = vscode.Uri.joinPath(media, file);
+    assert.ok(fs.statSync(uri.fsPath).isFile(), file);
+    assert.ok(panel.webview.html.includes(uri.toString()), file);
+  }
+});
 
 test("Open changes offers exactly four choices in order and retains the Working anchor", async t => {
   const { host, vscode } = setup(t); await host.open();

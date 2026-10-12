@@ -1,4 +1,4 @@
-import { record } from "./protocol";
+import { record } from "../client/protocol";
 
 export const semanticFamilies = ["symbols", "parameters", "equations", "shocks", "steady_state", "priors", "commands", "observables", "data", "occbin", "policy", "semi_structural", "moments", "ms_sbvar", "heterogeneity", "external_functions", "trends", "operations", "macro_context"] as const;
 export const facets = ["expression", "parameter_value", "symbol_kind", "label", "tags", "scope", "log_transform", "predetermined_convention", "timing", "shock_setup", "target", "role", "options", "order", "assignment", "prior", "operation", "complementarity"] as const;

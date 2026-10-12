@@ -1,8 +1,8 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { record } from "./protocol";
-import { projectDiagnosticsSetting } from "./settings";
-import type { ModelSnapshot } from "./client";
+import { record } from "../client/protocol";
+import { projectDiagnosticsSetting } from "../client/settings";
+import type { ModelSnapshot } from "../client/client";
 
 const states = ["pending", "checking", "checked", "incomplete", "failed", "excluded"] as const;
 type RootState = typeof states[number];

@@ -3,9 +3,9 @@ import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { resolveBinary, validateMcpBinary } from "./binary";
-import { record } from "./protocol";
-import { Log } from "./settings";
+import { resolveBinary, validateMcpBinary } from "../client/binary";
+import { record } from "../client/protocol";
+import { Log } from "../client/settings";
 
 const commandId = "dygnosis.setupProjectMcp";
 const reviewScheme = "dygnosis-mcp-review";

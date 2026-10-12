@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
-import { DygnosisClient, isAnalysisDocument } from "./client";
-import type { ModelSnapshot } from "./client";
-import type { Dimension, Equation, Location, ModelInfo, RelatedFile } from "./protocol";
-import { listSetting } from "./settings";
+import { DygnosisClient, isAnalysisDocument } from "../client/client";
+import type { ModelSnapshot } from "../client/client";
+import type { Dimension, Equation, Location, ModelInfo, RelatedFile } from "../client/protocol";
+import { listSetting } from "../client/settings";
 
 export const modelViewSections = ["counts", "timing", "dimensions", "relatedFiles"];
 export interface NavigationContext {

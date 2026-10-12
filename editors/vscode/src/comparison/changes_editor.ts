@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
-import { DygnosisClient } from "./client";
+import { DygnosisClient } from "../client/client";
 import { diffHtml, diffPreferences } from "./diff";
 import { ComparisonResource, changesScheme, changesViewType, GitSelector, historyScheme, inputLabel, ModelSelector, resourceData, resourceName, resourceQuery } from "./changes_resource";
 import { DiffChoices, DiffRow, DiffSide, normalizeChoices, parseDiff, sameTarget } from "./diff_view";
@@ -9,7 +9,7 @@ import { GitRepository, GitSources, HistoryCursor, PinnedCommit } from "./git_so
 import { decodeGitDocument, normalizeGitText } from "./git_provenance";
 import { HistoricalSources, historicalSource } from "./history_sources";
 import { captureComparison, CapturedComparison, ComparisonFailure } from "./snapshot_compare";
-import { record } from "./protocol";
+import { record } from "../client/protocol";
 import { CapturedTextSources } from "./captured_text";
 import { SourceFile } from "./semantic_view";
 
@@ -60,7 +60,7 @@ class ChangesDocument implements vscode.CustomDocument {
 }
 
 /** A custom document owns capture state; each split owns its display choices. */
-export function registerChanges(service: DygnosisClient): vscode.Disposable {
+export function registerChanges(service: DygnosisClient, extensionUri: vscode.Uri): vscode.Disposable {
   let gitSources: Promise<GitSources> | undefined, disposed = false, opening = 0;
   let invocation: vscode.CancellationTokenSource | undefined;
   const documents = new Map<string, ChangesDocument>(), remembered = new Map<string, DiffChoices>();
@@ -72,7 +72,7 @@ export function registerChanges(service: DygnosisClient): vscode.Disposable {
     if (view) subscriptions.push(view.panel.onDidDispose(() => source.cancel()));
     return { token: source.token, signal: abort.signal, dispose: () => { for (const item of subscriptions) item.dispose(); } };
   };
-  const assets = vscode.Uri.file(path.resolve(__dirname, "../media"));
+  const assets = vscode.Uri.joinPath(extensionUri, "media");
   const capturedText = new CapturedTextSources();
   const git = (): Promise<GitSources> => gitSources ??= createGitSources().catch(error => { gitSources = undefined; throw error; });
   const history = new HistoricalSources(async (source, token) => {

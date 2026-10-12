@@ -1,3 +1,4 @@
+const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const Module = require("node:module");
@@ -5,7 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { URL } = require("node:url");
-const { parseDiff, normalizeChoices, diffSections, changeKinds } = require("../out/diff_view");
+const { parseDiff, normalizeChoices, diffSections, changeKinds } = require(compiledModule("diff_view"));
 const before = "file:///before/main.mod", after = "file:///after/variant.mod";
 function uri(value) { const parsed = new URL(value); return { scheme: parsed.protocol.slice(0, -1), path: parsed.pathname, fsPath: decodeURIComponent(parsed.pathname), toString: () => value }; }
 function location(value = before, line = 3) { return { uri: value, range: { start: { line, character: 2 }, end: { line, character: 12 } } }; }
@@ -103,7 +104,7 @@ const vscode = { workspace: { getConfiguration: (_section, scope) => {
 } } };
 const originalLoad = Module._load;
 Module._load = function(id, ...args) { return id === "vscode" ? vscode : originalLoad.call(this, id, ...args); };
-const { diffPreferences } = require("../out/diff"); Module._load = originalLoad;
+const { diffPreferences } = require(compiledModule("diff")); Module._load = originalLoad;
 test("launching model Kind preferences use resource scope and ignore retired section settings", () => {
   const result = diffPreferences(uri(after), message => preferenceLogs.push(message));
   assert.equal(Object.hasOwn(result, "layout"), false); assert.equal(Object.hasOwn(result, "sections"), false); assert.deepEqual(result.changeKinds, ["removed"]);

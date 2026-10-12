@@ -1,23 +1,23 @@
-import { registerProjectStatus } from "./project_status";
-import { registerChanges } from "./changes_editor";
-import { registerProjectMcp } from "./project_mcp";
+import { registerProjectStatus } from "./editor/project_status";
+import { registerChanges } from "./comparison/changes_editor";
+import { registerProjectMcp } from "./mcp/project_mcp";
 // The installed-package harness verifies and stages the actual bundled engine.
-export { verifyPackagedBundle, ensureManagedBinary } from "./project_mcp";
-import { registerOriginJumps } from "./origin_jumps";
-import { registerDiagnosticActions } from "./quickfix";
-import { registerLenses } from "./lenses";
-import { registerColors } from "./color";
-import { registerModelView } from "./model_view";
-import { registerStatus } from "./status";
+export { verifyPackagedBundle, ensureManagedBinary } from "./mcp/project_mcp";
+import { registerOriginJumps } from "./editor/origin_jumps";
+import { registerDiagnosticActions } from "./editor/quickfix";
+import { registerLenses } from "./editor/lenses";
+import { registerColors } from "./editor/color";
+import { registerModelView } from "./editor/model_view";
+import { registerStatus } from "./editor/status";
 import * as vscode from "vscode";
-import { DygnosisClient, isAnalysisDocument } from "./client";
-import { registerMcp } from "./mcp";
-import { registerEffectivePreview } from "./preview";
-import { listSetting } from "./settings";
-import { registerHelp } from "./help";
-import { changesViewType, historyScheme } from "./changes_resource";
+import { DygnosisClient, isAnalysisDocument } from "./client/client";
+import { registerMcp } from "./mcp/mcp";
+import { registerEffectivePreview } from "./editor/preview";
+import { listSetting } from "./client/settings";
+import { registerHelp } from "./help/help";
+import { changesViewType, historyScheme } from "./comparison/changes_resource";
 import * as path from "node:path";
-import { record } from "./protocol";
+import { record } from "./client/protocol";
 
 let service: DygnosisClient | undefined;
 export function activate(context: vscode.ExtensionContext): DygnosisClient {
@@ -26,7 +26,7 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
   service = client;
   context.subscriptions.push(registerProjectMcp(context, client));
   const previews = registerEffectivePreview(client);
-  context.subscriptions.push(client, registerDiagnosticActions(client), registerProjectStatus(client), registerLenses(client), registerStatus(client), registerModelView(client), registerColors(client), registerMcp(context, client.log), previews, registerOriginJumps(client, previews), registerChanges(client),
+  context.subscriptions.push(client, registerDiagnosticActions(client), registerProjectStatus(client), registerLenses(client), registerStatus(client), registerModelView(client), registerColors(client), registerMcp(context, client.log), previews, registerOriginJumps(client, previews), registerChanges(client, context.extensionUri),
     vscode.commands.registerCommand("dygnosis.restartServer", () => client.restart()),
     vscode.commands.registerCommand("dygnosis.showOutput", () => client.output.show()),
     vscode.commands.registerCommand("dygnosis.openSettings", () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:CoconutWater.dygnosis")),

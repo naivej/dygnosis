@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
-import { resolveBinary, validateMcpBinary } from "./binary";
-import { Log } from "./settings";
+import { resolveBinary, validateMcpBinary } from "../client/binary";
+import { Log } from "../client/settings";
 
 export function registerMcp(context: vscode.ExtensionContext, log: Log): vscode.Disposable {
   const changed = new vscode.EventEmitter<void>();

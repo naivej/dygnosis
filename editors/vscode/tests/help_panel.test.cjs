@@ -1,3 +1,4 @@
+const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const path = require('node:path');
@@ -34,7 +35,7 @@ function makePanel() {
 }
 const load = Module._load;
 Module._load = function (name, ...args) { if (name === 'vscode') return vscode; return load.call(this, name, ...args); };
-const { registerHelp } = require('../out/help');
+const { registerHelp } = require(compiledModule("help"));
 Module._load = load;
 function setup(shown = false) {
   host = { commands: new Map(), executed: [], external: [], panels: [], invitations: 0 };

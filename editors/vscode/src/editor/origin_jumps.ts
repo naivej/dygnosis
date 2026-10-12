@@ -1,11 +1,11 @@
 import * as vscode from "vscode";
-import type { DygnosisClient, InputInvalidation, NavigationGuard } from "./client";
+import type { DygnosisClient, InputInvalidation, NavigationGuard } from "../client/client";
 import { sameWrittenLocation } from "./model_view";
 import type { EffectivePreviewRegistry, EffectivePreviewSession } from "./preview";
 import { appendMacroMessages, effectivePreviewArguments } from "./preview";
-import { location, record } from "./protocol";
-import type { Location, Position, Range } from "./protocol";
-import { booleanSetting, listSetting, macroTintOnlyChange } from "./settings";
+import { location, record } from "../client/protocol";
+import type { Location, Position, Range } from "../client/protocol";
+import { booleanSetting, listSetting, macroTintOnlyChange } from "../client/settings";
 
 /** The input-only event and native placement option are integrated with 0.11.2. */
 export interface OriginJumpClient extends Pick<DygnosisClient, "client" | "currentInstance" | "log" | "failure" | "revalidate" | "execute" | "output"> {

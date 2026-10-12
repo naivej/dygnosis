@@ -1,3 +1,4 @@
+const { compiledModule, importedModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const Module = require("node:module");
@@ -120,19 +121,19 @@ const originalLoad = Module._load;
 Module._load = function(id, ...args) {
   if (id === "vscode") return vscode;
   if (id === "vscode-languageclient/node") return { DocumentSymbolRequest: { method: "textDocument/documentSymbol" }, ExecuteCommandRequest: { type: "workspace/executeCommand" }, State: { Stopped: 1 } };
-  if (id === "./client" && /(?:model_view|preview)\.js$/.test(args[0]?.filename ?? "")) return {
+  if (importedModule(id, args[0]) === "client" && /(?:model_view|preview)\.js$/.test(args[0]?.filename ?? "")) return {
     isAnalysisDocument: document => document.languageId === "dynare" && ["file", "untitled"].includes(document.uri.scheme),
   };
   return originalLoad.call(this, id, ...args);
 };
-const { registerEffectivePreview } = require("../out/preview");
-const { registerOriginJumps, parsePreviewNavigation, previewRowAt, previewRegionAt, writtenSourcePicks, projectRegionTarget, macroTintRanges } = require("../out/origin_jumps");
+const { registerEffectivePreview } = require(compiledModule("preview"));
+const { registerOriginJumps, parsePreviewNavigation, previewRowAt, previewRegionAt, writtenSourcePicks, projectRegionTarget, macroTintRanges } = require(compiledModule("origin_jumps"));
 const contributed = require("../package.json").contributes;
 const originCommands = ["dygnosis.goToWrittenSource", "dygnosis.refreshEffectiveModel"];
 const originJumpContributions = { commands: contributed.commands.filter(item => originCommands.includes(item.command)),
   menus: Object.fromEntries(Object.entries(contributed.menus).map(([key, items]) => [key, items.filter(item => originCommands.includes(item.command))])),
   keybindings: contributed.keybindings.filter(item => originCommands.includes(item.command)) };
-const { DygnosisClient } = require("../out/client");
+const { DygnosisClient } = require(compiledModule("client"));
 Module._load = originalLoad;
 
 const main = "file:///project/main.mod";

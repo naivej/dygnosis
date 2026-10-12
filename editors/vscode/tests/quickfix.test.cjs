@@ -1,3 +1,4 @@
+const { compiledModule, importedModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const Module = require("node:module");
@@ -83,10 +84,10 @@ const originalLoad = Module._load;
 Module._load = function(id, ...args) {
   if (id === "vscode") return vscode;
   if (id === "vscode-languageclient/node") return languageClient;
-  if (id === "./client" && args[0].filename.endsWith("quickfix.js")) return { isAnalysisDocument: document => document.languageId === "dynare" && ["file", "untitled"].includes(document.uri.scheme) };
+  if (importedModule(id, args[0]) === "client" && args[0].filename.endsWith("quickfix.js")) return { isAnalysisDocument: document => document.languageId === "dynare" && ["file", "untitled"].includes(document.uri.scheme) };
   return originalLoad.call(this, id, ...args);
 };
-const { registerDiagnosticActions, diagnosticCode, safeExplanation } = require("../out/quickfix");
+const { registerDiagnosticActions, diagnosticCode, safeExplanation } = require(compiledModule("quickfix"));
 // Exercise the installed v9 converters: data survives only on ProtocolDiagnostic instances.
 const p2c = require("vscode-languageclient/lib/common/protocolConverter").createConverter();
 const c2p = require("vscode-languageclient/lib/common/codeConverter").createConverter();

@@ -1,3 +1,4 @@
+const { compiledModule } = require("./extension_modules.cjs");
 // Verify semantic comparison controls on the rendered native VS Code webview.
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
@@ -8,7 +9,7 @@ const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const vscode = require("vscode");
 const { nativeChanges, nativeWorkbench } = require("./native_webview.cjs");
-const { resourceName, resourceQuery, changesViewType } = require("../../out/changes_resource");
+const { resourceName, resourceQuery, changesViewType } = require(compiledModule("changes_resource"));
 
 async function captureFailure(evidence) {
   evidence.semantic_tabs = vscode.window.tabGroups.all.map(group => ({

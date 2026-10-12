@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
-import { DygnosisClient, isAnalysisDocument, isRootUri } from "./client";
-import { Dimension, ModelInfo } from "./protocol";
-import { booleanSetting, listSetting } from "./settings";
+import { DygnosisClient, isAnalysisDocument, isRootUri } from "../client/client";
+import { Dimension, ModelInfo } from "../client/protocol";
+import { booleanSetting, listSetting } from "../client/settings";
 
 export const statusCounts = ["endogenous", "exogenous", "equations"];
 export type StatusCount = "endogenous" | "exogenous" | "equations";

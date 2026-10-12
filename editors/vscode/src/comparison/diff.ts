@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
-import { listSetting } from "./settings";
+import { listSetting } from "../client/settings";
 import { changeKinds, DiffPreferences, normalizeChangeKinds } from "./diff_view";
 
 export function diffPreferences(root: vscode.Uri, log: (message: string) => void): DiffPreferences {

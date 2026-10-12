@@ -1,3 +1,4 @@
+const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
@@ -7,11 +8,11 @@ const { createHash } = require("node:crypto");
 const { Buffer } = require("node:buffer");
 const vscode = require("vscode");
 const { probeNativeMcp } = require("../scripts/native-mcp-host.cjs");
-const { effectivePreviewArguments } = require("../out/preview");
-const { createGitSources } = require("../out/git_source_host");
-const { captureComparison } = require("../out/snapshot_compare");
-const { historicalUri } = require("../out/history_sources");
-const { resourceName, resourceQuery, changesViewType } = require("../out/changes_resource");
+const { effectivePreviewArguments } = require(compiledModule("preview"));
+const { createGitSources } = require(compiledModule("git_source_host"));
+const { captureComparison } = require(compiledModule("snapshot_compare"));
+const { historicalUri } = require(compiledModule("history_sources"));
+const { resourceName, resourceQuery, changesViewType } = require(compiledModule("changes_resource"));
 const { nativeWorkbench } = require("./helpers/native_webview.cjs");
 const { checkSemanticDiff } = require("./helpers/semantic_diff_host.cjs");
 

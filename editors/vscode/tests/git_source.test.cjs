@@ -1,3 +1,4 @@
+const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs/promises");
@@ -6,8 +7,8 @@ const path = require("node:path");
 const childProcess = require("node:child_process");
 const { Buffer } = require("node:buffer");
 const { pathToFileURL } = require("node:url");
-const { GitSources, GitSourceError, parseTreeManifest } = require("../out/git_source");
-const { decodeGitDocument, decodeGitText, normalizeGitText } = require("../out/git_provenance");
+const { GitSources, GitSourceError, parseTreeManifest } = require(compiledModule("git_source"));
+const { decodeGitDocument, decodeGitText, normalizeGitText } = require(compiledModule("git_provenance"));
 
 function fileUri(file) {
   const absolute = path.resolve(file);

@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { escapeHtml, HelpBundle, helpMarkdown, helpPages } from "./help_content";
-import { record } from "./protocol";
+import { record } from "../client/protocol";
 
 export interface HelpRequest { topic?: string; code?: string; markdown?: string; engineVersion?: string }
 

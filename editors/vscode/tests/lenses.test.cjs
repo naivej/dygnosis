@@ -1,3 +1,4 @@
+const { compiledModule, importedModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const Module = require("node:module");
@@ -96,15 +97,15 @@ const vscode = {
 const originalLoad = Module._load;
 Module._load = function(id, ...args) {
   if (id === "vscode") return vscode;
-  if (id === "./client" && /(?:lenses|model_view|preview)\.js$/.test(args[0]?.filename ?? "")) return {
+  if (importedModule(id, args[0]) === "client" && /(?:lenses|model_view|preview)\.js$/.test(args[0]?.filename ?? "")) return {
     documentSelector: [{ language: "dynare", scheme: "file" }, { language: "dynare", scheme: "untitled" }],
     isAnalysisDocument: doc => doc.languageId === "dynare" && ["file", "untitled"].includes(doc.uri.scheme),
   };
   return originalLoad.call(this, id, ...args);
 };
-const { lensPreferences, modelLensGroups, declarationLensGroups, registerLenses } = require("../out/lenses");
-const { browseModelEquations } = require("../out/model_view");
-const { registerEffectivePreview } = require("../out/preview");
+const { lensPreferences, modelLensGroups, declarationLensGroups, registerLenses } = require(compiledModule("lenses"));
+const { browseModelEquations } = require(compiledModule("model_view"));
+const { registerEffectivePreview } = require(compiledModule("preview"));
 Module._load = originalLoad;
 const lensContributions = { configuration: require("../package.json").contributes.configuration.find(group => group.title === "Dygnosis: Actions") };
 

@@ -1,6 +1,7 @@
+const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { helpMarkdown, helpPages } = require('../out/help_content');
+const { helpMarkdown, helpPages } = require(compiledModule("help_content"));
 const bundle = require('../help/bundle.json');
 
 test('Help uses every current command, check, option and setting feature owner without mutating its source', () => {

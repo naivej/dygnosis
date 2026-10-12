@@ -1,3 +1,4 @@
+const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const Module = require("node:module");
@@ -94,7 +95,7 @@ const vscode = {
 };
 const originalLoad = Module._load;
 Module._load = function(id, ...args) { if (id === "vscode") return vscode; return originalLoad.call(this, id, ...args); };
-const { parseProjectStatus, parseProjectCapability, projectStatusContent, registerProjectStatus } = require("../out/project_status");
+const { parseProjectStatus, parseProjectCapability, projectStatusContent, registerProjectStatus } = require(compiledModule("project_status"));
 Module._load = originalLoad;
 
 function root(state = "checked", extra = {}) {

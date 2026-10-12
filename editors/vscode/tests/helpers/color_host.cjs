@@ -1,3 +1,4 @@
+const { compiledModule } = require("./extension_modules.cjs");
 // Verify block-tint retention with native editor events and the matching engine.
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
@@ -35,7 +36,7 @@ async function checkBlockTintEditing(service, workspaceRoot, evidence, helpers) 
       styles.set(type.key, options.backgroundColor.id); return type;
     },
   } };
-  const colorPath = path.resolve(__dirname, "../../out/color.js");
+  const colorPath = compiledModule("color");
   const loaded = new Module(colorPath, module);
   loaded.filename = colorPath; loaded.paths = Module._nodeModulePaths(path.dirname(colorPath));
   loaded.require = name => name === "vscode" ? api : Module.prototype.require.call(loaded, name);

@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
-import { documentSelector, DygnosisClient, isAnalysisDocument, ModelSnapshot } from "./client";
+import { documentSelector, DygnosisClient, isAnalysisDocument, ModelSnapshot } from "../client/client";
 import { sameWrittenLocation } from "./model_view";
-import type { Declaration, Location, ModelInfo, Statement } from "./protocol";
-import { booleanSetting, Log } from "./settings";
+import type { Declaration, Location, ModelInfo, Statement } from "../client/protocol";
+import { booleanSetting, Log } from "../client/settings";
 
 export interface LensPreferences { modelEquations: boolean; declarationReferences: boolean; effectiveModel: boolean }
 interface ModelGroup { anchor: Location; statements: Statement[]; count: number | null }

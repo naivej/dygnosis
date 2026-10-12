@@ -1,7 +1,8 @@
+const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { ClientLifecycle } = require("../out/lifecycle");
-const { parseModelInfo, location } = require("../out/protocol");
+const { ClientLifecycle } = require(compiledModule("lifecycle"));
+const { parseModelInfo, location } = require(compiledModule("protocol"));
 
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 test("replacement disposes a pending initialize and only activates the newest client", async () => {

@@ -1,3 +1,4 @@
+const { compiledModule, importedModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const Module = require("node:module");
@@ -54,13 +55,13 @@ const vscode = {
 const originalLoad = Module._load;
 Module._load = function(id, ...args) {
   if (id === "vscode") return vscode;
-  if (id === "./client" && args[0]?.filename.endsWith("status.js")) return {
+  if (importedModule(id, args[0]) === "client" && args[0]?.filename.endsWith("status.js")) return {
     isAnalysisDocument: doc => doc.languageId === "dynare" && ["file", "untitled"].includes(doc.uri.scheme),
     isRootUri: value => ["file", "untitled"].includes(value.scheme) && /\.(mod|dyn)$/i.test(value.path),
   };
   return originalLoad.call(this, id, ...args);
 };
-const { modelStatus, registerStatus } = require("../out/status");
+const { modelStatus, registerStatus } = require(compiledModule("status"));
 Module._load = originalLoad;
 
 function facts(doc = document(), overrides = {}) {

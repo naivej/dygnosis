@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
-import { DygnosisClient } from "./client";
+import { DygnosisClient } from "../client/client";
 import { NavigationContext, validateNavigationContext } from "./model_view";
-import { record } from "./protocol";
+import { record } from "../client/protocol";
 
 export interface EffectivePreviewSession {
   readonly uri: vscode.Uri;

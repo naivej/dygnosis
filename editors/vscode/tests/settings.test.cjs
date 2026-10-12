@@ -1,3 +1,4 @@
+const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const Module = require("node:module");
@@ -15,8 +16,8 @@ const vscode = { workspace: {
 } };
 const originalLoad = Module._load;
 Module._load = function(id, ...args) { return id === "vscode" ? vscode : originalLoad.call(this, id, ...args); };
-const { configurationSnapshot, listSetting, booleanSetting } = require("../out/settings");
-const { executablePath, validateMcpBinary } = require("../out/binary");
+const { configurationSnapshot, listSetting, booleanSetting } = require(compiledModule("settings"));
+const { executablePath, validateMcpBinary } = require(compiledModule("binary"));
 Module._load = originalLoad;
 
 test("loose files use user defaults while folders receive complete workspace settings", () => {

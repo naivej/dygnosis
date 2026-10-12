@@ -1,8 +1,9 @@
+const { compiledModule, importedModule } = require("./extension_modules.cjs");
 // Native-like VS Code surface for comparison document, capture, and source lifetime tests.
 const Module = require("node:module");
 const path = require("node:path");
 const { URL, pathToFileURL, fileURLToPath } = require("node:url");
-const { resourceQuery, resourceName, changesScheme, changesViewType, historyScheme } = require("../../out/changes_resource");
+const { resourceQuery, resourceName, changesScheme, changesViewType, historyScheme } = require(compiledModule("changes_resource"));
 
 class Disposable {
   constructor(callback) { this.callback = callback; }
@@ -81,14 +82,15 @@ function snapshotResponse(request, changed = true) {
 }
 
 function load(name, vscode, injections = {}) {
-  for (const moduleName of ["changes_editor", "snapshot_compare", "history_sources", "captured_text", "diff", "settings", "extension"]) delete require.cache[require.resolve(`../../out/${moduleName}`)];
+  for (const moduleName of ["changes_editor", "snapshot_compare", "history_sources", "captured_text", "diff", "settings", "extension"]) delete require.cache[require.resolve(compiledModule(moduleName))];
   const originalLoad = Module._load;
   Module._load = function(id, ...args) {
     if (id === "vscode") return vscode;
-    if (Object.hasOwn(injections, id)) return injections[id];
+    const dependency = importedModule(id, args[0]);
+    if (dependency && Object.hasOwn(injections, dependency)) return injections[dependency];
     return originalLoad.call(this, id, ...args);
   };
-  try { return require(`../../out/${name}`); } finally { Module._load = originalLoad; }
+  try { return require(compiledModule(name)); } finally { Module._load = originalLoad; }
 }
 function createHost() {
   const host = { commands: new Map(), calls: [], providers: new Map(), texts: new Map(), custom: new Map(), panels: [], picks: [], dialogs: [], inputs: [], progress: [], shown: [], logs: [], failures: [], watchers: [], settings: new Map(), scopes: [], captures: [], revalidations: [], owners: [], changed: new Emitter(), modelUpdated: new Emitter(), configChanged: new Emitter(), closedText: new Emitter(), editorChanged: new Emitter(), tabsChanged: new Emitter(), tabGroupsChanged: new Emitter(), editor: undefined, activeTab: undefined };
@@ -194,8 +196,8 @@ function createHost() {
       host.captures.push({ resource, cancel, history });
       return host.capture ? host.capture(resource, cancel, history) : captured(resource, history, host, service.currentInstance);
     };
-    const { registerChanges } = load("changes_editor", vscode, { "./git_source_host": { createGitSources: async () => { if (host.gitUnavailable) throw new Error("Git is unavailable"); return git; } }, "./snapshot_compare": { captureComparison: capture, ComparisonFailure } });
-    host.registration = registerChanges(service); return host.registration;
+    const { registerChanges } = load("changes_editor", vscode, { "git_source_host": { createGitSources: async () => { if (host.gitUnavailable) throw new Error("Git is unavailable"); return git; } }, "snapshot_compare": { captureComparison: capture, ComparisonFailure } });
+    host.registration = registerChanges(service, Uri.file(path.resolve(__dirname, "../.."))); return host.registration;
   };
   host.open = argument => host.commands.get("dygnosis.openChanges")(argument);
   host.file = argument => host.commands.get("dygnosis.diffWith")(argument);

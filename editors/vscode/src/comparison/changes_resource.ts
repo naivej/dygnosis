@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { record } from "./protocol";
+import { record } from "../client/protocol";
 
 export interface WorkingSelector { kind: "working"; root_uri: string }
 export interface GitSelector {

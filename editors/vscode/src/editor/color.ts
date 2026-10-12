@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
-import { DygnosisClient, isAnalysisDocument } from "./client";
-import { location, ModelInfo, record } from "./protocol";
-import { booleanSetting, Log } from "./settings";
+import { DygnosisClient, isAnalysisDocument } from "../client/client";
+import { location, ModelInfo, record } from "../client/protocol";
+import { booleanSetting, Log } from "../client/settings";
 
 export type TintStyle = "off" | "subtle" | "model";
 export const tintStyles: TintStyle[] = ["off", "subtle", "model"];

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { GitSelector, historyScheme, treeKey } from "./changes_resource";
-import { record } from "./protocol";
+import { record } from "../client/protocol";
 
 export interface HistoricalSource { repository_uri: string; commit: string; file_key: string }
 interface RetainedSource { text: string; holders: Set<object>; owners: Map<string, GitSelector> }

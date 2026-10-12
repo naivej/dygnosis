@@ -1,3 +1,4 @@
+const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const Module = require("node:module");
@@ -70,7 +71,7 @@ const vscode = {
 const languageClient = { DocumentSymbolRequest: { method: "textDocument/documentSymbol" }, ExecuteCommandRequest: { type: "workspace/executeCommand" }, State: { Stopped: 1 } };
 const originalLoad = Module._load;
 Module._load = function(id, ...args) { return id === "vscode" ? vscode : id === "vscode-languageclient/node" ? languageClient : originalLoad.call(this, id, ...args); };
-const { DygnosisClient, extendCapabilities } = require("../out/client");
+const { DygnosisClient, extendCapabilities } = require(compiledModule("client"));
 Module._load = originalLoad;
 function reset() {
   host = { documents: [], folders: [{ uri: Uri.parse("file:///project"), name: "project" }], settings: {}, commands: new Map(), opened: [], reveals: [], managed: [], watchers: [], notifications: [], picks: [], symbols: 0,

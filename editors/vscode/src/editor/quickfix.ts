@@ -2,9 +2,9 @@ import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
 import type { MarkedToken, Token } from "marked" with { "resolution-mode": "import" };
 import { DocumentDiagnosticRequest, Middleware, WorkspaceDiagnosticRequest, WorkspaceDocumentDiagnosticReport, vsdiag } from "vscode-languageclient/node";
-import { DygnosisClient, isAnalysisDocument } from "./client";
-import { record } from "./protocol";
-import { booleanSetting } from "./settings";
+import { DygnosisClient, isAnalysisDocument } from "../client/client";
+import { record } from "../client/protocol";
+import { booleanSetting } from "../client/settings";
 
 // Static require lets the package bundle include these ESM dependencies.
 // eslint-disable-next-line @typescript-eslint/no-require-imports

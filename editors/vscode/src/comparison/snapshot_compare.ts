@@ -1,13 +1,13 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import { randomBytes } from "node:crypto";
-import { DygnosisClient } from "./client";
+import { DygnosisClient } from "../client/client";
 import { ComparisonResource, ModelSelector } from "./changes_resource";
 import { GitSources, HistoricalCapture, HistoricalInput } from "./git_source";
 import { DiffSide, DiffSnapshot, parseDiff, parseSnapshotDiff } from "./diff_view";
 import { HistoricalSources } from "./history_sources";
-import { engineSettings } from "./settings";
-import { record } from "./protocol";
+import { engineSettings } from "../client/settings";
+import { record } from "../client/protocol";
 import { normalizeGitText } from "./git_provenance";
 import { semanticCapability } from "./semantic_view";
 
