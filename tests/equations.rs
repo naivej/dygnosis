@@ -61,8 +61,8 @@ fn equivalent_capital_models_share_dynare_timing_and_keep_written_offsets() {
         assert_eq!(timing.class, beginning_timing[name].class);
         assert_eq!(timing.offsets, beginning_timing[name].offsets);
     }
-    assert!(!default_timing["k"].predetermined_conversion);
-    assert!(beginning_timing["k"].predetermined_conversion);
+    assert!(!default_timing["k"].predetermined_convention);
+    assert!(beginning_timing["k"].predetermined_convention);
     assert_eq!(structure_summary(&default), structure_summary(&beginning));
     let summary = structure_summary(&beginning);
     assert_eq!(
@@ -177,6 +177,7 @@ fn predetermined_marks_follow_valid_roles_and_successful_type_changes() {
         let id = &equations(&model)[0].idents[0];
         assert_eq!((id.timing, id.dynare_timing), (1, if shifted { 0 } else { 1 }), "{prefix}");
         assert_eq!(classify_variable_timing(&model)["k"].class, if shifted { TimingClass::Static } else { TimingClass::ForwardLooking }, "{prefix}");
+        assert_eq!(classify_variable_timing(&model)["k"].predetermined_convention, shifted, "{prefix}");
     }
     let model =
         parse("var k; predetermined_variables k; model; k(1)=0; end; change_type(parameters) k;");

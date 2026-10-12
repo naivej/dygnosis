@@ -1008,8 +1008,7 @@ async fn hover_heterogeneous_endogenous_uses_its_model_timing() {
         .expect("hover rpc")
         .expect("hover");
     let md = hover_markdown(hover);
-    assert!(md.contains("predetermined"), "hover: {md}");
-    assert!(md.contains("written offsets: -1, 0"), "hover: {md}");
+    assert!(md.contains("Timing: **predetermined**"), "hover: {md}");
     assert!(!md.to_ascii_lowercase().contains("unused"), "hover: {md}");
 }
 
@@ -1035,8 +1034,7 @@ async fn hover_heterogeneous_only_lag_is_not_unused() {
             .expect("hover"),
     );
     assert!(md.contains("Endogenous"), "hover: {md}");
-    assert!(md.contains("predetermined"), "hover: {md}");
-    assert!(md.contains("written offsets: -1, 0"), "hover: {md}");
+    assert!(md.contains("Timing: **predetermined**"), "hover: {md}");
     assert!(!md.to_ascii_lowercase().contains("unused"), "hover: {md}");
 }
 

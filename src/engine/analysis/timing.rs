@@ -31,9 +31,9 @@ impl TimingClass {
 pub struct TimingInfo {
     pub class: TimingClass,
     pub offsets: Vec<i32>,
-    /// The displayed uses received the predetermined-variable conversion.
-    /// A no-use fallback has no converted occurrence.
-    pub predetermined_conversion: bool,
+    /// A valid predetermined_variables declaration selects the convention.
+    /// The declaration remains active even when there is no dynamic use.
+    pub predetermined_convention: bool,
 }
 
 pub(crate) struct TimingAnalysis {
@@ -95,8 +95,7 @@ impl TimingAnalysis {
             let name = model.name(declaration.name).to_string();
             if model.final_heterogeneity(declaration).is_none() {
                 let mut timing = classify_offsets(aggregate_offsets.get(&declaration.name));
-                timing.predetermined_conversion = analysis.marked.contains(&declaration.name)
-                    && aggregate_offsets.contains_key(&declaration.name);
+                timing.predetermined_convention = analysis.is_predetermined(declaration.name);
                 analysis.aggregate.insert(name.clone(), timing.clone());
                 analysis.all.insert(name, timing);
             } else {
@@ -161,7 +160,7 @@ fn classify_offsets(offsets: Option<&HashSet<i32>>) -> TimingInfo {
     TimingInfo {
         class,
         offsets,
-        predetermined_conversion: false,
+        predetermined_convention: false,
     }
 }
 

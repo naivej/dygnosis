@@ -16,25 +16,15 @@ pub use crate::engine::analysis::timing::{
     classify_variable_timing, structure_summary, StructureSummary, TimingClass, TimingInfo,
 };
 
-/// Hover line names the offset convention when the written uses were shifted.
+/// Hover shows the timing class and the declared convention when applicable.
 pub fn format_timing_line(info: &TimingInfo) -> String {
-    let offsets = info
-        .offsets
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(", ");
-    if info.predetermined_conversion {
+    if info.predetermined_convention {
         format!(
-            "Timing: **{}** · Dynare end-of-period offsets: {} (one period earlier than written offsets)",
-            info.class.label(), offsets
+            "Timing: **{}**, end-of-period convention",
+            info.class.label()
         )
     } else {
-        format!(
-            "Timing: **{}** · written offsets: {}",
-            info.class.label(),
-            offsets
-        )
+        format!("Timing: **{}**", info.class.label())
     }
 }
 

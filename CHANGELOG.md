@@ -12,7 +12,8 @@
 
 - Expression value hints remain available after simple MATLAB helper assignments.
   This restores later parameter values such as `cfp_ss` in `CA_BMZ12_rep.mod`.
-- Variable hover shows timing offsets as numbers such as `-1, 0, 1`.
+- Variable hover shows the timing class. Variables declared with
+  `predetermined_variables` also show **end-of-period convention**.
 
 ## v0.11.17
 
