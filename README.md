@@ -1,23 +1,19 @@
 ![Dygnosis](media/logo_s.png) 
 
-Dygnosis provides language support for Dynare, acting as a second preprocessor that is deeply integrated into the editor and agent workflow via LSP and MCP.
+Dygnosis is a LSP for Dynare, working out of the box when installed from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis).
 
 - Edit with live diagnostics, hover, completion, document or selection formatting, fixes, and commented shock templates.
 - Navigate with references and rename across known includes, plus outline, workspace symbols, folding, syntax colors, and links to related files.
 - Inspect model counts, equations, includes, and expanded source, with jumps back to the written equations.
 - Compare a model with Git history or another `.mod` file; check unopened saved models in a project.
+- Run **Dygnosis: Open Help** to learn more.
 
-Dygnosis works out of the box when installed from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis). Run **Dygnosis: Open Help** to learn more.
+It also provides [MCP tools](https://github.com/naivej/dygnosis/blob/main/help/agents.md) and a [use-dynare skill](https://github.com/naivej/dygnosis/blob/main/.agents/skills/use-dynare/SKILL.md) for agents
 
-For MCP without VS Code, standalone binaries are available from [GitHub Releases](https://github.com/naivej/dygnosis/releases) when published for your host. [Agent tools](help/agents.md) lists the tools and connection options.
+Dygnosis does not depend on dynare, and leave numerical computation (such as steady states, stability and model solutions) to MATLAB. For MATLAB integration, see the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit).
 
-## Limits
 
-- Language support follows **Dynare 7.2**. Some pre-MATLAB checks are outside coverage; use Dynare for final validation.
-- Unsupported macro expressions are flagged as incomplete. Affected checks are withheld and model views are marked incomplete.
-- Dygnosis does not launch Dynare, MATLAB or Octave. Numerical results, including steady states, stability and model solutions, require running Dynare with MATLAB or Octave.
-
-For MATLAB integration, see the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit).
+**Compatibility**: Dynare 7.2
 
 ## Credits
 
@@ -27,4 +23,4 @@ For MATLAB integration, see the [MATLAB extension for VS Code](https://github.co
 
 ## License
 
-[GPL-3.0-or-later](LICENSE). The bundled use-dynare skill retains its upstream [MIT license](https://github.com/EconSolider/dynare-copilot/blob/main/LICENSE).
+Dygnosis is licensed under [GPL-3.0-or-later](https://github.com/naivej/dygnosis/blob/main/LICENSE). The use-dynare skill is licensed under [MIT](https://github.com/naivej/dygnosis/blob/main/.agents/skills/use-dynare/LICENSE).

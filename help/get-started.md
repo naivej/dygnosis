@@ -31,8 +31,8 @@ alongside the one being edited.
 
 Official Dynare with MATLAB or Octave performs steady-state calculations,
 simulation, estimation and other numerical tasks. Dygnosis supports the source
-work above; it does not run those tasks. [Analysis limits](about.md#analysis-limits)
-explain what its results establish.
+work above; it does not run those tasks. [About Dygnosis](about.md)
+describes what its results establish.
 
 [Agent tools](agents.md) support the same source workflow through MCP.
 

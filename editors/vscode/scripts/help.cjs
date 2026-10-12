@@ -7,6 +7,11 @@ const { productRoot, extensionRoot, rpc } = require('./common.cjs');
 const { readVersion, checkVersion } = require('../../../scripts/version.cjs');
 const source = path.join(productRoot, 'help');
 
+/** Marketplace listing and Help About. Both omit the logo: the listing already shows the extension icon, and Help only packs images under help/assets. */
+function productIntroduction(markdown) {
+  return markdown.replace(/!\[[^\]]*\]\([^)]*logo[^)]*\)\s*/g, '');
+}
+
 async function copyHelpAssets(topics, sourceRoot, targetRoot) {
   const images = new Set();
   for (const topic of topics) for (const [, file] of topic.markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)) {
@@ -75,11 +80,13 @@ async function build() {
   assert.equal(reference.fingerprint, await engineFingerprint(), 'Engine source changed. Press F5 so the launch task rebuilds the engine and refreshes Help.');
   const ids = new Set(registry.map(topic => topic.id));
   assert.equal(ids.size, registry.length);
+  const introduction = productIntroduction(await fs.readFile(path.join(productRoot, 'README.md'), 'utf8'));
+  assert.doesNotMatch(introduction, /\]\((?!https?:\/\/|#)[^)]+\)/, 'Product README links must be absolute http(s) URLs');
   const settings = Object.assign({}, ...manifest.contributes.configuration.map(group => group.properties));
   const topics = [];
   for (const topic of registry) {
     assert.match(topic.id, /^[a-z][a-z-]+$/);
-    const markdown = await fs.readFile(path.join(source, `${topic.id}.md`), 'utf8');
+    const markdown = topic.id === 'about' ? introduction : await fs.readFile(path.join(source, `${topic.id}.md`), 'utf8');
     assert.equal([...markdown.matchAll(/^```/gm)].length % 2, 0, `Unclosed code fence in ${topic.id}`);
     for (const [, key] of markdown.matchAll(/\]\(settings:([^)]*)\)/g)) assert.ok(Object.hasOwn(settings, key), `Unknown setting ${key}`);
     topics.push({ ...topic, markdown });
@@ -104,14 +111,7 @@ async function build() {
   for (const id of Object.values(settingsTopics)) assert.ok(ids.has(id), `Unknown setting owner ${id}`);
   await fs.writeFile(path.join(target, 'bundle.json'), JSON.stringify({ version: manifest.version, topics, reference, commands: manifest.contributes.commands, keybindings: manifest.contributes.keybindings, settingsTopics, commandsTopics }) + '\n');
   await copyHelpAssets(topics, source, target);
-  // The Marketplace introduction is generated from the short product README.
-  // This file is editors/vscode/README.md. Two levels up reaches product help/.
-  // vsce joins the link onto .../editors/vscode; the client then resolves "..".
-  // The listing already shows the extension icon, so the README omits the logo.
-  const readme = (await fs.readFile(path.join(productRoot, 'README.md'), 'utf8'))
-    .replace(/!\[[^\]]*\]\([^)]*logo[^)]*\)\s*/g, '');
-  await fs.writeFile(path.join(extensionRoot, 'README.md'), readme
-    .replace(/\]\((help\/[^)]+\.md(?:#[^)]*)?|help\/assets\/[^)]+|LICENSE|CHANGELOG\.md)\)/g, '](../../$1)'));
+  await fs.writeFile(path.join(extensionRoot, 'README.md'), introduction);
   console.log(`Help: ${topics.length} topics, ${reference.codes.length} checks, ${reference.tools.length} tools, ${Object.keys(settingsTopics).length} native settings`);
 }
 

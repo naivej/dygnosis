@@ -1,5 +1,7 @@
 const { compiledModule } = require("./helpers/extension_modules.cjs");
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 const { helpMarkdown, helpPages } = require(compiledModule("help_content"));
 const bundle = require('../help/bundle.json');
@@ -33,6 +35,13 @@ test('untrusted engine explanations cannot execute HTML, links or remote images'
   assert.match(html, /&lt;script&gt;/); assert.match(html, /data-copy/);
   assert.match(html, /data-link="help:diagnostics"/); assert.match(html, /data-link="settings:dynare.serverPath"/);
   assert.match(helpMarkdown('[Feature](appearance.md#expression-value-hints)', () => undefined), /data-link="help:appearance#expression-value-hints"/);
+});
+
+test('Help About and the extension listing use the product README without its logo', () => {
+  const product = fs.readFileSync(path.join(__dirname, '../../../README.md'), 'utf8').replace(/!\[[^\]]*\]\([^)]*logo[^)]*\)\s*/g, '');
+  assert.equal(bundle.topics.find(topic => topic.id === 'about').markdown, product);
+  assert.equal(fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8'), product);
+  assert.doesNotMatch(product, /!\[[^\]]*\]\(/);
 });
 
 test('every authored topic has balanced code examples and valid internal destinations', () => {

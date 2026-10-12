@@ -12,5 +12,6 @@
 /SOURCE.json
 /LICENSE
 /CHANGELOG.md
+/README.md
 /*.vsix
 /*.tsbuildinfo

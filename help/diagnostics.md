@@ -15,7 +15,7 @@ The [check reference](reference.md) gives each code's
 explanation. **Shared** checks follow Dynare, **added** checks are extra
 Dygnosis guidance, and **skipped** checks are documented but not reported.
 A clean Problems panel does not establish that Dynare can accept or solve the
-model; see [analysis limits](about.md#analysis-limits).
+model; see [About Dygnosis](about.md).
 
 ## Actions
 
