@@ -9,6 +9,10 @@
   ranges.
 - Outline names omit the declaration type already shown by their group.
   Timing, long names, TeX names and changed types remain visible.
+- `predetermined_variables` reports E023 for heterogeneous variables and names
+  that are not aggregate endogenous variables when the command is read.
+  Writing the command inside a `model` block reports E001 and no longer adds
+  a false equation or equation-count warning.
 
 ## v0.11.18
 

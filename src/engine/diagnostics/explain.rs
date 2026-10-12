@@ -62,7 +62,7 @@ static ENTRIES: &[(&str, ExplainEntry)] = &[
     }),
     ("E023", ExplainEntry {
         title: "Predetermined variable not declared endogenous",
-        body: "A name listed in `predetermined_variables` must also be declared as an endogenous variable in the `var` block. Dynare refuses: `Unknown symbol: e`.\n\n**Warrant**\n\nThe editor names the `predetermined_variables` role; Dynare's parse string is the generic `Unknown symbol`.\n\n**Fix**\n\n- Add the variable to the `var` declaration, or\n- Remove it from `predetermined_variables` if it is not actually   endogenous",
+        body: "A name listed in `predetermined_variables` must be an aggregate endogenous variable when the command is read. A heterogeneous variable declared with `var(heterogeneity=...)` is not eligible. Dynare refuses an unknown name with `Unknown symbol: NAME` and a declared name of the wrong type with `NAME is not endogenous.`\n\nAn earlier successful `change_type(var)` makes a name eligible. A later declaration or type change cannot validate an earlier command.\n\n**Warrant**\n\nThe editor points at the name and uses a command-specific sentence for both official refusals.\n\n**Fix**\n\n- Declare an intended aggregate endogenous variable with `var` before the command.\n- Remove a heterogeneous variable from the command and write its leads and lags directly in its equations.\n- Remove any other ineligible name from the command.",
         kind: ExplainKind::Shared,
     }),
     ("E024", ExplainEntry {

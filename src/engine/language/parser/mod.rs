@@ -2153,6 +2153,7 @@ impl Parser<'_> {
             end: opener_end,
         };
         let body_i = self.i;
+        let body_issues_before = self.model.parse_issues.len();
         let previous_context = self.constructor_context;
         self.constructor_context = DataTreeScope::Heterogeneous(dimension);
         self.in_equation_body = true;
@@ -2167,7 +2168,10 @@ impl Parser<'_> {
         }
         self.in_equation_body = false;
         self.constructor_context = previous_context;
-        if equations.is_empty() && self.at_block_end() {
+        if equations.is_empty()
+            && self.at_block_end()
+            && self.model.parse_issues.len() == body_issues_before
+        {
             self.hetero_bison_refuse(self.i, None);
         }
         if self.at_block_end() {
@@ -3194,7 +3198,7 @@ impl Parser<'_> {
         self.bump();
         let rhs_start = self.i;
         self.in_steady_state_rhs = true;
-        let (rhs, clean) = self.parse_expr_side(ExprStop::Semi);
+        let (rhs, clean, _) = self.parse_expr_side(ExprStop::Semi);
         self.in_steady_state_rhs = false;
         if rhs.is_none() {
             let (span, unexpected) = self.ss_unexpected_token(rhs_start);
@@ -10082,14 +10086,14 @@ impl Parser<'_> {
 
         let previous_target = self.in_constructor_target;
         self.in_constructor_target |= is_local;
-        let (lhs_expr, lhs_ok) = self.parse_expr_side(ExprStop::EqOrSemi);
+        let (lhs_expr, lhs_ok, lhs_refused) = self.parse_expr_side(ExprStop::EqOrSemi);
         self.in_constructor_target = previous_target;
         let saw_eq = self.at(TokenKind::Eq);
-        let (rhs_expr, rhs_ok) = if saw_eq {
+        let (rhs_expr, rhs_ok, rhs_refused) = if saw_eq {
             self.bump();
             self.parse_expr_side(ExprStop::Semi)
         } else {
-            (None, true)
+            (None, true, false)
         };
 
         let eq_end_i = self.i;
@@ -10119,6 +10123,10 @@ impl Parser<'_> {
         let stmt_end_i = self.i;
         let stmt_end = self.current_start();
         self.eat(TokenKind::Semi);
+
+        if lhs_refused || rhs_refused {
+            return None;
+        }
 
         let raw = join_lexemes(self.src, &self.tokens[stmt_i..eq_end_i]);
         let mut eq = equation_from_statement(
@@ -10219,7 +10227,7 @@ impl Parser<'_> {
         Some((equation, from..to))
     }
 
-    fn parse_expr_side(&mut self, stop: ExprStop) -> (Option<ExprId>, bool) {
+    fn parse_expr_side(&mut self, stop: ExprStop) -> (Option<ExprId>, bool, bool) {
         let id = self.parse_expr();
         let clean = match stop {
             ExprStop::EqOrSemi => {
@@ -10237,10 +10245,26 @@ impl Parser<'_> {
             }
         };
         if !clean {
+            // The merged-equation check owns a missing separator before a
+            // second '=' and supplies its existing proved semicolon edit.
+            let merged = matches!(stop, ExprStop::Semi)
+                && self.tokens[self.i..]
+                    .iter()
+                    .take_while(|token| {
+                        !matches!(token.kind, TokenKind::Semi | TokenKind::Eof)
+                            && !(token.kind == TokenKind::Ident
+                                && self.lexeme(token).eq_ignore_ascii_case("end"))
+                    })
+                    .any(|token| token.kind == TokenKind::Eq);
+            let refused =
+                self.in_equation_body && id.is_some() && self.at(TokenKind::Ident) && !merged;
+            if refused {
+                self.hetero_bison_refuse(self.i, None);
+            }
             self.skip_to_stmt_end();
-            return (id, false);
+            return (id, false, refused);
         }
-        (id, id.is_some() || self.at_side_empty(stop))
+        (id, id.is_some() || self.at_side_empty(stop), false)
     }
 
     fn at_side_empty(&self, stop: ExprStop) -> bool {

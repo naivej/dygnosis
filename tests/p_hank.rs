@@ -103,6 +103,88 @@ fn declared_dimension(model: &dygnosis::model::Model, name: &str) -> bool {
 }
 
 #[test]
+fn predetermined_command_inside_model_is_refused_without_an_equation() {
+    // Guard against counting a command-shaped row as an equation. The same
+    // expression grammar must reject adjacent identifiers in either model.
+    let binary = pinned_binary();
+    for prefix in [
+        "var a; model;",
+        "heterogeneity_dimension hh; var(heterogeneity=hh) a; model(heterogeneity=hh);",
+    ] {
+        for row in ["predetermined_variables a;", "a a=0;", "a=a a;"] {
+            let source = format!("{prefix} {row} a=a(-1); end;");
+            let model = parse(&source);
+            let diagnostics = analyze(&model);
+            let syntax: Vec<_> = diagnostics.iter().filter(|d| d.code == "E001").collect();
+            assert_eq!(syntax.len(), 1, "{source}: {diagnostics:?}");
+            assert_eq!(syntax[0].message, "syntax error, unexpected IDENTIFIER");
+            let unexpected = source.find(row).unwrap() + row.rfind('a').unwrap();
+            assert_eq!(syntax[0].span.start as usize, unexpected);
+            assert_eq!(syntax[0].span.end as usize, unexpected + 1);
+            let equations = if prefix.starts_with("var") {
+                &model.equations
+            } else {
+                &model.heterogeneous_models[0].equations
+            };
+            assert_eq!(equations.len(), 1, "{source}");
+            assert_eq!(equations[0].text, "a = a(-1)");
+            assert!(model.predetermined.is_empty(), "{source}");
+            assert!(
+                !diagnostics
+                    .iter()
+                    .any(|d| matches!(d.code.as_str(), "E020" | "E023" | "E192" | "W208")),
+                "{source}: {diagnostics:?}"
+            );
+            if let Some(binary) = binary.as_deref() {
+                let (accepted, report) = official_check(&source, binary);
+                assert!(!accepted, "{source}\n{report}");
+                assert!(
+                    report.contains("syntax error, unexpected IDENTIFIER"),
+                    "{source}\n{report}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn predetermined_only_model_row_keeps_the_first_syntax_error() {
+    // Guard against adding a second empty-body error at END after the only
+    // written row has already been refused.
+    for prefix in [
+        "var a; model;",
+        "heterogeneity_dimension hh; var(heterogeneity=hh) a; model(heterogeneity=hh);",
+    ] {
+        let source = format!("{prefix} predetermined_variables a; end;");
+        let model = parse(&source);
+        let diagnostics = errors(&source);
+        assert_eq!(diagnostics.len(), 1, "{source}: {diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E001");
+        assert_eq!(
+            diagnostics[0].message,
+            "syntax error, unexpected IDENTIFIER"
+        );
+        assert!(model.written_equations.is_empty(), "{source}");
+        assert!(model.predetermined.is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn predetermined_command_spelling_remains_a_valid_model_local() {
+    // Guard against banning the command spelling where the block lexer reads
+    // an ordinary identifier rather than a top-level command token.
+    let source = "heterogeneity_dimension hh; var(heterogeneity=hh) a; model(heterogeneity=hh); #predetermined_variables=1; a=predetermined_variables; end;";
+    assert!(errors(source).is_empty(), "{:?}", errors(source));
+    let model = parse(source);
+    assert_eq!(model.heterogeneous_models[0].equations.len(), 2);
+    assert!(model.predetermined.is_empty());
+    if let Some(binary) = pinned_binary() {
+        let (accepted, report) = official_check(source, &binary);
+        assert!(accepted, "{report}");
+    }
+}
+
+#[test]
 fn agent_views_keep_aggregate_and_heterogeneous_equations_separate() {
     let source = fixture("accepted_family.mod");
     let model = parse(&source);

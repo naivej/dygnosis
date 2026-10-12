@@ -80,17 +80,17 @@ fn earliest_local_defs(model: &Model, trees: &[Vec<&Equation>]) -> HashMap<Name,
 }
 
 fn check_e023(model: &Model) -> Vec<Diagnostic> {
-    let endo: HashSet<Name> = model.endogenous.iter().map(|d| d.name).collect();
     let mut seen = HashSet::new();
     let mut diagnostics = Vec::new();
     for decl in &model.predetermined {
-        if !seen.insert(decl.name) {
+        // ParsingDriver accepts only ordinary endogenous names at this command.
+        // Later declarations and type changes cannot validate an earlier mark.
+        if model.symbol_kind_in_context(decl.name, decl.symbol_type_context) == Some("var")
+            && !model.heterogeneous_in_context(decl.name, decl.symbol_type_context)
+        {
             continue;
         }
-        if endo.contains(&decl.name)
-            || (model.trend_vars.iter().any(|trend| trend.name == decl.name)
-                && model.symbol_kind_in_context(decl.name, decl.symbol_type_context) == Some("var"))
-        {
+        if !seen.insert(decl.name) {
             continue;
         }
         let name = model.name(decl.name);

@@ -62,4 +62,4 @@ declaration, it adds the convention:
 Timing: **predetermined**, end-of-period convention
 
 The class still comes from the equations, so it can be static, forward-looking
-or mixed. Written `k(+1)` is current `k` for timing analysis, and written `k` is `k(-1)`. Heterogeneous equations keep their written timing.
+or mixed. Written `k(+1)` is current `k` for timing analysis, and written `k` is `k(-1)`.
