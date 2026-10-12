@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.11.19
+
+- Fold complete Dynare blocks, written macro loops and conditionals, and
+  individual conditional branches. Multiline declarations, commands and Dynare
+  assignments fold by statement. Starting lines stay visible; with
+  `editor.foldingStrategy` set to `auto`, indentation does not determine the
+  ranges.
+
 ## v0.11.18
 
 - Expression value hints remain available after simple MATLAB helper assignments.

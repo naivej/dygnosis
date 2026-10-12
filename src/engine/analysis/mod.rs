@@ -2,6 +2,7 @@
 
 pub mod assignment_values;
 pub mod equations;
+pub(crate) mod folding;
 pub mod model_info;
 pub mod model_locals;
 pub mod timing;

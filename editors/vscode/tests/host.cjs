@@ -551,7 +551,16 @@ exports.run = async function run() {
     const extension = vscode.extensions.getExtension("CoconutWater.dygnosis");
     assert.ok(extension);
     const service = await extension.activate();
-    assert.ok(["all", "semantic"].includes(scope), "Native host scope must be all or semantic");
+    assert.ok(["all", "semantic", "folding"].includes(scope), "Native host scope must be all, semantic, or folding");
+    if (scope === "folding") {
+      const helper = require("./helpers/folding_host.cjs");
+      await helper.checkFolding(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, writeObservedInput });
+      await service.shutdown();
+      evidence.artifacts_after = await historyArtifacts();
+      assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "the engine and compiled extension must remain unchanged throughout the host gate");
+      evidence.passed = true;
+      return;
+    }
     if (scope === "semantic") {
       assert.equal(process.env.DYGNOSIS_HOST_REQUIRED_VISUAL, "1", "Semantic-only runs require actual native visual checks");
       await checkSemanticDiff(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, waitFor);

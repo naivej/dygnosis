@@ -1340,141 +1340,48 @@ impl Backend {
     }
 
     fn folding_ranges(&self, uri: &Url) -> Option<Vec<FoldingRange>> {
-        let mut inner = self.lock_inner();
-        let text = inner.document(uri)?.text.clone();
-        let directives = inner
-            .workspace
-            .get_model(uri.as_str())?
-            .macro_directives
-            .clone();
-        let normalized = crate::engine::language::parser::normalize_newlines(&text);
-        let index = LineIndex::new(&normalized);
-        let mut ranges = Vec::new();
-        let mut roots = inner.known_owner_roots(uri);
-        if roots.is_empty() && is_model_root(uri) {
-            roots.push(uri.clone());
-        }
-        for root in &roots {
-            inner.prepare_root(root);
-            let Some(model) = inner.workspace.get_effective_model(root.as_str()) else {
-                continue;
-            };
-            // Model blocks can span include files. A fold needs only its two
-            // written endpoints in this file, not a single-source whole span.
-            let endpoints: Vec<_> = model
-                .statements
-                .iter()
-                .filter(|statement| {
-                    statement.kind == crate::engine::language::model::StatementKind::Block
-                        && statement.complete
-                })
-                .filter_map(|statement| {
-                    let opener = model.expanded_tokens.get(statement.opener_range.start)?;
-                    let closer = statement
-                        .token_range
-                        .end
-                        .checked_sub(1)
-                        .and_then(|last| model.expanded_tokens.get(last))?;
-                    Some((statement.name.clone(), opener.span, closer.span))
+        let inner = self.lock_inner();
+        let text = crate::engine::language::parser::normalize_newlines(&inner.document(uri)?.text);
+        let model = inner.workspace.get_model(uri.as_str())?;
+        let index = LineIndex::new(&text);
+        let mut ranges: Vec<_> =
+            crate::engine::analysis::folding::source_folds(&text, &model.macro_directives)
+                .into_iter()
+                .filter_map(|fold| {
+                    let start_line = index.position_utf16(&text, fold.span.start).line;
+                    let end_line = index
+                        .position_utf16(&text, fold.span.end.saturating_sub(1))
+                        .line;
+                    (start_line < end_line).then_some(FoldingRange {
+                        start_line,
+                        end_line,
+                        start_character: None,
+                        end_character: None,
+                        kind: Some(if fold.comment {
+                            FoldingRangeKind::Comment
+                        } else {
+                            FoldingRangeKind::Region
+                        }),
+                        collapsed_text: None,
+                    })
                 })
                 .collect();
-            for (name, opener, closer) in endpoints {
-                let Some((start_file, start_span)) =
-                    inner.workspace.map_effective_origin(root.as_str(), opener)
-                else {
-                    continue;
-                };
-                let Some((end_file, end_span)) =
-                    inner.workspace.map_effective_origin(root.as_str(), closer)
-                else {
-                    continue;
-                };
-                let owner = crate::engine::workspace::include_resolver::normalize_uri(uri.as_str());
-                if crate::engine::workspace::include_resolver::normalize_uri(&start_file) != owner
-                    || crate::engine::workspace::include_resolver::normalize_uri(&end_file) != owner
-                {
-                    continue;
-                }
-                let start = index.position_utf16(&text, start_span.start);
-                let end = index.position_utf16(&text, end_span.end);
-                if start.line < end.line
-                    && !ranges.iter().any(|range: &FoldingRange| {
-                        range.start_line == start.line && range.end_line == end.line
-                    })
-                {
-                    ranges.push(FoldingRange {
-                        start_line: start.line,
-                        end_line: end.line,
-                        start_character: None,
-                        end_character: None,
-                        kind: Some(FoldingRangeKind::Region),
-                        collapsed_text: Some(format!("{name} ... end;")),
-                    });
-                }
+        // VS Code exposes one fold per starting line and accepts only nested
+        // or disjoint ranges. Prefer the enclosing construct at a shared line.
+        ranges.sort_by_key(|range| (range.start_line, std::cmp::Reverse(range.end_line)));
+        ranges.dedup_by_key(|range| range.start_line);
+        let mut ends = Vec::new();
+        ranges.retain(|range| {
+            while ends.last().is_some_and(|end| *end < range.start_line) {
+                ends.pop();
             }
-        }
-        if roots.is_empty() {
-            let model = inner.workspace.get_model(uri.as_str())?;
-            let report = crate::engine::language::expand::expand_report(&text);
-            ranges.extend(
-                WrittenView::new(uri, &text, model, &report.model_map, None, false, false).folds(),
-            );
-        }
-        let mut stack: Vec<&crate::engine::language::model::MacroDirective> = Vec::new();
-        const COND: &[&str] = &["if", "ifdef", "ifndef"];
-        for directive in &directives {
-            let kind = directive.kind.as_str();
-            if COND.contains(&kind) || kind == "for" {
-                stack.push(directive);
-            } else if kind == "endif"
-                && stack
-                    .last()
-                    .is_some_and(|d| COND.contains(&d.kind.as_str()))
-            {
-                let opener = stack.pop().unwrap();
-                let start = index.position_utf16(&text, opener.span.start);
-                let end = index.position_utf16(&text, directive.span.end);
-                if start.line < end.line {
-                    ranges.push(FoldingRange {
-                        start_line: start.line,
-                        start_character: None,
-                        end_line: end.line,
-                        end_character: None,
-                        kind: Some(FoldingRangeKind::Region),
-                        collapsed_text: Some(format!("@#{} ... @#endif", opener.kind)),
-                    });
-                }
-            } else if kind == "endfor" && stack.last().is_some_and(|d| d.kind == "for") {
-                let opener = stack.pop().unwrap();
-                let start = index.position_utf16(&text, opener.span.start);
-                let end = index.position_utf16(&text, directive.span.end);
-                if start.line < end.line {
-                    ranges.push(FoldingRange {
-                        start_line: start.line,
-                        start_character: None,
-                        end_line: end.line,
-                        end_character: None,
-                        kind: Some(FoldingRangeKind::Region),
-                        collapsed_text: Some("@#for ... @#endfor".into()),
-                    });
-                }
+            if ends.last().is_some_and(|end| *end < range.end_line) {
+                return false;
             }
-        }
-        for (start_line, end_line) in block_comment_folds(&text) {
-            ranges.push(FoldingRange {
-                start_line,
-                start_character: None,
-                end_line,
-                end_character: None,
-                kind: Some(FoldingRangeKind::Comment),
-                collapsed_text: None,
-            });
-        }
-        if ranges.is_empty() {
-            None
-        } else {
-            Some(ranges)
-        }
+            ends.push(range.end_line);
+            true
+        });
+        (!ranges.is_empty()).then_some(ranges)
     }
 
     fn selection_ranges(&self, uri: &Url, positions: &[Position]) -> Option<Vec<SelectionRange>> {
@@ -4268,32 +4175,6 @@ fn line_range_edit(text: &str, start_line: u32, end_line: u32, replacement: Stri
         range: Range::new(Position::new(start_line, 0), Position::new(end_line, end)),
         new_text: replacement,
     }
-}
-
-fn block_comment_folds(text: &str) -> Vec<(u32, u32)> {
-    let mut out = Vec::new();
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if bytes[i] == b'/' && bytes[i + 1] == b'*' {
-            let start = i;
-            i += 2;
-            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
-                i += 1;
-            }
-            if i + 1 < bytes.len() {
-                i += 2;
-                let start_line = text[..start].bytes().filter(|&b| b == b'\n').count() as u32;
-                let end_line = text[..i].bytes().filter(|&b| b == b'\n').count() as u32;
-                if start_line < end_line {
-                    out.push((start_line, end_line));
-                }
-            }
-            continue;
-        }
-        i += 1;
-    }
-    out
 }
 
 fn equation_at<'a>(

@@ -12,7 +12,7 @@ Navigation uses the current model and its known includes.
 | Show Call Hierarchy | Equations that use a variable. |
 | Outline, breadcrumbs and Go to Symbol in Editor | Structure in the current written file, with configurable [sections](settings:dynare.outline.sections) and [equation number labels](settings:dynare.outline.equationNumbers). |
 | Go to Symbol in Workspace | Symbols known to the language server. |
-| Folding | Complete block and macro regions. |
+| Folding | Complete Dynare blocks and written macro loops and conditionals. Multiline declarations, commands and Dynare assignments fold by statement. |
 
 [Equation navigation](model-and-includes.md#equations) reaches equations across
 the model, including repeated macro occurrences. Rename is unavailable where

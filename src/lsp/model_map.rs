@@ -608,41 +608,6 @@ impl<'a> WrittenView<'a> {
         output.sort_by_key(|row| range_key(row.range));
         output
     }
-
-    pub fn folds(&self) -> Vec<FoldingRange> {
-        let mut output = Vec::new();
-        for (statement, source) in self
-            .model
-            .statements
-            .iter()
-            .zip(&self.map.statements)
-            .filter(|(statement, _)| statement.kind == StatementKind::Block && statement.complete)
-        {
-            let local = self.local_locations(source);
-            if local.len() != 1 || source.segments.len() != 1 {
-                continue;
-            }
-            let range = local[0].range;
-            if range.start.line < range.end.line {
-                let key = (range.start.line, range.end.line);
-                if output
-                    .iter()
-                    .any(|row: &FoldingRange| (row.start_line, row.end_line) == key)
-                {
-                    continue;
-                }
-                output.push(FoldingRange {
-                    start_line: key.0,
-                    end_line: key.1,
-                    start_character: None,
-                    end_character: None,
-                    kind: Some(FoldingRangeKind::Region),
-                    collapsed_text: Some(format!("{} ... end;", statement.name)),
-                });
-            }
-        }
-        output
-    }
 }
 
 pub(crate) fn common_leaves(views: Vec<Vec<DocumentSymbol>>) -> Vec<DocumentSymbol> {

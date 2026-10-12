@@ -1,6 +1,10 @@
-# Run the isolated native UI acceptance harness with CDP enabled only on request.
+# Run the isolated native UI acceptance harness; folding scope requires CDP.
 $ErrorActionPreference = 'Stop'
+$electronRunAsNode = $env:ELECTRON_RUN_AS_NODE
+Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 $extensionRoot = Split-Path -Parent $PSScriptRoot
+$scope = $env:DYGNOSIS_HOST_SCOPE
+if ($scope -and $scope -notin @('all', 'semantic', 'folding')) { throw 'DYGNOSIS_HOST_SCOPE must be all, semantic, or folding.' }
 $testRoot = Join-Path $extensionRoot '.test-data'
 $runId = [Guid]::NewGuid().ToString()
 $hostRoot = Join-Path $testRoot $runId
@@ -12,7 +16,7 @@ if (-not $vscodeExecutable) {
 }
 if (-not (Test-Path -LiteralPath $vscodeExecutable)) { throw 'Set DYGNOSIS_VSCODE_EXECUTABLE to the minimum/current VS Code executable.' }
 if (-not $env:DYGNOSIS_TEST_BINARY) { throw 'Set DYGNOSIS_TEST_BINARY to the matching built engine.' }
-$visualEnabled = $env:DYGNOSIS_HOST_VISUAL -eq '1'
+$visualEnabled = $env:DYGNOSIS_HOST_VISUAL -eq '1' -or $scope -eq 'folding'
 if ($visualEnabled) {
     $cdpPort = 0
     if ($env:DYGNOSIS_HOST_CDP_PORT) {
@@ -48,11 +52,20 @@ $arguments = @(
     ('--extensions-dir="' + (Join-Path $hostRoot 'extensions') + '"'),
     '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--disable-gpu'
 )
+$arguments += '--no-sandbox'
 if ($visualEnabled) {
     $arguments += @('--remote-debugging-address=127.0.0.1', "--remote-debugging-port=$cdpPort")
 }
-$process = Start-Process -FilePath $vscodeExecutable -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait
-if (-not (Test-Path -LiteralPath $env:DYGNOSIS_HOST_RESULT)) { throw 'VS Code did not write a fresh extension test result.' }
+$hostStdout = Join-Path $hostRoot 'host.stdout.log'
+$hostStderr = Join-Path $hostRoot 'host.stderr.log'
+$process = Start-Process -FilePath $vscodeExecutable -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait `
+    -RedirectStandardOutput $hostStdout -RedirectStandardError $hostStderr
+if ($null -ne $electronRunAsNode) { $env:ELECTRON_RUN_AS_NODE = $electronRunAsNode }
+if (-not (Test-Path -LiteralPath $env:DYGNOSIS_HOST_RESULT)) {
+    $stdout = if (Test-Path -LiteralPath $hostStdout) { Get-Content -Raw -LiteralPath $hostStdout } else { '' }
+    $stderr = if (Test-Path -LiteralPath $hostStderr) { Get-Content -Raw -LiteralPath $hostStderr } else { '' }
+    throw "VS Code did not write a fresh extension test result. Exit $($process.ExitCode). stdout: $stdout stderr: $stderr"
+}
 $result = Get-Content -Raw -LiteralPath $env:DYGNOSIS_HOST_RESULT | ConvertFrom-Json
 if ($result.runId -ne $runId) { throw 'VS Code extension test result is stale.' }
 if ($result.passed -ne $true) { throw "VS Code extension test failed: $($result.error)" }
