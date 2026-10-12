@@ -6,7 +6,6 @@
   "dynare.outline.equationNumbers": "navigate-code",
   "dynare.statusBar.enabled": "model-and-includes",
   "dynare.statusBar.counts": "model-and-includes",
-  "dynare.modelView.sections": "model-and-includes",
   "dynare.nameDetails.longName": "appearance",
   "dynare.nameDetails.tex": "appearance",
   "dynare.parameterValueHints": "appearance",

@@ -133,12 +133,6 @@ exports.run = async function run() {
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
     await runCommand("workbench.action.closePanel");
     await focusExplorer();
-    await showView("dygnosis.model");
-    await settle(300);
-    clickAt(18, 748);
-    await settle(200);
-    clickAt(18, 778);
-    await settle(200);
     await showView("dygnosis.project");
     for (let i = 0; i < 5; ++i) await runCommand("list.expand");
   });
@@ -150,7 +144,7 @@ exports.run = async function run() {
     await runCommand("workbench.action.closePanel");
     await vscode.window.showTextDocument(model, { preview: false, viewColumn: vscode.ViewColumn.One });
     await focusExplorer();
-    await showView("dygnosis.model");
+    await showView("outline");
     for (let i = 0; i < 6; ++i) await runCommand("list.expand");
     const editor = await vscode.window.showTextDocument(model, { preview: false, viewColumn: vscode.ViewColumn.One });
     editor.revealRange(new vscode.Range(5, 0, 11, 0), vscode.TextEditorRevealType.InCenter);

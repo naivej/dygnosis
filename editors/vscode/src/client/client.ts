@@ -265,7 +265,7 @@ export class DygnosisClient implements vscode.Disposable {
         }));
         this.refreshSymbols();
         this.invalidate();
-        if (!this.modelInfoSupported) void this.failure("This engine does not support the Dynare model view. Update dynare.serverPath or use the bundled binary.");
+        if (!this.modelInfoSupported) void this.failure("This engine does not support model information. Update dynare.serverPath or use the bundled binary.");
       });
     } catch (error) { if (!this.closed && generation === this.startGeneration) await this.failure(`Dygnosis could not start. Reinstall the extension or check dynare.serverPath. ${String(error)}`); }
   }

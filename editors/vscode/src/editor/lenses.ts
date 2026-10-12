@@ -1,11 +1,11 @@
 import * as vscode from "vscode";
 import { documentSelector, DygnosisClient, isAnalysisDocument, ModelSnapshot } from "../client/client";
-import { sameWrittenLocation } from "./model_view";
+import { sameWrittenLocation } from "./model_navigation";
 import type { Declaration, Location, ModelInfo, Statement } from "../client/protocol";
 import { booleanSetting, Log } from "../client/settings";
 
 export interface LensPreferences { modelEquations: boolean; declarationReferences: boolean; effectiveModel: boolean }
-interface ModelGroup { anchor: Location; statements: Statement[]; count: number | null }
+interface ModelGroup { anchor: Location; statements: Statement[] }
 interface DeclarationGroup { anchor: Location; declarations: Declaration[] }
 interface LensContext {
   document: vscode.TextDocument; version: number; root: vscode.Uri; info: ModelSnapshot;
@@ -44,7 +44,7 @@ function mappedModelGroups(info: ModelInfo, document: vscode.TextDocument): Mode
     if (statement.name !== "model" || statement.kind !== "block" || !statement.complete || statement.native ||
         !safeAnchor(statement.lens_anchor, document)) continue;
     const key = anchorKey(statement.lens_anchor);
-    const group = groups.get(key) ?? { anchor: statement.lens_anchor, statements: [], count: null };
+    const group = groups.get(key) ?? { anchor: statement.lens_anchor, statements: [] };
     group.statements.push(statement);
     groups.set(key, group);
   }
@@ -63,7 +63,6 @@ export function modelLensGroups(info: ModelInfo, document: vscode.TextDocument):
       const rows = counts.get(statement.id) ?? { count: 0, mapped: true };
       return statement.equation_count !== null && statement.equation_count === rows.count && rows.mapped;
     });
-    if (safe && group.statements.length === 1) group.count = group.statements[0].equation_count;
     return safe;
   });
 }
@@ -148,8 +147,7 @@ export function registerLenses(service: DygnosisClient): vscode.Disposable {
         };
         const models = modelLensGroups(info, document);
         if (preferences.modelEquations) for (const group of models) add("modelEquations", group.anchor,
-          group.statements.map(row => row.id), group.count !== null ? group.count === 1 ? "Jump to equation" : `Jump to ${String(group.count)} equations`
-            : `Jump to equation (${String(group.statements.length)} occurrences)`, "dygnosis.browseLensEquations");
+          group.statements.map(row => row.id), "Jump to equation...", "dygnosis.browseLensEquations");
         if (preferences.declarationReferences) for (const group of declarationLensGroups(info, document))
           add("declarationReferences", group.anchor, group.declarations.map(row => row.id), "Find references", "dygnosis.findLensReferences");
         if (preferences.effectiveModel && safeAnchor(info.first_model_anchor, document)) {

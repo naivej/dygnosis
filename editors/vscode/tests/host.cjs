@@ -551,7 +551,15 @@ exports.run = async function run() {
     const extension = vscode.extensions.getExtension("CoconutWater.dygnosis");
     assert.ok(extension);
     const service = await extension.activate();
-    assert.ok(["all", "semantic", "folding"].includes(scope), "Native host scope must be all, semantic, or folding");
+    assert.ok(["all", "semantic", "folding", "presentation"].includes(scope), "Native host scope must be all, semantic, folding, or presentation");
+    if (scope === "presentation") {
+      await require("./helpers/presentation_host.cjs").checkPresentation(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, currentSnapshot, writeObservedInput });
+      await service.shutdown();
+      evidence.artifacts_after = await historyArtifacts();
+      assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "the engine and compiled extension must remain unchanged throughout the host gate");
+      evidence.passed = true;
+      return;
+    }
     if (scope === "folding") {
       const helper = require("./helpers/folding_host.cjs");
       await helper.checkFolding(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, writeObservedInput });
@@ -632,7 +640,7 @@ exports.run = async function run() {
     await waitFor(async () => {
       const lenses = await vscode.commands.executeCommand("vscode.executeCodeLensProvider", document.uri);
       equationLens = lenses?.find(lens => lens.command?.command === "dygnosis.browseLensEquations");
-      return equationLens?.command?.title === "Jump to equation";
+      return equationLens?.command?.title === "Jump to equation...";
     }, "equation CodeLens shows the jump title");
     const equationJump = vscode.commands.executeCommand(equationLens.command.command, ...equationLens.command.arguments);
     await new Promise(resolve => setTimeout(resolve, 500));

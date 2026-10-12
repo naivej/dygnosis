@@ -121,7 +121,7 @@ const originalLoad = Module._load;
 Module._load = function(id, ...args) {
   if (id === "vscode") return vscode;
   if (id === "vscode-languageclient/node") return { DocumentSymbolRequest: { method: "textDocument/documentSymbol" }, ExecuteCommandRequest: { type: "workspace/executeCommand" }, State: { Stopped: 1 } };
-  if (importedModule(id, args[0]) === "client" && /(?:model_view|preview)\.js$/.test(args[0]?.filename ?? "")) return {
+  if (importedModule(id, args[0]) === "client" && /(?:model_navigation|preview)\.js$/.test(args[0]?.filename ?? "")) return {
     isAnalysisDocument: document => document.languageId === "dynare" && ["file", "untitled"].includes(document.uri.scheme),
   };
   return originalLoad.call(this, id, ...args);

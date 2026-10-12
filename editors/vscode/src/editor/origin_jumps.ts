@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import type { DygnosisClient, InputInvalidation, NavigationGuard } from "../client/client";
-import { sameWrittenLocation } from "./model_view";
+import { sameWrittenLocation } from "./model_navigation";
 import type { EffectivePreviewRegistry, EffectivePreviewSession } from "./preview";
 import { appendMacroMessages, effectivePreviewArguments } from "./preview";
 import { location, record } from "../client/protocol";

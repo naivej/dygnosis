@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.11.20
+
+- Use **Jump to equation...** from the Command Palette or an equation CodeLens
+  to choose a counted equation and open its written source. The list includes
+  unnamed equations, scopes, and macro occurrences.
+- Remove the **Dynare model** Explorer panel. The status-bar hover presents
+  aggregate and dimension counts, including endogenous classes.
+- Group consecutive top-level Dynare assignments and MATLAB statements under
+  **MATLAB expressions** in Outline. Model and declaration names show written
+  heterogeneity options. Complete model blocks no longer show the
+  **Dygnosis numbers before transformation** detail.
+
 ## v0.11.19
 
 - Fold complete Dynare blocks, written macro loops and conditionals, and

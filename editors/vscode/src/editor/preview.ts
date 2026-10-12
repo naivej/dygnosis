@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { DygnosisClient } from "../client/client";
-import { NavigationContext, validateNavigationContext } from "./model_view";
+import { NavigationContext, validateNavigationContext } from "./model_navigation";
 import { record } from "../client/protocol";
 
 export interface EffectivePreviewSession {

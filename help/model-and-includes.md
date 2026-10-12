@@ -4,8 +4,8 @@
 
 A **model root** is the main `.mod` or `.dyn` file. An included file uses the
 context of the root that includes it, called its **model owner**.
-**Choose model owner** selects the context of an include shared by several
-known models. If no owner is known, open the root first.
+**Choose model owner** in the Command Palette selects the context of an
+include shared by several known models. If no owner is known, open the root first.
 **Treat this file as a model root** makes an included `.mod` or `.dyn` its own
 root again.
 
@@ -17,15 +17,20 @@ for a loose saved file.
 
 ## Model structure and counts
 
-**Dynare model** in Explorer shows aggregate counts, variable timing,
-heterogeneity dimensions and related files. Its [section settings](settings:dynare.modelView.sections)
-choose the visible sections and their order. Each heterogeneity dimension has
-separate counts.
-
 The [model status bar](settings:dynare.statusBar.enabled) shows aggregate
 endogenous, exogenous and equation counts for the active `.mod` or `.dyn` file.
-Its [count preferences](settings:dynare.statusBar.counts) choose which counts
-appear and in what order. These presentation choices apply to the displayed file.
+Click it to focus Outline. Hover shows an aggregate count block followed by
+one count block for each heterogeneity dimension. Each endogenous line includes
+static, predetermined, forward-looking and mixed counts, including zero.
+The accessibility label states the same counts.
+
+Its [count preferences](settings:dynare.statusBar.counts) choose which count
+lines appear and their order in every block and on the status bar. Hiding
+endogenous also hides its class counts. These choices apply to the displayed
+file. Outline shows model structure and heterogeneity dimensions; variable
+hover and declaration detail show timing. Parameter counts remain available
+to agents through `dynare_model_info`.
+
 Incomplete expansion withholds counts and equation navigation and shows the
 reason.
 
@@ -33,12 +38,16 @@ reason.
 
 | Action | Available result |
 |---|---|
-| Go to equation N | An equation by number, within the aggregate model or a selected dimension. |
-| Jump to named equation | A searchable list of equations, names, scopes and source files. |
-| Jump to equation / Jump to N equations | A CodeLens above a model block that lists its counted equations. The [equation action](settings:dynare.codeLens.modelEquations) can be hidden. |
+| Jump to equation... in the Command Palette | One searchable list of every counted equation in the active model, including unnamed equations. |
+| Jump to equation... above a model block | One searchable list of that opener's counted equations across every macro occurrence and scope. The [equation action](settings:dynare.codeLens.modelEquations) can be hidden. |
 | Find references | An optional [CodeLens at declarations](settings:dynare.codeLens.declarationReferences). |
 | Expand macros | An optional [CodeLens for the macro preview](settings:dynare.codeLens.effectiveModel). |
-| Refresh model view | Updated model information. |
+
+Each equation row shows its number and name, scope, source file, macro origin
+and equation text. Type any of those fields to filter the list. Choose a row
+to open its verified written source; cancel to keep the cursor where it is.
+Even a list with one equation waits for your choice. An empty model or opener
+explains that it has no counted equations.
 
 Native `editor.codeLens` also controls CodeLens visibility.
 

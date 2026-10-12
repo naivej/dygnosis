@@ -51,3 +51,21 @@ test("preview schemes and user-only executable scope are manifest constraints", 
   assert.equal(manifest.contributes.mcpServerDefinitionProviders[0].id, "dygnosis");
   assert.equal(manifest.activationEvents.includes("onStartupFinished"), true);
 });
+test("equation navigation manifest replaces old commands and removes the model panel", () => {
+  const { contributes } = require("../package.json");
+  const commands = contributes.commands.map(row => row.command);
+  const replacement = contributes.commands.find(row => row.command === "dygnosis.jumpToEquation");
+  assert.equal(replacement.title, "Jump to equation..."); assert.equal(replacement.icon, "$(list-ordered)");
+  assert.equal(replacement.enablement, "dygnosis.analysisDocument");
+  for (const command of ["dygnosis.goToEquation", "dygnosis.jumpToNamedEquation", "dygnosis.refreshModelView", "dygnosis.openRelatedFile"]) {
+    assert.equal(commands.includes(command), false, command);
+    assert.equal(Object.values(contributes.menus).flat().some(row => row.command === command), false, command);
+  }
+  assert.equal(Object.values(contributes.views).flat().some(row => row.id === "dygnosis.model"), false);
+  assert.equal(contributes.viewsWelcome.some(row => row.view === "dygnosis.model"), false);
+  assert.equal(Object.values(contributes.menus).flat().some(row => /dygnosis\.(model|equationNavigation|includeOwners)\b/.test(row.when ?? "")), false);
+  assert.equal(contributes.configuration.some(group => Object.hasOwn(group.properties, "dynare.modelView.sections")), false);
+  for (const command of ["dygnosis.jumpToEquation", "dygnosis.chooseModelOwner"]) {
+    assert.equal(contributes.menus.commandPalette.some(row => row.command === command && row.when === "dygnosis.analysisDocument"), true, command);
+  }
+});

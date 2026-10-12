@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.19",
+  "version": "0.11.20",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -128,18 +128,11 @@
         "enablement": "dygnosis.analysisDocument && resourceExtname =~ /\\.(mod|dyn)$/"
       },
       {
-        "command": "dygnosis.goToEquation",
-        "title": "Go to equation N",
+        "command": "dygnosis.jumpToEquation",
+        "title": "Jump to equation...",
         "category": "Dygnosis",
         "enablement": "dygnosis.analysisDocument",
         "icon": "$(list-ordered)"
-      },
-      {
-        "command": "dygnosis.jumpToNamedEquation",
-        "title": "Jump to named equation",
-        "category": "Dygnosis",
-        "enablement": "dygnosis.analysisDocument",
-        "icon": "$(search)"
       },
       {
         "command": "dygnosis.chooseModelOwner",
@@ -147,12 +140,6 @@
         "category": "Dygnosis",
         "enablement": "dygnosis.analysisDocument",
         "icon": "$(organization)"
-      },
-      {
-        "command": "dygnosis.refreshModelView",
-        "title": "Refresh model view",
-        "category": "Dygnosis",
-        "icon": "$(refresh)"
       },
       {
         "command": "dygnosis.explainDiagnostic",
@@ -292,11 +279,7 @@
           "when": "dygnosis.analysisDocument && resourceExtname =~ /\\.(mod|dyn)$/"
         },
         {
-          "command": "dygnosis.goToEquation",
-          "when": "dygnosis.analysisDocument"
-        },
-        {
-          "command": "dygnosis.jumpToNamedEquation",
+          "command": "dygnosis.jumpToEquation",
           "when": "dygnosis.analysisDocument"
         },
         {
@@ -318,26 +301,6 @@
       ],
       "view/title": [
         {
-          "command": "dygnosis.goToEquation",
-          "when": "view == dygnosis.model && dygnosis.equationNavigation",
-          "group": "navigation@1"
-        },
-        {
-          "command": "dygnosis.jumpToNamedEquation",
-          "when": "view == dygnosis.model && dygnosis.equationNavigation",
-          "group": "navigation@2"
-        },
-        {
-          "command": "dygnosis.chooseModelOwner",
-          "when": "view == dygnosis.model && dygnosis.includeOwners",
-          "group": "navigation@3"
-        },
-        {
-          "command": "dygnosis.refreshModelView",
-          "when": "view == dygnosis.model",
-          "group": "navigation@4"
-        },
-        {
           "command": "dygnosis.recheckProject",
           "when": "view == dygnosis.project",
           "group": "navigation@1"
@@ -354,18 +317,8 @@
         },
         {
           "command": "dygnosis.openHelp",
-          "when": "view == dygnosis.model",
-          "group": "navigation@99"
-        },
-        {
-          "command": "dygnosis.openHelp",
           "when": "view == dygnosis.project",
           "group": "navigation@99"
-        },
-        {
-          "command": "dygnosis.openChanges",
-          "when": "view == dygnosis.model && dygnosis.changesContext",
-          "group": "navigation@5"
         }
       ],
       "view/item/context": [
@@ -478,27 +431,6 @@
             ],
             "scope": "resource",
             "description": "Aggregate counts shown in the status bar, in this order. Empty hides the bar."
-          },
-          "dynare.modelView.sections": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "counts",
-                "timing",
-                "dimensions",
-                "relatedFiles"
-              ]
-            },
-            "uniqueItems": true,
-            "default": [
-              "counts",
-              "timing",
-              "dimensions",
-              "relatedFiles"
-            ],
-            "scope": "resource",
-            "description": "Sections shown in the Dynare model view. List order sets section order; empty hides its content."
           }
         }
       },
@@ -1487,11 +1419,6 @@
     "views": {
       "explorer": [
         {
-          "id": "dygnosis.model",
-          "name": "Dynare model",
-          "icon": "media/logo_s.png"
-        },
-        {
           "id": "dygnosis.project",
           "name": "Dynare project checks",
           "icon": "media/logo_s.png"
@@ -1513,10 +1440,6 @@
       }
     ],
     "viewsWelcome": [
-      {
-        "view": "dygnosis.model",
-        "contents": "Open a .mod or .dyn model to inspect its equations and names.\n[Open Dygnosis Help](command:dygnosis.openHelp)"
-      },
       {
         "view": "dygnosis.project",
         "contents": "Open a folder to check saved .mod models.\n[Open Dygnosis Help](command:dygnosis.openHelp)"

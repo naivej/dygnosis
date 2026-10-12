@@ -21,7 +21,7 @@ const moduleFiles = Object.freeze({
   lenses: "editor/lenses",
   lifecycle: "client/lifecycle",
   mcp: "mcp/mcp",
-  model_view: "editor/model_view",
+  model_navigation: "editor/model_navigation",
   origin_jumps: "editor/origin_jumps",
   preview: "editor/preview",
   project_mcp: "mcp/project_mcp",

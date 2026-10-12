@@ -97,14 +97,14 @@ const vscode = {
 const originalLoad = Module._load;
 Module._load = function(id, ...args) {
   if (id === "vscode") return vscode;
-  if (importedModule(id, args[0]) === "client" && /(?:lenses|model_view|preview)\.js$/.test(args[0]?.filename ?? "")) return {
+  if (importedModule(id, args[0]) === "client" && /(?:lenses|model_navigation|preview)\.js$/.test(args[0]?.filename ?? "")) return {
     documentSelector: [{ language: "dynare", scheme: "file" }, { language: "dynare", scheme: "untitled" }],
     isAnalysisDocument: doc => doc.languageId === "dynare" && ["file", "untitled"].includes(doc.uri.scheme),
   };
   return originalLoad.call(this, id, ...args);
 };
 const { lensPreferences, modelLensGroups, declarationLensGroups, registerLenses } = require(compiledModule("lenses"));
-const { browseModelEquations } = require(compiledModule("model_view"));
+const { browseModelEquations } = require(compiledModule("model_navigation"));
 const { registerEffectivePreview } = require(compiledModule("preview"));
 Module._load = originalLoad;
 const lensContributions = { configuration: require("../package.json").contributes.configuration.find(group => group.title === "Dygnosis: Actions") };
@@ -198,7 +198,7 @@ test("resource controls use approved defaults and native visibility with safe in
 });
 test("default actionable model lens reuses the cache facts and creates no reference scan or solver command", async () => {
   const env = setup(); const lenses = await env.provide();
-  assert.equal(lenses.length, 1); assert.equal(lenses[0].command.title, "Jump to equation");
+  assert.equal(lenses.length, 1); assert.equal(lenses[0].command.title, "Jump to equation...");
   assert.equal(lenses[0].command.command, "dygnosis.browseLensEquations");
   assert.deepEqual(lenses[0].range, new Range(3, 0, 3, 5)); assert.equal(env.service.requests.length, 1);
   assert.equal(env.host.references.length, 0); assert.equal(env.service.engineRequests.length, 0);
@@ -212,7 +212,7 @@ test("aggregate, heterogeneous and multiple model blocks keep their separate sur
   const rows = [equation(), equation("e2", { block_id: "s2", scope: "dimension", dimension: "households", location: location("file:///project/hank.inc", 2) }),
     equation("e3", { block_id: "s2", scope: "dimension", dimension: "households", number: 2 })];
   env.service.info = () => facts(env.doc, { statements: blocks, equations: rows });
-  const lenses = await env.provide(); assert.deepEqual(lenses.map(row => row.command.title), ["Jump to equation", "Jump to 2 equations", "Jump to 0 equations"]);
+  const lenses = await env.provide(); assert.deepEqual(lenses.map(row => row.command.title), ["Jump to equation...", "Jump to equation...", "Jump to equation..."]);
   env.host.answers.push(items => items[0]); await env.run(lenses[1]);
   assert.equal(env.host.picks[0].items.length, 2); assert.ok(env.host.picks[0].items.every(row => /households/.test(row.description)));
   assert.equal(env.service.jumps[0].target.uri, "file:///project/hank.inc");
@@ -220,26 +220,33 @@ test("aggregate, heterogeneous and multiple model blocks keep their separate sur
   env.host.activeEditor = env.host.editors[0]; await env.run(lenses[2]);
   assert.match(env.host.messages.at(-1), /no surviving counted equations/); env.registration.dispose();
 });
-test("repeated macro openers group once, omit ambiguous count and choose occurrence/dimension explicitly", async () => {
+test("repeated macro openers list all occurrences and scopes in one searchable picker", async () => {
   const env = setup();
-  const blocks = [statement("s1", { origin_frames: [{ kind: "for", variable: "i", value: "1", segments: [] }] }),
-    statement("s2", { dimension: "firms", equation_count: 2, origin_frames: [{ kind: "for", variable: "i", value: "2", segments: [] }] })];
-  const rows = [equation(), equation("e2", { block_id: "s2", scope: "dimension", dimension: "firms", number: 1 }),
-    equation("e3", { block_id: "s2", scope: "dimension", dimension: "firms", number: 2 })];
+  const firstOrigin = [{ kind: "for", variable: "i", value: "1", segments: [] }], secondOrigin = [{ kind: "for", variable: "i", value: "2", segments: [] }];
+  const blocks = [statement("s1", { origin_frames: firstOrigin }),
+    statement("s2", { dimension: "firms", equation_count: 2, origin_frames: secondOrigin }),
+    statement("other", { lens_anchor: location(undefined, 20) })];
+  const rows = [equation("e1", { origin_frames: firstOrigin }),
+    equation("e2", { block_id: "s2", scope: "dimension", dimension: "firms", number: 1, name: "", origin_frames: secondOrigin }),
+    equation("e3", { block_id: "s2", scope: "dimension", dimension: "firms", number: 2, origin_frames: secondOrigin }),
+    equation("outside", { block_id: "other" })];
   env.service.info = () => facts(env.doc, { statements: blocks, equations: rows });
-  const lenses = await env.provide(); assert.equal(lenses.length, 1); assert.equal(lenses[0].command.title, "Jump to equation (2 occurrences)");
-  env.host.answers.push(items => items[1], items => items[1]); await env.run(lenses[0]);
-  assert.deepEqual(env.host.picks[0].items.map(row => row.label), ["Aggregate", "Dimension firms"]);
-  assert.match(env.host.picks[0].items[0].detail, /i=1.*Expansion 1/); assert.match(env.host.picks[0].items[1].detail, /i=2.*Expansion 2/);
-  assert.deepEqual(env.host.picks[0].items.map(row => row.block.id), ["s1", "s2"]);
-  assert.deepEqual(env.host.picks[1].items.map(row => row.label), ["1 · Euler", "2 · Euler"]);
+  const lenses = await env.provide(); assert.equal(lenses.length, 2); assert.equal(lenses[0].command.title, "Jump to equation...");
+  env.host.answers.push(items => items[2]); await env.run(lenses[0]);
+  assert.equal(env.host.picks.length, 1);
+  const { items, options } = env.host.picks[0];
+  assert.deepEqual(items.map(row => row.label), ["1 · Euler", "1 · Unnamed equation", "2 · Euler"]);
+  assert.deepEqual(items.map(row => row.equation.id), ["e1", "e2", "e3"]);
+  assert.match(items[0].detail, /i=1/); assert.match(items[1].detail, /i=2/);
+  assert.match(items[0].description, /Aggregate/); assert.match(items[1].description, /Dimension firms/);
+  assert.equal(options.matchOnDescription, true); assert.equal(options.matchOnDetail, true);
   assert.equal(env.service.jumps.length, 1); env.registration.dispose();
 });
 test("removal/replacement counts only server surviving rows, without adding replacement or per-equation lenses", async () => {
   const env = setup(); env.service.info = () => facts(env.doc, { statements: [statement("s1", { equation_count: 0 }),
     statement("replacement", { name: "model_replace", equation_count: null, lens_anchor: null })],
     equations: [equation("replacement:e", { block_id: "replacement" })] });
-  assert.deepEqual((await env.provide()).map(row => row.command.title), ["Jump to 0 equations"]); env.registration.dispose();
+  assert.deepEqual((await env.provide()).map(row => row.command.title), ["Jump to equation..."]); env.registration.dispose();
 });
 test("incomplete, partial, ambiguous mapping and unsafe anchors expose no authoritative lenses", () => {
   const env = setup();
@@ -345,7 +352,7 @@ test("unsupported resources and unavailable facts stay quiet without source pars
   env.service.modelInfo = async () => { throw new Error("Unsupported schema"); }; assert.deepEqual(await env.provide(), []);
   assert.ok(env.service.logged.includes("Error: Unsupported schema")); assert.equal(env.host.messages.length, 0); env.registration.dispose();
 });
-test("block bridge validates root/revision/instance and refuses stale input during both picks and source loading", async () => {
+test("block bridge validates root/revision/instance and refuses stale input during the picker and source loading", async () => {
   for (const change of ["cancel", "version", "owner", "instance", "revision", "guard", "source"]) {
     const env = setup(); const lens = (await env.provide())[0]; const pick = deferred(); env.host.answers.push(() => pick.promise);
     const pending = env.run(lens); await flush(); assert.equal(env.host.picks.length, 1);
@@ -362,7 +369,7 @@ test("block bridge validates root/revision/instance and refuses stale input duri
     assert.equal(env.service.jumps.length, 0, change); env.registration.dispose();
   }
 });
-test("block occurrence cancellation and change prevent a second picker", async () => {
+test("repeated-opener list cancellation and change prevent navigation", async () => {
   for (const change of ["cancel", "version"]) {
     const env = setup(); const info = facts(env.doc, { statements: [statement(), statement("s2")], equations: [equation(), equation("e2", { block_id: "s2" })] });
     env.service.info = () => info; const lens = (await env.provide())[0]; const pick = deferred(); env.host.answers.push(() => pick.promise);
