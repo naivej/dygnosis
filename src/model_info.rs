@@ -21,7 +21,7 @@ pub fn format_timing_line(info: &TimingInfo) -> String {
     let offsets = info
         .offsets
         .iter()
-        .map(|&o| format_time_offset(o))
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(", ");
     if info.predetermined_conversion {
@@ -50,14 +50,6 @@ pub fn format_structure_lens(summary: &StructureSummary) -> String {
         summary.max_lead,
         summary.max_lag
     )
-}
-
-fn format_time_offset(offset: i32) -> String {
-    if offset == 0 {
-        "t".into()
-    } else {
-        format!("t{offset:+}")
-    }
 }
 
 /// Shared arithmetic operations. Strict mode uses retained numeric tokens and

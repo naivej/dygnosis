@@ -8,6 +8,8 @@ use crate::lexer::{Token, TokenKind};
 use crate::model::{AssignmentIndex, ExecutionStep, Model, StatementKind};
 use crate::model_info::arithmetic_number;
 
+mod native_scalar;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AssignmentValue {
     pub statement_id: usize,
@@ -154,11 +156,23 @@ pub fn assignment_values(model: &Model) -> Vec<AssignmentValue> {
                     let syntax = assignment
                         .expr
                         .and_then(|expr| model.assignment_syntax.get(&expr));
-                    if !syntax.is_some_and(|syntax| syntax.full_rhs) {
+                    let native_value = (assignment.native && !flow.active())
+                        .then(|| {
+                            native_scalar::scalar_value(
+                                &assignment.expression,
+                                model,
+                                &known,
+                                &native_shadows,
+                            )
+                        })
+                        .flatten();
+                    if native_value.is_none() && !syntax.is_some_and(|syntax| syntax.full_rhs) {
                         known.clear();
                         native_values.clear();
                     }
-                    let value = if !flow.active() && syntax.is_some_and(|syntax| syntax.full_rhs) {
+                    let value = if let Some((value, _)) = native_value {
+                        Some(value)
+                    } else if !flow.active() && syntax.is_some_and(|syntax| syntax.full_rhs) {
                         if assignment
                             .expr
                             .is_some_and(|expr| calls_may_mutate(model, expr, &native_shadows))
@@ -192,7 +206,8 @@ pub fn assignment_values(model: &Model) -> Vec<AssignmentValue> {
                         statement_id: *id,
                         value,
                         written_plain_number: syntax
-                            .is_some_and(|syntax| syntax.written_plain_number),
+                            .is_some_and(|syntax| syntax.written_plain_number)
+                            || native_value.is_some_and(|(_, plain)| plain),
                     });
                 } else if statement.kind == StatementKind::Declaration {
                     for declaration in model

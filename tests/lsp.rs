@@ -1009,7 +1009,7 @@ async fn hover_heterogeneous_endogenous_uses_its_model_timing() {
         .expect("hover");
     let md = hover_markdown(hover);
     assert!(md.contains("predetermined"), "hover: {md}");
-    assert!(md.contains("t-1"), "hover: {md}");
+    assert!(md.contains("written offsets: -1, 0"), "hover: {md}");
     assert!(!md.to_ascii_lowercase().contains("unused"), "hover: {md}");
 }
 
@@ -1036,12 +1036,8 @@ async fn hover_heterogeneous_only_lag_is_not_unused() {
     );
     assert!(md.contains("Endogenous"), "hover: {md}");
     assert!(md.contains("predetermined"), "hover: {md}");
-    assert!(md.contains("t-1"), "hover: {md}");
+    assert!(md.contains("written offsets: -1, 0"), "hover: {md}");
     assert!(!md.to_ascii_lowercase().contains("unused"), "hover: {md}");
-    assert!(
-        !md.contains("appears at t\n") && !md.ends_with("appears at t"),
-        "hover: {md}"
-    );
 }
 
 #[tokio::test]

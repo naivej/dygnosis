@@ -149,6 +149,7 @@ async fn full(server: &Backend, document: &Url) -> Vec<SemanticToken> {
     }
 }
 
+// Guards numeric hover offsets, including the predetermined convention shift.
 #[tokio::test]
 async fn predetermined_timing_agrees_in_hover_tokens_outline_and_model_map() {
     let document = uri("predetermined.mod");
@@ -177,12 +178,20 @@ async fn predetermined_timing_agrees_in_hover_tokens_outline_and_model_map() {
             markdown.contains(&format!("Timing: **{class}**")),
             "{markdown}"
         );
+        let display = offsets
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
         if *name == "u" {
-            assert!(markdown.contains("written offsets: t-1, t"), "{markdown}");
+            assert!(
+                markdown.contains(&format!("written offsets: {display}")),
+                "{markdown}"
+            );
             assert!(!markdown.contains("one period earlier"), "{markdown}");
         } else {
             assert!(
-                markdown.contains("Dynare end-of-period offsets:"),
+                markdown.contains(&format!("Dynare end-of-period offsets: {display}")),
                 "{markdown}"
             );
             assert!(
@@ -191,14 +200,6 @@ async fn predetermined_timing_agrees_in_hover_tokens_outline_and_model_map() {
             );
         }
         assert!(!markdown.contains("appears at"), "{markdown}");
-        for offset in offsets {
-            let display = match offset {
-                0 => "t".to_string(),
-                offset if *offset > 0 => format!("t+{offset}"),
-                offset => format!("t{offset}"),
-            };
-            assert!(markdown.contains(&display), "{markdown}");
-        }
     }
     let tokens = decode(&full(server, &document).await, &legend);
     for (line, name, modifiers) in [
@@ -336,18 +337,18 @@ async fn heterogeneous_uses_do_not_change_aggregate_timing_displays() {
     for needle in ["k;", "k(1)", "k(-1)"] {
         let markdown = hover(server, position(&document, text, needle, 0)).await;
         assert!(
-            markdown.contains("Timing: **static** · Dynare end-of-period offsets: t"),
+            markdown.contains("Timing: **static** · Dynare end-of-period offsets: 0"),
             "{markdown}"
         );
         assert!(
             markdown.contains("one period earlier than written offsets"),
             "{markdown}"
         );
-        assert!(!markdown.contains("t-1"), "{markdown}");
+        assert!(!markdown.contains("offsets: -1"), "{markdown}");
     }
     let heterogeneous_hover = hover(server, position(&document, text, "h=k", 0)).await;
     assert!(
-        heterogeneous_hover.contains("Timing: **static** · written offsets: t"),
+        heterogeneous_hover.contains("Timing: **static** · written offsets: 0"),
         "{heterogeneous_hover}"
     );
     assert!(

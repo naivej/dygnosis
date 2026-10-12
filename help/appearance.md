@@ -27,9 +27,7 @@ transparent.
 ## Expression value hints
 
 An assignment such as `beta = 1 / 1.04;` can show its known value. Plain numbers
-need no hint. Unknown inputs or intervening MATLAB execution can make a value
-unavailable. These are source arithmetic values, not estimated parameters or
-steady-state results.
+need no hint. Unknown inputs or MATLAB execution (except simple arithmetic) can make a value unavailable.
 
 [Value hints](settings:dynare.parameterValueHints) controls these annotations,
 together with native `editor.inlayHints.enabled`.

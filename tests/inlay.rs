@@ -29,7 +29,10 @@ fn assignments_follow_execution_and_legacy_final_readers_keep_their_meaning() {
         [Some(2.0), Some(3.0), Some(6.0), Some(7.0)]
     );
     let native = "helper=2;\nparameters p;\np=helper+1;\nhelper=p*2;\np=helper+1;";
-    assert!(values(native).iter().all(|row| row.1.is_none()));
+    assert_eq!(
+        values(native).iter().map(|row| row.1).collect::<Vec<_>>(),
+        [Some(2.0), Some(3.0), Some(6.0), Some(7.0)]
+    );
     assert_eq!(assigned_number(&parse(native), "p"), None);
     assert_eq!(
         assigned_number(&parse("parameters p; p=1/(1/0);"), "p"),
@@ -81,7 +84,7 @@ fn skipped_native_rhs_text_and_unbalanced_parentheses_are_not_scalar_proofs() {
             "{expression}: {actual:?}"
         );
     }
-    assert_eq!(values("helper=(2 /* comment */ +3);")[0].1, None);
+    assert_eq!(values("helper=(2 /* comment */ +3);")[0].1, Some(5.0));
 }
 
 #[test]
@@ -132,8 +135,8 @@ fn native_control_flow_never_establishes_unconditional_values_inside_a_branch() 
 fn written_native_callee_shadows_survive_unknown_values_and_invalidate_later_knowledge() {
     let fresh =
         values("parameters a b c d e;\na=1;\nexp=exp(a);\nb=a+1;\nc=exp(a);\nd=a+1;\na=2;\ne=a+1;");
-    assert_eq!(fresh[1].1, None);
-    assert_eq!(fresh[2].1, None);
+    assert_eq!(fresh[1].1, Some(1.0_f64.exp()));
+    assert_eq!(fresh[2].1, Some(2.0));
     assert_eq!(fresh[4].1, None);
     assert_eq!(fresh[6].1, Some(3.0));
     for assignment in ["exp=2;", "exp=unknown;"] {
@@ -148,6 +151,85 @@ fn written_native_callee_shadows_survive_unknown_values_and_invalidate_later_kno
     let ordinary = values("parameters a b c; a=1; b=exp(a); c=a+1;");
     assert_eq!(ordinary[1].1, None);
     assert_eq!(ordinary[2].1, Some(2.0));
+}
+
+/// Guards the CA_BMZ12 pattern: unrelated native scalar writes must not erase
+/// the earlier inputs of a later declared parameter assignment.
+#[test]
+fn native_scalar_helpers_preserve_later_parameter_hints() {
+    let actual = values(
+        "parameters ckfp_ss kfp_ss cfp_ss q_ss qfp_ss qgap_ss;\n\
+         ckfp_ss=.165; kfp_ss=4; q_ss=1; qfp_ss=1;\n\
+         iyfp_ss=1/2;\ncyfp_ss=ckfp_ss/2;\n\
+         cfp_ss=ckfp_ss*kfp_ss;\n\
+         uu_ss=log(cfp_ss);\nvf_ss=uu_ss/(1-.99);\n\
+         qgap_ss=q_ss-qfp_ss;\n",
+    );
+    assert_eq!(actual[6].1, Some(0.66));
+    assert_eq!(actual.last().unwrap().1, Some(0.0));
+}
+
+/// Guards MATLAB power order, complete native-line consumption, scalar inputs,
+/// and call shadows so the native proof cannot invent values or hide mutations.
+#[test]
+fn native_scalar_proofs_require_complete_finite_unshadowed_arithmetic() {
+    for (expression, expected) in [
+        ("2^3^2", Some(64.0)),
+        ("-2^2", Some(-4.0)),
+        ("2^-2", Some(0.25)),
+        ("2^-2^2", Some(0.0625)),
+        ("2^-3^2", Some(0.015625)),
+        ("2^-3^-2", Some(64.0)),
+        ("2^3^-2", Some(0.015625)),
+        ("2e-3+2", Some(2.002)),
+        ("sqrt(4)+abs(-2)+sin(0)+cos(0)+exp(0)", Some(6.0)),
+        ("unknown+1", None),
+        ("ln(1)", None),
+        ("sqrt(-1)", None),
+        ("log(-1)", None),
+        ("1e308*1e308", None),
+        ("1/(1/0)", None),
+        ("2; p=9", None),
+        ("2$", None),
+        ("2.*3", None),
+        ("p(1)", None),
+    ] {
+        let actual = values(&format!(
+            "parameters p q; p=2;\nhelper={expression};\nq=p+1;"
+        ));
+        assert_eq!(actual[1].1, expected, "{expression}: {actual:?}");
+        assert_eq!(
+            actual[2].1,
+            expected.map(|_| 3.0),
+            "{expression}: {actual:?}"
+        );
+    }
+    for assignment in ["log=2;", "log=unknown;"] {
+        let actual = values(&format!(
+            "{assignment}\nparameters p q; p=2;\nhelper=log(p);\nq=p+1;"
+        ));
+        assert_eq!(actual[2].1, None, "{assignment}: {actual:?}");
+        assert_eq!(actual[3].1, None, "{assignment}: {actual:?}");
+    }
+    assert_eq!(values("helper=2; // comment\n")[0].1, Some(2.0));
+    assert_eq!(values("helper=2; % comment\n")[0].1, Some(2.0));
+    assert!(
+        values(&format!("helper={}1{};", "(".repeat(129), ")".repeat(129)))[0]
+            .1
+            .is_none()
+    );
+}
+
+/// Guards the real LSP output after native helper writes, including its range.
+#[tokio::test]
+async fn parameter_hints_survive_native_helpers_at_the_written_assignment() {
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    let root = uri("native-helpers.mod");
+    open(server, &root, "parameters p q;\np=2;\nhelper=1;\nq=p+1;\n").await;
+    let rows = hints(server, &root, None).await;
+    assert_eq!(labels(&rows), ["= 3"]);
+    assert_eq!(rows[0].position, Position::new(3, 6));
 }
 
 fn uri(name: &str) -> Url {
