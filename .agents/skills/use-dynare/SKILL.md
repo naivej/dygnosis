@@ -69,6 +69,7 @@ Which tool to use for each need, how to pass includes, and how to read the resul
 | Change or extend an existing `.mod` | Existing model | — | "Existing model" below |
 | IRFs or simulated paths in the deliverable, publication figures, PDF export, scenario comparisons | Publication plots | `plot_irfs_pub.m`, `plot_series_pub.m` | `references/publication-plots.md` |
 | Replicate a paper, "a model with feature X", an implementation may already exist | Catalog lookup | — | `references/catalog-lookup.md` |
+| Meaning of a Dynare command, option, or block | Manual | — | `references/dynare-manual.md` |
 | A skeleton to start from | Templates | — | `references/templates.md` |
 | Details of a stage in "New model" | Stage details | — | `references/workflow-detail.md` |
 | Slow solves, repeated plotting or normalization, cached `oo_`, comparing models or scenarios | MATLAB-side workflow | — | `references/matlab-workflow.md` |
@@ -80,14 +81,15 @@ Which tool to use for each need, how to pass includes, and how to read the resul
 
 ## Sources
 
-Three local sources answer different questions. Use them together. Details:
-`references/catalog-lookup.md`.
+Four local sources answer different questions. Use them together. The two model
+libraries: `references/catalog-lookup.md`. The manual: `references/dynare-manual.md`.
 
 | Question | Source | Take | Do not copy |
 |---|---|---|---|
 | How to model the economics: first-order conditions, mechanisms, calibration, timing | Model reference library `references/catalog.csv` (MMB replications in `references/examples/<ModelID>.mod`) | Equation logic, parameter values, timing | Code form, especially of linearized versions |
 | How to write a Dynare block or command | Programming library `references/catalog-code.csv` (Pfeifer DSGE_mod and the `Dynare_Course/` chapters in `references/examples-code/<Folder>/<CodeID>.mod`) | Options, block structure, interfaces | Equations and calibration |
 | Details of a built-in command in the installed version | Official examples in `<dynare-root>/examples/` | Syntax, version compatibility | Equations and calibration |
+| Meaning of a command, option, or block | Manual, `references/dynare-manual.md` | Stated syntax and effect | Equations and calibration from its examples |
 
 If neither library matches, search `references/model-archive-catalog.csv` (column `Status`: `runnable`
 models have a `.mod`; `derivation-only (needs_review)` entries have only a derivation note, which is an
@@ -235,7 +237,8 @@ Account for every item below. Write the item, or name it as not applicable.
    and the completeness of the expansion. Name what was not checked.
 4. Numerical evidence: Dynare version, commands and outcome (steady-state residuals, rank condition,
    key numbers), or the execution limit and the commands for the user. For a numerical steady state,
-   say whether the steady-state pass in "Numerical runs" held.
+   say whether the steady-state pass in "Numerical runs" held. When a command or option meaning came
+   from the manual, name the file you read, as `references/dynare-manual.md` requires.
 5. Sources: the paper, appendix or reference implementation you used, as in the file header. Mark each
    reconstructed block as "reconstructed, not checked against the source", and name each missing source.
 6. Each problem you solved that `references/known-issues.md` does not cover: symptom, cause, fix.

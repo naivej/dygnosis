@@ -56,7 +56,7 @@ agent to MATLAB and to run MATLAB code.
 |---|---|
 | MATLAB session | MATLAB Agentic Toolkit (MCP tools such as `evaluate_matlab_code` and `run_matlab_file`, plus its MATLAB skills). If those tools are absent, point the user at the toolkit and mark numerical runs as not done. |
 | `<dynare-root>`: the Dynare folder that contains `matlab/` and `examples/` | Ask the user, or read an existing `addpath` in the project (`run_*.m`, `startup.m`). Typical install locations: Windows `C:/dynare/<x.y>`, macOS `/Applications/Dynare/<x.y>`, Linux packages `/usr/lib/dynare` (manual, "Installation and configuration"). If several versions are installed, use the one the user or the project names; otherwise use the newest and say which. |
-| Dynare version | After `addpath`, run `disp(dynare_version)`. Dygnosis checks against Dynare 7.2; report the version you ran. |
+| Dynare version | After `addpath`, run `disp(dynare_version)`. Dygnosis checks against Dynare 7.2; report the version you ran. Which manual matches that string: `references/dynare-manual.md`. |
 | Working folder | The folder of the `.mod` file. |
 
 Dynare 7.2 supports MATLAB R2020a to R2026a. Do not guess numerical results when MATLAB is unavailable:

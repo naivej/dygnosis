@@ -37,7 +37,7 @@ conditions, determinacy, correct economics or a successful experiment. Those nee
 | See text produced by `@#include` and macros | `dynare_expand`: `effective_text`, `complete`, navigation back to the written source. |
 | Find includes and companion files (steady-state file, helper files) | `dynare_related_files`, then read those files. A listed companion is not proof that its MATLAB code is correct. |
 | Understand a diagnostic | `dynare_explain`; `dynare_list_diagnostic_codes` to find a code. |
-| Check the options of a command | `dynare_list_options`, then the Dynare manual for meaning. An unknown command returns `known: false`. Do not invent options. |
+| Check the options of a command | `dynare_list_options`, then `references/dynare-manual.md` for meaning. An unknown command returns `known: false`. Do not invent options. |
 | Find and rename identifier spellings | `dynare_find_references`, then `dynare_rename`. These tools match spelling across the supplied text; inspect same-name locals in separate models before applying the result. Comments and strings stay unchanged. |
 | Apply a known fix, or format | `dynare_auto_fix`, `dynare_format` (`formatIndent`: `"tab"` or 1–8). |
 | Review the structural effect of an edit | `dynare_compare_models` with supplied text and includes, or with explicit repository inputs. It is not a numerical equivalence test. |
