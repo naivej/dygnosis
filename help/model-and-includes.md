@@ -56,16 +56,10 @@ occurrences can have distinct numbers but the same written source.
 | Forward-looking | Leads, no lags. |
 | Mixed | Both leads and lags. |
 
-Variable hover shows the timing class. For a valid `predetermined_variables`
+Variable hover shows the timing class. For a valid `predetermined_variables k;`
 declaration, it adds the convention:
 
 Timing: **predetermined**, end-of-period convention
 
 The class still comes from the equations, so it can be static, forward-looking
-or mixed.
-
-Aggregate timing uses Dynare's end-of-period convention. For a valid
-`predetermined_variables k;` declaration, written `k(+1)` is current `k` for
-timing analysis, and written `k` is `k(-1)`. Heterogeneous equations keep their
-written timing. A name with no equation use also has no lead or lag. These
-classes do not establish model stability.
+or mixed. Written `k(+1)` is current `k` for timing analysis, and written `k` is `k(-1)`. Heterogeneous equations keep their written timing.

@@ -7,6 +7,8 @@
   assignments fold by statement. Starting lines stay visible; with
   `editor.foldingStrategy` set to `auto`, indentation does not determine the
   ranges.
+- Outline names omit the declaration type already shown by their group.
+  Timing, long names, TeX names and changed types remain visible.
 
 ## v0.11.18
 

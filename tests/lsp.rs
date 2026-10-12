@@ -1323,7 +1323,18 @@ async fn document_symbols_show_blocks_commands_and_uncounted_rows() {
         ("u", "static"),
     ] {
         let row = declarations.iter().find(|row| row.name == name).unwrap();
-        assert!(row.detail.as_deref().unwrap().contains(class), "{row:?}");
+        assert_eq!(row.detail.as_deref(), Some(class), "{row:?}");
+    }
+    // The parent supplies the type; plain names must not repeat it as a detail.
+    for category in ["varexo", "parameters"] {
+        let declarations = nested
+            .iter()
+            .find(|row| row.name == category)
+            .unwrap()
+            .children
+            .as_ref()
+            .unwrap();
+        assert!(declarations.iter().all(|row| row.detail.is_none()));
     }
     assert!(nested.iter().all(|row| row.name != "forward-looking"));
     let model = dygnosis::parse(&text);

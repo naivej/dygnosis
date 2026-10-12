@@ -343,7 +343,10 @@ impl<'a> WrittenView<'a> {
         } else {
             &written.written_kind
         };
-        let mut details = vec![kind.to_string()];
+        let mut details = Vec::new();
+        if kind != written.written_kind {
+            details.push(kind.to_string());
+        }
         if kind == "var"
             && self.final_types
             && self.authoritative
@@ -369,7 +372,7 @@ impl<'a> WrittenView<'a> {
         };
         symbol(
             self.model.name(declaration.name).to_string(),
-            Some(details.join(" · ")),
+            (!details.is_empty()).then(|| details.join(" · ")),
             icon,
             location.range,
             location.range,
@@ -614,7 +617,16 @@ pub(crate) fn common_leaves(views: Vec<Vec<DocumentSymbol>>) -> Vec<DocumentSymb
     fn leaves(rows: Vec<DocumentSymbol>) -> Vec<DocumentSymbol> {
         rows.into_iter()
             .flat_map(|mut row| {
-                if let Some(children) = row.children.take() {
+                if let Some(mut children) = row.children.take() {
+                    // Shared includes flatten the tree, so declaration headings disappear.
+                    if row.kind == SymbolKind::NAMESPACE {
+                        for child in &mut children {
+                            child.detail = Some(match child.detail.take() {
+                                Some(detail) => format!("{} · {detail}", row.name),
+                                None => row.name.clone(),
+                            });
+                        }
+                    }
                     leaves(children)
                 } else {
                     vec![row]
