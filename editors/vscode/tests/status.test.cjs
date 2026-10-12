@@ -101,14 +101,46 @@ function setup(doc = document()) {
   return { host, service, changed, configure, doc };
 }
 
-test("numbers use aggregate facts, while timing and dimensions stay labelled in the tooltip", () => {
+test("aggregate icons and separate count blocks retain every class and dimension in hover and speech", () => {
+  // Guards against adding dimensions to aggregate icons or losing their facts in speech.
   const value = modelStatus(facts(), ["endogenous", "exogenous", "equations"], "main.mod");
   assert.equal(value.text, "$(symbol-variable) 4  $(symbol-field) 2  $(list-ordered) 3");
-  assert.match(value.tooltip, /Aggregate model before transformation\nEndogenous: 4\nExogenous: 2\nEquations: 3/);
-  assert.match(value.tooltip, /Timing: 1 static, 1 predetermined, 1 forward-looking, 1 mixed/);
-  assert.match(value.tooltip, /Dimension households: 100 endogenous, 10 exogenous, 90 equations/);
-  assert.match(value.accessibilityLabel, /Endogenous: 4.*Exogenous: 2.*Equations: 3/);
+  const report = [
+    "Aggregate model before transformation",
+    "4 endogenous (1 static, 1 predetermined, 1 forward-looking, 1 mixed)",
+    "2 exogenous", "3 equations", "Heterogeneous model: households",
+    "100 endogenous (1 static, 0 predetermined, 0 forward-looking, 0 mixed)",
+    "10 exogenous", "90 equations",
+  ];
+  assert.equal(value.tooltip, ["main.mod", ...report, "Click to focus Outline."].join("\n"));
+  assert.equal(value.accessibilityLabel, `main.mod. ${report.join(". ")}. Click to focus Outline.`);
   assert.doesNotMatch(value.text, /104|warning|error/);
+});
+test("selected count order applies to each dimension and hiding endogenous hides every class", () => {
+  // Guards against dimensions ignoring count selection or exposing hidden classes.
+  const info = facts(document(), { heterogeneity_dimensions: [
+    ...facts().heterogeneity_dimensions,
+    { dimension: "firms", n_endogenous: 0, n_exogenous: 0, n_equations: 0 },
+  ] });
+  const value = modelStatus(info, ["equations", "exogenous"], "main.mod");
+  assert.equal(value.text, "$(list-ordered) 3  $(symbol-field) 2");
+  assert.match(value.tooltip, /Aggregate model before transformation\n3 equations\n2 exogenous\nHeterogeneous model: households\n90 equations\n10 exogenous\nHeterogeneous model: firms\n0 equations\n0 exogenous/);
+  for (const text of [value.tooltip, value.accessibilityLabel]) {
+    assert.doesNotMatch(text, /endogenous|static|predetermined|forward-looking|mixed/);
+    assert.ok(text.indexOf("households") < text.indexOf("firms"));
+  }
+});
+test("missing class lists display all four zero classes for aggregate and dimensions", () => {
+  // Guards compatibility with count facts that omit class lists.
+  const info = facts(document(), { static: undefined, predetermined: undefined, forward_looking: undefined, mixed: undefined,
+    heterogeneity_dimensions: [{ dimension: "households", n_endogenous: 0, n_exogenous: 0, n_equations: 0 }] });
+  const value = modelStatus(info, ["endogenous"], "main.mod");
+  const classes = "(0 static, 0 predetermined, 0 forward-looking, 0 mixed)";
+  for (const text of [value.tooltip, value.accessibilityLabel]) {
+    assert.ok(text.includes(`4 endogenous ${classes}`));
+    assert.ok(text.includes(`0 endogenous ${classes}`));
+    assert.doesNotMatch(text, /exogenous|equations/);
+  }
 });
 test("incomplete expansion withholds even supplied old numbers", () => {
   const value = modelStatus(facts(document(), { complete: false, message: "Model expansion is incomplete" }), ["endogenous", "equations"], "main.mod");
@@ -154,7 +186,7 @@ test("default status is native, accessible, and focuses Outline", async () => {
   assert.equal(item.command, "outline.focus");
   assert.equal(item.name, "Dynare model counts");
   assert.equal(item.visible, true);
-  assert.match(item.accessibilityInformation.label, /Endogenous: 4/);
+  assert.match(item.accessibilityInformation.label, /4 endogenous/);
   assert.equal(item.backgroundColor, undefined);
   assert.equal(item.color, undefined);
   registration.dispose();

@@ -1,25 +1,27 @@
 import * as vscode from "vscode";
 import { DygnosisClient, isAnalysisDocument, isRootUri } from "../client/client";
-import { Dimension, ModelInfo } from "../client/protocol";
+import { ModelInfo } from "../client/protocol";
 import { booleanSetting, listSetting } from "../client/settings";
 
 export const statusCounts = ["endogenous", "exogenous", "equations"];
 export type StatusCount = "endogenous" | "exogenous" | "equations";
 interface StatusContent { text: string; tooltip: string; accessibilityLabel: string }
 const countDetails: Record<StatusCount, { field: "n_endogenous" | "n_exogenous" | "n_equations"; icon: string; label: string }> = {
-  endogenous: { field: "n_endogenous", icon: "symbol-variable", label: "Endogenous" },
-  exogenous: { field: "n_exogenous", icon: "symbol-field", label: "Exogenous" },
-  equations: { field: "n_equations", icon: "list-ordered", label: "Equations" },
+  endogenous: { field: "n_endogenous", icon: "symbol-variable", label: "endogenous" },
+  exogenous: { field: "n_exogenous", icon: "symbol-field", label: "exogenous" },
+  equations: { field: "n_equations", icon: "list-ordered", label: "equations" },
 };
 
-function timingLine(info: Pick<ModelInfo, "static" | "predetermined" | "forward_looking" | "mixed">): string {
-  return `Timing: ${info.static?.length ?? 0} static, ${info.predetermined?.length ?? 0} predetermined, ${info.forward_looking?.length ?? 0} forward-looking, ${info.mixed?.length ?? 0} mixed`;
-}
-function dimensionLines(dimension: Dimension): string[] {
-  return [
-    `Dimension ${dimension.dimension}: ${dimension.n_endogenous} endogenous, ${dimension.n_exogenous} exogenous, ${dimension.n_equations} equations`,
-    timingLine(dimension),
-  ];
+type CountFacts = Pick<ModelInfo, "n_endogenous" | "n_exogenous" | "n_equations" | "static" | "predetermined" | "forward_looking" | "mixed">;
+
+function countLines(info: CountFacts, counts: StatusCount[]): string[] {
+  return counts.map(count => {
+    const { field, label } = countDetails[count];
+    const line = `${String(info[field])} ${label}`;
+    return count === "endogenous"
+      ? `${line} (${info.static?.length ?? 0} static, ${info.predetermined?.length ?? 0} predetermined, ${info.forward_looking?.length ?? 0} forward-looking, ${info.mixed?.length ?? 0} mixed)`
+      : line;
+  });
 }
 
 function incompleteDetail(info: ModelInfo): string {
@@ -48,18 +50,22 @@ export function modelStatus(info: ModelInfo, counts: StatusCount[], modelLabel: 
     tooltip: `${modelLabel}\nModel counts are unavailable.\nClick to focus Outline.`,
     accessibilityLabel: "Dynare model counts are unavailable. Focus Outline.",
   };
-  const labels = shown.map(count => `${count.label}: ${String(count.value)}`);
+  const report = [
+    "Aggregate model before transformation",
+    ...countLines(info, counts),
+    ...(info.heterogeneity_dimensions ?? []).flatMap(dimension => [
+      `Heterogeneous model: ${dimension.dimension}`,
+      ...countLines(dimension, counts),
+    ]),
+  ];
   return {
     text: shown.map(count => `$(${count.icon}) ${String(count.value)}`).join("  "),
     tooltip: [
       modelLabel,
-      "Aggregate model before transformation",
-      ...labels,
-      timingLine(info),
-      ...(info.heterogeneity_dimensions ?? []).flatMap(dimensionLines),
+      ...report,
       "Click to focus Outline.",
     ].join("\n"),
-    accessibilityLabel: `Dynare aggregate model. ${labels.join(". ")}. Focus Outline.`,
+    accessibilityLabel: `${modelLabel}. ${report.join(". ")}. Click to focus Outline.`,
   };
 }
 

@@ -93,6 +93,26 @@ fn range_key(range: Range) -> (u32, u32, u32, u32) {
     )
 }
 
+fn append_expression_run(output: &mut Vec<DocumentSymbol>, run: &mut Vec<DocumentSymbol>) {
+    if run.len() < 2 {
+        output.append(run);
+        return;
+    }
+    let range = Range::new(
+        run.first().unwrap().range.start,
+        run.last().unwrap().range.end,
+    );
+    let selection = run[0].selection_range;
+    output.push(symbol(
+        "MATLAB expressions".to_string(),
+        None,
+        SymbolKind::NAMESPACE,
+        range,
+        selection,
+        std::mem::take(run),
+    ));
+}
+
 impl<'a> WrittenView<'a> {
     pub fn new(
         uri: &'a Url,
@@ -421,8 +441,17 @@ impl<'a> WrittenView<'a> {
                     });
             }
         }
+        let mut groups: Vec<_> = groups.into_iter().collect();
+        groups.sort_by_key(|(_, group)| range_key(group.range));
         let mut output = Vec::new();
+        let mut expressions = Vec::new();
         for ((kind, name, _), StatementGroup { ids, range, anchor }) in groups {
+            // Retained assignments are top-level rows. A hidden declaration,
+            // command or block is still a boundary in the written source.
+            let expression = kind == "assignment";
+            if !expression {
+                append_expression_run(&mut output, &mut expressions);
+            }
             let mut children = Vec::new();
             if (kind == "declaration" && enabled("declarations"))
                 || (kind == "dimension" && enabled("dimensions"))
@@ -551,10 +580,20 @@ impl<'a> WrittenView<'a> {
                 }
             }
             children.sort_by_key(|child| range_key(child.range));
-            let dimensions: BTreeSet<_> = ids
-                .iter()
-                .filter_map(|id| self.model.statements[*id].dimension.as_deref())
-                .collect();
+            let dimensions: BTreeSet<_> =
+                if kind == "declaration" && matches!(name.as_str(), "var" | "varexo") {
+                    self.model
+                        .written_declarations
+                        .iter()
+                        .filter(|row| ids.contains(&row.statement_id))
+                        .filter_map(|row| row.declaration.heterogeneity)
+                        .map(|(dimension, _)| self.model.name(dimension))
+                        .collect()
+                } else {
+                    ids.iter()
+                        .filter_map(|id| self.model.statements[*id].dimension.as_deref())
+                        .collect()
+                };
             let show = match kind {
                 "declaration" => enabled("declarations"),
                 "dimension" => enabled("dimensions"),
@@ -562,8 +601,11 @@ impl<'a> WrittenView<'a> {
                 _ => enabled("commands"),
             };
             if show {
-                let title = if name == "model" && dimensions.len() == 1 && self.final_types {
-                    format!("model ({})", dimensions.first().unwrap())
+                let title = if (name == "model"
+                    || (kind == "declaration" && matches!(name.as_str(), "var" | "varexo")))
+                    && dimensions.len() == 1
+                {
+                    format!("{name}(heterogeneity={})", dimensions.first().unwrap())
                 } else if dimensions.len() > 1 {
                     format!("{name} (multiple expansions)")
                 } else if anchor.is_none() && kind == "block" {
@@ -571,19 +613,13 @@ impl<'a> WrittenView<'a> {
                 } else {
                     name
                 };
-                let detail = if kind == "block"
+                let detail = if !self.authoritative
+                    && kind == "block"
                     && ids
                         .iter()
                         .any(|id| self.model.statements[*id].name == "model")
                 {
-                    Some(
-                        if self.authoritative {
-                            "Dygnosis numbers before transformation"
-                        } else {
-                            "recovered written structure"
-                        }
-                        .to_string(),
-                    )
+                    Some("recovered written structure".to_string())
                 } else {
                     None
                 };
@@ -594,7 +630,7 @@ impl<'a> WrittenView<'a> {
                     "assignment" => SymbolKind::VARIABLE,
                     _ => SymbolKind::EVENT,
                 };
-                output.push(symbol(
+                let row = symbol(
                     title,
                     detail,
                     icon,
@@ -603,11 +639,17 @@ impl<'a> WrittenView<'a> {
                         .or_else(|| children.first().map(|child| child.selection_range))
                         .unwrap_or(Range::new(range.start, range.start)),
                     children,
-                ));
+                );
+                if expression {
+                    expressions.push(row);
+                } else {
+                    output.push(row);
+                }
             } else {
                 output.extend(children);
             }
         }
+        append_expression_run(&mut output, &mut expressions);
         output.sort_by_key(|row| range_key(row.range));
         output
     }

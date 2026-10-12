@@ -215,6 +215,11 @@ async fn outline_and_folding_are_local_for_split_blocks_and_every_supported_kind
     all(&local, &mut flat);
     assert!(!flat.iter().any(|row| row.name.ends_with("body")));
     let child_rows = symbols(server, &body).await;
+    let fragment = child_rows
+        .iter()
+        .find(|row| row.name == "model (fragment)")
+        .unwrap();
+    assert!(fragment.detail.is_none());
     let mut flat = Vec::new();
     all(&child_rows, &mut flat);
     assert!(flat.iter().any(|row| row.name == "1 · body"));
@@ -524,4 +529,364 @@ async fn model_info_supplies_resolved_and_missing_native_dependency_candidates()
 
 fn crate_path_key(uri: &Url) -> String {
     dygnosis::include_resolver::normalize_uri(uri.as_str())
+}
+
+#[tokio::test]
+async fn expression_runs_mix_assignments_keep_locations_and_respect_hidden_boundaries() {
+    // Guards parameter exclusion, native-flag boundaries, source reordering,
+    // and parents that swallow hidden declarations, commands or blocks.
+    let root = url("expressions.mod");
+    let text = "parameters rho theta;\nrho=0.9;\nhelper=2;\n// Same run\n\ntheta=0.8;\nvar y;\nrho=0.7;\nhelper=3;\nsteady;\nrho=0.6;\nhelper=4;\nmodel; [name='equation'] y=rho; end;\nrho=0.5;\nhelper=5;\ninitval; y=0; end;\nendval; y=1; end;\nsteady_state_model; y=2; end;\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &root, text).await;
+    let mapped = info(server, &root, None).await;
+    let rows = symbols(server, &root).await;
+    assert_local_tree(&rows, text, None);
+    let runs: Vec<_> = rows
+        .iter()
+        .filter(|row| row.name == "MATLAB expressions")
+        .collect();
+    assert_eq!(runs.len(), 4);
+    for (run, lines) in runs
+        .iter()
+        .zip([vec![1, 2, 5], vec![7, 8], vec![10, 11], vec![13, 14]])
+    {
+        let children = run.children.as_ref().unwrap();
+        assert_eq!(run.kind, SymbolKind::NAMESPACE);
+        assert_eq!(run.range.start, children.first().unwrap().range.start);
+        assert_eq!(run.range.end, children.last().unwrap().range.end);
+        assert_eq!(run.selection_range, children[0].selection_range);
+        assert_eq!(
+            children
+                .iter()
+                .map(|row| row.range.start.line)
+                .collect::<Vec<_>>(),
+            lines
+        );
+        for child in children {
+            let statement = mapped["statements"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| {
+                    row["kind"] == "assignment"
+                        && row["location"]["range"]["start"]["line"] == child.range.start.line
+                })
+                .unwrap();
+            assert_eq!(child.name, statement["name"].as_str().unwrap());
+            assert_eq!(
+                serde_json::to_value(child.range).unwrap(),
+                statement["location"]["range"]
+            );
+            assert_eq!(
+                serde_json::to_value(child.selection_range).unwrap(),
+                statement["anchor"]["range"]
+            );
+            assert!(child.detail.is_none());
+        }
+    }
+    assert_eq!(
+        runs[0]
+            .children
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        ["rho", "helper", "theta"]
+    );
+    for block in ["model", "initval", "endval", "steady_state_model"] {
+        assert!(rows.iter().any(|row| row.name == block));
+    }
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: json!({"outline":{"sections":["commands"]}}),
+        })
+        .await;
+    let commands = symbols(server, &root).await;
+    assert_eq!(
+        commands
+            .iter()
+            .filter(|row| row.name == "MATLAB expressions")
+            .map(|row| row.range)
+            .collect::<Vec<_>>(),
+        runs.iter().map(|row| row.range).collect::<Vec<_>>()
+    );
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: json!({"outline":{"sections":["declarations","blocks","equations"]}}),
+        })
+        .await;
+    assert!(symbols(server, &root)
+        .await
+        .iter()
+        .all(|row| row.name != "MATLAB expressions" && row.kind != SymbolKind::VARIABLE));
+}
+
+#[tokio::test]
+async fn expression_runs_group_pure_assignments_and_leave_single_rows() {
+    // Guards both native-only and Dynare-only runs, and the unnecessary parent
+    // that would hide a lone assignment behind another click.
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    for (file, text, expected) in [
+        (
+            "dynare-run.mod",
+            "parameters rho theta;\nrho=0.9;\ntheta=0.8;\n",
+            vec!["rho", "theta"],
+        ),
+        (
+            "native-run.mod",
+            "first=1;\nsecond=2;\n",
+            vec!["first", "second"],
+        ),
+    ] {
+        let root = url(file);
+        open(server, &root, text).await;
+        let rows = symbols(server, &root).await;
+        let run = rows
+            .iter()
+            .find(|row| row.name == "MATLAB expressions")
+            .unwrap();
+        assert_eq!(
+            run.children
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_local_tree(&rows, text, None);
+    }
+    for text in ["parameters rho;\nrho=0.9;\n", "helper=1;\n"] {
+        let root = url("lone-expression.mod");
+        open(server, &root, text).await;
+        let rows = symbols(server, &root).await;
+        assert!(rows.iter().all(|row| row.name != "MATLAB expressions"));
+        assert!(rows
+            .iter()
+            .any(|row| row.kind == SymbolKind::VARIABLE && row.children.is_none()));
+    }
+}
+
+#[tokio::test]
+async fn expression_runs_deduplicate_macro_copies_and_keep_recovered_and_file_local_rows() {
+    // Guards duplicate macro children, loss of a valid run during recovery,
+    // and combining assignments from an included file into the root's range.
+    let root = url("macro-expressions.mod");
+    let child = url("expression-body.inc");
+    let child_text = "included_first=1;\nincluded_second=2;\n";
+    let text = "parameters rho;\n@#for k in 1:2\nrho=@{k};\nhelper=@{k};\n@#endfor\n@#include \"expression-body.inc\"\nmodel;\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &child, child_text).await;
+    open(server, &root, text).await;
+    assert_eq!(info(server, &root, None).await["complete"], false);
+    let rows = symbols(server, &root).await;
+    assert_local_tree(&rows, text, None);
+    let run = rows
+        .iter()
+        .find(|row| row.name == "MATLAB expressions")
+        .unwrap();
+    assert_eq!(
+        run.children
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        ["rho", "helper"]
+    );
+    assert_eq!(run.range.start.line, 2);
+    assert_eq!(run.range.end.line, 3);
+    let included = symbols(server, &child).await;
+    assert_local_tree(&included, child_text, None);
+    let run = included
+        .iter()
+        .find(|row| row.name == "MATLAB expressions")
+        .unwrap();
+    assert_eq!(
+        run.children
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        ["included_first", "included_second"]
+    );
+}
+
+#[tokio::test]
+async fn expression_runs_keep_namespace_detail_on_shared_include_leaves() {
+    // Guards the shared-owner flattening path dropping namespace detail or
+    // changing the workspace symbol's written location.
+    let child = url("shared-expressions.inc");
+    let a = url("expressions-owner-a.mod");
+    let b = url("expressions-owner-b.mod");
+    let child_text = "helper=1;\nother=2;\n";
+    let text = "@#include \"shared-expressions.inc\"\nvar y; model; y=0; end;\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &child, child_text).await;
+    open(server, &a, text).await;
+    let owned = symbols(server, &child).await;
+    let helper = owned
+        .iter()
+        .find(|row| row.name == "MATLAB expressions")
+        .unwrap()
+        .children
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|row| row.name == "helper")
+        .unwrap()
+        .clone();
+    open(server, &b, text).await;
+    let shared = symbols(server, &child).await;
+    assert_local_tree(&shared, child_text, None);
+    let leaf = shared.iter().find(|row| row.name == "helper").unwrap();
+    assert_eq!(leaf.detail.as_deref(), Some("MATLAB expressions"));
+    assert_eq!(leaf.range, helper.range);
+    assert_eq!(leaf.selection_range, helper.selection_range);
+    let workspace = server
+        .symbol(WorkspaceSymbolParams {
+            query: "helper".to_string(),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(workspace
+        .iter()
+        .any(|row| row.name == "helper"
+            && row.location == Location::new(child.clone(), helper.range)));
+}
+
+#[tokio::test]
+async fn model_outline_detail_marks_recovery_without_removing_equation_numbers() {
+    // Guards the retired complete-model detail returning, or its removal
+    // accidentally removing the recovered marker, equation prefixes or wire fact.
+    let root = url("model-detail.mod");
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &root, "var y;\nmodel; [name='euler'] y=0; end;\n").await;
+    let rows = symbols(server, &root).await;
+    let model = rows.iter().find(|row| row.name == "model").unwrap();
+    assert!(model.detail.is_none());
+    assert_eq!(model.children.as_ref().unwrap()[0].name, "1 · euler");
+    assert_eq!(
+        info(server, &root, None).await["equation_numbering"],
+        "Dygnosis numbers before transformation"
+    );
+    open(server, &root, "var y;\nmodel; [name='euler'] y=0;\n").await;
+    let rows = symbols(server, &root).await;
+    let model = rows.iter().find(|row| row.name == "model").unwrap();
+    assert_eq!(model.detail.as_deref(), Some("recovered written structure"));
+    assert_eq!(model.children.as_ref().unwrap()[0].name, "euler");
+}
+
+#[tokio::test]
+async fn outline_names_use_written_heterogeneity_and_preserve_declaration_children() {
+    // Guards old spaced model titles, missing declaration dimensions, unrelated
+    // model options in titles, and moving change_type names to another parent.
+    let root = url("heterogeneous-names.mod");
+    let text = "heterogeneity_dimension households;\nvar y;\nvarexo e;\nvar(heterogeneity=households) c $C$ (long_name='Consumption');\nvar(heterogeneity=households) assets;\nvarexo(heterogeneity=households) idio;\nparameters(heterogeneity=households) betta;\nvarexo_det deterministic_e;\nmodel(linear); [name='aggregate'] y=e; end;\nmodel(heterogeneity=households); [name='individual'] c=c(-1)+idio; assets=assets(-1); end;\nchange_type(parameters) c;\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &root, text).await;
+    let rows = symbols(server, &root).await;
+    assert_local_tree(&rows, text, None);
+    assert!(rows.iter().any(|row| row.name == "model"));
+    let model = rows
+        .iter()
+        .find(|row| row.name == "model(heterogeneity=households)")
+        .unwrap();
+    assert!(model.detail.is_none());
+    assert!(model
+        .children
+        .as_ref()
+        .unwrap()
+        .iter()
+        .any(|row| row.name == "1 · individual"));
+    let declarations: Vec<_> = rows
+        .iter()
+        .filter(|row| row.name == "var(heterogeneity=households)")
+        .collect();
+    assert_eq!(declarations.len(), 2);
+    let c = &declarations[0].children.as_ref().unwrap()[0];
+    assert_eq!(c.name, "c");
+    assert_eq!(c.kind, SymbolKind::NUMBER);
+    assert_eq!(c.detail.as_deref(), Some("parameters · Consumption · $C$"));
+    assert_eq!(declarations[1].children.as_ref().unwrap()[0].name, "assets");
+    let exogenous = rows
+        .iter()
+        .find(|row| row.name == "varexo(heterogeneity=households)")
+        .unwrap();
+    assert_eq!(exogenous.children.as_ref().unwrap()[0].name, "idio");
+    for unchanged in ["var", "varexo", "parameters", "varexo_det"] {
+        assert!(rows.iter().any(|row| row.name == unchanged));
+    }
+
+    // An ownerless include takes the fallback path with final types unavailable.
+    let ownerless = url("heterogeneous-names.inc");
+    open(server, &ownerless, text).await;
+    let recovered = symbols(server, &ownerless).await;
+    let model = recovered
+        .iter()
+        .find(|row| row.name == "model(heterogeneity=households)")
+        .unwrap();
+    assert_eq!(model.detail.as_deref(), Some("recovered written structure"));
+    assert!(recovered
+        .iter()
+        .any(|row| row.name == "var(heterogeneity=households)"));
+    assert!(recovered
+        .iter()
+        .any(|row| row.name == "varexo(heterogeneity=households)"));
+    let c = recovered
+        .iter()
+        .find(|row| row.name == "var(heterogeneity=households)")
+        .unwrap()
+        .children
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|row| row.name == "c")
+        .unwrap();
+    assert_eq!(c.kind, SymbolKind::VARIABLE);
+    assert_eq!(c.detail.as_deref(), Some("Consumption · $C$"));
+}
+
+#[tokio::test]
+async fn outline_names_keep_multiple_dimension_macro_expansion_fallbacks() {
+    // Guards selecting one dimension as the title of an opener or declaration
+    // that expands into different dimensions at the same written location.
+    let root = url("multiple-dimension-names.mod");
+    let text = "heterogeneity_dimension hh workers;\n@#for dimension in [\"hh\",\"workers\"]\nvar(heterogeneity=@{dimension}) c_@{dimension};\nvarexo(heterogeneity=@{dimension}) e_@{dimension};\nmodel(heterogeneity=@{dimension});\n[name='individual'] c_@{dimension}=e_@{dimension};\nend;\n@#endfor\n";
+    let (service, _socket) = new_service();
+    let server = service.inner();
+    open(server, &root, text).await;
+    let rows = symbols(server, &root).await;
+    assert_local_tree(&rows, text, None);
+    for title in [
+        "model (multiple expansions)",
+        "var (multiple expansions)",
+        "varexo (multiple expansions)",
+    ] {
+        let row = rows
+            .iter()
+            .find(|row| row.name == title)
+            .unwrap_or_else(|| panic!("{title}: {rows:?}"));
+        assert!(row.detail.is_none());
+    }
+    let model = rows
+        .iter()
+        .find(|row| row.name == "model (multiple expansions)")
+        .unwrap();
+    assert_eq!(
+        model.children.as_ref().unwrap()[0].detail.as_deref(),
+        Some("multiple expansions")
+    );
 }
