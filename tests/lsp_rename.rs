@@ -314,6 +314,64 @@ async fn rename_owned_include_names_use_saved_source_or_open_overlay() {
     }
 }
 
+// Guards an unopened include edit following canonicalize instead of the
+// opened root. Windows 8.3 temp paths and directory links are different URLs.
+#[cfg(any(unix, windows))]
+#[tokio::test]
+async fn rename_unopened_include_keeps_the_open_roots_path_spelling() {
+    let fixture = Fixture::new();
+    let real = fixture.0.join("real");
+    fs::create_dir(&real).unwrap();
+    let child_text = "y=p;\n";
+    fs::write(real.join("child.inc"), child_text).unwrap();
+    let root_text = "var y;parameters p;model;\n@#include \"child.inc\"\nend;\n";
+    fs::write(real.join("root.mod"), root_text).unwrap();
+    let alias = fixture.0.join("alias");
+    link_directory(&alias, &real);
+    let root = Url::from_file_path(alias.join("root.mod")).unwrap();
+    let child = Url::from_file_path(alias.join("child.inc")).unwrap();
+    let canonical =
+        Url::from_file_path(fs::canonicalize(alias.join("child.inc")).unwrap()).unwrap();
+    assert_ne!(
+        child, canonical,
+        "the directory link must differ from the canonical include path"
+    );
+    let (service, _socket) = new_service();
+    open(service.inner(), &root, root_text, 1).await;
+    let changes = edits(
+        rename(service.inner(), &root, root_text, "p;", "rho")
+            .await
+            .unwrap(),
+    );
+    assert!(
+        changes.contains_key(&root) && changes.contains_key(&child),
+        "open root {root}; alias include {child}; canonical include {canonical}; edit URIs {:?}",
+        changes.keys().map(Url::as_str).collect::<Vec<_>>()
+    );
+    assert_eq!(apply(child_text, &changes[&child].1), "y=rho;\n");
+}
+
+fn link_directory(link: &std::path::Path, target: &std::path::Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let result = std::process::Command::new("cmd.exe")
+            .creation_flags(0x08000000)
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "directory junction failed: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+}
+
 // Guards edits spreading to another root solely because its name has equal spelling.
 #[tokio::test]
 async fn rename_independent_equal_spellings_stay_separate() {

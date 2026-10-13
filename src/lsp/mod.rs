@@ -7,7 +7,7 @@ pub(crate) mod signature_help;
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 mod project;
@@ -3228,7 +3228,63 @@ fn naming_edit_url(inner: &Inner, open: &Url, file_key: &str) -> Option<Url> {
     }) {
         return Some(url.clone());
     }
-    file_url_from_path_key(file_key)
+    // An unopened include keeps an open file's directory spelling. Canonicalize
+    // alone differs for a Windows 8.3 path and for a directory link.
+    client_spelled_file_url(inner, open, file_key).or_else(|| file_url_from_path_key(file_key))
+}
+
+fn client_spelled_file_url(inner: &Inner, open: &Url, file_key: &str) -> Option<Url> {
+    if crate::engine::workspace::include_resolver::is_virtual_uri(file_key) {
+        return None;
+    }
+    let target = crate::engine::workspace::include_resolver::make_absolute(Path::new(file_key));
+    let mut bases = Vec::new();
+    if open.scheme() == "file" {
+        bases.push(open);
+    }
+    for url in inner.docs.keys() {
+        if url.scheme() == "file" && !bases.contains(&url) {
+            bases.push(url);
+        }
+    }
+    let mut best: Option<(usize, Url)> = None;
+    for base in bases {
+        let Some((spelled, depth)) = spelled_include_path(base, &target) else {
+            continue;
+        };
+        let Ok(url) = Url::from_file_path(&spelled) else {
+            continue;
+        };
+        if crate::engine::workspace::include_resolver::normalize_uri(url.as_str()) != file_key {
+            continue;
+        }
+        if best
+            .as_ref()
+            .is_none_or(|(best_depth, _)| depth > *best_depth)
+        {
+            best = Some((depth, url));
+        }
+    }
+    best.map(|(_, url)| url)
+}
+
+fn spelled_include_path(base: &Url, target: &Path) -> Option<(PathBuf, usize)> {
+    let base_dir = base.to_file_path().ok()?.parent()?.to_path_buf();
+    let canonical_dir = crate::engine::workspace::include_resolver::make_absolute(&base_dir);
+    let relative = target.strip_prefix(&canonical_dir).ok()?;
+    if relative.as_os_str().is_empty()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return None;
+    }
+    Some((base_dir.join(relative), canonical_dir.components().count()))
 }
 
 fn span_pos(pos: Position) -> crate::engine::language::span::Position {

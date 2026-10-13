@@ -15,6 +15,9 @@
 - Help describes the controls you can see in VS Code and gives steps for using
   them. Related problem locations have a duplicate-declaration example, with
   instructions for the Problems panel and Alt+F8 details.
+- Rename an included file that is not open using the same folder path as the
+  open model. A Windows short path or a linked folder no longer sends that
+  edit to a different file URI.
 
 ## v0.11.22
 
