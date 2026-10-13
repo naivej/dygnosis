@@ -2,6 +2,9 @@
 
 ## v0.11.21
 
+- Fix **Set up MCP for this project** rejecting local VS Code extension
+  storage with a false file-backed storage error. Managed executable updates
+  also work when VS Code exposes that disk storage as `vscode-userdata`.
 - Press F2 or choose **Rename symbol** from the editor context menu to rename
   ordinary Dynare symbols across the selected model and its known source files,
   including `.mod`, `.dyn`, `.inc`, and supported untitled documents. Rename

@@ -334,9 +334,12 @@ export function registerProjectMcp(context: vscode.ExtensionContext, service?: {
   const reviews = new Map<string, string>();
   const provider = vscode.workspace.registerTextDocumentContentProvider(reviewScheme, { provideTextDocumentContent: uri => reviews.get(uri.toString()) ?? "" });
   let disposed = false, running = false, retry: NodeJS.Timeout | undefined, retries = 0, pendingShown = false;
-  const storage = (): string => {
-    if (context.globalStorageUri.scheme !== "file" || !path.isAbsolute(context.globalStorageUri.fsPath)) throw new Error("Dygnosis project MCP requires file-backed extension storage on this host.");
-    return context.globalStorageUri.fsPath;
+  const storage = (): string | undefined => {
+    const uri = context.globalStorageUri;
+    // Desktop VS Code can expose its disk-backed user data through this scheme.
+    if (uri.scheme !== "file" && uri.scheme !== "vscode-userdata") return undefined;
+    const directory = uri.with({ scheme: "file" }).fsPath;
+    return path.isAbsolute(directory) ? directory : undefined;
   };
   const reportManaged = (binary: ManagedBinary): void => {
     if (binary.pendingVersion) {
@@ -350,12 +353,13 @@ export function registerProjectMcp(context: vscode.ExtensionContext, service?: {
   };
   const maintain = async (): Promise<void> => {
     try {
-      if (disposed || context.globalStorageUri.scheme !== "file") return;
-      const files = storagePaths(storage(), process.platform);
+      const directory = storage();
+      if (disposed || !directory) return;
+      const files = storagePaths(directory, process.platform);
       if (!await optionalBytes(files.active) && !await optionalBytes(files.pending)) return;
       const bundle = await verifyPackagedBundle(context);
       if (disposed) return;
-      reportManaged(await ensureManagedBinary(storage(), bundle));
+      reportManaged(await ensureManagedBinary(directory, bundle));
     } catch (error) { log(`Project MCP managed update: ${String(error)}`); }
   };
   const review = async (uri: vscode.Uri, before: string, after: string): Promise<boolean> => {
@@ -379,7 +383,9 @@ export function registerProjectMcp(context: vscode.ExtensionContext, service?: {
         await validateMcpBinary(selected, log);
         log(`Project MCP uses user-managed dynare.serverPath: ${selected.path}. Updates are your responsibility.`);
       } else {
-        const managed = await ensureManagedBinary(storage(), await verifyPackagedBundle(context));
+        const directory = storage();
+        if (!directory) throw new Error("Dygnosis project MCP requires file-backed extension storage on this host.");
+        const managed = await ensureManagedBinary(directory, await verifyPackagedBundle(context));
         executable = managed.path; reportManaged(managed);
       }
       if (disposed) return;

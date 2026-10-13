@@ -1,13 +1,14 @@
 const { compiledModule, importedModule } = require("./helpers/extension_modules.cjs");
 const assert = require("node:assert/strict");
 const { Buffer } = require("node:buffer");
-const { spawn } = require("node:child_process");
+const { execFile, spawn } = require("node:child_process");
 const { createHash } = require("node:crypto");
 const fs = require("node:fs/promises");
 const Module = require("node:module");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const { clearTimeout } = require("node:timers");
 const { pathToFileURL, fileURLToPath } = require("node:url");
 
 class Disposable {
@@ -21,6 +22,11 @@ class Uri {
   static file(value) { return new Uri(pathToFileURL(value).href); }
   static parse(value) { return new Uri(value); }
   static joinPath(base, ...parts) { return Uri.file(path.join(base.fsPath, ...parts)); }
+  with({ scheme }) {
+    const uri = new Uri(this.value.replace(/^[^:]+:/, `${scheme}:`));
+    uri.fsPath = this.fsPath;
+    return uri;
+  }
 }
 let host;
 const vscode = {
@@ -62,6 +68,14 @@ const vscode = {
 const originalLoad = Module._load;
 Module._load = function(id, ...args) {
   if (id === "vscode") return vscode;
+  if (id === "node:child_process") return {
+    execFile: (file, args, options, callback) => {
+      if (!host?.versionFiles) return execFile(file, args, options, callback);
+      assert.deepEqual(args, ["--version"]);
+      host.versionFiles.push(file);
+      return fixtureVersion(file).then(stdout => callback(null, stdout), callback);
+    },
+  };
   if (importedModule(id, args[0]) === "binary") return {
     resolveBinary: async () => { ++host.resolved; return host.binary; },
     validateMcpBinary: async () => { ++host.validated; },
@@ -91,6 +105,16 @@ const fixtureVersion = async file => `dygnosis ${(await fs.readFile(file, "utf8"
 const options = { version: fixtureVersion, lockAttempts: 50, lockDelayMs: 5 };
 function files(folder, platform = process.platform) {
   const bin = path.join(folder, "bin"); return { bin, binary: path.join(bin, platform === "win32" ? "dygnosis.exe" : "dygnosis"), active: path.join(bin, "managed.json"), pending: path.join(bin, "pending.json"), stage: path.join(bin, ".dygnosis.pending"), lock: path.join(bin, ".dygnosis.lock") };
+}
+async function packagedContext(t, scheme = "file") {
+  const folder = await directory(t), extensionPath = path.join(folder, "package"), source = bundle("0.11.2");
+  await fs.mkdir(files(extensionPath).bin, { recursive: true });
+  await fs.writeFile(files(extensionPath).binary, source.bytes);
+  await fs.writeFile(path.join(extensionPath, "SOURCE.json"), JSON.stringify(source.provenance));
+  host.folders = [{ name: "project", uri: Uri.file(folder) }];
+  host.binary = { path: files(extensionPath).binary, override: false, version: source.provenance.version };
+  host.versionFiles = [];
+  return { extensionPath, globalStorageUri: Uri.file(path.join(folder, "storage")).with({ scheme }), extension: { packageJSON: { name: "dygnosis", publisher: "CoconutWater", version: source.provenance.version } } };
 }
 
 test("strict project merge preserves unrelated text, server data and large numeric literals", () => {
@@ -334,6 +358,52 @@ test("multi-root command cancellation does not resolve a binary or write a confi
   const registration = registerProjectMcp({ extensionPath: folder, globalStorageUri: Uri.file(path.join(folder, "storage")), extension: { packageJSON: {} } });
   await host.commands.get("dygnosis.setupProjectMcp")(); assert.equal(host.picks.length, 1); assert.equal(host.resolved, 0);
   await assert.rejects(fs.stat(path.join(folder, ".mcp.json")), { code: "ENOENT" }); registration.dispose();
+});
+test("bundled project MCP setup accepts disk storage with a vscode-userdata URI", async t => {
+  for (const scheme of ["file", "vscode-userdata"]) await t.test(scheme, async t => {
+    reset(); const context = await packagedContext(t, scheme), storage = context.globalStorageUri.fsPath;
+    const registration = registerProjectMcp(context); t.after(() => registration.dispose());
+    await host.commands.get("dygnosis.setupProjectMcp")();
+    assert.deepEqual(host.errors, []);
+    const config = JSON.parse(await fs.readFile(path.join(host.folders[0].uri.fsPath, ".mcp.json"), "utf8"));
+    assert.deepEqual(config.mcpServers.dygnosis, { type: "stdio", command: files(storage).binary, args: ["mcp"] });
+    assert.deepEqual(await fs.readFile(files(storage).binary), bundle("0.11.2").bytes);
+    assert.deepEqual(host.versionFiles, [files(context.extensionPath).binary, files(storage).stage]);
+    assert.equal(JSON.parse(await fs.readFile(files(storage).active, "utf8")).version, "0.11.2");
+  });
+});
+test("activation updates a managed copy in vscode-userdata storage without editing project config", async t => {
+  reset(); const context = await packagedContext(t, "vscode-userdata"), storage = context.globalStorageUri.fsPath;
+  await ensureManagedBinary(storage, bundle("0.11.1"), options);
+  const configPath = path.join(host.folders[0].uri.fsPath, ".mcp.json"), source = '{"keep":42}';
+  await fs.writeFile(configPath, source);
+  let completed, timer;
+  const maintenance = new Promise((resolve, reject) => {
+    completed = resolve;
+    timer = setTimeout(() => reject(new Error("Managed update did not run for vscode-userdata storage")), 1000);
+  });
+  const registration = registerProjectMcp(context, { log: completed });
+  t.after(() => { registration.dispose(); clearTimeout(timer); });
+  try { assert.match(await maintenance, /executable updated to 0.11.2/); }
+  finally { clearTimeout(timer); }
+  assert.deepEqual(await fs.readFile(files(storage).binary), bundle("0.11.2").bytes);
+  assert.equal(JSON.parse(await fs.readFile(files(storage).active, "utf8")).version, "0.11.2");
+  assert.equal(await fs.readFile(configPath, "utf8"), source);
+  assert.equal(host.resolved, 0); assert.equal(host.saved, 0); assert.equal(host.opened.length, 0);
+});
+test("bundled setup rejects virtual and relative extension storage before copying or writing", async t => {
+  for (const kind of ["virtual", "relative-file", "relative-userdata"]) await t.test(kind, async t => {
+    reset(); const folder = await directory(t), storage = path.join(folder, "storage");
+    const globalStorageUri = Uri.file(storage).with({ scheme: kind === "virtual" ? "vscode-vfs" : kind === "relative-userdata" ? "vscode-userdata" : "file" });
+    if (kind.startsWith("relative")) globalStorageUri.fsPath = "relative-storage";
+    host.folders = [{ name: "project", uri: Uri.file(folder) }]; host.binary.override = false;
+    const registration = registerProjectMcp({ extensionPath: folder, globalStorageUri, extension: { packageJSON: {} } });
+    t.after(() => registration.dispose());
+    await host.commands.get("dygnosis.setupProjectMcp")();
+    assert.deepEqual(host.errors, ["Dygnosis project MCP setup: Dygnosis project MCP requires file-backed extension storage on this host."]);
+    await assert.rejects(fs.stat(storage), { code: "ENOENT" });
+    await assert.rejects(fs.stat(path.join(folder, ".mcp.json")), { code: "ENOENT" });
+  });
 });
 test("public Git root is used; explicit override remains at its user path and is never copied", async t => {
   reset(); const folder = await directory(t), child = path.join(folder, "models"); await fs.mkdir(child);
