@@ -1,16 +1,16 @@
 ![Dygnosis](media/logo_s.png) 
 
-Dygnosis is a LSP for Dynare, working out of the box when installed from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis).
+Dygnosis adds Dynare language support to VS Code. Install it from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis) to start editing models.
 
 - Edit with live diagnostics, hover, completion, document or selection formatting, fixes, and commented shock templates.
-- Navigate with references and rename across known includes, plus outline, workspace symbols, folding, syntax colors, and links to related files.
+- Follow names with **Go to Definition**, **Find All References** and **Rename symbol** across known includes. Browse **Outline**, fold blocks and open linked model files.
 - Inspect model counts, equations, includes, and expanded source, with jumps back to the written equations.
 - Compare a model with Git history or another `.mod` file; check unopened saved models in a project.
 - Run **Dygnosis: Open Help** to learn more.
 
-It also provides [MCP tools](https://github.com/naivej/dygnosis/blob/main/help/agents.md) and a [use-dynare skill](https://github.com/naivej/dygnosis/blob/main/.agents/skills/use-dynare/SKILL.md) for agents
+It also provides [MCP tools](https://github.com/naivej/dygnosis/blob/main/help/agents.md) and a [use-dynare skill](https://github.com/naivej/dygnosis/blob/main/.agents/skills/use-dynare/SKILL.md) for agents.
 
-Dygnosis does not depend on dynare, and leave numerical computation (such as steady states, stability and model solutions) to MATLAB. For MATLAB integration, see the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit).
+Editing and source analysis work without a Dynare installation. Run official Dynare in MATLAB or Octave for steady states, stability checks and model solutions. For MATLAB integration, see the [MATLAB extension for VS Code](https://github.com/mathworks/MATLAB-extension-for-vscode) and [MATLAB agentic toolkit](https://github.com/matlab/matlab-agentic-toolkit).
 
 
 **Compatibility**: Dynare 7.2

@@ -10,6 +10,6 @@
   {"id":"project-checks","title":"Check project models","keywords":["project checks","coverage","background","saved","exclude","cancel","Recheck"]},
   {"id":"agents","title":"Work with an agent","keywords":["MCP","tools",".mcp.json","managed binary","approval","standalone","executable"]},
   {"id":"reference","title":"Reference","keywords":["commands","checks","options","keyboard","shortcut","index","reference"]},
-  {"id":"troubleshoot","title":"Troubleshooting","keywords":["unavailable","incomplete","restart","Output","serverPath","trust","virtual"]},
+  {"id":"troubleshoot","title":"Support and problem reports","keywords":["support","report","issue","version","restart","Output","settings"]},
   {"id":"about","title":"About Dygnosis","keywords":["Dynare 7.2","license","credits","MATLAB","Marketplace","MCP"]}
 ]

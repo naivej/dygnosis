@@ -1,23 +1,14 @@
-# Troubleshooting
+# Support and problem reports
 
-[Dygnosis Output](action:output) records startup and failure details. Help stays
-available when the engine cannot run.
+Help stays available before a model opens and when the engine cannot run.
+These commands provide access to extension details and controls.
+Press F1 and type `Dygnosis` to find them in the Command Palette.
 
-| Problem | Recovery |
+| Command | Use |
 |---|---|
-| Engine does not start | Reinstall the extension package for the workspace host, or check the [server path](settings:dynare.serverPath) override. It must name a Dygnosis executable. |
-| Feature unavailable with an older engine | Clear the override to use the bundled engine, then [restart the language server](action:restart). |
-| Include has no model owner | Open its root `.mod` or `.dyn`. **Choose model owner** selects between known owners. |
-| Incomplete analysis | Resolve the reported include, parse or macro problem. Counts and source jumps can be unavailable until then. |
-| Preview or comparison out of date | Refresh it to use current inputs. |
-| Hint, color or CodeLens missing | Check the feature setting and native VS Code visibility controls. |
-| No project roots | Background discovery needs a file-backed folder with saved `.mod` roots. |
-| Project check failed | The project view and Output identify read or discovery failures. **Recheck project** retries. |
-| MCP setup rejected | Setup needs a trusted file-backed workspace and valid `.mcp.json`; duplicate keys, unsupported file structure and symlinks require correction. |
-| MCP update pending on Windows | Stop the other client's Dygnosis server so its executable can be replaced, then reconnect. |
-
-Virtual filesystems have syntax coloring only. Untitled files have no disk
-base for includes. A file treated as plain text needs Dynare language mode.
+| [Dygnosis: Show Output](action:output) | Opens the Output panel. Select Dygnosis from its channel list to read startup, analysis and failure details. |
+| [Dygnosis: Restart language server](action:restart) | Restarts model analysis. |
+| **Dygnosis: Open Settings** | Opens VS Code's Settings editor filtered to Dygnosis. |
 
 ## Report a problem
 

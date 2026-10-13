@@ -1,6 +1,7 @@
 # Inspect macro expansion
 
-**Expand macros** opens a read-only model preview with includes, macro loops,
+With your model active, run **Dygnosis: Expand macros** from the Command Palette.
+It opens a read-only editor tab with includes, macro loops,
 conditions and substitutions expanded. Written spacing stays in place around
 the expanded text. The preview is before Dynare's equation transformations.
 [Macro tint](settings:dynare.effectiveModel.macroTint) can shade the expanded
@@ -10,14 +11,11 @@ Palette.
 
 | Action | Result |
 |---|---|
-| Go to written source | The written text behind the cursor or selection. A generated name such as `beta_1` leads to `beta_@{j}`. |
-| Refresh macro expansion | A new preview from the current model and includes. |
-
-Source changes make the preview out of date. Source jumps remain unavailable
-until refresh, and a selection spanning several source regions may have no
-single target. Incomplete expansion shows its reason and has no source jumps.
+| Dygnosis: Go to written source | With the preview active, opens the line in your model file that produced the text at the cursor or selection. A generated name such as `beta_1` leads to `beta_@{j}`. |
+| Dygnosis: Refresh macro expansion | With the preview active, updates it from the current model and includes. Use this after editing a model file. |
 
 `@#echo` and `@#echomacrovars` messages appear in
-[Dygnosis Output](action:output) when the preview opens or refreshes.
+[Output](action:output) when the preview opens or refreshes. In that panel,
+select **Dygnosis** from the channel list to read them.
 `@#echomacrovars(save)` adds assignment text to the preview. These messages do
 not appear as diagnostics.

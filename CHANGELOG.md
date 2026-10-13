@@ -12,6 +12,9 @@
   a versioned structured envelope with causes, coverage, selection and limits;
   legacy leading text items remain available by default.
 - Proposals do not write files. Verify their input guards before applying them.
+- Help describes the controls you can see in VS Code and gives steps for using
+  them. Related problem locations have a duplicate-declaration example, with
+  instructions for the Problems panel and Alt+F8 details.
 
 ## v0.11.22
 
@@ -21,6 +24,9 @@
 - Show a reason when a native editor edit or source jump expires or cannot be
   applied. Partial macro expansion previews identify why source navigation is
   unavailable.
+- Focus Help on available features, controls and source scope. Remove repeated
+  refusal and partial-result explanations; support lists extension controls
+  and problem-report details.
 
 ## v0.11.21
 

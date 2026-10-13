@@ -4,52 +4,55 @@
 
 A **model root** is the main `.mod` or `.dyn` file. An included file uses the
 context of the root that includes it, called its **model owner**.
-**Choose model owner** in the Command Palette selects the context of an
-include shared by several known models. If no owner is known, open the root first.
-**Treat this file as a model root** makes an included `.mod` or `.dyn` its own
-root again.
+Open a root to make its include context available.
+For example, if `main.mod` includes `equations.inc`, open `main.mod` before
+working in `equations.inc` so its checks can use the declarations in `main.mod`.
+With an include active, run **Dygnosis: Choose model owner** from the Command
+Palette and select the main model from the list.
+**Dygnosis: Treat this file as a model root** makes an included `.mod` or `.dyn`
+its own main model again.
 
 Related files include recognized include, parameter, data and external-function
-files. Resolved links open those files; unresolved links remain visible.
+files. Hover over an include filename or a recognized file reference in the
+editor. If the file is found, VS Code shows a link that opens it; use the
+modifier key shown in the hover to follow the link.
 [Additional include directories](settings:dynare.searchPaths) extend the model
 root's file lookup. Relative paths use its workspace folder, or its directory
 for a loose saved file.
 
 ## Model structure and counts
 
-The [model status bar](settings:dynare.statusBar.enabled) shows aggregate
-endogenous, exogenous and equation counts for the active `.mod` or `.dyn` file.
-Click it to focus Outline. Hover shows an aggregate count block followed by
-one count block for each heterogeneity dimension. Each endogenous line includes
+The [model counts](settings:dynare.statusBar.enabled) appear as numbers beside
+variable and equation icons on the left of the status bar for the active `.mod`
+or `.dyn` file. Hover over those numbers to see counts under **Aggregate model
+before transformation** and each dimension name, such as **Heterogeneous model:
+households**. Click the numbers to open **Outline**.
+Each endogenous line in the hover includes
 static, predetermined, forward-looking and mixed counts, including zero.
-The accessibility label states the same counts.
+Screen readers announce the same counts.
 
-Its [count preferences](settings:dynare.statusBar.counts) choose which count
-lines appear and their order in every block and on the status bar. Hiding
+The [count setting](settings:dynare.statusBar.counts) chooses which counts
+appear and their order in the hover and on the status bar. Hiding
 endogenous also hides its class counts. These choices apply to the displayed
 file. Outline shows model structure and heterogeneity dimensions; variable
-hover and declaration detail show timing. Parameter counts remain available
-to agents through `dynare_model_info`.
-
-Incomplete expansion withholds counts and equation navigation and shows the
-reason.
+hover and declaration detail show timing.
 
 ## Equations
 
 | Action | Available result |
 |---|---|
-| Jump to equation... in the Command Palette | One searchable list of every counted equation in the active model, including unnamed equations. |
-| Jump to equation... above a model block | One searchable list of that opener's counted equations across every macro occurrence and scope. The [equation action](settings:dynare.codeLens.modelEquations) can be hidden. |
-| Find references | An optional [CodeLens at declarations](settings:dynare.codeLens.declarationReferences). |
-| Expand macros | An optional [CodeLens for the macro preview](settings:dynare.codeLens.effectiveModel). |
+| Dygnosis: Jump to equation... in the Command Palette | Opens a searchable list of every counted equation in the active model, including unnamed equations. |
+| Click Jump to equation... above a model block | Opens a list of that block's counted equations, including equations repeated by macros. The [equation action](settings:dynare.codeLens.modelEquations) can be hidden. |
+| Click Find references above a declaration | Opens the references list for that name. If the declaration lists several names, choose one first. The [declaration action](settings:dynare.codeLens.declarationReferences) is optional. |
+| Click Expand macros above the first model block | Opens the macro preview. The [preview action](settings:dynare.codeLens.effectiveModel) is optional. |
 
-Each equation row shows its number and name, scope, source file, macro origin
-and equation text. Type any of those fields to filter the list. Choose a row
-to open its verified written source; cancel to keep the cursor where it is.
-Even a list with one equation waits for your choice. An empty model or opener
-explains that it has no counted equations.
+Each equation row shows its number and name, **Aggregate** or a dimension name,
+filename and line, and equation text. A macro loop can also show a value such as
+`j=1`. Type a number, name or part of the equation to filter the list. Choose a
+row to open the line in your model file.
 
-Native `editor.codeLens` also controls CodeLens visibility.
+These clickable labels above code are called **CodeLens** in VS Code. To show
+them, enable **Editor: Code Lens** in Settings and the relevant Dygnosis setting.
 
 Equation numbers are assigned before Dynare's equation transformations and can
 differ from numbers in MATLAB or Octave results. Model locals, static-only

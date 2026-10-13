@@ -3,6 +3,17 @@
 Dygnosis adds Dynare language support to VS Code for `.mod`, `.dyn` and `.inc`
 files. Analysis works without a separate Dynare, MATLAB or Octave installation.
 
+Open a model file and check that the language name at the bottom right is
+**Dynare**. If it shows another language, click it and select **Dynare**.
+
+Press F1 to open the **Command Palette**. Type `Dygnosis` to find the extension's
+commands, such as **Dygnosis: Expand macros**. Help uses the command titles
+shown in that list. For VS Code commands such as **Go to Definition**, search
+for that title.
+
+In Help, use **Search** at the top to find a feature or check code. A settings
+link opens the matching control in VS Code's Settings editor.
+
 ## Understand the model
 
 [Model files and structure](model-and-includes.md) brings together includes,
@@ -38,8 +49,8 @@ describes what its results establish.
 
 **Dygnosis: Open Settings** contains the full configuration list. Feature pages
 mention configuration where it changes that feature's behavior or appearance.
-The [reference](reference.md) provides command, check and option lookup;
-[troubleshooting](troubleshoot.md) covers extension problems.
+The [reference](reference.md) lists commands, check codes and command options;
+[support](troubleshoot.md) provides extension controls and problem-report details.
 
 ## Availability
 
@@ -55,4 +66,3 @@ includes a disk location. An included file needs a known
 [Marketplace](https://marketplace.visualstudio.com/items?itemName=CoconutWater.dygnosis)
 provides the extension; [GitHub Releases](https://github.com/naivej/dygnosis/releases)
 provides candidate packages and standalone binaries when available.
-[About Dygnosis](about.md) describes the scope of its checks and results.
