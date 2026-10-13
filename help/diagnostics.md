@@ -11,9 +11,7 @@ a problem.
 | Warning | A potential problem that does not itself cause that refusal. |
 | Information | A point to review, such as missing equation names or incomplete analysis. |
 
-The [check reference](reference.md) gives each code's
-explanation. **Shared** checks follow Dynare, **added** checks are extra
-Dygnosis guidance, and **skipped** checks are documented but not reported.
+The [check reference](reference.md) gives each code's explanation.
 A clean Problems panel does not establish that Dynare can accept or solve the
 model; see [About Dygnosis](about.md).
 

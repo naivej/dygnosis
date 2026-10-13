@@ -2,6 +2,9 @@
 
 ## v0.11.21
 
+- The Reference page, before the diagnostic code list, defines **shared**,
+  **added**, and **skipped**. A skipped code stays documented because Dynare's
+  message depends on rewritten equations or on the MATLAB file it generates.
 - Fix **Set up MCP for this project** rejecting local VS Code extension
   storage with a false file-backed storage error. Managed executable updates
   also work when VS Code exposes that disk storage as `vscode-userdata`.
@@ -299,7 +302,7 @@ Language server and agent tools.
 - Workspace folders and loose files keep separate include paths and cached inputs. A settings change sends the full configuration. Clients can opt in to `dynare/modelInfoChanged` when the model should refresh.
 - Adds `dynare/modelInfo`. Counts and timing match `dynare_model_info`. The response also has written statements, declarations, counted equations, block categories, related files, and source segments. Outline and folding stay in the file on screen. Incomplete expansion withholds counts and equation numbers. Equation numbers describe the written model before Dynare rewrites it.
 - Hover and completion show the written `long_name` and TeX name. Each can be hidden. Completion uses separate icons for endogenous variables, exogenous variables, and parameters, and offers empty block skeletons. Highlights mark declarations and assignment targets as writes, and other uses as reads.
-- Semantic tokens negotiate `dynareEndogenous`, `dynareExogenous`, `dynareParameter`, and `dynareModelLocal`. A client that does not support a role receives `variable`. Full and range responses use that legend. Existing Dynare-specific color rules need the [selector migration](help/integrations.md#semantic-token-migration).
+- Semantic tokens negotiate `dynareEndogenous`, `dynareExogenous`, `dynareParameter`, and `dynareModelLocal`. A client that does not support a role receives `variable`. Full and range responses use that legend.
 - Duplicate and include-cycle diagnostics link to the earlier written location in the editor and in MCP results. A fix in an unopened include uses the current source. An edit to an open file uses that file's version. W020 and W022 carry LSP Unnecessary. E021 does not.
 - Expression-value hints return for an assignment whose right side is not a plain number. The hint is the value at that assignment when the arithmetic is finite and known. Plain numbers stay quiet. Unknown execution, and macro copies that do not share one value, withhold the hint. Hover values and comparison values stay as they were.
 
