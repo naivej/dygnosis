@@ -360,3 +360,29 @@ fn usage_written_references_and_include_owners_stay_available() {
         .iter()
         .any(|reference| model.name(reference.name) == "p"));
 }
+
+#[test]
+fn pac_model_discount_counts_as_a_parameter_use() {
+    let source = "var y; varexo e; parameters beta unused; beta=0.99; unused=0.5; model; y=0.9*y(-1)+e; end; pac_model(model_name=pac_y, auxiliary_model_name=target_var, discount=beta);";
+    // Check warns before transform substitutes the discount. That warning is
+    // intentional silence here, including when the option word keeps its case.
+    official(source, true, Some("beta"));
+    let rows = check_w022(&parse(source));
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].message, "Parameter(s) unused not used in the model");
+    let reported = analyze(&parse(source));
+    assert!(
+        reported
+            .iter()
+            .all(|row| row.code != "W022"
+                || row.message == "Parameter(s) unused not used in the model"),
+        "{reported:?}"
+    );
+    let cased = source.replace("discount=beta", "Discount=beta");
+    assert!(
+        check_w022(&parse(&cased))
+            .iter()
+            .all(|row| row.message == "Parameter(s) unused not used in the model"),
+        "{cased}"
+    );
+}

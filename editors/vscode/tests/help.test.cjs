@@ -21,7 +21,13 @@ test('Help uses every current command, check, option and setting feature owner w
   for (const [key, id] of Object.entries(bundle.settingsTopics)) assert.ok(pages.find(page => page.id === id).keywords.includes(key));
   assert.ok(!ids.has('settings'));
   assert.equal(JSON.stringify(bundle), original);
-  assert.ok(pages.find(page => page.id === 'reference').markdown.includes('[dynare_diagnose](tool:dynare_diagnose)'));
+  const referencePage = pages.find(page => page.id === 'reference');
+  assert.equal(referencePage.markdown.includes('## MCP tools'), false);
+  assert.equal(referencePage.markdown.includes('[dynare_diagnose](tool:dynare_diagnose)'), false);
+  assert.ok(pages.find(page => page.id === 'agents').markdown.includes('[dynare_diagnose](tool:dynare_diagnose)'));
+  const referenceHtml = helpMarkdown(referencePage.markdown, () => undefined);
+  for (const code of bundle.reference.codes) assert.match(referenceHtml, new RegExp(`data-link="check:${code.code}"`), code.code);
+  assert.match(referenceHtml, /planner_discount outside \(0, 1\]/);
 });
 
 test('untrusted engine explanations cannot execute HTML, links or remote images', () => {

@@ -1,6 +1,6 @@
 {
-  "version": "0.11.23",
-  "fingerprint": "1bd9c311da3fb3af934258b59eca5bd2245b3f7545e744200bc0b2b99e046a76",
+  "version": "0.11.24",
+  "fingerprint": "41cb8db7bf3a0263358030deea49d51e0bf78078b322ef0258d7c7fafb8d5f79",
   "tools": [
     {
       "name": "dynare_diagnose",
@@ -7003,7 +7003,7 @@
       "code": "W022",
       "kind": "shared",
       "title": "Parameter declared but never referenced in model equations",
-      "markdown": "### W022: Parameter declared but never referenced in model equations\n\nA parameter is declared but has no surviving use in aggregate dynamic or static-only equations, live model-local definitions, heterogeneous equations, or `steady_state_model`. Parameters assigned as targets in `steady_state_model` count as used. Calibration, `initval`, and shock expressions do not count as uses. Dynare warns: `Parameter(s) unused_p not used in the model`. Dygnosis reports one warning per written unused parameter and omits generated names such as `optimal_policy_discount_factor`. The check also applies to a complete file without a `model` block. An included declaration keeps the warning in that file, once for each requested root analysis.\n"
+      "markdown": "### W022: Parameter declared but never referenced in model equations\n\nA parameter is declared but has no surviving use in aggregate dynamic or static-only equations, live model-local definitions, heterogeneous equations, or `steady_state_model`. Parameters assigned as targets in `steady_state_model` count as used. A parameter named by the `discount` option of `pac_model` counts as used. Calibration, `initval`, and shock expressions do not count as uses. Dynare warns: `Parameter(s) unused_p not used in the model`. Dynare can still warn for a discount-only parameter at check, because it substitutes that discount while rewriting the model. Dygnosis reports one warning per written unused parameter and omits generated names such as `optimal_policy_discount_factor`. The check also applies to a complete file without a `model` block. An included declaration keeps the warning in that file, once for each requested root analysis.\n"
     },
     {
       "code": "W031",

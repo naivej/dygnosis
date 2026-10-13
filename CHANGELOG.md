@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.11.24
+
+- The Reference page lists commands, check codes and command options. MCP tools
+  stay in Work with an agent, and each tool name there still opens its input
+  reference.
+- The Reference entry for W102 opens its explanation. A bracket in a check
+  title no longer ends that link early.
+- A parameter named by `pac_model`'s `discount` option is not reported as
+  unused. For example, `discount=beta` in
+  `pac_model(model_name=pac_y, auxiliary_model_name=target_var, discount=beta);`
+  does not produce W022 for `beta`.
+
 ## v0.11.23
 
 - MCP model tools accept explicit text, supplied-map or saved-disk sources.

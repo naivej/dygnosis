@@ -40,7 +40,8 @@ Equations. Direct equation references show where changed names are used.
 
 A model comparison describes source facts, not numerical or algebraic
 equivalence. Uncertain equation matches appear as separate Removed and Added
-rows. Active filters affect the rows shown.
+rows. To help match an equation, give it the same unique `name` tag in both
+models. Active filters affect the rows shown.
 
 Text diff covers the main model and the included files used in that comparison.
 It does not include

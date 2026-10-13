@@ -1,7 +1,7 @@
 # Reference
 
-This reference lists Dygnosis commands, diagnostic explanations, recognized
-Dynare command options and MCP tools from the installed Help edition.
+This reference lists Dygnosis commands, diagnostic explanations and recognized
+Dynare command options from the installed Help edition.
 Click a command title below to open its Help topic, a check code to read its
 explanation, or a Dynare command name to see its options. For an explanation
 from the selected engine, use [Explain a check](diagnostics.md#actions); Help
