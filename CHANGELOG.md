@@ -11,6 +11,9 @@
   unused. For example, `discount=beta` in
   `pac_model(model_name=pac_y, auxiliary_model_name=target_var, discount=beta);`
   does not produce W022 for `beta`.
+- References and Rename include the parameter named by `pac_model`'s `discount`
+  option. Rename updates that option together with the declaration and other
+  bound uses.
 
 ## v0.11.23
 

@@ -412,6 +412,86 @@ async fn rename_rejects_ordinary_and_local_collisions_and_keyword_changes() {
     }
 }
 
+// Guards PAC discount references being omitted or blocking the complete Rename,
+// while native MATLAB strings and comments keep their text.
+#[tokio::test]
+async fn rename_and_references_include_pac_discount_parameter() {
+    let fixture = Fixture::new();
+    for option in ["discount", "Discount"] {
+        let text = format!(
+            "parameters beta;\nbeta=.9;\npac_model(model_name=pac_y, {option}=beta);\nuser_params={{'beta'}};\n// beta\n"
+        );
+        let root = fixture.write(&format!("pac_{option}.mod"), &text);
+        let (service, _socket) = new_service();
+        open(service.inner(), &root, &text, 1).await;
+        let expected: Vec<_> = ["beta;", "beta=", "beta);"]
+            .into_iter()
+            .map(|marker| {
+                let start = position(&root, &text, marker).position;
+                Location::new(
+                    root.clone(),
+                    Range::new(start, Position::new(start.line, start.character + 4)),
+                )
+            })
+            .collect();
+        let references = service
+            .inner()
+            .references(ReferenceParams {
+                text_document_position: position(&root, &text, "beta;"),
+                context: ReferenceContext {
+                    include_declaration: true,
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(references, expected, "PAC option {option}");
+        assert!(service
+            .inner()
+            .prepare_rename(position(&root, &text, "beta);"))
+            .await
+            .unwrap()
+            .is_some());
+        let changes = edits(
+            rename(service.inner(), &root, &text, "beta);", "betta")
+                .await
+                .expect("complete PAC discount Rename"),
+        );
+        assert_eq!(changes[&root].0, Some(1));
+        let expected_text = text
+            .replace("parameters beta;", "parameters betta;")
+            .replace("\nbeta=", "\nbetta=")
+            .replace(&format!("{option}=beta)"), &format!("{option}=betta)"));
+        assert_eq!(apply(&text, &changes[&root].1), expected_text);
+    }
+}
+
+// Guards the new discount binding from making generated names editable or
+// treating a PAC model name as an ordinary parameter reference.
+#[tokio::test]
+async fn rename_pac_discount_keeps_generated_and_unbound_slot_guards() {
+    let fixture = Fixture::new();
+    for text in [
+        "parameters beta; pac_model(model_name=pac_y, discount=@{\"beta\"});\n",
+        "parameters beta; pac_model(model_name=beta, discount=beta);\n",
+    ] {
+        let root = fixture.write("unproved_pac.mod", text);
+        let (service, _socket) = new_service();
+        open(service.inner(), &root, text, 1).await;
+        let refusal = service
+            .inner()
+            .prepare_rename(position(&root, text, "beta;"))
+            .await
+            .expect_err("unproved PAC name must withhold Rename");
+        assert!(!refusal.message.is_empty());
+        assert!(rename(service.inner(), &root, text, "beta;", "betta")
+            .await
+            .is_none());
+    }
+}
+
 // Guards safe shared bindings being lost and incompatible shared bindings being edited.
 #[tokio::test]
 async fn rename_shared_include_requires_the_same_written_declaration() {

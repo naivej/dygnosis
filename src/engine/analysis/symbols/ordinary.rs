@@ -30,7 +30,9 @@ pub(super) fn native_orders(model: &Model) -> HashSet<usize> {
 /// Parser-owned name slots. An equal spelling in a file/function/label slot
 /// is not evidence that the token refers to the selected ordinary symbol.
 pub(super) fn binding_sites(model: &Model, name: &str) -> HashSet<Span> {
-    use crate::engine::language::model::{DottedHead, PathTarget, ShockKind};
+    use crate::engine::language::model::{
+        DottedHead, PathTarget, SemiStructuralKind, SemiStructuralValue, ShockKind,
+    };
     let mut sites = HashSet::new();
     let mut add = |symbol, span| {
         if model.name(symbol) == name {
@@ -82,6 +84,24 @@ pub(super) fn binding_sites(model: &Model, name: &str) -> HashSet<Span> {
             break;
         }
         add(row.name, row.span);
+    }
+    for command in &model.semi_structural_commands {
+        if crate::engine::control::cancelled() {
+            break;
+        }
+        if command.kind != SemiStructuralKind::PacModel {
+            continue;
+        }
+        for option in &command.options {
+            if crate::engine::control::cancelled() {
+                break;
+            }
+            if option.name.eq_ignore_ascii_case("discount")
+                && let SemiStructuralValue::Symbol { name: symbol, span } = &option.value
+            {
+                add(*symbol, *span);
+            }
+        }
     }
     for row in model.varobs.iter().chain(&model.varexobs) {
         if crate::engine::control::cancelled() {
