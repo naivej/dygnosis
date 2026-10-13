@@ -1,6 +1,6 @@
 {
   "version": "0.11.23",
-  "fingerprint": "7328175f80af50169b80b6b38027740a73ec38ce8ae5ca3ddfe5dce387469168",
+  "fingerprint": "1bd9c311da3fb3af934258b59eca5bd2245b3f7545e744200bc0b2b99e046a76",
   "tools": [
     {
       "name": "dynare_diagnose",
@@ -199,7 +199,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -212,7 +212,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "expected_revision": {
             "description": "Returned source revision. Required when reusing snapshot-bound selections, proposals or continuation.",
@@ -246,7 +246,7 @@
             ]
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -292,7 +292,7 @@
     },
     {
       "name": "dynare_model_info",
-      "description": "Inspect model names, counts, timing and local definitions. Select summary, declarations, assignments, model_locals, statements, blocks, includes or scope sections. Assignment values are proven at their execution positions; unknown values stay null. Counts describe written equations before Dynare transformations. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. Single-model tools accept source text/map/disk or legacy supplied inputs. Maps use exact keys and no disk fallback. Coordinates are one-based Unicode scalars, with exclusive ends. Limits: 1,000,000 bytes per file, 8 MiB source/expansion/output, 256 files or lookup candidates per request, 64 owners, 1,000,000 macro work units, 1–1000 rows per page. No numerical execution.",
+      "description": "Inspect model names, counts, timing and local definitions. Select summary, declarations, assignments, model_locals, statements, blocks, includes or scope sections. For large saved models use source.kind=disk, detail=compact, selected sections and an explicit page_size, for example 10. Compact detail alone does not limit rows. Read selection.collections counts and request selection.continuation only when more rows are needed. Assignment values are proven at their execution positions; unknown values stay null. Counts describe written equations before Dynare transformations. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. Single-model tools accept source text/map/disk or legacy supplied inputs. Maps use exact keys and no disk fallback. Coordinates are one-based Unicode scalars, with exclusive ends. Limits: 1,000,000 bytes per file, 8 MiB source/expansion/output, 256 files or lookup candidates per request, 64 owners, 1,000,000 macro work units, 1–1000 rows per page. No numerical execution.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -480,7 +480,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -493,7 +493,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "expected_revision": {
             "description": "Returned source revision. Required when reusing snapshot-bound selections, proposals or continuation.",
@@ -520,7 +520,7 @@
             ]
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -741,7 +741,7 @@
             "description": "Explicit Before selector: Git reads this local commit tree; Working reads saved server-host files. Each root_file is repository-relative .mod or .dyn."
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -754,7 +754,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "expected_revision_a": {
             "description": "Expected Before source revision returned by the preceding comparison.",
@@ -831,7 +831,7 @@
             "type": "array"
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -1222,7 +1222,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -1235,7 +1235,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "expected_revision": {
             "description": "Returned source revision. Required when reusing snapshot-bound selections, proposals or continuation.",
@@ -1276,7 +1276,7 @@
             ]
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -1333,7 +1333,7 @@
     },
     {
       "name": "dynare_rename",
-      "description": "Propose a complete semantic Rename without writing files. Select exactly one old_name, target or binding_id. Collisions, incomplete inputs, generated names and incompatible checked owners refuse the whole proposal. Literal endogenous/mcp tag names retain surrounding quotes and text. Default leading content is rewritten text or a changed-file map; the canonical object includes complete edits and guards. changed means proposed text changed. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. Proposals contain complete original-source edits, expected text and SHA-256 guards for all checked inputs and missing candidates. Recheck saved disk inputs with expected_revision and verify all guards before external application. Proposals do not reserve files. Identities require their original expected_revision.",
+      "description": "Propose a complete semantic Rename without writing files. Select exactly one old_name, target or binding_id. Collisions, incomplete inputs, generated names and incompatible checked owners refuse the whole proposal. Literal endogenous/mcp tag names retain surrounding quotes and text. Default leading content is rewritten text or a changed-file map; the canonical object includes complete edits and guards. changed means proposed text changed. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners and include_dirs. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -1678,7 +1678,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -1691,7 +1691,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "expected_revision": {
             "description": "Returned source revision. Required when reusing snapshot-bound selections, proposals or continuation.",
@@ -1732,7 +1732,7 @@
             ]
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -1785,7 +1785,7 @@
     },
     {
       "name": "dynare_auto_fix",
-      "description": "Propose proven stored diagnostic fixes, optionally selected by code, diagnostic_id or written target. Each fix must repair its owning diagnostic. The result states applied and skipped work and diagnostics remaining in proposed source. No files are written. Default leading items retain resulting text and outcome details. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. Proposals contain complete original-source edits, expected text and SHA-256 guards for all checked inputs and missing candidates. Recheck saved disk inputs with expected_revision and verify all guards before external application. Proposals do not reserve files. Identities require their original expected_revision.",
+      "description": "Propose proven stored diagnostic fixes, optionally selected by code, diagnostic_id or written target. Each fix must repair its owning diagnostic. The result states applied and skipped work and diagnostics remaining in proposed source. No files are written. Default leading items retain resulting text and outcome details. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners and include_dirs. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -2008,7 +2008,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -2021,7 +2021,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "diagnostic_id": {
             "description": "Snapshot-bound selected diagnostic identity.",
@@ -2055,7 +2055,7 @@
             ]
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -2127,7 +2127,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -2140,10 +2140,10 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -2196,7 +2196,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -2209,7 +2209,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "kind": {
             "description": "Diagnostic classification filter: shared, added or skipped.",
@@ -2219,7 +2219,7 @@
             ]
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -2283,7 +2283,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -2296,7 +2296,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "option": {
             "description": "Exact option name filter.",
@@ -2306,7 +2306,7 @@
             ]
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -2589,7 +2589,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -2602,7 +2602,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "dimension": {
             "description": "Exact heterogeneity dimension name.",
@@ -2670,7 +2670,7 @@
             ]
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -2930,7 +2930,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -2943,7 +2943,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "expected_revision": {
             "description": "Returned source revision. Required when reusing snapshot-bound selections, proposals or continuation.",
@@ -2970,7 +2970,7 @@
             ]
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -3249,7 +3249,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -3262,7 +3262,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "equation_id": {
             "description": "Snapshot-bound expanded equation identity.",
@@ -3318,7 +3318,7 @@
             "description": "Whole-line formatting or expanded-text selection, one-based and inclusive."
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -3357,7 +3357,7 @@
     },
     {
       "name": "dynare_format",
-      "description": "Propose whitespace formatting for the root or selected source file. line_range selects whole lines, one-based and inclusive; reversed/out-of-file ranges are input errors. Preserves native MATLAB, verbatim layout and source outside the selected lines. formatIndent is tab or one to eight spaces. No file is written. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. Proposals contain complete original-source edits, expected text and SHA-256 guards for all checked inputs and missing candidates. Recheck saved disk inputs with expected_revision and verify all guards before external application. Proposals do not reserve files. Identities require their original expected_revision.",
+      "description": "Propose whitespace formatting for the root or selected source file. line_range selects whole lines, one-based and inclusive; reversed/out-of-file ranges are input errors. Preserves native MATLAB, verbatim layout and source outside the selected lines. formatIndent is tab or one to eight spaces. No file is written. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners and include_dirs. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -3566,7 +3566,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -3579,7 +3579,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "expected_revision": {
             "description": "Returned source revision. Required when reusing snapshot-bound selections, proposals or continuation.",
@@ -3627,7 +3627,7 @@
             "description": "Whole-line formatting or expanded-text selection, one-based and inclusive."
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -3879,7 +3879,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -3892,7 +3892,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "dimension": {
             "description": "Exact heterogeneity dimension name.",
@@ -3952,7 +3952,7 @@
             "type": "array"
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -4053,7 +4053,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -4066,7 +4066,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "exclude_paths": {
             "default": [],
@@ -4109,7 +4109,7 @@
             "type": "array"
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -4516,7 +4516,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -4529,7 +4529,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "expected_revision": {
             "description": "Returned source revision. Required when reusing snapshot-bound selections, proposals or continuation.",
@@ -4556,7 +4556,7 @@
             ]
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [
@@ -4613,7 +4613,7 @@
     },
     {
       "name": "dynare_code_actions",
-      "description": "List available diagnostic fixes, equation tags, long names and commented shock templates at a written target. Each action is a separate complete proposal. Select action_id with expected_revision to return that action's top-level proposal; alternatives are not combined. No files are written. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. Proposals contain complete original-source edits, expected text and SHA-256 guards for all checked inputs and missing candidates. Recheck saved disk inputs with expected_revision and verify all guards before external application. Proposals do not reserve files. Identities require their original expected_revision.",
+      "description": "List available diagnostic fixes, equation tags, long names and commented shock templates at a written target. Each action is a separate complete proposal. Select action_id with expected_revision to return that action's top-level proposal; alternatives are not combined. No files are written. Read schema_version 2 data with outcome, inputs, coverage, selection, proposal and limits. detail=compact omits legacy mirrors; causes remain beside partial/refused results. proposal.inputs contains guards for every checked file and missing lookup candidate; text_sha256 hashes original UTF-8 text, and missing candidates have exists=false with null hashes. proposal.edits contains original-source ranges, expected_text and new_text. proposal.revision binds these inputs, source_policy, checked_owners and include_dirs. Recheck saved disk inputs with expected_revision, verify all guards and expected text, then apply the complete proposal with external file tools. Proposals are atomic and do not reserve files. Identities require their original expected_revision.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -4850,7 +4850,7 @@
             ]
           },
           "continuation": {
-            "description": "Continuation returned by this tool for the same input, filters, sections and detail.",
+            "description": "Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.",
             "type": [
               "string",
               "null"
@@ -4863,7 +4863,7 @@
               }
             ],
             "default": "full",
-            "description": "Compact omits legacy text mirrors and optional prose. Causes and edit guards remain."
+            "description": "Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain."
           },
           "diagnostic_id": {
             "description": "Snapshot-bound selected diagnostic identity.",
@@ -4897,7 +4897,7 @@
             ]
           },
           "page_size": {
-            "description": "Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.",
+            "description": "Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.",
             "format": "uint",
             "minimum": 0,
             "type": [

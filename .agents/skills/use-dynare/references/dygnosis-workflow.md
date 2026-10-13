@@ -106,6 +106,113 @@ default leading content items in order. `detail: "compact"` omits those legacy
 mirrors. Editions from 2025-06-18 advertise `outputSchema` and
 `structuredContent`; older editions receive the canonical JSON text only.
 
+**Large saved models.** Use an explicit disk source so the client sends a path,
+not the model text. Select only the needed sections, request compact detail,
+and set `page_size`: compact detail omits mirrors and optional prose, but does
+not limit collection rows. For example, request the summary and declarations
+in pages of 10. In this example, `client` is an already-connected MCP SDK
+client. Replace the root with the actual saved path on the MCP server host.
+
+```js
+const source = {
+  kind: "disk",
+  root: "C:/models/US_FRB08mx_rep.mod", // Replace with the actual server-host path.
+};
+const query = {
+  source,
+  sections: ["summary", "declarations"],
+  detail: "compact",
+  page_size: 10,
+};
+
+async function callCanonical(name, args) {
+  const result = await client.callTool({ name, arguments: args });
+  if (result.structuredContent?.schema_version === 2) {
+    return result.structuredContent;
+  }
+  for (const item of [...(result.content ?? [])].reverse()) {
+    if (typeof item.text !== "string") continue;
+    try {
+      const value = JSON.parse(item.text);
+      if (value?.schema_version === 2) return value;
+    } catch {
+      // Legacy text may precede the canonical JSON item.
+    }
+  }
+  throw new Error(`${name} returned no canonical schema-version 2 result`);
+}
+
+const first = await callCanonical("dynare_model_info", query);
+if (first.outcome.status !== "ok") {
+  throw new Error("Model Info is incomplete; inspect coverage before using its facts");
+}
+const declarations = first.selection.collections.declarations;
+const declarationsRemain =
+  declarations.returned_count < declarations.available_matches;
+let next = null;
+if (declarationsRemain && first.selection.continuation) {
+  next = await callCanonical("dynare_model_info", {
+    ...query,
+    continuation: first.selection.continuation,
+    expected_revision: first.inputs[0].revision,
+  });
+}
+```
+
+For each entry in `selection.collections`, `returned_count` is the number in
+this page, `available_matches` is the number available to this query, and
+`total_matches` is that collection's total when known (otherwise `null`). The
+opaque `selection.continuation` is `null` when no collection has another page.
+Fetch another page only when its collection has more rows and a continuation
+is present. Keep the original source, sections, filters, detail and page size;
+send the continuation and the revision from `inputs[0].revision`. Single-model
+tools call this argument `expected_revision`; workspace batches use
+`expected_revisions` keyed by root; model comparison uses
+`expected_revision_a` and `expected_revision_b`.
+
+Use the returned binding identity to focus later queries. This example finds
+`xgap2` and its equations, then expands one returned equation without parsing
+source locations or inventing an identity:
+
+```js
+const symbol = await callCanonical("dynare_symbol_info", {
+  source,
+  symbol: "xgap2",
+  detail: "compact",
+});
+if (symbol.outcome.status !== "ok") throw new Error("xgap2 was not resolved");
+const binding_id = symbol.data.binding_id;
+const expected_revision = symbol.inputs[0].revision;
+
+const references = await callCanonical("dynare_find_references", {
+  source,
+  binding_id,
+  expected_revision,
+  detail: "compact",
+  page_size: 10,
+});
+const equations = await callCanonical("dynare_equations", {
+  source,
+  binding_id,
+  expected_revision,
+  detail: "compact",
+  page_size: 5,
+});
+const equation_id = equations.data.equations[0]?.equation_id;
+if (equation_id) {
+  const expanded = await callCanonical("dynare_expand", {
+    source,
+    equation_id,
+    expected_revision,
+    detail: "compact",
+  });
+}
+```
+
+Use each result's `selection.collections` to decide whether References or
+equations need another page. Their `selection.continuation` and the same
+`expected_revision` apply to that tool's next page.
+
 `outcome.status` is `ok`, `changed`, `unchanged`, `partial` or `refused`.
 Read its causes and per-owner `coverage` before relying on facts. A page of
 complete analysis remains `ok`; `selection` describes the page independently.
@@ -191,11 +298,13 @@ navigation schema 1 and their original file keys.
 
 `dynare_rename`, `dynare_code_actions`, `dynare_auto_fix` and `dynare_format`
 return proposals; they do not write files. Each proposal contains complete
-non-overlapping source edits, expected old text, the source revision and
-SHA-256 guards for all checked inputs, including unchanged dependencies and
-missing lookup candidates. Do not apply part of a proposal.
-
-The editing tools return proposed text. They do not save files.
+non-overlapping source edits. `proposal.revision`, `proposal.source_policy`,
+`proposal.checked_owners` and `proposal.include_dirs` describe the checked
+input. `proposal.inputs` contains one guard per checked file and missing lookup
+candidate. A guard has `file`, `exists`, `directory`, `identity`,
+`text_sha256`, `byte_sha256` and `length`; a missing candidate has
+`exists: false` and null hashes. Each item in `proposal.edits` has its original
+source range, `expected_text` and `new_text`. Do not apply part of a proposal.
 
 | Tool | Returns |
 |---|---|
@@ -205,8 +314,12 @@ The editing tools return proposed text. They do not save files.
 | `dynare_format` | A proposed whole-file or selected-line revision. |
 | `dynare_extract` | `fragment` with the declarations it needs, and `omitted_context` (for example `calibration`). `status: "empty"` when nothing matched. |
 
-For disk inputs, repeat the proposal request with its `expected_revision`. Verify every guard, apply the complete proposal with your file tools, refresh the inputs and run `dynare_diagnose` again. The revision check does not reserve files against later changes.
-3. Refresh the model inputs (the `files` map) and run `dynare_diagnose` again.
+For disk inputs, repeat the proposal request with the original
+`expected_revision`. If it returns `INPUT_CHANGED`, obtain a new proposal from
+the current inputs. Then verify every guard and each edit's `expected_text`,
+apply the complete proposal with your file tools, refresh the inputs and run
+`dynare_diagnose` again. The revision check does not reserve files against
+later changes.
 
 An extracted fragment is not a runnable model. Complete setup the result marks
 as omitted before presenting it as a runnable experiment.

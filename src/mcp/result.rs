@@ -12,15 +12,15 @@ pub(crate) const OUTPUT_BYTES: usize = 8 * 1024 * 1024;
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ResultOptions {
-    /// Compact omits legacy text mirrors and optional prose. Causes and edit guards remain.
+    /// Compact omits legacy text mirrors and optional prose, not collection rows. For large collections also set page_size and select sections or filters. Causes and edit guards remain.
     #[serde(default)]
     pub detail: Detail,
     /// Selected result sections. Omitted sections use the tool's default projection.
     #[serde(default)]
     pub sections: Vec<String>,
-    /// Maximum rows per collection, from 1 to 1000. Omit for the default full result within limits.
+    /// Maximum rows per collection, from 1 to 1000. Set explicitly for large queries, for example 10 with compact detail. Omitted values return the full collection within limits, even with compact detail.
     pub page_size: Option<usize>,
-    /// Continuation returned by this tool for the same input, filters, sections and detail.
+    /// Opaque selection.continuation from the preceding page. Repeat the same inputs, filters, sections, detail and page_size. For model queries also supply the tool's original expected revision arguments. Read selection.collections for returned and available match counts; fetch another page only when needed.
     pub continuation: Option<String>,
 }
 
@@ -51,8 +51,10 @@ pub(crate) struct ToolResult {
     pub outcome: Outcome,
     pub inputs: Vec<Value>,
     pub coverage: Option<Value>,
+    /// Collection paging: collections.<name> has returned_count, available_matches, total_matches (null when unknown) and offset. continuation is the opaque next-page token, or null when no available matches remain.
     pub selection: Option<Value>,
     pub data: Value,
+    /// Complete edit proposal, or null. inputs[] holds file, exists, directory, identity, text_sha256, byte_sha256 and length guards; missing candidates have exists=false and null hashes. revision binds these guards, source_policy, checked_owners and include_dirs. edits[] holds file, range (line, column, end_line, end_column), expected_text and new_text. Range positions are one-based Unicode scalars with exclusive ends. Verify all guards and expected text before applying the complete proposal with external file tools.
     pub proposal: Option<Value>,
     pub limits: Vec<Value>,
 }
