@@ -42,6 +42,7 @@ const vscode = {
   Range: class { constructor(...coordinates) { this.coordinates = coordinates; } },
   RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } }, CancellationTokenSource,
   window: {
+    showInformationMessage: message => { host.notifications.push(message); return Promise.resolve(); },
     get activeTextEditor() { return host.editor; },
     get visibleTextEditors() { return host.visibleEditors ?? (host.editor ? [host.editor] : []); },
     tabGroups: { get all() { return host.tabGroups ?? []; } },
@@ -72,6 +73,7 @@ const languageClient = { DocumentSymbolRequest: { method: "textDocument/document
 const originalLoad = Module._load;
 Module._load = function(id, ...args) { return id === "vscode" ? vscode : id === "vscode-languageclient/node" ? languageClient : originalLoad.call(this, id, ...args); };
 const { DygnosisClient, extendCapabilities } = require(compiledModule("client"));
+const { runCommand } = require(compiledModule("refusal"));
 Module._load = originalLoad;
 function reset() {
   host = { documents: [], folders: [{ uri: Uri.parse("file:///project"), name: "project" }], settings: {}, commands: new Map(), opened: [], reveals: [], managed: [], watchers: [], notifications: [], picks: [], symbols: 0,
@@ -206,7 +208,40 @@ test("an invalid replacement resolver disposes the old process instead of retain
   reset(); let fail = false;
   const client = service({ resolve: () => fail ? Promise.reject(new Error("invalid override")) : Promise.resolve({ path: "engine", version: "one", override: true }) });
   await client.ensureStarted(); const old = host.managed[0]; fail = true;
-  await client.restart(); assert.equal(old.disposed, true); assert.equal(client.client, undefined); await client.shutdown();
+  await assert.rejects(client.restart(), /could not start.*invalid override/); assert.equal(old.disposed, true); assert.equal(client.client, undefined);
+  // A failed replacement must release its startup promise so a corrected path can retry.
+  fail = false; await client.ensureStarted(); assert.ok(client.client); assert.equal(host.managed.length, 2); await client.shutdown();
+});
+
+// Guards an automatic restart rejecting outside a command boundary.
+test("a failed settings restart is logged once and can retry without a notification", async () => {
+  reset(); let fail = false;
+  const client = service({ resolve: async () => { if (fail) throw new Error("invalid override"); return { path: "engine", version: "one", override: true }; } });
+  await client.ensureStarted(); const notices = host.notifications.length, logs = []; client.log = value => logs.push(value); fail = true;
+  host.config.fire({ affectsConfiguration: name => name === "dynare" || name === "dynare.serverPath" }); await flush();
+  assert.equal(logs.length, 1); assert.match(logs[0], /could not start.*invalid override/); assert.equal(host.notifications.length, notices);
+  fail = false; await client.ensureStarted(); assert.ok(client.client); await client.shutdown();
+});
+
+// Guards a cold-start failure showing both the helper error and a command refusal.
+test("an explicit command shows one notification for the original startup cause", async () => {
+  reset();
+  const client = service({ resolve: async () => { throw new Error("invalid override"); } });
+  await runCommand(client, () => client.execute("dynare/modelInfo", []));
+  assert.equal(host.notifications.length, 1);
+  assert.match(host.notifications[0], /could not start.*invalid override/);
+  await client.shutdown();
+});
+
+// Guards explicit navigation losing the known cause when an engine lacks supported ModelInfo.
+test("an unsupported model-info capability reaches the command notification", async () => {
+  reset(); const client = service({ pending: true }), starting = client.ensureStarted(); await flush();
+  host.managed[0].client.initializeResult.capabilities.experimental.dygnosis.modelInfo.schema_version = 99;
+  host.managed[0].initialized.resolve(); await starting;
+  await runCommand(client, () => client.modelInfo(Uri.parse("file:///project/root.mod")));
+  const notices = host.notifications.filter(value => typeof value === "string");
+  assert.equal(notices.length, 1); assert.match(notices[0], /selected engine does not support model information.*bundled binary/);
+  await client.shutdown();
 });
 test("late old-instance notifications cannot invalidate the replacement client's Outline", async () => {
   reset(); const client = service(); await client.ensureStarted(); const old = host.managed[0].client;
@@ -329,7 +364,7 @@ test("navigation checks a caller guard after loading and before ownership or edi
   let current = true, sawLoaded = false;
   const location = { uri: target.toString(), range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } };
   const jump = client.openLocation(location, root, document => { sawLoaded = document === loaded; return current; });
-  current = false; pending.resolve(loaded); await jump;
+  current = false; pending.resolve(loaded); await assert.rejects(jump, /source changed/);
   assert.equal(sawLoaded, true); assert.deepEqual(host.opened, []);
   assert.equal((await client.rootForDocument(loaded)).toString(), target.toString(), "rejected navigation must not assign an owner");
   vscode.workspace.openTextDocument = originalOpen;
@@ -411,6 +446,23 @@ test("multi-owner presentation waits for a user pick before project priority is 
     assert.equal(client.chosenRootForDocument(child).toString(), b.toString());
     assert.equal((await client.rootForDocument(child, false)).toString(), b.toString()); assert.equal(host.picks.length, 1);
   } finally { await client.shutdown(); }
+});
+
+// Guards a real owner-picker cancellation being converted to a refusal toast.
+test("cancelling an owner picker stays silent at the command boundary", async () => {
+  reset(); const client = service(); await client.ensureStarted();
+  const a = Uri.parse("file:///project/a.mod"), b = Uri.parse("file:///project/b.mod");
+  const child = { uri: Uri.parse("file:///project/shared.inc"), languageId: "dynare", version: 1 };
+  host.documents.push({ uri: a, languageId: "dynare", version: 1 }, { uri: b, languageId: "dynare", version: 1 }, child);
+  const related = [{ kind: "include", filename: "shared.inc", resolved: true, path: child.uri.fsPath }];
+  host.managed[0].client.sendRequest = (_method, params) => Promise.resolve(model(params.arguments[0].root_uri, related));
+  await client.modelInfo(a); await client.modelInfo(b);
+  const before = host.notifications.length; host.pick = () => undefined;
+  await runCommand(client, () => client.rootForDocument(child, true));
+  assert.equal(host.picks.length, 1);
+  assert.equal(host.notifications.length, before);
+  assert.equal(client.chosenRootForDocument(child), undefined);
+  await client.shutdown();
 });
 test("native navigation upgrades automatic provenance, close clears priority and restart requires restored proof", async () => {
   reset(); const client = service(); await client.ensureStarted();
@@ -586,7 +638,7 @@ test("native Beside placement is forwarded only after a source loader guard acce
   const location = { uri: target.toString(), range: { start: { line: 2, character: 3 }, end: { line: 2, character: 5 } } };
   vscode.workspace.openTextDocument = () => pending.promise;
   const rejected = client.openLocation(location, root, () => false, { viewColumn: vscode.ViewColumn.Beside });
-  pending.resolve(loaded); await rejected; assert.equal(host.reveals.length, 0);
+  pending.resolve(loaded); await assert.rejects(rejected, /source changed/); assert.equal(host.reveals.length, 0);
   await client.openLocation(location, root, document => document === loaded, { viewColumn: vscode.ViewColumn.Beside });
   assert.equal(host.reveals.length, 1); assert.equal(host.reveals[0].options.viewColumn, vscode.ViewColumn.Beside);
   assert.deepEqual(host.reveals[0].options.selection.coordinates, [2, 3, 2, 5]);
@@ -680,7 +732,7 @@ test("Windows canonical loaded URI retains the chosen owner among several includ
   vscode.workspace.openTextDocument = () => Promise.resolve(loaded);
   try {
     const location = { uri: target.toString(), range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } };
-    await client.openLocation(location, chosen, () => false);
+    await assert.rejects(client.openLocation(location, chosen, () => false), /source changed/);
     assert.equal((await client.rootForDocument(loaded)).toString(), first.toString(), "a rejected load cannot change the native document owner");
     await client.openLocation(location, chosen, document => document === loaded);
     assert.equal((await client.rootForDocument(loaded)).toString(), chosen.toString(), "the accepted explicit root belongs to the canonical loaded URI");
@@ -707,10 +759,10 @@ test("a guard decision is checked after its await before source owner or editor 
   try {
     const location = { uri: target.toString(), range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } };
     let current = true;
-    await client.openLocation(location, chosen, async () => {
+    await assert.rejects(client.openLocation(location, chosen, async () => {
       void Promise.resolve().then(() => { current = false; });
       return { isCurrent: () => current };
-    });
+    }), /source changed/);
     assert.equal(host.reveals.length, 0);
     assert.equal((await client.rootForDocument(loaded)).toString(), first.toString());
     current = true;

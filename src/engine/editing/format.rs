@@ -33,6 +33,12 @@ pub enum FormatOutcome {
     Unsupported(&'static str),
 }
 
+pub(crate) enum RangeFormatOutcome {
+    Changed(u32, u32, String),
+    Unchanged,
+    Unsupported(&'static str),
+}
+
 /// Same decision as [`format_text`], with unchanged and unsupported kept apart.
 pub fn format_outcome(text: &str, indent_unit: &str) -> FormatOutcome {
     if text.trim().is_empty() {
@@ -95,8 +101,20 @@ pub fn format_range(
     end_line: u32,
     indent_unit: &str,
 ) -> Option<(u32, u32, String)> {
+    match format_range_outcome(text, start_line, end_line, indent_unit) {
+        RangeFormatOutcome::Changed(start, end, text) => Some((start, end, text)),
+        RangeFormatOutcome::Unchanged | RangeFormatOutcome::Unsupported(_) => None,
+    }
+}
+
+pub(crate) fn format_range_outcome(
+    text: &str,
+    start_line: u32,
+    end_line: u32,
+    indent_unit: &str,
+) -> RangeFormatOutcome {
     if text.trim().is_empty() {
-        return None;
+        return RangeFormatOutcome::Unchanged;
     }
     let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let raw_lines: Vec<&str> = text.split('\n').collect();
@@ -109,35 +127,40 @@ pub fn format_range(
         .split('\n')
         .map(|line| line.strip_suffix('\r').unwrap_or(line).to_string())
         .collect();
-    if orig_lines.is_empty() {
-        return None;
-    }
     let start = start_line as usize;
     let end = (end_line as usize).min(orig_lines.len() - 1);
     if start > end {
-        return None;
+        return RangeFormatOutcome::Unsupported(
+            "The formatting range is outside the document or reversed.",
+        );
     }
     let preserved = native_command_lines(text);
     let depth = depth_before(&stripped_lines, &preserved, start);
-    let formatted = format_lines(
+    let Some(formatted) = format_lines(
         &orig_lines[start..=end],
         &stripped_lines[start..=end],
         &preserved[start..=end],
         indent_unit,
         depth,
-    )?;
+    ) else {
+        return RangeFormatOutcome::Unsupported(
+            "The formatter cannot preserve the selected source while changing whitespace.",
+        );
+    };
     let original_slice = raw_lines[start..=end].join("\n");
     let mut replacement = formatted.join(eol);
     if raw_lines[end].ends_with('\r') {
         replacement.push('\r');
     }
     if replacement == original_slice {
-        return None;
+        return RangeFormatOutcome::Unchanged;
     }
     if canonical(&replacement) != canonical(&original_slice) {
-        return None;
+        return RangeFormatOutcome::Unsupported(
+            "Formatting would change more than whitespace in the selected source.",
+        );
     }
-    Some((start as u32, end as u32, replacement))
+    RangeFormatOutcome::Changed(start as u32, end as u32, replacement)
 }
 
 fn reformat(text: &str, indent_unit: &str) -> Option<String> {

@@ -74,7 +74,13 @@ async fn rename(
             work_done_progress_params: WorkDoneProgressParams::default(),
         })
         .await
-        .unwrap()
+        .unwrap_or_else(|error| {
+            assert!(
+                !error.message.trim().is_empty(),
+                "refused Rename needs a reason"
+            );
+            None
+        })
 }
 fn edits(edit: WorkspaceEdit) -> HashMap<Url, (Option<i32>, Vec<TextEdit>)> {
     assert!(
@@ -270,7 +276,15 @@ async fn rename_shared_include_requires_the_same_written_declaration() {
         open(service.inner(), &shared, "y=p*y(-1);\n", 3).await;
         let pos = position(&shared, "y=p*y(-1);\n", "p");
         assert_eq!(
-            service.inner().prepare_rename(pos).await.unwrap().is_some(),
+            service
+                .inner()
+                .prepare_rename(pos)
+                .await
+                .map(|prepared| prepared.is_some())
+                .unwrap_or_else(|error| {
+                    assert!(!error.message.is_empty());
+                    false
+                }),
             compatible
         );
         let result = rename(service.inner(), &shared, "y=p*y(-1);\n", "p", "rho").await;
@@ -321,12 +335,13 @@ async fn rename_deduplicates_macro_copies_and_withholds_generated_targets() {
     let generated = "var y;parameters p;model;y=@{\"p\"};end;\n";
     let root = fixture.write("generated.mod", generated);
     open(service.inner(), &root, generated, 1).await;
-    assert!(service
+    assert!(!service
         .inner()
         .prepare_rename(position(&root, generated, "p;"))
         .await
-        .unwrap()
-        .is_none());
+        .expect_err("refused Rename must explain its cause")
+        .message
+        .is_empty());
     assert!(rename(service.inner(), &root, generated, "p;", "rho")
         .await
         .is_none());
@@ -358,21 +373,22 @@ async fn rename_rechecks_saved_sources_and_requires_all_targets_editable() {
         apply("// changed\ny=p+p;\n", &changes[&child].1),
         "// changed\ny=rho+rho;\n"
     );
-    let mut permissions = fs::metadata(&path).unwrap().permissions();
+    let original_permissions = fs::metadata(&path).unwrap().permissions();
+    let mut permissions = original_permissions.clone();
     permissions.set_readonly(true);
     fs::set_permissions(&path, permissions.clone()).unwrap();
     assert!(rename(service.inner(), &root, text, "p;", "rho")
         .await
         .is_none());
-    permissions.set_readonly(false);
-    fs::set_permissions(&path, permissions).unwrap();
+    fs::set_permissions(&path, original_permissions).unwrap();
     fs::remove_file(path).unwrap();
-    assert!(service
+    assert!(!service
         .inner()
         .prepare_rename(position(&root, text, "p;"))
         .await
-        .unwrap()
-        .is_none());
+        .expect_err("refused Rename must explain its cause")
+        .message
+        .is_empty());
     assert!(rename(service.inner(), &root, text, "p;", "rho")
         .await
         .is_none());
@@ -557,12 +573,13 @@ async fn rename_refuses_unproved_tag_names_and_tag_declaration_collisions() {
         let root = fixture.write("unproved.mod", text);
         let (service, _socket) = new_service();
         open(service.inner(), &root, text, 1).await;
-        assert!(service
+        assert!(!service
             .inner()
             .prepare_rename(position(&root, text, "y;"))
             .await
-            .unwrap()
-            .is_none());
+            .expect_err("refused Rename must explain its cause")
+            .message
+            .is_empty());
         assert!(rename(service.inner(), &root, text, "y;", "z")
             .await
             .is_none());
@@ -601,8 +618,11 @@ async fn rename_semantic_tag_include_requires_compatible_owners() {
                 .inner()
                 .prepare_rename(position(&shared, tag_text, "y',mcp"))
                 .await
-                .unwrap()
-                .is_some(),
+                .map(|prepared| prepared.is_some())
+                .unwrap_or_else(|error| {
+                    assert!(!error.message.is_empty());
+                    false
+                }),
             compatible
         );
         let renamed = rename(service.inner(), &shared, tag_text, "y',mcp", "z").await;
@@ -639,7 +659,7 @@ async fn rename_refuses_tag_literal_with_incompatible_macro_roles() {
         let root = fixture.write("tag_roles.mod", text);
         let (service, _socket) = new_service();
         open(service.inner(), &root, text, 1).await;
-        assert!(service.inner().prepare_rename(position(&root, text, selected)).await.unwrap().is_none());
+        assert!(!service.inner().prepare_rename(position(&root, text, selected)).await.expect_err("refused Rename must explain its cause").message.is_empty());
         assert!(rename(service.inner(), &root, text, selected, "z").await.is_none());
     }
 }

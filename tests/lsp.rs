@@ -2088,9 +2088,9 @@ async fn prepare_rename_rejects_comment() {
         .inner()
         .prepare_rename(tdp(uri, &text, comment_byte))
         .await
-        .expect("prepare_rename rpc");
+        .expect_err("comment Rename must explain refusal");
     assert!(
-        prep.is_none(),
+        !prep.message.trim().is_empty(),
         "comment cursor must not be renameable: {prep:?}"
     );
 }

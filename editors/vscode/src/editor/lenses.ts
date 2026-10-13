@@ -1,3 +1,4 @@
+import { refuse, explainFailure } from "../client/refusal";
 import * as vscode from "vscode";
 import { documentSelector, DygnosisClient, isAnalysisDocument, ModelSnapshot } from "../client/client";
 import { sameWrittenLocation } from "./model_navigation";
@@ -158,14 +159,15 @@ export function registerLenses(service: DygnosisClient): vscode.Disposable {
       } catch (error) { if (current()) service.log(String(error)); return []; }
     },
   };
-  const unavailable = (): void => { void vscode.window.showInformationMessage("The model changed. Wait for the CodeLens to refresh and try again."); };
+  const unavailable = (): never => refuse("The model changed. Wait for the CodeLens to refresh and try again.");
   const action = (run: (target: LensTarget, info: ModelSnapshot) => Promise<void>) => async (target: LensTarget): Promise<void> => {
-    if (!target || !accepted.has(target)) return;
+    if (disposed) return;
     try {
+      if (!target || !accepted.has(target)) unavailable();
       const info = await freshContext(target);
       if (!info) { unavailable(); return; }
       await run(target, info);
-    } catch (error) { service.log(String(error)); void vscode.window.showInformationMessage("This model action is unavailable. Open Dygnosis Output for details."); }
+    } catch (error) { if (!disposed) await explainFailure(service, error); }
   };
   const listeners = [
     vscode.languages.registerCodeLensProvider(documentSelector, provider),
@@ -191,7 +193,7 @@ export function registerLenses(service: DygnosisClient): vscode.Disposable {
       if (!row?.location || !declaration.location || !sameWrittenLocation(row.location, declaration.location) ||
           !safeAnchor(row.location, target.context.document)) { unavailable(); return; }
       const editor = vscode.window.activeTextEditor;
-      if (!editor || editor.document !== target.context.document || !contextCurrent(target.context, true, false)) return;
+      if (!editor || editor.document !== target.context.document || !contextCurrent(target.context, true, false)) { unavailable(); return; }
       editor.selection = new vscode.Selection(row.location.range.start.line, row.location.range.start.character,
         row.location.range.start.line, row.location.range.start.character);
       await vscode.commands.executeCommand("references-view.findReferences");

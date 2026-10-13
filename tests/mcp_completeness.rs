@@ -39,10 +39,26 @@ fn assert_incomplete_compare(result: Value) {
     assert!(result["message"]
         .as_str()
         .is_some_and(|message| !message.is_empty()));
-    assert_eq!(
-        result.as_object().unwrap().len(),
-        2,
+    assert!(
+        result
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|key| matches!(key.as_str(), "status" | "message" | "inputs")),
         "diff claims escaped: {result}"
+    );
+    assert!(
+        result["inputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(
+                |input| matches!(input["side"].as_str(), Some("before" | "after"))
+                    && input["incomplete_reasons"]
+                        .as_array()
+                        .is_some_and(|reasons| !reasons.is_empty())
+            ),
+        "{result}"
     );
 }
 
@@ -95,7 +111,11 @@ fn identical_roots_with_one_missing_include_do_not_claim_equation_changes() {
             Some(after),
             None,
         );
-        assert_eq!(result["message"], "Model expansion is incomplete");
+        assert!(result["message"]
+            .as_str()
+            .unwrap()
+            .contains("change arrays"));
+        assert!(result["inputs"].to_string().contains("incomplete_reasons"));
         assert_incomplete_compare(result);
     }
     let complete = dynare_compare_models(

@@ -346,15 +346,16 @@ async fn rename_is_bound_versioned_and_collision_checked() {
     assert_eq!(edits[0].edits.len(), 3);
     for name in ["p", "w", "var", "end", "bad name"] {
         assert!(
-            server
+            !server
                 .rename(RenameParams {
                     text_document_position: pos.clone(),
                     new_name: name.into(),
                     work_done_progress_params: Default::default()
                 })
                 .await
-                .unwrap()
-                .is_none(),
+                .expect_err("refused Rename must explain its cause")
+                .message
+                .is_empty(),
             "{name}"
         );
     }
@@ -369,26 +370,29 @@ async fn rename_rejects_duplicate_declarations_and_shared_macro_bindings() {
         "var y; model_local_variable z; model_local_variable z $Z$; model; #z=1; y=z; end;";
     open(server, &uri, duplicate).await;
     for marker in ["#z", "y=z", "; model_local_variable z"] {
-        assert!(server
+        assert!(!server
             .prepare_rename(at(&uri, duplicate, marker))
             .await
-            .unwrap()
-            .is_none());
+            .expect_err("refused Rename must explain its cause")
+            .message
+            .is_empty());
     }
     let shared = "heterogeneity_dimension h k; var(heterogeneity=h) yh; var(heterogeneity=k) yk;\n@#for dim in [\"h\",\"k\"]\nmodel(heterogeneity=@{dim}); #z=1; end;\n@#endfor\nmodel(heterogeneity=h); yh=z; end; model(heterogeneity=k); yk=z; end;";
     open(server, &uri, shared).await;
-    assert!(server
+    assert!(!server
         .prepare_rename(at(&uri, shared, "yh=z"))
         .await
-        .unwrap()
-        .is_none());
+        .expect_err("refused Rename must explain its cause")
+        .message
+        .is_empty());
     let mixed = "@#for i in 1:2\n@#if i==2\nvar y;\nmodel;\n#z=1;\n@#endif\ny=z;\n@#if i==2\nend;\n@#endif\n@#endfor\n";
     open(server, &uri, mixed).await;
-    assert!(server
+    assert!(!server
         .prepare_rename(at(&uri, mixed, "#z"))
         .await
-        .unwrap()
-        .is_none());
+        .expect_err("refused Rename must explain its cause")
+        .message
+        .is_empty());
 }
 
 #[tokio::test]
@@ -440,11 +444,12 @@ async fn dimension_bindings_are_separate_and_shared_declaration_rename_is_unavai
     assert!(server.prepare_rename(pos).await.unwrap().is_some());
     let text = format!("model_local_variable z;\n{text}");
     open(server, &uri, &text).await;
-    assert!(server
+    assert!(!server
         .prepare_rename(at(&uri, &text, "b=z"))
         .await
-        .unwrap()
-        .is_none());
+        .expect_err("refused Rename must explain its cause")
+        .message
+        .is_empty());
 }
 
 #[tokio::test]
@@ -462,9 +467,10 @@ async fn literal_macro_reads_keep_navigation_and_synthesized_names_refuse_rename
     assert!(server.prepare_rename(pos).await.unwrap().is_some());
     let text = "@#define name=\"z\"\nvar y; model; #@{name}=1; y=@{name}; end;";
     open(server, &uri, text).await;
-    assert!(server
+    assert!(!server
         .prepare_rename(at(&uri, text, "y=@{name"))
         .await
-        .unwrap()
-        .is_none());
+        .expect_err("refused Rename must explain its cause")
+        .message
+        .is_empty());
 }

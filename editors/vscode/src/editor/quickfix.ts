@@ -1,3 +1,4 @@
+import { refuse, runCommand } from "../client/refusal";
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
 import type { MarkedToken, Token } from "marked" with { "resolution-mode": "import" };
@@ -329,24 +330,26 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
     return saved && saved.instance === service.currentInstance && saved.version === versionFor(saved.uri) ? saved : undefined;
   };
   const registrations = [status,
-    vscode.commands.registerCommand("dygnosis.applyDiagnosticEdit", async (argument: unknown): Promise<boolean> => {
-      if (disposed) return false;
+    vscode.commands.registerCommand("dygnosis.applyDiagnosticEdit", async (argument: unknown): Promise<boolean> => (await runCommand(service, async () => {
       syncInstance();
       const key = typeof argument === "object" && argument !== null && "diagnosticEdit" in argument && typeof argument.diagnosticEdit === "string" ? argument.diagnosticEdit : undefined;
       const saved = key ? pendingEdits.get(key) : undefined;
       if (key) pendingEdits.delete(key);
-      if (!saved || !currentEdit(saved)) return false;
-      return await vscode.workspace.applyEdit(saved.edit) === true;
-    }),
-    vscode.commands.registerCommand("dygnosis.ignoreDiagnostic", (argument: unknown) => {
+      if (!saved || !currentEdit(saved)) refuse("The diagnostic fix expired because its document, model inputs, or server changed. Request the fix again.");
+      const applied = await vscode.workspace.applyEdit(saved.edit) === true;
+      if (!applied) refuse("VS Code did not apply the diagnostic fix. Check that its source is writable and request the fix again.");
+      return true;
+    }, () => !disposed)) ?? false),
+    vscode.commands.registerCommand("dygnosis.ignoreDiagnostic", (argument: unknown) => runCommand(service, () => {
       const saved = savedAction(argument), code = saved ? diagnosticCode(saved.diagnostic) : undefined;
-      if (!code || !saved || disposed || !booleanSetting("diagnosticActions.ignore", saved.uri, true, service.log)) return;
+      if (!code || !saved) refuse("The selected diagnostic expired. Request the action from the current Problems list.");
+      if (!booleanSetting("diagnosticActions.ignore", saved.uri, true, service.log)) refuse("Ignore check is disabled by dynare.diagnosticActions.ignore.");
       hiddenCodes.add(code);
       for (const [id, pending] of pendingEdits) {
         if (pending.diagnostics.some(diagnostic => diagnosticCode(diagnostic) === code)) pendingEdits.delete(id);
       }
       refresh();
-    }),
+    }, () => !disposed)),
     vscode.commands.registerCommand("dygnosis.showDiagnostic", async () => {
       const code = await vscode.window.showQuickPick([...hiddenCodes].sort().map(code => ({ label: code, description: "Show this check in this window", code })), { title: "Dygnosis: Show a hidden check", placeHolder: "Choose a check to restore" });
       if (!code || disposed) return;
@@ -356,28 +359,28 @@ export function registerDiagnosticActions(service: DygnosisClient): vscode.Dispo
       if (disposed) return;
       hiddenCodes.clear(); refresh();
     }),
-    vscode.commands.registerCommand("dygnosis.explainDiagnostic", async (argument: unknown) => {
+    vscode.commands.registerCommand("dygnosis.explainDiagnostic", (argument: unknown) => runCommand(service, async () => {
       const startFolder = folderGeneration, startInstance = service.currentInstance, startInput = inputGeneration;
       const saved = savedAction(argument);
-      if (argument !== undefined && !saved) return;
-      if (saved && !booleanSetting("diagnosticActions.explain", saved.uri, true, service.log)) return;
+      if (argument !== undefined && !saved) { refuse("The selected diagnostic expired. Request its explanation again."); }
+      if (saved && !booleanSetting("diagnosticActions.explain", saved.uri, true, service.log)) { refuse("Explain check is disabled by dynare.diagnosticActions.explain."); }
       // Palette invocation can start the first client. Establish that instance before
       // capturing the preview guard, while rejecting a superseded existing client.
       await service.ensureStarted();
-      if (disposed || startFolder !== folderGeneration || (saved && !savedAction(argument)) ||
-        (startInstance > 0 && (startInstance !== service.currentInstance || startInput !== inputGeneration))) return;
+      if (disposed) return;
+      if (startFolder !== folderGeneration || (saved && !savedAction(argument)) ||
+        (startInstance > 0 && (startInstance !== service.currentInstance || startInput !== inputGeneration))) refuse("The diagnostic, source inputs, or server changed. Request Explain again.");
       const generation = folderGeneration, requestInstance = service.currentInstance, input = inputGeneration;
       const current = (): boolean => !disposed && generation === folderGeneration && requestInstance === service.currentInstance &&
         input === inputGeneration && (!saved || !!savedAction(argument));
       const code = saved ? diagnosticCode(saved.diagnostic) : (await vscode.window.showInputBox({ title: "Dygnosis: Explain a check", prompt: "Enter a diagnostic code, for example W010" }))?.trim();
-      if (!code || !current()) return;
-      try {
+      if (!code) return;
+      if (!current()) { if (!disposed) refuse("The diagnostic, source inputs, or server changed. Request Explain again."); return; }
         const markdown = await service.execute("dynare/explainDiagnostic", [code]);
-        if (!current()) return;
+        if (!current()) { if (!disposed) refuse("The diagnostic, source inputs, or server changed. Request Explain again."); return; }
         if (typeof markdown !== "string") throw new Error("The selected engine returned no diagnostic explanation. Use the bundled binary or update dynare.serverPath.");
         await vscode.commands.executeCommand("dygnosis.openHelp", { code, markdown: safeExplanation(markdown), engineVersion: service.client?.initializeResult?.serverInfo?.version });
-      } catch (error) { if (current()) await service.failure(String(error)); }
-    }),
+    }, () => !disposed)),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       ++folderGeneration;
       pushed.clear(); pulled.clear();

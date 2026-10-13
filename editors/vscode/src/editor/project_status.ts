@@ -1,3 +1,4 @@
+import { refuse, runCommand } from "../client/refusal";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { record } from "../client/protocol";
@@ -227,9 +228,19 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
     generation === expectedGeneration && snapshot() === expectedSnapshot && (client.isRunning?.() ?? true);
   const refresh = async (command?: string): Promise<void> => {
     if (!connection && (!enabled() || !folders().length)) return;
-    await service.ensureStarted(); synchronize();
+    try { await service.ensureStarted(); }
+    catch (error) {
+      if (disposed) return;
+      if (command) throw error;
+      startupFailed = true; service.log(String(error)); render(); return;
+    }
+    synchronize();
     const client = connection, supported = capability;
-    if (disposed || !client || !supported) return;
+    if (disposed) return;
+    if (!client || !supported) {
+      if (command) refuse("Project checks are unavailable. Use an engine that supports project checks.");
+      return;
+    }
     cancelRequest(); const cancellation = new vscode.CancellationTokenSource(); request = cancellation;
     const expectedGeneration = generation, expectedInstance = instance, expectedSnapshot = snapshot(), serial = ++response;
     try {
@@ -249,7 +260,9 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
       minPass = latest.pass_revision; status = latest; updateDependencyWatchers(); sendActiveRoot(); render();
     } catch (error) {
       if (!cancellation.token.isCancellationRequested && serial === response && current(client, expectedInstance, expectedGeneration, expectedSnapshot)) {
-        barrier = false; bufferedNotification = undefined; status = undefined; clearWatchers(dependencies); service.log(String(error));
+        barrier = false; bufferedNotification = undefined; status = undefined; clearWatchers(dependencies);
+        if (command) { render(); throw error; }
+        service.log(String(error));
         message("unavailable", "warning", String(error));
       }
     } finally { if (request === cancellation) request = undefined; cancellation.dispose(); }
@@ -354,18 +367,21 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
   };
   const configureExclusions = async (target?: unknown): Promise<void> => {
     const currentFolders = folders();
+    if (!currentFolders.length) { refuse("Open a project folder before changing background-check exclusions."); }
     const selected = target instanceof ProjectItem ? target.folder : undefined;
     const folder = selected ?? (currentFolders.length === 1 ? currentFolders[0] :
       (await vscode.window.showQuickPick(currentFolders.map(value => ({ label: value.name, description: value.uri.fsPath, folder: value })),
         { placeHolder: "Choose a folder for background-check exclusions" }))?.folder);
-    if (!folder || !folders().some(value => value.uri.toString() === folder.uri.toString())) return;
+    if (!folder) return;
+    if (!folders().some(value => value.uri.toString() === folder.uri.toString())) { refuse("The project folder changed. Configure its exclusions again."); }
     const config = vscode.workspace.getConfiguration("dynare", folder.uri), raw: unknown = config.get("projectExcludePaths", []);
     const existing = Array.isArray(raw) ? raw.filter((entry): entry is string => typeof entry === "string") : [];
     const action = await vscode.window.showQuickPick([
       { label: "Add exclusion…", action: "add" }, { label: "Remove exclusion…", action: "remove" },
       { label: "Reset folder exclusions", action: "reset" }, { label: "Open project settings", action: "settings" },
     ], { placeHolder: `Background-check exclusions for ${folder.name}` });
-    if (!action || !folders().some(value => value.uri.toString() === folder.uri.toString())) return;
+    if (!action) return;
+    if (!folders().some(value => value.uri.toString() === folder.uri.toString())) { refuse("The project folder changed. Configure its exclusions again."); }
     if (action.action === "settings") { await vscode.commands.executeCommand("workbench.action.openSettings", "@id:dynare.projectExcludePaths"); return; }
     let value: string[] | undefined;
     if (action.action === "add") {
@@ -375,15 +391,16 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
       const pattern = await vscode.window.showQuickPick(existing, { placeHolder: "Choose an exclusion to remove" });
       if (pattern === undefined) return; value = existing.filter(entry => entry !== pattern);
     }
-    if (!disposed && folders().some(currentFolder => currentFolder.uri.toString() === folder.uri.toString()))
-      await config.update("projectExcludePaths", value, vscode.ConfigurationTarget.WorkspaceFolder);
+    if (disposed) return;
+    if (!folders().some(currentFolder => currentFolder.uri.toString() === folder.uri.toString())) refuse("The project folder changed. Configure its exclusions again.");
+    await config.update("projectExcludePaths", value, vscode.ConfigurationTarget.WorkspaceFolder);
   };
-  const runAction = (kind: "recheck" | "cancel"): void => {
-    if (!capability) { render(); return; }
+  const runAction = (kind: "recheck" | "cancel"): Promise<void> => {
+    if (!capability) { render(); refuse("Project checks are unavailable. Enable dynare.projectDiagnostics and use an engine that supports project checks."); }
     if (kind === "recheck" && status) minPass = status.pass_revision + 1;
     beginBarrier(); ++generation; ++response; cancelRequest();
     if (kind === "recheck") { status = undefined; render(); }
-    void refresh(kind === "recheck" ? capability.recheck_command : capability.cancel_command);
+    return refresh(kind === "recheck" ? capability.recheck_command : capability.cancel_command);
   };
   const subscriptions = [
     service.onDidChange(synchronize), vscode.window.onDidChangeActiveTextEditor(sendActiveRoot),
@@ -395,9 +412,9 @@ export function registerProjectStatus(service: ProjectClientPort): vscode.Dispos
     vscode.workspace.onDidCloseTextDocument(documentChanged),
     vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration("dynare")) reconfigure(); }),
     vscode.commands.registerCommand("dygnosis.projectStatus", () => vscode.commands.executeCommand("dygnosis.project.focus")),
-    vscode.commands.registerCommand("dygnosis.recheckProject", () => runAction("recheck")),
-    vscode.commands.registerCommand("dygnosis.cancelProject", () => runAction("cancel")),
-    vscode.commands.registerCommand("dygnosis.configureProjectExclusions", (target: unknown) => configureExclusions(target)),
+    vscode.commands.registerCommand("dygnosis.recheckProject", () => runCommand(service, () => runAction("recheck"), () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.cancelProject", () => runCommand(service, () => runAction("cancel"), () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.configureProjectExclusions", (target: unknown) => runCommand(service, () => configureExclusions(target), () => !disposed)),
   ];
   if (service.onDidReady) subscriptions.push(service.onDidReady(synchronize));
   synchronize(); startFolders();

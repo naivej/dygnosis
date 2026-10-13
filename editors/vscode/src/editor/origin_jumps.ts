@@ -1,3 +1,4 @@
+import { refuse, runCommand } from "../client/refusal";
 import * as vscode from "vscode";
 import type { DygnosisClient, InputInvalidation, NavigationGuard } from "../client/client";
 import { sameWrittenLocation } from "./model_navigation";
@@ -322,10 +323,11 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     cancel(state); state.cancellation = new vscode.CancellationTokenSource();
     return { operation: state.operation, epoch: state.epoch, token: state.cancellation.token };
   };
-  const unavailable = (): void => { void vscode.window.showInformationMessage("This preview has changed or its source is unavailable. Refresh macro expansion and choose the row again."); };
+  const unavailable = (): never => refuse("This preview has changed or its source is unavailable. Refresh macro expansion and choose the row again.");
   const refresh = async (): Promise<void> => {
     const state = activeState();
-    if (!state || disposed) return;
+    if (disposed) return;
+    if (!state) { refuse("Open a macro expansion preview before refreshing it."); }
     state.stale = true; const request = begin(state); updateContext();
     const instance = service.currentInstance, generation = state.session.generation;
     const current = (): boolean => !disposed && !state.closed && state.operation === request.operation && state.epoch === request.epoch &&
@@ -336,17 +338,17 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       let payload: PreviewNavigation | undefined;
       if (supportsNavigation(service)) {
         payload = parsePreviewNavigation(result, state.session.root);
-        if (!rootVersionMatches(state, payload)) return;
+        if (!rootVersionMatches(state, payload)) { unavailable(); return; }
         const info = await service.revalidate(state.session.root, payload.revision, instance, state.session.root, request.token);
-        if (!info || !current()) return;
+        if (!info || !current()) { if (current()) unavailable(); return; }
       }
       if (!record(result) || typeof result.effective_text !== "string") throw new Error("This engine cannot refresh the effective model. Update dynare.serverPath or use the bundled binary.");
       appendMacroMessages(service.output, result);
       if (!current()) return;
       state.payload = payload; state.instance = instance; state.stale = !payload?.complete;
-      if (!previews.replace(state.session, result)) return;
+      if (!previews.replace(state.session, result)) { unavailable(); return; }
       watch(state); updateContext();
-    } catch (error) { if (current()) await service.failure(String(error)); }
+    } catch (error) { if (current()) throw error; }
   };
   const openTarget = async (state: State, editor: vscode.TextEditor, target: PreviewLocation, proofMatch: (fresh: PreviewNavigation, loadedDocument?: vscode.TextDocument) => boolean): Promise<void> => {
     const request = begin(state), generation = state.session.generation, documentVersion = editor.document.version, instance = state.instance;
@@ -379,7 +381,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       return undefined;
     };
     try {
-      if (!await validated()) { if (current()) { stale(state); unavailable(); } return; }
+      if (!await validated()) { if (current()) { unavailable(); } return; }
       state.loadingOperation = request.operation;
       let acceptedProof: Proof | undefined;
       await service.openLocation(target, state.session.root, async document => {
@@ -387,12 +389,12 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
         const loaded = document.version;
         if (document.isClosed || !sameUri(document.uri.toString(), target.uri) || !targetFitsDocument(target, document) ||
             (target.document_version !== null && loaded !== target.document_version) ||
-            (target.document_version === null && document.isDirty)) { stale(state); return false; }
+            (target.document_version === null && document.isDirty)) { unavailable(); }
         const proof = await validated(document);
         const proofCurrent = (): boolean => !!proof && proof.fileEpoch === state.fileEpoch && proof.revision === payload.revision &&
           sameUri(proof.root, state.session.root.toString()) && current() && !document.isClosed && document.version === loaded &&
           (target.document_version !== null || !document.isDirty);
-        if (!proofCurrent()) { if (current()) { stale(state); unavailable(); } return false; }
+        if (!proofCurrent()) { if (current()) { unavailable(); } return false; }
         return { isCurrent: (): boolean => {
           if (!proofCurrent()) return false;
           acceptedProof = proof;
@@ -402,7 +404,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       if (acceptedProof && acceptedProof.fileEpoch === state.fileEpoch && ownsOperation()) {
         state.pendingFile = false; state.stale = false; updateContext();
       }
-    } catch (error) { if (current()) { stale(state); service.log(String(error)); unavailable(); } } finally {
+    } catch (error) { if (ownsOperation()) { stale(state); throw error; } } finally {
       if (state.loadingOperation === request.operation) {
         state.loadingOperation = undefined;
         if (state.pendingFile && ownsOperation()) stale(state);
@@ -411,11 +413,13 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
   };
   const navigate = async (): Promise<void> => {
     const state = activeState(), editor = vscode.window.activeTextEditor;
-    if (!state || !editor || !usable(state)) return;
+    if (!state || !editor) refuse("Open a macro expansion preview before requesting a written source jump.");
+    if (!supportsNavigation(service)) refuse("This engine does not support verified source jumps. Use the bundled binary or update dynare.serverPath.");
+    if (!usable(state)) unavailable();
     const regions = state.payload!.source_navigation;
     if (regions) {
       const region = previewRegionAt(regions, editor.selection);
-      if (!region) return;
+      if (!region) { refuse("This selection has no single verified written source region. Select a smaller region and try again."); }
       const target = projectRegionTarget(state.payload!, region, editor.selection);
       await openTarget(state, editor, target, (fresh, loadedDocument) => {
         const freshRegion = fresh.source_navigation?.find(candidate => candidate.id === region.id);
@@ -429,9 +433,9 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       return;
     }
     const row = previewRowAt(state.payload!.navigation, editor.selection);
-    if (!row) return;
+    if (!row) { refuse("This selection has no verified model row. Select an equation or model-local definition."); }
     const picks = writtenSourcePicks(row);
-    if (!picks.length) return;
+    if (!picks.length) { refuse("The selected row has no verified written source location."); }
     const request = begin(state), generation = state.session.generation, documentVersion = editor.document.version, instance = state.instance;
     const selection = JSON.stringify(editor.selection), payload = state.payload!;
     const ownsOperation = (): boolean => !disposed && !state.closed && state.operation === request.operation && state.epoch === request.epoch &&
@@ -469,12 +473,12 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       return undefined;
     };
     try {
-      if (!await validated()) { if (current()) { stale(state); unavailable(); } return; }
+      if (!await validated()) { if (current()) { unavailable(); } return; }
       const pick = picks.length === 1 ? picks[0] : await vscode.window.showQuickPick(picks, {
         placeHolder: "Choose the written portion of this model row", matchOnDescription: true, matchOnDetail: true,
       });
       if (!pick || !current()) return;
-      if (!await validated(pick)) { if (current()) { stale(state); unavailable(); } return; }
+      if (!await validated(pick)) { if (current()) { unavailable(); } return; }
       state.loadingOperation = request.operation;
       let acceptedProof: Proof | undefined;
       await service.openLocation(pick.target, state.session.root, async document => {
@@ -482,12 +486,12 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
         const loaded = document.version;
         if (document.isClosed || !sameUri(document.uri.toString(), pick.target.uri) || !targetFitsDocument(pick.target, document) ||
             (pick.target.document_version !== null && loaded !== pick.target.document_version) ||
-            (pick.target.document_version === null && document.isDirty)) { stale(state); return false; }
+            (pick.target.document_version === null && document.isDirty)) { unavailable(); }
         const proof = await validated(pick, document);
         const proofCurrent = (): boolean => !!proof && proof.fileEpoch === state.fileEpoch && proof.revision === payload.revision &&
           sameUri(proof.root, state.session.root.toString()) && current() && !document.isClosed && document.version === loaded &&
           (pick.target.document_version !== null || !document.isDirty);
-        if (!proofCurrent()) { if (current()) { stale(state); unavailable(); } return false; }
+        if (!proofCurrent()) { if (current()) { unavailable(); } return false; }
         return { isCurrent: (): boolean => {
           if (!proofCurrent()) return false;
           acceptedProof = proof;
@@ -497,7 +501,7 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
       if (acceptedProof && acceptedProof.fileEpoch === state.fileEpoch && ownsOperation()) {
         state.pendingFile = false; state.stale = false; updateContext();
       }
-    } catch (error) { if (current()) { stale(state); service.log(String(error)); unavailable(); } } finally {
+    } catch (error) { if (ownsOperation()) { stale(state); throw error; } } finally {
       if (state.loadingOperation === request.operation) {
         state.loadingOperation = undefined;
         if (state.pendingFile && ownsOperation()) stale(state);
@@ -505,8 +509,8 @@ export function registerOriginJumps(service: OriginJumpClient, previews: Effecti
     }
   };
   const subscriptions = [previews.onDidCreate(attach), previews.onDidClose(detach),
-    vscode.commands.registerCommand("dygnosis.goToWrittenSource", () => navigate()),
-    vscode.commands.registerCommand("dygnosis.refreshEffectiveModel", refresh),
+    vscode.commands.registerCommand("dygnosis.goToWrittenSource", () => runCommand(service, navigate, () => !disposed)),
+    vscode.commands.registerCommand("dygnosis.refreshEffectiveModel", () => runCommand(service, refresh, () => !disposed)),
     vscode.window.onDidChangeActiveTextEditor(updateContext), vscode.window.onDidChangeTextEditorSelection(updateContext),
     vscode.window.onDidChangeVisibleTextEditors(updateContext),
     vscode.workspace.onDidChangeConfiguration(event => {

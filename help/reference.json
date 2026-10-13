@@ -1,10 +1,10 @@
 {
-  "version": "0.11.21",
-  "fingerprint": "69f65e6f12e9fc1e3e0ce61d656fc65243cb6c226d90499853c3e726ebf4925b",
+  "version": "0.11.22",
+  "fingerprint": "3a32b7ea76ee67221d76847b5020c650327752dfd03e6229c39938f705118279",
   "tools": [
     {
       "name": "dynare_auto_fix",
-      "description": "Apply stored diagnostic fixes to a .mod file. Leaves the text unchanged when macros would make the rewrite unsafe.",
+      "description": "Apply safe stored diagnostic fixes to supplied .mod text. The first content item is the resulting file text. A second item reports status, the reason for withheld or partial fixes, and remaining diagnostics. Macros can prevent all fixes. This tool cannot repair every diagnostic. Read both content items.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -273,7 +273,7 @@
     },
     {
       "name": "dynare_diagnose",
-      "description": "Check supplied model text and return code, severity, message and written source range. Lines and Unicode-scalar columns are one-based. A files map supplies includes; this mode does not read disk.",
+      "description": "Check supplied model text and return code, severity, message and written source range. Lines and Unicode-scalar columns are one-based. A files map supplies includes; this mode does not read disk. Read all content items: incomplete coverage adds a notice with its causes.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -479,7 +479,7 @@
     },
     {
       "name": "dynare_find_references",
-      "description": "Find whole-word occurrences of a name by identifier spelling, including declarations, and skip comments. This tool does not resolve model-local bindings. Source lines and Unicode-scalar columns are one-based. A files map returns file keys; without a map, positions refer to file_content.",
+      "description": "Find whole-word occurrences of a name by identifier spelling, including declarations, and skip comments. This tool does not resolve model-local bindings. Source lines and Unicode-scalar columns are one-based. A files map returns file keys; without a map, positions refer to file_content. Read all content items: partial source coverage adds a notice with its causes.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -607,7 +607,7 @@
     },
     {
       "name": "dynare_related_files",
-      "description": "List include targets and companion files for the active .mod (kind, filename, resolved, path).",
+      "description": "List include targets and companion files for the active .mod (kind, filename, resolved, path). Requires a nonempty files map and active_file. Read all content items: incomplete discovery adds a notice with its causes.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -644,7 +644,7 @@
     },
     {
       "name": "dynare_rename",
-      "description": "Rename occurrences by identifier spelling. This tool does not resolve model-local bindings. Skips comments. Without a files map, returns the rewritten text (or the original if the new name is not a legal identifier). With a map, returns only files that changed.",
+      "description": "Rename occurrences by identifier spelling, skipping comments. This tool does not resolve model-local bindings. Without a files map, the first content item is rewritten text; with a map, it is the changed-file map. Invalid or reserved identifiers are input errors. Incomplete source coverage withholds the whole rename with a reason. An unchanged result adds a notice explaining why. Read all content items.",
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -676,7 +676,7 @@
             ]
           },
           "new_name": {
-            "description": "Replacement identifier. An illegal identifier leaves text unchanged.",
+            "description": "Replacement identifier. Illegal or reserved identifiers return an input error.",
             "type": "string"
           },
           "old_name": {

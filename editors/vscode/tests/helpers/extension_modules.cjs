@@ -28,6 +28,7 @@ const moduleFiles = Object.freeze({
   project_status: "editor/project_status",
   protocol: "client/protocol",
   quickfix: "editor/quickfix",
+  refusal: "client/refusal",
   rename_guard: "client/rename",
   semantic_view: "comparison/semantic_view",
   settings: "client/settings",

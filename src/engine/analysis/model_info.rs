@@ -361,7 +361,7 @@ pub fn incomplete_reason_records(
         && !records.unresolved.is_empty()
     {
         let mut reasons = incomplete_reason_records(model, None);
-        reasons.retain(|(_, code, _)| !matches!(*code, "E063" | "I211"));
+        reasons.retain(|(_, code, _)| !matches!(*code, "E001" | "E063" | "I211"));
         reasons.extend(e061_reasons(records));
         return reasons;
     }
@@ -410,7 +410,11 @@ pub fn incomplete_reason_records(
             )];
         }
     }
-    Vec::new()
+    crate::engine::diagnostics::check_parse::check_parse(model)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.code == "E001")
+        .map(|diagnostic| (diagnostic.span, "E001", diagnostic.message))
+        .collect()
 }
 
 /// The same include/companion rows, with each transport retaining its path keys.

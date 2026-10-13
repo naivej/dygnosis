@@ -46,6 +46,7 @@ const vscode = {
   RelativePattern: class { constructor(baseUri, pattern) { this.baseUri = baseUri; this.pattern = pattern; } },
   ConfigurationTarget: { WorkspaceFolder: 3 },
   window: {
+    showInformationMessage: async message => { host.notifications.push(message); },
     get activeTextEditor() { return host.editor; },
     createStatusBarItem: (id, alignment, priority) => {
       const item = { id, alignment, priority, visible: false, disposed: false, show() { this.visible = true; }, hide() { this.visible = false; }, dispose() { this.disposed = true; } };
@@ -122,7 +123,7 @@ function connection(result = initializeResult()) {
 }
 function setup(options = {}) {
   host = { folders: options.folders ?? [folder()], settings: options.settings ?? {}, resources: new Map(), scopes: [],
-    editor: options.editor, items: [], views: [], watchers: [], picks: [], choices: [], inputs: [], inputValues: [], updates: [], executed: [], relativePaths: [], commands: new Map(),
+    editor: options.editor, items: [], views: [], watchers: [], picks: [], choices: [], inputs: [], inputValues: [], updates: [], executed: [], relativePaths: [], commands: new Map(), notifications: [],
     active: new Emitter(), folderChanged: new Emitter(), configured: new Emitter(), edited: new Emitter(), closed: new Emitter() };
   const changed = new Emitter(), updated = new Emitter();
   const service = { client: options.client, currentInstance: 1, starts: 0, queries: [], logged: [], status: options.status ?? facts(), onDidChange: changed.event,
@@ -424,6 +425,25 @@ test("Recheck and Cancel use advertised commands and preserve their different li
   assert.equal(env.host.settings.projectDiagnostics, undefined); assert.match(env.host.items[0].tooltip, /file edit\/change or Recheck/);
   env.service.client.notify(facts([root()], { pass_revision: 3 })); assert.match(env.host.items[0].text, /1\/1 checked/);
   registration.dispose();
+});
+
+// Guards explicit project actions dropping their request promise and losing the refusal cause.
+test("Recheck and Cancel wait for the request and show its cause once", async () => {
+  for (const command of ["dygnosis.recheckProject", "dygnosis.cancelProject"]) {
+    const env = setup(), registration = registerProjectStatus(env.service); await flush();
+    const pending = deferred(); env.service.execute = () => pending.promise;
+    let finished = false; const action = env.host.commands.get(command)().then(() => { finished = true; }); await flush();
+    assert.equal(finished, false); pending.reject(new Error("engine request failed")); await action;
+    assert.deepEqual(env.host.notifications, ["engine request failed"]); registration.dispose();
+  }
+});
+
+// Guards an automatic project refresh leaking a startup rejection after an engine failure.
+test("a background project refresh logs a startup failure without notifying", async () => {
+  const env = setup(), registration = registerProjectStatus(env.service); await flush();
+  env.service.ensureStarted = async () => { throw new Error("startup failed"); };
+  env.host.edited.fire({ document: document() }); await new Promise(resolve => setTimeout(resolve, 90)); await flush();
+  assert.ok(env.service.logged.some(message => /startup failed/.test(message))); assert.deepEqual(env.host.notifications, []); registration.dispose();
 });
 test("rapid overlay edits coalesce a status query and close refreshes saved coverage", async () => {
   const env = setup(), registration = registerProjectStatus(env.service); await flush();

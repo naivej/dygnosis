@@ -26,7 +26,8 @@ They analyze model source; they do not run Dynare or numerical experiments.
 MCP reference search and rename match spelling; they do not distinguish
 model-local definitions as [editor navigation](navigate-code.md#model-local-variables)
 does. Extracted fragments need completion before they can run. Editing tools
-return text for the agent to apply.
+return text for the agent to apply. Auto Fix returns the resulting text first;
+its second item has a status, message and remaining diagnostics.
 
 ## Check and compare
 

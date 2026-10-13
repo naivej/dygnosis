@@ -27,7 +27,7 @@ use crate::engine::catalog::list_options;
 use crate::engine::comparison::{compare_models_with_sources, CompareSource};
 use crate::engine::diagnostics::explain;
 use crate::engine::diagnostics::{analyze, Diagnostic, Severity};
-use crate::engine::editing::auto_fix::auto_fix;
+use crate::engine::editing::auto_fix::{auto_fix, auto_fix_outcome};
 use crate::engine::editing::extract::{
     extract, EquationDomain, EquationRole, ExtractError, ExtractRequest, ExtractResult,
     ExtractStatus,
@@ -191,7 +191,8 @@ pub fn dynare_model_info(
         (Some(files), Some(active)) => McpUnit::mapped(file_content, active, files),
         _ => McpUnit::free(file_content),
     };
-    if let Some(status) = incomplete_model_status(&unit.model, unit.includes_complete) {
+    if let Some(mut status) = incomplete_model_status(&unit.model, unit.includes_complete) {
+        status["incomplete_reasons"] = unit.incomplete_reasons();
         return status;
     }
     let mut info = model_info_json(&unit.model);
@@ -294,6 +295,7 @@ pub fn dynare_equations(
 ) -> Value {
     let unit = mcp_unit(file_content, active_file, files);
     if let Some(mut status) = incomplete_model_status(&unit.model, unit.includes_complete) {
+        status["incomplete_reasons"] = unit.incomplete_reasons();
         status["equations"] = json!([]);
         status["count_gap"] = Value::Null;
         return status;
@@ -451,6 +453,9 @@ pub fn dynare_expand(
     };
     if !unit.complete {
         result["status"] = json!("incomplete");
+        result["message"] =
+            json!("Expansion is partial; equation counts and source navigation are unavailable.");
+        result["incomplete_reasons"] = unit.incomplete_reasons();
     }
     // A missing include is not spliced. The root equations that follow it are
     // not a finished expansion, so the count stays zero.
@@ -553,6 +558,7 @@ struct McpUnit {
     revision: String,
     complete: bool,
     includes_complete: bool,
+    reasons: Option<Value>,
 }
 
 fn mcp_unit(
@@ -570,6 +576,42 @@ fn mcp_unit(
 }
 
 impl McpUnit {
+    fn incomplete_reasons(&self) -> Value {
+        if let Some(reasons) = &self.reasons {
+            return reasons.clone();
+        }
+        let reasons =
+            crate::engine::analysis::model_info::incomplete_reason_records(&self.model, None);
+        let mut reasons: Vec<Value> = reasons
+            .into_iter()
+            .map(|(span, code, message)| {
+                let mut row = json!({"code":code, "message":message});
+                let origin = if code == "E061" {
+                    Some((self.root_file.as_deref(), span))
+                } else {
+                    self.files.is_none().then_some((None, span))
+                };
+                if let Some((file, span)) = origin {
+                    if let Some(text) = self.source_for(file) {
+                        row["range"] = range_json(span, text);
+                    }
+                    if let Some(file) = self.map_uri(file) {
+                        row["file"] = json!(file);
+                    }
+                }
+                row
+            })
+            .collect();
+        if !self.includes_complete {
+            reasons.push(json!({"message":"Required include text is unavailable. Supply a files map and its active_file root key."}));
+        }
+        if reasons.is_empty() {
+            json!([{ "message": "The complete expanded source or its written locations could not be verified." }])
+        } else {
+            json!(reasons)
+        }
+    }
+
     fn free(file_content: &str) -> Self {
         use std::hash::{Hash, Hasher};
         let report = expand_report(file_content);
@@ -588,6 +630,7 @@ impl McpUnit {
             revision: format!("{:016x}", hash.finish()),
             complete,
             includes_complete,
+            reasons: None,
         }
     }
 
@@ -623,6 +666,9 @@ impl McpUnit {
         let includes_complete = ws.includes_complete(active);
         let complete =
             report.navigation_complete && includes_complete && ws.input_snapshot_is_current(active);
+        let reasons = (!complete).then(|| {
+            comparison_incomplete_reasons(&mut ws, active, &model, Some(&workspace_files))
+        });
         for uri in ws.document_uris() {
             if let Some(src) = ws.get_source(&uri) {
                 sources.insert(uri, src.to_string());
@@ -638,6 +684,7 @@ impl McpUnit {
             revision,
             complete,
             includes_complete,
+            reasons,
         }
     }
 
@@ -781,10 +828,29 @@ pub fn dynare_compare_models(
         active_file_b,
         first_nonempty_files(files_b, files),
     );
-    if let Some(status) = incomplete_model_status(&model_a, workspace_a.includes_complete(&root_a))
-        .or_else(|| incomplete_model_status(&model_b, workspace_b.includes_complete(&root_b)))
-    {
-        return status;
+    let mut incomplete = Vec::new();
+    for (side, model, workspace, root, files) in [
+        (
+            "before",
+            &model_a,
+            &mut workspace_a,
+            &root_a,
+            first_nonempty_files(files_a, files),
+        ),
+        (
+            "after",
+            &model_b,
+            &mut workspace_b,
+            &root_b,
+            first_nonempty_files(files_b, files),
+        ),
+    ] {
+        if incomplete_model_status(model, workspace.includes_complete(root)).is_some() {
+            incomplete.push(json!({"side":side, "incomplete_reasons":comparison_incomplete_reasons(workspace, root, model, files)}));
+        }
+    }
+    if !incomplete.is_empty() {
+        return json!({"status":"incomplete", "message":"Comparison inputs are incomplete; change arrays and source navigation were withheld.", "inputs":incomplete});
     }
     let mut diff = compare_models_with_sources(
         &model_a,
@@ -870,6 +936,37 @@ pub fn dynare_compare_models(
     );
     result["sources"] = json!({"before":before.sources(),"after":after.sources()});
     result
+}
+
+fn comparison_incomplete_reasons(
+    workspace: &mut Workspace,
+    root: &str,
+    model: &Model,
+    files: Option<&HashMap<String, String>>,
+) -> Value {
+    let includes = workspace.include_records(root).cloned();
+    let reasons =
+        crate::engine::analysis::model_info::incomplete_reason_records(model, includes.as_ref());
+    json!(reasons
+        .into_iter()
+        .map(|(span, code, message)| {
+            let mut reason = json!({"code":code,"message":message});
+            let origin = if code == "E061" {
+                Some((normalize_uri(root), span))
+            } else {
+                workspace.map_effective_origin(root, span)
+            };
+            if let Some((file, span)) = origin {
+                if let Some(text) = workspace.source_for_normalized_key(&file) {
+                    reason["range"] = range_json(span, text);
+                }
+                if let Some(files) = files {
+                    reason["file"] = json!(related_file_path(Path::new(&file), files));
+                }
+            }
+            reason
+        })
+        .collect::<Vec<_>>())
 }
 
 /// Python `files_a or files`: an empty map is missing and the fallback is used.
@@ -1726,6 +1823,24 @@ fn tool_text(text: String) -> CallToolResult {
     CallToolResult::success(vec![ContentBlock::text(text)])
 }
 
+/// Keep the original payload first; clients must also read the coverage notice.
+fn tool_notice(mut result: CallToolResult, notice: Value) -> CallToolResult {
+    result.content.push(ContentBlock::text(notice.to_string()));
+    result
+}
+
+fn tool_coverage(result: CallToolResult, src: &MappedSource<'_>) -> CallToolResult {
+    let unit = mcp_unit(src.content, src.active, src.files);
+    if unit.complete {
+        result
+    } else {
+        tool_notice(
+            result,
+            json!({"status":"partial", "message":"Only available written source was inspected; unresolved includes, parsing, or macro expansion prevent complete model coverage.", "incomplete_reasons":unit.incomplete_reasons()}),
+        )
+    }
+}
+
 /// Map args for diagnose / model_info: optional `file_content` overlay.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct IncludeMapParams {
@@ -2022,7 +2137,7 @@ struct RenameParams {
     file_content: Option<String>,
     /// Exact identifier to rename. Comments are excluded; the tool returns text and does not write files.
     old_name: String,
-    /// Replacement identifier. An illegal identifier leaves text unchanged.
+    /// Replacement identifier. Illegal or reserved identifiers return an input error.
     new_name: String,
     /// Required with a nonempty files map; must exactly match a key. A missing or unmatched key returns JSON-RPC invalid parameters (-32602). It is not a disk path to load.
     #[serde(default)]
@@ -2045,13 +2160,20 @@ fn resolve_mapped<'a>(
     file_content: Option<&'a str>,
     active_file: Option<&'a str>,
     files: Option<&'a HashMap<String, String>>,
-) -> Result<Option<MappedSource<'a>>, rmcp::ErrorData> {
+) -> Result<MappedSource<'a>, rmcp::ErrorData> {
     match nonempty_map(files) {
-        None => Ok(file_content.map(|content| MappedSource {
-            content,
-            active: None,
-            files: None,
-        })),
+        None => file_content
+            .map(|content| MappedSource {
+                content,
+                active: None,
+                files: None,
+            })
+            .ok_or_else(|| {
+                rmcp::ErrorData::invalid_params(
+                    "file_content is required without a nonempty files map; no source was supplied",
+                    None,
+                )
+            }),
         Some(files) => {
             let active = active_file.ok_or_else(|| {
                 rmcp::ErrorData::invalid_params(
@@ -2059,6 +2181,12 @@ fn resolve_mapped<'a>(
                     None,
                 )
             })?;
+            if active.is_empty() {
+                return Err(rmcp::ErrorData::invalid_params(
+                    "active_file must name a file; an empty file location is unavailable",
+                    None,
+                ));
+            }
             if !files.contains_key(active) {
                 return Err(rmcp::ErrorData::invalid_params(
                     format!("\"{active}\" is not in the file map"),
@@ -2066,11 +2194,11 @@ fn resolve_mapped<'a>(
                 ));
             }
             let content = file_content.unwrap_or_else(|| files[active].as_str());
-            Ok(Some(MappedSource {
+            Ok(MappedSource {
                 content,
                 active: Some(active),
                 files: Some(files),
-            }))
+            })
         }
     }
 }
@@ -2099,22 +2227,21 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_diagnose",
         input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "Check supplied model text and return code, severity, message and written source range. Lines and Unicode-scalar columns are one-based. A files map supplies includes; this mode does not read disk."
+        description = "Check supplied model text and return code, severity, message and written source range. Lines and Unicode-scalar columns are one-based. A files map supplies includes; this mode does not read disk. Read all content items: incomplete coverage adds a notice with its causes."
     )]
     fn diagnose_tool(
         &self,
         Parameters(params): Parameters<IncludeMapParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let diags = match resolve_mapped(
+        let src = resolve_mapped(
             params.file_content.as_deref(),
             params.active_file.as_deref(),
             params.files.as_ref(),
-        )? {
-            Some(src) => dynare_diagnose(src.content, src.active, src.files),
-            None => Vec::new(),
-        };
-        Ok(tool_json(
-            serde_json::to_value(diags).expect("diagnose json"),
+        )?;
+        let diags = dynare_diagnose(src.content, src.active, src.files);
+        Ok(tool_coverage(
+            tool_json(serde_json::to_value(diags).expect("diagnose json")),
+            &src,
         ))
     }
 
@@ -2127,14 +2254,12 @@ impl DygnosisMcp {
         &self,
         Parameters(params): Parameters<IncludeMapParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let info = match resolve_mapped(
+        let src = resolve_mapped(
             params.file_content.as_deref(),
             params.active_file.as_deref(),
             params.files.as_ref(),
-        )? {
-            Some(src) => dynare_model_info(src.content, src.active, src.files),
-            None => dynare_model_info("", None, None),
-        };
+        )?;
+        let info = dynare_model_info(src.content, src.active, src.files);
         Ok(tool_json(info))
     }
 
@@ -2172,61 +2297,103 @@ impl DygnosisMcp {
     #[tool(
         name = "dynare_find_references",
         input_schema = mcp_input_schema::<FindReferencesParams>(),
-        description = "Find whole-word occurrences of a name by identifier spelling, including declarations, and skip comments. This tool does not resolve model-local bindings. Source lines and Unicode-scalar columns are one-based. A files map returns file keys; without a map, positions refer to file_content."
+        description = "Find whole-word occurrences of a name by identifier spelling, including declarations, and skip comments. This tool does not resolve model-local bindings. Source lines and Unicode-scalar columns are one-based. A files map returns file keys; without a map, positions refer to file_content. Read all content items: partial source coverage adds a notice with its causes."
     )]
     fn find_references_tool(
         &self,
         Parameters(params): Parameters<FindReferencesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let value = match resolve_mapped(
+        let src = resolve_mapped(
             params.file_content.as_deref(),
             params.active_file.as_deref(),
             params.files.as_ref(),
-        )? {
-            Some(src) => dynare_find_references(src.content, &params.symbol, src.active, src.files),
-            None => json!([]),
-        };
-        Ok(tool_json(value))
+        )?;
+        let value = dynare_find_references(src.content, &params.symbol, src.active, src.files);
+        Ok(tool_coverage(tool_json(value), &src))
     }
 
     #[tool(
         name = "dynare_rename",
         input_schema = mcp_input_schema::<RenameParams>(),
-        description = "Rename occurrences by identifier spelling. This tool does not resolve model-local bindings. Skips comments. Without a files map, returns the rewritten text (or the original if the new name is not a legal identifier). With a map, returns only files that changed."
+        description = "Rename occurrences by identifier spelling, skipping comments. This tool does not resolve model-local bindings. Without a files map, the first content item is rewritten text; with a map, it is the changed-file map. Invalid or reserved identifiers are input errors. Incomplete source coverage withholds the whole rename with a reason. An unchanged result adds a notice explaining why. Read all content items."
     )]
     fn rename_tool(
         &self,
         Parameters(params): Parameters<RenameParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        match resolve_mapped(
+        if !is_legal_ident(&params.old_name) || !is_legal_ident(&params.new_name) {
+            return Err(rmcp::ErrorData::invalid_params(
+                "old_name and new_name must be legal, non-reserved Dynare identifiers",
+                None,
+            ));
+        }
+        let src = resolve_mapped(
             params.file_content.as_deref(),
             params.active_file.as_deref(),
             params.files.as_ref(),
-        )? {
-            Some(src) => {
-                let result = dynare_rename(
-                    src.content,
-                    &params.old_name,
-                    &params.new_name,
-                    src.active,
-                    src.files,
-                );
-                match result {
-                    Value::String(text) => Ok(tool_text(text)),
-                    other => Ok(tool_json(other)),
-                }
+        )?;
+        {
+            let unit = mcp_unit(src.content, src.active, src.files);
+            if !unit.complete {
+                return Ok(CallToolResult::error(vec![ContentBlock::text(json!({"status":"refused", "message":"Rename was withheld because source coverage is incomplete; supply all required includes and resolve parsing or macro expansion first.", "incomplete_reasons":unit.incomplete_reasons()}).to_string())]));
             }
-            None => Ok(tool_text(String::new())),
+            let result = dynare_rename(
+                src.content,
+                &params.old_name,
+                &params.new_name,
+                src.active,
+                src.files,
+            );
+            let unchanged = params.old_name == params.new_name
+                || result.as_str() == Some(src.content)
+                || result.as_object().is_some_and(|map| map.is_empty());
+            let result = match result {
+                Value::String(text) => tool_text(text),
+                other => tool_json(other),
+            };
+            Ok(if unchanged {
+                tool_notice(
+                    result,
+                    json!({"status":"unchanged", "message": if params.old_name == params.new_name { "The requested name is already the current name." } else { "No matching identifier was found in the inspected written source." }}),
+                )
+            } else {
+                result
+            })
         }
     }
 
     #[tool(
         name = "dynare_auto_fix",
         input_schema = mcp_input_schema::<FileContentParams>(),
-        description = "Apply stored diagnostic fixes to a .mod file. Leaves the text unchanged when macros would make the rewrite unsafe."
+        description = "Apply safe stored diagnostic fixes to supplied .mod text. The first content item is the resulting file text. A second item reports status, the reason for withheld or partial fixes, and remaining diagnostics. Macros can prevent all fixes. This tool cannot repair every diagnostic. Read both content items."
     )]
-    fn auto_fix_tool(&self, Parameters(params): Parameters<FileContentParams>) -> String {
-        dynare_auto_fix(&params.file_content)
+    fn auto_fix_tool(&self, Parameters(params): Parameters<FileContentParams>) -> CallToolResult {
+        let (text, refusal) = match auto_fix_outcome(&params.file_content) {
+            Ok(text) => (text, None),
+            Err(reason) => (params.file_content.clone(), Some(reason)),
+        };
+        let remaining = dynare_diagnose(&text, None, None);
+        let partial = remaining
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.severity.as_str(), "ERROR" | "WARNING"));
+        let status = if refusal.is_some() {
+            "refused"
+        } else if partial {
+            "partial"
+        } else if text == params.file_content {
+            "unchanged"
+        } else {
+            "changed"
+        };
+        let reason = refusal.unwrap_or(if partial { "Only safe stored fixes were applied. Remaining diagnostics need manual changes or have no applicable automatic fix." } else if text == params.file_content { "No applicable automatic fixes were found." } else { "Safe stored fixes were applied." });
+        let mut result = tool_notice(
+            tool_text(text),
+            json!({"status":status, "message":reason, "remaining_diagnostics":remaining}),
+        );
+        if refusal.is_some() {
+            result.is_error = Some(true);
+        }
+        result
     }
 
     #[tool(
@@ -2269,35 +2436,34 @@ impl DygnosisMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let index = params.index.map(|i| i as usize);
         let name = params.name.as_deref();
-        let payload = match resolve_mapped(
+        let src = resolve_mapped(
             params.file_content.as_deref(),
             params.active_file.as_deref(),
             params.files.as_ref(),
-        )? {
-            Some(src) => dynare_equations(src.content, src.active, src.files, name, index),
-            None => dynare_equations("", None, None, name, index),
-        };
+        )?;
+        let payload = dynare_equations(src.content, src.active, src.files, name, index);
         Ok(tool_json(payload))
     }
 
     #[tool(
         name = "dynare_related_files",
         input_schema = mcp_input_schema::<IncludeMapParams>(),
-        description = "List include targets and companion files for the active .mod (kind, filename, resolved, path)."
+        description = "List include targets and companion files for the active .mod (kind, filename, resolved, path). Requires a nonempty files map and active_file. Read all content items: incomplete discovery adds a notice with its causes."
     )]
     fn related_files_tool(
         &self,
         Parameters(params): Parameters<IncludeMapParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let value = match resolve_mapped(
+        let src = resolve_mapped(
             params.file_content.as_deref(),
             params.active_file.as_deref(),
             params.files.as_ref(),
-        )? {
-            Some(src) => dynare_related_files(src.content, src.active, src.files),
-            None => json!([]),
-        };
-        Ok(tool_json(value))
+        )?;
+        if src.files.is_none() {
+            return Err(rmcp::ErrorData::invalid_params("Related files requires a nonempty files map and its active_file root key; free text has no file location", None));
+        }
+        let value = dynare_related_files(src.content, src.active, src.files);
+        Ok(tool_coverage(tool_json(value), &src))
     }
 
     #[tool(
@@ -2309,14 +2475,12 @@ impl DygnosisMcp {
         &self,
         Parameters(params): Parameters<IncludeMapParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let value = match resolve_mapped(
+        let src = resolve_mapped(
             params.file_content.as_deref(),
             params.active_file.as_deref(),
             params.files.as_ref(),
-        )? {
-            Some(src) => dynare_expand(src.content, src.active, src.files),
-            None => dynare_expand("", None, None),
-        };
+        )?;
+        let value = dynare_expand(src.content, src.active, src.files);
         Ok(tool_json(value))
     }
 
@@ -2383,6 +2547,150 @@ impl ServerHandler for DygnosisMcp {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn content_json(result: &CallToolResult, index: usize) -> Value {
+        let value = serde_json::to_value(result).unwrap();
+        serde_json::from_str(value["content"][index]["text"].as_str().unwrap()).unwrap()
+    }
+
+    // Guards a missing source being reported as a successful empty model/search.
+    #[test]
+    fn mapped_tools_require_source_but_accept_explicit_empty_text() {
+        let params = || Parameters(serde_json::from_value(json!({})).unwrap());
+        for error in [
+            DygnosisMcp.diagnose_tool(params()).unwrap_err(),
+            DygnosisMcp.model_info_tool(params()).unwrap_err(),
+            DygnosisMcp.expand_tool(params()).unwrap_err(),
+        ] {
+            assert!(error.message.contains("no source was supplied"));
+        }
+        let empty = DygnosisMcp
+            .diagnose_tool(Parameters(
+                serde_json::from_value(json!({"file_content":""})).unwrap(),
+            ))
+            .unwrap();
+        assert!(content_json(&empty, 0).is_array());
+        let related = DygnosisMcp
+            .related_files_tool(Parameters(
+                serde_json::from_value(json!({"file_content":"var y;"})).unwrap(),
+            ))
+            .unwrap_err();
+        assert!(related.message.contains("file location"));
+        // A map with an empty root key cannot supply the file location needed by discovery.
+        let empty_location = DygnosisMcp
+            .related_files_tool(Parameters(
+                serde_json::from_value(json!({"active_file":"", "files":{"":"var y;"}})).unwrap(),
+            ))
+            .unwrap_err();
+        assert!(empty_location.message.contains("empty file location"));
+    }
+
+    // Guards successful-looking partial search/diagnostics and unexplained expansion.
+    #[test]
+    fn incomplete_tools_keep_results_and_explain_missing_include() {
+        let text = "var y;\n@#include \"missing.inc\"\nmodel;y=0;end;\n";
+        let args = json!({"active_file":"root.mod", "files":{"root.mod":text}});
+        let diagnose = DygnosisMcp
+            .diagnose_tool(Parameters(serde_json::from_value(args.clone()).unwrap()))
+            .unwrap();
+        assert!(content_json(&diagnose, 0).is_array());
+        let notice = content_json(&diagnose, 1);
+        assert_eq!(notice["status"], "partial");
+        assert!(notice["incomplete_reasons"]
+            .to_string()
+            .contains("missing.inc"));
+        let mut args = args;
+        args["symbol"] = json!("y");
+        let references = DygnosisMcp
+            .find_references_tool(Parameters(serde_json::from_value(args).unwrap()))
+            .unwrap();
+        assert!(!content_json(&references, 0).as_array().unwrap().is_empty());
+        assert_eq!(content_json(&references, 1)["status"], "partial");
+        let expansion = dynare_expand(text, None, None);
+        assert_eq!(expansion["complete"], false);
+        assert!(!expansion["message"].as_str().unwrap().is_empty());
+        assert!(!expansion["incomplete_reasons"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    // Guards a real macro cause being replaced by generic incomplete guidance.
+    #[test]
+    fn incomplete_results_retain_macro_type_errors_and_builtin_reference_searches() {
+        let info = dynare_model_info("@#define x = \"s\" + 1\nvar y;model;y=0;end;", None, None);
+        assert!(
+            info["incomplete_reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason["code"] == "E285"),
+            "{info}"
+        );
+        let references = DygnosisMcp
+            .find_references_tool(Parameters(
+                serde_json::from_value(
+                    json!({"file_content":"var y;model;y=sin(y);end;", "symbol":"sin"}),
+                )
+                .unwrap(),
+            ))
+            .unwrap();
+        assert_eq!(content_json(&references, 0).as_array().unwrap().len(), 1);
+    }
+
+    // Guards illegal Rename and incomplete file maps silently returning unchanged text.
+    #[test]
+    fn rename_tool_explains_refusal_and_no_match() {
+        let args = |new_name: &str| json!({"file_content":"var y; model;y=0;end;", "old_name":"absent", "new_name":new_name});
+        let error = DygnosisMcp
+            .rename_tool(Parameters(serde_json::from_value(args("var")).unwrap()))
+            .unwrap_err();
+        assert!(error.message.contains("non-reserved"));
+        let unchanged = DygnosisMcp
+            .rename_tool(Parameters(serde_json::from_value(args("z")).unwrap()))
+            .unwrap();
+        assert_eq!(content_json(&unchanged, 1)["status"], "unchanged");
+        assert!(content_json(&unchanged, 1)["message"]
+            .as_str()
+            .unwrap()
+            .contains("No matching identifier"));
+        let refused = DygnosisMcp.rename_tool(Parameters(serde_json::from_value(json!({"file_content":"var y;\n@#include \"missing.inc\"\nmodel;y=0;end;", "old_name":"y", "new_name":"z"})).unwrap())).unwrap();
+        assert_eq!(refused.is_error, Some(true));
+        assert_eq!(content_json(&refused, 0)["status"], "refused");
+    }
+
+    // Guards a macro refusal and remaining unfixed warnings looking like full repair.
+    #[test]
+    fn auto_fix_reports_refused_and_partial_repairs() {
+        let text = "@#define p=1\nparameters a; a=@{p};";
+        let refused = DygnosisMcp.auto_fix_tool(Parameters(FileContentParams {
+            file_content: text.into(),
+        }));
+        assert_eq!(refused.is_error, Some(true));
+        assert_eq!(content_json(&refused, 1)["status"], "refused");
+        assert!(content_json(&refused, 1)["message"]
+            .as_str()
+            .unwrap()
+            .contains("interpolation"));
+        let partial = DygnosisMcp.auto_fix_tool(Parameters(FileContentParams {
+            file_content: "var y;
+model;
+y=1/0
+end;
+"
+            .into(),
+        }));
+        assert_eq!(content_json(&partial, 1)["status"], "partial");
+        assert!(!content_json(&partial, 1)["remaining_diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        let value = serde_json::to_value(&partial).unwrap();
+        assert!(value["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("y=1/0;"));
+    }
 
     #[test]
     fn compare_modes_are_exclusive_and_require_explicit_inputs() {

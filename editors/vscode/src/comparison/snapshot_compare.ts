@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import { randomBytes } from "node:crypto";
 import { DygnosisClient } from "../client/client";
+import type { ModelSnapshot } from "../client/client";
 import { ComparisonResource, ModelSelector } from "./changes_resource";
 import { GitSources, HistoricalCapture, HistoricalInput } from "./git_source";
 import { DiffSide, DiffSnapshot, parseDiff, parseSnapshotDiff } from "./diff_view";
@@ -27,6 +28,14 @@ export class ComparisonFailure extends Error {
   constructor(readonly code: string, message: string, readonly side?: DiffSide, readonly fileKey?: string) { super(message); }
 }
 function assertActive(token: vscode.CancellationToken): void { if (token.isCancellationRequested) throw new ComparisonFailure("CANCELLED", "Comparison capture was cancelled."); }
+function requireCompleteModel(info: ModelSnapshot | undefined, side: DiffSide): asserts info is ModelSnapshot {
+  const label = side === "before" ? "Before" : "After";
+  if (!info) throw new ComparisonFailure("ROOT_NOT_FOUND", `${label} model information is unavailable.`, side);
+  if (!info.complete) {
+    const reasons = info.incomplete_reasons?.map(reason => reason.message).join("; ") || info.message || "Model parsing or macro expansion is incomplete.";
+    throw new ComparisonFailure("INCOMPLETE_INPUT", `${label}: ${reasons} Comparison changes were withheld.`, side);
+  }
+}
 export function configuredSearchPaths(context: vscode.Uri, service: DygnosisClient): string[] {
   const folder = vscode.workspace.getWorkspaceFolder(context);
   const base = folder?.uri.fsPath ?? path.dirname(context.fsPath);
@@ -74,7 +83,7 @@ export async function captureComparison(service: DygnosisClient, git: () => Prom
     assertActive(token);
     if (selector.kind === "working") {
       const root = vscode.Uri.parse(selector.root_uri), info = await service.modelInfo(root, root, true, token);
-      if (!info) throw new ComparisonFailure("ROOT_NOT_FOUND", `${side === "before" ? "Before" : "After"} model could not be captured: ${selector.root_uri}`, side);
+      requireCompleteModel(info, side);
       working.push({ root, expected: info.revision });
       return { kind: "working", input_id: ids[side], root_uri: selector.root_uri, expected_revision: info.revision, ...(searchPaths ? { search_paths: searchPaths } : {}) };
     }
@@ -152,7 +161,8 @@ async function captureLegacy(service: DygnosisClient, resource: ComparisonResour
   if (resource.before.kind !== "working" || resource.after.kind !== "working") throw new Error("History comparison requires snapshot support.");
   const roots = { before: vscode.Uri.parse(resource.before.root_uri), after: vscode.Uri.parse(resource.after.root_uri) }, instance = service.currentInstance;
   const infos = { before: await service.modelInfo(roots.before, roots.before, true, token), after: await service.modelInfo(roots.after, roots.after, true, token) };
-  if (!infos.before?.complete || !infos.after?.complete) throw new ComparisonFailure("INCOMPLETE_INPUT", "Incomplete model inputs. Fix them and Refresh.");
+  requireCompleteModel(infos.before, "before");
+  requireCompleteModel(infos.after, "after");
   const experimental: unknown = service.client?.initializeResult?.capabilities.experimental;
   const capability = record(experimental) && record(experimental.dygnosis) ? experimental.dygnosis.compareModels : undefined;
   if (record(capability) && capability.navigation_schema_version !== 1) throw new Error("This engine advertises an unsupported comparison. Update dynare.serverPath or use the bundled binary.");

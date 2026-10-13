@@ -2,7 +2,7 @@
 name = "dygnosis"
 description = "Dynare analysis core — LSP and MCP for .mod files"
 # Product version source. After editing, run: node scripts/version.cjs --sync
-version = "0.11.21"
+version = "0.11.22"
 edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/naivej/dygnosis"
@@ -27,6 +27,21 @@ tower-lsp = "0.20"
 tower = { version = "0.4", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Line numbers for backtraces. Full symbols made each test program about 270 MB.
+# Incremental compilation stays on (the dev default).
+[profile.dev]
+debug = "line-tables-only"
+incremental = true
+
+[profile.dev.package."*"]
+debug = false
+
+# Full symbols for a debugger: cargo test --profile debugging
+# Output goes to target/debugging/ and leaves target/debug/ unchanged.
+[profile.debugging]
+inherits = "dev"
+debug = "full"
 
 [profile.release]
 codegen-units = 1

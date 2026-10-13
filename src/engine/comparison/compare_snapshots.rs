@@ -437,11 +437,25 @@ fn incomplete(workspace: &mut Workspace, root: &str, model: &Model) -> Option<Sn
         workspace.includes_complete(root),
     )?;
     let miss = workspace.find_unresolved_includes(root).first().cloned();
+    let includes = workspace.include_records(root).cloned();
+    let reasons =
+        crate::engine::analysis::model_info::incomplete_reason_records(model, includes.as_ref());
     Some(SnapshotFailure::new(
         "INCOMPLETE_INPUT",
         match &miss {
             Some(miss) => format!("Active include {} is absent or unreadable", miss.filename),
-            None => "Model parsing or macro expansion is incomplete".to_owned(),
+            None if !reasons.is_empty() => format!(
+                "Comparison was withheld: {}",
+                reasons
+                    .iter()
+                    .map(|(_, code, message)| format!("{code}: {message}"))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
+            None => {
+                "Model parsing or macro expansion is incomplete; comparison changes were withheld"
+                    .to_owned()
+            }
         },
         miss.map(|miss| miss.filename),
     ))

@@ -56,8 +56,12 @@ pub fn apply_fix(text: &str, edits: &[TextEdit]) -> String {
 /// Refuses when the raw file has both `@#define`/`@#for` and a `@{ident}`
 /// interpolation (lexer tokens; comments are trivia).
 pub fn auto_fix(text: &str) -> String {
+    auto_fix_outcome(text).unwrap_or_else(|_| text.to_string())
+}
+
+pub(crate) fn auto_fix_outcome(text: &str) -> Result<String, &'static str> {
     if refuse_macro_rewrite(text) {
-        return text.to_string();
+        return Err("Automatic fixes were withheld because macro definitions or loops with identifier interpolation can change the written edit targets.");
     }
     let mut text = text.to_string();
     for _ in 0..3 {
@@ -73,7 +77,7 @@ pub fn auto_fix(text: &str) -> String {
     if !fixes.is_empty() {
         text = apply_fix(&text, &fixes);
     }
-    text
+    Ok(text)
 }
 
 fn repairing_fixes(text: &str, diags: &[Diagnostic], parse_pass: bool) -> Vec<TextEdit> {

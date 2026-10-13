@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use dygnosis::{compare_models_with_sources, dynare_compare_models, parse, CompareSource};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 fn row<'a>(diff: &'a Value, id: &str) -> &'a Value {
     diff["navigation"]["rows"]
@@ -243,10 +243,10 @@ fn incomplete_input_withholds_mcp_comparison_and_navigation() {
     let before = "@#include \"missing-compare.inc\"\nvar y; model; y=1; end;";
     let after = "var y; model; y=2; end;";
     let diff = dynare_compare_models(before, after, None, None, None, None, None);
-    assert_eq!(
-        diff,
-        json!({"status": "incomplete", "message": "Model expansion is incomplete"})
-    );
+    assert_eq!(diff["status"], "incomplete");
+    assert!(diff["message"].as_str().unwrap().contains("change arrays"));
+    assert!(!diff["inputs"].as_array().unwrap().is_empty());
+    assert!(diff.get("navigation").is_none());
 }
 
 #[test]
@@ -260,10 +260,10 @@ fn unnamed_mcp_compare_does_not_resolve_absolute_host_includes_for_navigation() 
     );
     let after = before.replace("z=1", "z=2");
     let diff = dynare_compare_models(&before, &after, None, None, None, None, None);
-    assert_eq!(
-        diff,
-        json!({"status": "incomplete", "message": "Model expansion is incomplete"})
-    );
+    assert_eq!(diff["status"], "incomplete");
+    assert!(diff["message"].as_str().unwrap().contains("change arrays"));
+    assert!(!diff["inputs"].as_array().unwrap().is_empty());
+    assert!(diff.get("navigation").is_none());
     let legacy = compare_models_with_sources(
         &parse(&before),
         &parse(&after),

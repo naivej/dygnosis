@@ -1,3 +1,4 @@
+import { refuse, explainFailure, runCommand } from "../client/refusal";
 import * as vscode from "vscode";
 import * as path from "node:path";
 import { DygnosisClient } from "../client/client";
@@ -344,66 +345,74 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       const before = await chooseBaseline(context.anchor, fileOnly, token, signal);
       if (!before || disposed || request !== opening || token.isCancellationRequested) return;
       await openResource({ schema_version: 1, before, after: context.anchor, ...context }, view?.panel.viewColumn, view?.choices);
-    } catch (error) { if (!disposed && request === opening && !token.isCancellationRequested) await service.failure(String(error)); }
+    } catch (error) { if (!disposed && request === opening && !token.isCancellationRequested) await explainFailure(service, error); }
     finally { selection.dispose(); }
   };
-  const validateWorking = async (doc: ChangesDocument, row?: Pick<DiffRow, "id" | "navigation">): Promise<boolean> => {
+  const validateWorking = async (doc: ChangesDocument, row?: Pick<DiffRow, "id" | "navigation">): Promise<void> => {
     const generation = doc.generation, result = doc.result, instance = doc.instance;
-    if (!result || doc.status !== "ready" || !current(doc, generation, instance)) return false;
+    const expired = (): never => refuse("Comparison inputs changed. Refresh the comparison before opening source.");
+    if (!result || doc.status !== "ready" || !current(doc, generation, instance)) return expired();
     const verified = await Promise.all(result.working.map(input => service.revalidate(input.root, input.expected, instance)));
-    if (!current(doc, generation, instance) || verified.some(info => !info)) return false;
+    if (!current(doc, generation, instance) || verified.some(info => !info)) expired();
     if (row && result.legacy) {
       const fresh = parseDiff(await service.execute("dynare/compareModels", [modelUri(doc.resource.before).toString(), modelUri(doc.resource.after).toString()]), modelUri(doc.resource.before).toString(), modelUri(doc.resource.after).toString());
       const matched = fresh.rows.find(candidate => candidate.id === row.id);
-      if (!matched || !sameTarget(matched.navigation.before, row.navigation.before) || !sameTarget(matched.navigation.after, row.navigation.after)) return false;
+      if (!matched || !sameTarget(matched.navigation.before, row.navigation.before) || !sameTarget(matched.navigation.after, row.navigation.after)) expired();
     }
-    return current(doc, generation, instance);
+    if (!current(doc, generation, instance)) expired();
+  };
+  const sourceAction = async (doc: ChangesDocument, action: () => Promise<void>): Promise<void> => {
+    const generation = doc.generation, instance = doc.instance;
+    try { await action(); }
+    catch (error) { if (current(doc, generation, instance)) { stale(doc); await explainFailure(service, error); } }
   };
   const openSource = async (doc: ChangesDocument, row: Pick<DiffRow, "id" | "navigation">, side: DiffSide): Promise<void> => {
     const generation = doc.generation, instance = doc.instance, result = doc.result;
-    if (!result) return;
+    if (!result) { refuse("This comparison has no current result. Refresh it before opening source."); }
     const own = result.snapshot.rows.find(candidate => candidate.id === row.id), target = row.navigation[side] ?? row.navigation.block_openers?.[side];
     const locations = target?.written_locations ?? (own ? cardSourceFiles(result, own, side) : []).map(uri => ({ uri, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } }));
-    if (!locations.length) return;
-    const refuse = (): void => { if (current(doc, generation, instance)) stale(doc); };
-    try {
-      if (!await validateWorking(doc, row)) { refuse(); return; }
-      const selected = locations.length === 1 ? locations[0] : (await vscode.window.showQuickPick(locations.map(location => ({
-        label: location.uri, description: `${side === "before" ? "Before" : "After"}${target ? ` · line ${location.range.start.line + 1}` : " · row not present"}`, location,
-      })), { placeHolder: "Choose a contributing written source" }))?.location;
-      if (!selected || !current(doc, generation, instance)) return;
-      const source = vscode.Uri.parse(selected.uri);
-      let written = await vscode.workspace.openTextDocument(source);
-      if (source.scheme === historyScheme) written = await vscode.languages.setTextDocumentLanguage(written, "dynare");
-      if (!await validateWorking(doc, row) || !current(doc, generation, instance)) { refuse(); return; }
-      const key = [...result.sourceUris[side]].find(([, uri]) => uri.toString() === source.toString())?.[0];
-      if (!key || !result.legacy && normalizeGitText(written.getText()) !== normalizeGitText(result.texts[side][key])) { refuse(); return; }
-      const input = doc.resource[side]; if (input.kind === "working") service.selectOwner(written.uri, modelUri(input));
-      const range = new vscode.Range(selected.range.start.line, selected.range.start.character, selected.range.end.line, selected.range.end.character);
-      await vscode.window.showTextDocument(written, { selection: range });
-    } catch (error) { service.log(String(error)); refuse(); }
+    if (!locations.length) { refuse("The selected change has no verified source location on this side."); }
+    const expired = (): never => refuse("Comparison inputs changed. Refresh the comparison before opening source.");
+    await validateWorking(doc, row);
+    const selected = locations.length === 1 ? locations[0] : (await vscode.window.showQuickPick(locations.map(location => ({
+      label: location.uri, description: `${side === "before" ? "Before" : "After"}${target ? ` · line ${location.range.start.line + 1}` : " · row not present"}`, location,
+    })), { placeHolder: "Choose a contributing written source" }))?.location;
+    if (!selected || !current(doc, generation, instance)) return;
+    const source = vscode.Uri.parse(selected.uri);
+    let written = await vscode.workspace.openTextDocument(source);
+    if (source.scheme === historyScheme) written = await vscode.languages.setTextDocumentLanguage(written, "dynare");
+    if (!current(doc, generation, instance)) return;
+    await validateWorking(doc, row);
+    if (!current(doc, generation, instance)) return;
+    const key = [...result.sourceUris[side]].find(([, uri]) => uri.toString() === source.toString())?.[0];
+    if (!key || !result.legacy && normalizeGitText(written.getText()) !== normalizeGitText(result.texts[side][key])) expired();
+    const input = doc.resource[side]; if (input.kind === "working") service.selectOwner(written.uri, modelUri(input));
+    const range = new vscode.Range(selected.range.start.line, selected.range.start.character, selected.range.end.line, selected.range.end.character);
+    await vscode.window.showTextDocument(written, { selection: range });
   };
   const openCaptured = async (doc: ChangesDocument, file: SourceFile): Promise<void> => {
     const generation = doc.generation, instance = doc.instance, result = doc.result;
-    if (!result || doc.status !== "ready") return;
-    try {
-      if (!await validateWorking(doc) || !current(doc, generation, instance)) { if (current(doc, generation, instance)) stale(doc); return; }
-      const uri = (which: DiffSide): vscode.Uri | undefined => {
-        const own = file[which];
-        if (own && (!own.exact_text_available || !Object.hasOwn(result.texts[which], own.file_key))) return undefined;
-        const input = doc.resource[which], label = `${sourceName(own?.file_key ?? file.before?.file_key ?? file.after!.file_key)} (${which}${input.kind === "git" ? ` ${input.commit.slice(0, 7)}` : " captured"})`;
-        if (input.kind === "git" && own) return result.sourceUris[which].get(own.file_key);
-        return capturedText.retain(result.holder, `${file.pointer}:${which}`, label, own ? result.texts[which][own.file_key] : "");
-      };
-      const before = uri("before"), after = uri("after");
-      if (before && after && await validateWorking(doc) && current(doc, generation, instance)) await vscode.commands.executeCommand("vscode.diff", before, after, textDiffTitle(doc.resource, file.before?.file_key, file.after?.file_key));
-    } catch (error) { service.log(String(error)); if (current(doc, generation, instance)) stale(doc); }
+    if (!result || doc.status !== "ready") { refuse("Refresh this comparison before opening its captured text."); }
+    await validateWorking(doc);
+    if (!current(doc, generation, instance)) return;
+    const uri = (which: DiffSide): vscode.Uri | undefined => {
+      const own = file[which];
+      if (own && (!own.exact_text_available || !Object.hasOwn(result.texts[which], own.file_key))) return undefined;
+      const input = doc.resource[which], label = `${sourceName(own?.file_key ?? file.before?.file_key ?? file.after!.file_key)} (${which}${input.kind === "git" ? ` ${input.commit.slice(0, 7)}` : " captured"})`;
+      if (input.kind === "git" && own) return result.sourceUris[which].get(own.file_key);
+      return capturedText.retain(result.holder, `${file.pointer}:${which}`, label, own ? result.texts[which][own.file_key] : "");
+    };
+    const before = uri("before"), after = uri("after");
+    if (!before || !after) refuse("Complete captured text is unavailable for this file.");
+    await validateWorking(doc);
+    if (current(doc, generation, instance)) await vscode.commands.executeCommand("vscode.diff", before, after, textDiffTitle(doc.resource, file.before?.file_key, file.after?.file_key));
   };
   const chooseCaptured = async (doc: ChangesDocument): Promise<void> => {
     const generation = doc.generation, instance = doc.instance;
     const files = doc.result?.snapshot.sourceChanges?.files ?? [];
-    if (!files.length) return;
-    if (!await validateWorking(doc) || !current(doc, generation, instance)) { if (current(doc, generation, instance)) stale(doc); return; }
+    if (!files.length) { refuse("This comparison has no captured file changes to show."); }
+    await validateWorking(doc);
+    if (!current(doc, generation, instance)) return;
     const selected = await vscode.window.showQuickPick(files.map(file => {
       const available = (["before", "after"] as const).every(side => !file[side] || file[side].exact_text_available && Object.hasOwn(doc.result!.texts[side], file[side].file_key));
       return {
@@ -414,7 +423,7 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
       };
     }), { placeHolder: "Choose a changed captured file for text diff" });
     if (!selected || !current(doc, generation, instance)) return;
-    if (!selected.available) { void vscode.window.showInformationMessage("Complete captured text is unavailable for this file."); return; }
+    if (!selected.available) { refuse("Complete captured text is unavailable for this file."); }
     await openCaptured(doc, selected.file);
   };
   const choosePath = async (doc: ChangesDocument, view: EditorView): Promise<void> => {
@@ -461,22 +470,24 @@ export function registerChanges(service: DygnosisClient, extensionUri: vscode.Ur
           else if (message.type === "refresh") void refresh(doc);
           else if (message.type === "help") void vscode.commands.executeCommand("dygnosis.openHelp", "structural-diff");
           else if (message.type === "changeComparison") void start(undefined, false, doc, view);
-          else if (message.type === "swap") void openResource({ ...doc.resource, before: doc.resource.after, after: doc.resource.before }, panel.viewColumn, view.choices);
-          else if (message.type === "choosePath") void choosePath(doc, view).catch(error => service.failure(String(error)));
+          else if (message.type === "swap") void runCommand(service, () => openResource({ ...doc.resource, before: doc.resource.after, after: doc.resource.before }, panel.viewColumn, view.choices), () => !disposed && !doc.disposed);
+          else if (message.type === "choosePath") void runCommand(service, () => choosePath(doc, view), () => !disposed && !doc.disposed);
           else if (message.type === "rootTextDiff" && message.token === doc.generation && doc.status === "ready") {
-            const generation = doc.generation;
-            void validateWorking(doc).then(valid => {
-              if (!valid) { if (doc.generation === generation) stale(doc); return; }
+            const generation = doc.generation, instance = doc.instance;
+            void sourceAction(doc, async () => {
+              await validateWorking(doc);
+              if (!current(doc, generation, instance)) return;
               const result = doc.result!, before = result.sourceUris.before.get(result.inputs.before.root_file), after = result.sourceUris.after.get(result.inputs.after.root_file);
-              if (before && after && doc.generation === generation) return vscode.commands.executeCommand("vscode.diff", before, after, textDiffTitle(doc.resource, result.inputs.before.root_file, result.inputs.after.root_file));
-            }).catch(error => service.failure(String(error)));
+              if (!before || !after) refuse("Complete captured source is unavailable for one comparison model.");
+              await vscode.commands.executeCommand("vscode.diff", before, after, textDiffTitle(doc.resource, result.inputs.before.root_file, result.inputs.after.root_file));
+            });
           } else if (message.type === "openSource" && message.token === doc.generation && doc.status === "ready" && typeof message.rowId === "string" && (message.side === "before" || message.side === "after")) {
-            const row = doc.result?.snapshot.rows.find(row => row.id === message.rowId); if (row) void openSource(doc, row, message.side);
+            const row = doc.result?.snapshot.rows.find(row => row.id === message.rowId); if (row) void sourceAction(doc, () => openSource(doc, row, message.side as DiffSide));
           } else if (message.type === "openReference" && message.token === doc.generation && doc.status === "ready" && typeof message.pointer === "string" && (message.side === "before" || message.side === "after")) {
             const reference = doc.result?.snapshot.references?.find(reference => reference.pointer === message.pointer && reference.side === message.side);
-            if (reference) void openSource(doc, { id: reference.pointer, navigation: reference.navigation }, reference.side);
+            if (reference) void sourceAction(doc, () => openSource(doc, { id: reference.pointer, navigation: reference.navigation }, reference.side));
           } else if (message.type === "capturedTextDiff" && message.token === doc.generation && doc.status === "ready") {
-            void chooseCaptured(doc).catch(error => service.failure(String(error)));
+            void sourceAction(doc, () => chooseCaptured(doc));
           }
         }), panel.onDidChangeViewState(() => { if (panel.visible) send(doc); }));
       panel.webview.html = diffHtml(panel.webview, assets); send(doc);

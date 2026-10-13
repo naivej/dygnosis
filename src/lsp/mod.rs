@@ -40,7 +40,9 @@ use crate::engine::diagnostics::{check_file, check_in_workspace_with_origins, Di
 use crate::engine::editing::equation_names::{
     equation_name_plan, long_name_plan, metadata_completion,
 };
-use crate::engine::editing::format::{format_range, format_text};
+use crate::engine::editing::format::{
+    format_outcome, format_range_outcome, FormatOutcome, RangeFormatOutcome,
+};
 use crate::engine::editing::refs::{
     enclosing_paren_has_ident, ident_at, is_legal_ident, occurrences, option_command_at,
     option_owner_at,
@@ -1110,27 +1112,42 @@ impl Backend {
         crate::lsp::signature_help::signature_help(&doc.text, byte)
     }
 
-    fn prepare_rename_at(&self, pos: &TextDocumentPositionParams) -> Option<Range> {
+    fn prepare_rename_at(&self, pos: &TextDocumentPositionParams) -> Result<Range> {
         let mut inner = self.lock_inner();
         if let Some(edit) = locals::rename(&mut inner, pos, None) {
-            edit?;
-            let text = &inner.document(&pos.text_document.uri)?.text;
+            edit.map_err(tower_lsp::jsonrpc::Error::invalid_params)?;
+            let text = &inner
+                .document(&pos.text_document.uri)
+                .ok_or_else(|| tower_lsp::jsonrpc::Error::invalid_params(rename::SOURCE))?
+                .text;
             let index = LineIndex::new(text);
             let byte = index.offset_utf16(text, span_pos(pos.position));
-            return ident_at(text, byte).map(|(_, span)| span_range(&index, text, span));
+            return ident_at(text, byte)
+                .map(|(_, span)| span_range(&index, text, span))
+                .ok_or_else(|| {
+                    tower_lsp::jsonrpc::Error::invalid_params(
+                        "Place the cursor on a declared model name.",
+                    )
+                });
         }
-        rename::decide(&mut inner, pos, None).map(|decision| decision.range)
+        rename::decide(&mut inner, pos, None)
+            .map(|decision| decision.range)
+            .map_err(tower_lsp::jsonrpc::Error::invalid_params)
     }
 
-    fn rename_at(&self, pos: &TextDocumentPositionParams, new_name: &str) -> Option<WorkspaceEdit> {
+    fn rename_at(&self, pos: &TextDocumentPositionParams, new_name: &str) -> Result<WorkspaceEdit> {
         if !is_legal_ident(new_name) {
-            return None;
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                rename::IDENTIFIER,
+            ));
         }
         let mut inner = self.lock_inner();
         if let Some(edit) = locals::rename(&mut inner, pos, Some(new_name)) {
-            return edit;
+            return edit.map_err(tower_lsp::jsonrpc::Error::invalid_params);
         }
-        rename::decide(&mut inner, pos, Some(new_name)).map(|decision| decision.edit)
+        rename::decide(&mut inner, pos, Some(new_name))
+            .map(|decision| decision.edit)
+            .map_err(tower_lsp::jsonrpc::Error::invalid_params)
     }
 
     fn quick_fixes(&self, params: &CodeActionParams) -> Option<CodeActionResponse> {
@@ -1564,34 +1581,55 @@ impl Backend {
         })
     }
 
-    fn format_document(&self, uri: &Url) -> Option<Vec<TextEdit>> {
+    fn format_document(&self, uri: &Url) -> Result<Option<Vec<TextEdit>>> {
         let inner = self.lock_inner();
-        let doc = inner.document(uri)?;
+        let doc = inner.document(uri).ok_or_else(|| {
+            tower_lsp::jsonrpc::Error::invalid_params(
+                "The formatting document is unavailable. Open it and try again.",
+            )
+        })?;
         let settings = inner.settings.resolve(uri);
-        let formatted = format_text(&doc.text, &settings.format_indent_unit)?;
-        Some(vec![full_document_edit(&doc.text, formatted)])
+        match format_outcome(&doc.text, &settings.format_indent_unit) {
+            FormatOutcome::Changed(formatted) => {
+                Ok(Some(vec![full_document_edit(&doc.text, formatted)]))
+            }
+            FormatOutcome::Unchanged => Ok(None),
+            FormatOutcome::Unsupported(reason) => {
+                Err(tower_lsp::jsonrpc::Error::invalid_params(reason))
+            }
+        }
     }
 
-    fn format_line_range(&self, uri: &Url, range: Range) -> Option<Vec<TextEdit>> {
+    fn format_line_range(&self, uri: &Url, range: Range) -> Result<Option<Vec<TextEdit>>> {
         let inner = self.lock_inner();
-        let doc = inner.document(uri)?;
+        let doc = inner.document(uri).ok_or_else(|| {
+            tower_lsp::jsonrpc::Error::invalid_params(
+                "The formatting document is unavailable. Open it and try again.",
+            )
+        })?;
         let mut end_line = range.end.line;
         if range.end.character == 0 && end_line > range.start.line {
             end_line -= 1;
         }
         let settings = inner.settings.resolve(uri);
-        let (start_line, end_line, replacement) = format_range(
+        let (start_line, end_line, replacement) = match format_range_outcome(
             &doc.text,
             range.start.line,
             end_line,
             &settings.format_indent_unit,
-        )?;
-        Some(vec![line_range_edit(
+        ) {
+            RangeFormatOutcome::Changed(start, end, replacement) => (start, end, replacement),
+            RangeFormatOutcome::Unchanged => return Ok(None),
+            RangeFormatOutcome::Unsupported(reason) => {
+                return Err(tower_lsp::jsonrpc::Error::invalid_params(reason))
+            }
+        };
+        Ok(Some(vec![line_range_edit(
             &doc.text,
             start_line,
             end_line,
             replacement,
-        )])
+        )]))
     }
 
     fn execute(&self, command: &str, arguments: &[Value]) -> Value {
@@ -1610,9 +1648,8 @@ impl Backend {
             "dynare/compareModels" => self.compare_command(arguments),
             "dynare/compareModelSnapshots" => self.compare_snapshot_command(arguments),
             "dynare/showEffectiveModel" => self.show_effective_model_command(arguments),
-            "dynare/captureRename" => {
-                rename::capture_command(&mut self.lock_inner(), arguments).unwrap_or(Value::Null)
-            }
+            "dynare/captureRename" => rename::capture_command(&mut self.lock_inner(), arguments)
+                .unwrap_or_else(|reason| json!({"error":reason, "code":"RENAME_REFUSED"})),
             "dynare/modelInfo" => self.model_info_command(arguments),
             _ => json!({"error": format!("unknown command {command}"), "code": "UNKNOWN_COMMAND"}),
         };
@@ -1675,35 +1712,10 @@ impl Backend {
         let mut result = if complete {
             crate::engine::analysis::model_info::model_info_json(&model)
         } else {
-            let reasons = crate::engine::analysis::model_info::incomplete_reason_records(
-                &model,
-                Some(&includes),
-            );
-            let reason_json: Vec<Value> = reasons
-                .iter()
-                .map(|(span, code, message)| {
-                    let location =
-                        incomplete_reason_location(&mut inner, &root, *span, *code == "E061");
-                    json!({
-                        "code": code,
-                        "message": message,
-                        "location": location,
-                    })
-                })
-                .collect();
-            let mut reason_json = reason_json;
-            reason_json.sort_by_key(|reason| {
-                (
-                    reason["location"]["uri"].as_str().unwrap_or("").to_string(),
-                    reason["location"]["range"]["start"]["line"]
-                        .as_u64()
-                        .unwrap_or(0),
-                    reason["location"]["range"]["start"]["character"]
-                        .as_u64()
-                        .unwrap_or(0),
-                )
-            });
-            crate::engine::analysis::model_info::model_incomplete_status_with_reasons(&reason_json)
+            let reasons = self.model_info_reasons(&mut inner, &root);
+            crate::engine::analysis::model_info::model_incomplete_status_with_reasons(
+                reasons.as_array().unwrap(),
+            )
         };
         let Some(text) = inner.workspace.get_source(document.as_str()) else {
             return json!({"error":"The displayed source is unavailable", "code":"DOCUMENT_NOT_FOUND"});
@@ -1774,17 +1786,20 @@ impl Backend {
         let Some(model_b) = inner.workspace.get_effective_model(uri_b.as_str()).cloned() else {
             return json!({"error": format!("No parsed model for uri_b: {uri_b}"), "code": "URI_B_NOT_FOUND"});
         };
-        if let Some(status) = crate::engine::analysis::model_info::incomplete_model_status(
-            &model_a,
-            inner.workspace.includes_complete(uri_a.as_str()),
-        )
-        .or_else(|| {
-            crate::engine::analysis::model_info::incomplete_model_status(
-                &model_b,
-                inner.workspace.includes_complete(uri_b.as_str()),
+        let mut incomplete = Vec::new();
+        for (side, uri, model) in [("before", &uri_a, &model_a), ("after", &uri_b, &model_b)] {
+            if crate::engine::analysis::model_info::incomplete_model_status(
+                model,
+                inner.workspace.includes_complete(uri.as_str()),
             )
-        }) {
-            return status;
+            .is_some()
+            {
+                let root = Url::parse(uri).expect("validated comparison URI");
+                incomplete.push(json!({"side":side,"root_uri":uri,"incomplete_reasons":self.model_info_reasons(&mut inner, &root)}));
+            }
+        }
+        if !incomplete.is_empty() {
+            return json!({"status":"incomplete", "message":"Comparison inputs are incomplete; change arrays and source navigation were withheld.", "inputs":incomplete});
         }
         let mut diff = compare_models_with_sources(
             &model_a,
@@ -2175,11 +2190,41 @@ impl Backend {
         }
         if !complete {
             result["status"] = json!("incomplete");
+            let info = self.model_info_reasons(&mut inner, &uri);
+            result["incomplete_reasons"] = info;
+            result["message"] = json!(if source_unproven
+                || requested == Some("source") && layout.is_none()
+            {
+                "Expansion is partial because the requested source layout could not be verified; source navigation is unavailable."
+            } else {
+                "Expansion is partial; unresolved includes, parsing, or macro expansion prevent complete counts and source navigation."
+            });
         }
         if !inner.workspace.input_snapshot_is_current(uri.as_str()) {
             return json!({"success":false,"code":"INPUT_CHANGED","message":"The model inputs changed; refresh the effective model"});
         }
         result
+    }
+
+    fn model_info_reasons(&self, inner: &mut Inner, root: &Url) -> Value {
+        let includes = inner.workspace.include_records(root.as_str()).cloned();
+        let model = inner.workspace.get_effective_model(root.as_str()).cloned();
+        let mut reasons = Vec::new();
+        if let Some(model) = model {
+            for (span, code, message) in
+                crate::engine::analysis::model_info::incomplete_reason_records(
+                    &model,
+                    includes.as_ref(),
+                )
+            {
+                let location = incomplete_reason_location(inner, root, span, code == "E061");
+                reasons.push(json!({"code":code, "message":message, "location":location}));
+            }
+        }
+        if reasons.is_empty() {
+            reasons.push(json!({"message":"The complete expanded source or its written locations could not be verified."}));
+        }
+        json!(reasons)
     }
 
     fn prepare_hierarchy(
@@ -2685,12 +2730,14 @@ impl LanguageServer for Backend {
         ordering::ready().await;
         Ok(self
             .prepare_rename_at(&params)
-            .map(PrepareRenameResponse::Range))
+            .map(PrepareRenameResponse::Range)
+            .map(Some)?)
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
         ordering::ready().await;
-        Ok(self.rename_at(&params.text_document_position, &params.new_name))
+        self.rename_at(&params.text_document_position, &params.new_name)
+            .map(Some)
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
@@ -2754,7 +2801,7 @@ impl LanguageServer for Backend {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         ordering::ready().await;
-        Ok(self.format_document(&params.text_document.uri))
+        self.format_document(&params.text_document.uri)
     }
 
     async fn range_formatting(
@@ -2762,7 +2809,7 @@ impl LanguageServer for Backend {
         params: DocumentRangeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
         ordering::ready().await;
-        Ok(self.format_line_range(&params.text_document.uri, params.range))
+        self.format_line_range(&params.text_document.uri, params.range)
     }
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
@@ -4157,7 +4204,7 @@ impl notification::Notification for ModelInfoChanged {
 fn explain_command(arguments: &[Value]) -> Value {
     let code = extract_explain_code(arguments);
     let Some(code) = code else {
-        return Value::Null;
+        return json!({"error":"Explain Diagnostic requires a diagnostic code, for example W010.", "code":"INVALID_ARGUMENTS"});
     };
     match explain::render_markdown(&code) {
         Some(md) => Value::String(md),

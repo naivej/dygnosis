@@ -168,7 +168,7 @@ test("empty, incomplete, unowned and unavailable models explain why no equation 
   env.host.editor = { document: env.doc }; env.service.modelInfo = async () => undefined; await env.run("jumpToEquation");
   assert.match(env.host.messages.at(-1), /information is unavailable/);
   env.service.modelInfo = async () => { throw new Error("unknown schema"); }; await env.run("jumpToEquation");
-  assert.match(env.host.messages.at(-1), /model action is unavailable/); assert.ok(env.service.logged.includes("Error: unknown schema"));
+  assert.match(env.host.messages.at(-1), /unknown schema/); assert.ok(env.service.logged.includes("Error: unknown schema"));
   assert.equal(env.host.picks.length, 0); assert.equal(env.service.jumps.length, 0); env.registration.dispose();
 });
 test("unsupported and closed documents do not acquire navigation or owner facts", async () => {

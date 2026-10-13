@@ -368,7 +368,9 @@ test("older override preserves basic preview and refresh while origins remain un
   assert.equal(env.host.contexts.get("dygnosis.previewWrittenSource"), false);
   await env.run("goToWrittenSource"); assert.equal(env.service.jumps.length, 0);
   env.service.value = { effective_text: "model;\ny = 2;\nend;" }; await env.run("refreshEffectiveModel");
-  assert.ok(session.text.includes("y = 2")); assert.equal(env.service.logged.length, 0);
+  assert.ok(session.text.includes("y = 2"));
+  assert.equal(env.host.messages.length, 1);
+  assert.match(env.host.messages[0], /engine does not support verified source jumps/);
   assert.deepEqual(env.service.requests[0].args, [main]);
   assert.deepEqual(env.service.requests.at(-1).args, [{ root_uri: main }]);
   env.registration.dispose(); env.previews.dispose();

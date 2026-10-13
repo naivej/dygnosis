@@ -429,7 +429,7 @@ pub(super) fn rename(
     inner: &mut Inner,
     pos: &TextDocumentPositionParams,
     new_name: Option<&str>,
-) -> Option<Option<WorkspaceEdit>> {
+) -> Option<std::result::Result<WorkspaceEdit, &'static str>> {
     let text = inner.document(&pos.text_document.uri)?.text.clone();
     let byte = LineIndex::new(&text).offset_utf16(&text, span_pos(pos.position));
     let views = views(inner, &pos.text_document.uri);
@@ -440,15 +440,18 @@ pub(super) fn rename(
     if selections.iter().all(Vec::is_empty) {
         return None;
     }
-    if views.len() != 1 || selections[0].len() != 1 || !views[0].complete {
-        return Some(None);
+    if views.len() != 1 || selections[0].len() != 1 {
+        return Some(Err(rename::BINDING));
+    }
+    if !views[0].complete {
+        return Some(Err(rename::INCOMPLETE));
     }
     let view = &views[0];
     let binding = selections[0][0];
     let old_name = view.model.name(binding.name);
     let new_name = new_name.unwrap_or(old_name);
     if !crate::engine::analysis::model_locals::is_local_name(new_name) {
-        return Some(None);
+        return Some(Err(rename::IDENTIFIER));
     }
     if new_name != old_name
         && (view
@@ -461,7 +464,7 @@ pub(super) fn rename(
                     && definition.dimension == binding.dimension
             }))
     {
-        return Some(None);
+        return Some(Err(rename::COLLISION));
     }
     if view
         .facts
@@ -475,12 +478,12 @@ pub(super) fn rename(
                 definition.name == binding.name && definition.dimension != binding.dimension
             })
     {
-        return Some(None);
+        return Some(Err(rename::BINDING));
     }
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
     for (span, _) in sites(view, binding, true) {
         let Some((uri, range)) = editable(inner, view, span, old_name) else {
-            return Some(None);
+            return Some(Err(rename::MAPPING));
         };
         // One literal macro site can supply several different bindings. Every
         // execution changed by this written edit must belong to this rename.
@@ -489,25 +492,25 @@ pub(super) fn rename(
             .get_source(uri.as_str())
             .map(|source| LineIndex::new(source).offset_utf16(source, span_pos(range.start)))
         else {
-            return Some(None);
+            return Some(Err(rename::SOURCE));
         };
         if selected(inner, view, &uri, edit_byte)
             .iter()
             .any(|other| *other != binding)
         {
-            return Some(None);
+            return Some(Err(rename::BINDING));
         }
         for (order, token) in view.model.expanded_tokens.iter().enumerate() {
             if location(inner, view, token.span)
                 .is_some_and(|target| target.uri == uri && target.range == range)
                 && !owns_execution(view, binding, order)
             {
-                return Some(None);
+                return Some(Err(rename::BINDING));
             }
         }
         let owners = inner.known_owner_roots(&uri);
         if owners.iter().any(|owner| owner != &view.root) {
-            return Some(None);
+            return Some(Err(rename::BINDING));
         }
         let edit = TextEdit {
             range,
@@ -524,9 +527,9 @@ pub(super) fn rename(
             .workspace
             .input_snapshot_is_current(view.root.as_str())
     {
-        return Some(None);
+        return Some(Err(rename::STALE));
     }
-    Some(Some(versioned_workspace_edit(inner, changes)))
+    Some(Ok(versioned_workspace_edit(inner, changes)))
 }
 
 /// Map the cursor to every parser execution at that written site.

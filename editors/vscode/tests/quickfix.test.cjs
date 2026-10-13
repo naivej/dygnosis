@@ -55,6 +55,7 @@ const vscode = {
     createStatusBarItem: () => { const item = { shown: false, show() { this.shown = true; }, hide() { this.shown = false; }, dispose() { this.shown = false; this.disposed = true; } }; host.status.push(item); return item; },
     showQuickPick: items => Promise.resolve(items.find(item => item.code === host.selection) ?? items[0]),
     showInputBox: () => Promise.resolve(host.input),
+    showInformationMessage: message => { host.messages.push(message); return Promise.resolve(); },
   },
   commands: {
     registerCommand: (name, callback) => { host.commands.set(name, callback); return new Disposable(() => host.commands.delete(name)); },
@@ -94,7 +95,7 @@ const c2p = require("vscode-languageclient/lib/common/codeConverter").createConv
 Module._load = originalLoad;
 const token = { isCancellationRequested: false };
 function reset() {
-  host = { status: [], commands: new Map(), executed: [], providers: new Map(), documents: [], settings: {}, folder: new Emitter(), close: new Emitter(), changed: new Emitter(), opened: [], refreshes: 0, calls: [], logs: [], progress: new Map(), applied: [] };
+  host = { messages: [], status: [], commands: new Map(), executed: [], providers: new Map(), documents: [], settings: {}, folder: new Emitter(), close: new Emitter(), changed: new Emitter(), opened: [], refreshes: 0, calls: [], logs: [], progress: new Map(), applied: [] };
   const provider = { onDidChangeDiagnosticsEmitter: { fire() { ++host.refreshes; } } };
   host.invalidated = new Emitter();
   const service = { middleware: {}, currentInstance: 1, onDidChange: host.changed.event, onDidInvalidate: host.invalidated.event,
@@ -545,6 +546,7 @@ test("dependency, ownership, close, reopen, and instance changes cannot revive a
     await prepare(service, doc, fix);
     assert.equal(await command(fix.command.command, ...fix.command.arguments), false, title);
     assert.equal(host.applied.length, 0, title);
+    assert.match(host.messages.at(-1), /expired.*document, model inputs, or server changed/, title);
     registration.dispose();
   };
   await refuse((_service, doc) => { ++doc.version; }, "document version");
@@ -573,6 +575,18 @@ test("dependency, ownership, close, reopen, and instance changes cannot revive a
   assert.equal(await command(current.command.command, ...current.command.arguments), true);
   assert.equal(await command(paired.command.command, ...paired.command.arguments), false);
   assert.equal(host.applied.length, 1);
+  registration.dispose();
+});
+
+// Guards a valid stored fix being declined by the host without a user explanation.
+test("a host-declined diagnostic edit reports why no fix was applied", async () => {
+  const service = reset(), registration = registerDiagnosticActions(service), doc = document();
+  const diagnostic = note("E001", undefined, 1);
+  push(service, doc, [diagnostic]);
+  const fix = await sealedFix(service, doc, diagnostic, "Apply fix for E001");
+  host.applyResult = false;
+  assert.equal(await command(fix.command.command, ...fix.command.arguments), false);
+  assert.match(host.messages.at(-1), /VS Code did not apply.*writable/);
   registration.dispose();
 });
 

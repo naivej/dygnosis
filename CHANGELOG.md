@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.11.22
+
+- Explain why MCP and LSP edit requests are refused, and report the cause of
+  partial MCP results. Auto Fix keeps the resulting text first and reports its
+  status and remaining diagnostics in a second item.
+- Show a reason when a native editor edit or source jump expires or cannot be
+  applied. Partial macro expansion previews identify why source navigation is
+  unavailable.
+
 ## v0.11.21
 
 - The Reference page, before the diagnostic code list, defines **shared**,

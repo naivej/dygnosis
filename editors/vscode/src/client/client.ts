@@ -1,3 +1,4 @@
+import { CommandCancelled, refuse, runCommand } from "./refusal";
 import { spawn, ChildProcess } from "node:child_process";
 import * as vscode from "vscode";
 import {
@@ -153,11 +154,11 @@ export class DygnosisClient implements vscode.Disposable {
         return wrapped;
       });
     };
-    this.disposables.push(vscode.commands.registerCommand("dygnosis.openIncludeLink", (key: unknown) => this.openIncludeLink(key)));
+    this.disposables.push(vscode.commands.registerCommand("dygnosis.openIncludeLink", (key: unknown) => runCommand(this, () => this.openIncludeLink(key), () => !this.closed)));
     const watcher = vscode.workspace.createFileSystemWatcher("**/*.{mod,dyn,inc}");
     this.disposables.push(this.watch(watcher),
       vscode.workspace.onDidOpenTextDocument(document => {
-        if (isAnalysisDocument(document)) void this.ensureStarted();
+        if (isAnalysisDocument(document)) void this.ensureStarted().catch(error => this.log(String(error)));
         else if (document.languageId === "dynare" && !document.uri.scheme.startsWith("dygnosis-"))
           this.output.appendLine(`Grammar only for ${document.uri.scheme}: documents; native analysis requires file or untitled.`);
       }),
@@ -170,11 +171,11 @@ export class DygnosisClient implements vscode.Disposable {
       vscode.workspace.onDidCloseTextDocument(document => {
         if (isAnalysisDocument(document)) { this.explicitOwnerDocuments.delete(document.uri.toString()); this.pruneSourceLinks(document.uri); this.invalidate(undefined, document.uri); }
       }),
-      vscode.workspace.onDidChangeWorkspaceFolders(() => { this.selectedOwners.clear(); this.explicitOwnerDocuments.clear(); this.ownedDocuments.clear(); void this.sendSettings(); }),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => { this.selectedOwners.clear(); this.explicitOwnerDocuments.clear(); this.ownedDocuments.clear(); void this.sendSettings().catch(error => this.log(String(error))); }),
       vscode.workspace.onDidChangeConfiguration(event => {
         if (!event.affectsConfiguration("dynare") || macroTintOnlyChange(event)) return;
-        if (event.affectsConfiguration("dynare.serverPath")) void this.restart();
-        else void this.sendSettings();
+        if (event.affectsConfiguration("dynare.serverPath")) void this.restart().catch(error => this.log(String(error)));
+        else void this.sendSettings().catch(error => this.log(String(error)));
       }),
     );
   }
@@ -232,7 +233,7 @@ export class DygnosisClient implements vscode.Disposable {
       for (const root of this.selectedOwners.values()) roots.add(root);
       for (const root of this.rootCandidates.keys()) if (!roots.has(root)) this.rootCandidates.delete(root);
       this.pruneDependencyWatchers();
-      void Promise.all([...roots].map(root => this.modelInfo(vscode.Uri.parse(root))));
+      void Promise.all([...roots].map(root => this.modelInfo(vscode.Uri.parse(root)))).catch(error => this.log(String(error)));
     }, 75);
   }
   async ensureStarted(): Promise<void> {
@@ -276,9 +277,9 @@ export class DygnosisClient implements vscode.Disposable {
         }));
         this.refreshSymbols();
         this.invalidate();
-        if (!this.modelInfoSupported) void this.failure("This engine does not support model information. Update dynare.serverPath or use the bundled binary.");
+        if (!this.modelInfoSupported) this.log("This engine does not support model information. Update dynare.serverPath or use the bundled binary.");
       });
-    } catch (error) { if (!this.closed && generation === this.startGeneration) await this.failure(`Dygnosis could not start. Reinstall the extension or check dynare.serverPath. ${String(error)}`); }
+    } catch (error) { if (!this.closed && generation === this.startGeneration) throw new Error(`Dygnosis could not start. Reinstall the extension or check dynare.serverPath. ${String(error)}`, { cause: error }); }
   }
   async restart(): Promise<void> {
     if (this.closed) return;
@@ -288,8 +289,8 @@ export class DygnosisClient implements vscode.Disposable {
     // start() replaces and disposes the prior client, including a pending start.
     const replacement = this.start();
     this.starting = replacement;
-    await replacement;
-    if (this.starting === replacement) this.starting = undefined;
+    try { await replacement; }
+    finally { if (this.starting === replacement) this.starting = undefined; }
   }
   async sendSettings(): Promise<void> {
     ++this.settingsGeneration;
@@ -323,12 +324,16 @@ export class DygnosisClient implements vscode.Disposable {
     const client = this.client;
     if (!client) throw new Error("Dygnosis is unavailable. Open Dygnosis Output or restart the language server.");
     if (!client.initializeResult?.capabilities.executeCommandProvider?.commands.includes(command)) throw new Error(`The selected engine does not support ${command}. Use the bundled binary or update dynare.serverPath.`);
-    return client.sendRequest(ExecuteCommandRequest.type, { command, arguments: args }, token);
+    const result: unknown = await client.sendRequest(ExecuteCommandRequest.type, { command, arguments: args }, token);
+    if (record(result) && typeof result.error === "string") throw new Error(result.error);
+    if (record(result) && result.success === false && typeof result.message === "string") throw new Error(result.message);
+    return result;
   }
   async modelInfo(root: vscode.Uri, document = root, fresh = false, token?: vscode.CancellationToken): Promise<ModelSnapshot | undefined> {
     if (token?.isCancellationRequested) return undefined;
     await this.ensureStarted();
-    if (!this.modelInfoSupported || this.closed || token?.isCancellationRequested) return undefined;
+    if (this.closed || token?.isCancellationRequested) return undefined;
+    if (!this.modelInfoSupported) refuse("The selected engine does not support model information. Use the bundled binary or update dynare.serverPath.");
     return fresh ? this.freshModelInfo(root, document, token) : this.requestModelInfo(root, document);
   }
   /** Fresh navigators sharing a root/document cannot cancel one another. */
@@ -359,12 +364,10 @@ export class DygnosisClient implements vscode.Disposable {
     const result = Promise.race([task, aborted]);
     // A cancelled queued caller returns immediately, but its slot must still
     // wait for its predecessor so later live callers cannot bypass that proof.
-    const tail = task.then(() => {});
+    const tail = task.then(() => {}, () => {});
     this.freshTails.set(key, tail);
-    void result.then(() => {
-      this.cancelFreshRequests.delete(cancel);
-      callerSubscription?.dispose();
-    });
+    const release = (): void => { this.cancelFreshRequests.delete(cancel); callerSubscription?.dispose(); };
+    void result.then(release, release);
     void tail.then(() => {
       if (this.freshTails.get(key) === tail) this.freshTails.delete(key);
     });
@@ -391,8 +394,8 @@ export class DygnosisClient implements vscode.Disposable {
       this.modelInfoUpdated.fire(snapshot);
       return snapshot;
     }).catch((error: unknown) => {
-      if (!cancellation.token.isCancellationRequested) { this.log(String(error)); void this.failure(String(error)); }
-      return undefined;
+      if (cancellation.token.isCancellationRequested || this.closed) return undefined;
+      throw error;
     });
     this.cache.set(key, { epoch, version, cancellation, result });
     return result;
@@ -478,8 +481,9 @@ export class DygnosisClient implements vscode.Disposable {
     const pick = await vscode.window.showQuickPick(owners.map(root => ({ label: vscode.workspace.asRelativePath(root), description: root.fsPath, root })), { placeHolder: "Choose the model that owns this include" }, token);
     if (token?.isCancellationRequested) return undefined;
     if (this.selectedOwners.get(key) !== selection) return undefined;
-    if (pick) this.selectOwner(document.uri, pick.root);
-    return pick?.root;
+    if (!pick) throw new CommandCancelled();
+    this.selectOwner(document.uri, pick.root);
+    return pick.root;
   }
   private ownsDocument(info: ModelInfo, document: vscode.Uri): boolean {
     const equal = (value: string): boolean => sameUri(vscode.Uri.parse(value), document);
@@ -487,11 +491,12 @@ export class DygnosisClient implements vscode.Disposable {
       info.related_files.some(row => row.kind === "include" && row.path && sameUri(vscode.Uri.file(row.path), document));
   }
   private async openIncludeLink(key: unknown): Promise<void> {
-    if (typeof key !== "string") return;
+    const unavailable = (): never => refuse("This include link expired or its model owner changed. Request the link from the current source again.");
+    if (typeof key !== "string") { unavailable(); return; }
     const link = this.includeLinks.get(key);
-    if (!link || link.instance !== this.instance) return;
+    if (!link || link.instance !== this.instance) { unavailable(); return; }
     const source = vscode.workspace.textDocuments.find(document => sameUri(document.uri, link.source));
-    if (!source || source.version !== link.version) return;
+    if (!source || source.version !== link.version) { unavailable(); return; }
     const sourceKey = source.uri.toString();
     const editor = vscode.window.activeTextEditor;
     const invocationOwner = this.selectedOwners.get(sourceKey);
@@ -499,18 +504,18 @@ export class DygnosisClient implements vscode.Disposable {
     const currentInput = (): boolean => !this.closed && this.instance === link.instance &&
       source.version === link.version && vscode.window.activeTextEditor === editor;
     const root = await this.rootForDocument(source, true);
-    if (!root || !currentInput()) return;
+    if (!root || !currentInput()) { unavailable(); return; }
     // A root picker may intentionally choose an owner. Retain its accepted
     // outcome, then refuse later context changes during validation or loading.
     const owner = this.selectedOwners.get(sourceKey);
     const owned = this.ownedDocuments.has(sourceKey);
     if (sameUri(root, source.uri)
       ? owner !== invocationOwner || owned !== invocationOwned
-      : owner !== root.toString() || !owned) return;
+      : owner !== root.toString() || !owned) { unavailable(); return; }
     const currentContext = (): boolean => currentInput() &&
       this.selectedOwners.get(sourceKey) === owner && this.ownedDocuments.has(sourceKey) === owned;
     const info = await this.modelInfo(root, source.uri, true);
-    if (!info || !currentContext() || info.client_instance !== link.instance || !this.ownsDocument(info, link.target)) return;
+    if (!info || !currentContext() || info.client_instance !== link.instance || !this.ownsDocument(info, link.target)) { unavailable(); return; }
     await this.openSource(link.target, root, currentContext);
   }
   async modelForDocument(document: vscode.TextDocument, prompt = false): Promise<ModelSnapshot | undefined> {
@@ -538,7 +543,9 @@ export class DygnosisClient implements vscode.Disposable {
     const document = await vscode.workspace.openTextDocument(uri);
     const decision = guard ? await guard(document) : true;
     // An asynchronous proof may expire before this continuation can reveal it.
-    if (typeof decision === "boolean" ? !decision : decision.isCurrent() !== true) return;
+    if (typeof decision === "boolean" ? !decision : decision.isCurrent() !== true) {
+      refuse("The model or source changed while loading this location. Request the source jump again.");
+    }
     if (root) this.selectOwner(document.uri, root);
     const viewColumn = options?.reuseOpen ? reuseOpenViewColumn(document.uri) : options?.viewColumn;
     await vscode.window.showTextDocument(document, { viewColumn, selection });

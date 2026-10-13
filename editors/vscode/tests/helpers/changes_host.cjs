@@ -82,7 +82,7 @@ function snapshotResponse(request, changed = true) {
 }
 
 function load(name, vscode, injections = {}) {
-  for (const moduleName of ["changes_editor", "snapshot_compare", "history_sources", "captured_text", "diff", "settings", "extension"]) delete require.cache[require.resolve(compiledModule(moduleName))];
+  for (const moduleName of ["changes_editor", "snapshot_compare", "history_sources", "captured_text", "diff", "settings", "extension", "refusal"]) delete require.cache[require.resolve(compiledModule(moduleName))];
   const originalLoad = Module._load;
   Module._load = function(id, ...args) {
     if (id === "vscode") return vscode;
@@ -93,7 +93,7 @@ function load(name, vscode, injections = {}) {
   try { return require(compiledModule(name)); } finally { Module._load = originalLoad; }
 }
 function createHost() {
-  const host = { commands: new Map(), calls: [], providers: new Map(), texts: new Map(), custom: new Map(), panels: [], picks: [], dialogs: [], inputs: [], progress: [], shown: [], logs: [], failures: [], watchers: [], settings: new Map(), scopes: [], captures: [], revalidations: [], owners: [], changed: new Emitter(), modelUpdated: new Emitter(), configChanged: new Emitter(), closedText: new Emitter(), editorChanged: new Emitter(), tabsChanged: new Emitter(), tabGroupsChanged: new Emitter(), editor: undefined, activeTab: undefined };
+  const host = { commands: new Map(), calls: [], providers: new Map(), texts: new Map(), custom: new Map(), panels: [], picks: [], dialogs: [], inputs: [], progress: [], shown: [], logs: [], failures: [], notifications: [], watchers: [], settings: new Map(), scopes: [], captures: [], revalidations: [], owners: [], changed: new Emitter(), modelUpdated: new Emitter(), configChanged: new Emitter(), closedText: new Emitter(), editorChanged: new Emitter(), tabsChanged: new Emitter(), tabGroupsChanged: new Emitter(), editor: undefined, activeTab: undefined };
   host.document = (uri, text = "var y; model; y=2; end;\n") => {
     const found = host.texts.get(uri.toString()); if (found) { found.text = text; return found; }
     const document = { uri, version: 1, languageId: "dynare", isClosed: false, text, getText() { return this.text; } }; host.texts.set(uri.toString(), document); return document;
@@ -154,7 +154,7 @@ function createHost() {
       async showQuickPick(items, options, cancel) { host.picks.push({ items, options, cancel }); return host.pick ? host.pick(items, options, cancel) : items.find(item => item.mode === "previous") ?? items[0]; },
       async showOpenDialog(options) { host.dialogs.push(options); return host.select ? host.select(options) : [baselineUri]; },
       async showInputBox(options, cancel) { host.inputs.push({ ...options, cancel }); return host.input ? host.input(options, cancel) : "HEAD~1"; },
-      showInformationMessage: async message => { host.logs.push(message); },
+      showInformationMessage: async message => { host.notifications.push(message); },
       async withProgress(options, action) { const source = new CancellationTokenSource(); host.progress.push({ options, source }); return action({}, source.token); },
       showTextDocument: async (document, options) => { host.shown.push({ document, options }); return { document }; },
     },

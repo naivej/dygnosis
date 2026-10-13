@@ -18,6 +18,7 @@ import { registerHelp } from "./help/help";
 import { changesViewType, historyScheme } from "./comparison/changes_resource";
 import * as path from "node:path";
 import { record } from "./client/protocol";
+import { runCommand } from "./client/refusal";
 
 let service: DygnosisClient | undefined;
 export function activate(context: vscode.ExtensionContext): DygnosisClient {
@@ -27,13 +28,14 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
   context.subscriptions.push(registerProjectMcp(context, client));
   const previews = registerEffectivePreview(client);
   context.subscriptions.push(client, registerDiagnosticActions(client), registerProjectStatus(client), registerLenses(client), registerStatus(client), registerModelNavigation(client), registerColors(client), registerMcp(context, client.log), previews, registerOriginJumps(client, previews), registerChanges(client, context.extensionUri),
-    vscode.commands.registerCommand("dygnosis.restartServer", () => client.restart()),
+    vscode.commands.registerCommand("dygnosis.restartServer", () => runCommand(client, () => client.restart())),
     vscode.commands.registerCommand("dygnosis.showOutput", () => client.output.show()),
     vscode.commands.registerCommand("dygnosis.openSettings", () => vscode.commands.executeCommand("workbench.action.openSettings", "@ext:CoconutWater.dygnosis")),
     vscode.commands.registerCommand("dygnosis.editSettingsJson", () => vscode.commands.executeCommand("workbench.action.openSettingsJson")),
     vscode.commands.registerCommand("dygnosis.treatAsRoot", () => {
       const document = vscode.window.activeTextEditor?.document;
       if (document) client.treatAsRoot(document.uri);
+      else void vscode.window.showInformationMessage("Open a Dynare model file before treating it as a root.");
     }),
   );
   let contextGeneration = 0;
@@ -68,13 +70,13 @@ export function activate(context: vscode.ExtensionContext): DygnosisClient {
       if (!custom) void vscode.commands.executeCommand("setContext", "dygnosis.changesContext", hasOwner);
       const supported = client.client?.initializeResult?.capabilities.executeCommandProvider?.commands.includes("dynare/showEffectiveModel") ?? false;
       void vscode.commands.executeCommand("setContext", "dygnosis.modelContext", hasOwner && supported);
-    });
+    }).catch(error => client.log(String(error)));
   };
   context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(updateContext),
     vscode.window.tabGroups.onDidChangeTabs(updateContext), vscode.window.tabGroups.onDidChangeTabGroups(updateContext),
     vscode.workspace.onDidChangeConfiguration(updateContext), client.onDidChange(updateContext), client.onDidUpdateModelInfo(updateContext));
   updateContext();
-  if (vscode.workspace.textDocuments.some(isAnalysisDocument)) void client.ensureStarted();
+  if (vscode.workspace.textDocuments.some(isAnalysisDocument)) void client.ensureStarted().catch(error => client.log(String(error)));
   return client;
 }
 export async function deactivate(): Promise<void> { await service?.shutdown(); service = undefined; }

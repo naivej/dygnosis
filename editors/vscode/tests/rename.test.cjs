@@ -53,13 +53,21 @@ test("saved targets load before conversion; raw versions and a second complete d
   assert.ok(host.documents.has(child)); assert.equal(edit.converted.documentChanges[1].textDocument.version, 1);
 });
 
+// Guards the native Rename path replacing a server refusal with a generic result.
+test("capture refusal keeps the server's cause and never reaches edit conversion", async () => {
+  const { run } = setup();
+  host.capture = () => ({ error: "The new name is already declared in an affected model.", code: "RENAME_REFUSED" });
+  await assert.rejects(run(), /already declared/);
+  assert.equal(host.converted.length, 0);
+});
+
 test("a raw stale version or saved source mismatch withholds the entire edit", async () => {
   for (const wrong of ["version", "saved", "unsyncedOpen"]) {
     const { run, envelope } = setup();
     if (wrong === "version") host.capture = () => { const offered = envelope(); offered.sources[0].version = 0; offered.edit.documentChanges[0].textDocument.version = 0; return offered; };
     if (wrong === "saved") host.disk.set(child, "changed p");
     if (wrong === "unsyncedOpen") { host.document(child, "changed p"); host.capture = () => { const offered = envelope(); offered.sources[1].version = null; offered.edit.documentChanges[1].textDocument.version = null; return offered; }; }
-    assert.equal(await run(), undefined, wrong); assert.equal(host.converted.length, 0);
+    await assert.rejects(run(), /Rename|engine/, wrong); assert.equal(host.converted.length, 0);
   }
 });
 
@@ -73,7 +81,7 @@ test("edits, dependency file invalidation, settings and replacement during loadi
       if (reason === "instance") ++service.currentInstance;
       if (reason === "owner") host.capture = () => { const changed = envelope(); changed.owners.push({ root_uri: "file:///project/other.mod", revision: "other" }); return changed; };
     };
-    assert.equal(await run(), undefined, reason); assert.equal(host.converted.length, 0);
+    await assert.rejects(run(), /Rename|engine/, reason); assert.equal(host.converted.length, 0);
   }
 });
 
@@ -89,7 +97,7 @@ test("the second decision cannot change targets, edit ranges or source text", as
       }
       return value;
     };
-    assert.equal(await run(), undefined, reason); assert.equal(host.converted.length, 0);
+    await assert.rejects(run(), /Rename|engine/, reason); assert.equal(host.converted.length, 0);
   }
 });
 
@@ -100,12 +108,12 @@ test("document changes during asynchronous conversion cannot escape the final ve
   while (!host.converted.length) await new Promise(resolve => setImmediate(resolve));
   ++host.documents.get(child).version;
   pending.resolve();
-  assert.equal(await result, undefined);
+  await assert.rejects(result, /Rename/);
 });
 
 test("an unsupported engine cannot bypass the checked application path", async () => {
   const { service, run } = setup(); service.client.initializeResult.capabilities.executeCommandProvider.commands = [];
-  assert.equal(await run(), undefined);
+  await assert.rejects(run(), /Rename|engine/, undefined);
   assert.equal(host.requests, 0);
 });
 
@@ -156,7 +164,7 @@ test("URI aliases do not permit duplicate identities or genuinely changed target
       if (reason === "different") value.sources[1].uri = "file:///different/equations.inc";
       return value;
     };
-    assert.equal(await run(), undefined, reason); assert.equal(host.converted.length, 0);
+    await assert.rejects(run(), /Rename|engine/, reason); assert.equal(host.converted.length, 0);
   }
 });
 
@@ -171,6 +179,6 @@ test("recapture cannot merge distinct native query or fragment resources", { ski
       }
       return value;
     };
-    assert.equal(await run(), undefined, suffix); assert.equal(host.converted.length, 0);
+    await assert.rejects(run(), /Rename/, suffix); assert.equal(host.converted.length, 0);
   }
 });

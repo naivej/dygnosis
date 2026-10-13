@@ -123,7 +123,7 @@ test("an unowned or disproved plaintext SCM include cannot become a model throug
     const { host } = setup(t), included = Uri.joinPath(rootUri, "unowned.data"), document = host.document(included); document.languageId = "plaintext";
     host.rootFor = () => undefined; host.knownOwners = () => known ? [anchorUri] : []; host.select = () => [anchorUri];
     host.modelInfo = () => ({ revision: "current root", complete: true, related_files: [{ kind: "include", path: Uri.joinPath(rootUri, "different.data").fsPath }] });
-    await host.open({ resourceUri: included }); assert.equal(host.panels.length, 0); assert.equal(host.owners.length, 0); assert.equal(document.languageId, "plaintext"); assert.match(host.failures[0], /does not include this source/);
+    await host.open({ resourceUri: included }); assert.equal(host.panels.length, 0); assert.equal(host.owners.length, 0); assert.equal(document.languageId, "plaintext"); assert.equal(host.notifications.length, 1); assert.match(host.notifications[0], /does not include this source/);
   }
 });
 
@@ -195,7 +195,7 @@ test("symbolic Git plaintext and third-party sources require an explicit revisio
     if (source === "symbolic Git") host.editor.document.languageId = "plaintext";
     host.provenance = () => { throw new Error("Source has no fixed provenance"); }; host.select = () => [anchorUri]; host.input = () => commits.opened;
     await host.open(); assert.equal(host.inputs.length, 1); assert.ok(host.inputs[0].cancel, "explicit source revision receives invocation cancellation");
-    if (source === "mismatched source") { assert.equal(host.panels.length, 0); assert.match(host.failures[0], /does not match.*source revision/); }
+    if (source === "mismatched source") { assert.equal(host.panels.length, 0); assert.equal(host.notifications.length, 1); assert.match(host.notifications[0], /does not match.*source revision/); }
     else { assert.equal(host.last().status, "ready"); assert.deepEqual(host.captures[0].resource.after, historical()); assert.deepEqual(host.captures[0].resource.anchor, historical()); }
   }
 });
@@ -256,7 +256,7 @@ test("historical include ownership uses a candidate root only after a proof at t
     host.capture = (resource, cancel, history) => { const result = captured(resource, history, host, service.currentInstance); if (!included) result.inputs.after.file_keys = ["main.mod"]; return result; };
     await host.open(); assert.equal(host.captures[0].resource.before.root_file, "main.mod"); assert.equal(host.captures[0].resource.after.commit, commits.opened);
     if (included) { assert.equal(host.panels.length, 1); assert.equal(host.panels[0].document.resource.after.root_file, "main.mod"); }
-    else { assert.equal(host.panels.length, 0); assert.match(host.failures[0], /does not include.*written.data.*bbbbbbb/); }
+    else { assert.equal(host.panels.length, 0); assert.equal(host.notifications.length, 1); assert.match(host.notifications[0], /does not include.*written.data.*bbbbbbb/); }
   }
 });
 
@@ -430,6 +430,26 @@ test("Working source navigation revalidates before and after document load and r
   host.validate = undefined; host.loadText = undefined; host.message({ type: "refresh" }); await flush();
   const target = host.last().rows[0].navigation.after.written_locations[0], document = host.texts.get(target.uri); document.text += "modified";
   host.source("after"); await flush(); assert.equal(host.shown.length, 0); assert.equal(host.last().status, "stale");
+  assert.equal(host.notifications.length, 2); assert.ok(host.notifications.every(message => /Comparison inputs changed/.test(message)));
+});
+
+// Guards explicit webview actions bypassing the shared command boundary.
+test("reference, root text, captured text and Swap failures each show their cause once", async t => {
+  for (const type of ["openReference", "rootTextDiff", "capturedTextDiff", "swap"]) {
+    const { host, service, vscode } = createHost(); host.install(); t.after(() => host.registration.dispose());
+    host.capture = (resource, cancel, history) => {
+      const result = captured(resource, history, host, service.currentInstance), row = result.snapshot.rows[0];
+      result.snapshot.references = [{ pointer: "/reference/0", side: "after", navigation: row.navigation }];
+      result.snapshot.sourceChanges = { files: [{ pointer: "/file/0", change: "modified", correspondence: "selected_roots", before: { file_key: result.inputs.before.root_file, exact_text_available: true }, after: { file_key: result.inputs.after.root_file, exact_text_available: true } }] };
+      return result;
+    };
+    await host.openSaved(comparison());
+    if (type === "swap") vscode.commands.executeCommand = async () => { throw new Error("editor could not open comparison"); };
+    else host.validate = () => { throw new Error("source check failed"); };
+    host.message({ type, token: host.last().token, pointer: "/reference/0", side: "after" }); await flush();
+    assert.deepEqual(host.notifications, [type === "swap" ? "editor could not open comparison" : "source check failed"]);
+    assert.deepEqual(host.failures, []);
+  }
 });
 
 test("historical source tabs retain captured bytes after the comparison closes and restore through a fresh provider", async t => {
