@@ -284,7 +284,6 @@ fn push_render<'a>(stack: &mut Vec<RenderItem<'a>>, value: &'a MacroVal, style: 
     match value {
         MacroVal::Bool(true) => stack.push(RenderItem::Static("true")),
         MacroVal::Bool(false) => stack.push(RenderItem::Static("false")),
-        MacroVal::Int(number) => stack.push(RenderItem::Owned(format_real(*number as f64))),
         MacroVal::Real(number) => stack.push(RenderItem::Owned(format_real(*number))),
         MacroVal::Bytes(_) => {}
         MacroVal::Text(text) => match style {
@@ -352,7 +351,7 @@ fn measure_val(value: &MacroVal) -> Result<ValCost, MacroEvalError> {
             return Err(MacroEvalError::Limit("iteration work"));
         }
         match value {
-            MacroVal::Int(_) | MacroVal::Real(_) | MacroVal::Bool(_) | MacroVal::Unresolved => {}
+            MacroVal::Real(_) | MacroVal::Bool(_) | MacroVal::Unresolved => {}
             MacroVal::Text(text) => {
                 bytes = bytes.saturating_add(text.len());
                 if bytes > STRING_CAP {
@@ -408,7 +407,6 @@ pub(crate) fn clone_macro_val(
 #[derive(serde::Serialize, serde::Deserialize)]
 enum ReplayAtom {
     RealBits(u64),
-    Int(i64),
     Bool(bool),
     Text(String),
     Bytes(Vec<u8>),
@@ -445,7 +443,6 @@ pub(crate) fn encode_replay_value(
     while let Some(value) = pending.pop() {
         atoms.push(match value {
             MacroVal::Real(number) => ReplayAtom::RealBits(number.to_bits()),
-            MacroVal::Int(number) => ReplayAtom::Int(*number),
             MacroVal::Bool(value) => ReplayAtom::Bool(*value),
             MacroVal::Text(value) => ReplayAtom::Text(value.clone()),
             MacroVal::Bytes(value) => ReplayAtom::Bytes(value.clone()),
@@ -501,7 +498,6 @@ pub(crate) fn decode_replay_value(
     for atom in atoms.into_iter().rev() {
         let (value, depth) = match atom {
             ReplayAtom::RealBits(bits) => (MacroVal::Real(f64::from_bits(bits)), 1),
-            ReplayAtom::Int(number) => (MacroVal::Int(number), 1),
             ReplayAtom::Bool(value) => (MacroVal::Bool(value), 1),
             ReplayAtom::Text(value) => (MacroVal::Text(value), 1),
             ReplayAtom::Bytes(value) => (MacroVal::Bytes(value), 1),
@@ -2248,7 +2244,6 @@ fn eval_logic(
     let truth = match &left {
         MacroVal::Bool(v) => *v,
         MacroVal::Real(v) => *v != 0.0,
-        MacroVal::Int(v) => *v != 0,
         _ => {
             return Err(official(
                 "E285",
@@ -2263,7 +2258,7 @@ fn eval_logic(
     let rhs = eval_expr(right, global, local, call_depth, expr_depth, budget)?;
     let right_truth = match &rhs {
         MacroVal::Bool(v) => *v,
-        MacroVal::Real(_) | MacroVal::Int(_) => numeric(&rhs).is_some_and(|n| n != 0.0),
+        MacroVal::Real(v) => *v != 0.0,
         _ => {
             return Err(official(
                 "E285",
@@ -2277,7 +2272,6 @@ fn eval_logic(
 fn numeric(value: &MacroVal) -> Option<f64> {
     match value {
         MacroVal::Real(v) => Some(*v),
-        MacroVal::Int(v) => Some(*v as f64),
         _ => None,
     }
 }
@@ -2331,8 +2325,8 @@ fn eval_add(
     budget: &mut MacroBudget,
 ) -> Result<MacroVal, MacroEvalError> {
     match (&left, &right) {
-        (MacroVal::Real(_) | MacroVal::Int(_), _) => match numeric(&right) {
-            Some(b) => Ok(MacroVal::Real(numeric(&left).unwrap() + b)),
+        (MacroVal::Real(a), _) => match numeric(&right) {
+            Some(b) => Ok(MacroVal::Real(a + b)),
             None => Err(mismatch("+")),
         },
         (MacroVal::Text(a), MacroVal::Text(b)) => {
@@ -2382,9 +2376,7 @@ fn eval_sub(
     budget: &mut MacroBudget,
 ) -> Result<MacroVal, MacroEvalError> {
     match (&left, &right) {
-        (MacroVal::Real(_) | MacroVal::Int(_), MacroVal::Real(_) | MacroVal::Int(_)) => Ok(
-            MacroVal::Real(numeric(&left).unwrap() - numeric(&right).unwrap()),
-        ),
+        (MacroVal::Real(a), MacroVal::Real(b)) => Ok(MacroVal::Real(a - b)),
         (MacroVal::Array(a), MacroVal::Array(b)) => {
             charge_set_scans(a, b, false, budget)?;
             let mut out = Vec::new();
@@ -2395,7 +2387,7 @@ fn eval_sub(
             }
             seal_value(MacroVal::Array(out))
         }
-        (MacroVal::Real(_) | MacroVal::Int(_) | MacroVal::Array(_), _) => Err(mismatch("-")),
+        (MacroVal::Real(_) | MacroVal::Array(_), _) => Err(mismatch("-")),
         _ => Err(missing_op("-")),
     }
 }
@@ -2406,9 +2398,7 @@ fn eval_mul(
     budget: &mut MacroBudget,
 ) -> Result<MacroVal, MacroEvalError> {
     match (&left, &right) {
-        (MacroVal::Real(_) | MacroVal::Int(_), MacroVal::Real(_) | MacroVal::Int(_)) => Ok(
-            MacroVal::Real(numeric(&left).unwrap() * numeric(&right).unwrap()),
-        ),
+        (MacroVal::Real(a), MacroVal::Real(b)) => Ok(MacroVal::Real(a * b)),
         (MacroVal::Array(a), MacroVal::Array(b)) => {
             seal_value(MacroVal::Array(cartesian(a, b, budget)?))
         }
@@ -2419,10 +2409,8 @@ fn eval_mul(
 
 fn eval_div(left: MacroVal, right: MacroVal) -> Result<MacroVal, MacroEvalError> {
     match (&left, &right) {
-        (MacroVal::Real(_) | MacroVal::Int(_), MacroVal::Real(_) | MacroVal::Int(_)) => Ok(
-            MacroVal::Real(numeric(&left).unwrap() / numeric(&right).unwrap()),
-        ),
-        (MacroVal::Real(_) | MacroVal::Int(_), _) => Err(mismatch("/")),
+        (MacroVal::Real(a), MacroVal::Real(b)) => Ok(MacroVal::Real(a / b)),
+        (MacroVal::Real(_), _) => Err(mismatch("/")),
         _ => Err(missing_op("/")),
     }
 }
@@ -2433,13 +2421,10 @@ fn eval_pow(
     budget: &mut MacroBudget,
 ) -> Result<MacroVal, MacroEvalError> {
     match left {
-        MacroVal::Real(_) | MacroVal::Int(_) => {
-            let a = numeric(&left).unwrap();
-            match numeric(&right) {
-                Some(b) => Ok(MacroVal::Real(a.powf(b))),
-                None => Err(mismatch("^")),
-            }
-        }
+        MacroVal::Real(a) => match numeric(&right) {
+            Some(b) => Ok(MacroVal::Real(a.powf(b))),
+            None => Err(mismatch("^")),
+        },
         MacroVal::Array(items) => {
             let Some(exp) = numeric(&right) else {
                 return Err(official(
@@ -2515,7 +2500,7 @@ fn push_factor(
     budget: &mut MacroBudget,
 ) -> Result<(), MacroEvalError> {
     match value {
-        MacroVal::Real(_) | MacroVal::Int(_) | MacroVal::Text(_) => {
+        MacroVal::Real(_) | MacroVal::Text(_) => {
             row.push(clone_macro_val(value, budget)?);
         }
         MacroVal::Tuple(items) => {
@@ -2596,9 +2581,7 @@ fn eval_cmp(
     texts: fn(&str, &str) -> bool,
 ) -> Result<MacroVal, MacroEvalError> {
     match (&left, &right) {
-        (MacroVal::Real(_) | MacroVal::Int(_), MacroVal::Real(_) | MacroVal::Int(_)) => Ok(
-            MacroVal::Bool(reals(numeric(&left).unwrap(), numeric(&right).unwrap())),
-        ),
+        (MacroVal::Real(a), MacroVal::Real(b)) => Ok(MacroVal::Bool(reals(*a, *b))),
         (MacroVal::Text(a), MacroVal::Text(b)) => Ok(MacroVal::Bool(texts(a, b))),
         (MacroVal::Text(_) | MacroVal::Bytes(_), MacroVal::Text(_) | MacroVal::Bytes(_)) => {
             let left_bytes = match &left {
@@ -2619,9 +2602,7 @@ fn eval_cmp(
                 _ => return Err(missing_op(op)),
             }))
         }
-        (MacroVal::Real(_) | MacroVal::Int(_) | MacroVal::Text(_) | MacroVal::Bytes(_), _) => {
-            Err(mismatch(op))
-        }
+        (MacroVal::Real(_) | MacroVal::Text(_) | MacroVal::Bytes(_), _) => Err(mismatch(op)),
         _ => Err(missing_op(op)),
     }
 }
@@ -2637,7 +2618,6 @@ fn eval_unary(
         Unary::Not => match &value {
             MacroVal::Bool(v) => Ok(MacroVal::Bool(!v)),
             MacroVal::Real(v) => Ok(MacroVal::Bool(*v == 0.0)),
-            MacroVal::Int(v) => Ok(MacroVal::Bool(*v == 0)),
             _ => Err(missing_op("!")),
         },
         Unary::Neg => match numeric(&value) {
@@ -2683,7 +2663,6 @@ fn cast_bool(
     match value {
         MacroVal::Bool(v) => Ok(MacroVal::Bool(v)),
         MacroVal::Real(v) => Ok(MacroVal::Bool(v != 0.0)),
-        MacroVal::Int(v) => Ok(MacroVal::Bool(v != 0)),
         MacroVal::Text(s) => Ok(MacroVal::Bool(string_to_bool(&s)?)),
         MacroVal::Array(items) => cast_singleton(items, "Array", true, global, local),
         MacroVal::Tuple(items) => cast_singleton(items, "Tuple", true, global, local),
@@ -2698,7 +2677,6 @@ fn cast_real(
 ) -> Result<MacroVal, MacroEvalError> {
     match value {
         MacroVal::Real(v) => Ok(MacroVal::Real(v)),
-        MacroVal::Int(v) => Ok(MacroVal::Real(v as f64)),
         MacroVal::Bool(v) => Ok(MacroVal::Real(if v { 1.0 } else { 0.0 })),
         MacroVal::Text(s) => Ok(MacroVal::Real(string_to_real(&s)?)),
         MacroVal::Array(items) => cast_singleton(items, "Array", false, global, local),
@@ -2958,10 +2936,7 @@ fn eval_builtin(op: Builtin, args: &[MacroVal]) -> Result<MacroVal, MacroEvalErr
         Builtin::Length => length_of(&args[0]),
         Builtin::IsEmpty => isempty_of(&args[0]),
         Builtin::IsBoolean => Ok(MacroVal::Bool(matches!(args[0], MacroVal::Bool(_)))),
-        Builtin::IsReal => Ok(MacroVal::Bool(matches!(
-            args[0],
-            MacroVal::Real(_) | MacroVal::Int(_)
-        ))),
+        Builtin::IsReal => Ok(MacroVal::Bool(matches!(args[0], MacroVal::Real(_)))),
         Builtin::IsString => Ok(MacroVal::Bool(matches!(
             args[0],
             MacroVal::Text(_) | MacroVal::Bytes(_)
@@ -3176,14 +3151,14 @@ fn real_of(value: &MacroVal) -> Result<f64, MacroEvalError> {
 
 fn flatten_index(value: MacroVal, out: &mut Vec<i64>) -> Result<(), MacroEvalError> {
     match value {
-        MacroVal::Real(_) | MacroVal::Int(_) => {
+        MacroVal::Real(_) => {
             out.push(index_int(&value)?);
             Ok(())
         }
         MacroVal::Array(items) => {
             for item in items {
                 match item {
-                    MacroVal::Real(_) | MacroVal::Int(_) => out.push(index_int(&item)?),
+                    MacroVal::Real(_) => out.push(index_int(&item)?),
                     MacroVal::Array(_) => {
                         return Err(official(
                             "E285",
@@ -3228,7 +3203,7 @@ fn apply_index(
 ) -> Result<MacroVal, MacroEvalError> {
     match value {
         MacroVal::Bool(_) => Err(official("E285", "You cannot index a boolean")),
-        MacroVal::Real(_) | MacroVal::Int(_) => Err(official("E285", "You cannot index a real")),
+        MacroVal::Real(_) => Err(official("E285", "You cannot index a real")),
         MacroVal::Tuple(_) => Err(official("E285", "You cannot index a tuple")),
         MacroVal::Text(text) => index_text(text.as_bytes(), indexes, budget),
         MacroVal::Bytes(text) => index_text(&text, indexes, budget),
@@ -3294,7 +3269,7 @@ fn index_text(
 fn type_name(value: &MacroVal) -> &'static str {
     match value {
         MacroVal::Bool(_) => "boolean",
-        MacroVal::Real(_) | MacroVal::Int(_) => "real",
+        MacroVal::Real(_) => "real",
         MacroVal::Text(_) | MacroVal::Bytes(_) => "string",
         MacroVal::Tuple(_) => "tuple",
         MacroVal::Array(_) => "array",
@@ -3320,10 +3295,7 @@ fn values_equal(left: &MacroVal, right: &MacroVal) -> bool {
             };
             left_bytes == right_bytes
         }
-        (MacroVal::Int(a), MacroVal::Int(b)) => a == b,
         (MacroVal::Real(a), MacroVal::Real(b)) => a == b,
-        (MacroVal::Int(a), MacroVal::Real(b)) => *a as f64 == *b,
-        (MacroVal::Real(a), MacroVal::Int(b)) => *a == *b as f64,
         (MacroVal::Array(a), MacroVal::Array(b)) | (MacroVal::Tuple(a), MacroVal::Tuple(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y))
         }
@@ -3339,7 +3311,6 @@ fn truth(value: &MacroVal, message: &str) -> Result<bool, MacroEvalError> {
     match value {
         MacroVal::Bool(v) => Ok(*v),
         MacroVal::Real(v) => Ok(*v != 0.0),
-        MacroVal::Int(v) => Ok(*v != 0),
         _ => Err(official("E283", message)),
     }
 }
@@ -3829,7 +3800,7 @@ mod tests {
             tuple,
             input,
             MacroVal::Bool(true),
-            MacroVal::Int(-9),
+            val("-9"),
         ]);
         assert!(values_equal(&replay_round_trip(&array), &array));
     }

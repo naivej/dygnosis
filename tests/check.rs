@@ -1,18 +1,13 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use dygnosis::span::Span;
-use dygnosis::{
-    check_file, check_walk, dynare_workspace_diagnose, format_check_lines, Diagnostic, Severity,
-};
+use dygnosis::{check_file, check_walk, dynare_workspace_diagnose, Diagnostic, Severity};
 
 const OUT: &[&str] = &[
     "E040", "W040", "W041", "I041", "W071", "I070", "I071", "W080", "W081", "DYNR",
 ];
 
 const I050_MESSAGE: &str = "No initval or steady_state_model block. Add an initval block with initial guesses, or a steady_state_model block with closed-form assignments.";
-
-const SEVERITIES: &[&str] = &["ERROR", "WARNING", "INFO", "HINT", "UNKNOWN"];
 
 fn copilot_mod(archive_dir: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -54,106 +49,24 @@ fn is_p_digits(code: &str) -> bool {
     !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
 }
 
-fn split_path_line_col(prefix: &str) -> Option<(&str, u32, u32)> {
-    let col_at = prefix.rfind(':')?;
-    let col: u32 = prefix[col_at + 1..].parse().ok()?;
-    let rest = &prefix[..col_at];
-    let line_at = rest.rfind(':')?;
-    let line: u32 = rest[line_at + 1..].parse().ok()?;
-    Some((&rest[..line_at], line, col))
-}
-
-/// `{filepath}:{line}:{col}: {SEVERITY} [{code}] {message}`
-fn parse_diag_line(line: &str) -> Option<(String, u32, u32, String, String, String)> {
-    let (sev, idx, needle_len) = SEVERITIES.iter().find_map(|sev| {
-        let needle = format!(": {sev} [");
-        line.find(&needle).map(|i| (*sev, i, needle.len()))
-    })?;
-    let (path, line_n, col) = split_path_line_col(&line[..idx])?;
-    let after = &line[idx + needle_len..];
-    let close = after.find(']')?;
-    let code = after[..close].to_string();
-    let message = after.get(close + 2..)?.to_string();
-    Some((
-        path.to_string(),
-        line_n,
-        col,
-        sev.to_string(),
-        code,
-        message,
-    ))
-}
-
-fn printed_codes(stdout: &str) -> HashSet<String> {
-    stdout
-        .lines()
-        .filter_map(parse_diag_line)
-        .map(|d| d.4)
-        .collect()
-}
-
-fn assert_no_out(stdout: &str) {
-    let codes = printed_codes(stdout);
+fn assert_no_out(diags: &[Diagnostic]) {
+    let codes: HashSet<_> = diags.iter().map(|diag| diag.code.as_str()).collect();
     for code in OUT {
         assert!(
             !codes.contains(*code),
-            "Out code {code} must not print; got {codes:?}"
+            "Out code {code} must not be emitted; got {codes:?}"
         );
     }
 }
 
-fn assert_no_out_or_preproc(stdout: &str) {
-    assert_no_out(stdout);
-    let codes = printed_codes(stdout);
-    for code in &codes {
+fn assert_no_out_or_preproc(diags: &[Diagnostic]) {
+    assert_no_out(diags);
+    for code in diags.iter().map(|diag| diag.code.as_str()) {
         assert!(
             !is_p_digits(code),
-            "preprocessor code {code} must not print"
+            "preprocessor code {code} must not be emitted"
         );
     }
-}
-
-#[test]
-fn format_check_lines_empty() {
-    let out = format_check_lines("model.mod", &[], "var y;\n");
-    assert_eq!(out, "No issues found in model.mod\n");
-}
-
-#[test]
-fn format_check_lines_one_error() {
-    let src = "var y;\n";
-    let diags = vec![Diagnostic::new(
-        Span::new(0, 3),
-        Severity::Error,
-        "E001",
-        "missing semicolon",
-    )];
-    let out = format_check_lines("x.mod", &diags, src);
-    assert_eq!(
-        out,
-        "x.mod:1:1: ERROR [E001] missing semicolon\n\n1 issue(s): 1 error(s), 0 warning(s)\n"
-    );
-}
-
-#[test]
-fn format_check_lines_mixed_info_counts_in_n_only() {
-    let src = "var y;\nvar z;\n";
-    let y = src.find('y').unwrap();
-    let z = src.find('z').unwrap();
-    let diags = vec![
-        Diagnostic::new(Span::new(0, 3), Severity::Error, "E001", "err"),
-        Diagnostic::new(Span::new(y, y + 1), Severity::Warning, "W010", "warn"),
-        Diagnostic::new(Span::new(z, z + 1), Severity::Information, "I050", "info"),
-    ];
-    let out = format_check_lines("mix.mod", &diags, src);
-    assert_eq!(
-        out,
-        "mix.mod:1:1: ERROR [E001] err\n\
-         mix.mod:1:5: WARNING [W010] warn\n\
-         mix.mod:2:5: INFO [I050] info\n\
-         \n\
-         3 issue(s): 1 error(s), 1 warning(s)\n"
-    );
 }
 
 #[test]
@@ -161,9 +74,8 @@ fn p_core_check_file_no_preproc() {
     let path = copilot_mod("trend_rbc_gov_inv");
     let path_str = path.to_str().expect("utf-8 path");
     let text = read_mod("trend_rbc_gov_inv");
-    let stdout = format_check_lines(path_str, &check_file(&text, path_str), &text);
-    assert_eq!(stdout, format!("No issues found in {path_str}\n"));
-    assert_no_out_or_preproc(&stdout);
+    let diags = check_file(&text, path_str);
+    assert!(diags.is_empty(), "{diags:?}");
 
     for name in ["sims_wu_2019", "lk2024"] {
         let path = copilot_mod(name);
@@ -187,8 +99,7 @@ fn p_core_check_file_no_preproc() {
             "{name} library check codes: {:?}",
             diags.iter().map(|d| &d.code).collect::<Vec<_>>()
         );
-        let stdout = format_check_lines(path_str, &diags, &text);
-        assert_no_out_or_preproc(&stdout);
+        assert_no_out_or_preproc(&diags);
     }
 
     let path = copilot_mod("govt_rbc_irf_matching");
@@ -206,7 +117,7 @@ fn p_core_check_file_no_preproc() {
             "cascade must not emit {extra}; got {codes:?}"
         );
     }
-    assert_no_out_or_preproc(&format_check_lines(path_str, &diags, &text));
+    assert_no_out_or_preproc(&diags);
 }
 
 #[test]
@@ -214,8 +125,7 @@ fn swff_check_has_no_out_codes() {
     let path = copilot_mod("swff");
     let path_str = path.to_str().expect("utf-8 path");
     let text = read_mod("swff");
-    let stdout = format_check_lines(path_str, &check_file(&text, path_str), &text);
-    assert_no_out(&stdout);
+    assert_no_out(&check_file(&text, path_str));
 }
 
 #[test]

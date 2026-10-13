@@ -19,5 +19,6 @@
   "dygnosis.recheckProject": "project-checks",
   "dygnosis.cancelProject": "project-checks",
   "dygnosis.configureProjectExclusions": "project-checks",
-  "dygnosis.openChanges": "structural-diff"
+  "dygnosis.openChanges": "structural-diff",
+  "dygnosis.renameSymbol": "navigate-code"
 }

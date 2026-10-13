@@ -3,7 +3,7 @@
   "displayName": "Dygnosis",
   "icon": "media/logo_s.png",
   "description": "Language support for Dynare",
-  "version": "0.11.20",
+  "version": "0.11.21",
   "publisher": "CoconutWater",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -88,6 +88,12 @@
       }
     ],
     "commands": [
+      {
+        "command": "dygnosis.renameSymbol",
+        "title": "Rename symbol",
+        "category": "Dygnosis",
+        "enablement": "dygnosis.analysisDocument && !editorReadonly"
+      },
       {
         "command": "dygnosis.openHelp",
         "title": "Open Help",
@@ -244,6 +250,11 @@
       ],
       "editor/context": [
         {
+          "command": "dygnosis.renameSymbol",
+          "when": "dygnosis.analysisDocument && !editorReadonly",
+          "group": "1_modification@1.1"
+        },
+        {
           "command": "dygnosis.showEffectiveModel",
           "when": "dygnosis.modelContext && dygnosis.contextActions",
           "group": "navigation"
@@ -270,6 +281,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "dygnosis.renameSymbol",
+          "when": "dygnosis.analysisDocument"
+        },
         {
           "command": "dygnosis.showEffectiveModel",
           "when": "dygnosis.modelContext"
@@ -1426,6 +1441,11 @@
       ]
     },
     "keybindings": [
+      {
+        "command": "dygnosis.renameSymbol",
+        "key": "f2",
+        "when": "dygnosis.analysisDocument && editorTextFocus && !editorReadonly"
+      },
       {
         "command": "dygnosis.goToWrittenSource",
         "key": "ctrl+alt+g",

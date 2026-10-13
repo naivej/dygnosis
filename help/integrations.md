@@ -210,6 +210,96 @@ model's required nested local definitions and explicit metadata, including
 definitions in earlier blocks. A different dimension's same-name definition
 is not that dependency. No MCP completion tool is added.
 
+### Editor rename
+
+The VS Code extension contributes `dygnosis.renameSymbol` as **Rename symbol**
+in the editor context menu and binds it to F2 for a focused, writable Dynare
+document. It first requests standard `textDocument/prepareRename`, then opens
+the native name input. After input, it captures and verifies the full edit and
+calls the public `workspace.applyEdit` API once. The built-in VS Code rename
+provider is disabled for this extension client because its edit adapter drops
+document versions. Other LSP clients continue to use standard
+`textDocument/prepareRename` and `textDocument/rename`.
+
+A rename covers the selected model and every known owner of each edited source.
+An include's extension does not determine eligibility; an explicitly included
+source such as an `.m` file can be a target, while an unrelated MATLAB buffer
+is not. Shared sources are edited only when their affected models have the same
+first accepted declaration and final type. Incomplete inputs, uneditable
+targets, ambiguous ownership, changed inputs, or a name collision withhold the
+edit. Literal references in `endogenous` and `mcp` equation tags are rename
+targets only when their written source and owner are verified. Existing quotes
+and surrounding tag text are preserved. A macro-generated numeric bound in an
+`mcp` value can remain generated while a verified literal name in that value
+is renamed. A generated name occurrence or ambiguous source owner withholds
+the whole operation. Equation `name` tags and symbol `long_name` metadata are
+display labels and remain unchanged. Open-document edits carry their document
+versions; saved targets use unversioned edits.
+
+The server advertises the VS Code capture command as
+`experimental.dygnosis.rename: { command: "dynare/captureRename",
+schema_version: 1, max_source_bytes: 16777216 }`. Execute
+`dynare/captureRename` with one ordinary LSP `RenameParams` object:
+
+```json
+{
+  "textDocument": { "uri": "file:///C:/models/main.mod" },
+  "position": { "line": 2, "character": 11 },
+  "newName": "rho"
+}
+```
+
+The result is `null` when the operation cannot be captured. Otherwise it has
+`schema_version: 1`, a standard versioned `WorkspaceEdit` in `edit`, the exact
+`sources` used to decide the operation, and `owners` for each affected model.
+`edit.documentChanges` contains only genuine text edits. `sources` includes
+every affected model root and executed include, even when a source has no text
+edit:
+
+```json
+{
+  "schema_version": 1,
+  "edit": {
+    "documentChanges": [{
+      "textDocument": { "uri": "file:///C:/models/main.mod", "version": 4 },
+      "edits": [{
+        "range": {
+          "start": { "line": 2, "character": 10 },
+          "end": { "line": 2, "character": 11 }
+        },
+        "newText": "rho"
+      }]
+    }]
+  },
+  "sources": [
+    { "uri": "file:///C:/models/main.mod", "text": "...", "version": 4 },
+    { "uri": "file:///C:/models/parts/variables.inc", "text": "...", "version": null }
+  ],
+  "owners": [
+    { "root_uri": "file:///C:/models/main.mod", "revision": "opaque-current-revision" }
+  ]
+}
+```
+
+Each source has its exact current text and a numeric version when open, or
+`null` when saved and closed. Unrelated MATLAB companion files are not
+captured. The combined source text cannot exceed the advertised
+`max_source_bytes`. Owner revisions are opaque equality tokens for the current
+server instance. The server checks them against current inputs on each capture;
+the client compares the affected owner identities across captures because
+loading a saved source can change its overlay revision.
+
+The VS Code extension loads every captured source, captures the decision again,
+and checks the exact source text, document versions, owner identities, server
+instance, and edit shape before calling `workspace.applyEdit`. The second
+capture also makes the server validate current owner revisions again. For a captured
+source with no genuine text edit, it adds an empty insertion only to the
+application copy so the native edit validates that source's version too. The
+installed supported VS Code hosts validate those versions before ignoring the
+empty operations. A stale or partial capture applies no edits. The custom
+command does not change the standard LSP rename request or MCP `dynare_rename`
+contract.
+
 ## Semantic token migration
 
 The server negotiates four role types against the types and modifiers advertised by the client at initialize. Both full and range token responses use the returned legend.

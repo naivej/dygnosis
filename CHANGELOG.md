@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.11.21
+
+- Press F2 or choose **Rename symbol** from the editor context menu to rename
+  ordinary Dynare symbols across the selected model and its known source files,
+  including `.mod`, `.dyn`, `.inc`, and supported untitled documents. Rename
+  is withheld when the complete edit cannot be verified, a replacement name
+  already exists or source ownership is ambiguous. Verified literal references
+  in `endogenous` and `mcp` equation tags are renamed with existing quotes
+  preserved; generated name occurrences withhold the edit. Equation `name`
+  tags and symbol `long_name` labels stay unchanged. MATLAB companion text is
+  not renamed.
+- Remove the public Rust functions `format_structure_lens`,
+  `format_check_lines`, and `format_check_lines_with_origins`. Callers can use
+  the shared analysis data or current LSP and MCP output instead.
+- Remove the legacy private integer macro-value and replay branches.
+  Evaluation and replay continue to use real values, including loop values and
+  collection members.
+
 ## v0.11.20
 
 - Use **Jump to equation...** from the Command Palette or an equation CodeLens

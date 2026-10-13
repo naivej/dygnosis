@@ -8,7 +8,7 @@ Navigation uses the current model and its known includes.
 | Go to Declaration / Go to Type Definition | The available declaration target. |
 | Find All References | Known occurrences across the model and its includes. |
 | Document highlights | Occurrences in the current file. |
-| Rename Symbol | Renaming across known source locations. |
+| **Rename symbol** | Rename a symbol across its verified model source locations. Press F2 or choose **Rename symbol** from the editor context menu. |
 | Show Call Hierarchy | Equations that use a variable. |
 | Outline, breadcrumbs and Go to Symbol in Editor | Structure in the current written file, with configurable [sections](settings:dynare.outline.sections) and [equation number labels](settings:dynare.outline.equationNumbers). |
 | Go to Symbol in Workspace | Symbols known to the language server. |
@@ -16,8 +16,23 @@ Navigation uses the current model and its known includes.
 
 [Equation navigation](model-and-includes.md#equations) reaches equations across
 the model, including repeated macro occurrences. Rename is unavailable where
-source edits are ambiguous or the new name conflicts with an existing name.
-It does not infer aliases in MATLAB code.
+the complete source edit cannot be verified, an affected model already has the
+new name, or a shared source has incompatible model bindings. Rename follows
+known model ownership across `.mod`, `.dyn`, and included source files; the
+included file's extension does not decide its owner. A shared file is changed
+only when its affected models use the same declaration and type. Rename also
+supports untitled Dynare documents. It leaves MATLAB companion text unchanged
+and does not infer aliases in MATLAB code.
+
+Rename also updates literal references in an equation's `endogenous` or
+`mcp` tag when their source is verified. Existing quotes around the tag value
+stay in place. Rename is unavailable when the name occurrence is generated or
+its source owner is ambiguous. Equation `name` tags and symbol `long_name`
+labels remain unchanged.
+
+The editor asks for a new name in its native input box. Before it applies the
+rename, it verifies the current model inputs again. If they change during the
+operation, no rename is applied.
 
 ## Outline
 

@@ -120,7 +120,7 @@ const vscode = {
 const originalLoad = Module._load;
 Module._load = function(id, ...args) {
   if (id === "vscode") return vscode;
-  if (id === "vscode-languageclient/node") return { DocumentSymbolRequest: { method: "textDocument/documentSymbol" }, ExecuteCommandRequest: { type: "workspace/executeCommand" }, State: { Stopped: 1 } };
+  if (id === "vscode-languageclient/node") return { DocumentSymbolRequest: { method: "textDocument/documentSymbol" }, RenameRequest: { method: "textDocument/rename" }, ExecuteCommandRequest: { type: "workspace/executeCommand" }, State: { Stopped: 1 } };
   if (importedModule(id, args[0]) === "client" && /(?:model_navigation|preview)\.js$/.test(args[0]?.filename ?? "")) return {
     isAnalysisDocument: document => document.languageId === "dynare" && ["file", "untitled"].includes(document.uri.scheme),
   };
@@ -217,6 +217,7 @@ async function realClientSetup() {
     },
   });
   await service.ensureStarted();
+  assert.ok(service.supportsModelInfo, `real-client setup must complete the engine handshake: ${base.host.messages.join("; ")}`);
   const previews = registerEffectivePreview(service), registration = registerOriginJumps(service, previews);
   const show = async () => { base.host.editor = { document: base.rootDocument, selection: new Range(1, 0), setDecorations() {} }; await base.run("showEffectiveModel"); await flush(); return previews.sessions().at(-1); };
   return { ...base, engine, service, previews, registration, show,

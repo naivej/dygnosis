@@ -16,6 +16,9 @@ mod ordering;
 
 mod locals;
 
+mod rename;
+mod rename_tags;
+
 #[cfg(test)]
 mod ordering_tests;
 
@@ -1116,17 +1119,7 @@ impl Backend {
             let byte = index.offset_utf16(text, span_pos(pos.position));
             return ident_at(text, byte).map(|(_, span)| span_range(&index, text, span));
         }
-        let doc = inner.document(&pos.text_document.uri)?;
-        let index = LineIndex::new(&doc.text);
-        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
-        let (word, span) = ident_at(&doc.text, byte)?;
-        if !is_legal_ident(&word) {
-            return None;
-        }
-        if !is_declared_in_open(&inner, &word) {
-            return None;
-        }
-        Some(span_range(&index, &doc.text, span))
+        rename::decide(&mut inner, pos, None).map(|decision| decision.range)
     }
 
     fn rename_at(&self, pos: &TextDocumentPositionParams, new_name: &str) -> Option<WorkspaceEdit> {
@@ -1137,43 +1130,7 @@ impl Backend {
         if let Some(edit) = locals::rename(&mut inner, pos, Some(new_name)) {
             return edit;
         }
-        let doc = inner.document(&pos.text_document.uri)?;
-        let index = LineIndex::new(&doc.text);
-        let byte = index.offset_utf16(&doc.text, span_pos(pos.position));
-        let (word, _) = ident_at(&doc.text, byte)?;
-        if !is_legal_ident(&word) || !is_declared_in_open(&inner, &word) {
-            return None;
-        }
-        let mut changes = HashMap::new();
-        for (uri, open) in &inner.docs {
-            if !uri_is_mod_or_inc(uri) {
-                continue;
-            }
-            let idx = LineIndex::new(&open.text);
-            let mut spans = occurrences(&open.text, &word);
-            if spans.is_empty() {
-                continue;
-            }
-            spans.sort_by_key(|s| std::cmp::Reverse(s.start));
-            let edits = spans
-                .into_iter()
-                .map(|span| TextEdit {
-                    range: span_range(&idx, &open.text, span),
-                    new_text: new_name.to_string(),
-                })
-                .collect::<Vec<_>>();
-            if !edits.is_empty() {
-                changes.insert(uri.clone(), edits);
-            }
-        }
-        if changes.is_empty() {
-            None
-        } else {
-            Some(WorkspaceEdit {
-                changes: Some(changes),
-                ..WorkspaceEdit::default()
-            })
-        }
+        rename::decide(&mut inner, pos, Some(new_name)).map(|decision| decision.edit)
     }
 
     fn quick_fixes(&self, params: &CodeActionParams) -> Option<CodeActionResponse> {
@@ -1653,6 +1610,9 @@ impl Backend {
             "dynare/compareModels" => self.compare_command(arguments),
             "dynare/compareModelSnapshots" => self.compare_snapshot_command(arguments),
             "dynare/showEffectiveModel" => self.show_effective_model_command(arguments),
+            "dynare/captureRename" => {
+                rename::capture_command(&mut self.lock_inner(), arguments).unwrap_or(Value::Null)
+            }
             "dynare/modelInfo" => self.model_info_command(arguments),
             _ => json!({"error": format!("unknown command {command}"), "code": "UNKNOWN_COMMAND"}),
         };
@@ -2940,6 +2900,7 @@ pub fn initialize_result() -> InitializeResult {
                     "dynare/compareModels".into(),
                     "dynare/compareModelSnapshots".into(),
                     "dynare/showEffectiveModel".into(),
+                    "dynare/captureRename".into(),
                     "dynare/modelInfo".into(),
                     "dynare/projectStatus".into(),
                     "dynare/recheckProject".into(),
@@ -2959,6 +2920,7 @@ pub fn initialize_result() -> InitializeResult {
             experimental: Some(json!({"dygnosis": {
                 "modelInfo": {"command": "dynare/modelInfo", "schema_version": MODEL_INFO_SCHEMA_VERSION, "dependency_candidates": true, "model_locals": true},
                 "modelInfoChanged": true,
+                "rename": {"command":"dynare/captureRename", "schema_version":1, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES},
                 "compareModels": {"command": "dynare/compareModels", "navigation_schema_version": 1,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
                 "compareModelSnapshots": {"command":"dynare/compareModelSnapshots", "schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_SCHEMA_VERSION, "navigation_schema_version":crate::engine::comparison::compare_snapshots::SNAPSHOT_NAVIGATION_SCHEMA_VERSION, "needs_sources":true, "max_manifest_files":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_FILES, "max_source_bytes":crate::engine::comparison::compare_snapshots::MAX_SNAPSHOT_SOURCE_BYTES,"semantic_schema_version":1,"source_changes_schema_version":1,"coverage_schema_version":1},
                 "effectivePreview": {"command":"dynare/showEffectiveModel", "navigation_schema_version":crate::engine::preview::preview_navigation::NAVIGATION_SCHEMA_VERSION, "source_navigation_schema_version":crate::engine::preview::source_navigation::SOURCE_NAVIGATION_SCHEMA_VERSION, "dependency_candidates":true, "readable_layout":true, "source_layout":true, "macro_ranges":true, "macro_messages":true},
@@ -3643,24 +3605,6 @@ fn is_declared_in_open(inner: &Inner, word: &str) -> bool {
             .and_then(|m| find_decl(m, word))
             .is_some()
     })
-}
-
-fn uri_is_mod_or_inc(uri: &Url) -> bool {
-    let ext = uri
-        .to_file_path()
-        .ok()
-        .and_then(|p| {
-            p.extension()
-                .and_then(|e| e.to_str())
-                .map(|s| s.to_ascii_lowercase())
-        })
-        .or_else(|| {
-            Path::new(uri.path())
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|s| s.to_ascii_lowercase())
-        });
-    matches!(ext.as_deref(), Some("mod" | "inc"))
 }
 
 fn fix_title(d: &crate::Diagnostic) -> String {

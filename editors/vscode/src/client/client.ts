@@ -2,12 +2,14 @@ import { spawn, ChildProcess } from "node:child_process";
 import * as vscode from "vscode";
 import {
   ClientCapabilities, DocumentSymbolRequest, ExecuteCommandRequest, FeatureState, InitializeParams,
-  LanguageClient, Middleware, StaticFeature, State,
+  LanguageClient, Middleware, RenameRequest, StaticFeature, State,
 } from "vscode-languageclient/node";
 import { Binary, resolveBinary } from "./binary";
 import { ClientLifecycle, ManagedClient } from "./lifecycle";
 import { configurationSnapshot, macroTintOnlyChange } from "./settings";
 import { ModelInfo, parseModelInfo, record, timingModifiers, tokenRoles } from "./protocol";
+import { renameSymbol } from "./rename";
+import { sameSourceUri as sameUri } from "./source_uri";
 
 interface ClientProcess extends ManagedClient { readonly client: LanguageClient }
 export interface ClientDependencies {
@@ -122,6 +124,14 @@ export class DygnosisClient implements vscode.Disposable {
   private modelInfoSupported = false;
   lastInitializeParams: InitializeParams | undefined;
   constructor(private readonly context: vscode.ExtensionContext, private readonly dependencies: ClientDependencies = {}) {
+    // VS Code's RenameProvider converter drops document versions. Own native
+    // application through the public, version-aware workspace.applyEdit API.
+    this.middleware.handleRegisterCapability = async (params, next) => {
+      const cancellation = new vscode.CancellationTokenSource();
+      try { await next({ ...params, registrations: params.registrations.filter(registration => registration.method !== RenameRequest.method) }, cancellation.token); }
+      finally { cancellation.dispose(); }
+    };
+    this.disposables.push(vscode.commands.registerCommand("dygnosis.renameSymbol", () => renameSymbol(this)));
     this.middleware.provideDocumentLinks = async (document, token, next) => {
       const instance = this.instance, client = this.client, version = document.version;
       const links = await next(document, token);
@@ -249,6 +259,7 @@ export class DygnosisClient implements vscode.Disposable {
       await this.lifecycle.replace(() => create(binary, this.output, this.middleware, configurationSnapshot(this.log), params => { this.lastInitializeParams = params; }), async managed => {
         this.reportedFailure = undefined;
         const client = managed.client;
+        client.getFeature(RenameRequest.method).clear();
         ++this.instance;
         await this.reconcileStartup(client);
         if (this.closed || generation !== this.startGeneration || client !== this.client) return;
@@ -559,11 +570,6 @@ export class DygnosisClient implements vscode.Disposable {
     return this.shutdownPromise;
   }
   dispose(): void { void this.shutdown(); }
-}
-function sameUri(left: vscode.Uri, right: vscode.Uri): boolean {
-  if (left.scheme !== right.scheme) return false;
-  if (left.scheme === "file" && process.platform === "win32") return left.fsPath.toLowerCase() === right.fsPath.toLowerCase();
-  return left.toString() === right.toString();
 }
 /** Prefer a visible or hidden text tab after async validation; otherwise open beside. */
 function reuseOpenViewColumn(uri: vscode.Uri): vscode.ViewColumn {

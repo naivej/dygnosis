@@ -307,7 +307,7 @@ fn valid_length_builtin_expands_for_both_transports() {
 }
 
 #[test]
-fn incomplete_macro_analysis_is_visible_in_formatted_lines_and_mcp_diagnosis() {
+fn incomplete_macro_analysis_is_information_in_diagnostic_set_and_mcp() {
     let src = "@#define nums = 1:10001\nvar y; model; y=@{nums}; end;\n";
     let path = "limit.mod";
     let set = dygnosis::check_file_with_origins(src, path);
@@ -317,15 +317,15 @@ fn incomplete_macro_analysis_is_visible_in_formatted_lines_and_mcp_diagnosis() {
         .find(|diag| diag.code == "I211")
         .expect("incomplete-analysis Information");
     assert_eq!(note.span.start, src.find("@#define").unwrap() as u32);
-    let printed = dygnosis::format_check_lines_with_origins(path, &set, src);
-    assert!(printed.contains("INFO [I211]"), "{printed}");
-    assert!(!printed.contains("No issues found"), "{printed}");
+    assert_eq!(note.severity, dygnosis::Severity::Information);
     let mcp = dygnosis::mcp::dynare_diagnose(src, None, None);
     let item = mcp
         .iter()
         .find(|diag| diag.code == "I211")
         .expect("MCP I211");
     assert_eq!((item.line, item.column), (1, 1));
+    assert_eq!(item.severity, "INFORMATION");
+    assert_eq!(item.message, note.message);
 }
 
 #[test]

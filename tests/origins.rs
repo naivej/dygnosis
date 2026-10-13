@@ -3,8 +3,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use dygnosis::include_resolver::normalize_uri;
 use dygnosis::mcp::{dynare_diagnose, dynare_workspace_diagnose};
-use dygnosis::{check_file_with_origins, format_check_lines_with_origins};
+use dygnosis::span::Span;
+use dygnosis::{check_file_with_origins, Severity};
 
 fn scratch(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -23,8 +25,8 @@ fn scratch(label: &str) -> PathBuf {
 }
 
 #[test]
-fn cli_names_child_for_included_unknown_symbol() {
-    let dir = scratch("cli");
+fn diagnostic_set_keeps_the_included_unknown_symbol_owner_and_written_span() {
+    let dir = scratch("unknown-owner");
     let root = dir.join("root.mod");
     let child = dir.join("child.inc");
     let root_text = "@#include \"child.inc\"\n";
@@ -34,17 +36,20 @@ fn cli_names_child_for_included_unknown_symbol() {
     let path = root.to_str().unwrap();
 
     let set = check_file_with_origins(root_text, path);
-    let output = format_check_lines_with_origins(path, &set, root_text);
-    let line = output
-        .lines()
-        .find(|line| line.contains("[E020]"))
+    let (index, diagnostic) = set
+        .diagnostics
+        .iter()
+        .enumerate()
+        .find(|(_, diagnostic)| diagnostic.code == "E020")
         .expect("E020");
-    assert!(
-        line.to_ascii_lowercase()
-            .starts_with(&format!("{}:1:17:", child.display()).to_ascii_lowercase()),
-        "{line}"
-    );
-    assert!(line.contains("zz"), "{line}");
+    let owner = set.origins[index].as_ref().expect("written child owner");
+    assert_eq!(set.root, normalize_uri(path));
+    assert_eq!(owner.file, normalize_uri(child.to_str().unwrap()));
+    assert_eq!(owner.text.as_ref(), child_text);
+    let start = child_text.find("zz").unwrap();
+    assert_eq!(owner.span, Span::new(start, start + 2));
+    assert_eq!(diagnostic.severity, Severity::Error);
+    assert!(diagnostic.message.contains("zz"), "{diagnostic:?}");
 
     fs::remove_dir_all(dir).unwrap();
 }

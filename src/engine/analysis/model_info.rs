@@ -28,20 +28,6 @@ pub fn format_timing_line(info: &TimingInfo) -> String {
     }
 }
 
-/// One-line form of [`StructureSummary`]. No Compute Steady State or solver names.
-pub fn format_structure_lens(summary: &StructureSummary) -> String {
-    format!(
-        "{} endogenous: {} predetermined, {} forward-looking, {} static · {} varexo · max lead {}, max lag {}",
-        summary.endogenous,
-        summary.predetermined,
-        summary.forward_looking,
-        summary.static_vars,
-        summary.varexo,
-        summary.max_lead,
-        summary.max_lag
-    )
-}
-
 /// Shared arithmetic operations. Strict mode uses retained numeric tokens and
 /// requires finite intermediates; legacy mode retains the written-number reader.
 pub(crate) fn arithmetic_number(

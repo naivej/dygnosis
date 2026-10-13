@@ -43,9 +43,6 @@ pub struct IncompleteReason {
 
 #[derive(Clone, Debug)]
 pub(crate) enum MacroVal {
-    /// Stored numbers are [`MacroVal::Real`]. This variant keeps older match arms total.
-    #[allow(dead_code)]
-    Int(i64),
     Real(f64),
     Bool(bool),
     Text(String),
@@ -65,7 +62,6 @@ impl MacroVal {
     fn condition(&self) -> Option<bool> {
         match self {
             MacroVal::Bool(b) => Some(*b),
-            MacroVal::Int(n) => Some(*n != 0),
             MacroVal::Real(n) => Some(*n != 0.0),
             _ => None,
         }

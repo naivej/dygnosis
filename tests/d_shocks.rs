@@ -173,10 +173,18 @@ fn w060_resolved_include_maps_selected_span_to_active_file() {
         &source[warning.span.start as usize..warning.span.end as usize],
         "e"
     );
-    let printed = dygnosis::format_check_lines(path.to_str().unwrap(), &diags, &source);
-    assert!(
-        printed.contains("main.mod:2:25: WARNING [W060]"),
-        "{printed}"
+    let lsp = diagnostics_for(path.to_str().unwrap(), &source);
+    let warning = lsp
+        .iter()
+        .find(|d| matches!(&d.code, Some(NumberOrString::String(code)) if code == "W060"))
+        .expect("active-root W060");
+    assert_eq!(
+        warning.severity,
+        Some(tower_lsp::lsp_types::DiagnosticSeverity::WARNING)
+    );
+    assert_eq!(
+        (warning.range.start.line, warning.range.start.character),
+        (1, 24)
     );
     let included_path = path.with_file_name("included_request.mod");
     let included_source = std::fs::read_to_string(&included_path).unwrap();

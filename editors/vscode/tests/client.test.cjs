@@ -68,7 +68,7 @@ const vscode = {
     asRelativePath: uri => uri.path,
   },
 };
-const languageClient = { DocumentSymbolRequest: { method: "textDocument/documentSymbol" }, ExecuteCommandRequest: { type: "workspace/executeCommand" }, State: { Stopped: 1 } };
+const languageClient = { DocumentSymbolRequest: { method: "textDocument/documentSymbol" }, RenameRequest: { method: "textDocument/rename" }, ExecuteCommandRequest: { type: "workspace/executeCommand" }, State: { Stopped: 1 } };
 const originalLoad = Module._load;
 Module._load = function(id, ...args) { return id === "vscode" ? vscode : id === "vscode-languageclient/node" ? languageClient : originalLoad.call(this, id, ...args); };
 const { DygnosisClient, extendCapabilities } = require(compiledModule("client"));
@@ -95,7 +95,7 @@ function service(options = {}) {
         sendNotification: (method, params) => { host.notifications.push({ method, params }); return options.notify?.(method, params) ?? Promise.resolve(); },
         onNotification: (_method, listener) => { client.notify = listener; return new Disposable(); },
         onDidChangeState: listener => { client.state = listener; return new Disposable(); },
-        getFeature: () => ({ clear() {}, unregister() {}, register() { ++host.symbols; } }),
+        getFeature: request => ({ clear() { (host.clearedFeatures ??= []).push(request); }, unregister() {}, register() { ++host.symbols; } }),
         sendRequest: () => Promise.resolve(model()),
       };
       const managed = { client, disposed: false,
@@ -106,6 +106,16 @@ function service(options = {}) {
     },
   });
 }
+
+test("native Rename application has one command owner and no static or dynamic provider bypass", async () => {
+  reset(); const client = service(); await client.ensureStarted();
+  assert.ok(host.commands.has("dygnosis.renameSymbol"));
+  assert.ok(host.clearedFeatures.includes("textDocument/rename"));
+  let registered;
+  await client.middleware.handleRegisterCapability({ registrations: [{ id: "unsafe", method: "textDocument/rename" }, { id: "kept", method: "textDocument/hover" }] }, async params => { registered = params.registrations; });
+  assert.deepEqual(registered, [{ id: "kept", method: "textDocument/hover" }]);
+  await client.shutdown();
+});
 test("startup sends latest settings and reconciles folders changed while initialize was pending", async () => {
   reset(); const client = service({ pending: true }); const starting = client.ensureStarted();
   await flush();

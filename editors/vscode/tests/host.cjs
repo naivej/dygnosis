@@ -551,7 +551,15 @@ exports.run = async function run() {
     const extension = vscode.extensions.getExtension("CoconutWater.dygnosis");
     assert.ok(extension);
     const service = await extension.activate();
-    assert.ok(["all", "semantic", "folding", "presentation"].includes(scope), "Native host scope must be all, semantic, folding, or presentation");
+    assert.ok(["all", "semantic", "folding", "presentation", "rename"].includes(scope), "Native host scope must be all, semantic, folding, presentation, or rename");
+    if (scope === "rename") {
+      await require("./helpers/rename_host.cjs").checkRename(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, currentSnapshot, writeObservedInput });
+      await service.shutdown();
+      evidence.artifacts_after = await historyArtifacts();
+      assert.deepEqual(evidence.artifacts_after, evidence.artifacts_before, "the engine and compiled extension must remain unchanged throughout the host gate");
+      evidence.passed = true;
+      return;
+    }
     if (scope === "presentation") {
       await require("./helpers/presentation_host.cjs").checkPresentation(service, vscode.workspace.workspaceFolders[0].uri.fsPath, evidence, { waitFor, currentSnapshot, writeObservedInput });
       await service.shutdown();

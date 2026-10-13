@@ -5,8 +5,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use dygnosis::explain::{explain, ExplainKind};
 use dygnosis::{analyze, check_file, parse, Diagnostic};
 
-#[test]
-fn included_writing_notes_use_owner_scalar_positions_in_formatter_and_mcp() {
+#[tokio::test]
+async fn included_writing_notes_keep_owners_and_scalar_or_utf16_positions() {
+    use tower_lsp::lsp_types::*;
+    use tower_lsp::LanguageServer;
+
     let dir = std::env::temp_dir().join(format!(
         "dygnosis-writing-wire-{}-{}",
         std::process::id(),
@@ -25,9 +28,25 @@ fn included_writing_notes_use_owner_scalar_positions_in_formatter_and_mcp() {
     let root_key = root.to_string_lossy().to_string();
     let child_key = child.to_string_lossy().to_string();
     let set = dygnosis::check_file_with_origins(root_text, &root_key);
-    let output = dygnosis::format_check_lines_with_origins(&root_key, &set, root_text);
-    assert!(output.contains("child.inc:1:6: INFO [I209]"), "{output}");
-    assert!(output.contains("child.inc:2:1: INFO [I208]"), "{output}");
+    for (code, keyword) in [("I209", "var"), ("I208", "model")] {
+        let (index, note) = set
+            .diagnostics
+            .iter()
+            .enumerate()
+            .find(|(_, note)| note.code == code)
+            .unwrap();
+        let owner = set.origins[index].as_ref().expect("written child owner");
+        assert_eq!(
+            owner.file,
+            dygnosis::include_resolver::normalize_uri(&child_key)
+        );
+        assert_eq!(owner.text.as_ref(), child_text);
+        assert_eq!(
+            &owner.text[owner.span.start as usize..owner.span.end as usize],
+            keyword
+        );
+        assert_eq!(note.severity, dygnosis::Severity::Information);
+    }
     let files = HashMap::from([
         (root_key.clone(), root_text.to_string()),
         (child_key.clone(), child_text.to_string()),
@@ -37,6 +56,54 @@ fn included_writing_notes_use_owner_scalar_positions_in_formatter_and_mcp() {
         let note = notes.iter().find(|note| note.code == code).unwrap();
         assert_eq!(note.file.as_deref(), Some(child_key.as_str()));
         assert_eq!((note.line, note.column), (line, column));
+        assert_eq!(note.severity, "INFORMATION");
+    }
+    let root_uri = Url::from_file_path(&root).unwrap();
+    let child_uri = Url::from_file_path(&child).unwrap();
+    let (service, _socket) = dygnosis::server::new_service();
+    let backend = service.inner();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: root_uri,
+                language_id: "dynare".into(),
+                version: 1,
+                text: root_text.into(),
+            },
+        })
+        .await;
+    let report = backend
+        .diagnostic(DocumentDiagnosticParams {
+            text_document: TextDocumentIdentifier { uri: child_uri },
+            identifier: None,
+            previous_result_id: None,
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap();
+    let DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(report)) = report
+    else {
+        panic!("expected child diagnostic report");
+    };
+    let items = report.full_document_diagnostic_report.items;
+    for (code, line, character, end_character) in [("I209", 0, 6, 9), ("I208", 1, 0, 5)] {
+        let note = items
+            .iter()
+            .find(|note| note.code == Some(NumberOrString::String(code.into())))
+            .unwrap();
+        assert_eq!(note.severity, Some(DiagnosticSeverity::INFORMATION));
+        assert_eq!(
+            note.range,
+            Range::new(
+                Position::new(line, character),
+                Position::new(line, end_character)
+            )
+        );
+        assert_eq!(
+            note.message,
+            notes.iter().find(|item| item.code == code).unwrap().message
+        );
     }
     std::fs::remove_dir_all(&dir).unwrap();
 }

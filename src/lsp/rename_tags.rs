@@ -1,0 +1,275 @@
+//! Verified symbol references inside the two semantic equation-tag values.
+
+use super::*;
+use crate::engine::language::lexer::Token;
+
+#[derive(Clone)]
+pub(super) struct Reference {
+    pub name: String,
+    pub declaration: bool,
+    pub order: Option<usize>,
+    pub declaration_order: usize,
+    pub within_token: Span,
+    pub written: Option<(String, Span)>,
+}
+
+fn semantic_name<'a>(key: &str, value: &'a str) -> Option<(usize, &'a str)> {
+    let name = match key {
+        "endogenous" => value,
+        "mcp" => {
+            let separator = value.find('<').or_else(|| value.find('>'))?;
+            value[..separator].trim_matches([' ', '\n', '\t'])
+        }
+        _ => return None,
+    };
+    is_legal_ident(name).then(|| (value.find(name).unwrap_or(0), name))
+}
+
+fn content(raw: &str) -> Option<&str> {
+    let quote = *raw.as_bytes().first()?;
+    if !matches!(quote, b'\'' | b'"') || raw.len() < 2 || raw.as_bytes().last() != Some(&quote) {
+        return None;
+    }
+    raw.get(1..raw.len() - 1)
+}
+
+/// Only copied bytes prove an editable reference. Other bytes in the same
+/// string may be generated, including an mcp tag's numeric bound.
+fn literal(
+    inner: &mut Inner,
+    root: &Url,
+    model: &Model,
+    token: &Token,
+    within: Span,
+    name: &str,
+    lexers: &mut HashMap<String, Vec<Token>>,
+) -> Option<(String, Span)> {
+    let raw = token.text(&model.source);
+    if raw.get(within.start as usize..within.end as usize) != Some(name) {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if let Some(emitted) = &token.emitted {
+        if emitted
+            .source
+            .text
+            .get(emitted.span.start as usize..emitted.span.end as usize)
+            != Some(raw)
+        {
+            return None;
+        }
+        let span = Span {
+            start: emitted.span.start + within.start,
+            end: emitted.span.start + within.end,
+        };
+        let mut next = span.start;
+        let first = emitted
+            .source
+            .origins
+            .partition_point(|origin| origin.emitted.end <= span.start);
+        for origin in emitted.source.origins[first..]
+            .iter()
+            .take_while(|origin| origin.emitted.start < span.end)
+        {
+            let start = span.start.max(origin.emitted.start);
+            let end = span.end.min(origin.emitted.end);
+            if !origin.copied || start != next || end <= start {
+                return None;
+            }
+            let written = Span {
+                start: origin.written.start + start - origin.emitted.start,
+                end: origin.written.start + end - origin.emitted.start,
+            };
+            parts.push(
+                inner
+                    .workspace
+                    .map_effective_origin(root.as_str(), written)?,
+            );
+            next = end;
+        }
+        if next != span.end {
+            return None;
+        }
+    } else {
+        if token.lexeme.is_some() {
+            return None;
+        }
+        parts.push(inner.workspace.map_effective_origin(
+            root.as_str(),
+            Span {
+                start: token.span.start + within.start,
+                end: token.span.start + within.end,
+            },
+        )?);
+    }
+    let (file, mut span) = parts.first()?.clone();
+    for (other_file, other_span) in parts.iter().skip(1) {
+        if other_file != &file || other_span.start != span.end {
+            return None;
+        }
+        span.end = other_span.end;
+    }
+    let source = inner.workspace.source_for_normalized_key(&file)?;
+    if source.get(span.start as usize..span.end as usize) != Some(name) {
+        return None;
+    }
+    let tokens = lexers
+        .entry(file.clone())
+        .or_insert_with(|| tokenize(source));
+    let index = tokens.partition_point(|written| written.span.end <= span.start);
+    if !tokens.get(index).is_some_and(|written| {
+        (written.kind == TokenKind::Ident && written.span == span)
+            || written.kind == TokenKind::String
+                && written.span.start < span.start
+                && span.end < written.span.end
+    }) {
+        return None;
+    }
+    Some((file, span))
+}
+
+pub(super) fn collect(inner: &mut Inner, root: &Url, model: &Model) -> Vec<Reference> {
+    let mut result = Vec::new();
+    let mut lexers = HashMap::new();
+    for row in &model.written_equations {
+        let tokens = &model.expanded_tokens;
+        let mut order = row.token_range.start;
+        let mut found = HashSet::new();
+        while order < row.token_range.end && tokens[order].kind == TokenKind::LBrack {
+            order += 1;
+            while order < row.token_range.end && tokens[order].kind != TokenKind::RBrack {
+                if tokens[order].kind == TokenKind::Ident
+                    && tokens
+                        .get(order + 1)
+                        .is_some_and(|token| token.kind == TokenKind::Eq)
+                {
+                    let key = tokens[order].text(&model.source).to_ascii_lowercase();
+                    let value_order = order + 2;
+                    if let Some(token) = tokens
+                        .get(value_order)
+                        .filter(|token| token.kind == TokenKind::String)
+                        && let Some(value) = content(token.text(&model.source))
+                        && row
+                            .equation
+                            .tag_map
+                            .get(&key)
+                            .is_some_and(|accepted| accepted == value)
+                        && let Some((offset, name)) = semantic_name(&key, value)
+                    {
+                        let within_token = Span::new(offset + 1, offset + 1 + name.len());
+                        result.push(Reference {
+                            name: name.into(),
+                            declaration: key == "endogenous",
+                            order: Some(value_order),
+                            declaration_order: row.token_range.end,
+                            within_token,
+                            written: literal(
+                                inner,
+                                root,
+                                model,
+                                token,
+                                within_token,
+                                name,
+                                &mut lexers,
+                            ),
+                        });
+                        found.insert(key);
+                    }
+                }
+                order += 1;
+            }
+            order += 1;
+        }
+        for key in ["endogenous", "mcp"] {
+            if !found.contains(key)
+                && let Some(value) = row.equation.tag_map.get(key)
+                && let Some((_, name)) = semantic_name(key, value)
+            {
+                result.push(Reference {
+                    name: name.into(),
+                    declaration: key == "endogenous",
+                    order: None,
+                    declaration_order: row.token_range.end,
+                    within_token: Span::default(),
+                    written: None,
+                });
+            }
+        }
+    }
+    result
+}
+
+/// Every execution of a changed literal must still be the same semantic
+/// reference. A macro copy used as a display label is not an editable use.
+pub(super) fn compatible(
+    inner: &mut Inner,
+    root: &Url,
+    model: &Model,
+    references: &[Reference],
+    targets: &HashSet<(String, Span)>,
+    name: &str,
+) -> bool {
+    let mut lexers = HashMap::new();
+    for (order, token) in model
+        .expanded_tokens
+        .iter()
+        .enumerate()
+        .filter(|(_, token)| token.kind == TokenKind::String)
+    {
+        let Some(value) = content(token.text(&model.source)) else {
+            continue;
+        };
+        // A copied reference can be joined to generated label text or placed
+        // inside quote/comment-like label characters. Check all exact byte
+        // matches, including overlaps, without identifier-token boundaries.
+        for (start, _) in value
+            .char_indices()
+            .filter(|(start, _)| value[*start..].starts_with(name))
+        {
+            let span = Span::new(start, start + name.len());
+            let within = Span {
+                start: span.start + 1,
+                end: span.end + 1,
+            };
+            let Some(target) = literal(inner, root, model, token, within, name, &mut lexers) else {
+                continue;
+            };
+            if targets.contains(&target)
+                && !references.iter().any(|reference| {
+                    reference.order == Some(order)
+                        && reference.name == name
+                        && reference.within_token == within
+                        && reference.written.as_ref() == Some(&target)
+                })
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+pub(super) fn rewrite(
+    model: &Model,
+    tokens: &mut [Token],
+    references: &[Reference],
+    name: &str,
+    replacement: &str,
+) -> Option<()> {
+    for reference in references.iter().filter(|reference| reference.name == name) {
+        reference.written.as_ref()?;
+        let token = tokens.get_mut(reference.order?)?;
+        let mut raw = token.text(&model.source).to_owned();
+        if raw.get(reference.within_token.start as usize..reference.within_token.end as usize)
+            != Some(name)
+        {
+            return None;
+        }
+        raw.replace_range(
+            reference.within_token.start as usize..reference.within_token.end as usize,
+            replacement,
+        );
+        token.lexeme = Some(raw);
+    }
+    Some(())
+}

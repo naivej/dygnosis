@@ -99,9 +99,8 @@ pub use check_w130::check_w130;
 pub use check_w160::{check_w160, quiet_i050};
 pub use companion::{CompanionKind, CompanionRecord};
 pub use diagnostic::{
-    analyze, check_file, check_file_with_origins, format_check_lines,
-    format_check_lines_with_origins, Diagnostic, DiagnosticSet, Severity, TextEdit, WritingContext,
-    WritingRows,
+    analyze, check_file, check_file_with_origins, Diagnostic, DiagnosticSet, Severity, TextEdit,
+    WritingContext, WritingRows,
 };
 pub use e010::check_e010;
 pub use equations::{
@@ -133,8 +132,8 @@ pub use model_diff::{
     SymbolSide, UnmatchedSameName, WrittenPeriod,
 };
 pub use model_info::{
-    assigned_number, classify_variable_timing, format_structure_lens, format_timing_line,
-    structure_summary, StructureSummary, TimingClass, TimingInfo,
+    assigned_number, classify_variable_timing, format_timing_line, structure_summary,
+    StructureSummary, TimingClass, TimingInfo,
 };
 pub use parser::parse;
 

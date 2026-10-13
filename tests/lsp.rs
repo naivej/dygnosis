@@ -809,6 +809,28 @@ fn apply_edits(text: &str, edits: &[TextEdit]) -> String {
     out
 }
 
+fn rename_changes(edit: WorkspaceEdit) -> std::collections::HashMap<Url, Vec<TextEdit>> {
+    let DocumentChanges::Edits(documents) = edit.document_changes.expect("versioned rename") else {
+        panic!("text edits")
+    };
+    documents
+        .into_iter()
+        .map(|document| {
+            (
+                document.text_document.uri,
+                document
+                    .edits
+                    .into_iter()
+                    .map(|edit| match edit {
+                        OneOf::Left(edit) => edit,
+                        OneOf::Right(_) => panic!("plain rename edit"),
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
 #[tokio::test]
 async fn utf16_emoji_diagnostic_and_rename() {
     let text = "var \u{1F600}\u{1F600}y;\n";
@@ -867,7 +889,7 @@ async fn utf16_emoji_diagnostic_and_rename() {
         .await
         .expect("rename rpc")
         .expect("rename edit");
-    let edits = edit.changes.expect("changes").remove(&uri).expect("edits");
+    let edits = rename_changes(edit).remove(&uri).expect("edits");
     assert_eq!(edits.len(), 1);
     assert_eq!(edits[0].range.start.character, 8);
     assert_eq!(edits[0].range.end.character, 9);
@@ -2093,7 +2115,7 @@ async fn rename_betta_in_file() {
         .await
         .expect("rename rpc")
         .expect("rename edit");
-    let changes = edit.changes.expect("changes");
+    let changes = rename_changes(edit);
     let edits = changes.get(&uri).expect("edits for trend");
     let new_text = apply_edits(&text, edits);
     assert!(new_text.contains("beta_disc"));
@@ -2133,7 +2155,7 @@ async fn rename_swff_cross_file() {
         .await
         .expect("rename rpc")
         .expect("rename edit");
-    let changes = edit.changes.expect("changes");
+    let changes = rename_changes(edit);
     let mod_edits = changes.get(&mod_uri).map(|e| e.len()).unwrap_or(0);
     let inc_edits = changes.get(&inc_uri).map(|e| e.len()).unwrap_or(0);
     assert!(
@@ -2281,11 +2303,12 @@ fn initialize_capabilities_wave_c() {
         .expect("executeCommand")
         .commands
         .clone();
-    assert_eq!(commands.len(), 8, "commands: {commands:?}");
+    assert_eq!(commands.len(), 9, "commands: {commands:?}");
     assert!(commands.contains(&"dynare/explainDiagnostic".into()));
     assert!(commands.contains(&"dynare/compareModels".into()));
     assert!(commands.contains(&"dynare/compareModelSnapshots".into()));
     assert!(commands.contains(&"dynare/showEffectiveModel".into()));
+    assert!(commands.contains(&"dynare/captureRename".into()));
     assert!(commands.contains(&"dynare/modelInfo".into()));
     assert!(commands.contains(&"dynare/projectStatus".into()));
     assert!(commands.contains(&"dynare/recheckProject".into()));
@@ -2820,7 +2843,7 @@ async fn rename_skips_open_m_buffer() {
         .await
         .expect("rename rpc")
         .expect("rename edit");
-    let changes = edit.changes.expect("changes");
+    let changes = rename_changes(edit);
     assert!(
         changes.get(&mod_uri).is_some_and(|e| !e.is_empty()),
         "expected edits in the .mod: {changes:?}"
@@ -2829,24 +2852,6 @@ async fn rename_skips_open_m_buffer() {
         !changes.contains_key(&m_uri),
         "rename must not put a .m URI in WorkspaceEdit: {changes:?}"
     );
-    for uri in changes.keys() {
-        let path = uri
-            .to_file_path()
-            .unwrap_or_else(|_| PathBuf::from(uri.path()));
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        assert!(
-            ext == "mod" || ext == "inc",
-            "rename URI must be .mod or .inc, got {uri}"
-        );
-        assert!(
-            !matches!(ext.as_str(), "m" | "csv" | "mat" | "xls" | "xlsx"),
-            "forbidden companion extension in rename: {uri}"
-        );
-    }
 }
 
 #[tokio::test]

@@ -45,12 +45,13 @@ async function checkModelLocalEditing(service, workspaceRoot, evidence, helpers)
   assert.equal(definitions.length, 1);
   const definition = definitions[0].targetSelectionRange ?? definitions[0].range;
   assert.equal(document.getText(definition), "zz_helper");
-  const renamed = await vscode.commands.executeCommand("vscode.executeDocumentRenameProvider", document.uri, position, "zz_result");
+  const capture = await service.execute("dynare/captureRename", [{ textDocument: { uri: document.uri.toString() }, position, newName: "zz_result" }]);
+  const renamed = await service.client.protocol2CodeConverter.asWorkspaceEdit(capture.edit);
   assert.ok(renamed instanceof vscode.WorkspaceEdit);
   assert.equal(renamed.entries().reduce((sum, [, edits]) => sum + edits.length, 0), 2);
   assert.equal(await vscode.workspace.applyEdit(renamed), true);
   assert.equal(document.getText(), completed.replaceAll("zz_helper", "zz_result"));
-  evidence.checks.push("native macro/local prefix acceptance, helper hover, definition provider and versioned rename");
+  evidence.checks.push("native macro/local prefix acceptance, helper hover, definition provider and guarded Rename capture");
 
   const productRoot = path.resolve(__dirname, "../../../..");
   const examples = [
@@ -78,7 +79,8 @@ async function checkModelLocalEditing(service, workspaceRoot, evidence, helpers)
     const site = new vscode.Position(helperPosition.line, column);
     const help = await vscode.commands.executeCommand("vscode.executeHoverProvider", copy.uri, site);
     assert.ok(help.some(hover => hover.contents.some(content => content.value?.includes("Model-local variable"))), description);
-    const edits = await vscode.commands.executeCommand("vscode.executeDocumentRenameProvider", copy.uri, site, "zz_verified_helper");
+    const captured = await service.execute("dynare/captureRename", [{ textDocument: { uri: copy.uri.toString() }, position: site, newName: "zz_verified_helper" }]);
+    const edits = await service.client.protocol2CodeConverter.asWorkspaceEdit(captured.edit);
     assert.ok(edits instanceof vscode.WorkspaceEdit, `${description} rename`);
     assert.ok(edits.entries().flatMap(([, rows]) => rows).length >= 2);
     const references = await vscode.commands.executeCommand("vscode.executeReferenceProvider", copy.uri, site);
@@ -93,7 +95,7 @@ async function checkModelLocalEditing(service, workspaceRoot, evidence, helpers)
     copyEditor.selection = new vscode.Selection(use.range.start, use.range.start);
     await vscode.commands.executeCommand("editor.action.revealDefinition");
     await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === copy.uri.toString() && vscode.window.activeTextEditor.selection.active.line === site.line, `${description} native definition jump`);
-    evidence.checks.push(`${description}: temporary copy, prefix acceptance, hover, native definition jump and scoped rename provider`);
+    evidence.checks.push(`${description}: temporary copy, prefix acceptance, hover, native definition jump and scoped Rename capture`);
   }
 }
 
